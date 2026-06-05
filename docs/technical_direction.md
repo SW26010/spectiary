@@ -53,15 +53,9 @@ DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在�
 
 ## 数据边界
 
-当前不决定最终 loader。下一步只需要定义输入合同：
-
-- 数据源路径。
-- spectrum count。
-- 当前 spectrum index。
-- wavelength vector。
-- flux vector。
-- metadata。
-- overlay catalog 输入。
+当前不决定最终 loader。真实数据输入合同定义在
+[Spectrum Snapshot Contract](spectrum_snapshot_contract.md)，由 `domain` 产出
+稳定快照，UI 和 plot 只读该快照。
 
 Python、IPC、native loader 或外部预处理都只能作为实现选择，不写入第一阶段产品承诺。
 

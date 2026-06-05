@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain/spectrum_snapshot.h"
+
 #include <string>
 #include <vector>
 
@@ -12,5 +14,6 @@ struct SpectrumSeries {
 };
 
 SpectrumSeries MakeSmallSyntheticSpectrum();
+SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot();
 
 }  // namespace specforge

@@ -1,6 +1,8 @@
 #include "domain/spectrum_fixture.h"
 
 #include <cmath>
+#include <memory>
+#include <utility>
 
 namespace specforge {
 namespace {
@@ -33,6 +35,46 @@ SpectrumSeries MakeSmallSyntheticSpectrum()
     }
 
     return series;
+}
+
+SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot()
+{
+    SpectrumSeries series = MakeSmallSyntheticSpectrum();
+
+    auto snapshot = std::make_shared<SpectrumSnapshot>();
+    snapshot->source.id = "synthetic.small_spectrum";
+    snapshot->source.display_name = "Small synthetic fixture";
+    snapshot->source.uri = "synthetic://small-spectrum";
+    snapshot->source.metadata.push_back({"source_type", "synthetic_fixture", "domain"});
+
+    snapshot->collection.spectrum_count = 1;
+    snapshot->collection.current_index = 0;
+
+    snapshot->current_spectrum.name = series.name;
+    snapshot->current_spectrum.x_values = std::make_shared<const std::vector<double>>(std::move(series.wavelength));
+    snapshot->current_spectrum.y_values = std::make_shared<const std::vector<double>>(std::move(series.flux));
+    snapshot->current_spectrum.point_count = snapshot->current_spectrum.x_values->size();
+    snapshot->current_spectrum.metadata.push_back({"fixture", "small synthetic spectrum", "domain"});
+
+    snapshot->axis.x_quantity = SpectrumAxisQuantity::Wavelength;
+    snapshot->axis.x_unit = SpectrumAxisUnit::Angstrom;
+    snapshot->axis.x_frame = SpectrumAxisFrame::Unknown;
+    snapshot->axis.y_quantity = SpectrumValueQuantity::Flux;
+    snapshot->axis.x_label = "wavelength";
+    snapshot->axis.y_label = "flux";
+
+    snapshot->capabilities.can_plot_current_spectrum = true;
+    snapshot->capabilities.can_show_spectral_lines = true;
+    snapshot->capabilities.requires_rest_frame_warning = true;
+
+    snapshot->diagnostics.push_back({
+        SpectrumDiagnosticSeverity::Warning,
+        SpectrumDiagnosticCode::AxisFrameUnknown,
+        "Synthetic fixture has no verified wavelength coordinate frame.",
+        {},
+    });
+
+    return snapshot;
 }
 
 }  // namespace specforge

@@ -16,6 +16,7 @@ add_executable(specforge_native WIN32
     src/app/specforge_app.h
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_fixture.h
+    src/domain/spectrum_snapshot.h
     src/main.cpp
     src/platform/win32_window.cpp
     src/platform/win32_window.h
