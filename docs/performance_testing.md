@@ -116,4 +116,4 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specfo
 
 ## 注意
 
-当前 shell 仍使用 synthetic fixture。它可以验证 shell 和 ImPlot 交互链路，但不能证明真实光谱数据达标。接入真实数据后，必须用同一流程重新生成日志。
+当前 shell 同时保留 synthetic fixture 和 `.npy` 真实数据竖切片。Synthetic fixture 可以验证 shell 和 ImPlot 交互链路，但不能证明真实光谱数据达标。真实性能结论必须用实际 `.npy` 数据源按同一流程重新生成日志。

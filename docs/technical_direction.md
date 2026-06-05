@@ -53,11 +53,11 @@ DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在�
 
 ## 数据边界
 
-当前不决定最终 loader。真实数据输入合同定义在
+当前 `.npy` loader 是第一条真实数据竖切片，不代表最终 loader 已定。真实数据输入合同定义在
 [Spectrum Snapshot Contract](spectrum_snapshot_contract.md)，由 `domain` 产出
 稳定快照，UI 和 plot 只读该快照。
 
-Python、IPC、native loader 或外部预处理都只能作为实现选择，不写入第一阶段产品承诺。
+Python、IPC、native loader 或外部预处理都只能作为 producer 侧实现选择，不能写入 UI/plot 产品承诺。
 
 ## Profile 事件
 

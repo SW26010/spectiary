@@ -2,12 +2,15 @@
 
 ## 当前阶段
 
-本阶段只做第一次提交前的项目整理，不实现产品代码。验收标准是：
+仓库已经完成第一次项目整理、native shell 和第一条真实数据竖切片。当前可提交状态包括：
 
-- 目标、范围、非目标清楚。
-- 目标技术栈清楚。
-- 临时 demo、生成产物和本地数据不进入提交。
-- 后续实现可以按文档开始，不需要重新解释方向。
+- `specforge_native` Windows executable target。
+- Win32 + DirectX 11 + Dear ImGui docking + ImPlot shell。
+- 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture 和 `.npy` loader 使用同一条 UI/plot 路径。
+- `.npy` loader 支持 1D 或行级 2D float32/float64 array，并一次渲染一条光谱。
+- 可选 JSONL profile sink 已经接入，用于解释输入、view update、draw、render/present 的基本链路。
+
+当前仍不声明真实数据性能达标；任何刷新率或延迟结论必须来自真实数据和新日志。
 
 ## 产品目标
 
@@ -59,7 +62,7 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ### 调整
 
-- 交接稿中关于 Python 继续承担数据与业务状态的描述不能直接搬到本仓库。SpecForge 的目标栈是 native Windows C++，因此第一步应先定义数据输入合同，再决定是否接入 Python、导出文件、IPC 或 native loader。
+- 交接稿中关于 Python 继续承担数据与业务状态的描述不能直接搬到本仓库。SpecForge 的目标栈是 native Windows C++，当前已通过 `SpectrumSnapshotHandle` 和 `.npy` loader 落地第一条输入合同；后续 Python、导出文件、IPC 或 native loader 只能作为 producer 侧实现选择，不能渗入 UI/plot 路径。
 - range slider 不要求照搬旧 UI。优先用 ImPlot 的轴限制、overview plot、drag rect、drag line、numeric inputs 或 lock toggles 组合出更适合 ImGui 的交互。
 - 谱线 overlay 不需要手写 canvas 系统。优先使用 ImPlot 的 line、annotation、shaded region 和 legend/selection 能力。
 - pan 和 wheel zoom 优先使用 ImPlot 的交互和 axis limits。只有证明确实不能满足光谱工作流时，才引入自定义 transform 层。
@@ -77,12 +80,14 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ### Phase 0: Clean House
 
+状态：已完成，作为仓库卫生和路线边界的基线。
+
 范围：
 
 - 整理 README、需求、技术方向和环境文档。
 - 清理生成产物、本地数据和旧 demo 提交路径。
 - 声明 Win32/DX11/ImGui/ImPlot 目标依赖。
-- 不实现产品代码。
+- 不在该阶段实现产品代码。
 
 验收：
 
@@ -92,12 +97,14 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ### Milestone 1: Native Shell
 
+状态：已完成初始 native shell。
+
 范围：
 
 - 增加 Win32 + DirectX 11 application shell。
 - 初始化 Dear ImGui docking 和 ImPlot。
 - 建立 dock host、主图窗口、侧栏、状态栏和 profile sink。
-- 只使用 synthetic 或 small fixture 验证 shell，不做真实性能结论。
+- 保留 synthetic fixture 作为 shell smoke data，不从它得出真实性能结论。
 
 验收：
 
@@ -107,25 +114,27 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ### Milestone 2: Spectrum Vertical Slice
 
+状态：第一条 `.npy` 真实数据竖切片已存在，后续继续收敛交互和 profile 验收。
+
 范围：
 
-- 接入第一种真实光谱输入。
-- 显示一条光谱。
+- 接入第一种真实光谱输入：1D 或行级 2D `.npy` float32/float64 array。
+- 显示一条光谱，并支持在 2D matrix 中切换上一条和下一条光谱。
 - 支持主图 pan 和 cursor-centered wheel zoom。
 - 输出 input、view update、draw、present timing 的 JSONL profile。
 
 验收：
 
-- 真实数据可打开并渲染。
-- pan 和 zoom 可用。
-- profile 日志能解释基本延迟指标。
+- `.npy` 真实数据通过和 synthetic fixture 相同的 snapshot/UI/plot 路径打开并渲染。
+- pan、zoom 和 spectrum previous/next 可用。
+- profile 日志能解释基本延迟指标；真实性能目标仍必须用真实数据和新日志单独证明。
 
 ### Milestone 3: Product Interaction
 
 范围：
 
 - wavelength 和 flux range navigation。
-- spectrum previous/next。
+- spectrum previous/next 的工作流收敛。
 - view preset。
 - 范围夹取和无效窗口防护。
 
@@ -150,8 +159,8 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ## 非目标
 
-- 当前阶段不做应用实现。
-- 当前阶段不做数据加载器选择。
+- 当前阶段不做 FITS loader 或泛化多 loader 框架。
+- `.npy` loader 是第一条真实数据竖切片，不等于最终数据栈承诺。
 - 当前阶段不做性能目标证明。
 - 当前阶段不引入本地大数据。
 - 当前阶段不创建旧项目兼容层。

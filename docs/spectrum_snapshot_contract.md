@@ -98,5 +98,6 @@ snapshot.
 
 The synthetic fixture may continue to exist for shell testing. It must be marked
 as synthetic through source metadata and should not be used for real-data
-performance claims. Real-data loaders should eventually produce the same
-`SpectrumSnapshot` shape.
+performance claims. The current `.npy` loader already produces the same
+`SpectrumSnapshot` shape for 1D arrays and row-level 2D arrays; future loaders
+must keep that UI/plot boundary intact.
