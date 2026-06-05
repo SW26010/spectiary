@@ -7,6 +7,7 @@
 #include <implot.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <iomanip>
@@ -14,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -153,6 +155,14 @@ bool ShouldUseDarkTitleBar()
     return result == ERROR_SUCCESS && apps_use_light_theme == 0;
 }
 
+std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
+{
+    const auto match = std::find_if(metadata.begin(), metadata.end(), [key](const SpectrumMetadataEntry& entry) {
+        return entry.key == key;
+    });
+    return match == metadata.end() ? std::string_view{} : std::string_view(match->value);
+}
+
 void ApplyTitleBarTheme(HWND hwnd)
 {
     const BOOL use_dark_title_bar = ShouldUseDarkTitleBar() ? TRUE : FALSE;
@@ -178,9 +188,12 @@ SpecForgeApp::~SpecForgeApp()
     Shutdown();
 }
 
-int SpecForgeApp::Run(HINSTANCE instance, int show_command)
+int SpecForgeApp::Run(
+    HINSTANCE instance,
+    int show_command,
+    std::optional<std::filesystem::path> initial_source)
 {
-    Initialize(instance, show_command);
+    Initialize(instance, show_command, initial_source);
 
     MSG message = {};
     while (running_) {
@@ -204,13 +217,36 @@ int SpecForgeApp::Run(HINSTANCE instance, int show_command)
     return static_cast<int>(message.wParam);
 }
 
-void SpecForgeApp::Initialize(HINSTANCE instance, int show_command)
+void SpecForgeApp::Initialize(
+    HINSTANCE instance,
+    int show_command,
+    const std::optional<std::filesystem::path>& initial_source)
 {
+    if (initial_source) {
+        ui_.OpenSource(*initial_source);
+    }
+
     profile_ = ProfileSink::CreateDefault();
+    const SpectrumSnapshotHandle startup_snapshot = ui_.current_snapshot();
+    const std::string source_type(
+        startup_snapshot ? MetadataValue(startup_snapshot->source.metadata, "source_type") : std::string_view{});
     profile_.WriteEvent("runtime_config", {
                                             ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
                                             ProfileSink::Field::String("profile_path", profile_.path().string()),
-                                            ProfileSink::Field::Bool("synthetic_fixture", true),
+                                            ProfileSink::Field::String(
+                                                "source",
+                                                startup_snapshot ? startup_snapshot->source.display_name : ""),
+                                            ProfileSink::Field::String("source_type", source_type),
+                                            ProfileSink::Field::Bool(
+                                                "can_plot_current_spectrum",
+                                                startup_snapshot &&
+                                                    startup_snapshot->capabilities.can_plot_current_spectrum),
+                                            ProfileSink::Field::Number(
+                                                "spectrum_count",
+                                                std::to_string(
+                                                    startup_snapshot
+                                                        ? startup_snapshot->collection.spectrum_count
+                                                        : 0)),
                                         });
 
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -680,7 +716,11 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         break;
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
+        ui_.RefreshSystemColors();
         ApplyTitleBarTheme(hwnd);
+        return 0;
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+        ui_.RefreshSystemColors();
         return 0;
     case WM_DISPLAYCHANGE:
         LogDisplayEnvironment("display_change");

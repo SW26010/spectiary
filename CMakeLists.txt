@@ -16,6 +16,8 @@ add_executable(specforge_native WIN32
     src/app/specforge_app.h
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_fixture.h
+    src/domain/spectrum_loader.cpp
+    src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
     src/main.cpp
     src/platform/win32_window.cpp
@@ -46,7 +48,9 @@ target_link_libraries(specforge_native PRIVATE
     d3d11
     dxgi
     dwmapi
+    comdlg32
     imm32
+    shell32
 )
 
 if(MSVC)
@@ -59,3 +63,22 @@ set_target_properties(specforge_native PROPERTIES
     OUTPUT_NAME SpecForge
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
+
+enable_testing()
+
+add_executable(specforge_loader_tests
+    tests/spectrum_loader_tests.cpp
+    src/domain/spectrum_loader.cpp
+    src/domain/spectrum_loader.h
+    src/domain/spectrum_snapshot.h
+)
+
+target_include_directories(specforge_loader_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_loader_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_loader_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)

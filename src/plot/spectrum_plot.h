@@ -1,6 +1,8 @@
 #pragma once
 
-#include "domain/spectrum_fixture.h"
+#include "domain/spectrum_snapshot.h"
+
+#include <imgui.h>
 
 #include <cstdint>
 
@@ -24,9 +26,15 @@ struct SpectrumPlotProfileContext {
     std::uint64_t frame_index = 0;
 };
 
+struct SpectrumPlotStyle {
+    ImVec4 line_color = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
+    float line_weight = 1.4f;
+};
+
 void RenderSpectrumPlot(
-    const SpectrumSeries& series,
+    const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
-    const SpectrumPlotProfileContext& profile = {});
+    const SpectrumPlotProfileContext& profile = {},
+    const SpectrumPlotStyle& style = {});
 
 }  // namespace specforge

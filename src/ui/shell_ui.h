@@ -1,6 +1,6 @@
 #pragma once
 
-#include "domain/spectrum_fixture.h"
+#include "domain/spectrum_snapshot.h"
 #include "plot/spectrum_plot.h"
 
 #include <imgui.h>
@@ -26,6 +26,9 @@ public:
     ShellUi();
 
     void Render(const ShellStatus& status);
+    void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
+    void RefreshSystemColors();
+    [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
     void RenderDockHost(const ShellStatus& status);
@@ -34,9 +37,12 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
+    void SetSnapshot(SpectrumSnapshotHandle snapshot);
+    void SwitchSpectrum(int direction);
 
-    SpectrumSeries spectrum_;
+    SpectrumSnapshotHandle snapshot_;
     SpectrumPlotState plot_state_;
+    SpectrumPlotStyle plot_style_;
     bool layout_seeded_ = false;
 };
 

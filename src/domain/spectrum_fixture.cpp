@@ -2,10 +2,18 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
+
+struct SyntheticSpectrumData {
+    std::string name;
+    std::vector<double> wavelength;
+    std::vector<double> flux;
+};
 
 double Gaussian(double x, double center, double width, double amplitude)
 {
@@ -13,11 +21,9 @@ double Gaussian(double x, double center, double width, double amplitude)
     return amplitude * std::exp(-0.5 * distance * distance);
 }
 
-}  // namespace
-
-SpectrumSeries MakeSmallSyntheticSpectrum()
+SyntheticSpectrumData MakeSmallSyntheticSpectrumData()
 {
-    SpectrumSeries series;
+    SyntheticSpectrumData series;
     series.name = "Small synthetic spectrum";
     series.wavelength.reserve(768);
     series.flux.reserve(768);
@@ -37,9 +43,11 @@ SpectrumSeries MakeSmallSyntheticSpectrum()
     return series;
 }
 
+}  // namespace
+
 SpectrumSnapshotHandle MakeSmallSyntheticSpectrumSnapshot()
 {
-    SpectrumSeries series = MakeSmallSyntheticSpectrum();
+    SyntheticSpectrumData series = MakeSmallSyntheticSpectrumData();
 
     auto snapshot = std::make_shared<SpectrumSnapshot>();
     snapshot->source.id = "synthetic.small_spectrum";

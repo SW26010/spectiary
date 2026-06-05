@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -20,23 +21,43 @@ struct Bounds {
     double y_max = 1.0;
 };
 
-Bounds ComputeBounds(const SpectrumSeries& series)
+bool CanPlotSnapshot(const SpectrumSnapshotHandle& snapshot)
+{
+    if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
+        return false;
+    }
+
+    const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
+    const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
+    return x_values && y_values && !x_values->empty() && x_values->size() == y_values->size() &&
+           snapshot->current_spectrum.point_count == x_values->size() &&
+           x_values->size() <= static_cast<std::size_t>(std::numeric_limits<int>::max());
+}
+
+Bounds ComputeBounds(const SpectrumSnapshot& snapshot)
 {
     Bounds bounds;
-    if (series.wavelength.empty() || series.flux.empty()) {
+    const SpectrumValueVector& x_values = snapshot.current_spectrum.x_values;
+    const SpectrumValueVector& y_values = snapshot.current_spectrum.y_values;
+    if (!x_values || !y_values || x_values->empty() || y_values->empty()) {
         return bounds;
     }
 
-    const auto [x_min, x_max] = std::minmax_element(series.wavelength.begin(), series.wavelength.end());
-    const auto [y_min, y_max] = std::minmax_element(series.flux.begin(), series.flux.end());
+    const auto [x_min, x_max] = std::minmax_element(x_values->begin(), x_values->end());
+    const auto [y_min, y_max] = std::minmax_element(y_values->begin(), y_values->end());
     bounds.x_min = *x_min;
     bounds.x_max = *x_max;
     bounds.y_min = *y_min;
     bounds.y_max = *y_max;
 
     const double y_padding = (bounds.y_max - bounds.y_min) * 0.08;
-    bounds.y_min -= y_padding;
-    bounds.y_max += y_padding;
+    if (y_padding > 0.0) {
+        bounds.y_min -= y_padding;
+        bounds.y_max += y_padding;
+    } else {
+        bounds.y_min -= 1.0;
+        bounds.y_max += 1.0;
+    }
     return bounds;
 }
 
@@ -99,34 +120,45 @@ void WritePanDragEvent(
 }  // namespace
 
 void RenderSpectrumPlot(
-    const SpectrumSeries& series,
+    const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
-    const SpectrumPlotProfileContext& profile)
+    const SpectrumPlotProfileContext& profile,
+    const SpectrumPlotStyle& style)
 {
-    if (series.wavelength.empty() || series.flux.empty()) {
+    if (!CanPlotSnapshot(snapshot)) {
+        ImGui::TextDisabled("No plottable spectrum.");
         return;
     }
 
     if (state.fit_next_frame) {
-        const Bounds bounds = ComputeBounds(series);
+        const Bounds bounds = ComputeBounds(*snapshot);
         ImPlot::SetNextAxesLimits(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max, ImPlotCond_Always);
         state.fit_next_frame = false;
     }
 
     if (ImPlot::BeginPlot("Spectrum##main_spectrum", ImVec2(-1.0f, -1.0f), ImPlotFlags_Crosshairs)) {
-        ImPlot::SetupAxis(ImAxis_X1, "wavelength");
-        ImPlot::SetupAxis(ImAxis_Y1, "flux");
+        const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
+        const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
+        ImPlot::SetupAxis(ImAxis_X1, x_label);
+        ImPlot::SetupAxis(ImAxis_Y1, y_label);
 
         ImPlotSpec spec;
+        spec.LineColor = style.line_color;
+        spec.LineWeight = style.line_weight;
+        spec.MarkerLineColor = spec.LineColor;
+        spec.MarkerFillColor = spec.LineColor;
         if (state.show_points) {
             spec.Marker = ImPlotMarker_Circle;
             spec.MarkerSize = 2.0f;
         }
+        const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
+        const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
+        const std::string& name = snapshot->current_spectrum.name;
         ImPlot::PlotLine(
-            series.name.c_str(),
-            series.wavelength.data(),
-            series.flux.data(),
-            static_cast<int>(std::min(series.wavelength.size(), series.flux.size())),
+            name.empty() ? "current spectrum" : name.c_str(),
+            x_values->data(),
+            y_values->data(),
+            static_cast<int>(x_values->size()),
             spec);
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {

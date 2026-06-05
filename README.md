@@ -11,8 +11,11 @@ synthetic spectrum fixture, and optional JSONL profile output.
 
 - `specforge_native` builds the Windows executable target.
 - The app shell initializes Win32, DirectX 11, Dear ImGui docking, and ImPlot.
-- The main plot uses a small synthetic fixture only; no real-data performance
-  conclusion is claimed from this shell.
+- The main plot consumes `SpectrumSnapshotHandle` snapshots from the domain
+  layer; the synthetic fixture and `.npy` loader use the same UI/plot path.
+- The first real-data vertical slice supports opening a 1D or row-level 2D
+  `.npy` float32/float64 array and renders one spectrum row at a time.
+- No real-data performance conclusion is claimed from this shell yet.
 - Generated build trees, local data, layout files, profile logs, and scratch
   experiments are ignored.
 
@@ -75,6 +78,18 @@ The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
 layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
 JSONL profile output under `logs/`, or set `SPECFORGE_PROFILE_DIR` to write
 profile output to a specific directory.
+
+Launch with a `.npy` source path to smoke-test the real-data vertical slice:
+
+```powershell
+.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_matrix.npy
+```
+
+Inside the app, the Files panel `Open...` button supports the same `.npy`
+loader. A 3909-column matrix uses the fixed loglam wavelength grid; other
+column counts fall back to pixel index and report that in snapshot diagnostics.
+Known auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`,
+and `*_known_mask.npy` are rejected instead of being plotted as spectra.
 
 ## Interaction Profiling
 

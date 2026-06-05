@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string_view>
 
@@ -22,7 +23,10 @@ public:
     SpecForgeApp(const SpecForgeApp&) = delete;
     SpecForgeApp& operator=(const SpecForgeApp&) = delete;
 
-    int Run(HINSTANCE instance, int show_command);
+    int Run(
+        HINSTANCE instance,
+        int show_command,
+        std::optional<std::filesystem::path> initial_source = std::nullopt);
 
 private:
     struct PendingResize {
@@ -36,7 +40,10 @@ private:
         WINDOWPLACEMENT placement = {};
     };
 
-    void Initialize(HINSTANCE instance, int show_command);
+    void Initialize(
+        HINSTANCE instance,
+        int show_command,
+        const std::optional<std::filesystem::path>& initial_source);
     void InitializeUiBackends();
     void Shutdown();
     void RenderFrame();
