@@ -73,4 +73,14 @@ cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildT
 
 The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
 layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
-JSONL profile output under `logs/`.
+JSONL profile output under `logs/`, or set `SPECFORGE_PROFILE_DIR` to write
+profile output to a specific directory.
+
+## Interaction Profiling
+
+For the standard ImPlot pan/drag responsiveness flow, see
+[docs/performance_testing.md](docs/performance_testing.md). The short path is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetMs 6.9444
+```

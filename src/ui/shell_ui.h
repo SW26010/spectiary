@@ -10,8 +10,11 @@
 
 namespace specforge {
 
+class ProfileSink;
+
 struct ShellStatus {
     bool profile_open = false;
+    ProfileSink* profile = nullptr;
     std::filesystem::path profile_path;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
@@ -28,7 +31,7 @@ private:
     void RenderDockHost(const ShellStatus& status);
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
-    void RenderMainPlot();
+    void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
 

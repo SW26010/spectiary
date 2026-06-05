@@ -68,7 +68,8 @@ cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildT
 build/ninja-msvc-debug/SpecForge.exe
 ```
 
-ImGui layout 写入 `imgui.ini`。设置 `SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 会写入 `logs/`。
+ImGui layout 写入 `imgui.ini`。设置 `SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 默认写入
+`logs/`；需要指定输出位置时，设置 `SPECFORGE_PROFILE_DIR`。
 
 ## 仓库卫生
 

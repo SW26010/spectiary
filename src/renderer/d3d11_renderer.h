@@ -25,8 +25,12 @@ public:
 
     [[nodiscard]] ID3D11Device* device() const noexcept { return device_.Get(); }
     [[nodiscard]] ID3D11DeviceContext* context() const noexcept { return device_context_.Get(); }
+    [[nodiscard]] UINT present_sync_interval() const noexcept { return kPresentSyncInterval; }
+    [[nodiscard]] bool GetSwapChainDesc(DXGI_SWAP_CHAIN_DESC& desc) const;
 
 private:
+    static constexpr UINT kPresentSyncInterval = 1;
+
     bool CreateRenderTarget();
     void ReleaseRenderTarget();
 

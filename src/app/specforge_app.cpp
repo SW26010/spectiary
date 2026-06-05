@@ -5,12 +5,15 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 #include <implot.h>
+#include <windowsx.h>
 
 #include <array>
 #include <chrono>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -33,6 +36,70 @@ std::string HResultMessage(const char* action, HRESULT result)
     return message.str();
 }
 
+std::string HResultHex(HRESULT result)
+{
+    std::ostringstream message;
+    message << "0x" << std::hex << std::setw(8) << std::setfill('0') << static_cast<unsigned long>(result);
+    return message.str();
+}
+
+std::string WideToUtf8(std::wstring_view value)
+{
+    if (value.empty()) {
+        return {};
+    }
+
+    const int size = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value.data(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (size <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value.data(),
+        static_cast<int>(value.size()),
+        result.data(),
+        size,
+        nullptr,
+        nullptr);
+    return result;
+}
+
+double RatioHz(UINT numerator, UINT denominator)
+{
+    if (denominator == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(numerator) / static_cast<double>(denominator);
+}
+
+double PeriodMillisecondsFromHz(double hz)
+{
+    if (hz <= 0.0) {
+        return 0.0;
+    }
+    return 1000.0 / hz;
+}
+
+double QpcTicksToMilliseconds(std::int64_t ticks)
+{
+    LARGE_INTEGER frequency = {};
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
+        return 0.0;
+    }
+    return static_cast<double>(ticks) * 1000.0 / static_cast<double>(frequency.QuadPart);
+}
+
 bool IsProfiledInputMessage(UINT message)
 {
     switch (message) {
@@ -43,6 +110,7 @@ bool IsProfiledInputMessage(UINT message)
     case WM_RBUTTONUP:
     case WM_MBUTTONUP:
     case WM_MOUSEWHEEL:
+    case WM_MOUSEMOVE:
         return true;
     default:
         return false;
@@ -166,6 +234,7 @@ void SpecForgeApp::Initialize(HINSTANCE instance, int show_command)
 
     InitializeUiBackends();
     window_.Show(show_command);
+    LogDisplayEnvironment("startup");
 }
 
 void SpecForgeApp::InitializeUiBackends()
@@ -244,6 +313,7 @@ void SpecForgeApp::RenderFrame()
         ProfileTimer timer(profile_, "view_update", frame_index_);
         ShellStatus status;
         status.profile_open = profile_.is_open();
+        status.profile = &profile_;
         status.profile_path = profile_.path();
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
@@ -268,13 +338,18 @@ void SpecForgeApp::RenderFrame()
         }
     }
 
-    const auto present_start = std::chrono::steady_clock::now();
-    const HRESULT present_result = renderer_.Present();
-    const auto present_elapsed = std::chrono::steady_clock::now() - present_start;
-    profile_.WriteDuration(
-        "present",
-        frame_index_,
-        std::chrono::duration<double, std::milli>(present_elapsed).count());
+    HRESULT present_result = S_OK;
+    if (profile_.is_open()) {
+        const auto present_start = std::chrono::steady_clock::now();
+        present_result = renderer_.Present();
+        const auto present_elapsed = std::chrono::steady_clock::now() - present_start;
+        profile_.WriteDuration(
+            "present",
+            frame_index_,
+            std::chrono::duration<double, std::milli>(present_elapsed).count());
+    } else {
+        present_result = renderer_.Present();
+    }
 
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage("Present", present_result));
@@ -302,6 +377,7 @@ void SpecForgeApp::ApplyPendingResize()
                                                     ProfileSink::Field::Number("width", std::to_string(resize.width)),
                                                     ProfileSink::Field::Number("height", std::to_string(resize.height)),
                                                 });
+    LogDisplayEnvironment("resize");
 }
 
 void SpecForgeApp::ApplyUiScale(float dpi_scale)
@@ -363,6 +439,7 @@ void SpecForgeApp::EnterFullscreen()
         monitor_rect.bottom - monitor_rect.top,
         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     profile_.WriteEvent("fullscreen", {ProfileSink::Field::Bool("enabled", true)});
+    LogDisplayEnvironment("fullscreen_enter");
 }
 
 void SpecForgeApp::ExitFullscreen()
@@ -388,12 +465,189 @@ void SpecForgeApp::ExitFullscreen()
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     ApplyTitleBarTheme(hwnd);
     profile_.WriteEvent("fullscreen", {ProfileSink::Field::Bool("enabled", false)});
+    LogDisplayEnvironment("fullscreen_exit");
+}
+
+void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+
+    HWND hwnd = window_.hwnd();
+
+    MONITORINFOEXW monitor_info = {};
+    monitor_info.cbSize = sizeof(monitor_info);
+    HMONITOR monitor = nullptr;
+    bool monitor_ok = false;
+    if (hwnd != nullptr) {
+        monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        monitor_ok = monitor != nullptr && GetMonitorInfoW(monitor, &monitor_info);
+    }
+
+    DEVMODEW display_mode = {};
+    display_mode.dmSize = sizeof(display_mode);
+    const bool display_mode_ok =
+        monitor_ok && EnumDisplaySettingsW(monitor_info.szDevice, ENUM_CURRENT_SETTINGS, &display_mode);
+
+    DWM_TIMING_INFO dwm_timing = {};
+    dwm_timing.cbSize = sizeof(dwm_timing);
+    HRESULT dwm_result = hwnd != nullptr ? DwmGetCompositionTimingInfo(hwnd, &dwm_timing) : E_HANDLE;
+    std::string dwm_query_target = "window";
+    if (FAILED(dwm_result)) {
+        dwm_timing = {};
+        dwm_timing.cbSize = sizeof(dwm_timing);
+        dwm_result = DwmGetCompositionTimingInfo(nullptr, &dwm_timing);
+        dwm_query_target = "desktop";
+    }
+    const bool dwm_ok = SUCCEEDED(dwm_result);
+    const double dwm_refresh_hz =
+        dwm_ok ? RatioHz(dwm_timing.rateRefresh.uiNumerator, dwm_timing.rateRefresh.uiDenominator) : 0.0;
+    const double dwm_compose_hz =
+        dwm_ok ? RatioHz(dwm_timing.rateCompose.uiNumerator, dwm_timing.rateCompose.uiDenominator) : 0.0;
+
+    DXGI_SWAP_CHAIN_DESC swap_chain_desc = {};
+    const bool swapchain_ok = renderer_.GetSwapChainDesc(swap_chain_desc);
+    const double swapchain_desc_hz = swapchain_ok
+                                         ? RatioHz(
+                                               swap_chain_desc.BufferDesc.RefreshRate.Numerator,
+                                               swap_chain_desc.BufferDesc.RefreshRate.Denominator)
+                                         : 0.0;
+
+    profile_.WriteEvent("display_environment", {
+                                                  ProfileSink::Field::String("reason", std::string(reason)),
+                                                  ProfileSink::Field::Bool("monitor_ok", monitor_ok),
+                                                  ProfileSink::Field::String(
+                                                      "monitor_device",
+                                                      monitor_ok ? WideToUtf8(monitor_info.szDevice) : ""),
+                                                  ProfileSink::Field::Bool(
+                                                      "monitor_primary",
+                                                      monitor_ok &&
+                                                          (monitor_info.dwFlags & MONITORINFOF_PRIMARY) != 0),
+                                                  ProfileSink::Field::Number(
+                                                      "monitor_left",
+                                                      std::to_string(monitor_ok ? monitor_info.rcMonitor.left : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "monitor_top",
+                                                      std::to_string(monitor_ok ? monitor_info.rcMonitor.top : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "monitor_width",
+                                                      std::to_string(
+                                                          monitor_ok
+                                                              ? monitor_info.rcMonitor.right -
+                                                                    monitor_info.rcMonitor.left
+                                                              : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "monitor_height",
+                                                      std::to_string(
+                                                          monitor_ok
+                                                              ? monitor_info.rcMonitor.bottom -
+                                                                    monitor_info.rcMonitor.top
+                                                              : 0)),
+                                                  ProfileSink::Field::Bool("display_mode_ok", display_mode_ok),
+                                                  ProfileSink::Field::Number(
+                                                      "display_mode_frequency_hz",
+                                                      std::to_string(
+                                                          display_mode_ok ? display_mode.dmDisplayFrequency : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "display_mode_width",
+                                                      std::to_string(display_mode_ok ? display_mode.dmPelsWidth : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "display_mode_height",
+                                                      std::to_string(display_mode_ok ? display_mode.dmPelsHeight : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "display_mode_position_x",
+                                                      std::to_string(display_mode_ok ? display_mode.dmPosition.x : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "display_mode_position_y",
+                                                      std::to_string(display_mode_ok ? display_mode.dmPosition.y : 0)),
+                                                  ProfileSink::Field::Bool("dwm_timing_ok", dwm_ok),
+                                                  ProfileSink::Field::String("dwm_query_target", dwm_query_target),
+                                                  ProfileSink::Field::String(
+                                                      "dwm_result",
+                                                      HResultHex(dwm_result)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_refresh_numerator",
+                                                      std::to_string(
+                                                          dwm_ok ? dwm_timing.rateRefresh.uiNumerator : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_refresh_denominator",
+                                                      std::to_string(
+                                                          dwm_ok ? dwm_timing.rateRefresh.uiDenominator : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_refresh_hz",
+                                                      std::to_string(dwm_refresh_hz)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_refresh_period_ms",
+                                                      std::to_string(PeriodMillisecondsFromHz(dwm_refresh_hz))),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_qpc_refresh_period_ms",
+                                                      std::to_string(
+                                                          dwm_ok
+                                                              ? QpcTicksToMilliseconds(dwm_timing.qpcRefreshPeriod)
+                                                              : 0.0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_compose_numerator",
+                                                      std::to_string(
+                                                          dwm_ok ? dwm_timing.rateCompose.uiNumerator : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_compose_denominator",
+                                                      std::to_string(
+                                                          dwm_ok ? dwm_timing.rateCompose.uiDenominator : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_compose_hz",
+                                                      std::to_string(dwm_compose_hz)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_compose_period_ms",
+                                                      std::to_string(PeriodMillisecondsFromHz(dwm_compose_hz))),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_frames_late",
+                                                      std::to_string(dwm_ok ? dwm_timing.cFramesLate : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_frames_dropped",
+                                                      std::to_string(dwm_ok ? dwm_timing.cFramesDropped : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "dwm_frames_missed",
+                                                      std::to_string(dwm_ok ? dwm_timing.cFramesMissed : 0)),
+                                                  ProfileSink::Field::Bool("swapchain_ok", swapchain_ok),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_present_sync_interval",
+                                                      std::to_string(renderer_.present_sync_interval())),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_desc_refresh_numerator",
+                                                      std::to_string(
+                                                          swapchain_ok
+                                                              ? swap_chain_desc.BufferDesc.RefreshRate.Numerator
+                                                              : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_desc_refresh_denominator",
+                                                      std::to_string(
+                                                          swapchain_ok
+                                                              ? swap_chain_desc.BufferDesc.RefreshRate.Denominator
+                                                              : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_desc_refresh_hz",
+                                                      std::to_string(swapchain_desc_hz)),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_desc_refresh_period_ms",
+                                                      std::to_string(PeriodMillisecondsFromHz(swapchain_desc_hz))),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_buffer_count",
+                                                      std::to_string(swapchain_ok ? swap_chain_desc.BufferCount : 0)),
+                                                  ProfileSink::Field::Bool(
+                                                      "swapchain_windowed",
+                                                      swapchain_ok && swap_chain_desc.Windowed == TRUE),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_swap_effect",
+                                                      std::to_string(
+                                                          swapchain_ok ? swap_chain_desc.SwapEffect : 0)),
+                                              });
 }
 
 LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
-    if (IsProfiledInputMessage(message)) {
-        LogInputMessage(message, wparam);
+    if (profile_.is_open() && IsProfiledInputMessage(message)) {
+        LogInputMessage(message, wparam, lparam);
     }
 
     if (message == WM_KEYDOWN && wparam == VK_F11 && IsInitialKeyDown(lparam)) {
@@ -428,6 +682,9 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     case WM_THEMECHANGED:
         ApplyTitleBarTheme(hwnd);
         return 0;
+    case WM_DISPLAYCHANGE:
+        LogDisplayEnvironment("display_change");
+        return 0;
     case WM_DPICHANGED:
         if (imgui_initialized_) {
             ApplyUiScale(DpiScaleFromWParam(wparam));
@@ -447,6 +704,7 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
                                                 ProfileSink::Field::Number("dpi", std::to_string(HIWORD(wparam))),
                                                 ProfileSink::Field::Number("dpi_scale", std::to_string(ui_dpi_scale_)),
                                             });
+        LogDisplayEnvironment("dpi_changed");
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -458,30 +716,76 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
-void SpecForgeApp::LogInputMessage(UINT message, WPARAM wparam)
+void SpecForgeApp::LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam)
 {
+    const int x = GET_X_LPARAM(lparam);
+    const int y = GET_Y_LPARAM(lparam);
+
     switch (message) {
     case WM_LBUTTONDOWN:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_press_left")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_press_left"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
     case WM_RBUTTONDOWN:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_press_right")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_press_right"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
     case WM_MBUTTONDOWN:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_press_middle")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_press_middle"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
     case WM_LBUTTONUP:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_release_left")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_release_left"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
     case WM_RBUTTONUP:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_release_right")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_release_right"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
     case WM_MBUTTONUP:
-        profile_.WriteEvent("input", {ProfileSink::Field::String("kind", "pointer_release_middle")});
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_release_middle"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                     });
         break;
+    case WM_MOUSEMOVE: {
+        const bool left_down = (wparam & MK_LBUTTON) != 0;
+        const bool right_down = (wparam & MK_RBUTTON) != 0;
+        const bool middle_down = (wparam & MK_MBUTTON) != 0;
+        if (!left_down && !right_down && !middle_down) {
+            break;
+        }
+        profile_.WriteEvent("input", {
+                                         ProfileSink::Field::String("kind", "pointer_move"),
+                                         ProfileSink::Field::Number("x", std::to_string(x)),
+                                         ProfileSink::Field::Number("y", std::to_string(y)),
+                                         ProfileSink::Field::Bool("left_down", left_down),
+                                         ProfileSink::Field::Bool("right_down", right_down),
+                                         ProfileSink::Field::Bool("middle_down", middle_down),
+                                     });
+        break;
+    }
     case WM_MOUSEWHEEL:
         profile_.WriteEvent("input", {
                                           ProfileSink::Field::String("kind", "wheel"),
+                                          ProfileSink::Field::Number("x", std::to_string(x)),
+                                          ProfileSink::Field::Number("y", std::to_string(y)),
                                           ProfileSink::Field::Number(
                                               "wheel_delta",
                                               std::to_string(GET_WHEEL_DELTA_WPARAM(wparam))),

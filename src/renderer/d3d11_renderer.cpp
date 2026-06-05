@@ -89,7 +89,15 @@ void D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
 
 HRESULT D3D11Renderer::Present()
 {
-    return swap_chain_->Present(1, 0);
+    return swap_chain_->Present(kPresentSyncInterval, 0);
+}
+
+bool D3D11Renderer::GetSwapChainDesc(DXGI_SWAP_CHAIN_DESC& desc) const
+{
+    if (swap_chain_ == nullptr) {
+        return false;
+    }
+    return SUCCEEDED(swap_chain_->GetDesc(&desc));
 }
 
 bool D3D11Renderer::CreateRenderTarget()

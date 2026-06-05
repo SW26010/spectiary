@@ -35,7 +35,7 @@ void ShellUi::Render(const ShellStatus& status)
     RenderDockHost(status);
     RenderFilesPanel();
     RenderInfoTagsPanel();
-    RenderMainPlot();
+    RenderMainPlot(status);
     RenderSpectralLinesPanel();
 }
 
@@ -157,10 +157,10 @@ void ShellUi::RenderInfoTagsPanel()
     ImGui::End();
 }
 
-void ShellUi::RenderMainPlot()
+void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
     ImGui::Begin(kMainPlotWindow);
-    RenderSpectrumPlot(spectrum_, plot_state_);
+    RenderSpectrumPlot(spectrum_, plot_state_, SpectrumPlotProfileContext{status.profile, status.frame_index});
     ImGui::End();
 }
 

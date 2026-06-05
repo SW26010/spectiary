@@ -1,31 +1,66 @@
 #include "profile/profile_sink.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <cmath>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <utility>
 
 namespace specforge {
 namespace {
 
-bool IsProfileEnabled()
+std::optional<std::string> ReadEnvironmentVariable(const char* name)
 {
     char* raw_value = nullptr;
     std::size_t value_size = 0;
-    if (_dupenv_s(&raw_value, &value_size, "SPECFORGE_PROFILE") != 0 || raw_value == nullptr) {
-        return false;
+    if (_dupenv_s(&raw_value, &value_size, name) != 0 || raw_value == nullptr) {
+        return std::nullopt;
     }
 
     std::unique_ptr<char, decltype(&std::free)> value(raw_value, std::free);
-    std::string normalized(value.get());
+    return std::string(value.get());
+}
+
+bool IsProfileEnabled()
+{
+    std::optional<std::string> value = ReadEnvironmentVariable("SPECFORGE_PROFILE");
+    if (!value) {
+        return false;
+    }
+
+    std::string normalized = *value;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char character) {
         return static_cast<char>(std::tolower(character));
     });
     return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes";
+}
+
+std::filesystem::path ProfileDirectory()
+{
+    std::optional<std::string> directory = ReadEnvironmentVariable("SPECFORGE_PROFILE_DIR");
+    if (directory && !directory->empty()) {
+        return std::filesystem::path(*directory);
+    }
+    return std::filesystem::current_path() / "logs";
+}
+
+bool IsFiniteJsonNumber(std::string_view value)
+{
+    if (value.empty()) {
+        return false;
+    }
+
+    double parsed = 0.0;
+    const char* begin = value.data();
+    const char* end = begin + value.size();
+    const auto result = std::from_chars(begin, end, parsed);
+    return result.ec == std::errc() && result.ptr == end && std::isfinite(parsed);
 }
 
 }  // namespace
@@ -55,7 +90,7 @@ ProfileSink ProfileSink::CreateDefault()
         return ProfileSink();
     }
 
-    const std::filesystem::path directory = std::filesystem::current_path() / "logs";
+    const std::filesystem::path directory = ProfileDirectory();
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     return ProfileSink(directory / ("specforge-profile-" + TimestampForFileName() + ".jsonl"));
@@ -72,8 +107,11 @@ void ProfileSink::WriteEvent(std::string_view event_name, std::initializer_list<
         stream_ << ",\"" << EscapeJson(field.name) << "\":";
         if (field.quoted) {
             stream_ << "\"" << EscapeJson(field.value) << "\"";
-        } else {
+        } else if (field.value == "true" || field.value == "false" || field.value == "null" ||
+                   IsFiniteJsonNumber(field.value)) {
             stream_ << field.value;
+        } else {
+            stream_ << "null";
         }
     }
     stream_ << "}\n";
@@ -153,13 +191,24 @@ std::string ProfileSink::TimestampForFileName()
     return timestamp.str();
 }
 
-ProfileTimer::ProfileTimer(ProfileSink& sink, std::string_view event_name, std::uint64_t frame_index)
-    : sink_(sink), event_name_(event_name), frame_index_(frame_index), start_(std::chrono::steady_clock::now())
+ProfileTimer::ProfileTimer(ProfileSink& sink, std::string_view event_name, std::uint64_t frame_index) : sink_(sink)
 {
+    if (!sink_.is_open()) {
+        return;
+    }
+
+    active_ = true;
+    event_name_ = event_name;
+    frame_index_ = frame_index;
+    start_ = std::chrono::steady_clock::now();
 }
 
 ProfileTimer::~ProfileTimer()
 {
+    if (!active_) {
+        return;
+    }
+
     const auto elapsed = std::chrono::steady_clock::now() - start_;
     const double milliseconds = std::chrono::duration<double, std::milli>(elapsed).count();
     sink_.WriteDuration(event_name_, frame_index_, milliseconds);

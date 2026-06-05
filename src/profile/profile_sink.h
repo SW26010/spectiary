@@ -59,8 +59,9 @@ public:
 private:
     ProfileSink& sink_;
     std::string event_name_;
-    std::uint64_t frame_index_;
+    std::uint64_t frame_index_ = 0;
     std::chrono::steady_clock::time_point start_;
+    bool active_ = false;
 };
 
 }  // namespace specforge

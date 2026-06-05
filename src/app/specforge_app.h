@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace specforge {
 
@@ -44,9 +45,10 @@ private:
     void ToggleFullscreen();
     void EnterFullscreen();
     void ExitFullscreen();
+    void LogDisplayEnvironment(std::string_view reason);
 
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
-    void LogInputMessage(UINT message, WPARAM wparam);
+    void LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam);
 
     Win32Window window_;
     D3D11Renderer renderer_;
