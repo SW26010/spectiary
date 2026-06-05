@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -86,6 +87,32 @@ std::string LowerAscii(std::string value)
 std::string ExtensionLower(const std::filesystem::path& path)
 {
     return LowerAscii(PathToUtf8(path.extension()));
+}
+
+bool IsFitsExtension(std::string_view extension)
+{
+    return extension == ".fits" || extension == ".fit" || extension == ".fts";
+}
+
+std::string SourceFormatLabel(const std::filesystem::path& path)
+{
+    const std::string extension = ExtensionLower(path);
+    if (extension == ".npy") {
+        return "npy";
+    }
+    if (extension == ".csv") {
+        return "csv";
+    }
+    if (IsFitsExtension(extension)) {
+        return "fits";
+    }
+    if (extension == ".gz" && IsFitsExtension(ExtensionLower(path.stem()))) {
+        return "fits.gz";
+    }
+    if (!extension.empty() && extension.front() == '.') {
+        return extension.substr(1);
+    }
+    return "file";
 }
 
 std::string TrimAscii(std::string value)
@@ -403,10 +430,11 @@ SpectrumDiagnostic MakeDiagnostic(
     return SpectrumDiagnostic{severity, code, std::move(message), std::move(metadata)};
 }
 
-void AddSourceBasics(SpectrumSnapshot& snapshot, const std::filesystem::path& path)
+void AddSourceBasics(SpectrumSnapshot& snapshot, const std::filesystem::path& path, std::string_view source_type = "file")
 {
     const std::string path_text = PathToUtf8(path);
-    snapshot.source.id = path_text.empty() ? "file:" : "file:" + path_text;
+    const std::string_view source_prefix = source_type == "folder" ? "folder:" : "file:";
+    snapshot.source.id = path_text.empty() ? std::string(source_prefix) : std::string(source_prefix) + path_text;
     snapshot.source.display_name = FileNameToUtf8(path);
     snapshot.source.path = path;
     snapshot.source.uri = path_text.empty() ? std::string{} : "file://" + path_text;
@@ -416,19 +444,40 @@ SpectrumSnapshotHandle MakeErrorSnapshot(
     const std::filesystem::path& path,
     SpectrumDiagnosticCode code,
     std::string message,
-    std::vector<SpectrumMetadataEntry> metadata = {})
+    std::vector<SpectrumMetadataEntry> diagnostic_metadata = {},
+    std::string source_type = "file",
+    std::vector<SpectrumMetadataEntry> source_metadata = {})
 {
     auto snapshot = std::make_shared<SpectrumSnapshot>();
-    AddSourceBasics(*snapshot, path);
-    snapshot->source.metadata.push_back({"source_type", "file", "domain"});
+    AddSourceBasics(*snapshot, path, source_type);
+    snapshot->source.metadata.push_back({"source_type", std::move(source_type), "domain"});
+    snapshot->source.metadata.insert(
+        snapshot->source.metadata.end(),
+        std::make_move_iterator(source_metadata.begin()),
+        std::make_move_iterator(source_metadata.end()));
     snapshot->collection.spectrum_count = 0;
     snapshot->capabilities.has_domain_error = true;
     snapshot->diagnostics.push_back(MakeDiagnostic(
         SpectrumDiagnosticSeverity::Error,
         code,
         std::move(message),
-        std::move(metadata)));
+        std::move(diagnostic_metadata)));
     return snapshot;
+}
+
+SpectrumSnapshotHandle MakeNpyErrorSnapshot(
+    const std::filesystem::path& path,
+    SpectrumDiagnosticCode code,
+    std::string message,
+    std::vector<SpectrumMetadataEntry> diagnostic_metadata = {})
+{
+    return MakeErrorSnapshot(
+        path,
+        code,
+        std::move(message),
+        std::move(diagnostic_metadata),
+        "file",
+        {{"format", "npy", "domain"}});
 }
 
 SpectrumValueQuantity InferYQuantity(const std::filesystem::path& path)
@@ -533,9 +582,9 @@ SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::s
     try {
         row = ReadNpyRow(path, spectrum_index);
     } catch (const NpyLoadError& error) {
-        return MakeErrorSnapshot(path, error.code(), error.what());
+        return MakeNpyErrorSnapshot(path, error.code(), error.what());
     } catch (const std::exception& error) {
-        return MakeErrorSnapshot(path, SpectrumDiagnosticCode::InvalidShape, error.what());
+        return MakeNpyErrorSnapshot(path, SpectrumDiagnosticCode::InvalidShape, error.what());
     }
 
     const bool has_loglam_grid = row.column_count == kLogLamGridColumns;
@@ -545,7 +594,7 @@ SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::s
     std::size_t filtered_count = 0;
     FilterFiniteValues(x_values, y_values, filtered_count);
     if (x_values.empty()) {
-        return MakeErrorSnapshot(
+        return MakeNpyErrorSnapshot(
             path,
             SpectrumDiagnosticCode::NoValidPixels,
             "Selected NPY row has no finite plottable pixels.",
@@ -635,17 +684,37 @@ SpectrumSnapshotHandle LoadSpectrumSnapshotFromPath(const std::filesystem::path&
             exists_error ? "Could not inspect the input path." : "Input path does not exist.");
     }
 
+    std::error_code directory_error;
+    const bool is_directory = std::filesystem::is_directory(path, directory_error);
+    if (directory_error) {
+        return MakeErrorSnapshot(
+            path,
+            SpectrumDiagnosticCode::OpenFailed,
+            "Could not inspect whether the input path is a file or directory.");
+    }
+    if (is_directory) {
+        return MakeErrorSnapshot(
+            path,
+            SpectrumDiagnosticCode::UnsupportedFormat,
+            "Folder sources can be added to the Files list, but directory parsing is not implemented yet.",
+            {},
+            "folder");
+    }
+
     const std::string extension = ExtensionLower(path);
     if (extension != ".npy") {
+        const std::string format = SourceFormatLabel(path);
         return MakeErrorSnapshot(
             path,
             SpectrumDiagnosticCode::UnsupportedFormat,
             "Only .npy spectrum matrices are supported in this vertical slice.",
-            {{"extension", extension, "domain"}});
+            {{"format", format, "domain"}},
+            "file",
+            {{"format", format, "domain"}});
     }
 
     if (IsAuxiliaryNpyArrayName(path)) {
-        return MakeErrorSnapshot(
+        return MakeNpyErrorSnapshot(
             path,
             SpectrumDiagnosticCode::UnsupportedFormat,
             "Auxiliary .npy arrays are not opened as spectra; choose a spectrum matrix such as *_X.npy or *_flux.npy.",

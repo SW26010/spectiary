@@ -48,8 +48,8 @@ target_link_libraries(specforge_native PRIVATE
     d3d11
     dxgi
     dwmapi
-    comdlg32
     imm32
+    ole32
     shell32
 )
 

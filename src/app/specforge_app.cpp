@@ -157,10 +157,12 @@ bool ShouldUseDarkTitleBar()
 
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
 {
-    const auto match = std::find_if(metadata.begin(), metadata.end(), [key](const SpectrumMetadataEntry& entry) {
-        return entry.key == key;
-    });
-    return match == metadata.end() ? std::string_view{} : std::string_view(match->value);
+    for (std::size_t index = 0; index < metadata.size(); ++index) {
+        if (metadata[index].key == key) {
+            return metadata[index].value;
+        }
+    }
+    return {};
 }
 
 void ApplyTitleBarTheme(HWND hwnd)

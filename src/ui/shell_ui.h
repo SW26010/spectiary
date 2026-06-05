@@ -5,8 +5,12 @@
 
 #include <imgui.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace specforge {
 
@@ -31,6 +35,26 @@ public:
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
+    struct SourceListEntry {
+        std::filesystem::path path;
+        std::string key;
+        std::string display_name;
+        std::string type_label;
+        std::string state_label;
+        // Stores the last domain snapshot for this source so reactivation can use
+        // an explicit cache instead of reloading. Do not remove as a summary-only
+        // optimization without retesting CSV/folder error snapshots: that change
+        // reproduced 0xc0000005 shared_ptr refcount crashes.
+        SpectrumSnapshotHandle cached_snapshot;
+        std::size_t last_spectrum_index = 0;
+    };
+
+    std::size_t AddOrUpdateSource(
+        const std::filesystem::path& path,
+        SpectrumSnapshotHandle snapshot,
+        std::size_t spectrum_index);
+    void ActivateSource(std::size_t source_index);
+    void RemoveSource(std::size_t source_index);
     void RenderDockHost(const ShellStatus& status);
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
@@ -43,6 +67,8 @@ private:
     SpectrumSnapshotHandle snapshot_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
+    std::vector<SourceListEntry> sources_;
+    std::optional<std::size_t> current_source_index_;
     bool layout_seeded_ = false;
 };
 

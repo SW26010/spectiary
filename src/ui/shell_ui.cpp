@@ -5,21 +5,26 @@
 #include "plot/spectrum_plot.h"
 
 #include <Windows.h>
-#include <commdlg.h>
 #include <dwmapi.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <shobjidl.h>
+#include <wrl/client.h>
 
 #include <algorithm>
-#include <array>
+#include <cctype>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 namespace specforge {
 namespace {
+
+using Microsoft::WRL::ComPtr;
 
 constexpr const char* kDockHostWindow = "SpecForge Dock Host";
 constexpr const char* kMainPlotWindow = "Spectrum";
@@ -29,18 +34,71 @@ constexpr const char* kSpectralLinesWindow = "Spectral Lines";
 constexpr float kStatusBarHeight = 28.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
-std::string NarrowPath(const std::filesystem::path& path)
+class ScopedComInitialization {
+public:
+    ScopedComInitialization()
+        : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)),
+          uninitialize_(SUCCEEDED(result_))
+    {
+    }
+
+    ~ScopedComInitialization()
+    {
+        if (uninitialize_) {
+            CoUninitialize();
+        }
+    }
+
+    [[nodiscard]] bool ready() const
+    {
+        return SUCCEEDED(result_);
+    }
+
+private:
+    HRESULT result_ = E_FAIL;
+    bool uninitialize_ = false;
+};
+
+std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
 }
 
+std::string NarrowPath(const std::filesystem::path& path)
+{
+    return PathToUtf8(path);
+}
+
+std::string FileNameToUtf8(const std::filesystem::path& path)
+{
+    const std::filesystem::path filename = path.filename();
+    return filename.empty() ? PathToUtf8(path) : PathToUtf8(filename);
+}
+
+std::string LowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+std::string SourceKey(const std::filesystem::path& path)
+{
+    std::error_code error;
+    const std::filesystem::path absolute_path = std::filesystem::absolute(path, error);
+    return LowerAscii(PathToUtf8(error ? path : absolute_path));
+}
+
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
 {
-    const auto match = std::find_if(metadata.begin(), metadata.end(), [key](const SpectrumMetadataEntry& entry) {
-        return entry.key == key;
-    });
-    return match == metadata.end() ? std::string_view{} : std::string_view(match->value);
+    for (std::size_t index = 0; index < metadata.size(); ++index) {
+        if (metadata[index].key == key) {
+            return metadata[index].value;
+        }
+    }
+    return {};
 }
 
 std::string_view SeverityLabel(SpectrumDiagnosticSeverity severity)
@@ -186,23 +244,204 @@ std::string_view SourceStateLabel(const SpectrumSnapshotHandle& snapshot)
     return "not plottable";
 }
 
-std::optional<std::filesystem::path> ShowOpenNpyDialog()
+std::string SnapshotDisplayNameText(const SpectrumSnapshotHandle& snapshot, const std::filesystem::path& path)
 {
-    std::array<wchar_t, 32768> filename = {};
+    if (snapshot && !snapshot->source.display_name.empty()) {
+        return snapshot->source.display_name;
+    }
+    return FileNameToUtf8(path);
+}
 
-    OPENFILENAMEW dialog = {};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = GetActiveWindow();
-    dialog.lpstrFilter = L"NumPy arrays (*.npy)\0*.npy\0All files (*.*)\0*.*\0";
-    dialog.lpstrFile = filename.data();
-    dialog.nMaxFile = static_cast<DWORD>(filename.size());
-    dialog.lpstrTitle = L"Open spectrum matrix";
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+std::string SnapshotTypeLabelText(const SpectrumSnapshotHandle& snapshot)
+{
+    if (!snapshot) {
+        return "unknown";
+    }
 
-    if (!GetOpenFileNameW(&dialog)) {
+    const std::string_view format = MetadataValue(snapshot->source.metadata, "format");
+    if (!format.empty()) {
+        return std::string{format};
+    }
+
+    const std::string_view source_type = MetadataValue(snapshot->source.metadata, "source_type");
+    return source_type.empty() ? std::string{"unknown"} : std::string{source_type};
+}
+
+std::string SnapshotStateLabelText(const SpectrumSnapshotHandle& snapshot)
+{
+    return std::string{SourceStateLabel(snapshot)};
+}
+
+bool CreateOpenDialog(ComPtr<IFileOpenDialog>& dialog)
+{
+    return SUCCEEDED(CoCreateInstance(
+            CLSID_FileOpenDialog,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(dialog.GetAddressOf())));
+}
+
+std::optional<std::filesystem::path> DialogResultPath(IFileOpenDialog* dialog)
+{
+    if (dialog == nullptr) {
         return std::nullopt;
     }
-    return std::filesystem::path(filename.data());
+
+    ComPtr<IShellItem> item;
+    if (FAILED(dialog->GetResult(item.GetAddressOf()))) {
+        return std::nullopt;
+    }
+
+    PWSTR filesystem_path = nullptr;
+    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &filesystem_path)) || filesystem_path == nullptr) {
+        return std::nullopt;
+    }
+
+    std::filesystem::path path(filesystem_path);
+    CoTaskMemFree(filesystem_path);
+    return path;
+}
+
+std::optional<std::filesystem::path> ShowSourceFilePicker()
+{
+    ScopedComInitialization com;
+    if (!com.ready()) {
+        return std::nullopt;
+    }
+
+    ComPtr<IFileOpenDialog> dialog;
+    if (!CreateOpenDialog(dialog)) {
+        return std::nullopt;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_FILEMUSTEXIST;
+        dialog->SetOptions(options);
+    }
+
+    static constexpr COMDLG_FILTERSPEC kSourceFilters[] = {
+        {L"Spectrum sources", L"*.npy;*.csv;*.fits;*.fit;*.fts;*.fits.gz"},
+        {L"NumPy arrays", L"*.npy"},
+        {L"CSV files", L"*.csv"},
+        {L"FITS files", L"*.fits;*.fit;*.fts;*.fits.gz"},
+        {L"All files", L"*.*"},
+    };
+    dialog->SetTitle(L"Add source file");
+    dialog->SetFileTypes(static_cast<UINT>(sizeof(kSourceFilters) / sizeof(kSourceFilters[0])), kSourceFilters);
+    dialog->SetFileTypeIndex(1);
+
+    const HRESULT show_result = dialog->Show(GetActiveWindow());
+    if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
+        return std::nullopt;
+    }
+
+    return DialogResultPath(dialog.Get());
+}
+
+std::optional<std::filesystem::path> ShowSourceFolderPicker()
+{
+    ScopedComInitialization com;
+    if (!com.ready()) {
+        return std::nullopt;
+    }
+
+    ComPtr<IFileOpenDialog> dialog;
+    if (!CreateOpenDialog(dialog)) {
+        return std::nullopt;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_PICKFOLDERS;
+        dialog->SetOptions(options);
+    }
+    dialog->SetTitle(L"Add source folder");
+
+    const HRESULT show_result = dialog->Show(GetActiveWindow());
+    if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
+        return std::nullopt;
+    }
+
+    return DialogResultPath(dialog.Get());
+}
+
+bool TableCellTextButton(const char* id, std::string_view text, ImU32 text_color)
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    const float height = ImGui::GetFrameHeight();
+
+    const bool clicked = ImGui::InvisibleButton(id, ImVec2(width, height));
+    const ImVec2 max(min.x + width, min.y + height);
+    const float text_y = min.y + std::max(0.0f, (height - ImGui::GetTextLineHeight()) * 0.5f);
+    const ImVec2 text_pos(min.x + style.FramePadding.x, text_y);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImGui::PushClipRect(min, max, true);
+    draw_list->AddText(text_pos, text_color, text.data(), text.data() + text.size());
+    ImGui::PopClipRect();
+
+    return clicked;
+}
+
+float TrashIconButtonWidth()
+{
+    return ImGui::GetFrameHeight() * 0.5f;
+}
+
+bool TrashIconButton(const char* id, const ImRect& hit_rect)
+{
+    const float height = ImGui::GetFrameHeight();
+    const float width = std::max(1.0f, hit_rect.GetWidth());
+    ImGui::SetCursorScreenPos(hit_rect.Min);
+    const ImVec2 button_size(width, std::max(1.0f, hit_rect.GetHeight()));
+    const bool clicked = ImGui::InvisibleButton(id, button_size);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    if (hovered || active) {
+        const ImU32 background = ImGui::GetColorU32(active ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
+        draw_list->AddRectFilled(min, max, background, 3.0f);
+    }
+
+    const ImU32 icon_color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float icon_width = std::min(TrashIconButtonWidth(), width);
+    const float icon_left = min.x + std::max(0.0f, (width - icon_width) * 0.5f);
+    const float left = icon_left + icon_width * 0.14f;
+    const float right = icon_left + icon_width * 0.86f;
+    const float handle_left = icon_left + icon_width * 0.38f;
+    const float handle_right = icon_left + icon_width * 0.62f;
+    const float icon_top = min.y + std::max(0.0f, (max.y - min.y - height) * 0.5f);
+    const float top = icon_top + height * 0.25f;
+    const float lid_y = icon_top + height * 0.34f;
+    const float body_top = icon_top + height * 0.43f;
+    const float body_bottom = icon_top + height * 0.73f;
+    const float stroke = 1.35f;
+
+    draw_list->AddLine(ImVec2(handle_left, top), ImVec2(handle_right, top), icon_color, stroke);
+    draw_list->AddLine(ImVec2(left, lid_y), ImVec2(right, lid_y), icon_color, stroke);
+    draw_list->AddRect(ImVec2(left + icon_width * 0.05f, body_top), ImVec2(right - icon_width * 0.05f, body_bottom), icon_color, 2.0f, 0, stroke);
+    draw_list->AddLine(
+        ImVec2(icon_left + icon_width * 0.43f, body_top + height * 0.06f),
+        ImVec2(icon_left + icon_width * 0.43f, body_bottom - height * 0.05f),
+        icon_color,
+        1.0f);
+    draw_list->AddLine(
+        ImVec2(icon_left + icon_width * 0.57f, body_top + height * 0.06f),
+        ImVec2(icon_left + icon_width * 0.57f, body_bottom - height * 0.05f),
+        icon_color,
+        1.0f);
+
+    if (hovered) {
+        ImGui::SetTooltip("Remove from list");
+    }
+    return clicked;
 }
 
 void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
@@ -252,12 +491,86 @@ void ShellUi::RefreshSystemColors()
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    SetSnapshot(LoadSpectrumSnapshotFromPath(path, spectrum_index));
+    SpectrumSnapshotHandle loaded_snapshot = LoadSpectrumSnapshotFromPath(path, spectrum_index);
+    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
+    current_source_index_ = source_index;
+    SetSnapshot(std::move(loaded_snapshot));
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
     return snapshot_;
+}
+
+std::size_t ShellUi::AddOrUpdateSource(
+    const std::filesystem::path& path,
+    SpectrumSnapshotHandle snapshot,
+    std::size_t spectrum_index)
+{
+    const std::string key = SourceKey(path);
+    const auto match = std::find_if(sources_.begin(), sources_.end(), [&key](const SourceListEntry& entry) {
+        return entry.key == key;
+    });
+    if (match != sources_.end()) {
+        match->path = path;
+        match->display_name = SnapshotDisplayNameText(snapshot, path);
+        match->type_label = SnapshotTypeLabelText(snapshot);
+        match->state_label = SnapshotStateLabelText(snapshot);
+        match->cached_snapshot = std::move(snapshot);
+        match->last_spectrum_index = spectrum_index;
+        return static_cast<std::size_t>(std::distance(sources_.begin(), match));
+    }
+
+    SourceListEntry entry;
+    entry.path = path;
+    entry.key = key;
+    entry.display_name = SnapshotDisplayNameText(snapshot, path);
+    entry.type_label = SnapshotTypeLabelText(snapshot);
+    entry.state_label = SnapshotStateLabelText(snapshot);
+    entry.cached_snapshot = std::move(snapshot);
+    entry.last_spectrum_index = spectrum_index;
+    sources_.push_back(std::move(entry));
+    return sources_.size() - 1;
+}
+
+void ShellUi::ActivateSource(std::size_t source_index)
+{
+    if (source_index >= sources_.size()) {
+        return;
+    }
+
+    SourceListEntry& entry = sources_[source_index];
+    current_source_index_ = source_index;
+    SetSnapshot(entry.cached_snapshot);
+}
+
+void ShellUi::RemoveSource(std::size_t source_index)
+{
+    if (source_index >= sources_.size()) {
+        return;
+    }
+
+    const bool removed_current = current_source_index_ && *current_source_index_ == source_index;
+    std::optional<std::size_t> next_current_index;
+    if (removed_current && sources_.size() > 1) {
+        next_current_index = source_index + 1 < sources_.size() ? source_index : source_index - 1;
+    }
+
+    sources_.erase(sources_.begin() + static_cast<std::ptrdiff_t>(source_index));
+
+    if (removed_current) {
+        current_source_index_.reset();
+        if (next_current_index) {
+            ActivateSource(*next_current_index);
+        } else {
+            SetSnapshot(MakeSmallSyntheticSpectrumSnapshot());
+        }
+        return;
+    }
+
+    if (current_source_index_ && *current_source_index_ > source_index) {
+        current_source_index_ = *current_source_index_ - 1;
+    }
 }
 
 void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
@@ -348,44 +661,79 @@ void ShellUi::RenderFilesPanel()
     ImGui::TextUnformatted("Files");
     ImGui::Separator();
 
-    if (ImGui::Button("Open...")) {
-        if (std::optional<std::filesystem::path> path = ShowOpenNpyDialog()) {
+    if (ImGui::Button("Add file...")) {
+        if (std::optional<std::filesystem::path> path = ShowSourceFilePicker()) {
             OpenSource(*path);
         }
     }
     ImGui::SameLine();
-    ImGui::BeginDisabled();
-    ImGui::Button("Recent");
-    ImGui::EndDisabled();
+    if (ImGui::Button("Add folder...")) {
+        if (std::optional<std::filesystem::path> path = ShowSourceFolderPicker()) {
+            OpenSource(*path);
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu source%s", sources_.size(), sources_.size() == 1 ? "" : "s");
 
     ImGui::Spacing();
-    if (ImGui::BeginTable("files_table", 3, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Source");
-        ImGui::TableSetupColumn("Type");
-        ImGui::TableSetupColumn("State");
+    if (sources_.empty()) {
+        ImGui::TextDisabled("No sources added in this session.");
+    } else if (ImGui::BeginTable(
+                   "files_table",
+                   4,
+                   ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
+                       ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX)) {
+        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 128.0f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableHeadersRow();
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        const char* source_name = snapshot_ ? snapshot_->source.display_name.c_str() : "none";
-        ImGui::TextUnformatted(source_name);
-        if (snapshot_ && !snapshot_->source.path.empty() && ImGui::IsItemHovered()) {
-            const std::string path = NarrowPath(snapshot_->source.path);
-            ImGui::SetTooltip("%s", path.c_str());
+        std::optional<std::size_t> source_to_remove;
+        for (std::size_t index = 0; index < sources_.size(); ++index) {
+            const SourceListEntry& entry = sources_[index];
+            const bool is_current = current_source_index_ && *current_source_index_ == index;
+
+            ImGui::TableNextRow();
+            if (is_current) {
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_Header));
+            }
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(static_cast<int>(index));
+            if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
+                ActivateSource(index);
+            }
+            if (ImGui::IsItemHovered()) {
+                const std::string path = NarrowPath(entry.path);
+                ImGui::SetTooltip("%s", path.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            if (TableCellTextButton("type", entry.type_label, ImGui::GetColorU32(ImGuiCol_Text))) {
+                ActivateSource(index);
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+            if (TableCellTextButton("state", entry.state_label, state_color)) {
+                ActivateSource(index);
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            const ImRect remove_cell =
+                ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+            if (TrashIconButton("remove", remove_cell)) {
+                source_to_remove = index;
+            }
+            ImGui::PopID();
         }
-        ImGui::TableSetColumnIndex(1);
-        const std::string_view source_type =
-            snapshot_ ? MetadataValue(snapshot_->source.metadata, "source_type") : std::string_view{};
-        if (source_type.empty()) {
-            ImGui::TextUnformatted("unknown");
-        } else {
-            ImGui::TextUnformatted(source_type.data(), source_type.data() + source_type.size());
-        }
-        ImGui::TableSetColumnIndex(2);
-        const std::string_view state = SourceStateLabel(snapshot_);
-        ImGui::TextUnformatted(state.data(), state.data() + state.size());
 
         ImGui::EndTable();
+
+        if (source_to_remove) {
+            RemoveSource(*source_to_remove);
+        }
     }
 
     ImGui::End();

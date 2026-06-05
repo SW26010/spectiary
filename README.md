@@ -85,11 +85,18 @@ Launch with a `.npy` source path to smoke-test the real-data vertical slice:
 .\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_matrix.npy
 ```
 
-Inside the app, the Files panel `Open...` button supports the same `.npy`
-loader. A 3909-column matrix uses the fixed loglam wavelength grid; other
-column counts fall back to pixel index and report that in snapshot diagnostics.
-Known auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`,
-and `*_known_mask.npy` are rejected instead of being plotted as spectra.
+Inside the app, the Files panel `Add file...` button opens source files through
+the same domain snapshot loader, and `Add folder...` opens the native Windows
+folder picker to add a directory source to the session list. The file picker exposes common candidate
+source suffixes such as `.npy`, `.csv`, and FITS variants, but the current
+real-data vertical slice only plots `.npy` matrices. Unsupported files and
+folders stay visible in the Files panel as domain-produced error snapshots with
+diagnostics.
+
+A 3909-column `.npy` matrix uses the fixed loglam wavelength grid; other column
+counts fall back to pixel index and report that in snapshot diagnostics. Known
+auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`, and
+`*_known_mask.npy` are rejected instead of being plotted as spectra.
 
 ## Interaction Profiling
 

@@ -15,6 +15,7 @@ namespace {
 
 using specforge::SpectrumAxisQuantity;
 using specforge::SpectrumDiagnosticCode;
+using specforge::SpectrumDiagnosticSeverity;
 using specforge::SpectrumSnapshotHandle;
 using specforge::SpectrumValueQuantity;
 
@@ -110,6 +111,17 @@ bool HasDiagnosticCode(const SpectrumSnapshotHandle& snapshot, SpectrumDiagnosti
     return false;
 }
 
+std::string_view MetadataValue(const SpectrumSnapshotHandle& snapshot, std::string_view key)
+{
+    Require(snapshot != nullptr, "expected a snapshot");
+    for (const specforge::SpectrumMetadataEntry& entry : snapshot->source.metadata) {
+        if (entry.key == key) {
+            return entry.value;
+        }
+    }
+    return {};
+}
+
 void TestLoadsSelectedNpyRow()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_row_X.npy";
@@ -177,6 +189,42 @@ void TestClassifiesEmptyShape()
     Require(FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::EmptyData, "empty NPY shape should be empty data");
 }
 
+void TestUnsupportedCsvUsesDomainSnapshot()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_pending.csv";
+    {
+        std::ofstream stream(path);
+        Require(stream.good(), "could not open CSV test fixture for writing");
+        stream << "wavelength,flux\n1,2\n";
+        Require(stream.good(), "could not write CSV test fixture");
+    }
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    Require(!snapshot->capabilities.can_plot_current_spectrum, "unsupported CSV should not be plottable");
+    Require(snapshot->capabilities.has_domain_error, "unsupported CSV should be a domain error snapshot");
+    Require(FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat, "CSV should be unsupported");
+    Require(snapshot->diagnostics.front().severity == SpectrumDiagnosticSeverity::Error, "CSV diagnostic should be an error");
+    Require(MetadataValue(snapshot, "source_type") == "file", "CSV source type should come from domain");
+    Require(MetadataValue(snapshot, "format") == "csv", "CSV format should come from domain");
+}
+
+void TestFolderUsesDomainSnapshot()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_folder_source";
+    std::error_code error;
+    std::filesystem::remove_all(path, error);
+    Require(std::filesystem::create_directory(path), "could not create folder source test fixture");
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    Require(!snapshot->capabilities.can_plot_current_spectrum, "folder source should not be plottable");
+    Require(snapshot->capabilities.has_domain_error, "folder source should be a domain error snapshot");
+    Require(FirstDiagnosticCode(snapshot) == SpectrumDiagnosticCode::UnsupportedFormat, "folder should be unsupported");
+    Require(snapshot->diagnostics.front().severity == SpectrumDiagnosticSeverity::Error, "folder diagnostic should be an error");
+    Require(MetadataValue(snapshot, "source_type") == "folder", "folder source type should come from domain");
+
+    std::filesystem::remove_all(path, error);
+}
+
 }  // namespace
 
 int main()
@@ -185,5 +233,7 @@ int main()
     TestRejectsAuxiliaryNpyArrays();
     TestClassifiesUnsupportedDtype();
     TestClassifiesEmptyShape();
+    TestUnsupportedCsvUsesDomainSnapshot();
+    TestFolderUsesDomainSnapshot();
     return 0;
 }

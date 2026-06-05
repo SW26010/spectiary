@@ -94,6 +94,16 @@ Format-specific rules stay in the producer side of `domain`. The producer may
 use `docs/data_formats.md` as input policy, but it only exposes the normalized
 snapshot.
 
+UI may keep a session-level source list and may expose broad file picker or
+folder path-entry affordances for likely spectrum sources. Those affordances are
+not loader decisions or support claims. Every selected source must still go
+through a domain snapshot producer, including unsupported files and folders.
+
+Unsupported sources are represented as domain-created error snapshots. UI may
+display their normalized `source` metadata, `capabilities`, and `diagnostics`,
+but must not infer parser support, synthesize placeholder snapshots, or
+recompute source-type diagnostics itself.
+
 ## Current Fixture
 
 The synthetic fixture may continue to exist for shell testing. It must be marked
