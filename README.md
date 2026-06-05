@@ -13,8 +13,10 @@ synthetic spectrum fixture, and optional JSONL profile output.
 - The app shell initializes Win32, DirectX 11, Dear ImGui docking, and ImPlot.
 - The main plot consumes `SpectrumSnapshotHandle` snapshots from the domain
   layer; the synthetic fixture and `.npy` loader use the same UI/plot path.
-- The first real-data vertical slice supports opening a 1D or row-level 2D
-  `.npy` float32/float64 array and renders one spectrum row at a time.
+- The real-data loader supports `.npy` spectrum matrices, simple
+  wavelength/flux `.csv` files, and recognized single-spectrum FITS files
+  focused on LAMOST/SDSS table spectra. Limited COEFF0/COEFF1 FITS image
+  handling is a narrow fallback, not a generic FITS support promise.
 - No real-data performance conclusion is claimed from this shell yet.
 - Generated build trees, local data, layout files, profile logs, and scratch
   experiments are ignored.
@@ -79,19 +81,21 @@ layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
 JSONL profile output under `logs/`, or set `SPECFORGE_PROFILE_DIR` to write
 profile output to a specific directory.
 
-Launch with a `.npy` source path to smoke-test the real-data vertical slice:
+Launch with a spectrum source path to smoke-test the real-data loader:
 
 ```powershell
-.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_matrix.npy
+.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
 ```
 
 Inside the app, the Files panel `Add file...` button opens source files through
 the same domain snapshot loader, and `Add folder...` opens the native Windows
-folder picker to add a directory source to the session list. The file picker exposes common candidate
-source suffixes such as `.npy`, `.csv`, and FITS variants, but the current
-real-data vertical slice only plots `.npy` matrices. Unsupported files and
-folders stay visible in the Files panel as domain-produced error snapshots with
-diagnostics.
+folder picker to add a directory source to the session list. Folder loading is
+non-recursive and treats first-level `.csv` and FITS files as one navigable
+collection. Subfolders, unrelated file types, and mixed CSV/FITS folders are
+reported as diagnostics. The file picker exposes common candidate source
+suffixes such as `.npy`, `.csv`, and FITS variants. Unsupported files and
+catalog FITS files stay visible in the Files panel as domain-produced error
+snapshots with diagnostics.
 
 A 3909-column `.npy` matrix uses the fixed loglam wavelength grid; other column
 counts fall back to pixel index and report that in snapshot diagnostics. Known

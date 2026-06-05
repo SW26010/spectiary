@@ -2,12 +2,12 @@
 
 ## 当前阶段
 
-仓库已经完成第一次项目整理、native shell 和第一条真实数据竖切片。当前可提交状态包括：
+仓库已经完成第一次项目整理、native shell 和多格式真实数据 loader。当前可提交状态包括：
 
 - `specforge_native` Windows executable target。
 - Win32 + DirectX 11 + Dear ImGui docking + ImPlot shell。
-- 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture 和 `.npy` loader 使用同一条 UI/plot 路径。
-- `.npy` loader 支持 1D 或行级 2D float32/float64 array，并一次渲染一条光谱。
+- 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture、`.npy`、CSV 和 FITS loader 使用同一条 UI/plot 路径。
+- loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱。
 - 可选 JSONL profile sink 已经接入，用于解释输入、view update、draw、render/present 的基本链路。
 
 当前仍不声明真实数据性能达标；任何刷新率或延迟结论必须来自真实数据和新日志。
@@ -114,12 +114,12 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ### Milestone 2: Spectrum Vertical Slice
 
-状态：第一条 `.npy` 真实数据竖切片已存在，后续继续收敛交互和 profile 验收。
+状态：多格式真实数据输入已存在，后续继续收敛交互和 profile 验收。
 
 范围：
 
-- 接入第一种真实光谱输入：1D 或行级 2D `.npy` float32/float64 array。
-- 显示一条光谱，并支持在 2D matrix 中切换上一条和下一条光谱。
+- 接入真实光谱输入：1D/2D `.npy`、简单 `.csv`、可识别的单条 FITS table 光谱。
+- 显示一条光谱，并支持在 2D `.npy` matrix 或多行 vector-table FITS 中切换上一条和下一条光谱。
 - 支持主图 pan 和 cursor-centered wheel zoom。
 - 输出 input、view update、draw、present timing 的 JSONL profile。
 
@@ -159,8 +159,8 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 
 ## 非目标
 
-- 当前阶段不做 FITS loader 或泛化多 loader 框架。
-- `.npy` loader 是第一条真实数据竖切片，不等于最终数据栈承诺。
+- 当前阶段不做 catalog 管理、旧项目兼容层或泛化多后端框架。
+- 当前 loader 支持 `.npy`、简单 `.csv` 和可识别的单条 LAMOST/SDSS FITS table 光谱；受限 image fallback 不等于可靠 image FITS 或最终数据栈承诺。
 - 当前阶段不做性能目标证明。
 - 当前阶段不引入本地大数据。
 - 当前阶段不创建旧项目兼容层。

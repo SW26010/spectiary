@@ -2,12 +2,13 @@
 
 ## 当前提交范围
 
-仓库当前是 native shell + 第一条 `.npy` 真实数据竖切片。`specforge_native` 是 Win32 + DirectX 11 executable target，
+仓库当前是 native shell + 多格式真实数据 loader。`specforge_native` 是 Win32 + DirectX 11 executable target，
 用于初始化 Dear ImGui docking、ImPlot、dock host、主图、文件区、信息/标签区、谱线区、状态栏和可选 JSONL profile sink。
 默认启动仍有 small synthetic fixture 用于 smoke test；命令行源路径和 Files 面板 `Add file...` 支持通过 domain snapshot loader 打开 source。
 Files 面板 `Add folder...` 使用 Windows 原生目录选择器添加目录 source，目录本身仍交给 domain snapshot loader 处理。
-当前可绘制的真实数据仍是 `.npy` 光谱矩阵；CSV/FITS 文件和 folder source 只进入 Files 列表，并由 domain 产出不可绘制的 diagnostic snapshot。
-`.npy` loader 支持 1D 或行级 2D float32/float64 array，通过 `SpectrumSnapshotHandle` 进入同一条 UI/plot 路径。
+当前可绘制的真实数据包括 `.npy` 光谱矩阵、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱，以及第一层包含 CSV/FITS 文件的 folder collection；受限 image FITS fallback 不作为主支持承诺，catalog/unsupported FITS 由 domain 产出不可绘制的 diagnostic snapshot。
+Folder source 非递归加载第一层 CSV/FITS 文件，子文件夹、其它文件类型、CSV/FITS 混用都会写入 warning diagnostics。
+`.npy` loader 支持 1D 或行级 2D float32/float64 array，CSV/FITS loader 产出同一类 `SpectrumSnapshotHandle` 进入同一条 UI/plot 路径。
 3909 列矩阵使用固定 loglam wavelength grid，其他列数退回 pixel index 并写入 snapshot diagnostics。
 辅助数组如 `*_label.npy`、`*_index.npy`、`*_ormask.npy` 和 `*_known_mask.npy` 不作为光谱打开。
 当前仍不从 shell 或竖切片得出真实数据性能结论。
@@ -39,10 +40,11 @@ $env:VCPKG_ROOT
 
 - `imgui[docking-experimental,win32-binding,dx11-binding]`
 - `implot`
+- `zlib`
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
-DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`、`dwmapi` 和 `imm32`。
+DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`、`dwmapi` 和 `imm32`。`zlib` 只用于受限 `.fits.gz` 单光谱读取路径。
 
 ## CMake Presets
 

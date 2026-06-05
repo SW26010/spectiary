@@ -11,6 +11,7 @@
         "dx11-binding"
       ]
     },
-    "implot"
+    "implot",
+    "zlib"
   ]
 }

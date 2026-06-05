@@ -8,12 +8,42 @@
 - 已经处理好的 `.npy` 光谱矩阵。
 - 星表/catalog FITS。
 
-星表 FITS 不是一条光谱，不能直接按 `flux-wavelength` 画图。当前已实现的真实数据竖切片能直接画的是：
+星表 FITS 不是一条光谱，不能直接按 `flux-wavelength` 画图。当前已实现的真实数据读取能直接画的是：
 
+- 两列波长/流量 `.csv` 光谱。
 - 一维 `.npy` 光谱数组。
 - 二维 `.npy` 光谱矩阵中的一行。
+- 可识别的单条 FITS table 光谱：LAMOST/SDSS table 路径。
 
-下面的 FITS 规则是后续输入策略，不是当前已实现 loader。接入 FITS 时，如果文件里找不到可识别的单条光谱结构，应提示“这是 catalog 或不支持的 FITS，不是单条光谱”，而不是把星表列误当成光谱曲线。
+打开 FITS 时，如果文件里找不到可识别的单条光谱结构，应提示“这是 catalog 或不支持的 FITS，不是单条光谱”，而不是把星表列误当成光谱曲线。
+
+当前 native loader 是同步 UI 路径，只面向单条光谱级别文件。为避免误开大型 catalog FITS 时卡 UI 或占用过多内存，FITS/FITS.GZ 在读取和解压前有大小上限；超过上限时应返回 domain error snapshot，而不是继续尝试整文件解析。
+
+当前 FITS reader 是窄口径 vertical slice，不做通用 FITS。后续如果继续扩张 FITS 支持，应先把实现从通用 loader 文件拆到独立 `fits_spectrum_loader` 边界，并优先评估 CFITSIO/CCfits，而不是继续堆手写 FITS 语义。
+
+## CSV 读取
+
+当前 CSV loader 支持带表头的简单两列光谱，常见列名是：
+
+```text
+wav, flux
+wavelength, flux
+loglam, flux
+```
+
+如果使用 `loglam`，波长按 `10 ** loglam` 转换；如果使用 `wav`/`wavelength`，直接视为 Angstrom 波长。读取后清理不可解析、非有限、非正波长的行，并按波长升序绘图。CSV 不携带 rest-frame 校正状态，因此只能作为未确认坐标系的波长轴显示。
+
+## 文件夹读取
+
+Folder source 是一个由多个文件组成的光谱集合，只读取目录第一层，不递归进入子文件夹。当前纳入集合的文件类型是：
+
+- `.csv`
+- `.fits`
+- `.fit`
+- `.fts`
+- `.fits.gz`
+
+目录中的子文件夹不会递归加载，应写入 warning diagnostic。其它文件类型也应忽略并写入 warning diagnostic。CSV 和 FITS 混在同一个目录时仍可加载，但也应写入 warning diagnostic，因为这通常表示数据批次不纯，需要业务侧确认。集合内部按文件名稳定排序，UI 的上一条/下一条在这些文件之间切换。
 
 ## 统一波长网格
 
@@ -59,7 +89,7 @@ data/Carbon_Spectral/carbon_dr10(int.)_11550_fits
 data/new_carbon_candidates/Final_matched_fits(dr10_v1.0)
 ```
 
-DR10 FITS 主要按 image HDU 读：
+DR10 FITS 常见 image HDU 结构是：
 
 - `data[0]` 是 flux。
 - `data[1]` 是 inverse variance。
@@ -72,6 +102,8 @@ wavelength = 10 ** (COEFF0 + COEFF1 * pixel)
 ```
 
 这里 `COEFF1` 通常应为 `0.0001`。原始光谱可能不覆盖完整 3909 网格，首尾无覆盖位置在 raw flux/mask 里可能是 `NaN`。
+
+当前 native loader 仅在 header 明确提供 `COEFF0/COEFF1` 时把这种 image 结构作为受限 fallback 识别；这不是可靠 image FITS 或通用 FITS 支持承诺。不要用 `CRVAL1/CD1_1` 等 WCS 字段猜测 log10 wavelength，除非后续同时实现并验证 `CTYPE/DC-FLAG` 等语义。
 
 FITS 读取后续需要补充径向速度/红移元数据识别。读取器应在不改变当前绘图波长的前提下，
 优先记录可验证来源，例如 header 或 table metadata 中的 `radial_velocity_km_s`、
@@ -134,7 +166,7 @@ SDSS 还有两个坑：
 打开 FITS 时建议按这个顺序：
 
 1. 找 table HDU：必须有 `flux`，并且有 `loglam` 或 `wavelength`。
-2. 找 image HDU：必须有 `COEFF0/COEFF1`，默认第 0 行是 flux。
+2. 找受限 image fallback：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时按 `ivar > 0` 过滤；第 4 行存在时按 `ormask == 0` 过滤；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
 3. 读取可验证的径向速度或红移元数据，但当前阶段只记录，不自动校正波长。
 4. 清理非有限 wavelength/flux、非正 wavelength，并按 wavelength 升序画。
 5. 如果找不到这些信息，提示“这是 catalog 或不支持的 FITS，不是单条光谱”。
@@ -151,4 +183,4 @@ LAMOST DR13 -> SDSS DR17 -> SDSS DR19
 
 ## 一句话总结
 
-程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵，`LAMOST/SDSS FITS` 要先识别 HDU 和波长列，`mask/ivar` 决定有效点，`X.npy` 是处理后的特征而不是原始流量。
+程序层面不要把所有文件都当成同一种结构。`NPY` 是行级矩阵，FITS 要先识别 HDU、波长列或受限 `COEFF0/COEFF1` fallback，`mask/ivar` 决定有效点，`X.npy` 是处理后的特征而不是原始流量。

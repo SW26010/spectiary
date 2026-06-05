@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 set(SPECFORGE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/specforge.exe.manifest")
 
@@ -45,6 +46,7 @@ target_compile_definitions(specforge_native PRIVATE
 target_link_libraries(specforge_native PRIVATE
     imgui::imgui
     implot::implot
+    ZLIB::ZLIB
     d3d11
     dxgi
     dwmapi
@@ -74,6 +76,7 @@ add_executable(specforge_loader_tests
 )
 
 target_include_directories(specforge_loader_tests PRIVATE src)
+target_link_libraries(specforge_loader_tests PRIVATE ZLIB::ZLIB)
 
 if(MSVC)
     target_compile_options(specforge_loader_tests PRIVATE /W4 /permissive-)

@@ -99,7 +99,7 @@ folder path-entry affordances for likely spectrum sources. Those affordances are
 not loader decisions or support claims. Every selected source must still go
 through a domain snapshot producer, including unsupported files and folders.
 
-Unsupported sources are represented as domain-created error snapshots. UI may
+Unsupported sources, including folders with no supported spectra, are represented as domain-created error snapshots. UI may
 display their normalized `source` metadata, `capabilities`, and `diagnostics`,
 but must not infer parser support, synthesize placeholder snapshots, or
 recompute source-type diagnostics itself.

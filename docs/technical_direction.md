@@ -53,11 +53,13 @@ DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在�
 
 ## 数据边界
 
-当前 `.npy` loader 是第一条真实数据竖切片，不代表最终 loader 已定。真实数据输入合同定义在
+当前真实数据 loader 支持 `.npy`、简单波长/流量 `.csv`，以及可识别的单条 LAMOST/SDSS FITS table 光谱。真实数据输入合同定义在
 [Spectrum Snapshot Contract](spectrum_snapshot_contract.md)，由 `domain` 产出
 稳定快照，UI 和 plot 只读该快照。
 
 Python、IPC、native loader 或外部预处理都只能作为 producer 侧实现选择，不能写入 UI/plot 产品承诺。
+
+当前 FITS reader 只能作为窄口径 vertical slice。若后续 FITS 支持继续扩张，应先抽到独立 `fits_spectrum_loader` 边界，并优先评估 CFITSIO/CCfits，而不是继续在通用 loader 文件里叠加手写 FITS 细节。
 
 ## Profile 事件
 
