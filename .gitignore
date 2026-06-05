@@ -6,6 +6,7 @@ CMakeUserPresets.json
 
 # Local runtime/layout state
 imgui.ini
+logs/
 *.log
 
 # Native build artifacts

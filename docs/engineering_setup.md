@@ -2,7 +2,9 @@
 
 ## 当前提交范围
 
-这是第一次提交前的环境整理阶段。仓库当前只验证依赖声明和工程方向，不声明应用 executable target。
+仓库已经进入 Milestone 1 的 native shell 阶段。当前声明一个 Win32 + DirectX 11 executable target，
+用于初始化 Dear ImGui docking、ImPlot、dock host、主图、文件区、信息/标签区、谱线区、状态栏和可选 JSONL profile sink。
+当前 shell 只使用 small synthetic fixture，不从它得出真实数据性能结论。
 
 ## 必需工具
 
@@ -34,7 +36,7 @@ $env:VCPKG_ROOT
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
-DirectX 11 来自 Windows SDK，后续 executable target 应链接 `d3d11` 和 `dxgi`。
+DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`、`dwmapi` 和 `imm32`。
 
 ## CMake Presets
 
@@ -52,7 +54,21 @@ Visual Studio configure check：
 cmake --preset vs2022-x64-debug
 ```
 
-当前阶段 configure success 即为环境验收。没有 executable target，也没有可运行程序。
+Configure success 验证依赖和生成文件，build success 验证 native shell target。
+
+Build native shell：
+
+```powershell
+cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+```
+
+生成程序位于：
+
+```text
+build/ninja-msvc-debug/SpecForge.exe
+```
+
+ImGui layout 写入 `imgui.ini`。设置 `SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 会写入 `logs/`。
 
 ## 仓库卫生
 
@@ -64,17 +80,16 @@ cmake --preset vs2022-x64-debug
 - `vcpkg_installed/`
 - `CMakeUserPresets.json`
 - `imgui.ini`
+- `logs/`
 - 本地光谱数据。
 - `.scratch/` 中的旧 demo 和实验。
 
 如果后续需要测试数据，只提交小型、明确授权的 fixture，并放在专门的 fixture 路径中。
 
-## 下一次实现前检查
+## 后续实现检查
 
-开始写代码前先确认：
+继续实现前先确认：
 
-- Win32 + DX11 shell 是否直接以 Dear ImGui official example 为基础。
-- docking 是否通过标准 dockspace 实现。
 - 第一条 spectrum 数据从哪个输入合同进入。
 - profile JSONL schema 是否先于性能判断落地。
 - 真实数据路径是否仍留在仓库外。

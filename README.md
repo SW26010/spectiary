@@ -3,18 +3,18 @@
 SpecForge is being prepared as a native Windows spectrum viewer built on Win32,
 DirectX 11, Dear ImGui docking, ImPlot, CMake, and vcpkg.
 
-This repository is currently in the first-commit cleanup phase. The goal of this
-phase is to make the project direction, environment, and documentation clean
-before product code is added.
+This repository now contains the first native shell slice for the product
+direction: a Win32 + DirectX 11 executable with Dear ImGui docking, ImPlot, a
+synthetic spectrum fixture, and optional JSONL profile output.
 
 ## Current State
 
-- Product code is intentionally not implemented yet.
-- The retired GLFW/OpenGL demo has been moved out of the commit path.
-- `CMakeLists.txt` validates the declared dependency stack but does not declare
-  an executable target.
-- Generated build trees, local data, layout files, and scratch experiments are
-  ignored.
+- `specforge_native` builds the Windows executable target.
+- The app shell initializes Win32, DirectX 11, Dear ImGui docking, and ImPlot.
+- The main plot uses a small synthetic fixture only; no real-data performance
+  conclusion is claimed from this shell.
+- Generated build trees, local data, layout files, profile logs, and scratch
+  experiments are ignored.
 
 ## Product Direction
 
@@ -61,5 +61,16 @@ Or use the Visual Studio generator preset:
 cmake --preset vs2022-x64-debug
 ```
 
-At this phase, configure success is the expected verification. There is no
-application executable to run yet.
+Configure success verifies the dependency stack and generated build files.
+
+## Build
+
+Use the Ninja preset from a terminal with the MSVC environment loaded:
+
+```powershell
+cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+```
+
+The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
+layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
+JSONL profile output under `logs/`.
