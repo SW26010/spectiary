@@ -1,0 +1,34 @@
+build/
+out/
+.vs/
+.vscode/
+CMakeUserPresets.json
+
+# Local runtime/layout state
+imgui.ini
+*.log
+
+# Native build artifacts
+*.exe
+*.ilk
+*.lib
+*.obj
+*.pdb
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# vcpkg/CMake generated install trees
+vcpkg_installed/
+
+# Local sample data should stay outside the repo unless added as small fixtures.
+data/
+*.fits
+*.fit
+*.fts
+*.npy
+*.npz
+
+# Preserved local experiments and retired demos.
+.scratch/

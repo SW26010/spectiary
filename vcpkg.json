@@ -1,0 +1,16 @@
+{
+  "name": "specforge",
+  "version-string": "0.1.0",
+  "builtin-baseline": "eb35a05cc21c69ec1399f7532b7dd61d271ac0d1",
+  "dependencies": [
+    {
+      "name": "imgui",
+      "features": [
+        "docking-experimental",
+        "win32-binding",
+        "dx11-binding"
+      ]
+    },
+    "implot"
+  ]
+}
