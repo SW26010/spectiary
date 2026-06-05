@@ -172,7 +172,7 @@ bool HasDiagnosticAtLeast(const SpectrumSnapshotHandle& snapshot, SpectrumDiagno
     });
 }
 
-std::string SourceStateLabel(const SpectrumSnapshotHandle& snapshot)
+std::string_view SourceStateLabel(const SpectrumSnapshotHandle& snapshot)
 {
     if (!snapshot) {
         return "none";
@@ -213,11 +213,15 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
     }
 
     for (const SpectrumDiagnostic& diagnostic : snapshot->diagnostics) {
-        const std::string severity(SeverityLabel(diagnostic.severity));
-        const std::string code(DiagnosticCodeLabel(diagnostic.code));
-        ImGui::TextColored(SeverityColor(diagnostic.severity), "%s", severity.c_str());
+        const std::string_view severity = SeverityLabel(diagnostic.severity);
+        const std::string_view code = DiagnosticCodeLabel(diagnostic.code);
+        ImGui::TextColored(
+            SeverityColor(diagnostic.severity),
+            "%.*s",
+            static_cast<int>(severity.size()),
+            severity.data());
         ImGui::SameLine();
-        ImGui::TextDisabled("%s", code.c_str());
+        ImGui::TextDisabled("%.*s", static_cast<int>(code.size()), code.data());
         ImGui::TextWrapped("%s", diagnostic.message.c_str());
         for (const SpectrumMetadataEntry& entry : diagnostic.metadata) {
             ImGui::BulletText("%s: %s", entry.key.c_str(), entry.value.c_str());
@@ -329,8 +333,8 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::TextDisabled("|");
     ImGui::SameLine();
     ImGui::TextUnformatted(status.profile_open ? "Profile active" : "Profile off");
-    if (status.profile_open && ImGui::IsItemHovered()) {
-        const std::string profile_path = NarrowPath(status.profile_path);
+    if (status.profile_open && status.profile_path != nullptr && ImGui::IsItemHovered()) {
+        const std::string profile_path = NarrowPath(*status.profile_path);
         ImGui::SetTooltip("%s", profile_path.c_str());
     }
 
@@ -363,19 +367,23 @@ void ShellUi::RenderFilesPanel()
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        const std::string source_name = snapshot_ ? snapshot_->source.display_name : std::string("none");
-        ImGui::TextUnformatted(source_name.c_str());
+        const char* source_name = snapshot_ ? snapshot_->source.display_name.c_str() : "none";
+        ImGui::TextUnformatted(source_name);
         if (snapshot_ && !snapshot_->source.path.empty() && ImGui::IsItemHovered()) {
             const std::string path = NarrowPath(snapshot_->source.path);
             ImGui::SetTooltip("%s", path.c_str());
         }
         ImGui::TableSetColumnIndex(1);
-        const std::string source_type(
-            snapshot_ ? MetadataValue(snapshot_->source.metadata, "source_type") : std::string_view{});
-        ImGui::TextUnformatted(source_type.empty() ? "unknown" : source_type.c_str());
+        const std::string_view source_type =
+            snapshot_ ? MetadataValue(snapshot_->source.metadata, "source_type") : std::string_view{};
+        if (source_type.empty()) {
+            ImGui::TextUnformatted("unknown");
+        } else {
+            ImGui::TextUnformatted(source_type.data(), source_type.data() + source_type.size());
+        }
         ImGui::TableSetColumnIndex(2);
-        const std::string state = SourceStateLabel(snapshot_);
-        ImGui::TextUnformatted(state.c_str());
+        const std::string_view state = SourceStateLabel(snapshot_);
+        ImGui::TextUnformatted(state.data(), state.data() + state.size());
 
         ImGui::EndTable();
     }

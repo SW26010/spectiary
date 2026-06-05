@@ -15,7 +15,7 @@ class ProfileSink;
 struct ShellStatus {
     bool profile_open = false;
     ProfileSink* profile = nullptr;
-    std::filesystem::path profile_path;
+    const std::filesystem::path* profile_path = nullptr;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
     std::uint64_t frame_index = 0;

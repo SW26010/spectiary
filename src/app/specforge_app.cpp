@@ -350,7 +350,7 @@ void SpecForgeApp::RenderFrame()
         ShellStatus status;
         status.profile_open = profile_.is_open();
         status.profile = &profile_;
-        status.profile_path = profile_.path();
+        status.profile_path = status.profile_open ? &profile_.path() : nullptr;
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
