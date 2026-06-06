@@ -105,14 +105,31 @@ wavelength = 10 ** (COEFF0 + COEFF1 * pixel)
 
 当前 native loader 仅在 header 明确提供 `COEFF0/COEFF1` 时把这种 image 结构作为受限 fallback 识别；这不是可靠 image FITS 或通用 FITS 支持承诺。不要用 `CRVAL1/CD1_1` 等 WCS 字段猜测 log10 wavelength，除非后续同时实现并验证 `CTYPE/DC-FLAG` 等语义。
 
-FITS 读取后续需要补充径向速度/红移元数据识别。读取器应在不改变当前绘图波长的前提下，
-优先记录可验证来源，例如 header 或 table metadata 中的 `radial_velocity_km_s`、
-`redshift`、`radial_velocity_source` 和 `rest_frame_correction_status`。这些值只是后续
-坐标校正的输入；只读到 RV 或 redshift 不能清除 UI 警告。只有在明确完成观测波长到
-rest-frame 的校正后，才应同时把 `x_axis_frame` 标为 `rest`，并把
-`rest_frame_correction_status` 标为 `applied`、`verified` 或等价状态。`unknown` frame
-仍可作为参考显示 rest-frame 标准线表并显示黄色叹号；`observed` frame 默认不显示
-rest-frame 标准线表，除非 `rest_frame_correction_status` 明确表示校正已应用。
+FITS 读取需要把“观测波长轴”与“到目标静止系”分开。观测波长仍来自
+`COEFF0/COEFF1`、`WAVELENGTH` 或 `LOGLAM`，不要再做一次 FITS/WCS 波长校准。
+如果后续要显示目标静止系，核心关系是：
+
+```text
+lambda_rest = lambda_observed / (1 + z)
+z ~= radial_velocity_km_s / 299792.458
+```
+
+这里的低速近似只适合恒星视向速度。`HELIO_RV` 是观测者运动/日心框架修正，
+不是目标静止系速度，不能拿它再把谱线“修一次”。LAMOST/SDSS 光谱通常是真空
+波长，谱线表也必须使用真空波长；例如 Hα 应用约 `6564.614 Å`，不是空气波长
+`6562.801 Å`。
+
+读取器应在不改变当前绘图波长的前提下，优先记录可验证来源，例如
+`wavelength_medium`、`observer_frame_correction`、`radial_velocity_km_s`、
+`redshift`、`radial_velocity_source`、`target_redshift`、`target_redshift_status`
+和 `rest_frame_correction_status`。恒星优先使用官方 RV 并按低速近似推导
+`target_redshift`；星系/QSO 使用 pipeline `Z`。无效值必须挡住，例如 LAMOST
+常见 `Z=-9999`；`ZWARNING` 非零时应显示为不可靠/需人工确认。只读到 RV 或
+redshift 不能清除 UI 警告。只有在明确完成观测波长到 rest-frame 的显示或数据
+校正后，才应同时把 `x_axis_frame` 标为 `rest`，并把
+`rest_frame_correction_status` 标为 `applied`、`verified` 或等价状态。`unknown`
+frame 仍可作为参考显示 rest-frame 标准线表并显示黄色叹号；`observed` frame
+默认不显示 rest-frame 标准线表，除非 `rest_frame_correction_status` 明确表示校正已应用。
 
 ## LAMOST DR13 LRS
 
@@ -167,7 +184,7 @@ SDSS 还有两个坑：
 
 1. 找 table HDU：必须有 `flux`，并且有 `loglam` 或 `wavelength`。
 2. 找受限 image fallback：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时按 `ivar > 0` 过滤；第 4 行存在时按 `ormask == 0` 过滤；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
-3. 读取可验证的径向速度或红移元数据，但当前阶段只记录，不自动校正波长。
+3. 读取可验证的目标 RV 或红移元数据，挡住无效 redshift，标记不可靠 redshift，并记录当前是否有可用的 `target_redshift`；不要使用 `HELIO_RV` 作为目标速度。
 4. 清理非有限 wavelength/flux、非正 wavelength，并按 wavelength 升序画。
 5. 如果找不到这些信息，提示“这是 catalog 或不支持的 FITS，不是单条光谱”。
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstddef>
@@ -27,6 +28,8 @@ using specforge::SpectrumDiagnosticCode;
 using specforge::SpectrumDiagnosticSeverity;
 using specforge::SpectrumSnapshotHandle;
 using specforge::SpectrumValueQuantity;
+
+constexpr double kSpeedOfLightKmPerSecond = 299792.458;
 
 void Require(bool condition, std::string_view message)
 {
@@ -230,6 +233,13 @@ void WriteFitsScalarTable(const std::filesystem::path& path)
                                 FitsCard("TFORM2", "'E'"),
                                 FitsCard("TTYPE3", "'ivar'"),
                                 FitsCard("TFORM3", "'E'"),
+                                FitsCard("RV", "               -42.5"),
+                                FitsCard("Z", "              0.0123"),
+                                FitsCard("ZWARNING", "                   0"),
+                                FitsCard("HELIO_RV", "               15.25"),
+                                FitsCard("HELIO", "                   T"),
+                                FitsCard("VACUUM", "                   T"),
+                                FitsCard("CLASS", "'STAR'"),
                             });
 
     std::vector<unsigned char> data;
@@ -256,17 +266,20 @@ void WriteFitsVectorTable(const std::filesystem::path& path)
                                 FitsCard("XTENSION", "'BINTABLE'"),
                                 FitsCard("BITPIX", "                   8"),
                                 FitsCard("NAXIS", "                   2"),
-                                FitsCard("NAXIS1", "                  36"),
+                                FitsCard("NAXIS1", "                  40"),
                                 FitsCard("NAXIS2", "                   1"),
                                 FitsCard("PCOUNT", "                   0"),
                                 FitsCard("GCOUNT", "                   1"),
-                                FitsCard("TFIELDS", "                   3"),
+                                FitsCard("TFIELDS", "                   4"),
                                 FitsCard("TTYPE1", "'WAVELENGTH'"),
                                 FitsCard("TFORM1", "'3E'"),
                                 FitsCard("TTYPE2", "'FLUX'"),
                                 FitsCard("TFORM2", "'3E'"),
                                 FitsCard("TTYPE3", "'ORMASK12'"),
                                 FitsCard("TFORM3", "'3E'"),
+                                FitsCard("TTYPE4", "'RV'"),
+                                FitsCard("TFORM4", "'E'"),
+                                FitsCard("VACUUM", "                   T"),
                             });
 
     std::vector<unsigned char> data;
@@ -279,9 +292,46 @@ void WriteFitsVectorTable(const std::filesystem::path& path)
     for (float value : {0.0F, 1.0F, 0.0F}) {
         AppendBigEndianFloat(data, value);
     }
+    AppendBigEndianFloat(data, 124.5F);
     stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     PadFitsData(stream, data.size());
     Require(stream.good(), "could not write vector FITS fixture");
+}
+
+void WriteFitsInvalidRedshiftTable(const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open invalid-redshift FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   8"),
+                                FitsCard("NAXIS2", "                   2"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'flux'"),
+                                FitsCard("TFORM1", "'E'"),
+                                FitsCard("TTYPE2", "'loglam'"),
+                                FitsCard("TFORM2", "'E'"),
+                                FitsCard("Z", "             -9999.0"),
+                                FitsCard("ZWARNING", "                  64"),
+                                FitsCard("VACUUM", "                   T"),
+                            });
+
+    std::vector<unsigned char> data;
+    for (const std::array<float, 2> row : {
+             std::array<float, 2>{10.0F, 3.0F},
+             std::array<float, 2>{20.0F, 3.1F},
+         }) {
+        AppendBigEndianFloat(data, row[0]);
+        AppendBigEndianFloat(data, row[1]);
+    }
+    stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write invalid-redshift FITS fixture");
 }
 
 void WriteMalformedFitsTableWidth(const std::filesystem::path& path)
@@ -421,6 +471,18 @@ std::string_view MetadataValue(const SpectrumSnapshotHandle& snapshot, std::stri
         }
     }
     return {};
+}
+
+double MetadataDouble(const SpectrumSnapshotHandle& snapshot, std::string_view key)
+{
+    const std::string_view value = MetadataValue(snapshot, key);
+    Require(!value.empty(), "expected numeric metadata value");
+    return std::stod(std::string(value));
+}
+
+bool NearlyEqual(double left, double right, double tolerance)
+{
+    return std::abs(left - right) <= tolerance;
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -598,6 +660,30 @@ void TestLoadsFitsScalarTableSpectrum()
     Require(snapshot->axis.y_quantity == SpectrumValueQuantity::Flux, "FITS table should expose flux axis");
     Require(MetadataValue(snapshot, "source_type") == "fits_spectrum", "FITS source type should come from domain");
     Require(MetadataValue(snapshot, "format") == "fits", "FITS format should come from domain");
+    Require(MetadataValue(snapshot, "radial_velocity_km_s") == "-42.5", "FITS header RV should be retained");
+    Require(MetadataValue(snapshot, "radial_velocity_source") == "header:RV", "FITS header RV source should be retained");
+    Require(MetadataValue(snapshot, "redshift") == "0.0123", "FITS header redshift should be retained");
+    Require(
+        MetadataValue(snapshot, "heliocentric_correction_km_s") == "15.25",
+        "FITS heliocentric correction should stay distinct from object RV");
+    Require(MetadataValue(snapshot, "wavelength_medium") == "vacuum", "FITS VACUUM header should be normalized");
+    Require(
+        MetadataValue(snapshot, "observer_frame_correction") == "heliocentric",
+        "FITS HELIO_RV should record the observer-frame correction");
+    Require(
+        NearlyEqual(MetadataDouble(snapshot, "target_redshift"), -42.5 / kSpeedOfLightKmPerSecond, 1.0e-15),
+        "stellar target redshift should be derived from RV");
+    Require(
+        MetadataValue(snapshot, "target_redshift_source") == "radial_velocity_low_speed",
+        "stellar target redshift should identify the low-speed RV approximation");
+    Require(MetadataValue(snapshot, "target_redshift_status") == "available", "stellar target redshift should be available");
+    Require(
+        MetadataValue(snapshot, "target_rest_frame_status") == "available_not_applied",
+        "available target rest-frame input should not imply an applied correction");
+    Require(
+        MetadataValue(snapshot, "rest_frame_correction_status") == "not_applied",
+        "FITS reader should record that rest-frame correction was not applied");
+    Require(snapshot->capabilities.requires_rest_frame_warning, "FITS metadata alone should not clear rest-frame warning");
     Require(HasDiagnosticCode(snapshot, SpectrumDiagnosticCode::IvarFilteredPixels), "FITS table should report IVAR filtering");
 }
 
@@ -612,7 +698,37 @@ void TestLoadsFitsVectorTableSpectrum()
     Require(snapshot->axis.x_quantity == SpectrumAxisQuantity::Wavelength, "FITS vector table should expose wavelength axis");
     Require(MetadataValue(snapshot, "source_type") == "fits_spectrum", "FITS vector source type should come from domain");
     Require(MetadataValue(snapshot, "format") == "fits", "FITS vector format should come from domain");
+    Require(
+        MetadataValue(snapshot, "radial_velocity_km_s") == "124.5",
+        "FITS vector table scalar RV column should be retained");
+    Require(
+        MetadataValue(snapshot, "radial_velocity_source") == "table_column:RV",
+        "FITS vector table scalar RV source should be retained");
+    Require(
+        NearlyEqual(MetadataDouble(snapshot, "target_redshift"), 124.5 / kSpeedOfLightKmPerSecond, 1.0e-15),
+        "FITS vector table target redshift should be derived from scalar RV");
     Require(HasDiagnosticCode(snapshot, SpectrumDiagnosticCode::MaskFilteredPixels), "FITS vector table should report mask filtering");
+}
+
+void TestBlocksInvalidFitsRedshiftForRestFrameInput()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_invalid_redshift.fits";
+    WriteFitsInvalidRedshiftTable(path);
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    Require(snapshot->capabilities.can_plot_current_spectrum, "invalid-redshift FITS should still be plottable");
+    Require(MetadataValue(snapshot, "redshift") == "-9999.0", "raw invalid FITS redshift should be visible");
+    Require(MetadataValue(snapshot, "redshift_warning") == "64", "raw FITS ZWARNING should be visible");
+    Require(MetadataValue(snapshot, "target_redshift").empty(), "invalid FITS redshift must not become target redshift");
+    Require(
+        MetadataValue(snapshot, "target_redshift_status") == "invalid",
+        "invalid FITS redshift should be marked invalid");
+    Require(
+        MetadataValue(snapshot, "target_redshift_warning") == "invalid_pipeline_redshift",
+        "invalid FITS redshift should explain why it was blocked");
+    Require(
+        MetadataValue(snapshot, "target_rest_frame_status") == "unavailable",
+        "invalid FITS redshift should not enable target rest-frame correction");
 }
 
 void TestLoadsLimitedFitsImageSpectrum()
@@ -839,6 +955,7 @@ int main()
     TestLoadsCsvSpectrum();
     TestLoadsFitsScalarTableSpectrum();
     TestLoadsFitsVectorTableSpectrum();
+    TestBlocksInvalidFitsRedshiftForRestFrameInput();
     TestLoadsLimitedFitsImageSpectrum();
     TestRejectsFitsImageWcsFallback();
     TestRejectsMalformedFitsTableWidth();

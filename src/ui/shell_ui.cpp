@@ -101,6 +101,51 @@ std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadat
     return {};
 }
 
+std::string_view MetadataDisplayValue(std::string_view value)
+{
+    if (value == "not_applied") {
+        return "not applied";
+    }
+    if (value == "available_not_applied") {
+        return "available, not applied";
+    }
+    if (value == "unreliable_not_applied") {
+        return "unreliable, not applied";
+    }
+    if (value == "radial_velocity_low_speed") {
+        return "RV / c low-speed approximation";
+    }
+    if (value == "pipeline_redshift") {
+        return "pipeline redshift";
+    }
+    if (value == "zwarning_nonzero") {
+        return "ZWARNING nonzero";
+    }
+    if (value == "invalid_pipeline_redshift") {
+        return "invalid pipeline redshift";
+    }
+    return value;
+}
+
+void RenderMetadataLine(const char* label, std::string_view value, std::string_view suffix = {})
+{
+    if (value.empty()) {
+        return;
+    }
+    value = MetadataDisplayValue(value);
+    if (suffix.empty()) {
+        ImGui::Text("%s: %.*s", label, static_cast<int>(value.size()), value.data());
+    } else {
+        ImGui::Text(
+            "%s: %.*s %.*s",
+            label,
+            static_cast<int>(value.size()),
+            value.data(),
+            static_cast<int>(suffix.size()),
+            suffix.data());
+    }
+}
+
 std::string_view SeverityLabel(SpectrumDiagnosticSeverity severity)
 {
     switch (severity) {
@@ -751,6 +796,31 @@ void ShellUi::RenderInfoTagsPanel()
         ImGui::Text("Points: %zu", current.point_count);
         ImGui::Text("X: %s", snapshot_->axis.x_label.empty() ? "unknown" : snapshot_->axis.x_label.c_str());
         ImGui::Text("Y: %s", snapshot_->axis.y_label.empty() ? "unknown" : snapshot_->axis.y_label.c_str());
+        RenderMetadataLine("Wavelength medium", MetadataValue(snapshot_->source.metadata, "wavelength_medium"));
+        RenderMetadataLine(
+            "Observer correction",
+            MetadataValue(snapshot_->source.metadata, "observer_frame_correction"));
+        RenderMetadataLine(
+            "Radial velocity",
+            MetadataValue(snapshot_->source.metadata, "radial_velocity_km_s"),
+            "km/s");
+        RenderMetadataLine("RV source", MetadataValue(snapshot_->source.metadata, "radial_velocity_source"));
+        RenderMetadataLine("Redshift", MetadataValue(snapshot_->source.metadata, "redshift"));
+        RenderMetadataLine("Redshift warning", MetadataValue(snapshot_->source.metadata, "redshift_warning"));
+        RenderMetadataLine("Target z", MetadataValue(snapshot_->source.metadata, "target_redshift"));
+        RenderMetadataLine("Target z source", MetadataValue(snapshot_->source.metadata, "target_redshift_source"));
+        RenderMetadataLine("Target z status", MetadataValue(snapshot_->source.metadata, "target_redshift_status"));
+        RenderMetadataLine("Target z warning", MetadataValue(snapshot_->source.metadata, "target_redshift_warning"));
+        RenderMetadataLine(
+            "Heliocentric correction",
+            MetadataValue(snapshot_->source.metadata, "heliocentric_correction_km_s"),
+            "km/s");
+        RenderMetadataLine(
+            "Target rest frame",
+            MetadataValue(snapshot_->source.metadata, "target_rest_frame_status"));
+        RenderMetadataLine(
+            "Rest-frame correction",
+            MetadataValue(snapshot_->source.metadata, "rest_frame_correction_status"));
         if (snapshot_->collection.spectrum_count > 0) {
             ImGui::Text(
                 "Spectrum: %zu / %zu",
@@ -864,7 +934,7 @@ void ShellUi::RenderSpectralLinesPanel()
     }
     if (ImGui::BeginTable("spectral_lines_table", 3, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
         ImGui::TableSetupColumn("Line");
-        ImGui::TableSetupColumn("Wavelength");
+        ImGui::TableSetupColumn("Vacuum Angstrom");
         ImGui::TableSetupColumn("Group");
         ImGui::TableHeadersRow();
 
@@ -872,7 +942,7 @@ void ShellUi::RenderSpectralLinesPanel()
         ImGui::TableSetColumnIndex(0);
         ImGui::TextDisabled("H alpha");
         ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled("6562.8");
+        ImGui::TextDisabled("6564.614");
         ImGui::TableSetColumnIndex(2);
         ImGui::TextDisabled("reference");
 
@@ -880,7 +950,7 @@ void ShellUi::RenderSpectralLinesPanel()
         ImGui::TableSetColumnIndex(0);
         ImGui::TextDisabled("Na D");
         ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled("5892.0");
+        ImGui::TextDisabled("5891.6 / 5897.6");
         ImGui::TableSetColumnIndex(2);
         ImGui::TextDisabled("reference");
 

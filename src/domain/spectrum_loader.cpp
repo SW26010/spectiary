@@ -31,6 +31,7 @@ namespace {
 constexpr std::size_t kLogLamGridColumns = 3909;
 constexpr double kLogLamStart = 3.5682;
 constexpr double kLogLamStep = 0.0001;
+constexpr double kSpeedOfLightKmPerSecond = 299792.458;
 constexpr std::uintmax_t kMaxSynchronousFitsFileBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxSynchronousInflatedFitsBytes = 64ULL * 1024ULL * 1024ULL;
 
@@ -1345,6 +1346,11 @@ struct FitsHdu {
     std::vector<FitsColumn> columns;
 };
 
+struct FitsMetadataMatch {
+    std::string key;
+    std::string value;
+};
+
 std::string ParseFitsCardValue(std::string_view card)
 {
     if (card.size() < 10 || card[8] != '=') {
@@ -1411,7 +1417,7 @@ std::optional<double> FitsDouble(const FitsHeader& header, std::string_view key)
     if (!value) {
         return std::nullopt;
     }
-    return ParseDouble(*value);
+    return ParseDouble(std::string(*value));
 }
 
 std::size_t RoundUpFitsBlock(std::size_t value)
@@ -1736,6 +1742,12 @@ const FitsColumn* FindFitsMaskColumn(const FitsHdu& hdu)
     return nullptr;
 }
 
+bool IsFitsNumericColumn(const FitsColumn& column)
+{
+    return column.code == 'B' || column.code == 'I' || column.code == 'J' || column.code == 'K' ||
+           column.code == 'E' || column.code == 'D';
+}
+
 std::vector<double> ReadFitsColumnVector(
     const std::vector<unsigned char>& bytes,
     const FitsHdu& hdu,
@@ -1780,27 +1792,263 @@ std::vector<double> ReadFitsColumnVector(
     return values;
 }
 
+std::string FormatFitsMetadataNumber(double value)
+{
+    std::ostringstream stream;
+    stream.precision(std::numeric_limits<double>::max_digits10);
+    stream << value;
+    return stream.str();
+}
+
+bool HasLoadedMetadataKey(const LoadedSpectrum& loaded, std::string_view key)
+{
+    return std::any_of(
+        loaded.source_metadata.begin(),
+        loaded.source_metadata.end(),
+        [key](const SpectrumMetadataEntry& entry) {
+            return entry.key == key;
+        });
+}
+
+std::optional<std::string_view> LoadedMetadataValue(const LoadedSpectrum& loaded, std::string_view key)
+{
+    for (const SpectrumMetadataEntry& entry : loaded.source_metadata) {
+        if (entry.key == key) {
+            return entry.value;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<double> LoadedMetadataDouble(const LoadedSpectrum& loaded, std::string_view key)
+{
+    const std::optional<std::string_view> value = LoadedMetadataValue(loaded, key);
+    if (!value) {
+        return std::nullopt;
+    }
+    return ParseDouble(std::string(*value));
+}
+
+std::optional<FitsMetadataMatch> FirstFitsHeaderValue(
+    const std::vector<FitsHdu>& hdus,
+    std::initializer_list<std::string_view> header_keys)
+{
+    for (const FitsHdu& hdu : hdus) {
+        for (std::string_view key : header_keys) {
+            const std::optional<std::string> value = FitsValue(hdu.header, key);
+            if (value && !value->empty()) {
+                return FitsMetadataMatch{std::string(key), *value};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+bool FitsMetadataTruthy(std::string_view value)
+{
+    const std::string normalized = UpperAscii(TrimAscii(std::string(value)));
+    return normalized == "T" || normalized == "TRUE" || normalized == "1";
+}
+
+bool FitsMetadataFalsey(std::string_view value)
+{
+    const std::string normalized = UpperAscii(TrimAscii(std::string(value)));
+    return normalized == "F" || normalized == "FALSE" || normalized == "0";
+}
+
+bool RedshiftValueIsUsable(double value)
+{
+    return std::isfinite(value) && value > -1.0 && value < 20.0;
+}
+
+bool RedshiftWarningIsSet(const LoadedSpectrum& loaded)
+{
+    const std::optional<double> warning = LoadedMetadataDouble(loaded, "redshift_warning");
+    return warning && std::isfinite(*warning) && std::abs(*warning) > 0.0;
+}
+
+bool SurveyClassUsesPipelineRedshift(const LoadedSpectrum& loaded)
+{
+    const std::optional<std::string_view> survey_class = LoadedMetadataValue(loaded, "survey_class");
+    if (!survey_class) {
+        return false;
+    }
+
+    const std::string normalized = UpperAscii(TrimAscii(std::string(*survey_class)));
+    return normalized == "GALAXY" || normalized == "QSO" || normalized == "AGN";
+}
+
+void AddFitsWavelengthFrameMetadata(LoadedSpectrum& loaded)
+{
+    if (const std::optional<std::string_view> vacuum = LoadedMetadataValue(loaded, "wavelength_vacuum")) {
+        if (!HasLoadedMetadataKey(loaded, "wavelength_medium")) {
+            if (FitsMetadataTruthy(*vacuum)) {
+                loaded.source_metadata.push_back({"wavelength_medium", "vacuum", "fits"});
+            } else if (FitsMetadataFalsey(*vacuum)) {
+                loaded.source_metadata.push_back({"wavelength_medium", "air", "fits"});
+            }
+        }
+    }
+    if (!HasLoadedMetadataKey(loaded, "observer_frame_correction")) {
+        const std::optional<std::string_view> heliocentric_applied =
+            LoadedMetadataValue(loaded, "heliocentric_correction_applied");
+        if (HasLoadedMetadataKey(loaded, "heliocentric_correction_km_s") ||
+            (heliocentric_applied && FitsMetadataTruthy(*heliocentric_applied))) {
+            loaded.source_metadata.push_back({"observer_frame_correction", "heliocentric", "fits"});
+        }
+    }
+}
+
+void AddFitsRestFrameStatusMetadata(LoadedSpectrum& loaded)
+{
+    if (!HasLoadedMetadataKey(loaded, "rest_frame_correction_status")) {
+        loaded.source_metadata.push_back({"rest_frame_correction_status", "not_applied", "domain"});
+    }
+}
+
+void AddFitsTargetRestFrameMetadata(LoadedSpectrum& loaded)
+{
+    if (HasLoadedMetadataKey(loaded, "target_rest_frame_status")) {
+        return;
+    }
+
+    const bool prefer_pipeline_redshift = SurveyClassUsesPipelineRedshift(loaded);
+    const std::optional<double> radial_velocity = LoadedMetadataDouble(loaded, "radial_velocity_km_s");
+    const bool radial_velocity_usable = radial_velocity && std::isfinite(*radial_velocity);
+    const std::optional<double> redshift = LoadedMetadataDouble(loaded, "redshift");
+    const bool redshift_usable = redshift && RedshiftValueIsUsable(*redshift);
+    const bool redshift_unreliable = RedshiftWarningIsSet(loaded);
+
+    if (!prefer_pipeline_redshift && radial_velocity_usable) {
+        const double target_redshift = *radial_velocity / kSpeedOfLightKmPerSecond;
+        loaded.source_metadata.push_back({"target_redshift", FormatFitsMetadataNumber(target_redshift), "domain"});
+        loaded.source_metadata.push_back({"target_redshift_source", "radial_velocity_low_speed", "domain"});
+        loaded.source_metadata.push_back({"target_redshift_status", "available", "domain"});
+        loaded.source_metadata.push_back({"target_rest_frame_status", "available_not_applied", "domain"});
+        return;
+    }
+
+    if (redshift_usable) {
+        loaded.source_metadata.push_back({"target_redshift", FormatFitsMetadataNumber(*redshift), "domain"});
+        loaded.source_metadata.push_back({"target_redshift_source", "pipeline_redshift", "domain"});
+        if (redshift_unreliable) {
+            loaded.source_metadata.push_back({"target_redshift_status", "unreliable", "domain"});
+            loaded.source_metadata.push_back({"target_redshift_warning", "zwarning_nonzero", "domain"});
+            loaded.source_metadata.push_back({"target_rest_frame_status", "unreliable_not_applied", "domain"});
+        } else {
+            loaded.source_metadata.push_back({"target_redshift_status", "available", "domain"});
+            loaded.source_metadata.push_back({"target_rest_frame_status", "available_not_applied", "domain"});
+        }
+        return;
+    }
+
+    if (redshift && !redshift_usable) {
+        loaded.source_metadata.push_back({"target_redshift_status", "invalid", "domain"});
+        loaded.source_metadata.push_back({"target_redshift_warning", "invalid_pipeline_redshift", "domain"});
+    } else {
+        loaded.source_metadata.push_back({"target_redshift_status", "missing", "domain"});
+    }
+    loaded.source_metadata.push_back({"target_rest_frame_status", "unavailable", "domain"});
+}
+
 void AddFitsHeaderMetadata(LoadedSpectrum& loaded, const std::vector<FitsHdu>& hdus)
 {
     const auto add_first_value = [&](std::string_view output_key, std::initializer_list<std::string_view> header_keys) {
-        for (const FitsHdu& hdu : hdus) {
-            for (std::string_view key : header_keys) {
-                const std::optional<std::string> value = FitsValue(hdu.header, key);
-                if (value && !value->empty()) {
-                    loaded.source_metadata.push_back({std::string(output_key), *value, "fits"});
-                    return;
-                }
-            }
+        if (HasLoadedMetadataKey(loaded, output_key)) {
+            return;
+        }
+        if (const std::optional<FitsMetadataMatch> match = FirstFitsHeaderValue(hdus, header_keys)) {
+            loaded.source_metadata.push_back({std::string(output_key), match->value, "fits"});
         }
     };
 
+    if (!HasLoadedMetadataKey(loaded, "radial_velocity_km_s")) {
+        if (const std::optional<FitsMetadataMatch> match = FirstFitsHeaderValue(
+                hdus,
+                {"RADVEL", "RAD_VEL", "RADIALV", "RADIAL_V", "RV", "VRAD", "RVEL", "1D_RV"})) {
+            loaded.source_metadata.push_back({"radial_velocity_km_s", match->value, "fits"});
+            loaded.source_metadata.push_back({"radial_velocity_source", "header:" + match->key, "fits"});
+        }
+    }
     add_first_value("telescope", {"TELESCOP"});
     add_first_value("data_release", {"DATA_V", "RUN2D"});
     add_first_value("heliocentric_correction_km_s", {"HELIO_RV"});
+    add_first_value("heliocentric_correction_applied", {"HELIO"});
     add_first_value("redshift", {"Z", "1D_Z"});
+    add_first_value("redshift_error", {"Z_ERR", "ZERR", "1D_Z_ERR"});
+    add_first_value("redshift_warning", {"ZWARNING", "Z_WARN"});
+    add_first_value("redshift_flag", {"ZFLAG"});
     add_first_value("survey_class", {"CLASS", "1D_CLASS"});
     add_first_value("survey_subclass", {"SUBCLASS", "1D_SUBCL"});
     add_first_value("wavelength_vacuum", {"VACUUM"});
+    AddFitsWavelengthFrameMetadata(loaded);
+    AddFitsRestFrameStatusMetadata(loaded);
+    AddFitsTargetRestFrameMetadata(loaded);
+}
+
+std::optional<FitsMetadataMatch> FitsScalarColumnMetadata(
+    const std::vector<unsigned char>& bytes,
+    const FitsHdu& hdu,
+    std::size_t row_index,
+    std::initializer_list<std::string_view> column_names)
+{
+    const FitsColumn* column = FindFitsColumn(hdu, column_names);
+    if (column == nullptr || column->repeat != 1 || !IsFitsNumericColumn(*column)) {
+        return std::nullopt;
+    }
+    std::vector<double> values = ReadFitsColumnVector(bytes, hdu, *column, row_index, false);
+    if (values.empty() || !std::isfinite(values.front())) {
+        return std::nullopt;
+    }
+    return FitsMetadataMatch{column->name, FormatFitsMetadataNumber(values.front())};
+}
+
+void AddFitsTableMetadata(
+    LoadedSpectrum& loaded,
+    const std::vector<unsigned char>& bytes,
+    const FitsHdu& hdu,
+    std::size_t row_index,
+    bool scalar_rows)
+{
+    if (scalar_rows) {
+        return;
+    }
+
+    if (!HasLoadedMetadataKey(loaded, "radial_velocity_km_s")) {
+        if (const std::optional<FitsMetadataMatch> match = FitsScalarColumnMetadata(
+                bytes,
+                hdu,
+                row_index,
+                {"RADIALVELOCITYKMS",
+                 "RADIALVELOCITY",
+                 "RADIALVEL",
+                 "RADVEL",
+                 "VRAD",
+                 "RV",
+                 "RVEL",
+                 "1DRV"})) {
+            loaded.source_metadata.push_back({"radial_velocity_km_s", match->value, "fits"});
+            loaded.source_metadata.push_back({"radial_velocity_source", "table_column:" + match->key, "fits"});
+        }
+    }
+    if (!HasLoadedMetadataKey(loaded, "redshift")) {
+        if (const std::optional<FitsMetadataMatch> match =
+                FitsScalarColumnMetadata(bytes, hdu, row_index, {"REDSHIFT", "Z", "ZHELIO", "1DZ"})) {
+            loaded.source_metadata.push_back({"redshift", match->value, "fits"});
+        }
+    }
+    if (!HasLoadedMetadataKey(loaded, "redshift_error")) {
+        if (const std::optional<FitsMetadataMatch> match =
+                FitsScalarColumnMetadata(bytes, hdu, row_index, {"ZERR", "ZERROR", "ZERRPIPE", "ZERRNOQSO", "ZERRFULL"})) {
+            loaded.source_metadata.push_back({"redshift_error", match->value, "fits"});
+        }
+    }
+    if (!HasLoadedMetadataKey(loaded, "redshift_warning")) {
+        if (const std::optional<FitsMetadataMatch> match =
+                FitsScalarColumnMetadata(bytes, hdu, row_index, {"ZWARNING", "ZWARN", "ZWARNINGNOQSO"})) {
+            loaded.source_metadata.push_back({"redshift_warning", match->value, "fits"});
+        }
+    }
 }
 
 std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
@@ -1843,6 +2091,7 @@ std::optional<LoadedSpectrum> TryLoadFitsTableSpectrum(
     loaded.source_metadata.push_back({"hdu_type", "bintable", "fits"});
     loaded.source_metadata.push_back({"x_column", x_column->name, "fits"});
     loaded.source_metadata.push_back({"flux_column", flux_column->name, "fits"});
+    AddFitsTableMetadata(loaded, bytes, hdu, requested_index, scalar_rows);
     loaded.spectrum_metadata.push_back({"hdu_index", std::to_string(hdu.index), "fits"});
     if (!scalar_rows) {
         loaded.spectrum_metadata.push_back({"row_index", std::to_string(requested_index), "fits"});
