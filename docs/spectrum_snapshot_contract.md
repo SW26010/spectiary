@@ -80,6 +80,8 @@ Important flags:
 
 `Observed` wavelength axes should not silently display rest-frame standard line
 tables. `Unknown` axes may show reference overlays only with an explicit warning.
+The concrete public line-table schema and UI/plot overlay rules are documented
+in `docs/spectral_line_catalog_contract.md`.
 
 ## Source Boundaries
 

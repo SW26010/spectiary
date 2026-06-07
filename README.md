@@ -13,6 +13,9 @@ synthetic spectrum fixture, and optional JSONL profile output.
 - The app shell initializes Win32, DirectX 11, Dear ImGui docking, and ImPlot.
 - The main plot consumes `SpectrumSnapshotHandle` snapshots from the domain
   layer; the synthetic fixture and `.npy` loader use the same UI/plot path.
+- A versioned public spectral-line catalog is loaded from
+  `config/spectral_lines.public.tsv`; the Spectral Lines panel filters it and
+  the main plot renders line and band reference overlays.
 - The real-data loader supports `.npy` spectrum matrices, simple
   wavelength/flux `.csv` files, and recognized single-spectrum FITS files
   focused on LAMOST/SDSS table spectra. Limited COEFF0/COEFF1 FITS image
@@ -28,11 +31,15 @@ The product target is an elegant, responsive, dockable desktop spectrum viewer:
 - primary view: wavelength on X, flux on Y
 - interaction: pan, cursor-centered wheel zoom, range navigation, spectrum
   switching, and spectral-line overlays
+- overlay data: public rest-frame vacuum Angstrom reference markers in tracked
+  config; subtype presets, zoom windows, and private criteria stay out of the
+  public catalog
 - windowing: freely dockable ImGui panels using the docking branch
 - performance: measured on real data before making refresh-rate claims
 
-See [docs/product_requirements.md](docs/product_requirements.md) and
-[docs/technical_direction.md](docs/technical_direction.md).
+See [docs/product_requirements.md](docs/product_requirements.md),
+[docs/technical_direction.md](docs/technical_direction.md), and
+[docs/spectral_line_catalog_contract.md](docs/spectral_line_catalog_contract.md).
 
 ## Environment
 

@@ -117,13 +117,99 @@ void WritePanDragEvent(
                                 });
 }
 
+bool IsVisibleInPlot(const SpectralLineMarker& marker, const ImPlotRect& limits)
+{
+    if (marker.kind == SpectralLineMarkerKind::Line) {
+        return marker.vacuum_angstrom && *marker.vacuum_angstrom >= limits.X.Min &&
+               *marker.vacuum_angstrom <= limits.X.Max;
+    }
+    return marker.start_vacuum_angstrom && marker.end_vacuum_angstrom &&
+           *marker.end_vacuum_angstrom >= limits.X.Min && *marker.start_vacuum_angstrom <= limits.X.Max;
+}
+
+ImVec4 SpectralLineColor(const SpectralLineMarker& marker)
+{
+    if (marker.group == "Balmer") {
+        return ImVec4(0.95f, 0.42f, 0.35f, 0.78f);
+    }
+    if (marker.group == "CN" || marker.group == "CH" || marker.group == "C2" || marker.group == "Isotope") {
+        return ImVec4(0.43f, 0.78f, 0.64f, 0.76f);
+    }
+    if (marker.group == "Ba II" || marker.group == "Sr II") {
+        return ImVec4(0.95f, 0.72f, 0.32f, 0.78f);
+    }
+    return ImVec4(0.66f, 0.72f, 0.82f, 0.72f);
+}
+
+void RenderSpectralLineOverlays(const SpectrumPlotOverlays& overlays)
+{
+    if (overlays.spectral_lines == nullptr || overlays.spectral_line_count == 0) {
+        return;
+    }
+
+    const ImPlotRect limits = ImPlot::GetPlotLimits();
+    const double y_span = limits.Y.Max - limits.Y.Min;
+    if (y_span <= 0.0) {
+        return;
+    }
+
+    ImDrawList* draw_list = ImPlot::GetPlotDrawList();
+    if (draw_list == nullptr) {
+        return;
+    }
+
+    ImPlot::PushPlotClipRect();
+    int visible_index = 0;
+    for (std::size_t index = 0; index < overlays.spectral_line_count; ++index) {
+        const SpectralLineMarker* marker = overlays.spectral_lines[index];
+        if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
+            continue;
+        }
+
+        const ImVec4 color = SpectralLineColor(*marker);
+        const double label_y = limits.Y.Min + y_span * (0.92 - 0.08 * static_cast<double>(visible_index % 3));
+
+        if (marker->kind == SpectralLineMarkerKind::Band) {
+            const ImVec2 start_min = ImPlot::PlotToPixels(*marker->start_vacuum_angstrom, limits.Y.Min);
+            const ImVec2 end_max = ImPlot::PlotToPixels(*marker->end_vacuum_angstrom, limits.Y.Max);
+            const ImVec2 rect_min(std::min(start_min.x, end_max.x), std::min(start_min.y, end_max.y));
+            const ImVec2 rect_max(std::max(start_min.x, end_max.x), std::max(start_min.y, end_max.y));
+            draw_list->AddRectFilled(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.10f)));
+            draw_list->AddRect(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.34f)));
+            if (overlays.show_spectral_line_labels) {
+                const double x_mid = (*marker->start_vacuum_angstrom + *marker->end_vacuum_angstrom) * 0.5;
+                const ImVec2 label_pos = ImPlot::PlotToPixels(x_mid, label_y);
+                draw_list->AddText(
+                    ImVec2(label_pos.x + 4.0f, label_pos.y),
+                    ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.92f)),
+                    marker->display_label.c_str());
+            }
+        } else if (marker->vacuum_angstrom) {
+            const double x = *marker->vacuum_angstrom;
+            const ImVec2 bottom = ImPlot::PlotToPixels(x, limits.Y.Min);
+            const ImVec2 top = ImPlot::PlotToPixels(x, limits.Y.Max);
+            draw_list->AddLine(bottom, top, ImGui::GetColorU32(color), 1.0f);
+            if (overlays.show_spectral_line_labels) {
+                const ImVec2 label_pos = ImPlot::PlotToPixels(x, label_y);
+                draw_list->AddText(
+                    ImVec2(label_pos.x + 4.0f, label_pos.y),
+                    ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.95f)),
+                    marker->display_label.c_str());
+            }
+        }
+        ++visible_index;
+    }
+    ImPlot::PopPlotClipRect();
+}
+
 }  // namespace
 
 void RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile,
-    const SpectrumPlotStyle& style)
+    const SpectrumPlotStyle& style,
+    const SpectrumPlotOverlays& overlays)
 {
     if (!CanPlotSnapshot(snapshot)) {
         ImGui::TextDisabled("No plottable spectrum.");
@@ -160,6 +246,10 @@ void RenderSpectrumPlot(
             y_values->data(),
             static_cast<int>(x_values->size()),
             spec);
+
+        if (snapshot->capabilities.can_show_spectral_lines) {
+            RenderSpectralLineOverlays(overlays);
+        }
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
             const ImPlotRect limits = ImPlot::GetPlotLimits();

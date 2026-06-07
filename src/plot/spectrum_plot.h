@@ -1,9 +1,11 @@
 #pragma once
 
 #include "domain/spectrum_snapshot.h"
+#include "overlays/spectral_line_catalog.h"
 
 #include <imgui.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace specforge {
@@ -31,10 +33,17 @@ struct SpectrumPlotStyle {
     float line_weight = 1.4f;
 };
 
+struct SpectrumPlotOverlays {
+    const SpectralLineMarker* const* spectral_lines = nullptr;
+    std::size_t spectral_line_count = 0;
+    bool show_spectral_line_labels = true;
+};
+
 void RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile = {},
-    const SpectrumPlotStyle& style = {});
+    const SpectrumPlotStyle& style = {},
+    const SpectrumPlotOverlays& overlays = {});
 
 }  // namespace specforge

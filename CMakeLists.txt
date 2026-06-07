@@ -21,6 +21,8 @@ add_executable(specforge_native WIN32
     src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
     src/main.cpp
+    src/overlays/spectral_line_catalog.cpp
+    src/overlays/spectral_line_catalog.h
     src/platform/win32_window.cpp
     src/platform/win32_window.h
     ${SPECFORGE_MANIFEST}
@@ -66,6 +68,13 @@ set_target_properties(specforge_native PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
+add_custom_command(TARGET specforge_native POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv"
+        "$<TARGET_FILE_DIR:specforge_native>/config/spectral_lines.public.tsv"
+)
+
 enable_testing()
 
 add_executable(specforge_loader_tests
@@ -85,3 +94,30 @@ else()
 endif()
 
 add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
+
+add_executable(specforge_spectral_line_catalog_tests
+    tests/spectral_line_catalog_tests.cpp
+    src/overlays/spectral_line_catalog.cpp
+    src/overlays/spectral_line_catalog.h
+)
+
+target_include_directories(specforge_spectral_line_catalog_tests PRIVATE src)
+target_compile_definitions(
+    specforge_spectral_line_catalog_tests
+    PRIVATE SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv"
+        "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
+)
+
+if(MSVC)
+    target_compile_options(specforge_spectral_line_catalog_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_spectral_line_catalog_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_spectral_line_catalog_tests COMMAND specforge_spectral_line_catalog_tests)

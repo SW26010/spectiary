@@ -11,9 +11,11 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,11 +28,11 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-constexpr const char* kDockHostWindow = "SpecForge Dock Host";
-constexpr const char* kMainPlotWindow = "Spectrum";
-constexpr const char* kFilesWindow = "Files";
-constexpr const char* kInfoTagsWindow = "Info & Tags";
-constexpr const char* kSpectralLinesWindow = "Spectral Lines";
+constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
+constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
+constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
+constexpr const char* kInfoTagsWindow = "Info & Tags###SpecForgeInfoTagsV2";
+constexpr const char* kSpectralLinesWindow = "Spectral Lines###SpecForgeSpectralLinesV2";
 constexpr float kStatusBarHeight = 28.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
@@ -82,6 +84,33 @@ std::string LowerAscii(std::string value)
         return static_cast<char>(std::tolower(character));
     });
     return value;
+}
+
+bool ContainsCaseInsensitive(std::string_view text, std::string_view pattern)
+{
+    if (pattern.empty()) {
+        return true;
+    }
+    return LowerAscii(std::string(text)).find(LowerAscii(std::string(pattern))) != std::string::npos;
+}
+
+std::string MarkerWavelengthText(const SpectralLineMarker& marker)
+{
+    std::array<char, 64> buffer = {};
+    if (marker.kind == SpectralLineMarkerKind::Line && marker.vacuum_angstrom) {
+        std::snprintf(buffer.data(), buffer.size(), "%.3f", *marker.vacuum_angstrom);
+        return buffer.data();
+    }
+    if (marker.kind == SpectralLineMarkerKind::Band && marker.start_vacuum_angstrom && marker.end_vacuum_angstrom) {
+        std::snprintf(
+            buffer.data(),
+            buffer.size(),
+            "%.3f-%.3f",
+            *marker.start_vacuum_angstrom,
+            *marker.end_vacuum_angstrom);
+        return buffer.data();
+    }
+    return {};
 }
 
 std::string SourceKey(const std::filesystem::path& path)
@@ -144,6 +173,34 @@ void RenderMetadataLine(const char* label, std::string_view value, std::string_v
             static_cast<int>(suffix.size()),
             suffix.data());
     }
+}
+
+void RenderDisabledText(std::string_view text)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopStyleColor();
+}
+
+void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+}
+
+std::vector<std::string> SpectralLineGroups(const SpectralLineCatalog& catalog)
+{
+    std::vector<std::string> groups;
+    groups.reserve(catalog.markers.size());
+    for (const SpectralLineMarker& marker : catalog.markers) {
+        groups.push_back(marker.group);
+    }
+    std::sort(groups.begin(), groups.end());
+    groups.erase(std::unique(groups.begin(), groups.end()), groups.end());
+    return groups;
 }
 
 std::string_view SeverityLabel(SpectrumDiagnosticSeverity severity)
@@ -515,7 +572,10 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 
 }  // namespace
 
-ShellUi::ShellUi() : snapshot_(MakeSmallSyntheticSpectrumSnapshot())
+ShellUi::ShellUi()
+    : snapshot_(MakeSmallSyntheticSpectrumSnapshot()),
+      spectral_line_catalog_(LoadDefaultSpectralLineCatalog()),
+      spectral_line_groups_(SpectralLineGroups(spectral_line_catalog_))
 {
     RefreshSystemColors();
 }
@@ -646,6 +706,53 @@ void ShellUi::SwitchSpectrum(int direction)
     OpenSource(snapshot_->source.path, next_index);
 }
 
+bool ShellUi::IsSpectralLineEnabled(const SpectralLineMarker& marker) const
+{
+    return disabled_spectral_line_ids_.find(marker.id) == disabled_spectral_line_ids_.end();
+}
+
+void ShellUi::SetSpectralLineEnabled(const SpectralLineMarker& marker, bool enabled)
+{
+    if (enabled) {
+        disabled_spectral_line_ids_.erase(marker.id);
+        return;
+    }
+    disabled_spectral_line_ids_.insert(marker.id);
+}
+
+std::vector<const SpectralLineMarker*> ShellUi::FilteredSpectralLineMarkers(bool include_disabled) const
+{
+    std::vector<const SpectralLineMarker*> markers;
+    if (!snapshot_ || !snapshot_->capabilities.can_show_spectral_lines || !show_public_spectral_lines_ ||
+        spectral_line_catalog_.markers.empty()) {
+        return markers;
+    }
+
+    std::string_view group_filter;
+    if (spectral_line_group_index_ > 0 &&
+        spectral_line_group_index_ <= static_cast<int>(spectral_line_groups_.size())) {
+        group_filter = spectral_line_groups_[static_cast<std::size_t>(spectral_line_group_index_ - 1)];
+    }
+
+    const std::string text_filter(spectral_line_filter_.data());
+    for (const SpectralLineMarker& marker : spectral_line_catalog_.markers) {
+        if (!group_filter.empty() && marker.group != group_filter) {
+            continue;
+        }
+        if (!text_filter.empty() && !ContainsCaseInsensitive(marker.id, text_filter) &&
+            !ContainsCaseInsensitive(marker.label, text_filter) &&
+            !ContainsCaseInsensitive(marker.group, text_filter) &&
+            !ContainsCaseInsensitive(marker.display_label, text_filter)) {
+            continue;
+        }
+        if (!include_disabled && !IsSpectralLineEnabled(marker)) {
+            continue;
+        }
+        markers.push_back(&marker);
+    }
+    return markers;
+}
+
 void ShellUi::RenderDockHost(const ShellStatus& status)
 {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -663,7 +770,7 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::Begin(kDockHostWindow, nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceFourPaneV1");
+    const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceFourPaneV2");
     ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
     dockspace_size.y = std::max(0.0f, dockspace_size.y - kStatusBarHeight);
 
@@ -718,10 +825,15 @@ void ShellUi::RenderFilesPanel()
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu source%s", sources_.size(), sources_.size() == 1 ? "" : "s");
+    const std::string source_count =
+        std::to_string(sources_.size()) + (sources_.size() == 1 ? " source" : " sources");
+    RenderDisabledText(source_count);
 
     ImGui::Spacing();
-    if (sources_.empty()) {
+    const bool has_active_source =
+        !sources_.empty() && current_source_index_ && *current_source_index_ < sources_.size() && snapshot_ &&
+        !snapshot_->source.path.empty();
+    if (!has_active_source) {
         ImGui::TextDisabled("No sources added in this session.");
     } else if (ImGui::BeginTable(
                    "files_table",
@@ -780,7 +892,6 @@ void ShellUi::RenderFilesPanel()
             RemoveSource(*source_to_remove);
         }
     }
-
     ImGui::End();
 }
 
@@ -823,9 +934,9 @@ void ShellUi::RenderInfoTagsPanel()
             MetadataValue(snapshot_->source.metadata, "rest_frame_correction_status"));
         if (snapshot_->collection.spectrum_count > 0) {
             ImGui::Text(
-                "Spectrum: %zu / %zu",
-                snapshot_->collection.current_index + 1,
-                snapshot_->collection.spectrum_count);
+                "Spectrum: %llu / %llu",
+                static_cast<unsigned long long>(snapshot_->collection.current_index + 1),
+                static_cast<unsigned long long>(snapshot_->collection.spectrum_count));
         }
 
         const bool can_previous = snapshot_->collection.can_move_previous;
@@ -894,11 +1005,13 @@ void ShellUi::RenderInfoTagsPanel()
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
     ImGui::Begin(kMainPlotWindow);
+    const std::vector<const SpectralLineMarker*> spectral_lines = FilteredSpectralLineMarkers(false);
     RenderSpectrumPlot(
         snapshot_,
         plot_state_,
         SpectrumPlotProfileContext{status.profile, status.frame_index},
-        plot_style_);
+        plot_style_,
+        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), show_spectral_line_labels_});
     ImGui::End();
 }
 
@@ -917,47 +1030,113 @@ void ShellUi::RenderSpectralLinesPanel()
             "Wavelength frame is unknown; rest-frame overlays are reference-only.");
     }
 
-    ImGui::BeginDisabled();
-    bool public_lines = true;
-    bool hidden_lines = false;
-    ImGui::Checkbox("Public", &public_lines);
+    ImGui::Checkbox("Public catalog", &show_public_spectral_lines_);
     ImGui::SameLine();
-    ImGui::Checkbox("Hidden", &hidden_lines);
-    const char* catalogs[] = {"No catalog loaded"};
-    int catalog_index = 0;
-    ImGui::Combo("Catalog", &catalog_index, catalogs, 1);
-    ImGui::EndDisabled();
+    ImGui::Checkbox("Labels", &show_spectral_line_labels_);
 
     ImGui::Spacing();
-    if (!can_show_lines) {
-        ImGui::BeginDisabled();
+    if (!spectral_line_catalog_.load_error.empty()) {
+        const std::string error = "Catalog load failed: " + spectral_line_catalog_.load_error;
+        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
+    } else if (spectral_line_catalog_.markers.empty()) {
+        ImGui::TextDisabled("No public catalog markers loaded.");
     }
-    if (ImGui::BeginTable("spectral_lines_table", 3, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
+
+    if (spectral_line_group_index_ < 0 ||
+        spectral_line_group_index_ > static_cast<int>(spectral_line_groups_.size())) {
+        spectral_line_group_index_ = 0;
+    }
+    const char* selected_group =
+        spectral_line_group_index_ == 0
+            ? "All groups"
+            : spectral_line_groups_[static_cast<std::size_t>(spectral_line_group_index_ - 1)].c_str();
+    if (ImGui::BeginCombo("Group", selected_group)) {
+        if (ImGui::Selectable("All groups", spectral_line_group_index_ == 0)) {
+            spectral_line_group_index_ = 0;
+        }
+        for (std::size_t index = 0; index < spectral_line_groups_.size(); ++index) {
+            const int item_index = static_cast<int>(index + 1);
+            if (ImGui::Selectable(spectral_line_groups_[index].c_str(), spectral_line_group_index_ == item_index)) {
+                spectral_line_group_index_ = item_index;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::InputTextWithHint(
+        "Filter",
+        "id, label, group, or plot label",
+        spectral_line_filter_.data(),
+        spectral_line_filter_.size());
+
+    ImGui::Spacing();
+    const std::vector<const SpectralLineMarker*> markers = FilteredSpectralLineMarkers(true);
+    const std::size_t shown_marker_count =
+        static_cast<std::size_t>(std::count_if(markers.begin(), markers.end(), [this](const auto* marker) {
+            return marker != nullptr && IsSpectralLineEnabled(*marker);
+        }));
+    const std::string marker_count = std::to_string(shown_marker_count) + " shown / " +
+                                     std::to_string(markers.size()) + " listed / " +
+                                     std::to_string(spectral_line_catalog_.markers.size()) + " public markers";
+    RenderDisabledText(marker_count);
+    if (ImGui::BeginTable(
+            "spectral_lines_table",
+            5,
+            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Show", ImGuiTableColumnFlags_WidthFixed, 44.0f);
         ImGui::TableSetupColumn("Line");
         ImGui::TableSetupColumn("Vacuum Angstrom");
         ImGui::TableSetupColumn("Group");
+        ImGui::TableSetupColumn("Kind");
         ImGui::TableHeadersRow();
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextDisabled("H alpha");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled("6564.614");
-        ImGui::TableSetColumnIndex(2);
-        ImGui::TextDisabled("reference");
+        for (const SpectralLineMarker* marker : markers) {
+            if (marker == nullptr) {
+                continue;
+            }
+            const bool marker_enabled = IsSpectralLineEnabled(*marker);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(marker->id.c_str());
+            bool checkbox_value = marker_enabled;
+            if (ImGui::Checkbox("##show", &checkbox_value)) {
+                SetSpectralLineEnabled(*marker, checkbox_value);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Show on plot");
+            }
+            ImGui::PopID();
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextDisabled("Na D");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled("5891.6 / 5897.6");
-        ImGui::TableSetColumnIndex(2);
-        ImGui::TextDisabled("reference");
+            ImGui::TableSetColumnIndex(1);
+            if (marker_enabled) {
+                ImGui::TextUnformatted(marker->label.c_str());
+            } else {
+                ImGui::TextDisabled("%s", marker->label.c_str());
+            }
+            if (!marker->notes.empty() && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", marker->notes.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            const std::string wavelength = MarkerWavelengthText(*marker);
+            if (marker_enabled) {
+                ImGui::TextUnformatted(wavelength.c_str());
+            } else {
+                ImGui::TextDisabled("%s", wavelength.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            if (marker_enabled) {
+                ImGui::TextUnformatted(marker->group.c_str());
+            } else {
+                ImGui::TextDisabled("%s", marker->group.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(4);
+            ImGui::TextDisabled("%s", SpectralLineMarkerKindLabel(marker->kind));
+        }
 
         ImGui::EndTable();
-    }
-    if (!can_show_lines) {
-        ImGui::EndDisabled();
     }
 
     ImGui::End();

@@ -282,6 +282,7 @@ void SpecForgeApp::InitializeUiBackends()
     ImPlot::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = "specforge-imgui-v2.ini";
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
