@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <fstream>
+#include <istream>
 #include <iterator>
 #include <optional>
 #include <sstream>
@@ -20,6 +21,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#endif
+
+#ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
+#include "specforge/public_spectral_lines_embedded.h"
 #endif
 
 namespace specforge {
@@ -199,40 +204,10 @@ std::vector<std::filesystem::path> DefaultCatalogCandidates()
     return candidates;
 }
 
-}  // namespace
-
-double SpectralLineMarkerPosition(const SpectralLineMarker& marker)
-{
-    if (marker.kind == SpectralLineMarkerKind::Line && marker.vacuum_angstrom) {
-        return *marker.vacuum_angstrom;
-    }
-    if (marker.start_vacuum_angstrom && marker.end_vacuum_angstrom) {
-        return (*marker.start_vacuum_angstrom + *marker.end_vacuum_angstrom) * 0.5;
-    }
-    return 0.0;
-}
-
-const char* SpectralLineMarkerKindLabel(SpectralLineMarkerKind kind)
-{
-    switch (kind) {
-    case SpectralLineMarkerKind::Band:
-        return "band";
-    case SpectralLineMarkerKind::Line:
-    default:
-        return "line";
-    }
-}
-
-SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path& path)
+SpectralLineCatalog LoadSpectralLineCatalogFromStream(std::istream& stream, std::filesystem::path path)
 {
     SpectralLineCatalog catalog;
-    catalog.path = path;
-
-    std::ifstream stream(path);
-    if (!stream.good()) {
-        catalog.load_error = "could not open spectral line catalog: " + path.string();
-        return catalog;
-    }
+    catalog.path = std::move(path);
 
     std::unordered_map<std::string, std::size_t> columns;
     std::unordered_set<std::string> marker_ids;
@@ -301,11 +276,11 @@ SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path&
     }
 
     if (!found_header) {
-        catalog.load_error = "spectral line catalog is missing a header row: " + path.string();
+        catalog.load_error = "spectral line catalog is missing a header row: " + catalog.path.string();
         return catalog;
     }
     if (catalog.markers.empty()) {
-        catalog.load_error = "spectral line catalog has no markers: " + path.string();
+        catalog.load_error = "spectral line catalog has no markers: " + catalog.path.string();
         return catalog;
     }
 
@@ -313,6 +288,43 @@ SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path&
         return SpectralLineMarkerPosition(left) < SpectralLineMarkerPosition(right);
     });
     return catalog;
+}
+
+}  // namespace
+
+double SpectralLineMarkerPosition(const SpectralLineMarker& marker)
+{
+    if (marker.kind == SpectralLineMarkerKind::Line && marker.vacuum_angstrom) {
+        return *marker.vacuum_angstrom;
+    }
+    if (marker.start_vacuum_angstrom && marker.end_vacuum_angstrom) {
+        return (*marker.start_vacuum_angstrom + *marker.end_vacuum_angstrom) * 0.5;
+    }
+    return 0.0;
+}
+
+const char* SpectralLineMarkerKindLabel(SpectralLineMarkerKind kind)
+{
+    switch (kind) {
+    case SpectralLineMarkerKind::Band:
+        return "band";
+    case SpectralLineMarkerKind::Line:
+    default:
+        return "line";
+    }
+}
+
+SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    if (!stream.good()) {
+        SpectralLineCatalog catalog;
+        catalog.path = path;
+        catalog.load_error = "could not open spectral line catalog: " + path.string();
+        return catalog;
+    }
+
+    return LoadSpectralLineCatalogFromStream(stream, path);
 }
 
 SpectralLineCatalog LoadDefaultSpectralLineCatalog()
@@ -324,9 +336,14 @@ SpectralLineCatalog LoadDefaultSpectralLineCatalog()
         }
     }
 
+#ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
+    std::istringstream stream(kEmbeddedPublicSpectralLineCatalog);
+    return LoadSpectralLineCatalogFromStream(stream, std::filesystem::path(kDefaultCatalogPath));
+#else
     SpectralLineCatalog catalog;
     catalog.load_error = "could not find default spectral line catalog: config/spectral_lines.public.tsv";
     return catalog;
+#endif
 }
 
 }  // namespace specforge

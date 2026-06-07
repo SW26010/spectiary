@@ -17,9 +17,26 @@
       }
     },
     {
+      "name": "static-release-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+        "SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static"
+      }
+    },
+    {
       "name": "vs2022-x64-debug",
       "displayName": "Visual Studio 2022 x64 Debug",
       "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64"
+    },
+    {
+      "name": "vs2022-x64-release-static",
+      "displayName": "Visual Studio 2022 x64 Static Release",
+      "inherits": "static-release-base",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64"
     },
@@ -31,6 +48,15 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "ninja-msvc-release-static",
+      "displayName": "Ninja MSVC Static Release",
+      "inherits": "static-release-base",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -40,8 +66,17 @@
       "configuration": "Debug"
     },
     {
+      "name": "vs2022-x64-release-static",
+      "configurePreset": "vs2022-x64-release-static",
+      "configuration": "Release"
+    },
+    {
       "name": "ninja-msvc-debug",
       "configurePreset": "ninja-msvc-debug"
+    },
+    {
+      "name": "ninja-msvc-release-static",
+      "configurePreset": "ninja-msvc-release-static"
     }
   ]
 }

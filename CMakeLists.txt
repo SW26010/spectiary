@@ -6,11 +6,48 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
+
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
 set(SPECFORGE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/specforge.exe.manifest")
+set(SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
+
+if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+    set(SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER
+        "${CMAKE_BINARY_DIR}/generated/specforge/public_spectral_lines_embedded.h"
+    )
+    add_custom_command(
+        OUTPUT "${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/generated/specforge"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DINPUT=${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
+            "-DOUTPUT=${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
+        DEPENDS
+            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
+            "${CMAKE_SOURCE_DIR}/cmake/embed_public_spectral_lines.cmake"
+        VERBATIM
+    )
+    add_custom_target(
+        specforge_embedded_public_spectral_lines
+        DEPENDS "${SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER}"
+    )
+
+    add_library(specforge_embedded_resources INTERFACE)
+    target_include_directories(specforge_embedded_resources INTERFACE "${CMAKE_BINARY_DIR}/generated")
+    target_compile_definitions(specforge_embedded_resources INTERFACE SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+endif()
+
+function(specforge_use_embedded_resources target_name)
+    if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+        target_link_libraries(${target_name} PRIVATE specforge_embedded_resources)
+        add_dependencies(${target_name} specforge_embedded_public_spectral_lines)
+    endif()
+endfunction()
 
 add_executable(specforge_native WIN32
     src/app/specforge_app.cpp
@@ -56,6 +93,7 @@ target_link_libraries(specforge_native PRIVATE
     ole32
     shell32
 )
+specforge_use_embedded_resources(specforge_native)
 
 if(MSVC)
     target_compile_options(specforge_native PRIVATE /W4 /permissive-)
@@ -68,12 +106,14 @@ set_target_properties(specforge_native PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
-add_custom_command(TARGET specforge_native POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv"
-        "$<TARGET_FILE_DIR:specforge_native>/config/spectral_lines.public.tsv"
-)
+if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+    add_custom_command(TARGET specforge_native POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
+            "$<TARGET_FILE_DIR:specforge_native>/config/spectral_lines.public.tsv"
+    )
+endif()
 
 enable_testing()
 
@@ -106,13 +146,16 @@ target_compile_definitions(
     specforge_spectral_line_catalog_tests
     PRIVATE SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+specforge_use_embedded_resources(specforge_spectral_line_catalog_tests)
 
-add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv"
-        "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
-)
+if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+    add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV}"
+            "$<TARGET_FILE_DIR:specforge_spectral_line_catalog_tests>/config/spectral_lines.public.tsv"
+    )
+endif()
 
 if(MSVC)
     target_compile_options(specforge_spectral_line_catalog_tests PRIVATE /W4 /permissive-)
