@@ -48,12 +48,18 @@ bool D3D11Renderer::Initialize(HWND hwnd)
         return false;
     }
 
-    return CreateRenderTarget();
+    if (!CreateRenderTarget()) {
+        return false;
+    }
+
+    RegisterOcclusionStatusEvent();
+    return true;
 }
 
 void D3D11Renderer::Shutdown()
 {
     ReleaseRenderTarget();
+    UnregisterOcclusionStatusEvent();
 
     if (swap_chain_ != nullptr) {
         swap_chain_->SetFullscreenState(FALSE, nullptr);
@@ -92,6 +98,14 @@ HRESULT D3D11Renderer::Present()
     return swap_chain_->Present(kPresentSyncInterval, 0);
 }
 
+HRESULT D3D11Renderer::PresentTest()
+{
+    if (swap_chain_ == nullptr) {
+        return E_FAIL;
+    }
+    return swap_chain_->Present(0, DXGI_PRESENT_TEST);
+}
+
 bool D3D11Renderer::GetSwapChainDesc(DXGI_SWAP_CHAIN_DESC& desc) const
 {
     if (swap_chain_ == nullptr) {
@@ -115,6 +129,74 @@ bool D3D11Renderer::CreateRenderTarget()
 void D3D11Renderer::ReleaseRenderTarget()
 {
     render_target_.Reset();
+}
+
+void D3D11Renderer::RegisterOcclusionStatusEvent()
+{
+    UnregisterOcclusionStatusEvent();
+    occlusion_status_registration_result_ = E_PENDING;
+
+    if (device_ == nullptr) {
+        occlusion_status_registration_result_ = E_FAIL;
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+    HRESULT result = device_.As(&dxgi_device);
+    if (FAILED(result)) {
+        occlusion_status_registration_result_ = result;
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    result = dxgi_device->GetAdapter(adapter.GetAddressOf());
+    if (FAILED(result)) {
+        occlusion_status_registration_result_ = result;
+        return;
+    }
+
+    result = adapter->GetParent(IID_PPV_ARGS(occlusion_factory_.GetAddressOf()));
+    if (FAILED(result)) {
+        occlusion_status_registration_result_ = result;
+        occlusion_factory_.Reset();
+        return;
+    }
+
+    occlusion_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (occlusion_event_ == nullptr) {
+        occlusion_status_registration_result_ = HRESULT_FROM_WIN32(GetLastError());
+        occlusion_factory_.Reset();
+        return;
+    }
+
+    result = occlusion_factory_->RegisterOcclusionStatusEvent(occlusion_event_, &occlusion_cookie_);
+    if (FAILED(result)) {
+        occlusion_status_registration_result_ = result;
+        CloseHandle(occlusion_event_);
+        occlusion_event_ = nullptr;
+        occlusion_cookie_ = 0;
+        occlusion_factory_.Reset();
+        return;
+    }
+
+    occlusion_registered_ = true;
+    occlusion_status_registration_result_ = S_OK;
+}
+
+void D3D11Renderer::UnregisterOcclusionStatusEvent() noexcept
+{
+    if (occlusion_registered_ && occlusion_factory_ != nullptr) {
+        occlusion_factory_->UnregisterOcclusionStatus(occlusion_cookie_);
+    }
+
+    occlusion_registered_ = false;
+    occlusion_cookie_ = 0;
+    occlusion_factory_.Reset();
+
+    if (occlusion_event_ != nullptr) {
+        CloseHandle(occlusion_event_);
+        occlusion_event_ = nullptr;
+    }
 }
 
 }  // namespace specforge

@@ -26,6 +26,7 @@ constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
 constexpr float kDefaultWindowsDpi = 96.0f;
 constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
+constexpr DWORD kOcclusionFallbackPollMilliseconds = 250;
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
 constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
 constexpr const wchar_t* kPersonalizeRegistryKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
@@ -212,6 +213,16 @@ int SpecForgeApp::Run(
             break;
         }
 
+        if (minimized_ || !window_visible_) {
+            WaitForRenderWake();
+            continue;
+        }
+
+        if (occluded_ && !TryResumeFromOcclusion()) {
+            WaitForRenderWake();
+            continue;
+        }
+
         RenderFrame();
     }
 
@@ -269,6 +280,16 @@ void SpecForgeApp::Initialize(
     if (!renderer_.Initialize(window_.hwnd())) {
         throw std::runtime_error("Failed to create the Direct3D 11 device and swap chain.");
     }
+    const HRESULT occlusion_status_result = renderer_.occlusion_status_registration_result();
+    profile_.WriteEvent("dxgi_occlusion_status_event", {
+                                                        ProfileSink::Field::Bool(
+                                                            "available",
+                                                            renderer_.occlusion_event() != nullptr &&
+                                                                SUCCEEDED(occlusion_status_result)),
+                                                        ProfileSink::Field::String(
+                                                            "registration_result",
+                                                            HResultHex(occlusion_status_result)),
+                                                    });
 
     InitializeUiBackends();
     window_.Show(show_command);
@@ -390,9 +411,58 @@ void SpecForgeApp::RenderFrame()
         present_result = renderer_.Present();
     }
 
+    if (present_result == DXGI_STATUS_OCCLUDED) {
+        if (!occluded_) {
+            profile_.WriteEvent("render_idle", {ProfileSink::Field::String("reason", "dxgi_occluded")});
+        }
+        occluded_ = true;
+        return;
+    }
+
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage("Present", present_result));
     }
+}
+
+bool SpecForgeApp::TryResumeFromOcclusion()
+{
+    const HRESULT present_test = renderer_.PresentTest();
+    if (present_test == DXGI_STATUS_OCCLUDED) {
+        return false;
+    }
+
+    if (FAILED(present_test)) {
+        throw std::runtime_error(HResultMessage("Present test", present_test));
+    }
+
+    occluded_ = false;
+    profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "dxgi_present_test")});
+    return true;
+}
+
+void SpecForgeApp::WaitForRenderWake()
+{
+    if (!running_) {
+        return;
+    }
+
+    if (occluded_) {
+        HANDLE occlusion_event = renderer_.occlusion_event();
+        if (occlusion_event != nullptr) {
+            const DWORD result = MsgWaitForMultipleObjects(1, &occlusion_event, FALSE, INFINITE, QS_ALLINPUT);
+            if (result != WAIT_FAILED) {
+                return;
+            }
+        }
+
+        const DWORD result =
+            MsgWaitForMultipleObjectsEx(0, nullptr, kOcclusionFallbackPollMilliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (result != WAIT_FAILED) {
+            return;
+        }
+    }
+
+    WaitMessage();
 }
 
 void SpecForgeApp::ApplyPendingResize()
@@ -703,13 +773,44 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     }
 
     switch (message) {
-    case WM_SIZE:
-        if (wparam != SIZE_MINIMIZED) {
-            const UINT width = LOWORD(lparam);
-            const UINT height = HIWORD(lparam);
-            if (IsRenderableSize(width, height)) {
-                pending_resize_ = PendingResize{width, height};
+    case WM_SIZE: {
+        if (wparam == SIZE_MINIMIZED) {
+            if (!minimized_) {
+                profile_.WriteEvent("render_idle", {ProfileSink::Field::String("reason", "minimized")});
             }
+            minimized_ = true;
+            pending_resize_.reset();
+            return 0;
+        }
+
+        if (minimized_) {
+            profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "restored")});
+        }
+        minimized_ = false;
+        occluded_ = false;
+
+        const UINT width = LOWORD(lparam);
+        const UINT height = HIWORD(lparam);
+        if (IsRenderableSize(width, height)) {
+            pending_resize_ = PendingResize{width, height};
+        }
+        return 0;
+    }
+    case WM_SHOWWINDOW:
+        if (wparam == FALSE) {
+            const bool was_visible = window_visible_;
+            window_visible_ = false;
+            if (was_visible) {
+                profile_.WriteEvent("render_idle", {ProfileSink::Field::String("reason", "hidden")});
+            }
+            pending_resize_.reset();
+        } else {
+            const bool was_visible = window_visible_;
+            window_visible_ = true;
+            if (!was_visible) {
+                profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "shown")});
+            }
+            occluded_ = false;
         }
         return 0;
     case WM_SYSCOMMAND:

@@ -47,6 +47,8 @@ private:
     void InitializeUiBackends();
     void Shutdown();
     void RenderFrame();
+    bool TryResumeFromOcclusion();
+    void WaitForRenderWake();
     void ApplyPendingResize();
     void ApplyUiScale(float dpi_scale);
     void ToggleFullscreen();
@@ -64,6 +66,9 @@ private:
 
     bool imgui_initialized_ = false;
     bool running_ = true;
+    bool minimized_ = false;
+    bool window_visible_ = true;
+    bool occluded_ = false;
     ImGuiStyle base_imgui_style_;
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;
