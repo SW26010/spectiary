@@ -74,6 +74,8 @@ add_executable(specforge_native WIN32
     src/renderer/d3d11_renderer.h
     src/ui/shell_ui.cpp
     src/ui/shell_ui.h
+    src/ui/spectral_lines_grouping_view.cpp
+    src/ui/spectral_lines_grouping_view.h
     src/ui/spectral_lines_panel.cpp
     src/ui/spectral_lines_panel.h
     src/ui/spectral_lines_panel_controller.cpp
