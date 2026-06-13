@@ -130,6 +130,7 @@ bool SetGroupMarkerVisibility(
     const MarkerReference& reference);
 
 bool AddUserGroup(GroupingView& view, std::string id, std::string name);
+bool RemoveUserGroup(GroupingView& view, std::string_view group_id);
 bool ReorderUserGroupBefore(
     GroupingView& view,
     std::string_view source_group_id,
@@ -140,6 +141,11 @@ bool MoveMarkerReference(
     std::string_view marker_id,
     std::string_view source_group_id,
     std::string_view target_group_id);
+bool RemoveMarkerReferenceFromGroup(
+    GroupingView& view,
+    const CatalogIdentity& identity,
+    std::string_view marker_id,
+    std::string_view group_id);
 bool CopyMarkerReference(
     GroupingView& view,
     const CatalogIdentity& identity,

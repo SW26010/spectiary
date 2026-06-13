@@ -113,6 +113,11 @@ const UserGroup* FindGroup(const GroupingView& view, std::string_view group_id)
     return match == view.groups.end() ? nullptr : &(*match);
 }
 
+bool IsUnassignedGroup(const UserGroup& group)
+{
+    return group.is_unassigned || group.id == kUnassignedUserGroupId;
+}
+
 UserGroup& EnsureUnassignedGroup(GroupingView& view)
 {
     for (UserGroup& group : view.groups) {
@@ -130,6 +135,31 @@ UserGroup& EnsureUnassignedGroup(GroupingView& view)
     group.is_unassigned = true;
     view.groups.push_back(std::move(group));
     return view.groups.back();
+}
+
+bool ContainsReferenceInOrdinaryGroups(const GroupingView& view, const MarkerReference& target)
+{
+    return std::any_of(view.groups.begin(), view.groups.end(), [&target](const UserGroup& group) {
+        if (IsUnassignedGroup(group)) {
+            return false;
+        }
+        return ContainsReference(group.marker_references, target.catalog_identity, target.marker_id);
+    });
+}
+
+void AddReferenceToUnassignedIfAbsent(GroupingView& view, const MarkerReference& reference)
+{
+    UserGroup& unassigned = EnsureUnassignedGroup(view);
+    if (!ContainsReference(unassigned.marker_references, reference.catalog_identity, reference.marker_id)) {
+        unassigned.marker_references.push_back(reference);
+    }
+}
+
+void PreserveReferenceIfNoOrdinaryGroup(GroupingView& view, const MarkerReference& reference)
+{
+    if (!ContainsReferenceInOrdinaryGroups(view, reference)) {
+        AddReferenceToUnassignedIfAbsent(view, reference);
+    }
 }
 
 void SortReferencesByCatalogPosition(
@@ -474,6 +504,27 @@ bool AddUserGroup(GroupingView& view, std::string id, std::string name)
     return true;
 }
 
+bool RemoveUserGroup(GroupingView& view, std::string_view group_id)
+{
+    if (group_id.empty()) {
+        return false;
+    }
+
+    const auto match = std::find_if(view.groups.begin(), view.groups.end(), [group_id](const auto& group) {
+        return group.id == group_id;
+    });
+    if (match == view.groups.end() || IsUnassignedGroup(*match)) {
+        return false;
+    }
+
+    const std::vector<MarkerReference> removed_references = match->marker_references;
+    view.groups.erase(match);
+    for (const MarkerReference& reference : removed_references) {
+        PreserveReferenceIfNoOrdinaryGroup(view, reference);
+    }
+    return true;
+}
+
 bool ReorderUserGroupBefore(
     GroupingView& view,
     std::string_view source_group_id,
@@ -483,9 +534,6 @@ bool ReorderUserGroupBefore(
         return false;
     }
 
-    const auto is_unassigned = [](const UserGroup& group) {
-        return group.is_unassigned || group.id == kUnassignedUserGroupId;
-    };
     const auto find_index = [&view](std::string_view group_id) -> std::optional<std::size_t> {
         for (std::size_t index = 0; index < view.groups.size(); ++index) {
             if (view.groups[index].id == group_id) {
@@ -497,7 +545,7 @@ bool ReorderUserGroupBefore(
 
     std::optional<std::size_t> source_index = find_index(source_group_id);
     std::optional<std::size_t> target_index = find_index(target_group_id);
-    if (!source_index || !target_index || is_unassigned(view.groups[*source_index])) {
+    if (!source_index || !target_index || IsUnassignedGroup(view.groups[*source_index])) {
         return false;
     }
 
@@ -512,7 +560,7 @@ bool ReorderUserGroupBefore(
     UserGroup moving_group = std::move(view.groups[*source_index]);
     view.groups.erase(view.groups.begin() + static_cast<std::ptrdiff_t>(*source_index));
 
-    const auto unassigned = std::find_if(view.groups.begin(), view.groups.end(), is_unassigned);
+    const auto unassigned = std::find_if(view.groups.begin(), view.groups.end(), IsUnassignedGroup);
     if (unassigned != view.groups.end()) {
         const auto unassigned_index = static_cast<std::size_t>(std::distance(view.groups.begin(), unassigned));
         if (insert_index > unassigned_index) {
@@ -554,6 +602,32 @@ bool MoveMarkerReference(
         return true;
     }
     return removed_from_source;
+}
+
+bool RemoveMarkerReferenceFromGroup(
+    GroupingView& view,
+    const CatalogIdentity& identity,
+    std::string_view marker_id,
+    std::string_view group_id)
+{
+    if (marker_id.empty() || group_id.empty()) {
+        return false;
+    }
+
+    UserGroup* group = FindGroup(view, group_id);
+    if (group == nullptr || IsUnassignedGroup(*group)) {
+        return false;
+    }
+
+    const auto reference = FindReference(group->marker_references, identity, marker_id);
+    if (reference == group->marker_references.end()) {
+        return false;
+    }
+
+    const MarkerReference removed_reference = *reference;
+    group->marker_references.erase(reference);
+    PreserveReferenceIfNoOrdinaryGroup(view, removed_reference);
+    return true;
 }
 
 bool CopyMarkerReference(

@@ -63,6 +63,11 @@ struct UserGroupReorderGapResult {
     float min_y = 0.0f;
 };
 
+enum class ActionIcon {
+    Minus,
+    Trash,
+};
+
 class ScopedComInitialization {
 public:
     ScopedComInitialization()
@@ -706,7 +711,12 @@ float TrashIconButtonWidth()
     return ImGui::GetFrameHeight() * 0.5f;
 }
 
-bool TrashIconButton(const char* id, const ImRect& hit_rect)
+bool ActionIconButton(
+    const char* id,
+    const ImRect& hit_rect,
+    ActionIcon icon,
+    const char* tooltip,
+    bool reveal_on_hover)
 {
     const float height = ImGui::GetFrameHeight();
     const float width = std::max(1.0f, hit_rect.GetWidth());
@@ -725,38 +735,65 @@ bool TrashIconButton(const char* id, const ImRect& hit_rect)
         draw_list->AddRectFilled(min, max, background, 3.0f);
     }
 
+    const bool reveal_icon = !reveal_on_hover || hovered || active;
     const ImU32 icon_color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     const float icon_width = std::min(TrashIconButtonWidth(), width);
     const float icon_left = min.x + std::max(0.0f, (width - icon_width) * 0.5f);
-    const float left = icon_left + icon_width * 0.14f;
-    const float right = icon_left + icon_width * 0.86f;
-    const float handle_left = icon_left + icon_width * 0.38f;
-    const float handle_right = icon_left + icon_width * 0.62f;
     const float icon_top = min.y + std::max(0.0f, (max.y - min.y - height) * 0.5f);
-    const float top = icon_top + height * 0.25f;
-    const float lid_y = icon_top + height * 0.34f;
-    const float body_top = icon_top + height * 0.43f;
-    const float body_bottom = icon_top + height * 0.73f;
     const float stroke = 1.35f;
 
-    draw_list->AddLine(ImVec2(handle_left, top), ImVec2(handle_right, top), icon_color, stroke);
-    draw_list->AddLine(ImVec2(left, lid_y), ImVec2(right, lid_y), icon_color, stroke);
-    draw_list->AddRect(ImVec2(left + icon_width * 0.05f, body_top), ImVec2(right - icon_width * 0.05f, body_bottom), icon_color, 2.0f, 0, stroke);
-    draw_list->AddLine(
-        ImVec2(icon_left + icon_width * 0.43f, body_top + height * 0.06f),
-        ImVec2(icon_left + icon_width * 0.43f, body_bottom - height * 0.05f),
-        icon_color,
-        1.0f);
-    draw_list->AddLine(
-        ImVec2(icon_left + icon_width * 0.57f, body_top + height * 0.06f),
-        ImVec2(icon_left + icon_width * 0.57f, body_bottom - height * 0.05f),
-        icon_color,
-        1.0f);
+    if (reveal_icon && icon == ActionIcon::Minus) {
+        const float y = icon_top + height * 0.5f;
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.18f, y),
+            ImVec2(icon_left + icon_width * 0.82f, y),
+            icon_color,
+            stroke);
+    } else if (reveal_icon && icon == ActionIcon::Trash) {
+        const float left = icon_left + icon_width * 0.14f;
+        const float right = icon_left + icon_width * 0.86f;
+        const float handle_left = icon_left + icon_width * 0.38f;
+        const float handle_right = icon_left + icon_width * 0.62f;
+        const float top = icon_top + height * 0.25f;
+        const float lid_y = icon_top + height * 0.34f;
+        const float body_top = icon_top + height * 0.43f;
+        const float body_bottom = icon_top + height * 0.73f;
 
-    if (hovered) {
-        ImGui::SetTooltip("Remove from list");
+        draw_list->AddLine(ImVec2(handle_left, top), ImVec2(handle_right, top), icon_color, stroke);
+        draw_list->AddLine(ImVec2(left, lid_y), ImVec2(right, lid_y), icon_color, stroke);
+        draw_list->AddRect(
+            ImVec2(left + icon_width * 0.05f, body_top),
+            ImVec2(right - icon_width * 0.05f, body_bottom),
+            icon_color,
+            2.0f,
+            0,
+            stroke);
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.43f, body_top + height * 0.06f),
+            ImVec2(icon_left + icon_width * 0.43f, body_bottom - height * 0.05f),
+            icon_color,
+            1.0f);
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.57f, body_top + height * 0.06f),
+            ImVec2(icon_left + icon_width * 0.57f, body_bottom - height * 0.05f),
+            icon_color,
+            1.0f);
+    }
+
+    if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
+        ImGui::SetTooltip("%s", tooltip);
     }
     return clicked;
+}
+
+bool TrashIconButton(const char* id, const ImRect& hit_rect)
+{
+    return ActionIconButton(id, hit_rect, ActionIcon::Trash, "Remove from list", false);
+}
+
+bool HiddenActionIconButton(const char* id, const ImRect& hit_rect, ActionIcon icon, const char* tooltip)
+{
+    return ActionIconButton(id, hit_rect, icon, tooltip, true);
 }
 
 void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
@@ -1260,9 +1297,12 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
         }
 
         ImGui::SameLine();
+        const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
         ImGuiTreeNodeFlags group_flags = ImGuiTreeNodeFlags_SpanFullWidth;
         if (group_reorder_drag_active) {
             group_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        } else if (editable && ordinary_group) {
+            group_flags |= ImGuiTreeNodeFlags_AllowOverlap;
         }
         const std::string expansion_key = GroupExpansionKey(view.id, group.id);
         const bool group_was_expanded = panel_state.expanded_group_ids.find(expansion_key) !=
@@ -1319,7 +1359,6 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
             }
         }
 
-        const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
         if (editable && ordinary_group && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
             const std::string drag_payload = EncodeUserGroupDragPayload(editable_view->id, group.id);
             ImGui::SetDragDropPayload(
@@ -1347,6 +1386,30 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
             }
             ImGui::EndDragDropTarget();
         }
+
+        bool group_deleted = false;
+        if (editable && ordinary_group && !group_reorder_drag_active) {
+            const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+            const float action_width = ImGui::GetFrameHeight();
+            const ImRect delete_rect(
+                ImVec2(std::max(group_item_min.x, group_item_max.x - action_width), group_item_min.y),
+                group_item_max);
+            group_deleted = HiddenActionIconButton(
+                "delete_group",
+                delete_rect,
+                ActionIcon::Trash,
+                "Disband group") &&
+                            spectral_lines_panel_.DeleteUserGroupFromView(*editable_view, group.id);
+            ImGui::SetCursorScreenPos(saved_cursor);
+        }
+        if (group_deleted) {
+            if (group_contents_open) {
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+            continue;
+        }
+
         previous_group_midpoint_y = group_midpoint_y;
 
         if (group_contents_open) {
@@ -1381,11 +1444,16 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
                 ImGuiTreeNodeFlags marker_flags =
                     ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet |
                     ImGuiTreeNodeFlags_SpanFullWidth;
+                if (editable && ordinary_group) {
+                    marker_flags |= ImGuiTreeNodeFlags_AllowOverlap;
+                }
                 const std::string marker_suffix = resolved ? MarkerWavelengthText(*marker) : "unresolved";
                 if (!resolved || !marker_visible) {
                     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 }
                 ImGui::TreeNodeEx("marker", marker_flags, "%s  %s", label.c_str(), marker_suffix.c_str());
+                const ImVec2 marker_item_min = ImGui::GetItemRectMin();
+                const ImVec2 marker_item_max = ImGui::GetItemRectMax();
                 if (!resolved || !marker_visible) {
                     ImGui::PopStyleColor();
                 }
@@ -1437,7 +1505,29 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
                     RenderSharedReferenceMarker();
                 }
 
+                bool reference_removed = false;
+                if (editable && ordinary_group) {
+                    const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+                    const float action_width = ImGui::GetFrameHeight();
+                    const ImRect remove_rect(
+                        ImVec2(std::max(marker_item_min.x, marker_item_max.x - action_width), marker_item_min.y),
+                        marker_item_max);
+                    reference_removed = HiddenActionIconButton(
+                        "remove_reference",
+                        remove_rect,
+                        ActionIcon::Minus,
+                        "Remove from this group") &&
+                                        spectral_lines_panel_.RemoveMarkerReferenceFromGroup(
+                                            *editable_view,
+                                            reference->marker_id,
+                                            group.id);
+                    ImGui::SetCursorScreenPos(saved_cursor);
+                }
+
                 ImGui::PopID();
+                if (reference_removed) {
+                    break;
+                }
             }
             ImGui::TreePop();
         }

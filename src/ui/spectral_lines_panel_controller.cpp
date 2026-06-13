@@ -208,6 +208,16 @@ bool SpectralLinesPanelController::AddUserGroupToView(GroupingView& view)
     return true;
 }
 
+bool SpectralLinesPanelController::DeleteUserGroupFromView(GroupingView& view, std::string_view group_id)
+{
+    if (!RemoveUserGroup(view, group_id)) {
+        return false;
+    }
+    panel_state_.expanded_group_ids.erase(GroupExpansionKey(view.id, group_id));
+    MarkCacheDirty();
+    return true;
+}
+
 bool SpectralLinesPanelController::SetGroupVisibility(
     const UserGroup& group,
     bool visible,
@@ -265,6 +275,18 @@ bool SpectralLinesPanelController::MoveOrCopyMarkerReferenceToGroup(
         MarkCacheDirty();
     }
     return changed;
+}
+
+bool SpectralLinesPanelController::RemoveMarkerReferenceFromGroup(
+    GroupingView& view,
+    std::string_view marker_id,
+    std::string_view group_id)
+{
+    if (!specforge::RemoveMarkerReferenceFromGroup(view, catalog_identity_, marker_id, group_id)) {
+        return false;
+    }
+    MarkCacheDirty();
+    return true;
 }
 
 bool SpectralLinesPanelController::CopyMarkerReferenceToGroup(

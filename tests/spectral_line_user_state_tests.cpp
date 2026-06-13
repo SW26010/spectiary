@@ -1,5 +1,6 @@
 #include "overlays/spectral_line_user_state.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -68,6 +69,29 @@ specforge::MarkerReference ReferenceFor(specforge::CatalogIdentity identity, std
     reference.catalog_identity = std::move(identity);
     reference.marker_id = std::move(marker_id);
     return reference;
+}
+
+specforge::UserGroup* FindGroupById(specforge::GroupingView& view, std::string_view group_id)
+{
+    const auto match = std::find_if(view.groups.begin(), view.groups.end(), [group_id](const auto& group) {
+        return group.id == group_id;
+    });
+    return match == view.groups.end() ? nullptr : &(*match);
+}
+
+const specforge::UserGroup* FindGroupById(const specforge::GroupingView& view, std::string_view group_id)
+{
+    const auto match = std::find_if(view.groups.begin(), view.groups.end(), [group_id](const auto& group) {
+        return group.id == group_id;
+    });
+    return match == view.groups.end() ? nullptr : &(*match);
+}
+
+bool GroupContainsReference(const specforge::UserGroup& group, std::string_view marker_id)
+{
+    return std::any_of(group.marker_references.begin(), group.marker_references.end(), [marker_id](const auto& reference) {
+        return reference.marker_id == marker_id;
+    });
 }
 
 void TestPublicCatalogIdentityIsStable()
@@ -219,6 +243,114 @@ void TestMoveAndCopyMarkerReferences()
     const std::unordered_map<std::string, int> counts =
         specforge::MarkerReferenceCounts(view, specforge::PublicSpectralLineCatalogIdentity());
     Require(counts.at("h_alpha") == 2, "copied marker should be shared across two user groups");
+}
+
+void TestRemoveUserGroupAndMarkerReferences()
+{
+    const specforge::SpectralLineCatalog catalog = GroupedCatalog();
+    specforge::GroupingView view = specforge::CreateUserGroupingViewFromCatalog(
+        catalog,
+        specforge::PublicSpectralLineCatalogIdentity(),
+        "view-1",
+        "Working view");
+    Require(specforge::AddUserGroup(view, "group-1", "Interesting"), "user group should be added");
+    specforge::UserGroup* editable_group = FindGroupById(view, "group-1");
+    Require(editable_group != nullptr, "new user group should be addressable by id");
+    editable_group->marker_references.push_back(Reference("missing_marker"));
+
+    Require(
+        specforge::MoveMarkerReference(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "h_alpha",
+            specforge::UnassignedUserGroupId(),
+            "group-1"),
+        "marker reference should move into the user group");
+    Require(
+        specforge::RemoveMarkerReferenceFromGroup(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "h_alpha",
+            "group-1"),
+        "marker reference should be removable from its user group");
+    Require(
+        !specforge::RemoveMarkerReferenceFromGroup(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "h_alpha",
+            specforge::UnassignedUserGroupId()),
+        "Unassigned marker references should not be directly removable");
+    Require(
+        specforge::RemoveMarkerReferenceFromGroup(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "missing_marker",
+            "group-1"),
+        "unresolved marker reference should be removable from its user group");
+    const specforge::UserGroup* source_unassigned_after_unresolved_remove =
+        FindGroupById(view, specforge::UnassignedUserGroupId());
+    Require(
+        source_unassigned_after_unresolved_remove != nullptr &&
+            GroupContainsReference(*source_unassigned_after_unresolved_remove, "missing_marker"),
+        "removed unresolved marker reference should be preserved in source Unassigned");
+
+    const specforge::GroupingView after_reference_remove =
+        specforge::EffectiveUserGroupingView(view, catalog, specforge::PublicSpectralLineCatalogIdentity());
+    const specforge::UserGroup& unassigned_after_reference_remove = after_reference_remove.groups.back();
+    Require(unassigned_after_reference_remove.is_unassigned, "Unassigned should remain the last group");
+    Require(
+        std::any_of(
+            unassigned_after_reference_remove.marker_references.begin(),
+            unassigned_after_reference_remove.marker_references.end(),
+            [](const specforge::MarkerReference& reference) {
+                return reference.marker_id == "h_alpha";
+            }),
+        "removed marker reference should return to Unassigned in the effective view");
+    Require(
+        GroupContainsReference(unassigned_after_reference_remove, "missing_marker"),
+        "removed unresolved marker reference should remain in effective Unassigned");
+
+    Require(
+        specforge::MoveMarkerReference(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "h_beta",
+            specforge::UnassignedUserGroupId(),
+            "group-1"),
+        "second marker reference should move into the user group");
+    editable_group = FindGroupById(view, "group-1");
+    Require(editable_group != nullptr, "user group should still be addressable before deletion");
+    editable_group->marker_references.push_back(Reference("missing_from_deleted_group"));
+    Require(specforge::RemoveUserGroup(view, "group-1"), "ordinary user group should be removable");
+    Require(
+        !specforge::RemoveUserGroup(view, specforge::UnassignedUserGroupId()),
+        "Unassigned user group should not be removable");
+    const specforge::UserGroup* source_unassigned_after_group_remove =
+        FindGroupById(view, specforge::UnassignedUserGroupId());
+    Require(
+        source_unassigned_after_group_remove != nullptr &&
+            GroupContainsReference(*source_unassigned_after_group_remove, "missing_from_deleted_group"),
+        "unresolved marker references from a removed group should be preserved in source Unassigned");
+
+    const specforge::GroupingView after_group_remove =
+        specforge::EffectiveUserGroupingView(view, catalog, specforge::PublicSpectralLineCatalogIdentity());
+    Require(
+        std::none_of(after_group_remove.groups.begin(), after_group_remove.groups.end(), [](const auto& group) {
+            return group.id == "group-1";
+        }),
+        "removed user group should not remain in the effective view");
+    const specforge::UserGroup& unassigned_after_group_remove = after_group_remove.groups.back();
+    Require(
+        std::any_of(
+            unassigned_after_group_remove.marker_references.begin(),
+            unassigned_after_group_remove.marker_references.end(),
+            [](const specforge::MarkerReference& reference) {
+                return reference.marker_id == "h_beta";
+            }),
+        "marker references from a removed user group should return to Unassigned");
+    Require(
+        GroupContainsReference(unassigned_after_group_remove, "missing_from_deleted_group"),
+        "unresolved marker references from a removed group should remain in effective Unassigned");
 }
 
 void TestReorderUserGroups()
@@ -586,6 +718,7 @@ int main()
     TestReferenceIdentityMustMatchCurrentCatalog();
     TestSharedReferencesAreDetected();
     TestMoveAndCopyMarkerReferences();
+    TestRemoveUserGroupAndMarkerReferences();
     TestReorderUserGroups();
     TestMarkerVisibilityIsSharedAcrossViews();
     TestUngroupedCatalogHasNoCatalogGroupingView();
