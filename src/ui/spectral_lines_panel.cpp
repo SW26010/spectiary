@@ -1,0 +1,1052 @@
+#include "ui/spectral_lines_panel.h"
+
+#include <imgui.h>
+#include <imgui_internal.h>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdio>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace specforge {
+namespace {
+
+constexpr const char* kSpectralLinesWindow = "Spectral Lines###SpecForgeSpectralLinesV2";
+constexpr const char* kMarkerReferenceDragPayload = "SpecForgeMarkerReference";
+constexpr const char* kUserGroupDragPayload = "SpecForgeUserGroup";
+constexpr const char* kRenameGroupingViewPopup = "Rename grouping view###SpecForgeRenameGroupingViewPopup";
+constexpr const char* kRenameUserGroupPopup = "Rename group###SpecForgeRenameUserGroupPopup";
+constexpr const char* kDeleteGroupingViewPopup = "Delete grouping view###SpecForgeDeleteGroupingViewPopup";
+
+struct MarkerReferenceDragPayload {
+    std::string view_id;
+    std::string source_group_id;
+    std::string marker_id;
+};
+
+struct UserGroupDragPayload {
+    std::string view_id;
+    std::string group_id;
+};
+
+struct UserGroupReorderLine {
+    float y = 0.0f;
+    float x_min = 0.0f;
+    float x_max = 0.0f;
+};
+
+struct UserGroupReorderGapResult {
+    UserGroupReorderLine line;
+    float min_y = 0.0f;
+};
+
+enum class ActionIcon {
+    Minus,
+    Trash,
+};
+
+bool HasNonWhitespace(std::string_view text)
+{
+    return std::any_of(text.begin(), text.end(), [](unsigned char character) {
+        return std::isspace(character) == 0;
+    });
+}
+
+std::string EncodeMarkerReferenceDragPayload(
+    std::string_view view_id,
+    std::string_view source_group_id,
+    std::string_view marker_id)
+{
+    std::string payload;
+    payload.reserve(view_id.size() + source_group_id.size() + marker_id.size() + 2);
+    payload.append(view_id);
+    payload.push_back('\0');
+    payload.append(source_group_id);
+    payload.push_back('\0');
+    payload.append(marker_id);
+    return payload;
+}
+
+std::optional<MarkerReferenceDragPayload> DecodeMarkerReferenceDragPayload(const ImGuiPayload& payload)
+{
+    if (payload.Data == nullptr || payload.DataSize <= 0) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = static_cast<const char*>(payload.Data);
+    const std::string_view data(bytes, static_cast<std::size_t>(payload.DataSize));
+    const std::size_t first_separator = data.find('\0');
+    if (first_separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::size_t second_separator = data.find('\0', first_separator + 1);
+    if (second_separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    MarkerReferenceDragPayload decoded;
+    decoded.view_id = std::string(data.substr(0, first_separator));
+    decoded.source_group_id =
+        std::string(data.substr(first_separator + 1, second_separator - first_separator - 1));
+    decoded.marker_id = std::string(data.substr(second_separator + 1));
+    if (decoded.view_id.empty() || decoded.source_group_id.empty() || decoded.marker_id.empty()) {
+        return std::nullopt;
+    }
+    return decoded;
+}
+
+void SubmitMarkerReferenceDragPayload(
+    std::string_view view_id,
+    std::string_view source_group_id,
+    std::string_view marker_id,
+    std::string_view label)
+{
+    const std::string drag_payload = EncodeMarkerReferenceDragPayload(view_id, source_group_id, marker_id);
+    ImGui::SetDragDropPayload(
+        kMarkerReferenceDragPayload,
+        drag_payload.data(),
+        static_cast<int>(drag_payload.size()));
+    ImGui::TextUnformatted(label.data(), label.data() + label.size());
+    ImGui::TextDisabled(ImGui::GetIO().KeyCtrl ? "Drop: copy" : "Drop: move, Ctrl+drop: copy");
+}
+
+bool BeginCtrlMarkerReferenceDragDropSource(const ImRect& hit_rect)
+{
+    if (!ImGui::GetIO().KeyCtrl || hit_rect.GetWidth() <= 0.0f || hit_rect.GetHeight() <= 0.0f) {
+        return false;
+    }
+
+    const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(hit_rect.Min);
+    ImGui::InvisibleButton("marker_ctrl_drag_source", hit_rect.GetSize(), ImGuiButtonFlags_MouseButtonLeft);
+    ImGui::SetCursorScreenPos(saved_cursor);
+    return ImGui::BeginDragDropSource(ImGuiDragDropFlags_None);
+}
+
+ImRect CurrentFullWidthFrameRect()
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    return ImRect(
+        ImVec2(window->WorkRect.Min.x, cursor.y),
+        ImVec2(window->WorkRect.Max.x, cursor.y + ImGui::GetFrameHeight()));
+}
+
+void RenderCtrlMarkerReferenceHover(const ImRect& hit_rect)
+{
+    if (!ImGui::GetIO().KeyCtrl || ImGui::GetDragDropPayload() != nullptr ||
+        !ImGui::IsMouseHoveringRect(hit_rect.Min, hit_rect.Max, true)) {
+        return;
+    }
+
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        hit_rect.Min,
+        hit_rect.Max,
+        ImGui::GetColorU32(ImGuiCol_HeaderHovered));
+}
+
+std::string EncodeUserGroupDragPayload(std::string_view view_id, std::string_view group_id)
+{
+    std::string payload;
+    payload.reserve(view_id.size() + group_id.size() + 1);
+    payload.append(view_id);
+    payload.push_back('\0');
+    payload.append(group_id);
+    return payload;
+}
+
+std::optional<UserGroupDragPayload> DecodeUserGroupDragPayload(const ImGuiPayload& payload)
+{
+    if (payload.Data == nullptr || payload.DataSize <= 0) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = static_cast<const char*>(payload.Data);
+    const std::string_view data(bytes, static_cast<std::size_t>(payload.DataSize));
+    const std::size_t separator = data.find('\0');
+    if (separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    UserGroupDragPayload decoded;
+    decoded.view_id = std::string(data.substr(0, separator));
+    decoded.group_id = std::string(data.substr(separator + 1));
+    if (decoded.view_id.empty() || decoded.group_id.empty()) {
+        return std::nullopt;
+    }
+    return decoded;
+}
+
+std::optional<UserGroupDragPayload> CurrentUserGroupDragPayload()
+{
+    const ImGuiPayload* payload = ImGui::GetDragDropPayload();
+    if (payload == nullptr || !payload->IsDataType(kUserGroupDragPayload)) {
+        return std::nullopt;
+    }
+    return DecodeUserGroupDragPayload(*payload);
+}
+
+void DrawUserGroupReorderLine(float y, float x_min, float x_max)
+{
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_DragDropTarget);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddLine(ImVec2(x_min, y), ImVec2(x_max, y), color, 2.0f);
+    draw_list->AddCircleFilled(ImVec2(x_min, y), 3.0f, color);
+}
+
+std::optional<UserGroupDragPayload> AcceptUserGroupReorderPayload(std::string_view view_id, bool& accepted)
+{
+    accepted = false;
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kUserGroupDragPayload, flags)) {
+        if (std::optional<UserGroupDragPayload> drag = DecodeUserGroupDragPayload(*payload)) {
+            if (drag->view_id == view_id) {
+                accepted = true;
+                if (payload->IsDelivery()) {
+                    return drag;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+UserGroupReorderGapResult RenderUserGroupReorderGap(bool highlight)
+{
+    const float width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+    const float height = std::max(ImGui::GetStyle().ItemSpacing.y * 2.0f, 6.0f);
+    ImGui::InvisibleButton("##user_group_reorder_gap", ImVec2(width, height));
+    const ImVec2 gap_min = ImGui::GetItemRectMin();
+    const ImVec2 gap_max = ImGui::GetItemRectMax();
+
+    UserGroupReorderGapResult result;
+    result.line = UserGroupReorderLine{
+        (gap_min.y + gap_max.y) * 0.5f,
+        gap_min.x,
+        gap_max.x,
+    };
+    result.min_y = gap_min.y;
+    if (highlight) {
+        DrawUserGroupReorderLine(result.line.y, result.line.x_min, result.line.x_max);
+    }
+    return result;
+}
+
+std::optional<UserGroupDragPayload> RenderUserGroupReorderTarget(
+    std::string_view view_id,
+    const ImRect& hit_rect,
+    const UserGroupReorderLine& line,
+    ImGuiID target_id)
+{
+    std::optional<UserGroupDragPayload> delivered;
+    bool highlight = false;
+    if (ImGui::BeginDragDropTargetCustom(hit_rect, target_id)) {
+        delivered = AcceptUserGroupReorderPayload(view_id, highlight);
+        ImGui::EndDragDropTarget();
+    }
+    if (highlight) {
+        DrawUserGroupReorderLine(line.y, line.x_min, line.x_max);
+    }
+    return delivered;
+}
+
+std::string MarkerWavelengthText(const SpectralLineMarker& marker)
+{
+    std::array<char, 64> buffer = {};
+    if (marker.kind == SpectralLineMarkerKind::Line && marker.vacuum_angstrom) {
+        std::snprintf(buffer.data(), buffer.size(), "%.3f", *marker.vacuum_angstrom);
+        return buffer.data();
+    }
+    if (marker.kind == SpectralLineMarkerKind::Band && marker.start_vacuum_angstrom && marker.end_vacuum_angstrom) {
+        std::snprintf(
+            buffer.data(),
+            buffer.size(),
+            "%.3f-%.3f",
+            *marker.start_vacuum_angstrom,
+            *marker.end_vacuum_angstrom);
+        return buffer.data();
+    }
+    return {};
+}
+
+void RenderDisabledText(std::string_view text)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopStyleColor();
+}
+
+void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+}
+
+bool RenderGroupVisibilityControl(GroupVisibilityState state, bool& next_visible)
+{
+    next_visible = true;
+    if (state == GroupVisibilityState::SearchFiltered || state == GroupVisibilityState::Empty) {
+        bool value = false;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("##group_visibility", &value);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip(
+                state == GroupVisibilityState::SearchFiltered
+                    ? "Search is filtering this group; bulk visibility is disabled."
+                    : "No resolved markers in this group.");
+        }
+        return false;
+    }
+
+    bool value = state == GroupVisibilityState::AllVisible;
+    if (state == GroupVisibilityState::Mixed) {
+        ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+    }
+    const bool changed = ImGui::Checkbox("##group_visibility", &value);
+    if (state == GroupVisibilityState::Mixed) {
+        ImGui::PopItemFlag();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show or hide all resolved markers in this group.");
+    }
+    if (changed) {
+        next_visible = state == GroupVisibilityState::Mixed ? true : value;
+    }
+    return changed;
+}
+
+void RenderSharedReferenceMarker()
+{
+    ImGui::TextDisabled("*");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Shared marker reference: this marker also appears in another group in this view.");
+    }
+}
+
+ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
+{
+    switch (severity) {
+    case SpectrumDiagnosticSeverity::Error:
+        return ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+    case SpectrumDiagnosticSeverity::Warning:
+        return ImVec4(0.95f, 0.74f, 0.30f, 1.0f);
+    case SpectrumDiagnosticSeverity::Info:
+    default:
+        return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
+    }
+}
+
+float ActionIconButtonWidth()
+{
+    return ImGui::GetFrameHeight() * 0.5f;
+}
+
+bool HiddenActionIconButton(const char* id, const ImRect& hit_rect, ActionIcon icon, const char* tooltip)
+{
+    const float height = ImGui::GetFrameHeight();
+    const float width = std::max(1.0f, hit_rect.GetWidth());
+    ImGui::SetCursorScreenPos(hit_rect.Min);
+    const ImVec2 button_size(width, std::max(1.0f, hit_rect.GetHeight()));
+    const bool clicked = ImGui::InvisibleButton(id, button_size);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    if (hovered || active) {
+        const ImU32 background = ImGui::GetColorU32(active ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
+        draw_list->AddRectFilled(min, max, background, 3.0f);
+    }
+
+    const bool reveal_icon = hovered || active;
+    const ImU32 icon_color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float icon_width = std::min(ActionIconButtonWidth(), width);
+    const float icon_left = min.x + std::max(0.0f, (width - icon_width) * 0.5f);
+    const float icon_top = min.y + std::max(0.0f, (max.y - min.y - height) * 0.5f);
+    const float stroke = 1.35f;
+
+    if (reveal_icon && icon == ActionIcon::Minus) {
+        const float y = icon_top + height * 0.5f;
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.18f, y),
+            ImVec2(icon_left + icon_width * 0.82f, y),
+            icon_color,
+            stroke);
+    } else if (reveal_icon && icon == ActionIcon::Trash) {
+        const float left = icon_left + icon_width * 0.14f;
+        const float right = icon_left + icon_width * 0.86f;
+        const float handle_left = icon_left + icon_width * 0.38f;
+        const float handle_right = icon_left + icon_width * 0.62f;
+        const float top = icon_top + height * 0.25f;
+        const float lid_y = icon_top + height * 0.34f;
+        const float body_top = icon_top + height * 0.43f;
+        const float body_bottom = icon_top + height * 0.73f;
+
+        draw_list->AddLine(ImVec2(handle_left, top), ImVec2(handle_right, top), icon_color, stroke);
+        draw_list->AddLine(ImVec2(left, lid_y), ImVec2(right, lid_y), icon_color, stroke);
+        draw_list->AddRect(
+            ImVec2(left + icon_width * 0.05f, body_top),
+            ImVec2(right - icon_width * 0.05f, body_bottom),
+            icon_color,
+            2.0f,
+            0,
+            stroke);
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.43f, body_top + height * 0.06f),
+            ImVec2(icon_left + icon_width * 0.43f, body_bottom - height * 0.05f),
+            icon_color,
+            1.0f);
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.57f, body_top + height * 0.06f),
+            ImVec2(icon_left + icon_width * 0.57f, body_bottom - height * 0.05f),
+            icon_color,
+            1.0f);
+    }
+
+    if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
+        ImGui::SetTooltip("%s", tooltip);
+    }
+    return clicked;
+}
+
+}  // namespace
+
+const char* SpectralLinesPanelUi::WindowName()
+{
+    return kSpectralLinesWindow;
+}
+
+void SpectralLinesPanelUi::RenderGroupingView(
+    SpectralLinesPanelController& panel,
+    const SpectrumSnapshotHandle& snapshot,
+    const GroupingView& view,
+    GroupingView* editable_view)
+{
+    const bool editable = editable_view != nullptr && !editable_view->read_only;
+    const SpectralLineCatalog& catalog = panel.catalog();
+    const CatalogIdentity& identity = panel.catalog_identity();
+    CatalogUserState& user_state = panel.user_state();
+    CatalogPanelState& panel_state = panel.panel_state();
+    const std::string search(panel.filter_buffer().data());
+    const bool search_active = !search.empty();
+
+    if (editable) {
+        if (ImGui::Button("+ Group")) {
+            panel.AddUserGroupToView(*editable_view);
+        }
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
+                if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
+                    if (drag->view_id == editable_view->id) {
+                        const bool copy = ImGui::GetIO().KeyCtrl;
+                        panel.AddUserGroupWithMarkerReferenceToView(
+                            *editable_view,
+                            drag->marker_id,
+                            drag->source_group_id,
+                            copy);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::SameLine();
+    }
+
+    const std::vector<const SpectralLineMarker*> visible_markers = panel.FilteredMarkers(snapshot, false);
+    const std::string marker_count = std::to_string(visible_markers.size()) + " plot-visible / " +
+                                     std::to_string(catalog.markers.size()) + " catalog markers";
+    RenderDisabledText(marker_count);
+
+    const std::unordered_map<std::string, int> shared_counts = MarkerReferenceCounts(view, identity);
+    const std::optional<UserGroupDragPayload> active_user_group_drag =
+        editable ? CurrentUserGroupDragPayload() : std::nullopt;
+    const bool group_reorder_drag_active =
+        editable && active_user_group_drag && active_user_group_drag->view_id == editable_view->id;
+
+    if (view.groups.empty()) {
+        ImGui::TextDisabled("No groups in this view.");
+        return;
+    }
+
+    std::optional<UserGroupReorderGapResult> current_reorder_gap;
+    std::optional<float> previous_group_midpoint_y;
+    bool group_context_popup_open = false;
+    const auto render_reorder_gap = [&](const UserGroup& target_group) {
+        if (!group_reorder_drag_active) {
+            current_reorder_gap = std::nullopt;
+            return;
+        }
+        ImGui::PushID("group_reorder_gap");
+        ImGui::PushID(target_group.id.c_str());
+        current_reorder_gap = RenderUserGroupReorderGap(false);
+        ImGui::PopID();
+        ImGui::PopID();
+    };
+
+    for (std::size_t group_index = 0; group_index < view.groups.size(); ++group_index) {
+        const UserGroup& group = view.groups[group_index];
+
+        render_reorder_gap(group);
+
+        std::vector<const MarkerReference*> matching_references;
+        matching_references.reserve(group.marker_references.size());
+        for (const MarkerReference& reference : group.marker_references) {
+            if (MarkerMatchesSearch(catalog, identity, reference, search)) {
+                matching_references.push_back(&reference);
+            }
+        }
+        const bool group_has_search_matches = !matching_references.empty();
+        const bool group_dimmed_by_search = search_active && !group_has_search_matches;
+
+        ImGui::PushID(group.id.c_str());
+        ImGui::AlignTextToFramePadding();
+        bool next_group_visible = true;
+        if (RenderGroupVisibilityControl(
+                VisibilityStateForGroup(user_state, group, catalog, identity, search_active),
+                next_group_visible)) {
+            panel.SetGroupVisibility(group, next_group_visible, search_active);
+        }
+
+        ImGui::SameLine();
+        const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
+        const bool group_context_active = group_context_view_id_ && group_context_group_id_ &&
+                                          *group_context_view_id_ == view.id &&
+                                          *group_context_group_id_ == group.id;
+        ImGuiTreeNodeFlags group_flags = ImGuiTreeNodeFlags_SpanFullWidth;
+        if (group_reorder_drag_active) {
+            group_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        } else if (editable && ordinary_group) {
+            group_flags |= ImGuiTreeNodeFlags_AllowOverlap;
+        }
+        if (group_context_active) {
+            group_flags |= ImGuiTreeNodeFlags_Selected;
+        }
+        const std::string expansion_key = GroupExpansionKey(view.id, group.id);
+        const bool group_was_expanded = panel_state.expanded_group_ids.find(expansion_key) !=
+                                        panel_state.expanded_group_ids.end();
+        if (group_reorder_drag_active) {
+            ImGui::SetNextItemOpen(false, ImGuiCond_Always);
+        } else if (search_active && group_has_search_matches) {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextItemOpen(group_was_expanded, ImGuiCond_Always);
+        }
+        if (group_dimmed_by_search) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        }
+        if (group_reorder_drag_active) {
+            const ImVec4 transparent(0.0f, 0.0f, 0.0f, 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, transparent);
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, transparent);
+        }
+        const bool group_open = ImGui::TreeNodeEx(
+            "group",
+            group_flags,
+            "%s (%zu)",
+            group.name.c_str(),
+            matching_references.size());
+        const ImVec2 group_item_min = ImGui::GetItemRectMin();
+        const ImVec2 group_item_max = ImGui::GetItemRectMax();
+        if (group_reorder_drag_active) {
+            ImGui::PopStyleColor(2);
+        }
+        if (group_dimmed_by_search) {
+            ImGui::PopStyleColor();
+        }
+        if (!group_reorder_drag_active && ImGui::IsItemToggledOpen()) {
+            panel.SetGroupExpanded(view.id, group.id, group_open);
+        }
+        const bool group_contents_open = !group_reorder_drag_active && group_open;
+        const float group_midpoint_y = (group_item_min.y + group_item_max.y) * 0.5f;
+
+        if (group_reorder_drag_active && current_reorder_gap) {
+            const float target_min_y = previous_group_midpoint_y.value_or(current_reorder_gap->min_y);
+            const ImRect target_rect(
+                ImVec2(current_reorder_gap->line.x_min, target_min_y),
+                ImVec2(current_reorder_gap->line.x_max, group_midpoint_y));
+            if (std::optional<UserGroupDragPayload> drop = RenderUserGroupReorderTarget(
+                    editable_view->id,
+                    target_rect,
+                    current_reorder_gap->line,
+                    ImGui::GetID("user_group_reorder_target"))) {
+                panel.ReorderUserGroupBeforeInView(*editable_view, drop->group_id, group.id);
+            }
+        }
+
+        bool group_deleted = false;
+        if (editable && ordinary_group && !group_reorder_drag_active && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            group_context_view_id_ = editable_view->id;
+            group_context_group_id_ = group.id;
+        }
+        if (editable && ordinary_group && !group_reorder_drag_active &&
+            ImGui::BeginPopupContextItem("user_group_context")) {
+            group_context_popup_open = true;
+            group_context_view_id_ = editable_view->id;
+            group_context_group_id_ = group.id;
+            if (ImGui::Selectable("Rename")) {
+                renaming_group_view_id_ = editable_view->id;
+                renaming_group_id_ = group.id;
+                std::snprintf(
+                    renaming_group_name_.data(),
+                    renaming_group_name_.size(),
+                    "%s",
+                    group.name.c_str());
+                renaming_group_popup_requested_ = true;
+            }
+            if (ImGui::Selectable("Delete")) {
+                group_deleted = panel.DeleteUserGroupFromView(*editable_view, group.id);
+                group_context_view_id_.reset();
+                group_context_group_id_.reset();
+            }
+            ImGui::EndPopup();
+        }
+        if (group_deleted) {
+            if (group_contents_open) {
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+            continue;
+        }
+
+        if (editable && ordinary_group && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            const std::string drag_payload = EncodeUserGroupDragPayload(editable_view->id, group.id);
+            ImGui::SetDragDropPayload(
+                kUserGroupDragPayload,
+                drag_payload.data(),
+                static_cast<int>(drag_payload.size()));
+            ImGui::TextUnformatted(group.name.c_str());
+            ImGui::TextDisabled("Drop between groups to reorder");
+            ImGui::EndDragDropSource();
+        }
+
+        if (editable && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
+                if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
+                    if (drag->view_id == editable_view->id) {
+                        const bool copy = ImGui::GetIO().KeyCtrl;
+                        panel.MoveOrCopyMarkerReferenceToGroup(
+                            *editable_view,
+                            drag->marker_id,
+                            drag->source_group_id,
+                            group.id,
+                            copy);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        if (editable && ordinary_group && !group_reorder_drag_active) {
+            const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+            const float action_width = ImGui::GetFrameHeight();
+            const ImRect delete_rect(
+                ImVec2(std::max(group_item_min.x, group_item_max.x - action_width), group_item_min.y),
+                group_item_max);
+            group_deleted = HiddenActionIconButton(
+                "delete_group",
+                delete_rect,
+                ActionIcon::Trash,
+                "Disband group") &&
+                            panel.DeleteUserGroupFromView(*editable_view, group.id);
+            ImGui::SetCursorScreenPos(saved_cursor);
+        }
+        if (group_deleted) {
+            if (group_contents_open) {
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+            continue;
+        }
+
+        previous_group_midpoint_y = group_midpoint_y;
+
+        if (group_contents_open) {
+            for (const MarkerReference* reference : matching_references) {
+                if (reference == nullptr) {
+                    continue;
+                }
+
+                const SpectralLineMarker* marker = FindCatalogMarker(catalog, identity, *reference);
+                const bool resolved = marker != nullptr;
+                const bool marker_visible = resolved && IsMarkerVisible(user_state, reference->marker_id);
+                const std::string label = resolved ? marker->label : reference->marker_id;
+
+                ImGui::PushID(reference->marker_id.c_str());
+
+                ImGui::AlignTextToFramePadding();
+                const ImRect marker_hover_rect = CurrentFullWidthFrameRect();
+                RenderCtrlMarkerReferenceHover(marker_hover_rect);
+                bool checkbox_value = marker_visible;
+                if (!resolved) {
+                    ImGui::BeginDisabled();
+                }
+                if (ImGui::Checkbox("##marker_visibility", &checkbox_value) && resolved) {
+                    panel.SetMarkerEnabled(*marker, checkbox_value);
+                }
+                if (!resolved) {
+                    ImGui::EndDisabled();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip(resolved ? "Show on plot" : "Unresolved marker references are not plotted.");
+                }
+
+                ImGui::SameLine();
+                ImGuiTreeNodeFlags marker_flags =
+                    ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet |
+                    ImGuiTreeNodeFlags_SpanFullWidth;
+                if (editable && ordinary_group) {
+                    marker_flags |= ImGuiTreeNodeFlags_AllowOverlap;
+                }
+                const std::string marker_suffix = resolved ? MarkerWavelengthText(*marker) : "unresolved";
+                if (!resolved || !marker_visible) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                }
+                ImGui::TreeNodeEx("marker", marker_flags, "%s  %s", label.c_str(), marker_suffix.c_str());
+                const ImVec2 marker_item_min = ImGui::GetItemRectMin();
+                const ImVec2 marker_item_max = ImGui::GetItemRectMax();
+                if (!resolved || !marker_visible) {
+                    ImGui::PopStyleColor();
+                }
+                if (ImGui::IsItemHovered()) {
+                    if (resolved && !marker->notes.empty()) {
+                        ImGui::SetTooltip("%s\n%s", marker_suffix.c_str(), marker->notes.c_str());
+                    } else {
+                        ImGui::SetTooltip("%s", marker_suffix.c_str());
+                    }
+                }
+                if (editable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
+                    ImGui::EndDragDropSource();
+                } else if (editable && BeginCtrlMarkerReferenceDragDropSource(ImRect(marker_item_min, marker_item_max))) {
+                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
+                    ImGui::EndDragDropSource();
+                }
+                if (editable && ImGui::BeginPopupContextItem("marker_context")) {
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::Separator();
+                    if (ImGui::BeginMenu("Copy to group")) {
+                        bool has_target = false;
+                        for (const UserGroup& target_group : editable_view->groups) {
+                            if (target_group.id == group.id || target_group.is_unassigned ||
+                                target_group.id == UnassignedUserGroupId()) {
+                                continue;
+                            }
+                            has_target = true;
+                            if (ImGui::Selectable(target_group.name.c_str())) {
+                                panel.CopyMarkerReferenceToGroup(
+                                    *editable_view,
+                                    reference->marker_id,
+                                    target_group.id);
+                            }
+                        }
+                        if (!has_target) {
+                            ImGui::TextDisabled("No other groups");
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (IsSharedMarkerReference(shared_counts, *reference)) {
+                    ImGui::SameLine();
+                    RenderSharedReferenceMarker();
+                }
+
+                bool reference_removed = false;
+                if (editable && ordinary_group) {
+                    const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+                    const float action_width = ImGui::GetFrameHeight();
+                    const ImRect remove_rect(
+                        ImVec2(std::max(marker_item_min.x, marker_item_max.x - action_width), marker_item_min.y),
+                        marker_item_max);
+                    reference_removed = HiddenActionIconButton(
+                        "remove_reference",
+                        remove_rect,
+                        ActionIcon::Minus,
+                        "Remove from this group") &&
+                                        panel.RemoveMarkerReferenceFromGroup(
+                                            *editable_view,
+                                            reference->marker_id,
+                                            group.id);
+                    ImGui::SetCursorScreenPos(saved_cursor);
+                }
+
+                ImGui::PopID();
+                if (reference_removed) {
+                    break;
+                }
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+
+    if (!group_context_popup_open && !renaming_group_popup_requested_) {
+        group_context_view_id_.reset();
+        group_context_group_id_.reset();
+    }
+}
+
+void SpectralLinesPanelUi::Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot)
+{
+    const SpectralLineCatalog& catalog = panel.catalog();
+    const CatalogIdentity& identity = panel.catalog_identity();
+    const std::optional<GroupingView>& catalog_grouping_view = panel.catalog_grouping_view();
+    CatalogUserState& user_state = panel.user_state();
+    std::array<char, 96>& filter = panel.filter_buffer();
+
+    ImGui::Begin(kSpectralLinesWindow);
+    ImGui::TextUnformatted("Spectral Lines");
+    ImGui::Separator();
+
+    const bool can_show_lines = snapshot && snapshot->capabilities.can_show_spectral_lines;
+    if (!can_show_lines) {
+        ImGui::TextWrapped("Current snapshot does not expose a wavelength axis for spectral-line overlays.");
+    } else if (snapshot->capabilities.requires_rest_frame_warning) {
+        ImGui::TextColored(
+            SeverityColor(SpectrumDiagnosticSeverity::Warning),
+            "Wavelength frame is unknown; rest-frame overlays are reference-only.");
+    }
+
+    const char* selected_catalog = identity.display_name.c_str();
+    if (ImGui::BeginCombo("Catalog", selected_catalog)) {
+        ImGui::Selectable(selected_catalog, true);
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", identity.id.c_str());
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Labels", &panel.show_labels());
+
+    ImGui::Spacing();
+    if (!catalog.load_error.empty()) {
+        const std::string error = "Catalog load failed: " + catalog.load_error;
+        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
+    } else if (catalog.markers.empty()) {
+        ImGui::TextDisabled("No public catalog markers loaded.");
+    }
+    if (!panel.warning().empty()) {
+        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), panel.warning());
+    }
+
+    ImGui::InputTextWithHint(
+        "Search",
+        "id, label, catalog group, or plot label",
+        filter.data(),
+        filter.size());
+
+    ImGui::Spacing();
+    panel.NormalizeViewSelection();
+
+    std::optional<GroupingView> pending_duplicate;
+    std::optional<GroupingView> pending_rename;
+    std::optional<GroupingView> pending_delete;
+    const auto create_new_view = [&panel]() {
+        panel.CreateUserGroupingView();
+    };
+
+    if (ImGui::BeginTabBar("spectral_line_grouping_views", ImGuiTabBarFlags_Reorderable)) {
+        if (catalog_grouping_view) {
+            const bool selected = user_state.active_view_id == catalog_grouping_view->id;
+            const ImGuiTabItemFlags flags = panel.ShouldSelectTab(catalog_grouping_view->id)
+                                                 ? ImGuiTabItemFlags_SetSelected
+                                                 : ImGuiTabItemFlags_None;
+            if (ImGui::BeginTabItem(catalog_grouping_view->name.c_str(), nullptr, flags)) {
+                if (!selected) {
+                    panel.SetActiveView(catalog_grouping_view->id);
+                }
+                panel.AcknowledgeTabSelection(catalog_grouping_view->id);
+                if (ImGui::BeginPopupContextItem("catalog_grouping_view_context")) {
+                    if (ImGui::Selectable("Duplicate as user view")) {
+                        pending_duplicate = *catalog_grouping_view;
+                    }
+                    ImGui::EndPopup();
+                }
+                RenderGroupingView(panel, snapshot, *catalog_grouping_view, nullptr);
+                ImGui::EndTabItem();
+            }
+        }
+
+        for (std::size_t index = 0; index < user_state.grouping_views.size(); ++index) {
+            GroupingView& user_view = user_state.grouping_views[index];
+            const bool selected = user_state.active_view_id == user_view.id;
+            const ImGuiTabItemFlags flags = panel.ShouldSelectTab(user_view.id)
+                                                 ? ImGuiTabItemFlags_SetSelected
+                                                 : ImGuiTabItemFlags_None;
+            if (ImGui::BeginTabItem(user_view.name.c_str(), nullptr, flags)) {
+                if (!selected) {
+                    panel.SetActiveView(user_view.id);
+                }
+                panel.AcknowledgeTabSelection(user_view.id);
+                GroupingView effective_view = EffectiveUserGroupingView(user_view, catalog, identity);
+                if (ImGui::BeginPopupContextItem("user_grouping_view_context")) {
+                    if (ImGui::Selectable("Duplicate")) {
+                        pending_duplicate = effective_view;
+                    }
+                    if (ImGui::Selectable("Rename")) {
+                        pending_rename = user_view;
+                    }
+                    if (ImGui::Selectable("Delete")) {
+                        pending_delete = user_view;
+                    }
+                    ImGui::EndPopup();
+                }
+                RenderGroupingView(panel, snapshot, effective_view, &user_view);
+                ImGui::EndTabItem();
+            }
+        }
+
+        if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+            create_new_view();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("New user grouping view");
+        }
+        ImGui::EndTabBar();
+    }
+
+    if (pending_duplicate) {
+        panel.DuplicateUserGroupingView(*pending_duplicate);
+    }
+    if (pending_rename) {
+        renaming_grouping_view_id_ = pending_rename->id;
+        std::snprintf(
+            renaming_grouping_view_name_.data(),
+            renaming_grouping_view_name_.size(),
+            "%s",
+            pending_rename->name.c_str());
+        ImGui::OpenPopup(kRenameGroupingViewPopup);
+    }
+    if (pending_delete) {
+        deleting_grouping_view_id_ = pending_delete->id;
+        deleting_grouping_view_name_ = pending_delete->name;
+        ImGui::OpenPopup(kDeleteGroupingViewPopup);
+    }
+    if (renaming_group_popup_requested_) {
+        ImGui::OpenPopup(kRenameUserGroupPopup);
+        renaming_group_popup_requested_ = false;
+    }
+
+    if (ImGui::BeginPopupModal(kRenameGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted = ImGui::InputText(
+            "Name",
+            renaming_grouping_view_name_.data(),
+            renaming_grouping_view_name_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid_name = HasNonWhitespace(renaming_grouping_view_name_.data());
+        const auto finish_rename = [this, &panel]() {
+            if (renaming_grouping_view_id_) {
+                panel.RenameUserGroupingView(*renaming_grouping_view_id_, renaming_grouping_view_name_.data());
+            }
+            renaming_grouping_view_id_.reset();
+            renaming_grouping_view_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        };
+        if (!valid_name) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Rename") || (submitted && valid_name)) {
+            finish_rename();
+        }
+        if (!valid_name) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            renaming_grouping_view_id_.reset();
+            renaming_grouping_view_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopupModal(kRenameUserGroupPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted = ImGui::InputText(
+            "Name",
+            renaming_group_name_.data(),
+            renaming_group_name_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid_name = HasNonWhitespace(renaming_group_name_.data());
+        const auto finish_rename = [this, &panel, &user_state]() {
+            if (renaming_group_view_id_ && renaming_group_id_) {
+                for (GroupingView& view : user_state.grouping_views) {
+                    if (view.id == *renaming_group_view_id_) {
+                        panel.RenameUserGroupInView(view, *renaming_group_id_, renaming_group_name_.data());
+                        break;
+                    }
+                }
+            }
+            renaming_group_view_id_.reset();
+            renaming_group_id_.reset();
+            renaming_group_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        };
+        if (!valid_name) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Rename") || (submitted && valid_name)) {
+            finish_rename();
+        }
+        if (!valid_name) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            renaming_group_view_id_.reset();
+            renaming_group_id_.reset();
+            renaming_group_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopupModal(kDeleteGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Delete grouping view \"%s\"?", deleting_grouping_view_name_.c_str());
+        ImGui::TextDisabled("Catalog markers and marker visibility are not deleted.");
+        if (ImGui::Button("Delete")) {
+            if (deleting_grouping_view_id_) {
+                panel.DeleteUserGroupingView(*deleting_grouping_view_id_);
+            }
+            deleting_grouping_view_id_.reset();
+            deleting_grouping_view_name_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            deleting_grouping_view_id_.reset();
+            deleting_grouping_view_name_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (!catalog_grouping_view && user_state.grouping_views.empty()) {
+        ImGui::TextDisabled("This catalog has no catalog grouping view.");
+        if (ImGui::Button("+ New grouping view")) {
+            create_new_view();
+        }
+    }
+
+    ImGui::End();
+}
+
+}  // namespace specforge
