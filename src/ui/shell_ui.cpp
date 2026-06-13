@@ -177,6 +177,56 @@ std::optional<MarkerReferenceDragPayload> DecodeMarkerReferenceDragPayload(const
     return decoded;
 }
 
+void SubmitMarkerReferenceDragPayload(
+    std::string_view view_id,
+    std::string_view source_group_id,
+    std::string_view marker_id,
+    std::string_view label)
+{
+    const std::string drag_payload = EncodeMarkerReferenceDragPayload(view_id, source_group_id, marker_id);
+    ImGui::SetDragDropPayload(
+        kMarkerReferenceDragPayload,
+        drag_payload.data(),
+        static_cast<int>(drag_payload.size()));
+    ImGui::TextUnformatted(label.data(), label.data() + label.size());
+    ImGui::TextDisabled(ImGui::GetIO().KeyCtrl ? "Drop: copy" : "Drop: move, Ctrl+drop: copy");
+}
+
+bool BeginCtrlMarkerReferenceDragDropSource(const ImRect& hit_rect)
+{
+    if (!ImGui::GetIO().KeyCtrl || hit_rect.GetWidth() <= 0.0f || hit_rect.GetHeight() <= 0.0f) {
+        return false;
+    }
+
+    const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(hit_rect.Min);
+    ImGui::InvisibleButton("marker_ctrl_drag_source", hit_rect.GetSize(), ImGuiButtonFlags_MouseButtonLeft);
+    ImGui::SetCursorScreenPos(saved_cursor);
+    return ImGui::BeginDragDropSource(ImGuiDragDropFlags_None);
+}
+
+ImRect CurrentFullWidthFrameRect()
+{
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    return ImRect(
+        ImVec2(window->WorkRect.Min.x, cursor.y),
+        ImVec2(window->WorkRect.Max.x, cursor.y + ImGui::GetFrameHeight()));
+}
+
+void RenderCtrlMarkerReferenceHover(const ImRect& hit_rect)
+{
+    if (!ImGui::GetIO().KeyCtrl || ImGui::GetDragDropPayload() != nullptr ||
+        !ImGui::IsMouseHoveringRect(hit_rect.Min, hit_rect.Max, true)) {
+        return;
+    }
+
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        hit_rect.Min,
+        hit_rect.Max,
+        ImGui::GetColorU32(ImGuiCol_HeaderHovered));
+}
+
 std::string EncodeUserGroupDragPayload(std::string_view view_id, std::string_view group_id)
 {
     std::string payload;
@@ -1239,6 +1289,21 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
         if (ImGui::Button("+ Group")) {
             spectral_lines_panel_.AddUserGroupToView(*editable_view);
         }
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
+                if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
+                    if (drag->view_id == editable_view->id) {
+                        const bool copy = ImGui::GetIO().KeyCtrl;
+                        spectral_lines_panel_.AddUserGroupWithMarkerReferenceToView(
+                            *editable_view,
+                            drag->marker_id,
+                            drag->source_group_id,
+                            copy);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
         ImGui::SameLine();
     }
 
@@ -1468,6 +1533,8 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
                 ImGui::PushID(reference->marker_id.c_str());
 
                 ImGui::AlignTextToFramePadding();
+                const ImRect marker_hover_rect = CurrentFullWidthFrameRect();
+                RenderCtrlMarkerReferenceHover(marker_hover_rect);
                 bool checkbox_value = marker_visible;
                 if (!resolved) {
                     ImGui::BeginDisabled();
@@ -1507,14 +1574,10 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
                     }
                 }
                 if (editable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                    const std::string drag_payload =
-                        EncodeMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id);
-                    ImGui::SetDragDropPayload(
-                        kMarkerReferenceDragPayload,
-                        drag_payload.data(),
-                        static_cast<int>(drag_payload.size()));
-                    ImGui::TextUnformatted(label.c_str());
-                    ImGui::TextDisabled("Drop: move, Ctrl+drop: copy");
+                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
+                    ImGui::EndDragDropSource();
+                } else if (editable && BeginCtrlMarkerReferenceDragDropSource(ImRect(marker_item_min, marker_item_max))) {
+                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
                     ImGui::EndDragDropSource();
                 }
                 if (editable && ImGui::BeginPopupContextItem("marker_context")) {
@@ -1523,7 +1586,8 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
                     if (ImGui::BeginMenu("Copy to group")) {
                         bool has_target = false;
                         for (const UserGroup& target_group : editable_view->groups) {
-                            if (target_group.id == group.id) {
+                            if (target_group.id == group.id || target_group.is_unassigned ||
+                                target_group.id == UnassignedUserGroupId()) {
                                 continue;
                             }
                             has_target = true;

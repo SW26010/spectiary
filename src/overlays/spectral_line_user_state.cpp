@@ -640,7 +640,8 @@ bool CopyMarkerReference(
         return false;
     }
     UserGroup* target_group = FindGroup(view, target_group_id);
-    if (target_group == nullptr || ContainsReference(target_group->marker_references, identity, marker_id)) {
+    if (target_group == nullptr || IsUnassignedGroup(*target_group) ||
+        ContainsReference(target_group->marker_references, identity, marker_id)) {
         return false;
     }
     target_group->marker_references.push_back(MakeReference(identity, std::string(marker_id)));

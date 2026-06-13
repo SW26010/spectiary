@@ -208,6 +208,35 @@ bool SpectralLinesPanelController::AddUserGroupToView(GroupingView& view)
     return true;
 }
 
+bool SpectralLinesPanelController::AddUserGroupWithMarkerReferenceToView(
+    GroupingView& view,
+    std::string_view marker_id,
+    std::string_view source_group_id,
+    bool copy)
+{
+    if (!copy && source_group_id != UnassignedUserGroupId()) {
+        return false;
+    }
+
+    const std::string group_id = NextUserGroupId();
+    const std::string group_name = "Group " + group_id.substr(std::string("group-").size());
+    if (!AddUserGroup(view, group_id, group_name)) {
+        return false;
+    }
+
+    const bool reference_added =
+        copy ? CopyMarkerReference(view, catalog_identity_, marker_id, group_id)
+             : MoveMarkerReference(view, catalog_identity_, marker_id, source_group_id, group_id);
+    if (!reference_added) {
+        RemoveUserGroup(view, group_id);
+        return false;
+    }
+
+    panel_state_.expanded_group_ids.insert(GroupExpansionKey(view.id, group_id));
+    MarkCacheDirty();
+    return true;
+}
+
 bool SpectralLinesPanelController::RenameUserGroupInView(
     GroupingView& view,
     std::string_view group_id,

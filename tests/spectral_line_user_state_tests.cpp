@@ -240,6 +240,13 @@ void TestMoveAndCopyMarkerReferences()
     Require(
         specforge::CopyMarkerReference(view, specforge::PublicSpectralLineCatalogIdentity(), "h_alpha", "group-2"),
         "copy should add a shared marker reference to the target group");
+    Require(
+        !specforge::CopyMarkerReference(
+            view,
+            specforge::PublicSpectralLineCatalogIdentity(),
+            "h_alpha",
+            specforge::UnassignedUserGroupId()),
+        "copy to Unassigned should be rejected because Unassigned is derived from ordinary groups");
     const std::unordered_map<std::string, int> counts =
         specforge::MarkerReferenceCounts(view, specforge::PublicSpectralLineCatalogIdentity());
     Require(counts.at("h_alpha") == 2, "copied marker should be shared across two user groups");
