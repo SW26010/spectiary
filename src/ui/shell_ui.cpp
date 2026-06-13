@@ -39,6 +39,7 @@ const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 constexpr const char* kMarkerReferenceDragPayload = "SpecForgeMarkerReference";
 constexpr const char* kUserGroupDragPayload = "SpecForgeUserGroup";
 constexpr const char* kRenameGroupingViewPopup = "Rename grouping view###SpecForgeRenameGroupingViewPopup";
+constexpr const char* kRenameUserGroupPopup = "Rename group###SpecForgeRenameUserGroupPopup";
 constexpr const char* kDeleteGroupingViewPopup = "Delete grouping view###SpecForgeDeleteGroupingViewPopup";
 
 struct MarkerReferenceDragPayload {
@@ -1260,6 +1261,7 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
 
     std::optional<UserGroupReorderGapResult> current_reorder_gap;
     std::optional<float> previous_group_midpoint_y;
+    bool group_context_popup_open = false;
     const auto render_reorder_gap = [&](const UserGroup& target_group) {
         if (!group_reorder_drag_active) {
             current_reorder_gap = std::nullopt;
@@ -1298,11 +1300,17 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
 
         ImGui::SameLine();
         const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
+        const bool group_context_active = group_context_view_id_ && group_context_group_id_ &&
+                                          *group_context_view_id_ == view.id &&
+                                          *group_context_group_id_ == group.id;
         ImGuiTreeNodeFlags group_flags = ImGuiTreeNodeFlags_SpanFullWidth;
         if (group_reorder_drag_active) {
             group_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
         } else if (editable && ordinary_group) {
             group_flags |= ImGuiTreeNodeFlags_AllowOverlap;
+        }
+        if (group_context_active) {
+            group_flags |= ImGuiTreeNodeFlags_Selected;
         }
         const std::string expansion_key = GroupExpansionKey(view.id, group.id);
         const bool group_was_expanded = panel_state.expanded_group_ids.find(expansion_key) !=
@@ -1359,6 +1367,41 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
             }
         }
 
+        bool group_deleted = false;
+        if (editable && ordinary_group && !group_reorder_drag_active && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            group_context_view_id_ = editable_view->id;
+            group_context_group_id_ = group.id;
+        }
+        if (editable && ordinary_group && !group_reorder_drag_active &&
+            ImGui::BeginPopupContextItem("user_group_context")) {
+            group_context_popup_open = true;
+            group_context_view_id_ = editable_view->id;
+            group_context_group_id_ = group.id;
+            if (ImGui::Selectable("Rename")) {
+                renaming_group_view_id_ = editable_view->id;
+                renaming_group_id_ = group.id;
+                std::snprintf(
+                    renaming_group_name_.data(),
+                    renaming_group_name_.size(),
+                    "%s",
+                    group.name.c_str());
+                renaming_group_popup_requested_ = true;
+            }
+            if (ImGui::Selectable("Delete")) {
+                group_deleted = spectral_lines_panel_.DeleteUserGroupFromView(*editable_view, group.id);
+                group_context_view_id_.reset();
+                group_context_group_id_.reset();
+            }
+            ImGui::EndPopup();
+        }
+        if (group_deleted) {
+            if (group_contents_open) {
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+            continue;
+        }
+
         if (editable && ordinary_group && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
             const std::string drag_payload = EncodeUserGroupDragPayload(editable_view->id, group.id);
             ImGui::SetDragDropPayload(
@@ -1387,7 +1430,6 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
             ImGui::EndDragDropTarget();
         }
 
-        bool group_deleted = false;
         if (editable && ordinary_group && !group_reorder_drag_active) {
             const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
             const float action_width = ImGui::GetFrameHeight();
@@ -1533,6 +1575,11 @@ void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingV
         }
         ImGui::PopID();
     }
+
+    if (!group_context_popup_open && !renaming_group_popup_requested_) {
+        group_context_view_id_.reset();
+        group_context_group_id_.reset();
+    }
 }
 
 void ShellUi::RenderSpectralLinesPanel()
@@ -1671,6 +1718,10 @@ void ShellUi::RenderSpectralLinesPanel()
         deleting_grouping_view_name_ = pending_delete->name;
         ImGui::OpenPopup(kDeleteGroupingViewPopup);
     }
+    if (renaming_group_popup_requested_) {
+        ImGui::OpenPopup(kRenameUserGroupPopup);
+        renaming_group_popup_requested_ = false;
+    }
 
     if (ImGui::BeginPopupModal(kRenameGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         if (ImGui::IsWindowAppearing()) {
@@ -1705,6 +1756,52 @@ void ShellUi::RenderSpectralLinesPanel()
         if (ImGui::Button("Cancel")) {
             renaming_grouping_view_id_.reset();
             renaming_grouping_view_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopupModal(kRenameUserGroupPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted = ImGui::InputText(
+            "Name",
+            renaming_group_name_.data(),
+            renaming_group_name_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid_name = HasNonWhitespace(renaming_group_name_.data());
+        const auto finish_rename = [this, &user_state]() {
+            if (renaming_group_view_id_ && renaming_group_id_) {
+                for (GroupingView& view : user_state.grouping_views) {
+                    if (view.id == *renaming_group_view_id_) {
+                        spectral_lines_panel_.RenameUserGroupInView(
+                            view,
+                            *renaming_group_id_,
+                            renaming_group_name_.data());
+                        break;
+                    }
+                }
+            }
+            renaming_group_view_id_.reset();
+            renaming_group_id_.reset();
+            renaming_group_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        };
+        if (!valid_name) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Rename") || (submitted && valid_name)) {
+            finish_rename();
+        }
+        if (!valid_name) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            renaming_group_view_id_.reset();
+            renaming_group_id_.reset();
+            renaming_group_name_.fill('\0');
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

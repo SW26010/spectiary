@@ -39,6 +39,7 @@ public:
     bool RenameUserGroupingView(std::string_view view_id, std::string_view name);
     bool DeleteUserGroupingView(std::string_view view_id);
     bool AddUserGroupToView(GroupingView& view);
+    bool RenameUserGroupInView(GroupingView& view, std::string_view group_id, std::string_view name);
     bool DeleteUserGroupFromView(GroupingView& view, std::string_view group_id);
     bool SetGroupVisibility(const UserGroup& group, bool visible, bool search_active);
     void SetGroupExpanded(std::string_view view_id, std::string_view group_id, bool expanded);

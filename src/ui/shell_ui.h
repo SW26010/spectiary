@@ -75,6 +75,12 @@ private:
     SpectralLinesPanelController spectral_lines_panel_;
     std::optional<std::string> renaming_grouping_view_id_;
     std::array<char, 128> renaming_grouping_view_name_ = {};
+    std::optional<std::string> renaming_group_view_id_;
+    std::optional<std::string> renaming_group_id_;
+    std::array<char, 128> renaming_group_name_ = {};
+    bool renaming_group_popup_requested_ = false;
+    std::optional<std::string> group_context_view_id_;
+    std::optional<std::string> group_context_group_id_;
     std::optional<std::string> deleting_grouping_view_id_;
     std::string deleting_grouping_view_name_;
     std::vector<SourceListEntry> sources_;
