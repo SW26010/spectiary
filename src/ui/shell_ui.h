@@ -1,8 +1,8 @@
 #pragma once
 
 #include "domain/spectrum_snapshot.h"
-#include "overlays/spectral_line_catalog.h"
 #include "plot/spectrum_plot.h"
+#include "ui/spectral_lines_panel_controller.h"
 
 #include <imgui.h>
 
@@ -31,6 +31,7 @@ struct ShellStatus {
 class ShellUi {
 public:
     ShellUi();
+    ~ShellUi();
 
     void Render(const ShellStatus& status);
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
@@ -66,20 +67,16 @@ private:
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void SetSnapshot(SpectrumSnapshotHandle snapshot);
     void SwitchSpectrum(int direction);
-    [[nodiscard]] std::vector<const SpectralLineMarker*> FilteredSpectralLineMarkers(bool include_disabled) const;
-    [[nodiscard]] bool IsSpectralLineEnabled(const SpectralLineMarker& marker) const;
-    void SetSpectralLineEnabled(const SpectralLineMarker& marker, bool enabled);
+    void RenderSpectralLineGroupingView(const GroupingView& view, GroupingView* editable_view);
 
     SpectrumSnapshotHandle snapshot_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
-    SpectralLineCatalog spectral_line_catalog_;
-    std::vector<std::string> spectral_line_groups_;
-    int spectral_line_group_index_ = 0;
-    bool show_public_spectral_lines_ = true;
-    bool show_spectral_line_labels_ = true;
-    std::array<char, 96> spectral_line_filter_ = {};
-    std::unordered_set<std::string> disabled_spectral_line_ids_;
+    SpectralLinesPanelController spectral_lines_panel_;
+    std::optional<std::string> renaming_grouping_view_id_;
+    std::array<char, 128> renaming_grouping_view_name_ = {};
+    std::optional<std::string> deleting_grouping_view_id_;
+    std::string deleting_grouping_view_name_;
     std::vector<SourceListEntry> sources_;
     std::optional<std::size_t> current_source_index_;
     bool layout_seeded_ = false;

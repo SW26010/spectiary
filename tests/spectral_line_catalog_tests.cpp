@@ -64,7 +64,7 @@ void TestLoadsPublicCatalog()
 {
     const std::filesystem::path path =
         std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
     Require(catalog.markers.size() >= 30, "public catalog should contain the default reference markers");
 
@@ -82,7 +82,7 @@ void TestUsesVacuumWavelengthsForAtomicMarkers()
 {
     const std::filesystem::path path =
         std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
     Require(NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6564.614, 1.0e-6), "H alpha should use vacuum wavelength");
@@ -100,7 +100,7 @@ void TestPublicCatalogDoesNotContainPrivateOverlayConcepts()
 {
     const std::filesystem::path path =
         std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
     for (const specforge::SpectralLineMarker& marker : catalog.markers) {
@@ -128,13 +128,54 @@ void TestLoadsCatalogWithoutOptionalNotesColumn()
         stream << "h_alpha\tH alpha\tline\tBalmer\t6564.614\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
     Require(catalog.load_error.empty(), catalog.load_error);
     Require(catalog.markers.size() == 1, "catalog without notes should load one marker");
     Require(catalog.markers.front().notes.empty(), "missing optional notes column should default to empty");
+}
+
+void TestGenericCatalogMayOmitGrouping()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_spectral_line_catalog_without_group.tsv";
+    {
+        std::ofstream stream(path);
+        stream << "id\tlabel\tkind\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
+                  "display_label\tsource_ref\n";
+        stream << "marker_a\tMarker A\tline\t4100.0\t\t\tA\ttest\n";
+        stream << "marker_b\tMarker B\tline\t4200.0\t\t\tB\ttest\n";
+    }
+
+    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
+
+    Require(catalog.load_error.empty(), catalog.load_error);
+    Require(catalog.markers.size() == 2, "generic ungrouped catalog should load markers");
+    Require(catalog.markers.front().group.empty(), "missing generic group column should default to empty group");
+}
+
+void TestPublicCatalogRequiresGrouping()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_public_spectral_line_catalog_empty_group.tsv";
+    {
+        std::ofstream stream(path);
+        stream << "id\tlabel\tkind\tgroup\tvacuum_angstrom\tstart_vacuum_angstrom\tend_vacuum_angstrom\t"
+                  "display_label\tsource_ref\n";
+        stream << "h_alpha\tH alpha\tline\t\t6564.614\t\t\tHa\tNIST vacuum\n";
+    }
+
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
+
+    Require(!catalog.load_error.empty(), "public catalog should reject empty groups");
+    Require(Contains(catalog.load_error, "marker group is empty"), "public group error should be explicit");
+    Require(catalog.markers.empty(), "public group failure should clear partial catalog results");
 }
 
 #ifdef _WIN32
@@ -162,7 +203,7 @@ void TestRejectsDuplicateMarkerIds()
         stream << "h_alpha\tH alpha duplicate\tline\tBalmer\t6564.614\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -183,7 +224,7 @@ void TestRejectsEmptySourceRef()
         stream << "h_alpha\tH alpha\tline\tBalmer\t6564.614\t\t\tHa\t\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -203,7 +244,7 @@ void TestRejectsNonPositiveWavelengths()
         stream << "h_alpha\tH alpha\tline\tBalmer\t0\t\t\tHa\tNIST vacuum\n";
     }
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadSpectralLineCatalogFromPath(path);
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
 
@@ -220,6 +261,8 @@ int main()
     TestUsesVacuumWavelengthsForAtomicMarkers();
     TestPublicCatalogDoesNotContainPrivateOverlayConcepts();
     TestLoadsCatalogWithoutOptionalNotesColumn();
+    TestGenericCatalogMayOmitGrouping();
+    TestPublicCatalogRequiresGrouping();
 #ifdef _WIN32
     TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers();
 #endif

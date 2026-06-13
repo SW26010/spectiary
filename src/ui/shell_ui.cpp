@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -35,6 +36,32 @@ constexpr const char* kInfoTagsWindow = "Info & Tags###SpecForgeInfoTagsV2";
 constexpr const char* kSpectralLinesWindow = "Spectral Lines###SpecForgeSpectralLinesV2";
 constexpr float kStatusBarHeight = 28.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
+constexpr const char* kMarkerReferenceDragPayload = "SpecForgeMarkerReference";
+constexpr const char* kUserGroupDragPayload = "SpecForgeUserGroup";
+constexpr const char* kRenameGroupingViewPopup = "Rename grouping view###SpecForgeRenameGroupingViewPopup";
+constexpr const char* kDeleteGroupingViewPopup = "Delete grouping view###SpecForgeDeleteGroupingViewPopup";
+
+struct MarkerReferenceDragPayload {
+    std::string view_id;
+    std::string source_group_id;
+    std::string marker_id;
+};
+
+struct UserGroupDragPayload {
+    std::string view_id;
+    std::string group_id;
+};
+
+struct UserGroupReorderLine {
+    float y = 0.0f;
+    float x_min = 0.0f;
+    float x_max = 0.0f;
+};
+
+struct UserGroupReorderGapResult {
+    UserGroupReorderLine line;
+    float min_y = 0.0f;
+};
 
 class ScopedComInitialization {
 public:
@@ -92,6 +119,162 @@ bool ContainsCaseInsensitive(std::string_view text, std::string_view pattern)
         return true;
     }
     return LowerAscii(std::string(text)).find(LowerAscii(std::string(pattern))) != std::string::npos;
+}
+
+bool HasNonWhitespace(std::string_view text)
+{
+    return std::any_of(text.begin(), text.end(), [](unsigned char character) {
+        return std::isspace(character) == 0;
+    });
+}
+
+std::string EncodeMarkerReferenceDragPayload(
+    std::string_view view_id,
+    std::string_view source_group_id,
+    std::string_view marker_id)
+{
+    std::string payload;
+    payload.reserve(view_id.size() + source_group_id.size() + marker_id.size() + 2);
+    payload.append(view_id);
+    payload.push_back('\0');
+    payload.append(source_group_id);
+    payload.push_back('\0');
+    payload.append(marker_id);
+    return payload;
+}
+
+std::optional<MarkerReferenceDragPayload> DecodeMarkerReferenceDragPayload(const ImGuiPayload& payload)
+{
+    if (payload.Data == nullptr || payload.DataSize <= 0) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = static_cast<const char*>(payload.Data);
+    const std::string_view data(bytes, static_cast<std::size_t>(payload.DataSize));
+    const std::size_t first_separator = data.find('\0');
+    if (first_separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::size_t second_separator = data.find('\0', first_separator + 1);
+    if (second_separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    MarkerReferenceDragPayload decoded;
+    decoded.view_id = std::string(data.substr(0, first_separator));
+    decoded.source_group_id =
+        std::string(data.substr(first_separator + 1, second_separator - first_separator - 1));
+    decoded.marker_id = std::string(data.substr(second_separator + 1));
+    if (decoded.view_id.empty() || decoded.source_group_id.empty() || decoded.marker_id.empty()) {
+        return std::nullopt;
+    }
+    return decoded;
+}
+
+std::string EncodeUserGroupDragPayload(std::string_view view_id, std::string_view group_id)
+{
+    std::string payload;
+    payload.reserve(view_id.size() + group_id.size() + 1);
+    payload.append(view_id);
+    payload.push_back('\0');
+    payload.append(group_id);
+    return payload;
+}
+
+std::optional<UserGroupDragPayload> DecodeUserGroupDragPayload(const ImGuiPayload& payload)
+{
+    if (payload.Data == nullptr || payload.DataSize <= 0) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = static_cast<const char*>(payload.Data);
+    const std::string_view data(bytes, static_cast<std::size_t>(payload.DataSize));
+    const std::size_t separator = data.find('\0');
+    if (separator == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    UserGroupDragPayload decoded;
+    decoded.view_id = std::string(data.substr(0, separator));
+    decoded.group_id = std::string(data.substr(separator + 1));
+    if (decoded.view_id.empty() || decoded.group_id.empty()) {
+        return std::nullopt;
+    }
+    return decoded;
+}
+
+std::optional<UserGroupDragPayload> CurrentUserGroupDragPayload()
+{
+    const ImGuiPayload* payload = ImGui::GetDragDropPayload();
+    if (payload == nullptr || !payload->IsDataType(kUserGroupDragPayload)) {
+        return std::nullopt;
+    }
+    return DecodeUserGroupDragPayload(*payload);
+}
+
+void DrawUserGroupReorderLine(float y, float x_min, float x_max)
+{
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_DragDropTarget);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddLine(ImVec2(x_min, y), ImVec2(x_max, y), color, 2.0f);
+    draw_list->AddCircleFilled(ImVec2(x_min, y), 3.0f, color);
+}
+
+std::optional<UserGroupDragPayload> AcceptUserGroupReorderPayload(std::string_view view_id, bool& accepted)
+{
+    accepted = false;
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kUserGroupDragPayload, flags)) {
+        if (std::optional<UserGroupDragPayload> drag = DecodeUserGroupDragPayload(*payload)) {
+            if (drag->view_id == view_id) {
+                accepted = true;
+                if (payload->IsDelivery()) {
+                    return drag;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+UserGroupReorderGapResult RenderUserGroupReorderGap(bool highlight)
+{
+    const float width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+    const float height = std::max(ImGui::GetStyle().ItemSpacing.y * 2.0f, 6.0f);
+    ImGui::InvisibleButton("##user_group_reorder_gap", ImVec2(width, height));
+    const ImVec2 gap_min = ImGui::GetItemRectMin();
+    const ImVec2 gap_max = ImGui::GetItemRectMax();
+
+    UserGroupReorderGapResult result;
+    result.line = UserGroupReorderLine{
+        (gap_min.y + gap_max.y) * 0.5f,
+        gap_min.x,
+        gap_max.x,
+    };
+    result.min_y = gap_min.y;
+    if (highlight) {
+        DrawUserGroupReorderLine(result.line.y, result.line.x_min, result.line.x_max);
+    }
+    return result;
+}
+
+std::optional<UserGroupDragPayload> RenderUserGroupReorderTarget(
+    std::string_view view_id,
+    const ImRect& hit_rect,
+    const UserGroupReorderLine& line,
+    ImGuiID target_id)
+{
+    std::optional<UserGroupDragPayload> delivered;
+    bool highlight = false;
+    if (ImGui::BeginDragDropTargetCustom(hit_rect, target_id)) {
+        delivered = AcceptUserGroupReorderPayload(view_id, highlight);
+        ImGui::EndDragDropTarget();
+    }
+    if (highlight) {
+        DrawUserGroupReorderLine(line.y, line.x_min, line.x_max);
+    }
+    return delivered;
 }
 
 std::string MarkerWavelengthText(const SpectralLineMarker& marker)
@@ -191,16 +374,46 @@ void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
     ImGui::PopStyleColor();
 }
 
-std::vector<std::string> SpectralLineGroups(const SpectralLineCatalog& catalog)
+bool RenderGroupVisibilityControl(GroupVisibilityState state, bool& next_visible)
 {
-    std::vector<std::string> groups;
-    groups.reserve(catalog.markers.size());
-    for (const SpectralLineMarker& marker : catalog.markers) {
-        groups.push_back(marker.group);
+    next_visible = true;
+    if (state == GroupVisibilityState::SearchFiltered || state == GroupVisibilityState::Empty) {
+        bool value = false;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("##group_visibility", &value);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip(
+                state == GroupVisibilityState::SearchFiltered
+                    ? "Search is filtering this group; bulk visibility is disabled."
+                    : "No resolved markers in this group.");
+        }
+        return false;
     }
-    std::sort(groups.begin(), groups.end());
-    groups.erase(std::unique(groups.begin(), groups.end()), groups.end());
-    return groups;
+
+    bool value = state == GroupVisibilityState::AllVisible;
+    if (state == GroupVisibilityState::Mixed) {
+        ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+    }
+    const bool changed = ImGui::Checkbox("##group_visibility", &value);
+    if (state == GroupVisibilityState::Mixed) {
+        ImGui::PopItemFlag();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show or hide all resolved markers in this group.");
+    }
+    if (changed) {
+        next_visible = state == GroupVisibilityState::Mixed ? true : value;
+    }
+    return changed;
+}
+
+void RenderSharedReferenceMarker()
+{
+    ImGui::TextDisabled("*");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Shared marker reference: this marker also appears in another group in this view.");
+    }
 }
 
 std::string_view SeverityLabel(SpectrumDiagnosticSeverity severity)
@@ -573,20 +786,25 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 }  // namespace
 
 ShellUi::ShellUi()
-    : snapshot_(MakeSmallSyntheticSpectrumSnapshot()),
-      spectral_line_catalog_(LoadDefaultSpectralLineCatalog()),
-      spectral_line_groups_(SpectralLineGroups(spectral_line_catalog_))
+    : snapshot_(MakeSmallSyntheticSpectrumSnapshot())
 {
     RefreshSystemColors();
 }
 
+ShellUi::~ShellUi()
+{
+    spectral_lines_panel_.FlushCache();
+}
+
 void ShellUi::Render(const ShellStatus& status)
 {
+    spectral_lines_panel_.SetFrameIndex(status.frame_index);
     RenderDockHost(status);
     RenderFilesPanel();
     RenderInfoTagsPanel();
     RenderMainPlot(status);
     RenderSpectralLinesPanel();
+    spectral_lines_panel_.MaybeSaveCache(status.frame_index);
 }
 
 void ShellUi::RefreshSystemColors()
@@ -704,53 +922,6 @@ void ShellUi::SwitchSpectrum(int direction)
         return;
     }
     OpenSource(snapshot_->source.path, next_index);
-}
-
-bool ShellUi::IsSpectralLineEnabled(const SpectralLineMarker& marker) const
-{
-    return disabled_spectral_line_ids_.find(marker.id) == disabled_spectral_line_ids_.end();
-}
-
-void ShellUi::SetSpectralLineEnabled(const SpectralLineMarker& marker, bool enabled)
-{
-    if (enabled) {
-        disabled_spectral_line_ids_.erase(marker.id);
-        return;
-    }
-    disabled_spectral_line_ids_.insert(marker.id);
-}
-
-std::vector<const SpectralLineMarker*> ShellUi::FilteredSpectralLineMarkers(bool include_disabled) const
-{
-    std::vector<const SpectralLineMarker*> markers;
-    if (!snapshot_ || !snapshot_->capabilities.can_show_spectral_lines || !show_public_spectral_lines_ ||
-        spectral_line_catalog_.markers.empty()) {
-        return markers;
-    }
-
-    std::string_view group_filter;
-    if (spectral_line_group_index_ > 0 &&
-        spectral_line_group_index_ <= static_cast<int>(spectral_line_groups_.size())) {
-        group_filter = spectral_line_groups_[static_cast<std::size_t>(spectral_line_group_index_ - 1)];
-    }
-
-    const std::string text_filter(spectral_line_filter_.data());
-    for (const SpectralLineMarker& marker : spectral_line_catalog_.markers) {
-        if (!group_filter.empty() && marker.group != group_filter) {
-            continue;
-        }
-        if (!text_filter.empty() && !ContainsCaseInsensitive(marker.id, text_filter) &&
-            !ContainsCaseInsensitive(marker.label, text_filter) &&
-            !ContainsCaseInsensitive(marker.group, text_filter) &&
-            !ContainsCaseInsensitive(marker.display_label, text_filter)) {
-            continue;
-        }
-        if (!include_disabled && !IsSpectralLineEnabled(marker)) {
-            continue;
-        }
-        markers.push_back(&marker);
-    }
-    return markers;
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)
@@ -1005,18 +1176,283 @@ void ShellUi::RenderInfoTagsPanel()
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
     ImGui::Begin(kMainPlotWindow);
-    const std::vector<const SpectralLineMarker*> spectral_lines = FilteredSpectralLineMarkers(false);
+    const std::vector<const SpectralLineMarker*> spectral_lines =
+        spectral_lines_panel_.FilteredMarkers(snapshot_, false);
     RenderSpectrumPlot(
         snapshot_,
         plot_state_,
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         plot_style_,
-        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), show_spectral_line_labels_});
+        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()});
     ImGui::End();
+}
+
+void ShellUi::RenderSpectralLineGroupingView(const GroupingView& view, GroupingView* editable_view)
+{
+    const bool editable = editable_view != nullptr && !editable_view->read_only;
+    const SpectralLineCatalog& catalog = spectral_lines_panel_.catalog();
+    const CatalogIdentity& identity = spectral_lines_panel_.catalog_identity();
+    CatalogUserState& user_state = spectral_lines_panel_.user_state();
+    CatalogPanelState& panel_state = spectral_lines_panel_.panel_state();
+    const std::string search(spectral_lines_panel_.filter_buffer().data());
+    const bool search_active = !search.empty();
+
+    if (editable) {
+        if (ImGui::Button("+ Group")) {
+            spectral_lines_panel_.AddUserGroupToView(*editable_view);
+        }
+        ImGui::SameLine();
+    }
+
+    const std::vector<const SpectralLineMarker*> visible_markers =
+        spectral_lines_panel_.FilteredMarkers(snapshot_, false);
+    const std::string marker_count = std::to_string(visible_markers.size()) + " plot-visible / " +
+                                     std::to_string(catalog.markers.size()) + " catalog markers";
+    RenderDisabledText(marker_count);
+
+    const std::unordered_map<std::string, int> shared_counts = MarkerReferenceCounts(view, identity);
+    const std::optional<UserGroupDragPayload> active_user_group_drag =
+        editable ? CurrentUserGroupDragPayload() : std::nullopt;
+    const bool group_reorder_drag_active =
+        editable && active_user_group_drag && active_user_group_drag->view_id == editable_view->id;
+
+    if (view.groups.empty()) {
+        ImGui::TextDisabled("No groups in this view.");
+        return;
+    }
+
+    std::optional<UserGroupReorderGapResult> current_reorder_gap;
+    std::optional<float> previous_group_midpoint_y;
+    const auto render_reorder_gap = [&](const UserGroup& target_group) {
+        if (!group_reorder_drag_active) {
+            current_reorder_gap = std::nullopt;
+            return;
+        }
+        ImGui::PushID("group_reorder_gap");
+        ImGui::PushID(target_group.id.c_str());
+        current_reorder_gap = RenderUserGroupReorderGap(false);
+        ImGui::PopID();
+        ImGui::PopID();
+    };
+
+    for (std::size_t group_index = 0; group_index < view.groups.size(); ++group_index) {
+        const UserGroup& group = view.groups[group_index];
+
+        render_reorder_gap(group);
+
+        std::vector<const MarkerReference*> matching_references;
+        matching_references.reserve(group.marker_references.size());
+        for (const MarkerReference& reference : group.marker_references) {
+            if (MarkerMatchesSearch(catalog, identity, reference, search)) {
+                matching_references.push_back(&reference);
+            }
+        }
+        const bool group_has_search_matches = !matching_references.empty();
+        const bool group_dimmed_by_search = search_active && !group_has_search_matches;
+
+        ImGui::PushID(group.id.c_str());
+        ImGui::AlignTextToFramePadding();
+        bool next_group_visible = true;
+        if (RenderGroupVisibilityControl(
+                VisibilityStateForGroup(user_state, group, catalog, identity, search_active),
+                next_group_visible)) {
+            spectral_lines_panel_.SetGroupVisibility(group, next_group_visible, search_active);
+        }
+
+        ImGui::SameLine();
+        ImGuiTreeNodeFlags group_flags = ImGuiTreeNodeFlags_SpanFullWidth;
+        if (group_reorder_drag_active) {
+            group_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        }
+        const std::string expansion_key = GroupExpansionKey(view.id, group.id);
+        const bool group_was_expanded = panel_state.expanded_group_ids.find(expansion_key) !=
+                                        panel_state.expanded_group_ids.end();
+        if (group_reorder_drag_active) {
+            ImGui::SetNextItemOpen(false, ImGuiCond_Always);
+        } else if (search_active && group_has_search_matches) {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextItemOpen(group_was_expanded, ImGuiCond_Always);
+        }
+        if (group_dimmed_by_search) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        }
+        if (group_reorder_drag_active) {
+            const ImVec4 transparent(0.0f, 0.0f, 0.0f, 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, transparent);
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, transparent);
+        }
+        const bool group_open = ImGui::TreeNodeEx(
+            "group",
+            group_flags,
+            "%s (%zu)",
+            group.name.c_str(),
+            matching_references.size());
+        const ImVec2 group_item_min = ImGui::GetItemRectMin();
+        const ImVec2 group_item_max = ImGui::GetItemRectMax();
+        if (group_reorder_drag_active) {
+            ImGui::PopStyleColor(2);
+        }
+        if (group_dimmed_by_search) {
+            ImGui::PopStyleColor();
+        }
+        if (!group_reorder_drag_active && ImGui::IsItemToggledOpen()) {
+            spectral_lines_panel_.SetGroupExpanded(view.id, group.id, group_open);
+        }
+        const bool group_contents_open = !group_reorder_drag_active && group_open;
+        const float group_midpoint_y = (group_item_min.y + group_item_max.y) * 0.5f;
+
+        if (group_reorder_drag_active && current_reorder_gap) {
+            const float target_min_y = previous_group_midpoint_y.value_or(current_reorder_gap->min_y);
+            const ImRect target_rect(
+                ImVec2(current_reorder_gap->line.x_min, target_min_y),
+                ImVec2(current_reorder_gap->line.x_max, group_midpoint_y));
+            if (std::optional<UserGroupDragPayload> drop = RenderUserGroupReorderTarget(
+                    editable_view->id,
+                    target_rect,
+                    current_reorder_gap->line,
+                    ImGui::GetID("user_group_reorder_target"))) {
+                spectral_lines_panel_.ReorderUserGroupBeforeInView(
+                    *editable_view,
+                    drop->group_id,
+                    group.id);
+            }
+        }
+
+        const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
+        if (editable && ordinary_group && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            const std::string drag_payload = EncodeUserGroupDragPayload(editable_view->id, group.id);
+            ImGui::SetDragDropPayload(
+                kUserGroupDragPayload,
+                drag_payload.data(),
+                static_cast<int>(drag_payload.size()));
+            ImGui::TextUnformatted(group.name.c_str());
+            ImGui::TextDisabled("Drop between groups to reorder");
+            ImGui::EndDragDropSource();
+        }
+
+        if (editable && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
+                if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
+                    if (drag->view_id == editable_view->id) {
+                        const bool copy = ImGui::GetIO().KeyCtrl;
+                        spectral_lines_panel_.MoveOrCopyMarkerReferenceToGroup(
+                            *editable_view,
+                            drag->marker_id,
+                            drag->source_group_id,
+                            group.id,
+                            copy);
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        previous_group_midpoint_y = group_midpoint_y;
+
+        if (group_contents_open) {
+            for (const MarkerReference* reference : matching_references) {
+                if (reference == nullptr) {
+                    continue;
+                }
+
+                const SpectralLineMarker* marker = FindCatalogMarker(catalog, identity, *reference);
+                const bool resolved = marker != nullptr;
+                const bool marker_visible = resolved && IsMarkerVisible(user_state, reference->marker_id);
+                const std::string label = resolved ? marker->label : reference->marker_id;
+
+                ImGui::PushID(reference->marker_id.c_str());
+
+                ImGui::AlignTextToFramePadding();
+                bool checkbox_value = marker_visible;
+                if (!resolved) {
+                    ImGui::BeginDisabled();
+                }
+                if (ImGui::Checkbox("##marker_visibility", &checkbox_value) && resolved) {
+                    spectral_lines_panel_.SetMarkerEnabled(*marker, checkbox_value);
+                }
+                if (!resolved) {
+                    ImGui::EndDisabled();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip(resolved ? "Show on plot" : "Unresolved marker references are not plotted.");
+                }
+
+                ImGui::SameLine();
+                ImGuiTreeNodeFlags marker_flags =
+                    ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet |
+                    ImGuiTreeNodeFlags_SpanFullWidth;
+                const std::string marker_suffix = resolved ? MarkerWavelengthText(*marker) : "unresolved";
+                if (!resolved || !marker_visible) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                }
+                ImGui::TreeNodeEx("marker", marker_flags, "%s  %s", label.c_str(), marker_suffix.c_str());
+                if (!resolved || !marker_visible) {
+                    ImGui::PopStyleColor();
+                }
+                if (ImGui::IsItemHovered()) {
+                    if (resolved && !marker->notes.empty()) {
+                        ImGui::SetTooltip("%s\n%s", marker_suffix.c_str(), marker->notes.c_str());
+                    } else {
+                        ImGui::SetTooltip("%s", marker_suffix.c_str());
+                    }
+                }
+                if (editable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    const std::string drag_payload =
+                        EncodeMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id);
+                    ImGui::SetDragDropPayload(
+                        kMarkerReferenceDragPayload,
+                        drag_payload.data(),
+                        static_cast<int>(drag_payload.size()));
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::TextDisabled("Drop: move, Ctrl+drop: copy");
+                    ImGui::EndDragDropSource();
+                }
+                if (editable && ImGui::BeginPopupContextItem("marker_context")) {
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::Separator();
+                    if (ImGui::BeginMenu("Copy to group")) {
+                        bool has_target = false;
+                        for (const UserGroup& target_group : editable_view->groups) {
+                            if (target_group.id == group.id) {
+                                continue;
+                            }
+                            has_target = true;
+                            if (ImGui::Selectable(target_group.name.c_str())) {
+                                spectral_lines_panel_.CopyMarkerReferenceToGroup(
+                                    *editable_view,
+                                    reference->marker_id,
+                                    target_group.id);
+                            }
+                        }
+                        if (!has_target) {
+                            ImGui::TextDisabled("No other groups");
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (IsSharedMarkerReference(shared_counts, *reference)) {
+                    ImGui::SameLine();
+                    RenderSharedReferenceMarker();
+                }
+
+                ImGui::PopID();
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
 }
 
 void ShellUi::RenderSpectralLinesPanel()
 {
+    const SpectralLineCatalog& catalog = spectral_lines_panel_.catalog();
+    const CatalogIdentity& identity = spectral_lines_panel_.catalog_identity();
+    const std::optional<GroupingView>& catalog_grouping_view = spectral_lines_panel_.catalog_grouping_view();
+    CatalogUserState& user_state = spectral_lines_panel_.user_state();
+    std::array<char, 96>& filter = spectral_lines_panel_.filter_buffer();
+
     ImGui::Begin(kSpectralLinesWindow);
     ImGui::TextUnformatted("Spectral Lines");
     ImGui::Separator();
@@ -1030,113 +1466,185 @@ void ShellUi::RenderSpectralLinesPanel()
             "Wavelength frame is unknown; rest-frame overlays are reference-only.");
     }
 
-    ImGui::Checkbox("Public catalog", &show_public_spectral_lines_);
-    ImGui::SameLine();
-    ImGui::Checkbox("Labels", &show_spectral_line_labels_);
-
-    ImGui::Spacing();
-    if (!spectral_line_catalog_.load_error.empty()) {
-        const std::string error = "Catalog load failed: " + spectral_line_catalog_.load_error;
-        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
-    } else if (spectral_line_catalog_.markers.empty()) {
-        ImGui::TextDisabled("No public catalog markers loaded.");
-    }
-
-    if (spectral_line_group_index_ < 0 ||
-        spectral_line_group_index_ > static_cast<int>(spectral_line_groups_.size())) {
-        spectral_line_group_index_ = 0;
-    }
-    const char* selected_group =
-        spectral_line_group_index_ == 0
-            ? "All groups"
-            : spectral_line_groups_[static_cast<std::size_t>(spectral_line_group_index_ - 1)].c_str();
-    if (ImGui::BeginCombo("Group", selected_group)) {
-        if (ImGui::Selectable("All groups", spectral_line_group_index_ == 0)) {
-            spectral_line_group_index_ = 0;
-        }
-        for (std::size_t index = 0; index < spectral_line_groups_.size(); ++index) {
-            const int item_index = static_cast<int>(index + 1);
-            if (ImGui::Selectable(spectral_line_groups_[index].c_str(), spectral_line_group_index_ == item_index)) {
-                spectral_line_group_index_ = item_index;
-            }
-        }
+    const char* selected_catalog = identity.display_name.c_str();
+    if (ImGui::BeginCombo("Catalog", selected_catalog)) {
+        ImGui::Selectable(selected_catalog, true);
         ImGui::EndCombo();
     }
-    ImGui::InputTextWithHint(
-        "Filter",
-        "id, label, group, or plot label",
-        spectral_line_filter_.data(),
-        spectral_line_filter_.size());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", identity.id.c_str());
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Labels", &spectral_lines_panel_.show_labels());
 
     ImGui::Spacing();
-    const std::vector<const SpectralLineMarker*> markers = FilteredSpectralLineMarkers(true);
-    const std::size_t shown_marker_count =
-        static_cast<std::size_t>(std::count_if(markers.begin(), markers.end(), [this](const auto* marker) {
-            return marker != nullptr && IsSpectralLineEnabled(*marker);
-        }));
-    const std::string marker_count = std::to_string(shown_marker_count) + " shown / " +
-                                     std::to_string(markers.size()) + " listed / " +
-                                     std::to_string(spectral_line_catalog_.markers.size()) + " public markers";
-    RenderDisabledText(marker_count);
-    if (ImGui::BeginTable(
-            "spectral_lines_table",
-            5,
-            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
-                ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Show", ImGuiTableColumnFlags_WidthFixed, 44.0f);
-        ImGui::TableSetupColumn("Line");
-        ImGui::TableSetupColumn("Vacuum Angstrom");
-        ImGui::TableSetupColumn("Group");
-        ImGui::TableSetupColumn("Kind");
-        ImGui::TableHeadersRow();
+    if (!catalog.load_error.empty()) {
+        const std::string error = "Catalog load failed: " + catalog.load_error;
+        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
+    } else if (catalog.markers.empty()) {
+        ImGui::TextDisabled("No public catalog markers loaded.");
+    }
+    if (!spectral_lines_panel_.warning().empty()) {
+        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), spectral_lines_panel_.warning());
+    }
 
-        for (const SpectralLineMarker* marker : markers) {
-            if (marker == nullptr) {
-                continue;
-            }
-            const bool marker_enabled = IsSpectralLineEnabled(*marker);
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            ImGui::PushID(marker->id.c_str());
-            bool checkbox_value = marker_enabled;
-            if (ImGui::Checkbox("##show", &checkbox_value)) {
-                SetSpectralLineEnabled(*marker, checkbox_value);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Show on plot");
-            }
-            ImGui::PopID();
+    ImGui::InputTextWithHint(
+        "Search",
+        "id, label, catalog group, or plot label",
+        filter.data(),
+        filter.size());
 
-            ImGui::TableSetColumnIndex(1);
-            if (marker_enabled) {
-                ImGui::TextUnformatted(marker->label.c_str());
-            } else {
-                ImGui::TextDisabled("%s", marker->label.c_str());
-            }
-            if (!marker->notes.empty() && ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", marker->notes.c_str());
-            }
+    ImGui::Spacing();
+    spectral_lines_panel_.NormalizeViewSelection();
 
-            ImGui::TableSetColumnIndex(2);
-            const std::string wavelength = MarkerWavelengthText(*marker);
-            if (marker_enabled) {
-                ImGui::TextUnformatted(wavelength.c_str());
-            } else {
-                ImGui::TextDisabled("%s", wavelength.c_str());
-            }
+    std::optional<GroupingView> pending_duplicate;
+    std::optional<GroupingView> pending_rename;
+    std::optional<GroupingView> pending_delete;
+    const auto create_new_view = [this]() {
+        spectral_lines_panel_.CreateUserGroupingView();
+    };
 
-            ImGui::TableSetColumnIndex(3);
-            if (marker_enabled) {
-                ImGui::TextUnformatted(marker->group.c_str());
-            } else {
-                ImGui::TextDisabled("%s", marker->group.c_str());
+    if (ImGui::BeginTabBar("spectral_line_grouping_views", ImGuiTabBarFlags_Reorderable)) {
+        if (catalog_grouping_view) {
+            const bool selected = user_state.active_view_id == catalog_grouping_view->id;
+            const ImGuiTabItemFlags flags = spectral_lines_panel_.ShouldSelectTab(catalog_grouping_view->id)
+                                                 ? ImGuiTabItemFlags_SetSelected
+                                                 : ImGuiTabItemFlags_None;
+            if (ImGui::BeginTabItem(catalog_grouping_view->name.c_str(), nullptr, flags)) {
+                if (!selected) {
+                    spectral_lines_panel_.SetActiveView(catalog_grouping_view->id);
+                }
+                spectral_lines_panel_.AcknowledgeTabSelection(catalog_grouping_view->id);
+                if (ImGui::BeginPopupContextItem("catalog_grouping_view_context")) {
+                    if (ImGui::Selectable("Duplicate as user view")) {
+                        pending_duplicate = *catalog_grouping_view;
+                    }
+                    ImGui::EndPopup();
+                }
+                RenderSpectralLineGroupingView(*catalog_grouping_view, nullptr);
+                ImGui::EndTabItem();
             }
-
-            ImGui::TableSetColumnIndex(4);
-            ImGui::TextDisabled("%s", SpectralLineMarkerKindLabel(marker->kind));
         }
 
-        ImGui::EndTable();
+        for (std::size_t index = 0; index < user_state.grouping_views.size(); ++index) {
+            GroupingView& user_view = user_state.grouping_views[index];
+            const bool selected = user_state.active_view_id == user_view.id;
+            const ImGuiTabItemFlags flags = spectral_lines_panel_.ShouldSelectTab(user_view.id)
+                                                 ? ImGuiTabItemFlags_SetSelected
+                                                 : ImGuiTabItemFlags_None;
+            if (ImGui::BeginTabItem(user_view.name.c_str(), nullptr, flags)) {
+                if (!selected) {
+                    spectral_lines_panel_.SetActiveView(user_view.id);
+                }
+                spectral_lines_panel_.AcknowledgeTabSelection(user_view.id);
+                GroupingView effective_view = EffectiveUserGroupingView(user_view, catalog, identity);
+                if (ImGui::BeginPopupContextItem("user_grouping_view_context")) {
+                    if (ImGui::Selectable("Duplicate")) {
+                        pending_duplicate = effective_view;
+                    }
+                    if (ImGui::Selectable("Rename")) {
+                        pending_rename = user_view;
+                    }
+                    if (ImGui::Selectable("Delete")) {
+                        pending_delete = user_view;
+                    }
+                    ImGui::EndPopup();
+                }
+                RenderSpectralLineGroupingView(effective_view, &user_view);
+                ImGui::EndTabItem();
+            }
+        }
+
+        if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+            create_new_view();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("New user grouping view");
+        }
+        ImGui::EndTabBar();
+    }
+
+    if (pending_duplicate) {
+        spectral_lines_panel_.DuplicateUserGroupingView(*pending_duplicate);
+    }
+    if (pending_rename) {
+        renaming_grouping_view_id_ = pending_rename->id;
+        std::snprintf(
+            renaming_grouping_view_name_.data(),
+            renaming_grouping_view_name_.size(),
+            "%s",
+            pending_rename->name.c_str());
+        ImGui::OpenPopup(kRenameGroupingViewPopup);
+    }
+    if (pending_delete) {
+        deleting_grouping_view_id_ = pending_delete->id;
+        deleting_grouping_view_name_ = pending_delete->name;
+        ImGui::OpenPopup(kDeleteGroupingViewPopup);
+    }
+
+    if (ImGui::BeginPopupModal(kRenameGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted = ImGui::InputText(
+            "Name",
+            renaming_grouping_view_name_.data(),
+            renaming_grouping_view_name_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid_name = HasNonWhitespace(renaming_grouping_view_name_.data());
+        const auto finish_rename = [this]() {
+            if (renaming_grouping_view_id_) {
+                spectral_lines_panel_.RenameUserGroupingView(
+                    *renaming_grouping_view_id_,
+                    renaming_grouping_view_name_.data());
+            }
+            renaming_grouping_view_id_.reset();
+            renaming_grouping_view_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        };
+        if (!valid_name) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Rename") || (submitted && valid_name)) {
+            finish_rename();
+        }
+        if (!valid_name) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            renaming_grouping_view_id_.reset();
+            renaming_grouping_view_name_.fill('\0');
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopupModal(kDeleteGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Delete grouping view \"%s\"?", deleting_grouping_view_name_.c_str());
+        ImGui::TextDisabled("Catalog markers and marker visibility are not deleted.");
+        if (ImGui::Button("Delete")) {
+            if (deleting_grouping_view_id_) {
+                spectral_lines_panel_.DeleteUserGroupingView(*deleting_grouping_view_id_);
+            }
+            deleting_grouping_view_id_.reset();
+            deleting_grouping_view_name_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            deleting_grouping_view_id_.reset();
+            deleting_grouping_view_name_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (!catalog_grouping_view && user_state.grouping_views.empty()) {
+        ImGui::TextDisabled("This catalog has no catalog grouping view.");
+        if (ImGui::Button("+ New grouping view")) {
+            create_new_view();
+        }
     }
 
     ImGui::End();

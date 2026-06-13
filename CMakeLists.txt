@@ -60,6 +60,9 @@ add_executable(specforge_native WIN32
     src/main.cpp
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
+    src/overlays/spectral_line_user_state_cache_io.cpp
+    src/overlays/spectral_line_user_state.cpp
+    src/overlays/spectral_line_user_state.h
     src/platform/win32_window.cpp
     src/platform/win32_window.h
     ${SPECFORGE_MANIFEST}
@@ -71,6 +74,8 @@ add_executable(specforge_native WIN32
     src/renderer/d3d11_renderer.h
     src/ui/shell_ui.cpp
     src/ui/shell_ui.h
+    src/ui/spectral_lines_panel_controller.cpp
+    src/ui/spectral_lines_panel_controller.h
 )
 
 target_include_directories(specforge_native PRIVATE src)
@@ -164,3 +169,22 @@ else()
 endif()
 
 add_test(NAME specforge_spectral_line_catalog_tests COMMAND specforge_spectral_line_catalog_tests)
+
+add_executable(specforge_spectral_line_user_state_tests
+    tests/spectral_line_user_state_tests.cpp
+    src/overlays/spectral_line_catalog.cpp
+    src/overlays/spectral_line_catalog.h
+    src/overlays/spectral_line_user_state_cache_io.cpp
+    src/overlays/spectral_line_user_state.cpp
+    src/overlays/spectral_line_user_state.h
+)
+
+target_include_directories(specforge_spectral_line_user_state_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_spectral_line_user_state_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_spectral_line_user_state_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_spectral_line_user_state_tests COMMAND specforge_spectral_line_user_state_tests)

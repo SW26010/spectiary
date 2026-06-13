@@ -111,7 +111,7 @@ bool IsPositiveFinite(double value)
     return std::isfinite(value) && value > 0.0;
 }
 
-bool ValidateMarker(const SpectralLineMarker& marker, std::string& error)
+bool ValidateMarker(const SpectralLineMarker& marker, bool require_group, std::string& error)
 {
     if (marker.id.empty()) {
         error = "marker id is empty";
@@ -121,7 +121,7 @@ bool ValidateMarker(const SpectralLineMarker& marker, std::string& error)
         error = "marker label is empty for " + marker.id;
         return false;
     }
-    if (marker.group.empty()) {
+    if (require_group && marker.group.empty()) {
         error = "marker group is empty for " + marker.id;
         return false;
     }
@@ -204,7 +204,10 @@ std::vector<std::filesystem::path> DefaultCatalogCandidates()
     return candidates;
 }
 
-SpectralLineCatalog LoadSpectralLineCatalogFromStream(std::istream& stream, std::filesystem::path path)
+SpectralLineCatalog LoadSpectralLineCatalogFromStream(
+    std::istream& stream,
+    std::filesystem::path path,
+    bool require_group)
 {
     SpectralLineCatalog catalog;
     catalog.path = std::move(path);
@@ -235,7 +238,7 @@ SpectralLineCatalog LoadSpectralLineCatalogFromStream(std::istream& stream, std:
         marker.id = RequiredField(fields, columns, "id", error);
         marker.label = RequiredField(fields, columns, "label", error);
         const std::string kind = RequiredField(fields, columns, "kind", error);
-        marker.group = RequiredField(fields, columns, "group", error);
+        marker.group = require_group ? RequiredField(fields, columns, "group", error) : OptionalField(fields, columns, "group");
         marker.vacuum_angstrom =
             ParseOptionalDouble(RequiredField(fields, columns, "vacuum_angstrom", error), error);
         marker.start_vacuum_angstrom =
@@ -262,7 +265,7 @@ SpectralLineCatalog LoadSpectralLineCatalogFromStream(std::istream& stream, std:
             return catalog;
         }
 
-        if (!ValidateMarker(marker, error)) {
+        if (!ValidateMarker(marker, require_group, error)) {
             catalog.load_error = "line " + std::to_string(line_number) + ": " + error;
             catalog.markers.clear();
             return catalog;
@@ -324,7 +327,20 @@ SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path&
         return catalog;
     }
 
-    return LoadSpectralLineCatalogFromStream(stream, path);
+    return LoadSpectralLineCatalogFromStream(stream, path, false);
+}
+
+SpectralLineCatalog LoadPublicSpectralLineCatalogFromPath(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    if (!stream.good()) {
+        SpectralLineCatalog catalog;
+        catalog.path = path;
+        catalog.load_error = "could not open spectral line catalog: " + path.string();
+        return catalog;
+    }
+
+    return LoadSpectralLineCatalogFromStream(stream, path, true);
 }
 
 SpectralLineCatalog LoadDefaultSpectralLineCatalog()
@@ -332,13 +348,13 @@ SpectralLineCatalog LoadDefaultSpectralLineCatalog()
     for (const std::filesystem::path& candidate : DefaultCatalogCandidates()) {
         std::error_code error;
         if (std::filesystem::exists(candidate, error)) {
-            return LoadSpectralLineCatalogFromPath(candidate);
+            return LoadPublicSpectralLineCatalogFromPath(candidate);
         }
     }
 
 #ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
     std::istringstream stream(kEmbeddedPublicSpectralLineCatalog);
-    return LoadSpectralLineCatalogFromStream(stream, std::filesystem::path(kDefaultCatalogPath));
+    return LoadSpectralLineCatalogFromStream(stream, std::filesystem::path(kDefaultCatalogPath), true);
 #else
     SpectralLineCatalog catalog;
     catalog.load_error = "could not find default spectral line catalog: config/spectral_lines.public.tsv";
