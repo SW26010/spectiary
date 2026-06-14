@@ -326,7 +326,12 @@ float ActionIconButtonWidth()
     return ImGui::GetFrameHeight() * 0.5f;
 }
 
-bool HiddenActionIconButton(const char* id, const ImRect& hit_rect, ActionIcon icon, const char* tooltip)
+bool HiddenActionIconButton(
+    const char* id,
+    const ImRect& hit_rect,
+    ActionIcon icon,
+    const char* tooltip,
+    bool reveal_icon)
 {
     const float height = ImGui::GetFrameHeight();
     const float width = std::max(1.0f, hit_rect.GetWidth());
@@ -345,21 +350,21 @@ bool HiddenActionIconButton(const char* id, const ImRect& hit_rect, ActionIcon i
         draw_list->AddRectFilled(min, max, background, 3.0f);
     }
 
-    const bool reveal_icon = hovered || active;
-    const ImU32 icon_color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const bool draw_icon = reveal_icon || hovered || active;
+    const ImU32 icon_color = ImGui::GetColorU32(ImGuiCol_Text);
     const float icon_width = std::min(ActionIconButtonWidth(), width);
     const float icon_left = min.x + std::max(0.0f, (width - icon_width) * 0.5f);
     const float icon_top = min.y + std::max(0.0f, (max.y - min.y - height) * 0.5f);
     const float stroke = 1.35f;
 
-    if (reveal_icon && icon == ActionIcon::Minus) {
+    if (draw_icon && icon == ActionIcon::Minus) {
         const float y = icon_top + height * 0.5f;
         draw_list->AddLine(
             ImVec2(icon_left + icon_width * 0.18f, y),
             ImVec2(icon_left + icon_width * 0.82f, y),
             icon_color,
             stroke);
-    } else if (reveal_icon && icon == ActionIcon::Trash) {
+    } else if (draw_icon && icon == ActionIcon::Trash) {
         const float left = icon_left + icon_width * 0.14f;
         const float right = icon_left + icon_width * 0.86f;
         const float handle_left = icon_left + icon_width * 0.38f;
@@ -529,6 +534,7 @@ void SpectralLinesGroupingViewUi::Render(
             matching_references.size());
         const ImVec2 group_item_min = ImGui::GetItemRectMin();
         const ImVec2 group_item_max = ImGui::GetItemRectMax();
+        const bool group_row_hovered = ImGui::IsItemHovered();
         if (group_reorder_drag_active) {
             ImGui::PopStyleColor(2);
         }
@@ -628,7 +634,8 @@ void SpectralLinesGroupingViewUi::Render(
                 "delete_group",
                 delete_rect,
                 ActionIcon::Trash,
-                "Disband group") &&
+                "Disband group",
+                group_row_hovered) &&
                             panel.DeleteUserGroupFromView(*editable_view, group.id);
             ImGui::SetCursorScreenPos(saved_cursor);
         }
@@ -686,6 +693,7 @@ void SpectralLinesGroupingViewUi::Render(
                 ImGui::TreeNodeEx("marker", marker_flags, "%s  %s", label.c_str(), marker_suffix.c_str());
                 const ImVec2 marker_item_min = ImGui::GetItemRectMin();
                 const ImVec2 marker_item_max = ImGui::GetItemRectMax();
+                const bool marker_row_hovered = ImGui::IsItemHovered();
                 if (!resolved || !marker_visible) {
                     ImGui::PopStyleColor();
                 }
@@ -745,7 +753,8 @@ void SpectralLinesGroupingViewUi::Render(
                         "remove_reference",
                         remove_rect,
                         ActionIcon::Minus,
-                        "Remove from this group") &&
+                        "Remove from this group",
+                        marker_row_hovered) &&
                                         panel.RemoveMarkerReferenceFromGroup(
                                             *editable_view,
                                             reference->marker_id,
