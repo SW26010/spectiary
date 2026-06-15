@@ -24,6 +24,89 @@ The user's saved organization and marker visibility for one catalog identity. It
 does not include the catalog's marker definitions.
 _Avoid_: Catalog content, app layout
 
+**Source collection**:
+A loaded set of one or more spectrum samples that share one source identity and
+one sample ordering.
+_Avoid_: Single plotted spectrum, label file, spectral-line catalog
+
+**Source collection session**:
+The user's active working context for one source collection. It owns sample
+navigation state and loaded sample annotation results for that collection, while
+the plot snapshot remains the current spectrum display view.
+_Avoid_: Plot snapshot, labeling task, file parser
+
+**Sample label**:
+A classification assigned to one spectrum sample within a source collection. It
+is separate from spectral-line marker labels and does not define spectral
+reference data.
+_Avoid_: Spectral-line label, marker label, metadata tag
+
+**Sample annotation value**:
+A stored per-sample value associated with one spectrum sample. It may be a
+classification code, string, or continuous value.
+_Avoid_: Spectrum flux, sample name, row index
+
+**Sample annotation result**:
+The collection of sample annotation values associated with spectrum samples in a
+source collection. It is the general per-sample result shape; a sample label
+result is the classification-specific form.
+_Avoid_: Label set, UI preferences, spectral-line catalog
+
+**Sample label value**:
+The stored value that represents a sample label for one spectrum sample. It may
+already be human-readable or may need a mapping before display.
+_Avoid_: Marker label, display tag, spectrum name
+
+**Sample label mapping**:
+An optional interpretation from stored sample label values to user-facing sample
+labels.
+_Avoid_: Required class list, spectral-line mapping, parser rule
+
+**Sample label set**:
+The explicit set of sample labels available within one sample labeling task.
+_Avoid_: Existing label values, metadata tags, grouping view
+
+**Sample labeling task**:
+A distinct classification objective for a source collection, with its own sample
+label set and sample label result.
+_Avoid_: Only label file, global classification, spectral-line grouping
+
+**Sample navigation**:
+The user-facing control of the current spectrum sample within a source
+collection, including movement, ordering, and locating a sample.
+_Avoid_: Labeling window, label set, plot pan
+
+**Sample filtering**:
+The user-facing selection of a subset of spectrum samples from a source
+collection.
+_Avoid_: Sample navigation, labeling task, plot zoom
+
+**Sample annotation view**:
+The user-facing display of loaded sample annotation results for the current
+spectrum sample.
+_Avoid_: Labeling task editor, sample navigation, source metadata
+
+**Sample name**:
+An optional source-provided name for one spectrum sample. It is separate from row
+index and may be absent.
+_Avoid_: Row index, fallback sample display name, file path
+
+**Fallback sample display name**:
+A UI-only display string generated when a spectrum sample has no source-provided
+sample name. It may help identify the current row, but it is not a sample name
+and does not participate in sample-name location.
+_Avoid_: Sample name, source identity, relink key
+
+**Sample label result**:
+A classification-specific sample annotation result whose values are sample label
+values for one sample labeling task.
+_Avoid_: Label set, UI preferences, generic annotation result, continuous annotation
+
+**Sample labeling draft**:
+An in-progress sample label result saved for recovery before the user writes or
+exports the intended labeling output.
+_Avoid_: Final label output, label set, source data
+
 **Spectral-line marker**:
 A single reference line or band from a catalog that can be displayed on the plot.
 _Avoid_: User group item, classification rule

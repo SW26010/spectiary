@@ -160,6 +160,24 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 - overlay 开启后主图仍保持可读和可操作。
 - profile 能归因 overlay update。
 
+### Milestone 5: Sample Annotation And Labeling
+
+目标：样本标注是下一阶段的核心产品能力，但必须按 sample navigation、read-only sample annotation inspection、editable sample labeling、sample filtering 的顺序推进，避免一次性把完整标注系统压进当前查看器主线。
+
+范围：
+
+- 建立 sample navigation 的独立 surface，支持 row index 和 sample name 定位。
+- 自动加载同前缀 `*_y.npy` 作为只读 sample annotation result。
+- 在当前样本上显示已加载 annotation value 或映射后的 sample label。
+- 保持 manual labeling、sample filtering、外部输出 autosave 和 relink 为后续子阶段。
+
+验收：
+
+- annotation 数据必须与 source collection 的 spectrum count 严格匹配，不匹配时不附着到当前 source。
+- 只读 annotation 显示不改变原始数据，也不隐式创建 editable sample labeling task。
+- sample navigation 与主图切换保持一致，且不把 labeling window 作为当前样本索引的所有者。
+- 第一条竖切片完成后，再根据真实工作流验证决定进入可编辑 labeling。
+
 ## 非目标
 
 - 当前阶段不做 catalog 管理、旧项目兼容层或泛化多后端框架。

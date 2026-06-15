@@ -72,6 +72,7 @@ np.load(path, mmap_mode="r", allow_pickle=False)
 这些辅助数组不要当作主光谱打开：
 
 - `*_y.npy`
+- `*_name.npy`
 - `*_label.npy`
 - `*_index.npy`
 - `*_ormask.npy`

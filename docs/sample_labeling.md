@@ -1,0 +1,485 @@
+# Sample Labeling
+
+This document describes sample-label inspection, manual labeling, and local
+recovery boundaries. It is separate from spectral-line marker labels and from
+spectral-line catalog user state.
+
+## Language
+
+Use the terms from `CONTEXT.md`:
+
+- `Sample label`: a classification assigned to one spectrum sample.
+- `Sample annotation value`: a stored per-sample value.
+- `Sample annotation result`: stored per-sample values for a source collection;
+  the general per-sample result shape.
+- `Sample label value`: the stored value for one sample label.
+- `Sample label mapping`: optional interpretation from stored values to
+  user-facing labels.
+- `Sample label set`: the explicit labels available for manual labeling.
+- `Sample labeling task`: a distinct classification objective for a source
+  collection.
+- `Sample label result`: the classification-specific form of a sample annotation
+  result for one sample labeling task.
+- `Sample labeling draft`: an in-progress label result saved for recovery.
+
+## Staged Rollout
+
+Sample annotation and labeling is the next core product direction for SpecForge,
+but it should advance in this order:
+
+1. Sample navigation.
+2. Read-only sample annotation inspection.
+3. Editable sample labeling.
+4. Sample filtering.
+
+The first vertical slice is sample navigation plus read-only annotation
+inspection. It includes navigating samples by row index or sample name,
+automatically loading same-prefix `*_y.npy` annotation results for NPY source
+collections, and displaying the current sample's annotation values.
+
+Editable manual labeling, external label-output autosave, draft recovery, source
+relink behavior, and sample filtering belong to later sub-stages after the
+navigation and read-only annotation contracts are proven in real workflow use.
+
+## Existing Labels
+
+Existing per-sample annotation values may be loaded from companion data for the
+active source collection. Integer annotation values may be interpreted as sample
+label values through a sample label mapping when the user associates them with a
+sample labeling task. String and floating-point annotation values may be shown
+directly as read-only annotation results.
+
+When existing integer annotation values are present but no mapping is available,
+SpecForge should show the stored values rather than guessing class names.
+
+For automatically loaded read-only annotations, SpecForge should infer the
+annotation kind from dtype. Integer dtypes are categorical annotations and may be
+treated as sample-labeling results for display. String dtypes should default to
+plain read-only annotation display so companion name arrays or other text fields
+are not accidentally treated as classification labels. The first implementation
+does not convert string annotations into editable sample labeling tasks, but a
+future implementation may support that through an explicit user action.
+Floating-point dtypes are continuous annotations; they should display raw values
+and should not use sample label sets, mappings, classification shortcuts, or
+clear-label behavior.
+
+A source collection may have multiple sample labeling tasks and read-only
+annotation results. Existing annotation files or arrays should not be treated as
+globally tied to the currently selected sample label set; they may represent a
+different classification dimension or a non-classification value.
+
+Companion annotation data discovered next to a source collection should be loaded
+automatically as read-only sample annotation results. It should use the
+same per-sample display and navigation surfaces as editable manual labeling
+results, but they must not be mutated unless the user explicitly starts an
+editable task or chooses an output target.
+For NPY source collections, a same-prefix `*_y.npy` companion should be loaded
+automatically as a read-only sample annotation result by default. Other
+annotation or label result files should not be loaded automatically in the first
+implementation; the user should add them explicitly. In particular,
+`*_label.npy`, `*_known_mask.npy`, `*_index.npy`, and similar pipeline helper
+arrays are not first-stage auto-discovery targets.
+Automatically loaded `*_y.npy` annotation results should accept common integer
+dtypes, floating-point dtypes, and string or unicode dtypes.
+
+Every sample annotation result loaded for a source collection must have exactly
+one annotation value per spectrum sample. If the annotation result length does
+not match the source collection's spectrum count, SpecForge must not attach it
+to that source collection.
+
+## Manual Labeling
+
+Manual labeling uses a sample labeling task. The task has a stable task id, a
+user-facing task name, one sample label set, and workflow choices such as
+auto-advance behavior. The task name may change without changing the stable task
+id used for draft recovery and configuration references.
+
+Creating a new editable sample labeling task should start with every sample
+unlabeled. The initial label result is therefore a one-dimensional array filled
+with `-1`. Copying or editing existing label files is handled by explicit user
+file choices rather than by separate first-run task modes.
+
+The first editable labeling implementation should only support numeric
+categorical tasks. Each label in a sample label set should have an explicit
+stable numeric code. The UI should suggest the next available code when the user
+creates a label, but the user may explicitly choose a different unused code to
+match an existing training or data convention. The saved code is the durable
+identity used in numeric label results. Reordering labels, changing display
+names, or changing shortcuts must not change existing label code meanings.
+Changing a code that is already used by saved label values should require an
+explicit confirmation because it changes the interpretation of existing data.
+
+Each numeric label needs a stable numeric code, a display name, and an optional
+shortcut. Colors and other styling are optional later extensions. String and
+floating-point annotations may be displayed read-only, but they should not be
+edited or saved as first-version sample labeling tasks.
+
+Auto-advance after labeling is a global workflow setting for the active sample
+labeling task, not a per-label setting. When auto-advance is enabled, the default
+target is the next sample in source order. A separate skip-labeled option may
+make auto-advance jump to the next unlabeled sample instead.
+Because sample navigation is owned outside the Labeling window, assigning a
+label should emit an advance request rather than directly changing the current
+sample. The sample navigation surface decides and performs the actual switch,
+including skip-labeled behavior. Labeling does not inspect filter or
+out-of-filter state before issuing the request. After a Labeling navigation
+request, Navigation should return a navigation result with the actual current
+sample index and whether movement occurred. Labeling uses the returned actual
+index to update the task's remembered labeling position. If Navigation does not
+move, the returned index is still the current sample, so the write applies there
+and the remembered labeling position remains there. The movement flag is program
+state for control flow and tests, not a source for Labeling-owned user feedback.
+Any user-facing reason for not moving belongs to Navigation, not Labeling.
+
+Existing sample label values are not enough to define the manual labeling
+workflow because they do not necessarily contain shortcut, ordering, styling, or
+navigation behavior.
+
+## Sample Windows
+
+SpecForge should separate sample navigation, sample filtering, sample annotation
+inspection, and active manual labeling into distinct windows or surfaces.
+
+The visible sample navigation window should be named `Navigation`. In this
+document, `Sample navigation` remains the domain term for that surface and its
+state ownership; `Navigation` does not refer to wavelength range navigation or
+plot pan/zoom controls.
+
+The visible active manual labeling window should be named `Labeling`. In this
+document, `Sample labeling task` and `active manual labeling` remain the domain
+terms for the task and workflow behind that window.
+
+The visible sample filtering window should be named `Filters`. In this document,
+`Sample filtering` remains the domain term for filter ownership and behavior.
+
+Sample navigation owns the current sample index, previous/next movement,
+ordering, and locating samples by index or sample name. In the first
+implementation, that state should belong to a source-collection session or
+controller rather than to the Shell UI, plot window, or Labeling window. Other
+surfaces issue navigation requests and consume the resulting current sample;
+they do not directly mutate the current sample index. Sample navigation does
+not own sample filtering or manual labeling controls. It should remember the last
+shown sample index for a source collection whether or not any sample labeling
+task is active, and that remembered index should be persisted in local user state
+by source collection identity. Row index and sample name are independent locating
+mechanisms. For NPY source collections, sample names come from a
+same-prefix `*_name.npy` companion when present and length matched; without that
+companion, samples do not have sample names. For directory collections, each
+contained FITS or CSV file name is the sample name. The UI may still show a
+fallback sample display name for an unnamed NPY row, but sample-name location
+searches source-provided sample names only. Sample-name location should use the
+same realtime matching style as spectral-line search. As the user edits the
+query, the navigation surface updates the matching sample list immediately.
+Fallback sample display names are not searched; row-index location remains a
+separate direct numeric location mechanism. Navigation is the only
+surface that should expose previous/next sample movement and its shortcuts;
+Labeling should not duplicate separate previous/next controls. Navigation
+actions should still carry intent: direct location by row index or sample name is
+a direct locate action, while previous/next movement is a sequential move action.
+
+The first read-only vertical slice should keep navigation in source order and
+support only previous/next movement, direct row-index jumps, and sample-name
+realtime matching. Sorting by sample name or annotation value belongs to a later
+navigation sub-stage after the current-sample and annotation-display contract is
+stable.
+
+Future sample navigation sorting modes may include sample name and annotation
+value from a user-selected annotation result or sample labeling task. Sorting by
+annotation value must not implicitly follow the active editable task, because
+changing the active task should not unexpectedly reorder sample navigation.
+Annotation-value sorting should support ascending and descending order. Read-only
+string annotations may be sorted by lexical order, and floating-point
+annotations may be sorted by numeric value.
+
+Sample filtering belongs to a separate filtering window. It should support
+stacking multiple filter conditions. Categorical filters may use annotation
+values from a user-selected annotation result or sample labeling task, and must
+not implicitly follow the active editable task. Categorical filtering should
+support selecting multiple values at once, including the unlabeled sentinel for
+labeling tasks. For numeric categorical values with a label set or mapping, the
+filter UI should show the label name with the numeric code, such as `bad (1)`.
+Without a mapping, it should show the raw code. Read-only string annotations may
+be filtered by selecting multiple string values. Floating-point annotations
+should not be filterable in the first implementation.
+
+When filtering is active, previous/next navigation, navigation lists, and
+auto-advance should operate within the filtered sample set. Direct row-index
+location may still jump to a sample outside the filtered set, but the navigation
+surface should make that out-of-filter state visible. While the current sample is
+outside the filtered set, Navigation should not execute previous/next movement or
+navigation-list movement, because there is no current position inside the
+filtered sequence. The user must clear or change the filter, direct-locate a
+sample inside the filtered set, or use another explicit direct locate action.
+Requests from Labeling are still resolved by Navigation under these same
+navigation rules; Labeling does not bypass or reinterpret the active filter.
+
+The sample annotation view should be an independent `Annotations` window, not a
+section inside the Files or Info windows. In this document, `Sample annotation
+view` remains the domain term for that surface. The window should display loaded
+sample annotation results, including automatically loaded `*_y.npy` data. It consumes
+the active source collection and current sample from sample navigation, but it
+does not own source selection, file management, or the current sample index. It
+should show one annotation result per row with only the task or result name and
+the current sample's annotation value or mapped label name. In the first
+read-only vertical slice, it should not show drag or convert-to-labeling
+affordances because editable sample labeling is not available yet.
+
+After editable sample labeling exists, categorical annotation rows should expose
+a small drag affordance so the user can drag that annotation to the Labeling
+window and make it the active sample labeling task.
+
+Dragging a categorical annotation from the sample annotation view should convert
+that annotation into a local sample labeling task before it becomes editable.
+The converted task uses the annotation file as its output target, so SpecForge
+must warn that edits will modify the original data in place. The warning should
+say this is appropriate only when the user intentionally wants to edit that data
+or when the file represents an unfinished labeling task being restored, and it
+should recommend backing up the original data first.
+
+Only writable first-implementation integer categorical annotation formats may be
+converted this way. Floating-point and string annotations must not be converted
+into first-version sample labeling tasks. String annotation conversion remains a
+future extension point and must still require an explicit user action.
+
+After conversion, the task follows normal local sample labeling task rules. The
+existing annotation file is simply the selected output location for that task.
+The converted task may expand its category set like any local task, but writing
+back to the original output target is limited by that file's writable format and
+integer dtype. If a new numeric code cannot be represented safely, SpecForge
+should require the user to choose a different output target before saving.
+When a task is created locally inside SpecForge, it does not need the in-place
+edit warning; it starts without an external output target, but the user may write
+by selecting an output location. Locally created tasks may define and expand
+their own category sets.
+
+The Labeling window accepts only a sample label result through an active sample
+labeling task. It should not display generic annotation results or inactive
+annotation results, and it should not own or display the current sample index,
+sample ordering, previous/next controls, or filters. It may show task-level
+labeling progress such as labeled count, unlabeled count, pending count, and save
+state. Keyboard shortcuts, clear-label behavior, auto-advance, autosave status,
+and save-state indication belong only to the active editable task.
+
+Activating a sample labeling task should show the label state for the current
+sample from sample navigation. It must not silently restore or change the current
+sample index. During an active labeling workflow, Labeling may request Navigation
+to move to a specific sample or to an auto-advance target, but ordinary
+previous/next movement belongs to Navigation. Navigation remains the owner of the
+actual current sample index.
+
+If the task record has a remembered labeling position that differs from
+Navigation's current sample index, Labeling may show a one-time resume action
+immediately after task activation. It may also show that action while the task is
+active if the user uses Navigation, such as row-index or sample-name location, to
+inspect another sample while the task's remembered labeling position still
+points elsewhere. The user must explicitly confirm the resume action before
+Labeling requests Navigation to jump. The action means resume labeling at the
+remembered sample; it is not a restore of Navigation state and should not be
+named Back or Restore. Direct locate actions in Navigation do not by themselves
+update the task's remembered labeling position or dismiss the resume action.
+If the remembered sample is outside the active filter, the resume action may
+still be shown; confirming it sends a direct locate request to Navigation, which
+then enters the visible out-of-filter state rather than changing or bypassing the
+filter.
+Sequential move actions in Navigation do update the active task's remembered
+labeling position, because moving one sample at a time is treated as part of the
+active labeling workflow. Once the user labels or clears the current sample
+through Labeling, the resume action should disappear and the task's remembered
+labeling position should move to the current sample or to the auto-advance target
+if auto-advance moves after the write. Moving past a sample without writing a
+label is a skip; it advances the remembered labeling position but does not write
+the unlabeled sentinel.
+
+The active editable task should display all labels in its sample label set as
+buttons. Each button should show the label name and optional shortcut, and the
+button for the current sample's label value should be highlighted. A clear-label
+button should be available for writing the unlabeled value. When the current
+sample is unlabeled, the active task should display `Unlabeled`, no label button
+should be highlighted, and the clear-label button should be disabled.
+
+Shortcut uniqueness is scoped to one sample labeling task. Different tasks may
+reuse the same shortcut because only one task is active at a time. Within the
+active task, assigning a shortcut already used by another label should bind it to
+the newly edited label and leave the previous label unbound.
+
+Labeling shortcuts should work when the Labeling window or plot context is
+active, but not while the user is editing text. A shortcut binding must not use
+reserved UI operation keys or modifier-driven interactions used elsewhere in the
+application, such as plot controls or spectral-line drag operations.
+The first implementation should only allow unmodified letter and digit keys for
+label shortcuts. Modifier combinations, navigation keys, whitespace keys, Enter,
+Delete, and similar UI operation keys are out of scope for label bindings.
+Shortcuts are optional for all labels and labeling actions. If a label or clear
+operation has no shortcut, it remains available through the UI button.
+
+## Persistence
+
+Sample labeling task records are user workflow configuration and should default
+to local user storage under the SpecForge application data directory. A task
+record owns the stable task id, task name, label set, mapping choices, workflow
+settings, selected output path when one exists, internal autosave state, and an
+optional remembered labeling position for the one-time resume action. It does
+not own the source collection's current sample index. Like catalog user state,
+this is local user state by default rather than an exported data product.
+The remembered labeling position belongs to the sample labeling task and stores
+only a sample index. It does not carry source identity, source path, sample name,
+or relink information; the containing task record supplies the source collection
+identity.
+Task records are scoped to a source collection. SpecForge may keep multiple
+source collections in its candidate/source list, but the activated source
+collection determines which task records and sample annotations are shown in the
+sample windows.
+
+Sample navigation state is separate local user state scoped to source collection
+identity. It persists the last shown sample index for the source collection
+regardless of which sample labeling task is active. Activating or switching a
+sample labeling task must not overwrite that navigation state or use the task's
+remembered labeling position as the source collection's current sample index.
+
+A source collection identity for task-record lookup should include source name,
+source fingerprint, and spectrum count. For NPY sources, the source name is the
+file name; for folder collections, it is the folder name. The full directory path
+may be useful for file access and display, but it is not required as the source
+name.
+
+For NPY source collections, the first source fingerprint should use file size,
+file modification time, NPY dtype, and NPY shape. It should not hash the full
+array content in the first implementation.
+
+For folder source collections, the first source fingerprint should be derived
+from the supported sample-file listing. The listing must be normalized and sorted
+before fingerprinting so filesystem enumeration order does not change the
+identity. Each entry should include relative file name, file size, and file
+modification time. The first implementation should not read full file contents
+for this fingerprint.
+
+If multiple loaded source collections share the same source name, task-record
+matching still uses the full source collection identity. The UI may show a parent
+directory or short path to disambiguate same-name sources, but that display text
+does not become the source name.
+
+Relink requires the source spectrum count to match the task record's spectrum
+count. If only the source name changed while the source fingerprint and spectrum
+count still match, SpecForge may relink automatically and notify the user. If the
+source fingerprint changed while the source name and spectrum count still match,
+SpecForge should treat the loaded source as different by default and only relink
+after explicit user confirmation. If both source name and source fingerprint
+changed while spectrum count still matches, SpecForge should also treat the
+loaded source as different by default and only relink after explicit user
+confirmation. After relink, SpecForge should update the task record to the new
+source collection identity so the user is not prompted for the same source change
+every time. Relink does not reinterpret remembered labeling positions by sample
+name, source path, or content matching. A remembered labeling position remains
+the same sample index inside the relinked source collection.
+
+Local task records should be persisted in a versioned JSON cache under the
+user's local SpecForge application data directory, consistent with catalog user
+state persistence. Writes should be debounced, flushed on normal shutdown, and
+retried after non-blocking save failures.
+
+## Annotation I/O
+
+The sample-labeling model should treat annotation storage formats as adapters.
+Core labeling, navigation, filtering, and annotation display should work with a
+loaded sample annotation result: one value per spectrum sample, with a known
+value kind such as categorical integer, categorical string, or continuous
+floating point.
+
+Format-specific details belong behind annotation I/O. NPY is the only
+first-implementation adapter, not the domain model. Future adapters such as CSV
+can be added if they can produce or consume the same per-sample annotation result
+shape and validate that the value count matches the source collection's spectrum
+count.
+Annotation I/O belongs in a domain or service boundary, not in UI code. UI
+surfaces should consume loaded sample annotation results, task records, and save
+state without parsing storage formats or reimplementing dtype, shape, or write
+capability rules.
+
+Sample label results are labeling output. They should be written to an explicit
+output location chosen by the user. SpecForge should recommend choosing an
+external output file, but should not require one before labeling starts. Output
+formats should be compact and practical for C++ streaming reads and writes;
+verbose JSON is appropriate for drafts and recovery metadata, not as the
+preferred export format for large label arrays.
+The first export adapter should prioritize a one-dimensional `.npy` label array
+at the user's chosen output path, with one label value per spectrum sample.
+Numeric tasks write stable label codes, and the sample label set owns the
+interpretation from numeric code to user-facing label. Unlabeled samples in
+numeric tasks should use `-1`, so numeric label outputs should use a signed
+integer dtype. The first implementation should write new numeric label outputs
+as `int32`.
+`*_y.npy` is not the default output meaning; it is only a special auto-loaded
+companion convention for existing labels in the NPY adapter.
+
+The first labeling workflow is single-label classification. A label array has
+one element per spectrum sample; each element is either one label value or the
+task's unlabeled sentinel. Multi-label, multi-task, confidence, and per-sample
+notes are out of scope for the first export path.
+Clearing a label is a first-class operation that writes the task's unlabeled
+sentinel for the current sample. It is not represented as a real label in the
+sample label set and must not consume a stable label code.
+
+String and floating-point arrays may be loaded and displayed as existing
+read-only annotations. Manual classification output in the first editable
+implementation writes numeric label codes only. String task editing and
+compressed label result formats can be added later as explicit export options.
+
+Sample labeling drafts protect in-progress work before it has been written to
+the selected output location. They should be saved automatically as part of the
+local task record and kept separate from final sample label results.
+
+By default, manual labeling should autosave to the local draft. Once the user
+selects an explicit output location, label changes should autosave to that
+output location. There is no separate live-save toggle in the first
+implementation, and editable labeling should not use a document-style
+Save/Cancel workflow as its primary persistence model. Closing the task,
+switching sources, or exiting the application should not show blocking save
+reminders or retention prompts solely because the task is draft-only. The save
+state indicator is responsible for making the current persistence state visible.
+
+After an output location is selected, the external output becomes the source of
+truth for the task's label result. The local task record should continue to save
+task metadata, workflow settings, output path, optional remembered labeling
+position, and other UI recovery state, but should not maintain a competing
+second label result for the same task.
+
+The first implementation should not proactively delete old drafts. Drafts for
+the same labeling context may be overwritten by newer autosaves, but unrelated
+drafts should remain until a future explicit draft-management workflow exists.
+
+When the user starts or returns to an editable task, SpecForge should use the
+local task record to restore available internal autosave state. The restored
+state should clearly show that it came from internal autosave. The draft does
+not need a separate "clean-exit" or "crash-exit" marker.
+
+If the user selects an external output path for a task, the local task record
+stores that path. The associated internal draft should no longer be exposed as a
+separate auto-discovered file, auto-loaded label result, or load option when the
+user manually loads external label files. External label result files do not
+carry task identity in the first implementation.
+
+A sample labeling context should include the source collection identity, the
+sample labeling task id, and the output path when one has been selected. The
+initial source fingerprint may use file size and modification time for files, or
+a directory listing summary for folder collections; a later implementation may
+upgrade it to a content hash when the extra cost is justified.
+
+The recovery path must not silently overwrite an explicit sample label result.
+Because external label result files do not carry task identity in the first
+implementation, SpecForge should not infer draft ownership from a bare label
+file path alone.
+
+## Save State Indicator
+
+The labeling UI should show where the current label changes have been written:
+
+- internal autosave draft only;
+- autosaved to the selected output location;
+- pending changes waiting for the next autosave, including a count such as
+  `pending: 5`;
+- save failed and will be retried, with the pending count preserved.
+
+The pending count is the number of distinct samples whose latest label value has
+not yet been successfully persisted. Multiple edits to the same sample count as
+one pending sample. This indicator should describe the current write state
+without treating every restored draft as proof of a crash.
