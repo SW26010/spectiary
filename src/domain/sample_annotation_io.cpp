@@ -783,7 +783,7 @@ SampleCollectionContext LoadSampleCollectionContext(const SpectrumSnapshot& snap
 SampleCollectionIdentity BuildSampleCollectionIdentity(const SpectrumSnapshot& snapshot)
 {
     SampleCollectionIdentity identity;
-    identity.source_name = FileNameToUtf8(snapshot.source.path);
+    identity.source_name = FileNameToUtf8(snapshot.source.path.filename());
     identity.spectrum_count = snapshot.collection.spectrum_count;
 
     std::error_code directory_error;

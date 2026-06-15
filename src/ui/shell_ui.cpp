@@ -385,7 +385,16 @@ bool CreateOpenDialog(ComPtr<IFileOpenDialog>& dialog)
             IID_PPV_ARGS(dialog.GetAddressOf())));
 }
 
-std::optional<std::filesystem::path> DialogResultPath(IFileOpenDialog* dialog)
+bool CreateSaveDialog(ComPtr<IFileSaveDialog>& dialog)
+{
+    return SUCCEEDED(CoCreateInstance(
+            CLSID_FileSaveDialog,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(dialog.GetAddressOf())));
+}
+
+std::optional<std::filesystem::path> DialogResultPath(IFileDialog* dialog)
 {
     if (dialog == nullptr) {
         return std::nullopt;
@@ -461,6 +470,43 @@ std::optional<std::filesystem::path> ShowSourceFolderPicker()
         dialog->SetOptions(options);
     }
     dialog->SetTitle(L"Add source folder");
+
+    const HRESULT show_result = dialog->Show(GetActiveWindow());
+    if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
+        return std::nullopt;
+    }
+
+    return DialogResultPath(dialog.Get());
+}
+
+std::optional<std::filesystem::path> ShowLabelOutputFilePicker()
+{
+    ScopedComInitialization com;
+    if (!com.ready()) {
+        return std::nullopt;
+    }
+
+    ComPtr<IFileSaveDialog> dialog;
+    if (!CreateSaveDialog(dialog)) {
+        return std::nullopt;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_OVERWRITEPROMPT;
+        dialog->SetOptions(options);
+    }
+
+    static constexpr COMDLG_FILTERSPEC kLabelOutputFilters[] = {
+        {L"NumPy label arrays", L"*.npy"},
+        {L"All files", L"*.*"},
+    };
+    dialog->SetTitle(L"Choose label output");
+    dialog->SetFileTypes(
+        static_cast<UINT>(sizeof(kLabelOutputFilters) / sizeof(kLabelOutputFilters[0])),
+        kLabelOutputFilters);
+    dialog->SetFileTypeIndex(1);
+    dialog->SetDefaultExtension(L"npy");
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
@@ -602,19 +648,24 @@ ShellUi::ShellUi()
 
 ShellUi::~ShellUi()
 {
+    (void)sample_labeling_.FlushStateCache();
     spectral_lines_panel_.FlushCache();
 }
 
 void ShellUi::Render(const ShellStatus& status)
 {
+    label_shortcut_context_active_ = false;
     spectral_lines_panel_.SetFrameIndex(status.frame_index);
     RenderDockHost(status);
     RenderFilesPanel();
     RenderNavigationPanel();
     RenderAnnotationsPanel();
-    RenderInfoTagsPanel();
     RenderMainPlot(status);
+    RenderLabelingPanel();
+    RenderFiltersPanel();
+    RenderInfoTagsPanel();
     RenderSpectralLinesPanel();
+    sample_labeling_.MaybeSaveStateCache(status.frame_index);
     spectral_lines_panel_.MaybeSaveCache(status.frame_index);
 }
 
@@ -697,6 +748,10 @@ void ShellUi::RemoveSource(std::size_t source_index)
 
     if (removed_current) {
         current_source_index_.reset();
+        sample_labeling_.ClearActiveSource();
+        sample_filters_.Clear();
+        active_sample_workflow_identity_.reset();
+        sample_workflow_panel_ui_.ResetForSampleWorkflow();
         if (next_current_index) {
             ActivateSource(*next_current_index);
         } else {
@@ -747,9 +802,13 @@ void ShellUi::LoadActiveSourceAt(std::size_t spectrum_index)
     SyncNavigationInputs();
 }
 
-void ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
+SampleNavigationResult ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
 {
     const SampleNavigationResult result = sample_navigation_.Navigate(request);
+    if (result.has_active_source && result.target_found &&
+        (request.kind == SampleNavigationRequestKind::Previous || request.kind == SampleNavigationRequestKind::Next)) {
+        (void)sample_labeling_.RememberActivePosition(result.current_index);
+    }
     if (result.has_active_source && result.target_found) {
         if (!snapshot_ || snapshot_->collection.current_index != result.current_index) {
             LoadActiveSourceAt(result.current_index);
@@ -757,6 +816,7 @@ void ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
             SyncNavigationInputs();
         }
     }
+    return result;
 }
 
 void ShellUi::SyncSampleNavigationSession()
@@ -765,10 +825,16 @@ void ShellUi::SyncSampleNavigationSession()
         current_source_index_ && *current_source_index_ < sources_.size() && snapshot_ && !snapshot_->source.path.empty();
     if (!has_active_source) {
         sample_navigation_.ClearActiveSource();
+        sample_labeling_.ClearActiveSource();
+        sample_filters_.Clear();
+        active_sample_workflow_identity_.reset();
+        sample_workflow_panel_ui_.ResetForSampleWorkflow();
         return;
     }
 
     sample_navigation_.ActivateSource(sources_[*current_source_index_].key, snapshot_);
+    SyncSampleWorkflowSession();
+    ApplySampleFiltersToNavigation();
 }
 
 void ShellUi::SyncNavigationInputs()
@@ -784,6 +850,47 @@ void ShellUi::SyncNavigationInputs()
         row_index_buffer_.fill('\0');
     }
     CopyToBuffer(sample_name_query_buffer_, sample_navigation_.sample_name_query());
+}
+
+void ShellUi::SyncSampleWorkflowSession()
+{
+    if (!snapshot_ || snapshot_->source.path.empty() || snapshot_->collection.spectrum_count == 0) {
+        sample_labeling_.ClearActiveSource();
+        sample_filters_.Clear();
+        active_sample_workflow_identity_.reset();
+        sample_workflow_panel_ui_.ResetForSampleWorkflow();
+        return;
+    }
+
+    const SampleCollectionIdentity identity = BuildSampleCollectionIdentity(*snapshot_);
+    if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
+        sample_filters_.Clear();
+        sample_workflow_panel_ui_.ResetForSampleWorkflow();
+        active_sample_workflow_identity_ = identity.id;
+    }
+    sample_labeling_.ActivateSource(identity.id, identity.spectrum_count);
+}
+
+std::vector<SampleFilterSource> ShellUi::BuildSampleFilterSources() const
+{
+    return sample_workflow_panel_ui_.BuildFilterSources(sample_navigation_, sample_labeling_);
+}
+
+void ShellUi::ApplySampleFiltersToNavigation()
+{
+    const std::size_t sample_count =
+        sample_navigation_.spectrum_count().value_or(snapshot_ ? snapshot_->collection.spectrum_count : 0);
+    if (sample_count == 0) {
+        sample_navigation_.ClearSampleFilter();
+        return;
+    }
+
+    const SampleFilterEvaluation evaluation = sample_filters_.Evaluate(BuildSampleFilterSources(), sample_count);
+    if (evaluation.active) {
+        sample_navigation_.SetSampleFilter(evaluation.included_samples);
+    } else {
+        sample_navigation_.ClearSampleFilter();
+    }
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)
@@ -949,6 +1056,15 @@ void ShellUi::RenderNavigationPanel()
     ImGui::Text(
         "Row index: %llu",
         static_cast<unsigned long long>(navigation_index));
+    if (sample_navigation_.filter_active()) {
+        ImGui::Text(
+            "Filtered: %llu / %llu",
+            static_cast<unsigned long long>(sample_navigation_.filtered_sample_count()),
+            static_cast<unsigned long long>(navigation_count));
+        if (!sample_navigation_.current_sample_in_filter()) {
+            ImGui::TextDisabled("Current sample is outside the active filter");
+        }
+    }
     ImGui::TextWrapped(
         "Current: %s",
         snapshot_->current_spectrum.name.empty() ? "(unnamed)" : snapshot_->current_spectrum.name.c_str());
@@ -960,7 +1076,7 @@ void ShellUi::RenderNavigationPanel()
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("Previous")) {
-        RequestSampleNavigation(SampleNavigationRequest::Previous());
+        (void)RequestSampleNavigation(SampleNavigationRequest::Previous());
     }
     if (!can_previous) {
         ImGui::EndDisabled();
@@ -970,10 +1086,13 @@ void ShellUi::RenderNavigationPanel()
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("Next")) {
-        RequestSampleNavigation(SampleNavigationRequest::Next());
+        (void)RequestSampleNavigation(SampleNavigationRequest::Next());
     }
     if (!can_next) {
         ImGui::EndDisabled();
+    }
+    if (sample_navigation_.filter_active() && !sample_navigation_.current_sample_in_filter()) {
+        ImGui::TextDisabled("Sequential movement is paused outside the filtered set.");
     }
 
     ImGui::Spacing();
@@ -995,7 +1114,7 @@ void ShellUi::RenderNavigationPanel()
         ImGui::EndDisabled();
     }
     if (submit_row && can_go_to_row) {
-        RequestSampleNavigation(SampleNavigationRequest::LocateRow(*target_row));
+        (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(*target_row));
     } else if (!row_index_buffer_[0]) {
         ImGui::TextDisabled("Enter a row index");
     } else if (!can_go_to_row) {
@@ -1019,7 +1138,7 @@ void ShellUi::RenderNavigationPanel()
         sample_navigation_.SetSampleNameQuery(sample_name_query_buffer_.data());
     }
     if (submit_sample_name && sample_name_query_buffer_[0] != '\0') {
-        RequestSampleNavigation(SampleNavigationRequest::LocateSampleName(sample_name_query_buffer_.data()));
+        (void)RequestSampleNavigation(SampleNavigationRequest::LocateSampleName(sample_name_query_buffer_.data()));
     }
 
     const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
@@ -1048,7 +1167,7 @@ void ShellUi::RenderNavigationPanel()
                 ImGui::TableSetColumnIndex(1);
                 ImGui::PushID(static_cast<int>(row));
                 if (ImGui::Selectable(context->sample_names[row].c_str(), row == navigation_index)) {
-                    RequestSampleNavigation(SampleNavigationRequest::LocateRow(row));
+                    (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(row));
                 }
                 ImGui::PopID();
             }
@@ -1117,6 +1236,36 @@ void ShellUi::RenderAnnotationsPanel()
     }
 
     ImGui::End();
+}
+
+void ShellUi::RenderLabelingPanel()
+{
+    sample_workflow_panel_ui_.RenderLabeling(
+        snapshot_,
+        sample_navigation_,
+        sample_labeling_,
+        label_shortcut_context_active_,
+        [this](const SampleNavigationRequest& request) {
+            return RequestSampleNavigation(request);
+        },
+        [this]() {
+            ApplySampleFiltersToNavigation();
+        },
+        []() {
+            return ShowLabelOutputFilePicker();
+        });
+}
+
+void ShellUi::RenderFiltersPanel()
+{
+    sample_workflow_panel_ui_.RenderFilters(
+        snapshot_,
+        sample_navigation_,
+        sample_labeling_,
+        sample_filters_,
+        [this]() {
+            ApplySampleFiltersToNavigation();
+        });
 }
 
 void ShellUi::RenderInfoTagsPanel()
@@ -1207,6 +1356,9 @@ void ShellUi::RenderInfoTagsPanel()
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
     ImGui::Begin(kMainPlotWindow);
+    label_shortcut_context_active_ =
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const std::vector<const SpectralLineMarker*> spectral_lines =
         spectral_lines_panel_.FilteredMarkers(snapshot_, false);
     RenderSpectrumPlot(
@@ -1239,17 +1391,24 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGuiID navigation_id = 0;
     ImGuiID left_lower_id = 0;
     ImGuiID annotations_id = 0;
+    ImGuiID labeling_id = 0;
+    ImGuiID filters_id = 0;
+    ImGuiID right_upper_id = 0;
     ImGuiID spectral_lines_id = 0;
 
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, 0.24f, &left_id, &center_id);
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Right, 0.24f, &right_id, &center_id);
     ImGui::DockBuilderSplitNode(left_id, ImGuiDir_Down, 0.66f, &left_lower_id, &navigation_id);
     ImGui::DockBuilderSplitNode(left_lower_id, ImGuiDir_Down, 0.50f, &info_tags_id, &files_id);
-    ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.38f, &annotations_id, &spectral_lines_id);
+    ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.38f, &right_upper_id, &spectral_lines_id);
+    ImGui::DockBuilderSplitNode(right_upper_id, ImGuiDir_Down, 0.50f, &labeling_id, &annotations_id);
+    ImGui::DockBuilderSplitNode(labeling_id, ImGuiDir_Down, 0.50f, &filters_id, &labeling_id);
 
     ImGui::DockBuilderDockWindow(kFilesWindow, files_id);
     ImGui::DockBuilderDockWindow(kNavigationWindow, navigation_id);
     ImGui::DockBuilderDockWindow(kAnnotationsWindow, annotations_id);
+    ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::LabelingWindowName(), labeling_id);
+    ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::FiltersWindowName(), filters_id);
     ImGui::DockBuilderDockWindow(kInfoTagsWindow, info_tags_id);
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);
     ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), spectral_lines_id);

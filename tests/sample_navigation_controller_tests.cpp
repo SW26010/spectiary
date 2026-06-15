@@ -275,6 +275,93 @@ void TestRemoveSourceUsesExternalSourceKey()
     Require(!result.has_active_source, "removed source should not handle navigation requests");
 }
 
+void TestFilterConstrainsSequentialNavigation()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_filter.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_filter_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(
+        path,
+        "<f8",
+        {5, 2},
+        BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}));
+    WriteNpy(
+        path.parent_path() / "specforge_nav_filter_name.npy",
+        "<U7",
+        {5},
+        UnicodeNpyBytesFor({"alpha", "beta", "gamma", "delta", "omega"}, 7));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 5, 0));
+    controller.SetSampleFilter({false, true, false, true, false});
+    Require(controller.filter_active(), "filter should be active");
+    Require(controller.filtered_sample_count() == 2, "filter should count included samples");
+    Require(!controller.current_sample_in_filter(), "initial row should be outside the filter");
+    Require(!controller.can_move_next(), "out-of-filter row should not move next");
+
+    specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::Next());
+    Require(result.blocked_by_filter, "out-of-filter sequential move should be blocked");
+    Require(!result.target_found, "blocked filtered move should not produce a target");
+    Require(result.current_index == 0, "blocked filtered move should keep the current row");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(1));
+    Require(result.target_found && result.current_sample_in_filter, "direct row locate can enter the filter");
+    Require(controller.can_move_next(), "first filtered row should move next");
+    Require(!controller.can_move_previous(), "first filtered row should not move previous inside the filter");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Next());
+    Require(result.target_found && result.moved, "filtered next should move to the next included row");
+    Require(result.current_index == 3, "filtered next should skip excluded rows");
+    Require(!controller.can_move_next(), "last filtered row should not move next");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(result.target_found && result.moved, "filtered previous should move to prior included row");
+    Require(result.current_index == 1, "filtered previous should skip excluded rows");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LabelAdvance());
+    Require(result.target_found && result.moved, "label advance should move within the filtered source order");
+    Require(result.current_index == 3, "label advance should let navigation choose the filtered target");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(result.target_found && result.moved, "test should return to the first filtered row");
+    Require(result.current_index == 1, "test should return to row 1");
+
+    result = controller.Navigate(
+        specforge::SampleNavigationRequest::LabelAdvanceToEligible({false, false, false, true, false}));
+    Require(result.target_found && result.moved, "eligible label advance should move to the next eligible filtered row");
+    Require(result.current_index == 3, "eligible label advance should use navigation-owned filter state");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(result.target_found && result.moved, "test should return to the first filtered row again");
+    result = controller.Navigate(
+        specforge::SampleNavigationRequest::LabelAdvanceToEligible({false, false, true, false, false}));
+    Require(result.target_found && !result.moved, "eligible label advance should ignore excluded rows");
+    Require(result.current_index == 1, "label advance with no eligible filtered target should keep the current row");
+
+    controller.SetSampleNameQuery("a");
+    const std::vector<std::size_t>& matches = controller.sample_name_matches();
+    Require(matches.size() == 2, "sample-name matches should be filtered to included rows");
+    Require(matches[0] == 1 && matches[1] == 3, "filtered sample-name matches should preserve source order");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(4));
+    Require(result.target_found, "direct row locate can jump outside the filter");
+    Require(!result.current_sample_in_filter, "direct row locate should expose out-of-filter state");
+    result = controller.Navigate(specforge::SampleNavigationRequest::LabelAdvance());
+    Require(result.blocked_by_filter, "label advance should be blocked when the current row is outside the filter");
+    Require(!result.target_found, "blocked label advance should not produce a target");
+    Require(result.current_index == 4, "blocked label advance should keep the current row");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("omega"));
+    Require(!result.target_found, "sample-name locate should not jump to an excluded exact match");
+    Require(result.current_index == 4, "excluded sample-name locate should keep the current row");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("beta"));
+    Require(result.target_found && result.current_sample_in_filter, "sample-name locate should jump to an included match");
+    Require(result.current_index == 1, "sample-name locate should return the filtered match");
+}
+
 }  // namespace
 
 int main()
@@ -283,5 +370,6 @@ int main()
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerPersistsLastIndexBySourceIdentity();
     TestRemoveSourceUsesExternalSourceKey();
+    TestFilterConstrainsSequentialNavigation();
     return 0;
 }

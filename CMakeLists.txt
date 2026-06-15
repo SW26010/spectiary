@@ -52,6 +52,10 @@ endfunction()
 add_executable(specforge_native WIN32
     src/app/specforge_app.cpp
     src/app/specforge_app.h
+    src/domain/sample_filter.cpp
+    src/domain/sample_filter.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_fixture.h
     src/domain/sample_annotation_io.cpp
@@ -76,8 +80,12 @@ add_executable(specforge_native WIN32
     src/renderer/d3d11_renderer.h
     src/ui/shell_ui.cpp
     src/ui/shell_ui.h
+    src/ui/sample_labeling_controller.cpp
+    src/ui/sample_labeling_controller.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_workflow_panel.cpp
+    src/ui/sample_workflow_panel.h
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_grouping_view.h
     src/ui/spectral_lines_panel.cpp
@@ -168,6 +176,28 @@ else()
 endif()
 
 add_test(NAME specforge_sample_navigation_controller_tests COMMAND specforge_sample_navigation_controller_tests)
+
+add_executable(specforge_sample_labeling_filter_tests
+    tests/sample_labeling_filter_tests.cpp
+    src/domain/sample_filter.cpp
+    src/domain/sample_filter.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
+    src/domain/sample_annotation_io.h
+    src/domain/spectrum_snapshot.h
+    src/ui/sample_labeling_controller.cpp
+    src/ui/sample_labeling_controller.h
+)
+
+target_include_directories(specforge_sample_labeling_filter_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_sample_labeling_filter_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_sample_labeling_filter_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_sample_labeling_filter_tests COMMAND specforge_sample_labeling_filter_tests)
 
 add_executable(specforge_spectral_line_catalog_tests
     tests/spectral_line_catalog_tests.cpp

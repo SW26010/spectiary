@@ -604,6 +604,13 @@ void TestLoadsNpySampleAnnotationContext()
 
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 1);
     Require(snapshot->current_spectrum.name == "beta", "plain NPY source should use same-prefix sample name");
+    const specforge::SampleCollectionIdentity identity = specforge::BuildSampleCollectionIdentity(*snapshot);
+    Require(
+        identity.source_name == PathToUtf8(path.filename()),
+        "sample collection identity should use the source filename as its display name");
+    Require(
+        identity.id.find(PathToUtf8(path.parent_path())) == std::string::npos,
+        "sample collection identity id should not include the absolute source directory");
     const specforge::SampleCollectionContext context = specforge::LoadSampleCollectionContext(*snapshot);
     Require(context.sample_names.size() == 2, "sample context should load companion sample names");
     Require(context.sample_names[0] == "alpha", "first sample name should be decoded");

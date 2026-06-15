@@ -1,8 +1,11 @@
 #pragma once
 
 #include "domain/spectrum_snapshot.h"
+#include "domain/sample_filter.h"
 #include "plot/spectrum_plot.h"
+#include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 
@@ -14,7 +17,6 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -66,19 +68,26 @@ private:
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
     void RenderAnnotationsPanel();
+    void RenderLabelingPanel();
+    void RenderFiltersPanel();
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void SetSnapshot(SpectrumSnapshotHandle snapshot);
     void EnsureSnapshotMatchesNavigation();
     void LoadActiveSourceAt(std::size_t spectrum_index);
-    void RequestSampleNavigation(const SampleNavigationRequest& request);
+    [[nodiscard]] SampleNavigationResult RequestSampleNavigation(const SampleNavigationRequest& request);
     void SyncNavigationInputs();
     void SyncSampleNavigationSession();
+    void SyncSampleWorkflowSession();
+    [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
+    void ApplySampleFiltersToNavigation();
 
     SpectrumSnapshotHandle snapshot_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
+    SampleLabelingController sample_labeling_;
+    SampleFilterController sample_filters_;
     SampleNavigationController sample_navigation_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
@@ -86,7 +95,10 @@ private:
     std::optional<std::size_t> current_source_index_;
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};
+    std::optional<std::string> active_sample_workflow_identity_;
+    bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
+    SampleWorkflowPanelUi sample_workflow_panel_ui_;
 };
 
 }  // namespace specforge
