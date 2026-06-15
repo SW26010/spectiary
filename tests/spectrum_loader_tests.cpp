@@ -1,4 +1,5 @@
 #include "domain/spectrum_loader.h"
+#include "domain/sample_annotation_io.h"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,7 @@ using specforge::SpectrumDiagnosticCode;
 using specforge::SpectrumDiagnosticSeverity;
 using specforge::SpectrumSnapshotHandle;
 using specforge::SpectrumValueQuantity;
+using specforge::SampleAnnotationKind;
 
 constexpr double kSpeedOfLightKmPerSecond = 299792.458;
 
@@ -591,6 +593,71 @@ void TestLoadsSelectedNpyRow()
     Require(second->current_spectrum.name == "beta", "second row should use companion sample name");
 }
 
+void TestLoadsNpySampleAnnotationContext()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_annotation_context.npy";
+    const std::filesystem::path name_path = std::filesystem::temp_directory_path() / "specforge_annotation_context_name.npy";
+    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "specforge_annotation_context_y.npy";
+    WriteNpy(path, "<f8", {2, 3}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+    WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"alpha", "beta"}, 5));
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({7, -1}));
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 1);
+    Require(snapshot->current_spectrum.name == "beta", "plain NPY source should use same-prefix sample name");
+    const specforge::SampleCollectionContext context = specforge::LoadSampleCollectionContext(*snapshot);
+    Require(context.sample_names.size() == 2, "sample context should load companion sample names");
+    Require(context.sample_names[0] == "alpha", "first sample name should be decoded");
+    Require(context.sample_names[1] == "beta", "second sample name should be decoded");
+    Require(context.annotations.size() == 1, "sample context should auto-load same-prefix y annotation");
+    Require(context.annotations[0].kind == SampleAnnotationKind::CategoricalInteger, "integer y should be categorical");
+    Require(context.annotations[0].values.size() == 2, "annotation should carry one value per source sample");
+    Require(context.annotations[0].values[0].display_text == "7", "integer annotation should display raw code");
+    Require(context.annotations[0].values[1].display_text == "-1", "integer annotation should display unlabeled sentinel raw");
+}
+
+void TestLoadsReadOnlyAnnotationDtypes()
+{
+    const std::filesystem::path float_path = std::filesystem::temp_directory_path() / "specforge_annotation_float_X.npy";
+    const std::filesystem::path float_annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_float_y.npy";
+    WriteNpy(float_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteNpy(float_annotation_path, "<f4", {2}, BytesFor<float>({1.25F, -2.5F}));
+
+    const SpectrumSnapshotHandle float_snapshot = specforge::LoadSpectrumSnapshotFromPath(float_path, 0);
+    const specforge::SampleCollectionContext float_context = specforge::LoadSampleCollectionContext(*float_snapshot);
+    Require(float_context.annotations.size() == 1, "float y annotation should be loaded");
+    Require(
+        float_context.annotations[0].kind == SampleAnnotationKind::ContinuousFloat,
+        "floating-point y should be continuous");
+    Require(float_context.annotations[0].values[1].display_text == "-2.5", "float annotation should display raw value");
+
+    const std::filesystem::path string_path = std::filesystem::temp_directory_path() / "specforge_annotation_string_X.npy";
+    const std::filesystem::path string_annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_string_y.npy";
+    WriteNpy(string_path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteNpy(string_annotation_path, "<U4", {2}, UnicodeNpyBytesFor({"good", "bad"}, 4));
+
+    const SpectrumSnapshotHandle string_snapshot = specforge::LoadSpectrumSnapshotFromPath(string_path, 0);
+    const specforge::SampleCollectionContext string_context = specforge::LoadSampleCollectionContext(*string_snapshot);
+    Require(string_context.annotations.size() == 1, "string y annotation should be loaded");
+    Require(string_context.annotations[0].kind == SampleAnnotationKind::Text, "string y should stay read-only text");
+    Require(string_context.annotations[0].values[0].display_text == "good", "string annotation should be decoded");
+    Require(string_context.annotations[0].values[1].display_text == "bad", "string annotation should be decoded");
+}
+
+void TestRejectsMismatchedSampleAnnotationLength()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_annotation_mismatch_X.npy";
+    const std::filesystem::path annotation_path = std::filesystem::temp_directory_path() / "specforge_annotation_mismatch_y.npy";
+    WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteNpy(annotation_path, "<i4", {1}, BytesFor<std::int32_t>({1}));
+
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
+    const specforge::SampleCollectionContext context = specforge::LoadSampleCollectionContext(*snapshot);
+    Require(context.annotations.empty(), "mismatched annotation length must not attach to the source collection");
+    Require(!context.messages.empty(), "mismatched annotation length should explain why it was ignored");
+}
+
 void TestRejectsAuxiliaryNpyArrays()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_label.npy";
@@ -949,6 +1016,9 @@ void TestOptionalSampleDirectory()
 int main()
 {
     TestLoadsSelectedNpyRow();
+    TestLoadsNpySampleAnnotationContext();
+    TestLoadsReadOnlyAnnotationDtypes();
+    TestRejectsMismatchedSampleAnnotationLength();
     TestRejectsAuxiliaryNpyArrays();
     TestClassifiesUnsupportedDtype();
     TestClassifiesEmptyShape();

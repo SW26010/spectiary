@@ -1,0 +1,287 @@
+#include "domain/spectrum_snapshot.h"
+#include "ui/sample_navigation_controller.h"
+
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace {
+
+void Require(bool condition, std::string_view message)
+{
+    if (!condition) {
+        throw std::runtime_error(std::string(message));
+    }
+}
+
+std::string ShapeText(const std::vector<std::size_t>& shape)
+{
+    std::ostringstream stream;
+    stream << '(';
+    for (std::size_t index = 0; index < shape.size(); ++index) {
+        if (index > 0) {
+            stream << ", ";
+        }
+        stream << shape[index];
+    }
+    if (shape.size() == 1) {
+        stream << ',';
+    }
+    stream << ')';
+    return stream.str();
+}
+
+template <typename T>
+std::vector<unsigned char> BytesFor(const std::vector<T>& values)
+{
+    std::vector<unsigned char> bytes(values.size() * sizeof(T));
+    if (!bytes.empty()) {
+        std::memcpy(bytes.data(), values.data(), bytes.size());
+    }
+    return bytes;
+}
+
+std::vector<unsigned char> UnicodeNpyBytesFor(std::initializer_list<std::string_view> values, std::size_t code_units)
+{
+    std::vector<unsigned char> bytes;
+    bytes.reserve(values.size() * code_units * sizeof(std::uint32_t));
+    for (std::string_view value : values) {
+        for (std::size_t index = 0; index < code_units; ++index) {
+            const std::uint32_t code_point = index < value.size() ? static_cast<unsigned char>(value[index]) : 0U;
+            bytes.push_back(static_cast<unsigned char>(code_point & 0xffU));
+            bytes.push_back(static_cast<unsigned char>((code_point >> 8U) & 0xffU));
+            bytes.push_back(static_cast<unsigned char>((code_point >> 16U) & 0xffU));
+            bytes.push_back(static_cast<unsigned char>((code_point >> 24U) & 0xffU));
+        }
+    }
+    return bytes;
+}
+
+void WriteNpy(
+    const std::filesystem::path& path,
+    std::string_view descr,
+    const std::vector<std::size_t>& shape,
+    const std::vector<unsigned char>& payload)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open test fixture for writing");
+
+    std::string header = "{'descr': '";
+    header += descr;
+    header += "', 'fortran_order': False, 'shape': ";
+    header += ShapeText(shape);
+    header += ", }";
+
+    constexpr std::size_t kPreambleSize = 10;
+    const std::size_t header_with_newline = header.size() + 1;
+    const std::size_t padding = (16 - ((kPreambleSize + header_with_newline) % 16)) % 16;
+    header.append(padding, ' ');
+    header.push_back('\n');
+    Require(header.size() <= std::numeric_limits<std::uint16_t>::max(), "test NPY header is too large");
+
+    constexpr unsigned char kMagic[] = {0x93, 'N', 'U', 'M', 'P', 'Y'};
+    stream.write(reinterpret_cast<const char*>(kMagic), static_cast<std::streamsize>(sizeof(kMagic)));
+    constexpr char kVersion[] = {1, 0};
+    stream.write(kVersion, static_cast<std::streamsize>(sizeof(kVersion)));
+
+    const auto header_length = static_cast<std::uint16_t>(header.size());
+    const char length_bytes[] = {
+        static_cast<char>(header_length & 0xffU),
+        static_cast<char>((header_length >> 8U) & 0xffU),
+    };
+    stream.write(length_bytes, static_cast<std::streamsize>(sizeof(length_bytes)));
+    stream.write(header.data(), static_cast<std::streamsize>(header.size()));
+    if (!payload.empty()) {
+        stream.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    }
+    Require(stream.good(), "could not write test NPY fixture");
+}
+
+specforge::SpectrumSnapshotHandle MakeSnapshot(
+    const std::filesystem::path& path,
+    std::string source_id,
+    std::size_t spectrum_count,
+    std::size_t current_index)
+{
+    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    snapshot->source.id = std::move(source_id);
+    snapshot->source.path = path;
+    snapshot->collection.spectrum_count = spectrum_count;
+    snapshot->collection.current_index = current_index;
+    snapshot->collection.can_move_previous = current_index > 0;
+    snapshot->collection.can_move_next = current_index + 1 < spectrum_count;
+    snapshot->capabilities.can_switch_spectrum = spectrum_count > 1;
+    return snapshot;
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::string ReadTextFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    Require(stream.good(), "could not open text file");
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
+}
+
+void TestControllerOwnsNavigationState()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_controller.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_controller_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {3, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+    WriteNpy(path.parent_path() / "specforge_nav_controller_name.npy", "<U5", {3}, UnicodeNpyBytesFor({"alpha", "beta", "gamma"}, 5));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 3, 1));
+    Require(controller.current_index() && *controller.current_index() == 1, "controller should own initial current index");
+    Require(controller.can_move_previous(), "index 1 should move previous");
+    Require(controller.can_move_next(), "index 1 should move next");
+
+    specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(result.has_active_source, "previous request should resolve against active source");
+    Require(result.target_found, "previous target should be found");
+    Require(result.moved, "previous request should move from index 1");
+    Require(result.previous_index == 1, "previous result should report old index");
+    Require(result.current_index == 0, "previous result should report actual index");
+    Require(controller.current_index() && *controller.current_index() == 0, "controller should store previous result index");
+    Require(!controller.can_move_previous(), "index 0 should not move previous");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(result.target_found, "boundary previous request should still resolve");
+    Require(!result.moved, "boundary previous request should not move");
+    Require(result.current_index == 0, "boundary previous result should keep actual index");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::Next());
+    Require(result.moved, "next request should move");
+    Require(result.current_index == 1, "next request should return index 1");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(2));
+    Require(result.target_found, "valid row locate should resolve");
+    Require(result.moved, "row locate should move");
+    Require(result.current_index == 2, "row locate should return requested row");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(42));
+    Require(!result.target_found, "invalid row locate should not resolve");
+    Require(!result.moved, "invalid row locate should not move");
+    Require(result.current_index == 2, "invalid row locate should report unchanged actual index");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("beta"));
+    Require(result.target_found, "valid sample-name locate should resolve");
+    Require(result.moved, "sample-name locate should move");
+    Require(result.current_index == 1, "sample-name locate should return matched index");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("missing"));
+    Require(!result.target_found, "missing sample-name locate should not resolve");
+    Require(result.current_index == 1, "missing sample-name locate should report unchanged actual index");
+}
+
+void TestControllerReloadsCompanionContextOnReactivate()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_context.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_context_state.json";
+    const std::filesystem::path name_path = path.parent_path() / "specforge_nav_context_name.npy";
+    const std::filesystem::path annotation_path = path.parent_path() / "specforge_nav_context_y.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"alpha", "beta"}, 5));
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
+    const specforge::SampleCollectionContext* context = controller.active_context();
+    Require(context != nullptr, "active context should exist");
+    Require(context->sample_names[0] == "alpha", "initial name should load");
+    Require(context->annotations[0].values[0].display_text == "1", "initial annotation should load");
+
+    specforge::SampleNavigationResult result = controller.Navigate(specforge::SampleNavigationRequest::Next());
+    Require(result.current_index == 1, "test should move before reactivation");
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
+    Require(controller.current_index() && *controller.current_index() == 1, "unchanged reactivation should preserve session index");
+
+    WriteNpy(name_path, "<U5", {2}, UnicodeNpyBytesFor({"delta", "omega"}, 5));
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({42, 99}));
+    const std::filesystem::file_time_type next_time = std::filesystem::last_write_time(annotation_path) + std::chrono::seconds(2);
+    std::filesystem::last_write_time(name_path, next_time);
+    std::filesystem::last_write_time(annotation_path, next_time);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
+
+    context = controller.active_context();
+    Require(context != nullptr, "reactivated context should exist");
+    Require(context->sample_names[0] == "delta", "reactivate should reload changed sample names");
+    Require(context->annotations[0].values[0].display_text == "42", "reactivate should reload changed annotations");
+    Require(controller.current_index() && *controller.current_index() == 1, "context reload should preserve current index");
+}
+
+void TestControllerPersistsLastIndexBySourceIdentity()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_persist.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_persist_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {3, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+
+    {
+        specforge::SampleNavigationController controller(cache_path);
+        controller.ActivateSource("source-a", MakeSnapshot(path, "file:any-path-a", 3, 0));
+        const specforge::SampleNavigationResult result =
+            controller.Navigate(specforge::SampleNavigationRequest::LocateRow(2));
+        Require(result.current_index == 2, "first controller should navigate to row 2");
+    }
+
+    {
+        specforge::SampleNavigationController controller(cache_path);
+        controller.ActivateSource("source-b", MakeSnapshot(path, "file:any-path-b", 3, 0));
+        Require(controller.current_index() && *controller.current_index() == 2, "new controller should restore last row");
+    }
+
+    const std::string cache_text = ReadTextFile(cache_path);
+    Require(cache_text.find(PathToUtf8(path.parent_path())) == std::string::npos, "cache should not key state by absolute directory path");
+}
+
+void TestRemoveSourceUsesExternalSourceKey()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_remove.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_remove_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source-list-key", MakeSnapshot(path, "file:any-path", 2, 1));
+    Require(controller.current_index() && *controller.current_index() == 1, "test source should activate");
+
+    controller.RemoveSource("source-list-key");
+    Require(!controller.current_index(), "removed source should clear the active session");
+    const specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::Previous());
+    Require(!result.has_active_source, "removed source should not handle navigation requests");
+}
+
+}  // namespace
+
+int main()
+{
+    TestControllerOwnsNavigationState();
+    TestControllerReloadsCompanionContextOnReactivate();
+    TestControllerPersistsLastIndexBySourceIdentity();
+    TestRemoveSourceUsesExternalSourceKey();
+    return 0;
+}

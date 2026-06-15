@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdio>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,6 +32,8 @@ constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHost
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kInfoTagsWindow = "Info & Tags###SpecForgeInfoTagsV2";
+constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
+constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr float kStatusBarHeight = 28.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
@@ -85,6 +89,51 @@ std::string LowerAscii(std::string value)
         return static_cast<char>(std::tolower(character));
     });
     return value;
+}
+
+std::string TrimAscii(std::string_view value)
+{
+    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
+        return std::isspace(character) != 0;
+    });
+    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
+        return std::isspace(character) != 0;
+    }).base();
+
+    if (first >= last) {
+        return {};
+    }
+    return std::string(first, last);
+}
+
+std::optional<std::size_t> ParseRowIndex(std::string_view text)
+{
+    const std::string trimmed = TrimAscii(text);
+    if (trimmed.empty()) {
+        return std::nullopt;
+    }
+
+    std::size_t value = 0;
+    for (const char character : trimmed) {
+        if (character < '0' || character > '9') {
+            return std::nullopt;
+        }
+        const std::size_t digit = static_cast<std::size_t>(character - '0');
+        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
+            return std::nullopt;
+        }
+        value = value * 10U + digit;
+    }
+    return value;
+}
+
+template <std::size_t Size>
+void CopyToBuffer(std::array<char, Size>& buffer, std::string_view text)
+{
+    static_assert(Size > 0);
+    std::fill(buffer.begin(), buffer.end(), '\0');
+    const std::size_t copy_size = std::min(text.size(), Size - 1);
+    std::copy_n(text.begin(), copy_size, buffer.begin());
 }
 
 std::string SourceKey(const std::filesystem::path& path)
@@ -561,6 +610,8 @@ void ShellUi::Render(const ShellStatus& status)
     spectral_lines_panel_.SetFrameIndex(status.frame_index);
     RenderDockHost(status);
     RenderFilesPanel();
+    RenderNavigationPanel();
+    RenderAnnotationsPanel();
     RenderInfoTagsPanel();
     RenderMainPlot(status);
     RenderSpectralLinesPanel();
@@ -578,6 +629,7 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
     const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
     current_source_index_ = source_index;
     SetSnapshot(std::move(loaded_snapshot));
+    EnsureSnapshotMatchesNavigation();
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
@@ -625,6 +677,7 @@ void ShellUi::ActivateSource(std::size_t source_index)
     SourceListEntry& entry = sources_[source_index];
     current_source_index_ = source_index;
     SetSnapshot(entry.cached_snapshot);
+    EnsureSnapshotMatchesNavigation();
 }
 
 void ShellUi::RemoveSource(std::size_t source_index)
@@ -634,6 +687,7 @@ void ShellUi::RemoveSource(std::size_t source_index)
     }
 
     const bool removed_current = current_source_index_ && *current_source_index_ == source_index;
+    sample_navigation_.RemoveSource(sources_[source_index].key);
     std::optional<std::size_t> next_current_index;
     if (removed_current && sources_.size() > 1) {
         next_current_index = source_index + 1 < sources_.size() ? source_index : source_index - 1;
@@ -647,6 +701,8 @@ void ShellUi::RemoveSource(std::size_t source_index)
             ActivateSource(*next_current_index);
         } else {
             SetSnapshot(MakeSmallSyntheticSpectrumSnapshot());
+            sample_navigation_.ClearActiveSource();
+            SyncNavigationInputs();
         }
         return;
     }
@@ -662,26 +718,72 @@ void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
     plot_state_ = SpectrumPlotState{};
 }
 
-void ShellUi::SwitchSpectrum(int direction)
+void ShellUi::EnsureSnapshotMatchesNavigation()
 {
-    if (!snapshot_ || snapshot_->source.path.empty() || !snapshot_->capabilities.can_switch_spectrum) {
+    SyncSampleNavigationSession();
+    const std::optional<std::size_t> navigation_index = sample_navigation_.current_index();
+    if (navigation_index && snapshot_ && snapshot_->collection.spectrum_count > 0 &&
+        snapshot_->collection.current_index != *navigation_index) {
+        LoadActiveSourceAt(*navigation_index);
+        return;
+    }
+    SyncNavigationInputs();
+}
+
+void ShellUi::LoadActiveSourceAt(std::size_t spectrum_index)
+{
+    const bool has_active_source =
+        current_source_index_ && *current_source_index_ < sources_.size() && !sources_[*current_source_index_].path.empty();
+    if (!has_active_source) {
         return;
     }
 
-    const std::size_t current_index = snapshot_->collection.current_index;
-    if (direction < 0) {
-        if (current_index == 0) {
-            return;
+    const std::filesystem::path path = sources_[*current_source_index_].path;
+    SpectrumSnapshotHandle loaded_snapshot = LoadSpectrumSnapshotFromPath(path, spectrum_index);
+    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
+    current_source_index_ = source_index;
+    SetSnapshot(std::move(loaded_snapshot));
+    SyncSampleNavigationSession();
+    SyncNavigationInputs();
+}
+
+void ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
+{
+    const SampleNavigationResult result = sample_navigation_.Navigate(request);
+    if (result.has_active_source && result.target_found) {
+        if (!snapshot_ || snapshot_->collection.current_index != result.current_index) {
+            LoadActiveSourceAt(result.current_index);
+        } else {
+            SyncNavigationInputs();
         }
-        OpenSource(snapshot_->source.path, current_index - 1);
+    }
+}
+
+void ShellUi::SyncSampleNavigationSession()
+{
+    const bool has_active_source =
+        current_source_index_ && *current_source_index_ < sources_.size() && snapshot_ && !snapshot_->source.path.empty();
+    if (!has_active_source) {
+        sample_navigation_.ClearActiveSource();
         return;
     }
 
-    const std::size_t next_index = current_index + 1;
-    if (next_index >= snapshot_->collection.spectrum_count) {
-        return;
+    sample_navigation_.ActivateSource(sources_[*current_source_index_].key, snapshot_);
+}
+
+void ShellUi::SyncNavigationInputs()
+{
+    const std::optional<std::size_t> navigation_index = sample_navigation_.current_index();
+    if (navigation_index) {
+        std::snprintf(
+            row_index_buffer_.data(),
+            row_index_buffer_.size(),
+            "%zu",
+            *navigation_index);
+    } else {
+        row_index_buffer_.fill('\0');
     }
-    OpenSource(snapshot_->source.path, next_index);
+    CopyToBuffer(sample_name_query_buffer_, sample_navigation_.sample_name_query());
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)
@@ -701,7 +803,7 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::Begin(kDockHostWindow, nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceFourPaneV2");
+    const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
     ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
     dockspace_size.y = std::max(0.0f, dockspace_size.y - kStatusBarHeight);
 
@@ -826,6 +928,197 @@ void ShellUi::RenderFilesPanel()
     ImGui::End();
 }
 
+void ShellUi::RenderNavigationPanel()
+{
+    ImGui::Begin(kNavigationWindow);
+
+    if (!snapshot_ || snapshot_->source.path.empty() || snapshot_->collection.spectrum_count == 0) {
+        ImGui::TextDisabled("No active source");
+        ImGui::End();
+        return;
+    }
+
+    const std::size_t navigation_index =
+        sample_navigation_.current_index().value_or(snapshot_->collection.current_index);
+    const std::size_t navigation_count =
+        sample_navigation_.spectrum_count().value_or(snapshot_->collection.spectrum_count);
+    ImGui::Text(
+        "Sample: %llu / %llu",
+        static_cast<unsigned long long>(navigation_index + 1),
+        static_cast<unsigned long long>(navigation_count));
+    ImGui::Text(
+        "Row index: %llu",
+        static_cast<unsigned long long>(navigation_index));
+    ImGui::TextWrapped(
+        "Current: %s",
+        snapshot_->current_spectrum.name.empty() ? "(unnamed)" : snapshot_->current_spectrum.name.c_str());
+
+    ImGui::Spacing();
+    const bool can_previous = sample_navigation_.can_move_previous();
+    const bool can_next = sample_navigation_.can_move_next();
+    if (!can_previous) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Previous")) {
+        RequestSampleNavigation(SampleNavigationRequest::Previous());
+    }
+    if (!can_previous) {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
+    if (!can_next) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Next")) {
+        RequestSampleNavigation(SampleNavigationRequest::Next());
+    }
+    if (!can_next) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::Spacing();
+    bool submit_row = ImGui::InputText(
+        "Row index",
+        row_index_buffer_.data(),
+        row_index_buffer_.size(),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    const std::optional<std::size_t> target_row = ParseRowIndex(row_index_buffer_.data());
+    const bool can_go_to_row = target_row && *target_row < navigation_count;
+    if (!can_go_to_row) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Go")) {
+        submit_row = true;
+    }
+    if (!can_go_to_row) {
+        ImGui::EndDisabled();
+    }
+    if (submit_row && can_go_to_row) {
+        RequestSampleNavigation(SampleNavigationRequest::LocateRow(*target_row));
+    } else if (!row_index_buffer_[0]) {
+        ImGui::TextDisabled("Enter a row index");
+    } else if (!can_go_to_row) {
+        ImGui::TextDisabled("Row is outside this source");
+    }
+
+    ImGui::Spacing();
+    const SampleCollectionContext* context = sample_navigation_.active_context();
+    if (context == nullptr || context->sample_names.empty()) {
+        ImGui::TextDisabled("No source-provided sample names");
+        ImGui::End();
+        return;
+    }
+
+    bool submit_sample_name = ImGui::InputText(
+        "Sample name",
+        sample_name_query_buffer_.data(),
+        sample_name_query_buffer_.size(),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsItemEdited()) {
+        sample_navigation_.SetSampleNameQuery(sample_name_query_buffer_.data());
+    }
+    if (submit_sample_name && sample_name_query_buffer_[0] != '\0') {
+        RequestSampleNavigation(SampleNavigationRequest::LocateSampleName(sample_name_query_buffer_.data()));
+    }
+
+    const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
+    if (sample_name_query_buffer_[0] == '\0') {
+        ImGui::TextDisabled("Type to match sample names");
+    } else if (matches.empty()) {
+        ImGui::TextDisabled("No matches");
+    } else {
+        constexpr std::size_t kMaxVisibleMatches = 16;
+        const std::size_t visible_count = std::min(matches.size(), kMaxVisibleMatches);
+        if (ImGui::BeginTable(
+                "sample_name_matches",
+                2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Row", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+            ImGui::TableSetupColumn("Sample name");
+            for (std::size_t visible_index = 0; visible_index < visible_count; ++visible_index) {
+                const std::size_t row = matches[visible_index];
+                if (row >= context->sample_names.size()) {
+                    continue;
+                }
+
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%llu", static_cast<unsigned long long>(row));
+                ImGui::TableSetColumnIndex(1);
+                ImGui::PushID(static_cast<int>(row));
+                if (ImGui::Selectable(context->sample_names[row].c_str(), row == navigation_index)) {
+                    RequestSampleNavigation(SampleNavigationRequest::LocateRow(row));
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        if (matches.size() > visible_count) {
+            ImGui::TextDisabled("+ %llu more", static_cast<unsigned long long>(matches.size() - visible_count));
+        }
+    }
+
+    ImGui::End();
+}
+
+void ShellUi::RenderAnnotationsPanel()
+{
+    ImGui::Begin(kAnnotationsWindow);
+
+    const SampleCollectionContext* context = sample_navigation_.active_context();
+    if (!snapshot_ || context == nullptr || snapshot_->source.path.empty()) {
+        ImGui::TextDisabled("No active source");
+        ImGui::End();
+        return;
+    }
+
+    if (!context->messages.empty()) {
+        for (const std::string& message : context->messages) {
+            ImGui::TextDisabled("%s", message.c_str());
+        }
+        ImGui::Separator();
+    }
+
+    if (context->annotations.empty()) {
+        ImGui::TextDisabled("No read-only annotations");
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginTable(
+            "sample_annotations",
+            2,
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Result");
+        ImGui::TableSetupColumn("Value");
+        ImGui::TableHeadersRow();
+
+        const std::size_t current_index =
+            sample_navigation_.current_index().value_or(snapshot_->collection.current_index);
+        for (const SampleAnnotationResult& annotation : context->annotations) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(annotation.name.c_str());
+            if (ImGui::IsItemHovered()) {
+                const std::string path = NarrowPath(annotation.path);
+                ImGui::SetTooltip("%s", path.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            if (current_index < annotation.values.size()) {
+                ImGui::TextUnformatted(annotation.values[current_index].display_text.c_str());
+            } else {
+                ImGui::TextDisabled("(missing)");
+            }
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
 void ShellUi::RenderInfoTagsPanel()
 {
     ImGui::Begin(kInfoTagsWindow);
@@ -868,28 +1161,6 @@ void ShellUi::RenderInfoTagsPanel()
                 "Spectrum: %llu / %llu",
                 static_cast<unsigned long long>(snapshot_->collection.current_index + 1),
                 static_cast<unsigned long long>(snapshot_->collection.spectrum_count));
-        }
-
-        const bool can_previous = snapshot_->collection.can_move_previous;
-        const bool can_next = snapshot_->collection.can_move_next;
-        if (!can_previous) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Previous")) {
-            SwitchSpectrum(-1);
-        }
-        if (!can_previous) {
-            ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        if (!can_next) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Next")) {
-            SwitchSpectrum(1);
-        }
-        if (!can_next) {
-            ImGui::EndDisabled();
         }
     } else {
         ImGui::TextDisabled("No snapshot");
@@ -965,15 +1236,23 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGuiID right_id = 0;
     ImGuiID files_id = 0;
     ImGuiID info_tags_id = 0;
+    ImGuiID navigation_id = 0;
+    ImGuiID left_lower_id = 0;
+    ImGuiID annotations_id = 0;
+    ImGuiID spectral_lines_id = 0;
 
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, 0.24f, &left_id, &center_id);
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Right, 0.24f, &right_id, &center_id);
-    ImGui::DockBuilderSplitNode(left_id, ImGuiDir_Down, 0.50f, &info_tags_id, &files_id);
+    ImGui::DockBuilderSplitNode(left_id, ImGuiDir_Down, 0.66f, &left_lower_id, &navigation_id);
+    ImGui::DockBuilderSplitNode(left_lower_id, ImGuiDir_Down, 0.50f, &info_tags_id, &files_id);
+    ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.38f, &annotations_id, &spectral_lines_id);
 
     ImGui::DockBuilderDockWindow(kFilesWindow, files_id);
+    ImGui::DockBuilderDockWindow(kNavigationWindow, navigation_id);
+    ImGui::DockBuilderDockWindow(kAnnotationsWindow, annotations_id);
     ImGui::DockBuilderDockWindow(kInfoTagsWindow, info_tags_id);
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);
-    ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), right_id);
+    ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), spectral_lines_id);
     ImGui::DockBuilderFinish(dockspace_id);
 }
 

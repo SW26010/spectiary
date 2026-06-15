@@ -2,11 +2,13 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "plot/spectrum_plot.h"
+#include "ui/sample_navigation_controller.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 
 #include <imgui.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -62,19 +64,28 @@ private:
     void RenderDockHost(const ShellStatus& status);
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
+    void RenderNavigationPanel();
+    void RenderAnnotationsPanel();
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void SetSnapshot(SpectrumSnapshotHandle snapshot);
-    void SwitchSpectrum(int direction);
+    void EnsureSnapshotMatchesNavigation();
+    void LoadActiveSourceAt(std::size_t spectrum_index);
+    void RequestSampleNavigation(const SampleNavigationRequest& request);
+    void SyncNavigationInputs();
+    void SyncSampleNavigationSession();
 
     SpectrumSnapshotHandle snapshot_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
+    SampleNavigationController sample_navigation_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     std::vector<SourceListEntry> sources_;
     std::optional<std::size_t> current_source_index_;
+    std::array<char, 32> row_index_buffer_ = {};
+    std::array<char, 128> sample_name_query_buffer_ = {};
     bool layout_seeded_ = false;
 };
 

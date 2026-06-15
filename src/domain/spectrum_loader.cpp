@@ -1,5 +1,7 @@
 #include "domain/spectrum_loader.h"
 
+#include "domain/sample_annotation_io.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -541,42 +543,12 @@ std::string DecodeNpyString(std::string_view bytes, const NpyStringType& string_
     return decoded;
 }
 
-std::optional<std::filesystem::path> CompanionNamePath(const std::filesystem::path& path)
-{
-    const std::string filename = FileNameToUtf8(path.filename());
-    const std::string lower_filename = LowerAscii(filename);
-
-    struct SuffixRule {
-        std::string_view suffix;
-        std::string_view replacement;
-    };
-    static constexpr std::array<SuffixRule, 4> kRules = {
-        SuffixRule{"_x.npy", "_name.npy"},
-        SuffixRule{"-x.npy", "-name.npy"},
-        SuffixRule{"_flux.npy", "_name.npy"},
-        SuffixRule{"-flux.npy", "-name.npy"},
-    };
-
-    for (const SuffixRule& rule : kRules) {
-        if (lower_filename.ends_with(rule.suffix)) {
-            std::string candidate = filename.substr(0, filename.size() - rule.suffix.size());
-            candidate += rule.replacement;
-            return path.parent_path() / candidate;
-        }
-    }
-
-    if (lower_filename == "x.npy" || lower_filename == "flux.npy") {
-        return path.parent_path() / "name.npy";
-    }
-    return std::nullopt;
-}
-
 std::optional<std::string> ReadNpyNameForRow(
     const std::filesystem::path& spectrum_path,
     std::size_t expected_row_count,
     std::size_t row_index)
 {
-    const std::optional<std::filesystem::path> name_path = CompanionNamePath(spectrum_path);
+    const std::optional<std::filesystem::path> name_path = SampleCollectionCompanionNamePath(spectrum_path);
     if (!name_path) {
         return std::nullopt;
     }
@@ -712,36 +684,7 @@ std::string YLabelForQuantity(SpectrumValueQuantity quantity)
 
 bool IsAuxiliaryNpyArrayName(const std::filesystem::path& path)
 {
-    const std::string filename = LowerAscii(FileNameToUtf8(path));
-    static constexpr std::array<std::string_view, 9> kAuxiliaryNames = {
-        "y.npy",
-        "label.npy",
-        "index.npy",
-        "ormask.npy",
-        "inverse.npy",
-        "known_mask.npy",
-        "ivar.npy",
-        "mask.npy",
-        "name.npy",
-    };
-    static constexpr std::array<std::string_view, 9> kAuxiliarySuffixes = {
-        "_y.npy",
-        "_label.npy",
-        "_index.npy",
-        "_ormask.npy",
-        "_inverse.npy",
-        "_known_mask.npy",
-        "_ivar.npy",
-        "_mask.npy",
-        "_name.npy",
-    };
-
-    return std::any_of(kAuxiliaryNames.begin(), kAuxiliaryNames.end(), [&filename](std::string_view name) {
-               return filename == name;
-           }) ||
-           std::any_of(kAuxiliarySuffixes.begin(), kAuxiliarySuffixes.end(), [&filename](std::string_view suffix) {
-               return filename.ends_with(suffix);
-           });
+    return IsSampleCollectionAuxiliaryNpyArrayName(path);
 }
 
 std::vector<double> MakeXValues(std::size_t column_count, bool has_loglam_grid)
