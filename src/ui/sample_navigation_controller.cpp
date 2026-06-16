@@ -5,8 +5,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
-#include <regex>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -67,43 +67,146 @@ std::string JsonEscape(std::string_view value)
     return escaped;
 }
 
-std::string JsonUnescape(std::string_view value)
+void WriteJsonString(std::ostream& stream, std::string_view value)
 {
-    std::string unescaped;
-    unescaped.reserve(value.size());
-    for (std::size_t index = 0; index < value.size(); ++index) {
-        const char character = value[index];
-        if (character != '\\' || index + 1 >= value.size()) {
-            unescaped.push_back(character);
+    stream << '"' << JsonEscape(value) << '"';
+}
+
+void SkipJsonWhitespace(std::string_view text, std::size_t& position)
+{
+    while (position < text.size()) {
+        const char character = text[position];
+        if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
+            break;
+        }
+        ++position;
+    }
+}
+
+std::optional<std::string> ParseJsonString(std::string_view text, std::size_t& position)
+{
+    SkipJsonWhitespace(text, position);
+    if (position >= text.size() || text[position] != '"') {
+        return std::nullopt;
+    }
+
+    ++position;
+    std::string value;
+    while (position < text.size()) {
+        const char character = text[position++];
+        if (character == '"') {
+            return value;
+        }
+        if (character != '\\') {
+            value.push_back(character);
             continue;
         }
-        const char escaped = value[++index];
+        if (position >= text.size()) {
+            return std::nullopt;
+        }
+        const char escaped = text[position++];
         switch (escaped) {
         case '"':
         case '\\':
         case '/':
-            unescaped.push_back(escaped);
+            value.push_back(escaped);
             break;
         case 'n':
-            unescaped.push_back('\n');
+            value.push_back('\n');
             break;
         case 'r':
-            unescaped.push_back('\r');
+            value.push_back('\r');
             break;
         case 't':
-            unescaped.push_back('\t');
+            value.push_back('\t');
             break;
         default:
-            unescaped.push_back(escaped);
+            value.push_back(escaped);
             break;
         }
     }
-    return unescaped;
+    return std::nullopt;
 }
 
-void WriteJsonString(std::ostream& stream, std::string_view value)
+std::optional<std::size_t> ParseJsonSize(std::string_view text, std::size_t& position)
 {
-    stream << '"' << JsonEscape(value) << '"';
+    SkipJsonWhitespace(text, position);
+    if (position >= text.size() || text[position] < '0' || text[position] > '9') {
+        return std::nullopt;
+    }
+
+    std::size_t value = 0;
+    while (position < text.size() && text[position] >= '0' && text[position] <= '9') {
+        const std::size_t digit = static_cast<std::size_t>(text[position] - '0');
+        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
+            return std::nullopt;
+        }
+        value = value * 10U + digit;
+        ++position;
+    }
+    return value;
+}
+
+std::size_t FindJsonMemberValue(std::string_view text, std::string_view key, std::size_t search_position)
+{
+    std::string token = "\"";
+    token += key;
+    token += "\"";
+
+    while (search_position < text.size()) {
+        const std::size_t key_position = text.find(token, search_position);
+        if (key_position == std::string_view::npos) {
+            return std::string_view::npos;
+        }
+
+        std::size_t position = key_position + token.size();
+        SkipJsonWhitespace(text, position);
+        if (position < text.size() && text[position] == ':') {
+            ++position;
+            SkipJsonWhitespace(text, position);
+            return position;
+        }
+        search_position = key_position + 1;
+    }
+    return std::string_view::npos;
+}
+
+std::optional<std::string> FindJsonStringMember(
+    std::string_view text,
+    std::string_view key,
+    std::size_t search_position,
+    std::size_t& after_value)
+{
+    std::size_t position = FindJsonMemberValue(text, key, search_position);
+    if (position == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    std::optional<std::string> value = ParseJsonString(text, position);
+    if (!value) {
+        return std::nullopt;
+    }
+    after_value = position;
+    return value;
+}
+
+std::optional<std::size_t> FindJsonSizeMember(
+    std::string_view text,
+    std::string_view key,
+    std::size_t search_position,
+    std::size_t& after_value)
+{
+    std::size_t position = FindJsonMemberValue(text, key, search_position);
+    if (position == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    std::optional<std::size_t> value = ParseJsonSize(text, position);
+    if (!value) {
+        return std::nullopt;
+    }
+    after_value = position;
+    return value;
 }
 
 std::unordered_map<std::string, std::size_t> LoadStateCache(const std::filesystem::path& path)
@@ -129,14 +232,22 @@ std::unordered_map<std::string, std::size_t> LoadStateCache(const std::filesyste
         return indices;
     }
 
-    const std::regex item_expression(
-        "\\{\\s*\"identity\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"\\s*,\\s*\"last_index\"\\s*:\\s*([0-9]+)\\s*\\}");
-    for (std::sregex_iterator it(contents.begin(), contents.end(), item_expression), end; it != end; ++it) {
-        const std::string identity = JsonUnescape((*it)[1].str());
-        const std::size_t index = static_cast<std::size_t>(std::stoull((*it)[2].str()));
-        if (!identity.empty()) {
-            indices[identity] = index;
+    std::size_t position = 0;
+    while (position < contents.size()) {
+        std::size_t after_identity = 0;
+        std::optional<std::string> identity =
+            FindJsonStringMember(contents, "identity", position, after_identity);
+        if (!identity) {
+            break;
         }
+
+        std::size_t after_index = 0;
+        std::optional<std::size_t> index =
+            FindJsonSizeMember(contents, "last_index", after_identity, after_index);
+        if (index && !identity->empty()) {
+            indices[*identity] = *index;
+        }
+        position = index ? after_index : after_identity;
     }
     return indices;
 }

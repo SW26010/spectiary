@@ -256,6 +256,48 @@ void TestControllerPersistsLastIndexBySourceIdentity()
     Require(cache_text.find(PathToUtf8(path.parent_path())) == std::string::npos, "cache should not key state by absolute directory path");
 }
 
+void TestControllerLoadsLongFolderIdentityState()
+{
+    const std::filesystem::path folder_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_long_folder_identity";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_long_folder_identity_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder_path, cleanup_error);
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::create_directories(folder_path);
+
+    constexpr std::size_t kSampleCount = 40;
+    for (std::size_t index = 0; index < kSampleCount; ++index) {
+        std::ostringstream name;
+        name << "specforge-long-folder-identity-sample-" << index << "-with-extra-cache-text.csv";
+        std::ofstream stream(folder_path / name.str());
+        Require(stream.good(), "could not write folder identity sample");
+        stream << "wavelength,flux\n5000,1\n5001,2\n";
+    }
+
+    specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(folder_path, "folder:long-identity", kSampleCount, 0);
+    const std::string identity = specforge::BuildSampleCollectionIdentity(*snapshot).id;
+    Require(identity.size() > 1000, "test identity should be long enough to cover regex stack risk");
+
+    {
+        std::ofstream stream(cache_path);
+        Require(stream.good(), "could not write navigation cache fixture");
+        stream << "{\n";
+        stream << "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n";
+        stream << "  \"schema_version\": 1,\n";
+        stream << "  \"sources\": [\n";
+        stream << "    { \"identity\": \"short-source\", \"last_index\": 0 },\n";
+        stream << "    { \"identity\": \"" << identity << "\", \"last_index\": 7 }\n";
+        stream << "  ]\n";
+        stream << "}\n";
+    }
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("folder-source", snapshot);
+    Require(controller.current_index() && *controller.current_index() == 7, "long cached identity should restore index");
+}
+
 void TestRemoveSourceUsesExternalSourceKey()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_remove.npy";
@@ -369,6 +411,7 @@ int main()
     TestControllerOwnsNavigationState();
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerPersistsLastIndexBySourceIdentity();
+    TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
     return 0;
