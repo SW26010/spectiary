@@ -34,7 +34,7 @@ constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
-constexpr float kStatusBarHeight = 28.0f;
+constexpr float kStatusBarSeparatorThickness = 1.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
 enum class ActionIcon {
@@ -75,6 +75,47 @@ std::string PathToUtf8(const std::filesystem::path& path)
 std::string NarrowPath(const std::filesystem::path& path)
 {
     return PathToUtf8(path);
+}
+
+float StatusBarHeight()
+{
+    return kStatusBarSeparatorThickness + ImGui::GetFrameHeight();
+}
+
+void RenderStatusBar(const ShellStatus& status, const ImVec2& size)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const ImVec2 max(min.x + size.x, min.y + size.y);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddLine(
+        min,
+        ImVec2(max.x, min.y),
+        ImGui::GetColorU32(ImGuiCol_Separator),
+        kStatusBarSeparatorThickness);
+
+    const float text_y = min.y + kStatusBarSeparatorThickness +
+                         std::max(
+                             0.0f,
+                             (size.y - kStatusBarSeparatorThickness - ImGui::GetTextLineHeight()) * 0.5f);
+    ImGui::SetCursorScreenPos(ImVec2(min.x + style.FramePadding.x, text_y));
+    ImGui::TextUnformatted("Ready");
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::Text("Frame %llu", static_cast<unsigned long long>(status.frame_index));
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::Text("%ux%u", status.client_width, status.client_height);
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(status.profile_open ? "Profile active" : "Profile off");
+    if (status.profile_open && status.profile_path != nullptr && ImGui::IsItemHovered()) {
+        const std::string profile_path = NarrowPath(*status.profile_path);
+        ImGui::SetTooltip("%s", profile_path.c_str());
+    }
 }
 
 std::string FileNameToUtf8(const std::filesystem::path& path)
@@ -903,7 +944,8 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGuiWindowFlags host_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
-                                  ImGuiWindowFlags_NoDocking;
+                                  ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollbar |
+                                  ImGuiWindowFlags_NoScrollWithMouse;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -911,8 +953,10 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::PopStyleVar(2);
 
     const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
-    ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
-    dockspace_size.y = std::max(0.0f, dockspace_size.y - kStatusBarHeight);
+    const ImVec2 content_origin = ImGui::GetCursorScreenPos();
+    const ImVec2 content_size = ImGui::GetContentRegionAvail();
+    const float status_bar_height = StatusBarHeight();
+    ImVec2 dockspace_size(content_size.x, std::max(0.0f, content_size.y - status_bar_height));
 
     if (!layout_seeded_) {
         layout_seeded_ = true;
@@ -922,26 +966,8 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     }
 
     ImGui::DockSpace(dockspace_id, dockspace_size, ImGuiDockNodeFlags_None);
-
-    ImGui::Separator();
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.0f);
-    ImGui::TextUnformatted("Ready");
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Text("Frame %llu", static_cast<unsigned long long>(status.frame_index));
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Text("%ux%u", status.client_width, status.client_height);
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::TextUnformatted(status.profile_open ? "Profile active" : "Profile off");
-    if (status.profile_open && status.profile_path != nullptr && ImGui::IsItemHovered()) {
-        const std::string profile_path = NarrowPath(*status.profile_path);
-        ImGui::SetTooltip("%s", profile_path.c_str());
-    }
+    ImGui::SetCursorScreenPos(ImVec2(content_origin.x, content_origin.y + dockspace_size.y));
+    RenderStatusBar(status, ImVec2(content_size.x, status_bar_height));
 
     ImGui::End();
 }
