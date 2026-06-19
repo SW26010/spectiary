@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/spectrum_smoothing.h"
 #include "domain/spectrum_snapshot.h"
 #include "overlays/spectral_line_catalog.h"
 
@@ -15,6 +16,12 @@ class ProfileSink;
 struct SpectrumPlotState {
     bool fit_next_frame = true;
     bool show_points = false;
+    bool show_smoothed = false;
+    bool show_raw_when_smoothed = true;
+    SpectrumSmoothingSettings smoothing;
+    SpectrumValueVector smoothing_cache_source;
+    SpectrumSmoothingSettings smoothing_cache_settings;
+    SpectrumValueVector smoothed_y_values;
     bool pan_drag_active = false;
     bool has_profile_limits = false;
     double profiled_x_min = 0.0;

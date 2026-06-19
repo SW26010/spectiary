@@ -63,6 +63,8 @@ add_executable(specforge_native WIN32
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
+    src/domain/spectrum_smoothing.cpp
+    src/domain/spectrum_smoothing.h
     src/main.cpp
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
@@ -198,6 +200,22 @@ else()
 endif()
 
 add_test(NAME specforge_sample_labeling_filter_tests COMMAND specforge_sample_labeling_filter_tests)
+
+add_executable(specforge_spectrum_smoothing_tests
+    tests/spectrum_smoothing_tests.cpp
+    src/domain/spectrum_smoothing.cpp
+    src/domain/spectrum_smoothing.h
+)
+
+target_include_directories(specforge_spectrum_smoothing_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_spectrum_smoothing_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_spectrum_smoothing_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_spectrum_smoothing_tests COMMAND specforge_spectrum_smoothing_tests)
 
 add_executable(specforge_spectral_line_catalog_tests
     tests/spectral_line_catalog_tests.cpp

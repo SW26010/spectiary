@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -34,7 +35,65 @@ bool CanPlotSnapshot(const SpectrumSnapshotHandle& snapshot)
            x_values->size() <= static_cast<std::size_t>(std::numeric_limits<int>::max());
 }
 
-Bounds ComputeBounds(const SpectrumSnapshot& snapshot)
+bool SmoothingActive(const SpectrumPlotState& state)
+{
+    return state.show_smoothed && state.smoothing.method != SpectrumSmoothingMethod::None;
+}
+
+const char* SmoothingLabel(const SpectrumSmoothingSettings& settings)
+{
+    switch (settings.method) {
+    case SpectrumSmoothingMethod::Gaussian:
+        return "Gaussian smoothing";
+    case SpectrumSmoothingMethod::Median:
+        return "Median smoothing";
+    case SpectrumSmoothingMethod::None:
+    default:
+        return "current spectrum";
+    }
+}
+
+SpectrumValueVector SmoothedValuesFor(const SpectrumValueVector& y_values, SpectrumPlotState& state)
+{
+    if (!y_values) {
+        state.smoothing_cache_source.reset();
+        state.smoothed_y_values.reset();
+        return {};
+    }
+
+    const bool cache_valid = state.smoothing_cache_source == y_values &&
+                             state.smoothing_cache_settings == state.smoothing && state.smoothed_y_values &&
+                             state.smoothed_y_values->size() == y_values->size();
+    if (cache_valid) {
+        return state.smoothed_y_values;
+    }
+
+    auto smoothed = std::make_shared<std::vector<double>>(SmoothSpectrumValues(*y_values, state.smoothing));
+    state.smoothing_cache_source = y_values;
+    state.smoothing_cache_settings = state.smoothing;
+    state.smoothed_y_values = std::move(smoothed);
+    return state.smoothed_y_values;
+}
+
+void ExpandYBounds(Bounds& bounds, const std::vector<double>& y_values, bool& has_y_bounds)
+{
+    if (y_values.empty()) {
+        return;
+    }
+
+    const auto [y_min, y_max] = std::minmax_element(y_values.begin(), y_values.end());
+    if (!has_y_bounds) {
+        bounds.y_min = *y_min;
+        bounds.y_max = *y_max;
+        has_y_bounds = true;
+        return;
+    }
+
+    bounds.y_min = std::min(bounds.y_min, *y_min);
+    bounds.y_max = std::max(bounds.y_max, *y_max);
+}
+
+Bounds ComputeBounds(const SpectrumSnapshot& snapshot, SpectrumPlotState& state)
 {
     Bounds bounds;
     const SpectrumValueVector& x_values = snapshot.current_spectrum.x_values;
@@ -44,11 +103,22 @@ Bounds ComputeBounds(const SpectrumSnapshot& snapshot)
     }
 
     const auto [x_min, x_max] = std::minmax_element(x_values->begin(), x_values->end());
-    const auto [y_min, y_max] = std::minmax_element(y_values->begin(), y_values->end());
     bounds.x_min = *x_min;
     bounds.x_max = *x_max;
-    bounds.y_min = *y_min;
-    bounds.y_max = *y_max;
+
+    bool has_y_bounds = false;
+    if (SmoothingActive(state)) {
+        const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
+        if (smoothed_values && smoothed_values->size() == y_values->size()) {
+            ExpandYBounds(bounds, *smoothed_values, has_y_bounds);
+            if (state.show_raw_when_smoothed) {
+                ExpandYBounds(bounds, *y_values, has_y_bounds);
+            }
+        }
+    }
+    if (!has_y_bounds) {
+        ExpandYBounds(bounds, *y_values, has_y_bounds);
+    }
 
     const double y_padding = (bounds.y_max - bounds.y_min) * 0.08;
     if (y_padding > 0.0) {
@@ -217,7 +287,7 @@ void RenderSpectrumPlot(
     }
 
     if (state.fit_next_frame) {
-        const Bounds bounds = ComputeBounds(*snapshot);
+        const Bounds bounds = ComputeBounds(*snapshot, state);
         ImPlot::SetNextAxesLimits(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max, ImPlotCond_Always);
         state.fit_next_frame = false;
     }
@@ -228,24 +298,61 @@ void RenderSpectrumPlot(
         ImPlot::SetupAxis(ImAxis_X1, x_label);
         ImPlot::SetupAxis(ImAxis_Y1, y_label);
 
-        ImPlotSpec spec;
-        spec.LineColor = style.line_color;
-        spec.LineWeight = style.line_weight;
-        spec.MarkerLineColor = spec.LineColor;
-        spec.MarkerFillColor = spec.LineColor;
-        if (state.show_points) {
-            spec.Marker = ImPlotMarker_Circle;
-            spec.MarkerSize = 2.0f;
-        }
         const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
         const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
         const std::string& name = snapshot->current_spectrum.name;
-        ImPlot::PlotLine(
-            name.empty() ? "current spectrum" : name.c_str(),
-            x_values->data(),
-            y_values->data(),
-            static_cast<int>(x_values->size()),
-            spec);
+
+        ImPlotSpec base_spec;
+        base_spec.LineColor = style.line_color;
+        base_spec.LineWeight = style.line_weight;
+        base_spec.MarkerLineColor = base_spec.LineColor;
+        base_spec.MarkerFillColor = base_spec.LineColor;
+
+        if (SmoothingActive(state)) {
+            if (state.show_raw_when_smoothed) {
+                ImPlotSpec raw_spec = base_spec;
+                raw_spec.LineColor.w = 0.30f;
+                raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
+                raw_spec.MarkerLineColor = raw_spec.LineColor;
+                raw_spec.MarkerFillColor = raw_spec.LineColor;
+                ImPlot::PlotLine(
+                    "raw spectrum",
+                    x_values->data(),
+                    y_values->data(),
+                    static_cast<int>(x_values->size()),
+                    raw_spec);
+            }
+
+            const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
+            if (smoothed_values && smoothed_values->size() == x_values->size()) {
+                ImPlotSpec smoothed_spec = base_spec;
+                smoothed_spec.LineColor = ImVec4(0.94f, 0.36f, 0.22f, 1.0f);
+                smoothed_spec.LineWeight = std::max(1.0f, style.line_weight * 1.08f);
+                smoothed_spec.MarkerLineColor = smoothed_spec.LineColor;
+                smoothed_spec.MarkerFillColor = smoothed_spec.LineColor;
+                if (state.show_points) {
+                    smoothed_spec.Marker = ImPlotMarker_Circle;
+                    smoothed_spec.MarkerSize = 2.0f;
+                }
+                ImPlot::PlotLine(
+                    SmoothingLabel(state.smoothing),
+                    x_values->data(),
+                    smoothed_values->data(),
+                    static_cast<int>(x_values->size()),
+                    smoothed_spec);
+            }
+        } else {
+            if (state.show_points) {
+                base_spec.Marker = ImPlotMarker_Circle;
+                base_spec.MarkerSize = 2.0f;
+            }
+            ImPlot::PlotLine(
+                name.empty() ? "current spectrum" : name.c_str(),
+                x_values->data(),
+                y_values->data(),
+                static_cast<int>(x_values->size()),
+                base_spec);
+        }
 
         if (snapshot->capabilities.can_show_spectral_lines) {
             RenderSpectralLineOverlays(overlays);

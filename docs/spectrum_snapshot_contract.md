@@ -83,6 +83,18 @@ tables. `Unknown` axes may show reference overlays only with an explicit warning
 The concrete public line-table schema and UI/plot overlay rules are documented
 in `docs/spectral_line_catalog_contract.md`.
 
+## Display-Only Plot Transforms
+
+Plot smoothing is view state, not a domain filter. It must not mutate
+`current_spectrum.x_values`, `current_spectrum.y_values`, diagnostics, or source
+metadata, and it must not be serialized as part of a `SpectrumSnapshot`.
+
+Gaussian smoothing uses sigma in loaded sample-index units. A sigma value of `2`
+means two adjacent plotted samples, regardless of the x-axis unit or spacing; it
+is not measured in wavelength, Angstrom, pixel coordinate, or any other physical
+x-axis unit. If SpecForge later needs wavelength-width smoothing, that should be
+added as a separate mode with explicit axis-unit semantics.
+
 ## Source Boundaries
 
 The snapshot contract deliberately excludes loader mechanics:

@@ -32,6 +32,7 @@ constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHost
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
+constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr float kStatusBarSeparatorThickness = 1.0f;
@@ -271,6 +272,38 @@ ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
     default:
         return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
     }
+}
+
+int SmoothingMethodIndex(SpectrumSmoothingMethod method)
+{
+    switch (method) {
+    case SpectrumSmoothingMethod::Gaussian:
+        return 1;
+    case SpectrumSmoothingMethod::Median:
+        return 2;
+    case SpectrumSmoothingMethod::None:
+    default:
+        return 0;
+    }
+}
+
+SpectrumSmoothingMethod SmoothingMethodFromIndex(int index)
+{
+    switch (index) {
+    case 1:
+        return SpectrumSmoothingMethod::Gaussian;
+    case 2:
+        return SpectrumSmoothingMethod::Median;
+    case 0:
+    default:
+        return SpectrumSmoothingMethod::None;
+    }
+}
+
+void ClearSmoothingCache(SpectrumPlotState& state)
+{
+    state.smoothing_cache_source.reset();
+    state.smoothed_y_values.reset();
 }
 
 float RelativeLuminance(const ImVec4& color)
@@ -743,6 +776,9 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.annotations) {
         RenderAnnotationsPanel();
     }
+    if (panel_visibility_.smoothing) {
+        RenderSmoothingPanel();
+    }
     RenderMainPlot(status);
     if (panel_visibility_.labeling) {
         RenderLabelingPanel();
@@ -884,8 +920,14 @@ void ShellUi::OpenAnnotationFromFilePicker()
 
 void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
 {
+    const bool show_smoothed = plot_state_.show_smoothed;
+    const bool show_raw_when_smoothed = plot_state_.show_raw_when_smoothed;
+    const SpectrumSmoothingSettings smoothing = plot_state_.smoothing;
     snapshot_ = std::move(snapshot);
     plot_state_ = SpectrumPlotState{};
+    plot_state_.show_smoothed = show_smoothed;
+    plot_state_.show_raw_when_smoothed = show_raw_when_smoothed;
+    plot_state_.smoothing = smoothing;
 }
 
 void ShellUi::EnsureSnapshotMatchesNavigation()
@@ -1082,6 +1124,7 @@ void ShellUi::RenderMainMenuBar()
             panel_visibility_.annotations = true;
             panel_visibility_.labeling = true;
             panel_visibility_.filters = true;
+            panel_visibility_.smoothing = true;
             panel_visibility_.info = true;
             panel_visibility_.spectral_lines = true;
         }
@@ -1091,6 +1134,7 @@ void ShellUi::RenderMainMenuBar()
         ImGui::MenuItem("Annotations", nullptr, &panel_visibility_.annotations);
         ImGui::MenuItem("Labeling", nullptr, &panel_visibility_.labeling);
         ImGui::MenuItem("Filters", nullptr, &panel_visibility_.filters);
+        ImGui::MenuItem("Smoothing", nullptr, &panel_visibility_.smoothing);
         ImGui::MenuItem("Information", nullptr, &panel_visibility_.info);
         ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility_.spectral_lines);
         ImGui::EndMenu();
@@ -1428,6 +1472,79 @@ void ShellUi::RenderFiltersPanel()
         });
 }
 
+void ShellUi::RenderSmoothingPanel()
+{
+    if (!ImGui::Begin(kSmoothingWindow, &panel_visibility_.smoothing)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextUnformatted("Smoothing");
+    ImGui::Separator();
+
+    if (!snapshot_ || !snapshot_->capabilities.can_plot_current_spectrum) {
+        ImGui::TextDisabled("No plottable spectrum");
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Checkbox("Show smoothed curve", &plot_state_.show_smoothed);
+    ImGui::SameLine();
+    if (ImGui::Button("Reset")) {
+        plot_state_.show_smoothed = false;
+        plot_state_.show_raw_when_smoothed = true;
+        plot_state_.smoothing = SpectrumSmoothingSettings{};
+        ClearSmoothingCache(plot_state_);
+    }
+
+    static constexpr const char* kMethodLabels[] = {"None", "Gaussian", "Median"};
+    int method_index = SmoothingMethodIndex(plot_state_.smoothing.method);
+    if (ImGui::Combo("Method", &method_index, kMethodLabels, IM_ARRAYSIZE(kMethodLabels))) {
+        plot_state_.smoothing.method = SmoothingMethodFromIndex(method_index);
+        ClearSmoothingCache(plot_state_);
+    }
+
+    if (plot_state_.smoothing.method == SpectrumSmoothingMethod::Gaussian) {
+        float sigma = static_cast<float>(plot_state_.smoothing.gaussian_sigma);
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::DragFloat("Sigma", &sigma, 0.05f, 0.01f, 100.0f, "%.2f")) {
+            plot_state_.smoothing.gaussian_sigma = std::max(0.01, static_cast<double>(sigma));
+            ClearSmoothingCache(plot_state_);
+        }
+    } else if (plot_state_.smoothing.method == SpectrumSmoothingMethod::Median) {
+        const int normalized_kernel_size = NormalizeMedianKernelSize(plot_state_.smoothing.median_kernel_size);
+        if (normalized_kernel_size != plot_state_.smoothing.median_kernel_size) {
+            plot_state_.smoothing.median_kernel_size = normalized_kernel_size;
+            ClearSmoothingCache(plot_state_);
+        }
+        int kernel_size = plot_state_.smoothing.median_kernel_size;
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::InputInt("Kernel size", &kernel_size, 2, 10)) {
+            plot_state_.smoothing.median_kernel_size = NormalizeMedianKernelSize(kernel_size);
+            ClearSmoothingCache(plot_state_);
+        }
+        const int effective_kernel_size =
+            EffectiveMedianKernelSize(plot_state_.smoothing.median_kernel_size, snapshot_->current_spectrum.point_count);
+        if (effective_kernel_size != plot_state_.smoothing.median_kernel_size) {
+            ImGui::TextDisabled("Effective kernel: %d", effective_kernel_size);
+        }
+    }
+
+    if (plot_state_.smoothing.method == SpectrumSmoothingMethod::None && plot_state_.show_smoothed) {
+        ImGui::TextDisabled("No smoothing method selected");
+    }
+
+    if (!plot_state_.show_smoothed || plot_state_.smoothing.method == SpectrumSmoothingMethod::None) {
+        ImGui::BeginDisabled();
+    }
+    ImGui::Checkbox("Show raw overlay", &plot_state_.show_raw_when_smoothed);
+    if (!plot_state_.show_smoothed || plot_state_.smoothing.method == SpectrumSmoothingMethod::None) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::End();
+}
+
 void ShellUi::RenderInfoTagsPanel()
 {
     if (!ImGui::Begin(kInfoTagsWindow, &panel_visibility_.info)) {
@@ -1521,6 +1638,8 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGuiID right_id = 0;
     ImGuiID files_id = 0;
     ImGuiID info_tags_id = 0;
+    ImGuiID smoothing_id = 0;
+    ImGuiID info_group_id = 0;
     ImGuiID navigation_id = 0;
     ImGuiID left_lower_id = 0;
     ImGuiID annotations_id = 0;
@@ -1532,7 +1651,8 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, 0.24f, &left_id, &center_id);
     ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Right, 0.24f, &right_id, &center_id);
     ImGui::DockBuilderSplitNode(left_id, ImGuiDir_Down, 0.66f, &left_lower_id, &navigation_id);
-    ImGui::DockBuilderSplitNode(left_lower_id, ImGuiDir_Down, 0.50f, &info_tags_id, &files_id);
+    ImGui::DockBuilderSplitNode(left_lower_id, ImGuiDir_Down, 0.50f, &info_group_id, &files_id);
+    ImGui::DockBuilderSplitNode(info_group_id, ImGuiDir_Down, 0.42f, &smoothing_id, &info_tags_id);
     ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.38f, &right_upper_id, &spectral_lines_id);
     ImGui::DockBuilderSplitNode(right_upper_id, ImGuiDir_Down, 0.50f, &labeling_id, &annotations_id);
     ImGui::DockBuilderSplitNode(labeling_id, ImGuiDir_Down, 0.50f, &filters_id, &labeling_id);
@@ -1543,6 +1663,7 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::LabelingWindowName(), labeling_id);
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::FiltersWindowName(), filters_id);
     ImGui::DockBuilderDockWindow(kInfoTagsWindow, info_tags_id);
+    ImGui::DockBuilderDockWindow(kSmoothingWindow, smoothing_id);
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);
     ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), spectral_lines_id);
     ImGui::DockBuilderFinish(dockspace_id);
