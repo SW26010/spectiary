@@ -3,6 +3,7 @@
 #include "domain/spectrum_fixture.h"
 #include "domain/spectrum_loader.h"
 #include "plot/spectrum_plot.h"
+#include "ui/sample_name_autocomplete.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -34,6 +35,7 @@ constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
+constexpr const char* kSampleNavigationNameMatchesWindow = "Sample name matches###SpecForgeSampleNameMatchesV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr float kStatusBarSeparatorThickness = 1.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
@@ -165,6 +167,15 @@ std::optional<std::size_t> ParseRowIndex(std::string_view text)
             return std::nullopt;
         }
         value = value * 10U + digit;
+    }
+    return value;
+}
+
+std::optional<std::size_t> ParseSampleNumber(std::string_view text)
+{
+    const std::optional<std::size_t> value = ParseRowIndex(text);
+    if (!value || *value == 0) {
+        return std::nullopt;
     }
     return value;
 }
@@ -1002,11 +1013,46 @@ void ShellUi::SyncNavigationInputs()
             row_index_buffer_.data(),
             row_index_buffer_.size(),
             "%zu",
-            *navigation_index);
+            *navigation_index + 1);
     } else {
         row_index_buffer_.fill('\0');
     }
-    CopyToBuffer(sample_name_query_buffer_, sample_navigation_.sample_name_query());
+    if (snapshot_) {
+        CopyToBuffer(sample_name_query_buffer_, snapshot_->current_spectrum.name);
+        sample_navigation_.SetSampleNameQuery(snapshot_->current_spectrum.name);
+    } else {
+        sample_name_query_buffer_.fill('\0');
+        sample_navigation_.SetSampleNameQuery({});
+    }
+    ClearSampleNameSearch();
+}
+
+void ShellUi::BeginSampleNameSearch()
+{
+    sample_name_search_active_ = true;
+    sample_name_search_restore_name_ = snapshot_ ? snapshot_->current_spectrum.name : std::string{};
+}
+
+void ShellUi::ClearSampleNameSearch()
+{
+    sample_name_matches_open_ = false;
+    sample_name_search_active_ = false;
+    sample_name_search_restore_name_.clear();
+}
+
+void ShellUi::RestoreFailedSampleNameSearch()
+{
+    CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
+    sample_navigation_.SetSampleNameQuery(sample_name_search_restore_name_);
+    ClearSampleNameSearch();
+}
+
+void ShellUi::CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name)
+{
+    CopyToBuffer(sample_name_query_buffer_, matched_name);
+    sample_navigation_.SetSampleNameQuery(matched_name);
+    (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row));
+    ClearSampleNameSearch();
 }
 
 void ShellUi::SyncSampleWorkflowSession()
@@ -1248,33 +1294,40 @@ void ShellUi::RenderNavigationPanel()
         sample_navigation_.current_index().value_or(snapshot_->collection.current_index);
     const std::size_t navigation_count =
         sample_navigation_.spectrum_count().value_or(snapshot_->collection.spectrum_count);
-    ImGui::Text(
-        "Sample: %llu / %llu",
-        static_cast<unsigned long long>(navigation_index + 1),
-        static_cast<unsigned long long>(navigation_count));
-    ImGui::Text(
-        "Row index: %llu",
-        static_cast<unsigned long long>(navigation_index));
-    if (sample_navigation_.filter_active()) {
-        ImGui::Text(
-            "Filtered: %llu / %llu",
-            static_cast<unsigned long long>(sample_navigation_.filtered_sample_count()),
-            static_cast<unsigned long long>(navigation_count));
-        if (!sample_navigation_.current_sample_in_filter()) {
-            ImGui::TextDisabled("Current sample is outside the active filter");
+
+    ImGui::TextUnformatted("sample:");
+    ImGui::SameLine();
+    const float sample_input_width =
+        std::max(72.0f, ImGui::CalcTextSize("000000").x + ImGui::GetStyle().FramePadding.x * 2.0f);
+    ImGui::SetNextItemWidth(sample_input_width);
+    const bool index_changed = ImGui::InputText(
+        "##SampleNavigationSample",
+        row_index_buffer_.data(),
+        row_index_buffer_.size(),
+        ImGuiInputTextFlags_CharsDecimal);
+    const bool index_deactivated_after_edit = ImGui::IsItemDeactivatedAfterEdit();
+    if (index_changed) {
+        const std::optional<std::size_t> target_sample = ParseSampleNumber(row_index_buffer_.data());
+        if (target_sample && *target_sample <= navigation_count) {
+            const std::size_t target_row = *target_sample - 1;
+            if (target_row != navigation_index) {
+                (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row));
+            }
         }
     }
-    ImGui::TextWrapped(
-        "Current: %s",
-        snapshot_->current_spectrum.name.empty() ? "(unnamed)" : snapshot_->current_spectrum.name.c_str());
-
-    ImGui::Spacing();
+    if (index_deactivated_after_edit) {
+        SyncNavigationInputs();
+    }
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
+    ImGui::SameLine();
     const bool can_previous = sample_navigation_.can_move_previous();
     const bool can_next = sample_navigation_.can_move_next();
+    const ImVec2 sample_step_button_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
     if (!can_previous) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Previous")) {
+    if (ImGui::Button("-##PreviousSample", sample_step_button_size)) {
         (void)RequestSampleNavigation(SampleNavigationRequest::Previous());
     }
     if (!can_previous) {
@@ -1284,100 +1337,117 @@ void ShellUi::RenderNavigationPanel()
     if (!can_next) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Next")) {
+    if (ImGui::Button("+##NextSample", sample_step_button_size)) {
         (void)RequestSampleNavigation(SampleNavigationRequest::Next());
     }
     if (!can_next) {
         ImGui::EndDisabled();
     }
-    if (sample_navigation_.filter_active() && !sample_navigation_.current_sample_in_filter()) {
-        ImGui::TextDisabled("Sequential movement is paused outside the filtered set.");
-    }
 
-    ImGui::Spacing();
-    bool submit_row = ImGui::InputText(
-        "Row index",
-        row_index_buffer_.data(),
-        row_index_buffer_.size(),
-        ImGuiInputTextFlags_EnterReturnsTrue);
+    RenderSampleNameSearch(navigation_index);
+
+    ImGui::End();
+}
+
+void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
+{
+    ImGui::TextUnformatted("name:");
     ImGui::SameLine();
-    const std::optional<std::size_t> target_row = ParseRowIndex(row_index_buffer_.data());
-    const bool can_go_to_row = target_row && *target_row < navigation_count;
-    if (!can_go_to_row) {
-        ImGui::BeginDisabled();
-    }
-    if (ImGui::Button("Go")) {
-        submit_row = true;
-    }
-    if (!can_go_to_row) {
-        ImGui::EndDisabled();
-    }
-    if (submit_row && can_go_to_row) {
-        (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(*target_row));
-    } else if (!row_index_buffer_[0]) {
-        ImGui::TextDisabled("Enter a row index");
-    } else if (!can_go_to_row) {
-        ImGui::TextDisabled("Row is outside this source");
-    }
-
-    ImGui::Spacing();
-    const SampleCollectionContext* context = sample_navigation_.active_context();
-    if (context == nullptr || context->sample_names.empty()) {
-        ImGui::TextDisabled("No source-provided sample names");
-        ImGui::End();
-        return;
-    }
-
-    bool submit_sample_name = ImGui::InputText(
-        "Sample name",
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool sample_name_changed = ImGui::InputText(
+        "##SampleNavigationName",
         sample_name_query_buffer_.data(),
-        sample_name_query_buffer_.size(),
-        ImGuiInputTextFlags_EnterReturnsTrue);
-    if (ImGui::IsItemEdited()) {
-        sample_navigation_.SetSampleNameQuery(sample_name_query_buffer_.data());
+        sample_name_query_buffer_.size());
+    const float sample_name_input_width = ImGui::GetItemRectSize().x;
+    const float sample_name_input_left = ImGui::GetItemRectMin().x;
+    const float sample_name_input_bottom = ImGui::GetItemRectMax().y;
+    const bool sample_name_input_activated = ImGui::IsItemActivated();
+    const bool sample_name_input_active = ImGui::IsItemActive();
+
+    if (sample_name_input_activated || (sample_name_changed && !sample_name_search_active_)) {
+        BeginSampleNameSearch();
     }
-    if (submit_sample_name && sample_name_query_buffer_[0] != '\0') {
-        (void)RequestSampleNavigation(SampleNavigationRequest::LocateSampleName(sample_name_query_buffer_.data()));
+
+    const SampleCollectionContext* context = sample_navigation_.active_context();
+    if (sample_name_changed) {
+        sample_navigation_.SetSampleNameQuery(sample_name_query_buffer_.data());
+        const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
+        const std::string typed_name = sample_name_query_buffer_.data();
+        if (context != nullptr && !context->sample_names.empty() && !typed_name.empty() && !matches.empty()) {
+            const SampleNameAutocompleteEvaluation evaluation =
+                EvaluateSampleNameAutocomplete(context->sample_names, matches, typed_name);
+            if (evaluation.exact_match) {
+                CommitSampleNameSearch(*evaluation.exact_match, context->sample_names[*evaluation.exact_match]);
+                return;
+            }
+            sample_name_matches_open_ = true;
+        } else {
+            sample_name_matches_open_ = false;
+        }
     }
 
     const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
-    if (sample_name_query_buffer_[0] == '\0') {
-        ImGui::TextDisabled("Type to match sample names");
-    } else if (matches.empty()) {
-        ImGui::TextDisabled("No matches");
-    } else {
-        constexpr std::size_t kMaxVisibleMatches = 16;
-        const std::size_t visible_count = std::min(matches.size(), kMaxVisibleMatches);
-        if (ImGui::BeginTable(
-                "sample_name_matches",
-                2,
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("Row", ImGuiTableColumnFlags_WidthFixed, 56.0f);
-            ImGui::TableSetupColumn("Sample name");
-            for (std::size_t visible_index = 0; visible_index < visible_count; ++visible_index) {
-                const std::size_t row = matches[visible_index];
+    const std::string typed_name = sample_name_query_buffer_.data();
+    const SampleNameAutocompleteEvaluation evaluation =
+        context == nullptr ? SampleNameAutocompleteEvaluation{}
+                           : EvaluateSampleNameAutocomplete(context->sample_names, matches, typed_name);
+    const bool has_partial_matches = evaluation.has_partial_matches;
+    if (has_partial_matches && sample_name_input_active) {
+        sample_name_matches_open_ = true;
+    } else if (!has_partial_matches) {
+        sample_name_matches_open_ = false;
+    }
+
+    bool sample_name_dropdown_interacting = false;
+    std::optional<std::size_t> selected_row;
+    std::string selected_name;
+    if (sample_name_matches_open_ && has_partial_matches) {
+        const float row_height = ImGui::GetTextLineHeightWithSpacing();
+        const std::size_t visible_rows = std::min<std::size_t>(matches.size(), 12);
+        const float dropdown_height =
+            row_height * static_cast<float>(visible_rows) + ImGui::GetStyle().WindowPadding.y * 2.0f;
+        const ImVec2 dropdown_min(sample_name_input_left, sample_name_input_bottom);
+        const ImVec2 dropdown_max(
+            sample_name_input_left + sample_name_input_width,
+            sample_name_input_bottom + dropdown_height);
+        sample_name_dropdown_interacting = ImGui::IsMouseHoveringRect(dropdown_min, dropdown_max, false);
+        constexpr ImGuiWindowFlags dropdown_flags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+            ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNavFocus;
+        ImGui::SetNextWindowPos(dropdown_min, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(sample_name_input_width, dropdown_height), ImGuiCond_Always);
+        if (ImGui::Begin(kSampleNavigationNameMatchesWindow, nullptr, dropdown_flags)) {
+            sample_name_dropdown_interacting =
+                sample_name_dropdown_interacting ||
+                ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            for (const std::size_t row : matches) {
                 if (row >= context->sample_names.size()) {
                     continue;
                 }
-
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%llu", static_cast<unsigned long long>(row));
-                ImGui::TableSetColumnIndex(1);
                 ImGui::PushID(static_cast<int>(row));
                 if (ImGui::Selectable(context->sample_names[row].c_str(), row == navigation_index)) {
-                    (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(row));
+                    selected_row = row;
+                    selected_name = context->sample_names[row];
                 }
                 ImGui::PopID();
             }
-            ImGui::EndTable();
         }
-        if (matches.size() > visible_count) {
-            ImGui::TextDisabled("+ %llu more", static_cast<unsigned long long>(matches.size() - visible_count));
-        }
+        ImGui::End();
     }
 
-    ImGui::End();
+    if (selected_row) {
+        CommitSampleNameSearch(*selected_row, selected_name);
+        return;
+    }
+
+    if (ShouldRestoreSampleNameSearch(
+            sample_name_search_active_,
+            selected_row.has_value(),
+            sample_name_input_active,
+            sample_name_dropdown_interacting)) {
+        RestoreFailedSampleNameSearch();
+    }
 }
 
 void ShellUi::RenderAnnotationsPanel()

@@ -82,6 +82,7 @@ private:
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
+    void RenderSampleNameSearch(std::size_t navigation_index);
     void RenderAnnotationsPanel();
     void RenderLabelingPanel();
     void RenderFiltersPanel();
@@ -94,6 +95,10 @@ private:
     void LoadActiveSourceAt(std::size_t spectrum_index);
     [[nodiscard]] SampleNavigationResult RequestSampleNavigation(const SampleNavigationRequest& request);
     void SyncNavigationInputs();
+    void BeginSampleNameSearch();
+    void ClearSampleNameSearch();
+    void RestoreFailedSampleNameSearch();
+    void CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name);
     void SyncSampleNavigationSession();
     void SyncSampleWorkflowSession();
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
@@ -112,6 +117,9 @@ private:
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};
     std::optional<std::string> active_sample_workflow_identity_;
+    bool sample_name_matches_open_ = false;
+    bool sample_name_search_active_ = false;
+    std::string sample_name_search_restore_name_;
     bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
     PanelVisibility panel_visibility_;
