@@ -44,6 +44,10 @@ struct SampleCollectionIdentity {
 };
 
 [[nodiscard]] SampleCollectionContext LoadSampleCollectionContext(const SpectrumSnapshot& snapshot);
+[[nodiscard]] std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPath(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    std::string* error_message = nullptr);
 [[nodiscard]] SampleCollectionIdentity BuildSampleCollectionIdentity(const SpectrumSnapshot& snapshot);
 [[nodiscard]] bool IsSampleCollectionAuxiliaryNpyArrayName(const std::filesystem::path& source_path);
 [[nodiscard]] std::optional<std::filesystem::path> SampleCollectionCompanionNamePath(

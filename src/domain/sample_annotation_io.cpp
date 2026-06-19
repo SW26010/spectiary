@@ -759,6 +759,21 @@ std::vector<std::string> LoadFolderSampleNames(const std::filesystem::path& path
 
 }  // namespace
 
+std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPath(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    std::string* error_message)
+{
+    try {
+        return ReadAnnotationNpyValues(path, expected_count);
+    } catch (const std::exception& error) {
+        if (error_message != nullptr) {
+            *error_message = error.what();
+        }
+        return std::nullopt;
+    }
+}
+
 SampleCollectionContext LoadSampleCollectionContext(const SpectrumSnapshot& snapshot)
 {
     SampleCollectionContext context;

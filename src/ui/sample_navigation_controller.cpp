@@ -38,6 +38,12 @@ std::string LowerAscii(std::string value)
     return value;
 }
 
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 std::string JsonEscape(std::string_view value)
 {
     std::string escaped;
@@ -489,6 +495,45 @@ void SampleNavigationController::RemoveSource(std::string_view source_key)
 void SampleNavigationController::ClearActiveSource()
 {
     active_source_key_.reset();
+}
+
+bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
+    const std::filesystem::path& path,
+    std::string* message)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || session->spectrum_count == 0) {
+        if (message != nullptr) {
+            *message = "No active source can accept sample annotations.";
+        }
+        return false;
+    }
+
+    std::string load_error;
+    std::optional<SampleAnnotationResult> annotation =
+        LoadSampleAnnotationResultFromPath(path, session->spectrum_count, &load_error);
+    if (!annotation) {
+        std::string ignored_message = "Ignored " + PathToUtf8(path.filename()) + ": " + load_error + ".";
+        session->context.messages.push_back(ignored_message);
+        if (message != nullptr) {
+            *message = std::move(ignored_message);
+        }
+        return false;
+    }
+
+    const auto same_path = [&path](const SampleAnnotationResult& existing) {
+        return existing.path == path;
+    };
+    auto existing = std::find_if(session->context.annotations.begin(), session->context.annotations.end(), same_path);
+    if (existing != session->context.annotations.end()) {
+        *existing = std::move(*annotation);
+    } else {
+        session->context.annotations.push_back(std::move(*annotation));
+    }
+    if (message != nullptr) {
+        *message = {};
+    }
+    return true;
 }
 
 SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigationRequest& request)

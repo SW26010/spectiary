@@ -520,6 +520,42 @@ std::optional<std::filesystem::path> ShowSourceFolderPicker()
     return DialogResultPath(dialog.Get());
 }
 
+std::optional<std::filesystem::path> ShowAnnotationFilePicker()
+{
+    ScopedComInitialization com;
+    if (!com.ready()) {
+        return std::nullopt;
+    }
+
+    ComPtr<IFileOpenDialog> dialog;
+    if (!CreateOpenDialog(dialog)) {
+        return std::nullopt;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_FILEMUSTEXIST;
+        dialog->SetOptions(options);
+    }
+
+    static constexpr COMDLG_FILTERSPEC kAnnotationFilters[] = {
+        {L"NumPy annotation arrays", L"*.npy"},
+        {L"All files", L"*.*"},
+    };
+    dialog->SetTitle(L"Open annotation file");
+    dialog->SetFileTypes(
+        static_cast<UINT>(sizeof(kAnnotationFilters) / sizeof(kAnnotationFilters[0])),
+        kAnnotationFilters);
+    dialog->SetFileTypeIndex(1);
+
+    const HRESULT show_result = dialog->Show(GetActiveWindow());
+    if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
+        return std::nullopt;
+    }
+
+    return DialogResultPath(dialog.Get());
+}
+
 std::optional<std::filesystem::path> ShowLabelOutputFilePicker()
 {
     ScopedComInitialization com;
@@ -836,6 +872,16 @@ void ShellUi::OpenSourceFromFolderPicker()
     }
 }
 
+void ShellUi::OpenAnnotationFromFilePicker()
+{
+    if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
+        std::string message;
+        (void)sample_navigation_.AddReadOnlyAnnotationToActiveSource(*path, &message);
+        panel_visibility_.annotations = true;
+        ApplySampleFiltersToNavigation();
+    }
+}
+
 void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
 {
     snapshot_ = std::move(snapshot);
@@ -1014,6 +1060,17 @@ void ShellUi::RenderMainMenuBar()
         }
         if (ImGui::MenuItem("Open Folder...")) {
             OpenSourceFromFolderPicker();
+        }
+        const bool can_open_annotation =
+            sample_navigation_.active_context() != nullptr && sample_navigation_.spectrum_count().value_or(0) > 0;
+        if (!can_open_annotation) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::MenuItem("Open File as Annotation...")) {
+            OpenAnnotationFromFilePicker();
+        }
+        if (!can_open_annotation) {
+            ImGui::EndDisabled();
         }
         ImGui::EndMenu();
     }

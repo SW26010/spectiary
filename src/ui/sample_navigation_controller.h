@@ -54,6 +54,9 @@ public:
     void ActivateSource(std::string source_key, const SpectrumSnapshotHandle& snapshot);
     void RemoveSource(std::string_view source_key);
     void ClearActiveSource();
+    [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
+        const std::filesystem::path& path,
+        std::string* message = nullptr);
 
     [[nodiscard]] SampleNavigationResult Navigate(const SampleNavigationRequest& request);
     [[nodiscard]] std::optional<std::size_t> current_index() const;

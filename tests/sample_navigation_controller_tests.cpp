@@ -230,6 +230,55 @@ void TestControllerReloadsCompanionContextOnReactivate()
     Require(controller.current_index() && *controller.current_index() == 1, "context reload should preserve current index");
 }
 
+void TestControllerAddsManualAnnotationToActiveContext()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_manual_annotation.npy";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_manual_annotation_state.json";
+    const std::filesystem::path annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_manual_annotation_score.npy";
+    const std::filesystem::path mismatched_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_manual_annotation_mismatch.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {2, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({7, -1}));
+    WriteNpy(mismatched_path, "<i4", {1}, BytesFor<std::int32_t>({42}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
+
+    std::string message;
+    Require(
+        controller.AddReadOnlyAnnotationToActiveSource(annotation_path, &message),
+        "manual annotation should attach to active source");
+    const specforge::SampleCollectionContext* context = controller.active_context();
+    Require(context != nullptr, "active context should exist after manual annotation");
+    Require(context->annotations.size() == 1, "manual annotation should be appended");
+    Require(context->annotations[0].name == "specforge_nav_manual_annotation_score.npy", "annotation name should be file name");
+    Require(context->annotations[0].values[0].display_text == "7", "manual annotation should load first value");
+
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({99, 100}));
+    Require(
+        controller.AddReadOnlyAnnotationToActiveSource(annotation_path, &message),
+        "reopened manual annotation should replace same path");
+    context = controller.active_context();
+    Require(context != nullptr, "active context should still exist after replacement");
+    Require(context->annotations.size() == 1, "same annotation path should replace instead of duplicating");
+    Require(context->annotations[0].values[0].display_text == "99", "replacement should refresh annotation values");
+
+    Require(
+        !controller.AddReadOnlyAnnotationToActiveSource(mismatched_path, &message),
+        "mismatched manual annotation should be rejected");
+    context = controller.active_context();
+    Require(context != nullptr, "active context should still exist after rejected annotation");
+    Require(context->annotations.size() == 1, "rejected annotation should not be appended");
+    Require(
+        !context->messages.empty() &&
+            context->messages.back().find("NPY array length does not match") != std::string::npos,
+        "rejected annotation should add a visible context message");
+}
+
 void TestControllerPersistsLastIndexBySourceIdentity()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_persist.npy";
@@ -410,6 +459,7 @@ int main()
 {
     TestControllerOwnsNavigationState();
     TestControllerReloadsCompanionContextOnReactivate();
+    TestControllerAddsManualAnnotationToActiveContext();
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();

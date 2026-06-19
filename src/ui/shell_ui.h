@@ -75,6 +75,7 @@ private:
     void RemoveSource(std::size_t source_index);
     void OpenSourceFromFilePicker();
     void OpenSourceFromFolderPicker();
+    void OpenAnnotationFromFilePicker();
     void RenderDockHost(const ShellStatus& status);
     void RenderMainMenuBar();
     void RenderFilesPanel();
