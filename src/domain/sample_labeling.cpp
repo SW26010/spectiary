@@ -1,5 +1,7 @@
 #include "domain/sample_labeling.h"
 
+#include "domain/npy_array_io.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -54,11 +56,6 @@ void RefreshPendingSaveState(SampleLabelingTask& task)
         task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
         task.save_state.message.clear();
     }
-}
-
-std::string ShapeText(std::size_t value_count)
-{
-    return "(" + std::to_string(value_count) + ",)";
 }
 
 std::filesystem::path TemporaryOutputPath(const std::filesystem::path& path)
@@ -127,45 +124,13 @@ bool WriteInt32NpyFile(const std::filesystem::path& path, const std::vector<int>
         return false;
     }
 
-    std::string header = "{'descr': '<i4', 'fortran_order': False, 'shape': ";
-    header += ShapeText(values.size());
-    header += ", }";
-
-    constexpr std::size_t kPreambleSize = 10;
-    const std::size_t header_with_newline = header.size() + 1;
-    const std::size_t padding = (16 - ((kPreambleSize + header_with_newline) % 16)) % 16;
-    header.append(padding, ' ');
-    header.push_back('\n');
-    if (header.size() > std::numeric_limits<std::uint16_t>::max()) {
+    try {
+        WriteNpyInt32Vector(stream, values);
+    } catch (const NpyArrayError& error) {
         if (error_message != nullptr) {
-            *error_message = "NPY header is too large";
+            *error_message = error.what();
         }
         return false;
-    }
-
-    constexpr std::array<unsigned char, 6> kMagic = {0x93, 'N', 'U', 'M', 'P', 'Y'};
-    stream.write(reinterpret_cast<const char*>(kMagic.data()), static_cast<std::streamsize>(kMagic.size()));
-    constexpr std::array<char, 2> kVersion = {1, 0};
-    stream.write(kVersion.data(), static_cast<std::streamsize>(kVersion.size()));
-
-    const auto header_length = static_cast<std::uint16_t>(header.size());
-    const std::array<char, 2> length_bytes = {
-        static_cast<char>(header_length & 0xffU),
-        static_cast<char>((header_length >> 8U) & 0xffU),
-    };
-    stream.write(length_bytes.data(), static_cast<std::streamsize>(length_bytes.size()));
-    stream.write(header.data(), static_cast<std::streamsize>(header.size()));
-
-    for (const int value : values) {
-        const auto int_value = static_cast<std::int32_t>(value);
-        const auto raw_value = static_cast<std::uint32_t>(int_value);
-        const std::array<unsigned char, 4> bytes = {
-            static_cast<unsigned char>(raw_value & 0xffU),
-            static_cast<unsigned char>((raw_value >> 8U) & 0xffU),
-            static_cast<unsigned char>((raw_value >> 16U) & 0xffU),
-            static_cast<unsigned char>((raw_value >> 24U) & 0xffU),
-        };
-        stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
 
     if (!stream.good()) {
@@ -210,103 +175,39 @@ std::optional<std::vector<int>> ReadInt32Npy(
         return std::nullopt;
     }
 
-    std::array<unsigned char, 6> magic = {};
-    stream.read(reinterpret_cast<char*>(magic.data()), static_cast<std::streamsize>(magic.size()));
-    constexpr std::array<unsigned char, 6> kExpectedMagic = {0x93, 'N', 'U', 'M', 'P', 'Y'};
-    if (!stream.good() || magic != kExpectedMagic) {
-        if (error_message != nullptr) {
-            *error_message = "label output is not an NPY file";
-        }
-        return std::nullopt;
-    }
-
-    std::array<unsigned char, 2> version = {};
-    stream.read(reinterpret_cast<char*>(version.data()), static_cast<std::streamsize>(version.size()));
-    if (!stream.good()) {
-        if (error_message != nullptr) {
-            *error_message = "NPY version header is truncated";
-        }
-        return std::nullopt;
-    }
-
-    std::uint32_t header_length = 0;
-    if (version[0] == 1) {
-        std::array<unsigned char, 2> length_bytes = {};
-        stream.read(reinterpret_cast<char*>(length_bytes.data()), static_cast<std::streamsize>(length_bytes.size()));
-        if (!stream.good()) {
+    try {
+        const NpyHeader header = ReadNpyHeader(stream);
+        const std::optional<NpyScalarType> scalar_type = ParseNpyScalarType(header.descr);
+        if (!scalar_type || scalar_type->kind != NpyScalarKind::SignedInteger || scalar_type->item_size != sizeof(std::int32_t)) {
             if (error_message != nullptr) {
-                *error_message = "NPY v1 header length is truncated";
+                *error_message = "label output is not int32";
             }
             return std::nullopt;
         }
-        header_length =
-            static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[0])) |
-            (static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[1])) << 8U);
-    } else if (version[0] == 2 || version[0] == 3) {
-        std::array<unsigned char, 4> length_bytes = {};
-        stream.read(reinterpret_cast<char*>(length_bytes.data()), static_cast<std::streamsize>(length_bytes.size()));
-        if (!stream.good()) {
+        if (header.shape.size() != 1 || header.shape[0] != expected_count) {
             if (error_message != nullptr) {
-                *error_message = "NPY v2/v3 header length is truncated";
+                *error_message = "label output length does not match this source";
             }
             return std::nullopt;
         }
-        header_length =
-            static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[0])) |
-            (static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[1])) << 8U) |
-            (static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[2])) << 16U) |
-            (static_cast<std::uint32_t>(static_cast<unsigned char>(length_bytes[3])) << 24U);
-    } else {
-        if (error_message != nullptr) {
-            *error_message = "unsupported NPY version";
-        }
-        return std::nullopt;
-    }
 
-    std::string header(header_length, '\0');
-    stream.read(header.data(), static_cast<std::streamsize>(header.size()));
-    if (!stream.good()) {
-        if (error_message != nullptr) {
-            *error_message = "NPY header is truncated";
-        }
-        return std::nullopt;
-    }
+        ValidateNpyPayloadSize(path, header, expected_count, scalar_type->item_size);
+        SeekNpyData(stream, header);
 
-    if (header.find("'descr': '<i4'") == std::string::npos &&
-        header.find("\"descr\": \"<i4\"") == std::string::npos) {
+        const std::vector<std::int32_t> typed_values =
+            ReadNpyTypedValues<std::int32_t>(stream, expected_count, "label output data is truncated");
+        std::vector<int> values;
+        values.reserve(typed_values.size());
+        for (const std::int32_t value : typed_values) {
+            values.push_back(static_cast<int>(value));
+        }
+        return values;
+    } catch (const NpyArrayError& error) {
         if (error_message != nullptr) {
-            *error_message = "label output is not int32";
+            *error_message = error.what();
         }
         return std::nullopt;
     }
-    const std::string expected_shape = "'shape': (" + std::to_string(expected_count) + ",)";
-    const std::string expected_shape_json = "\"shape\": [" + std::to_string(expected_count) + "]";
-    if (header.find(expected_shape) == std::string::npos && header.find(expected_shape_json) == std::string::npos) {
-        if (error_message != nullptr) {
-            *error_message = "label output length does not match this source";
-        }
-        return std::nullopt;
-    }
-
-    std::vector<int> values;
-    values.reserve(expected_count);
-    for (std::size_t index = 0; index < expected_count; ++index) {
-        std::array<unsigned char, 4> bytes = {};
-        stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        if (!stream.good()) {
-            if (error_message != nullptr) {
-                *error_message = "label output data is truncated";
-            }
-            return std::nullopt;
-        }
-        const std::uint32_t raw =
-            static_cast<std::uint32_t>(bytes[0]) |
-            (static_cast<std::uint32_t>(bytes[1]) << 8U) |
-            (static_cast<std::uint32_t>(bytes[2]) << 16U) |
-            (static_cast<std::uint32_t>(bytes[3]) << 24U);
-        values.push_back(static_cast<int>(static_cast<std::int32_t>(raw)));
-    }
-    return values;
 }
 
 }  // namespace
