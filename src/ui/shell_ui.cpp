@@ -698,14 +698,28 @@ void ShellUi::Render(const ShellStatus& status)
     label_shortcut_context_active_ = false;
     spectral_lines_panel_.SetFrameIndex(status.frame_index);
     RenderDockHost(status);
-    RenderFilesPanel();
-    RenderNavigationPanel();
-    RenderAnnotationsPanel();
+    if (panel_visibility_.files) {
+        RenderFilesPanel();
+    }
+    if (panel_visibility_.navigation) {
+        RenderNavigationPanel();
+    }
+    if (panel_visibility_.annotations) {
+        RenderAnnotationsPanel();
+    }
     RenderMainPlot(status);
-    RenderLabelingPanel();
-    RenderFiltersPanel();
-    RenderInfoTagsPanel();
-    RenderSpectralLinesPanel();
+    if (panel_visibility_.labeling) {
+        RenderLabelingPanel();
+    }
+    if (panel_visibility_.filters) {
+        RenderFiltersPanel();
+    }
+    if (panel_visibility_.info) {
+        RenderInfoTagsPanel();
+    }
+    if (panel_visibility_.spectral_lines) {
+        RenderSpectralLinesPanel();
+    }
     sample_labeling_.MaybeSaveStateCache(status.frame_index);
     spectral_lines_panel_.MaybeSaveCache(status.frame_index);
 }
@@ -945,12 +959,14 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
                                   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollbar |
-                                  ImGuiWindowFlags_NoScrollWithMouse;
+                                  ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::Begin(kDockHostWindow, nullptr, host_flags);
     ImGui::PopStyleVar(2);
+
+    RenderMainMenuBar();
 
     const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
     const ImVec2 content_origin = ImGui::GetCursorScreenPos();
@@ -972,9 +988,42 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::End();
 }
 
+void ShellUi::RenderMainMenuBar()
+{
+    if (!ImGui::BeginMenuBar()) {
+        return;
+    }
+
+    if (ImGui::BeginMenu("View")) {
+        if (ImGui::MenuItem("Show all panels")) {
+            panel_visibility_.files = true;
+            panel_visibility_.navigation = true;
+            panel_visibility_.annotations = true;
+            panel_visibility_.labeling = true;
+            panel_visibility_.filters = true;
+            panel_visibility_.info = true;
+            panel_visibility_.spectral_lines = true;
+        }
+        ImGui::Separator();
+        ImGui::MenuItem("Files", nullptr, &panel_visibility_.files);
+        ImGui::MenuItem("Navigation", nullptr, &panel_visibility_.navigation);
+        ImGui::MenuItem("Annotations", nullptr, &panel_visibility_.annotations);
+        ImGui::MenuItem("Labeling", nullptr, &panel_visibility_.labeling);
+        ImGui::MenuItem("Filters", nullptr, &panel_visibility_.filters);
+        ImGui::MenuItem("Information", nullptr, &panel_visibility_.info);
+        ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility_.spectral_lines);
+        ImGui::EndMenu();
+    }
+
+    ImGui::EndMenuBar();
+}
+
 void ShellUi::RenderFilesPanel()
 {
-    ImGui::Begin(kFilesWindow);
+    if (!ImGui::Begin(kFilesWindow, &panel_visibility_.files)) {
+        ImGui::End();
+        return;
+    }
 
     ImGui::TextUnformatted("Files");
     ImGui::Separator();
@@ -1063,7 +1112,10 @@ void ShellUi::RenderFilesPanel()
 
 void ShellUi::RenderNavigationPanel()
 {
-    ImGui::Begin(kNavigationWindow);
+    if (!ImGui::Begin(kNavigationWindow, &panel_visibility_.navigation)) {
+        ImGui::End();
+        return;
+    }
 
     if (!snapshot_ || snapshot_->source.path.empty() || snapshot_->collection.spectrum_count == 0) {
         ImGui::TextDisabled("No active source");
@@ -1209,7 +1261,10 @@ void ShellUi::RenderNavigationPanel()
 
 void ShellUi::RenderAnnotationsPanel()
 {
-    ImGui::Begin(kAnnotationsWindow);
+    if (!ImGui::Begin(kAnnotationsWindow, &panel_visibility_.annotations)) {
+        ImGui::End();
+        return;
+    }
 
     const SampleCollectionContext* context = sample_navigation_.active_context();
     if (!snapshot_ || context == nullptr || snapshot_->source.path.empty()) {
@@ -1271,6 +1326,7 @@ void ShellUi::RenderLabelingPanel()
         sample_navigation_,
         sample_labeling_,
         label_shortcut_context_active_,
+        &panel_visibility_.labeling,
         [this](const SampleNavigationRequest& request) {
             return RequestSampleNavigation(request);
         },
@@ -1289,6 +1345,7 @@ void ShellUi::RenderFiltersPanel()
         sample_navigation_,
         sample_labeling_,
         sample_filters_,
+        &panel_visibility_.filters,
         [this]() {
             ApplySampleFiltersToNavigation();
         });
@@ -1296,7 +1353,10 @@ void ShellUi::RenderFiltersPanel()
 
 void ShellUi::RenderInfoTagsPanel()
 {
-    ImGui::Begin(kInfoTagsWindow);
+    if (!ImGui::Begin(kInfoTagsWindow, &panel_visibility_.info)) {
+        ImGui::End();
+        return;
+    }
 
     ImGui::TextUnformatted("Information");
     ImGui::Separator();
@@ -1368,7 +1428,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
 
 void ShellUi::RenderSpectralLinesPanel()
 {
-    spectral_lines_panel_ui_.Render(spectral_lines_panel_, snapshot_);
+    spectral_lines_panel_ui_.Render(spectral_lines_panel_, snapshot_, &panel_visibility_.spectral_lines);
 }
 
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)

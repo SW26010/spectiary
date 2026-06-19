@@ -57,6 +57,16 @@ private:
         std::size_t last_spectrum_index = 0;
     };
 
+    struct PanelVisibility {
+        bool files = true;
+        bool navigation = true;
+        bool annotations = true;
+        bool labeling = true;
+        bool filters = true;
+        bool info = true;
+        bool spectral_lines = true;
+    };
+
     std::size_t AddOrUpdateSource(
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,
@@ -64,6 +74,7 @@ private:
     void ActivateSource(std::size_t source_index);
     void RemoveSource(std::size_t source_index);
     void RenderDockHost(const ShellStatus& status);
+    void RenderMainMenuBar();
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
@@ -98,6 +109,7 @@ private:
     std::optional<std::string> active_sample_workflow_identity_;
     bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
+    PanelVisibility panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
 };
 

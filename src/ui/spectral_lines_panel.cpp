@@ -53,7 +53,10 @@ const char* SpectralLinesPanelUi::WindowName()
     return kSpectralLinesWindow;
 }
 
-void SpectralLinesPanelUi::Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot)
+void SpectralLinesPanelUi::Render(
+    SpectralLinesPanelController& panel,
+    const SpectrumSnapshotHandle& snapshot,
+    bool* open)
 {
     const SpectralLineCatalog& catalog = panel.catalog();
     const CatalogIdentity& identity = panel.catalog_identity();
@@ -61,7 +64,10 @@ void SpectralLinesPanelUi::Render(SpectralLinesPanelController& panel, const Spe
     CatalogUserState& user_state = panel.user_state();
     std::array<char, 96>& filter = panel.filter_buffer();
 
-    ImGui::Begin(kSpectralLinesWindow);
+    if (!ImGui::Begin(kSpectralLinesWindow, open)) {
+        ImGui::End();
+        return;
+    }
     ImGui::TextUnformatted("Spectral Lines");
     ImGui::Separator();
 

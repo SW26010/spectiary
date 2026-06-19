@@ -30,6 +30,7 @@ public:
         SampleNavigationController& navigation,
         SampleLabelingController& labeling,
         bool plot_shortcut_context_active,
+        bool* open,
         const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
         const std::function<void()>& apply_filters,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
@@ -39,6 +40,7 @@ public:
         SampleNavigationController& navigation,
         SampleLabelingController& labeling,
         SampleFilterController& filters,
+        bool* open,
         const std::function<void()>& apply_filters);
 
 private:

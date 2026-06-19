@@ -14,7 +14,7 @@ class SpectralLinesPanelUi {
 public:
     [[nodiscard]] static const char* WindowName();
 
-    void Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot);
+    void Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot, bool* open);
 
 private:
     std::optional<std::string> renaming_grouping_view_id_;

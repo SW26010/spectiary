@@ -183,11 +183,15 @@ void SampleWorkflowPanelUi::RenderLabeling(
     SampleNavigationController& navigation,
     SampleLabelingController& labeling,
     bool plot_shortcut_context_active,
+    bool* open,
     const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
     const std::function<void()>& apply_filters,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
 {
-    ImGui::Begin(kLabelingWindow);
+    if (!ImGui::Begin(kLabelingWindow, open)) {
+        ImGui::End();
+        return;
+    }
     const bool labeling_context_active =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
@@ -368,9 +372,13 @@ void SampleWorkflowPanelUi::RenderFilters(
     SampleNavigationController& navigation,
     SampleLabelingController& labeling,
     SampleFilterController& filters,
+    bool* open,
     const std::function<void()>& apply_filters)
 {
-    ImGui::Begin(kFiltersWindow);
+    if (!ImGui::Begin(kFiltersWindow, open)) {
+        ImGui::End();
+        return;
+    }
 
     const std::size_t sample_count =
         navigation.spectrum_count().value_or(snapshot ? snapshot->collection.spectrum_count : 0);
