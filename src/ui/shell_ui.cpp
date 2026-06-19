@@ -822,6 +822,20 @@ void ShellUi::RemoveSource(std::size_t source_index)
     }
 }
 
+void ShellUi::OpenSourceFromFilePicker()
+{
+    if (std::optional<std::filesystem::path> path = ShowSourceFilePicker()) {
+        OpenSource(*path);
+    }
+}
+
+void ShellUi::OpenSourceFromFolderPicker()
+{
+    if (std::optional<std::filesystem::path> path = ShowSourceFolderPicker()) {
+        OpenSource(*path);
+    }
+}
+
 void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
 {
     snapshot_ = std::move(snapshot);
@@ -994,6 +1008,16 @@ void ShellUi::RenderMainMenuBar()
         return;
     }
 
+    if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("Open File...")) {
+            OpenSourceFromFilePicker();
+        }
+        if (ImGui::MenuItem("Open Folder...")) {
+            OpenSourceFromFolderPicker();
+        }
+        ImGui::EndMenu();
+    }
+
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Show all panels")) {
             panel_visibility_.files = true;
@@ -1029,15 +1053,11 @@ void ShellUi::RenderFilesPanel()
     ImGui::Separator();
 
     if (ImGui::Button("Add file...")) {
-        if (std::optional<std::filesystem::path> path = ShowSourceFilePicker()) {
-            OpenSource(*path);
-        }
+        OpenSourceFromFilePicker();
     }
     ImGui::SameLine();
     if (ImGui::Button("Add folder...")) {
-        if (std::optional<std::filesystem::path> path = ShowSourceFolderPicker()) {
-            OpenSource(*path);
-        }
+        OpenSourceFromFolderPicker();
     }
     ImGui::SameLine();
     const std::string source_count =

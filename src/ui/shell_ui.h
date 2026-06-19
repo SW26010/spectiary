@@ -73,6 +73,8 @@ private:
         std::size_t spectrum_index);
     void ActivateSource(std::size_t source_index);
     void RemoveSource(std::size_t source_index);
+    void OpenSourceFromFilePicker();
+    void OpenSourceFromFolderPicker();
     void RenderDockHost(const ShellStatus& status);
     void RenderMainMenuBar();
     void RenderFilesPanel();
