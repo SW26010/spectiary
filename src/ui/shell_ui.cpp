@@ -31,7 +31,7 @@ using Microsoft::WRL::ComPtr;
 constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
-constexpr const char* kInfoTagsWindow = "Info & Tags###SpecForgeInfoTagsV2";
+constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr float kStatusBarHeight = 28.0f;
@@ -1305,39 +1305,9 @@ void ShellUi::RenderInfoTagsPanel()
         RenderMetadataLine(
             "Rest-frame correction",
             MetadataValue(snapshot_->source.metadata, "rest_frame_correction_status"));
-        if (snapshot_->collection.spectrum_count > 0) {
-            ImGui::Text(
-                "Spectrum: %llu / %llu",
-                static_cast<unsigned long long>(snapshot_->collection.current_index + 1),
-                static_cast<unsigned long long>(snapshot_->collection.spectrum_count));
-        }
     } else {
         ImGui::TextDisabled("No snapshot");
     }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Tags");
-    ImGui::Separator();
-    if (snapshot_) {
-        bool first_tag = true;
-        for (const SpectrumMetadataEntry& entry : snapshot_->source.metadata) {
-            if (entry.key != "source_type" && entry.key != "format") {
-                continue;
-            }
-            if (!first_tag) {
-                ImGui::SameLine();
-            }
-            first_tag = false;
-            ImGui::SmallButton(entry.value.c_str());
-        }
-        if (first_tag) {
-            ImGui::TextDisabled("No tags");
-        }
-    }
-    ImGui::BeginDisabled();
-    ImGui::SameLine();
-    ImGui::SmallButton("+ tag");
-    ImGui::EndDisabled();
 
     ImGui::Spacing();
     if (ImGui::Button("Fit view")) {
