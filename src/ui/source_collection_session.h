@@ -32,21 +32,6 @@ inline void MergeSourceCollectionSessionAction(
     target.navigation_inputs_changed = target.navigation_inputs_changed || source.navigation_inputs_changed;
 }
 
-struct SourceCollectionNavigationAction {
-    SampleNavigationResult navigation;
-    SourceCollectionSessionAction action;
-};
-
-struct SourceCollectionCommandResult {
-    bool changed = false;
-    SourceCollectionSessionAction action;
-};
-
-struct SourceCollectionAnnotationAction {
-    bool loaded = false;
-    SourceCollectionSessionAction action;
-};
-
 struct SourceCollectionSampleNameMatchView {
     std::size_t row = 0;
     std::string name;
@@ -115,8 +100,116 @@ struct SourceCollectionFilterView {
     std::vector<SourceCollectionFilterSourceView> sources;
 };
 
+struct SourceCollectionSourceView {
+    std::filesystem::path path;
+    std::string display_name;
+    std::string type_label;
+    std::string state_label;
+};
+
+struct SourceCollectionSessionView {
+    SpectrumSnapshotHandle snapshot;
+    std::vector<SourceCollectionSourceView> sources;
+    std::optional<std::size_t> current_source_index;
+    bool can_add_read_only_annotation = false;
+    SourceCollectionNavigationView navigation;
+    SourceCollectionLabelingView labeling;
+    SourceCollectionFilterView filter;
+};
+
+enum class SourceCollectionSessionCommandKind {
+    OpenSource,
+    ActivateSource,
+    RemoveSource,
+    NavigateSample,
+    AddReadOnlyAnnotation,
+    SetSampleNameQuery,
+    CommitSampleNameSelection,
+    CreateDefaultLabelingTask,
+    UpsertActiveLabel,
+    SetActiveLabelingAutoAdvance,
+    SetActiveLabelingSkipLabeledOnAdvance,
+    SetActiveLabelingOutputPath,
+    AssignActiveLabelToCurrentSample,
+    ClearActiveLabelForCurrentSample,
+    ClearFilters,
+    SetFilterValueSelected,
+    SetActiveLabelingFilterSourceSelected,
+};
+
+struct SourceCollectionSessionCommand {
+    [[nodiscard]] static SourceCollectionSessionCommand OpenSource(
+        std::filesystem::path path,
+        std::size_t spectrum_index = 0);
+    [[nodiscard]] static SourceCollectionSessionCommand ActivateSource(std::size_t source_index);
+    [[nodiscard]] static SourceCollectionSessionCommand RemoveSource(std::size_t source_index);
+    [[nodiscard]] static SourceCollectionSessionCommand NavigateSample(SampleNavigationRequest request);
+    [[nodiscard]] static SourceCollectionSessionCommand AddReadOnlyAnnotation(std::filesystem::path path);
+    [[nodiscard]] static SourceCollectionSessionCommand SetSampleNameQuery(std::string query);
+    [[nodiscard]] static SourceCollectionSessionCommand CommitSampleNameSelection(
+        std::size_t target_row,
+        std::string matched_name);
+    [[nodiscard]] static SourceCollectionSessionCommand CreateDefaultLabelingTask();
+    [[nodiscard]] static SourceCollectionSessionCommand UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingAutoAdvance(bool enabled);
+    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
+    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] static SourceCollectionSessionCommand AssignActiveLabelToCurrentSample(int code);
+    [[nodiscard]] static SourceCollectionSessionCommand ClearActiveLabelForCurrentSample();
+    [[nodiscard]] static SourceCollectionSessionCommand ClearFilters();
+    [[nodiscard]] static SourceCollectionSessionCommand SetFilterValueSelected(
+        std::string source_id,
+        std::string value_key,
+        bool selected);
+    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingFilterSourceSelected(bool selected);
+
+private:
+    friend class SourceCollectionSession;
+
+    SourceCollectionSessionCommand() = default;
+
+    SourceCollectionSessionCommandKind kind = SourceCollectionSessionCommandKind::SetSampleNameQuery;
+    std::filesystem::path path;
+    std::size_t spectrum_index = 0;
+    std::size_t source_index = 0;
+    SampleNavigationRequest navigation_request;
+    std::string query;
+    std::size_t target_row = 0;
+    std::string matched_name;
+    SampleLabelDefinition label;
+    bool enabled = false;
+    int label_code = kUnlabeledSampleLabelCode;
+    std::string filter_source_id;
+    std::string filter_value_key;
+    bool selected = false;
+};
+
+struct SourceCollectionSessionResult {
+    SourceCollectionSessionAction action;
+    SourceCollectionSessionView view;
+    SampleNavigationResult navigation;
+    bool changed = false;
+    bool loaded = false;
+    std::string message;
+};
+
 class SourceCollectionSession {
 public:
+    using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
+
+    explicit SourceCollectionSession(SnapshotLoader snapshot_loader);
+    SourceCollectionSession(
+        SnapshotLoader snapshot_loader,
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path);
+
+    [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionCommand command);
+    [[nodiscard]] SourceCollectionSessionView View() const;
+
+    void MaybeSaveStateCaches(std::uint64_t frame_index);
+    [[nodiscard]] bool FlushStateCaches();
+
+private:
     struct SourceListEntry {
         std::filesystem::path path;
         std::string key;
@@ -131,30 +224,28 @@ public:
         std::size_t last_spectrum_index = 0;
     };
 
-    using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
-
-    explicit SourceCollectionSession(SnapshotLoader snapshot_loader);
-    SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
-        std::filesystem::path navigation_state_cache_path,
-        std::filesystem::path labeling_state_cache_path);
-
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction RemoveSource(std::size_t source_index);
-    [[nodiscard]] SourceCollectionNavigationAction RequestSampleNavigation(const SampleNavigationRequest& request);
-    [[nodiscard]] SourceCollectionAnnotationAction AddReadOnlyAnnotationToActiveSource(
+    [[nodiscard]] SourceCollectionSessionAction RequestSampleNavigation(
+        const SampleNavigationRequest& request,
+        SampleNavigationResult* navigation_result = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
+        bool* loaded = nullptr,
         std::string* message = nullptr);
 
     [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
-    [[nodiscard]] SourceCollectionNavigationAction CommitSampleNameSelection(
+    [[nodiscard]] SourceCollectionSessionAction CommitSampleNameSelection(
         std::size_t target_row,
-        std::string matched_name);
+        std::string matched_name,
+        SampleNavigationResult* navigation_result = nullptr);
     [[nodiscard]] SourceCollectionSessionAction CreateDefaultLabelingTask();
-    [[nodiscard]] SourceCollectionCommandResult UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
+        SampleLabelDefinition label,
+        bool* changed = nullptr);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
@@ -171,16 +262,8 @@ public:
     [[nodiscard]] SourceCollectionLabelingView LabelingView() const;
     [[nodiscard]] SourceCollectionFilterView FilterView() const;
     [[nodiscard]] bool can_add_read_only_annotation() const;
-
-    void MaybeSaveStateCaches(std::uint64_t frame_index);
-    [[nodiscard]] bool FlushStateCaches();
-
-    [[nodiscard]] const SpectrumSnapshotHandle& snapshot() const;
-    [[nodiscard]] const std::vector<SourceListEntry>& sources() const;
-    [[nodiscard]] std::optional<std::size_t> current_source_index() const;
     [[nodiscard]] const SourceListEntry* current_source() const;
 
-private:
     [[nodiscard]] std::size_t AddOrUpdateSource(
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,

@@ -60,7 +60,7 @@ private:
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
-    void RenderSampleNameSearch(std::size_t navigation_index);
+    void RenderSampleNameSearch(const SourceCollectionNavigationView& navigation_view);
     void RenderAnnotationsPanel();
     void RenderLabelingPanel();
     void RenderFiltersPanel();
@@ -68,6 +68,7 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
+    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionCommand command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
     void ResetPlotStateForSnapshotChange();
     [[nodiscard]] SampleNavigationResult RequestSampleNavigation(const SampleNavigationRequest& request);

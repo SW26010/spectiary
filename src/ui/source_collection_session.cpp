@@ -134,6 +134,151 @@ SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
 
 }  // namespace
 
+SourceCollectionSessionCommand SourceCollectionSessionCommand::OpenSource(
+    std::filesystem::path path,
+    std::size_t spectrum_index)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::OpenSource;
+    command.path = std::move(path);
+    command.spectrum_index = spectrum_index;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::ActivateSource(std::size_t source_index)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::ActivateSource;
+    command.source_index = source_index;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::RemoveSource(std::size_t source_index)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::RemoveSource;
+    command.source_index = source_index;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::NavigateSample(SampleNavigationRequest request)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::NavigateSample;
+    command.navigation_request = std::move(request);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::AddReadOnlyAnnotation(std::filesystem::path path)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::AddReadOnlyAnnotation;
+    command.path = std::move(path);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetSampleNameQuery(std::string query)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetSampleNameQuery;
+    command.query = std::move(query);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::CommitSampleNameSelection(
+    std::size_t target_row,
+    std::string matched_name)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::CommitSampleNameSelection;
+    command.target_row = target_row;
+    command.matched_name = std::move(matched_name);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::CreateDefaultLabelingTask()
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::CreateDefaultLabelingTask;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::UpsertActiveLabel(SampleLabelDefinition label)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::UpsertActiveLabel;
+    command.label = std::move(label);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingAutoAdvance(bool enabled)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingAutoAdvance;
+    command.enabled = enabled;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingSkipLabeledOnAdvance;
+    command.enabled = enabled;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingOutputPath(
+    std::filesystem::path output_path)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingOutputPath;
+    command.path = std::move(output_path);
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(int code)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::AssignActiveLabelToCurrentSample;
+    command.label_code = code;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::ClearActiveLabelForCurrentSample()
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::ClearActiveLabelForCurrentSample;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::ClearFilters()
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::ClearFilters;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetFilterValueSelected(
+    std::string source_id,
+    std::string value_key,
+    bool selected)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetFilterValueSelected;
+    command.filter_source_id = std::move(source_id);
+    command.filter_value_key = std::move(value_key);
+    command.selected = selected;
+    return command;
+}
+
+SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingFilterSourceSelected(bool selected)
+{
+    SourceCollectionSessionCommand command;
+    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingFilterSourceSelected;
+    command.selected = selected;
+    return command;
+}
+
 SourceCollectionSession::SourceCollectionSession(SnapshotLoader snapshot_loader)
     : snapshot_loader_(std::move(snapshot_loader)),
       snapshot_(MakeSmallSyntheticSpectrumSnapshot())
@@ -149,6 +294,91 @@ SourceCollectionSession::SourceCollectionSession(
       snapshot_loader_(std::move(snapshot_loader)),
       snapshot_(MakeSmallSyntheticSpectrumSnapshot())
 {
+}
+
+SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSessionCommand command)
+{
+    SourceCollectionSessionResult result;
+    switch (command.kind) {
+    case SourceCollectionSessionCommandKind::OpenSource:
+        result.action = OpenSource(command.path, command.spectrum_index);
+        break;
+    case SourceCollectionSessionCommandKind::ActivateSource:
+        result.action = ActivateSource(command.source_index);
+        break;
+    case SourceCollectionSessionCommandKind::RemoveSource:
+        result.action = RemoveSource(command.source_index);
+        break;
+    case SourceCollectionSessionCommandKind::NavigateSample:
+        result.action = RequestSampleNavigation(command.navigation_request, &result.navigation);
+        break;
+    case SourceCollectionSessionCommandKind::AddReadOnlyAnnotation:
+        result.action = AddReadOnlyAnnotationToActiveSource(command.path, &result.loaded, &result.message);
+        break;
+    case SourceCollectionSessionCommandKind::SetSampleNameQuery:
+        result.action = SetSampleNameQuery(std::move(command.query));
+        break;
+    case SourceCollectionSessionCommandKind::CommitSampleNameSelection:
+        result.action =
+            CommitSampleNameSelection(command.target_row, std::move(command.matched_name), &result.navigation);
+        break;
+    case SourceCollectionSessionCommandKind::CreateDefaultLabelingTask:
+        result.action = CreateDefaultLabelingTask();
+        break;
+    case SourceCollectionSessionCommandKind::UpsertActiveLabel:
+        result.action = UpsertActiveLabel(std::move(command.label), &result.changed);
+        break;
+    case SourceCollectionSessionCommandKind::SetActiveLabelingAutoAdvance:
+        result.action = SetActiveLabelingAutoAdvance(command.enabled);
+        break;
+    case SourceCollectionSessionCommandKind::SetActiveLabelingSkipLabeledOnAdvance:
+        result.action = SetActiveLabelingSkipLabeledOnAdvance(command.enabled);
+        break;
+    case SourceCollectionSessionCommandKind::SetActiveLabelingOutputPath:
+        result.action = SetActiveLabelingOutputPath(std::move(command.path));
+        break;
+    case SourceCollectionSessionCommandKind::AssignActiveLabelToCurrentSample:
+        result.action = AssignActiveLabelToCurrentSample(command.label_code);
+        break;
+    case SourceCollectionSessionCommandKind::ClearActiveLabelForCurrentSample:
+        result.action = ClearActiveLabelForCurrentSample();
+        break;
+    case SourceCollectionSessionCommandKind::ClearFilters:
+        result.action = ClearFilters();
+        break;
+    case SourceCollectionSessionCommandKind::SetFilterValueSelected:
+        result.action = SetFilterValueSelected(
+            std::move(command.filter_source_id),
+            std::move(command.filter_value_key),
+            command.selected);
+        break;
+    case SourceCollectionSessionCommandKind::SetActiveLabelingFilterSourceSelected:
+        result.action = SetActiveLabelingFilterSourceSelected(command.selected);
+        break;
+    }
+    result.view = View();
+    return result;
+}
+
+SourceCollectionSessionView SourceCollectionSession::View() const
+{
+    SourceCollectionSessionView view;
+    view.snapshot = snapshot_;
+    view.current_source_index = current_source_index_;
+    view.sources.reserve(sources_.size());
+    for (const SourceListEntry& entry : sources_) {
+        SourceCollectionSourceView source_view;
+        source_view.path = entry.path;
+        source_view.display_name = entry.display_name;
+        source_view.type_label = entry.type_label;
+        source_view.state_label = entry.state_label;
+        view.sources.push_back(std::move(source_view));
+    }
+    view.can_add_read_only_annotation = can_add_read_only_annotation();
+    view.navigation = NavigationView();
+    view.labeling = LabelingView();
+    view.filter = FilterView();
+    return view;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
@@ -213,36 +443,43 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(std::size_t 
     return action;
 }
 
-SourceCollectionNavigationAction SourceCollectionSession::RequestSampleNavigation(
-    const SampleNavigationRequest& request)
+SourceCollectionSessionAction SourceCollectionSession::RequestSampleNavigation(
+    const SampleNavigationRequest& request,
+    SampleNavigationResult* navigation_result)
 {
-    SourceCollectionNavigationAction action;
-    action.navigation = navigation_.Navigate(request);
-    if (action.navigation.has_active_source && action.navigation.target_found &&
-        ShouldRememberLabelingPosition(request.kind)) {
-        (void)labeling_.RememberActivePosition(action.navigation.current_index);
+    SourceCollectionSessionAction action;
+    const SampleNavigationResult navigation = navigation_.Navigate(request);
+    if (navigation_result != nullptr) {
+        *navigation_result = navigation;
     }
-    if (action.navigation.has_active_source && action.navigation.target_found) {
-        if (!snapshot_ || snapshot_->collection.current_index != action.navigation.current_index) {
-            MergeSourceCollectionSessionAction(action.action, LoadActiveSourceAt(action.navigation.current_index));
+    if (navigation.has_active_source && navigation.target_found && ShouldRememberLabelingPosition(request.kind)) {
+        (void)labeling_.RememberActivePosition(navigation.current_index);
+    }
+    if (navigation.has_active_source && navigation.target_found) {
+        if (!snapshot_ || snapshot_->collection.current_index != navigation.current_index) {
+            MergeSourceCollectionSessionAction(action, LoadActiveSourceAt(navigation.current_index));
         } else {
-            action.action.navigation_inputs_changed = true;
+            action.navigation_inputs_changed = true;
         }
     }
     return action;
 }
 
-SourceCollectionAnnotationAction SourceCollectionSession::AddReadOnlyAnnotationToActiveSource(
+SourceCollectionSessionAction SourceCollectionSession::AddReadOnlyAnnotationToActiveSource(
     const std::filesystem::path& path,
+    bool* loaded,
     std::string* message)
 {
-    SourceCollectionAnnotationAction result;
-    result.loaded = navigation_.AddReadOnlyAnnotationToActiveSource(path, message);
-    if (result.loaded) {
-        ApplySampleFilters();
-        result.action.navigation_inputs_changed = true;
+    SourceCollectionSessionAction action;
+    const bool annotation_loaded = navigation_.AddReadOnlyAnnotationToActiveSource(path, message);
+    if (loaded != nullptr) {
+        *loaded = annotation_loaded;
     }
-    return result;
+    if (annotation_loaded) {
+        ApplySampleFilters();
+        action.navigation_inputs_changed = true;
+    }
+    return action;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::SetSampleNameQuery(std::string query)
@@ -251,12 +488,13 @@ SourceCollectionSessionAction SourceCollectionSession::SetSampleNameQuery(std::s
     return {};
 }
 
-SourceCollectionNavigationAction SourceCollectionSession::CommitSampleNameSelection(
+SourceCollectionSessionAction SourceCollectionSession::CommitSampleNameSelection(
     std::size_t target_row,
-    std::string matched_name)
+    std::string matched_name,
+    SampleNavigationResult* navigation_result)
 {
     navigation_.SetSampleNameQuery(std::move(matched_name));
-    return RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row));
+    return RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row), navigation_result);
 }
 
 SourceCollectionSessionAction SourceCollectionSession::CreateDefaultLabelingTask()
@@ -269,15 +507,18 @@ SourceCollectionSessionAction SourceCollectionSession::CreateDefaultLabelingTask
     return action;
 }
 
-SourceCollectionCommandResult SourceCollectionSession::UpsertActiveLabel(SampleLabelDefinition label)
+SourceCollectionSessionAction SourceCollectionSession::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
 {
-    SourceCollectionCommandResult result;
-    result.changed = labeling_.UpsertActiveLabel(std::move(label));
-    if (result.changed) {
-        ApplySampleFilters();
-        result.action.navigation_inputs_changed = true;
+    SourceCollectionSessionAction action;
+    const bool label_changed = labeling_.UpsertActiveLabel(std::move(label));
+    if (changed != nullptr) {
+        *changed = label_changed;
     }
-    return result;
+    if (label_changed) {
+        ApplySampleFilters();
+        action.navigation_inputs_changed = true;
+    }
+    return action;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingAutoAdvance(bool enabled)
@@ -567,21 +808,6 @@ bool SourceCollectionSession::FlushStateCaches()
     return labeling_.FlushStateCache();
 }
 
-const SpectrumSnapshotHandle& SourceCollectionSession::snapshot() const
-{
-    return snapshot_;
-}
-
-const std::vector<SourceCollectionSession::SourceListEntry>& SourceCollectionSession::sources() const
-{
-    return sources_;
-}
-
-std::optional<std::size_t> SourceCollectionSession::current_source_index() const
-{
-    return current_source_index_;
-}
-
 const SourceCollectionSession::SourceListEntry* SourceCollectionSession::current_source() const
 {
     if (!current_source_index_ || *current_source_index_ >= sources_.size()) {
@@ -732,8 +958,7 @@ SourceCollectionSessionAction SourceCollectionSession::ApplyLabelWriteResult(con
     action.navigation_inputs_changed = true;
 
     if (result.advance_requested && task != nullptr) {
-        SourceCollectionNavigationAction navigation_action = RequestSampleNavigation(BuildAutoAdvanceRequest(*task));
-        MergeSourceCollectionSessionAction(action, navigation_action.action);
+        MergeSourceCollectionSessionAction(action, RequestSampleNavigation(BuildAutoAdvanceRequest(*task)));
     }
     return action;
 }

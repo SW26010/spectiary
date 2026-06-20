@@ -141,7 +141,8 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
 }
 
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
-    SourceCollectionSession& session,
+    const SourceCollectionSessionView& session_view,
+    const SourceCollectionCommandSubmitter& submit,
     bool plot_shortcut_context_active,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
@@ -155,7 +156,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
 
-    const SourceCollectionLabelingView labeling_view = session.LabelingView();
+    const SourceCollectionLabelingView labeling_view = session_view.labeling;
     const std::optional<std::size_t> current_index = labeling_view.current_index;
     if (!labeling_view.has_active_source || !current_index) {
         ImGui::TextDisabled("No active source");
@@ -165,7 +166,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
 
     if (!labeling_view.has_active_task) {
         if (ImGui::Button("Create task")) {
-            MergeSourceCollectionSessionAction(action, session.CreateDefaultLabelingTask());
+            MergeSourceCollectionSessionAction(
+                action,
+                submit(SourceCollectionSessionCommand::CreateDefaultLabelingTask()).action);
         }
         ImGui::TextDisabled("No active task");
         ImGui::End();
@@ -189,7 +192,8 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         if (ImGui::Button("Resume")) {
             MergeSourceCollectionSessionAction(
                 action,
-                session.RequestSampleNavigation(SampleNavigationRequest::LocateRow(*labeling_view.remembered_position))
+                submit(SourceCollectionSessionCommand::NavigateSample(
+                           SampleNavigationRequest::LocateRow(*labeling_view.remembered_position)))
                     .action);
         }
     }
@@ -230,7 +234,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     ImGui::Spacing();
     bool auto_advance = labeling_view.auto_advance;
     if (ImGui::Checkbox("Auto-advance", &auto_advance)) {
-        MergeSourceCollectionSessionAction(action, session.SetActiveLabelingAutoAdvance(auto_advance));
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(SourceCollectionSessionCommand::SetActiveLabelingAutoAdvance(auto_advance)).action);
     }
     ImGui::SameLine();
     if (!auto_advance) {
@@ -238,7 +244,10 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     }
     bool skip_labeled_on_advance = labeling_view.skip_labeled_on_advance;
     if (ImGui::Checkbox("Skip labeled", &skip_labeled_on_advance)) {
-        MergeSourceCollectionSessionAction(action, session.SetActiveLabelingSkipLabeledOnAdvance(skip_labeled_on_advance));
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(SourceCollectionSessionCommand::SetActiveLabelingSkipLabeledOnAdvance(skip_labeled_on_advance))
+                .action);
     }
     if (!auto_advance) {
         ImGui::EndDisabled();
@@ -246,7 +255,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     ImGui::SameLine();
     if (ImGui::Button("Choose output...")) {
         if (std::optional<std::filesystem::path> path = choose_output_path()) {
-            MergeSourceCollectionSessionAction(action, session.SetActiveLabelingOutputPath(*path));
+            MergeSourceCollectionSessionAction(
+                action,
+                submit(SourceCollectionSessionCommand::SetActiveLabelingOutputPath(*path)).action);
         }
     }
 
@@ -260,11 +271,11 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     const std::optional<int> new_code = ParseInt(new_label_code_buffer_.data());
     if (ImGui::Button("Add label") && new_code) {
         const char shortcut = new_label_shortcut_buffer_[0];
-        SourceCollectionCommandResult result =
-            session.UpsertActiveLabel(SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut});
+        SourceCollectionSessionResult result = submit(SourceCollectionSessionCommand::UpsertActiveLabel(
+            SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut}));
         MergeSourceCollectionSessionAction(action, result.action);
         if (result.changed) {
-            const SourceCollectionLabelingView refreshed_view = session.LabelingView();
+            const SourceCollectionLabelingView& refreshed_view = result.view.labeling;
             const SampleLabelSet& label_set =
                 refreshed_view.has_active_task ? refreshed_view.label_set : labeling_view.label_set;
             std::snprintf(
@@ -314,16 +325,23 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     }
 
     if (label_code_to_assign) {
-        MergeSourceCollectionSessionAction(action, session.AssignActiveLabelToCurrentSample(*label_code_to_assign));
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(*label_code_to_assign)).action);
     } else if (clear_label_requested) {
-        MergeSourceCollectionSessionAction(action, session.ClearActiveLabelForCurrentSample());
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(SourceCollectionSessionCommand::ClearActiveLabelForCurrentSample()).action);
     }
 
     ImGui::End();
     return action;
 }
 
-SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollectionSession& session, bool* open)
+SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
+    const SourceCollectionSessionView& session_view,
+    const SourceCollectionCommandSubmitter& submit,
+    bool* open)
 {
     SourceCollectionSessionAction action;
     if (!ImGui::Begin(kFiltersWindow, open)) {
@@ -331,7 +349,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollect
         return action;
     }
 
-    SourceCollectionFilterView filter_view = session.FilterView();
+    SourceCollectionFilterView filter_view = session_view.filter;
     if (!filter_view.has_active_source) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
@@ -341,8 +359,10 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollect
     if (filter_view.has_active_labeling_task) {
         bool use_labeling_source = filter_view.active_labeling_filter_source_selected;
         if (ImGui::Checkbox("Use active labeling task", &use_labeling_source)) {
-            MergeSourceCollectionSessionAction(action, session.SetActiveLabelingFilterSourceSelected(use_labeling_source));
-            filter_view = session.FilterView();
+            SourceCollectionSessionResult result =
+                submit(SourceCollectionSessionCommand::SetActiveLabelingFilterSourceSelected(use_labeling_source));
+            MergeSourceCollectionSessionAction(action, result.action);
+            filter_view = result.view.filter;
         }
         if (!use_labeling_source) {
             ImGui::TextDisabled("Labeling task filters are not selected.");
@@ -357,8 +377,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollect
         ImGui::TextDisabled("Current sample is outside the active filter");
     }
     if (ImGui::Button("Clear filters")) {
-        MergeSourceCollectionSessionAction(action, session.ClearFilters());
-        filter_view = session.FilterView();
+        SourceCollectionSessionResult result = submit(SourceCollectionSessionCommand::ClearFilters());
+        MergeSourceCollectionSessionAction(action, result.action);
+        filter_view = result.view.filter;
     }
 
     for (const std::string& message : filter_view.evaluation.messages) {
@@ -385,7 +406,11 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollect
                 if (ImGui::Checkbox(label.c_str(), &selected)) {
                     MergeSourceCollectionSessionAction(
                         action,
-                        session.SetFilterValueSelected(source_view.id, option.key, selected));
+                        submit(SourceCollectionSessionCommand::SetFilterValueSelected(
+                                   source_view.id,
+                                   option.key,
+                                   selected))
+                            .action);
                 }
                 ImGui::PopID();
             }

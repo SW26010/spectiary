@@ -13,6 +13,9 @@
 
 namespace specforge {
 
+using SourceCollectionCommandSubmitter =
+    std::function<SourceCollectionSessionResult(SourceCollectionSessionCommand)>;
+
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();
@@ -21,12 +24,16 @@ public:
     void ResetForSampleWorkflow();
 
     [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
-        SourceCollectionSession& session,
+        const SourceCollectionSessionView& session_view,
+        const SourceCollectionCommandSubmitter& submit,
         bool plot_shortcut_context_active,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderFilters(SourceCollectionSession& session, bool* open);
+    [[nodiscard]] SourceCollectionSessionAction RenderFilters(
+        const SourceCollectionSessionView& session_view,
+        const SourceCollectionCommandSubmitter& submit,
+        bool* open);
 
 private:
     std::array<char, 96> new_label_name_buffer_ = {};

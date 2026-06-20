@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace specforge {
@@ -726,12 +727,12 @@ void ShellUi::RefreshSystemColors()
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    HandleSessionAction(session_.OpenSource(path, spectrum_index));
+    (void)SubmitSessionCommand(SourceCollectionSessionCommand::OpenSource(path, spectrum_index));
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
-    return session_.snapshot();
+    return session_.View().snapshot;
 }
 
 void ShellUi::OpenSourceFromFilePicker()
@@ -751,11 +752,19 @@ void ShellUi::OpenSourceFromFolderPicker()
 void ShellUi::OpenAnnotationFromFilePicker()
 {
     if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
-        std::string message;
-        SourceCollectionAnnotationAction action = session_.AddReadOnlyAnnotationToActiveSource(*path, &message);
-        HandleSessionAction(action.action);
-        panel_visibility_.annotations = true;
+        SourceCollectionSessionResult result =
+            SubmitSessionCommand(SourceCollectionSessionCommand::AddReadOnlyAnnotation(*path));
+        if (result.loaded) {
+            panel_visibility_.annotations = true;
+        }
     }
+}
+
+SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionCommand command)
+{
+    SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    HandleSessionAction(result.action);
+    return result;
 }
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
@@ -784,15 +793,16 @@ void ShellUi::ResetPlotStateForSnapshotChange()
 
 SampleNavigationResult ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
 {
-    SourceCollectionNavigationAction action = session_.RequestSampleNavigation(request);
-    HandleSessionAction(action.action);
-    return action.navigation;
+    SourceCollectionSessionResult result =
+        SubmitSessionCommand(SourceCollectionSessionCommand::NavigateSample(request));
+    return result.navigation;
 }
 
 void ShellUi::SyncNavigationInputs()
 {
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
-    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    const SourceCollectionSessionView view = session_.View();
+    const SpectrumSnapshotHandle& snapshot = view.snapshot;
+    const SourceCollectionNavigationView& navigation = view.navigation;
     const std::optional<std::size_t> navigation_index = navigation.current_index;
     if (navigation_index) {
         std::snprintf(
@@ -805,10 +815,10 @@ void ShellUi::SyncNavigationInputs()
     }
     if (snapshot) {
         CopyToBuffer(sample_name_query_buffer_, snapshot->current_spectrum.name);
-        (void)session_.SetSampleNameQuery(snapshot->current_spectrum.name);
+        (void)session_.Submit(SourceCollectionSessionCommand::SetSampleNameQuery(snapshot->current_spectrum.name));
     } else {
         sample_name_query_buffer_.fill('\0');
-        (void)session_.SetSampleNameQuery({});
+        (void)session_.Submit(SourceCollectionSessionCommand::SetSampleNameQuery({}));
     }
     ClearSampleNameSearch();
 }
@@ -816,7 +826,7 @@ void ShellUi::SyncNavigationInputs()
 void ShellUi::BeginSampleNameSearch()
 {
     sample_name_search_active_ = true;
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SpectrumSnapshotHandle snapshot = session_.View().snapshot;
     sample_name_search_restore_name_ = snapshot ? snapshot->current_spectrum.name : std::string{};
 }
 
@@ -830,15 +840,14 @@ void ShellUi::ClearSampleNameSearch()
 void ShellUi::RestoreFailedSampleNameSearch()
 {
     CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
-    (void)session_.SetSampleNameQuery(sample_name_search_restore_name_);
+    (void)session_.Submit(SourceCollectionSessionCommand::SetSampleNameQuery(sample_name_search_restore_name_));
     ClearSampleNameSearch();
 }
 
 void ShellUi::CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name)
 {
     CopyToBuffer(sample_name_query_buffer_, matched_name);
-    SourceCollectionNavigationAction action = session_.CommitSampleNameSelection(target_row, matched_name);
-    HandleSessionAction(action.action);
+    (void)SubmitSessionCommand(SourceCollectionSessionCommand::CommitSampleNameSelection(target_row, matched_name));
     ClearSampleNameSearch();
 }
 
@@ -895,7 +904,7 @@ void ShellUi::RenderMainMenuBar()
         if (ImGui::MenuItem("Open Folder...")) {
             OpenSourceFromFolderPicker();
         }
-        const bool can_open_annotation = session_.can_add_read_only_annotation();
+        const bool can_open_annotation = session_.View().can_add_read_only_annotation;
         if (!can_open_annotation) {
             ImGui::BeginDisabled();
         }
@@ -952,9 +961,10 @@ void ShellUi::RenderFilesPanel()
         OpenSourceFromFolderPicker();
     }
     ImGui::SameLine();
-    const std::vector<SourceCollectionSession::SourceListEntry>& sources = session_.sources();
-    const std::optional<std::size_t> current_source_index = session_.current_source_index();
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SourceCollectionSessionView view = session_.View();
+    const std::vector<SourceCollectionSourceView>& sources = view.sources;
+    const std::optional<std::size_t> current_source_index = view.current_source_index;
+    const SpectrumSnapshotHandle& snapshot = view.snapshot;
     const std::string source_count =
         std::to_string(sources.size()) + (sources.size() == 1 ? " source" : " sources");
     RenderDisabledText(source_count);
@@ -978,7 +988,7 @@ void ShellUi::RenderFilesPanel()
 
         std::optional<std::size_t> source_to_remove;
         for (std::size_t index = 0; index < sources.size(); ++index) {
-            const SourceCollectionSession::SourceListEntry& entry = sources[index];
+            const SourceCollectionSourceView& entry = sources[index];
             const bool is_current = current_source_index && *current_source_index == index;
 
             ImGui::TableNextRow();
@@ -989,7 +999,7 @@ void ShellUi::RenderFilesPanel()
             ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(index));
             if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
-                HandleSessionAction(session_.ActivateSource(index));
+                (void)SubmitSessionCommand(SourceCollectionSessionCommand::ActivateSource(index));
             }
             if (ImGui::IsItemHovered()) {
                 const std::string path = NarrowPath(entry.path);
@@ -998,13 +1008,13 @@ void ShellUi::RenderFilesPanel()
 
             ImGui::TableSetColumnIndex(1);
             if (TableCellTextButton("type", entry.type_label, ImGui::GetColorU32(ImGuiCol_Text))) {
-                HandleSessionAction(session_.ActivateSource(index));
+                (void)SubmitSessionCommand(SourceCollectionSessionCommand::ActivateSource(index));
             }
 
             ImGui::TableSetColumnIndex(2);
             ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             if (TableCellTextButton("state", entry.state_label, state_color)) {
-                HandleSessionAction(session_.ActivateSource(index));
+                (void)SubmitSessionCommand(SourceCollectionSessionCommand::ActivateSource(index));
             }
 
             ImGui::TableSetColumnIndex(3);
@@ -1019,7 +1029,7 @@ void ShellUi::RenderFilesPanel()
         ImGui::EndTable();
 
         if (source_to_remove) {
-            HandleSessionAction(session_.RemoveSource(*source_to_remove));
+            (void)SubmitSessionCommand(SourceCollectionSessionCommand::RemoveSource(*source_to_remove));
         }
     }
     ImGui::End();
@@ -1032,7 +1042,7 @@ void ShellUi::RenderNavigationPanel()
         return;
     }
 
-    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    const SourceCollectionNavigationView navigation = session_.View().navigation;
     if (!navigation.has_active_source) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
@@ -1091,14 +1101,15 @@ void ShellUi::RenderNavigationPanel()
         ImGui::EndDisabled();
     }
 
-    RenderSampleNameSearch(navigation_index);
+    RenderSampleNameSearch(navigation);
 
     ImGui::End();
 }
 
-void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
+void ShellUi::RenderSampleNameSearch(const SourceCollectionNavigationView& navigation_view)
 {
-    SourceCollectionNavigationView navigation = session_.NavigationView();
+    SourceCollectionNavigationView navigation = navigation_view;
+    const std::size_t navigation_index = navigation.current_index.value_or(0);
     ImGui::TextUnformatted("name:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
@@ -1117,8 +1128,9 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
     }
 
     if (sample_name_changed) {
-        (void)session_.SetSampleNameQuery(sample_name_query_buffer_.data());
-        navigation = session_.NavigationView();
+        SourceCollectionSessionResult result =
+            SubmitSessionCommand(SourceCollectionSessionCommand::SetSampleNameQuery(sample_name_query_buffer_.data()));
+        navigation = result.view.navigation;
         if (navigation.exact_sample_name_match) {
             CommitSampleNameSearch(*navigation.exact_sample_name_match, navigation.exact_sample_name);
             return;
@@ -1193,8 +1205,9 @@ void ShellUi::RenderAnnotationsPanel()
         return;
     }
 
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
-    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    const SourceCollectionSessionView view = session_.View();
+    const SpectrumSnapshotHandle& snapshot = view.snapshot;
+    const SourceCollectionNavigationView& navigation = view.navigation;
     if (!snapshot || !navigation.has_active_source || snapshot->source.path.empty()) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
@@ -1247,8 +1260,12 @@ void ShellUi::RenderAnnotationsPanel()
 
 void ShellUi::RenderLabelingPanel()
 {
+    const SourceCollectionSessionView view = session_.View();
     HandleSessionAction(sample_workflow_panel_ui_.RenderLabeling(
-        session_,
+        view,
+        [this](SourceCollectionSessionCommand command) {
+            return session_.Submit(std::move(command));
+        },
         label_shortcut_context_active_,
         &panel_visibility_.labeling,
         []() {
@@ -1258,7 +1275,13 @@ void ShellUi::RenderLabelingPanel()
 
 void ShellUi::RenderFiltersPanel()
 {
-    HandleSessionAction(sample_workflow_panel_ui_.RenderFilters(session_, &panel_visibility_.filters));
+    const SourceCollectionSessionView view = session_.View();
+    HandleSessionAction(sample_workflow_panel_ui_.RenderFilters(
+        view,
+        [this](SourceCollectionSessionCommand command) {
+            return session_.Submit(std::move(command));
+        },
+        &panel_visibility_.filters));
 }
 
 void ShellUi::RenderSmoothingPanel()
@@ -1271,7 +1294,7 @@ void ShellUi::RenderSmoothingPanel()
     ImGui::TextUnformatted("Smoothing");
     ImGui::Separator();
 
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SpectrumSnapshotHandle snapshot = session_.View().snapshot;
     if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
         ImGui::TextDisabled("No plottable spectrum");
         ImGui::End();
@@ -1344,7 +1367,7 @@ void ShellUi::RenderInfoTagsPanel()
 
     ImGui::TextUnformatted("Information");
     ImGui::Separator();
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SpectrumSnapshotHandle snapshot = session_.View().snapshot;
     if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
         ImGui::Text("Name: %s", current.name.empty() ? "(none)" : current.name.c_str());
@@ -1400,7 +1423,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     label_shortcut_context_active_ =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SpectrumSnapshotHandle snapshot = session_.View().snapshot;
     const std::vector<const SpectralLineMarker*> spectral_lines =
         spectral_lines_panel_.FilteredMarkers(snapshot, false);
     RenderSpectrumPlot(
@@ -1414,7 +1437,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
 
 void ShellUi::RenderSpectralLinesPanel()
 {
-    spectral_lines_panel_ui_.Render(spectral_lines_panel_, session_.snapshot(), &panel_visibility_.spectral_lines);
+    spectral_lines_panel_ui_.Render(spectral_lines_panel_, session_.View().snapshot, &panel_visibility_.spectral_lines);
 }
 
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
