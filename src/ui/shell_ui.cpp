@@ -752,7 +752,8 @@ void ShellUi::OpenAnnotationFromFilePicker()
 {
     if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
         std::string message;
-        (void)session_.AddReadOnlyAnnotationToActiveSource(*path, &message);
+        SourceCollectionAnnotationAction action = session_.AddReadOnlyAnnotationToActiveSource(*path, &message);
+        HandleSessionAction(action.action);
         panel_visibility_.annotations = true;
     }
 }
@@ -791,8 +792,8 @@ SampleNavigationResult ShellUi::RequestSampleNavigation(const SampleNavigationRe
 void ShellUi::SyncNavigationInputs()
 {
     const SpectrumSnapshotHandle& snapshot = session_.snapshot();
-    SampleNavigationController& navigation = session_.navigation();
-    const std::optional<std::size_t> navigation_index = navigation.current_index();
+    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    const std::optional<std::size_t> navigation_index = navigation.current_index;
     if (navigation_index) {
         std::snprintf(
             row_index_buffer_.data(),
@@ -804,10 +805,10 @@ void ShellUi::SyncNavigationInputs()
     }
     if (snapshot) {
         CopyToBuffer(sample_name_query_buffer_, snapshot->current_spectrum.name);
-        navigation.SetSampleNameQuery(snapshot->current_spectrum.name);
+        (void)session_.SetSampleNameQuery(snapshot->current_spectrum.name);
     } else {
         sample_name_query_buffer_.fill('\0');
-        navigation.SetSampleNameQuery({});
+        (void)session_.SetSampleNameQuery({});
     }
     ClearSampleNameSearch();
 }
@@ -829,15 +830,15 @@ void ShellUi::ClearSampleNameSearch()
 void ShellUi::RestoreFailedSampleNameSearch()
 {
     CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
-    session_.navigation().SetSampleNameQuery(sample_name_search_restore_name_);
+    (void)session_.SetSampleNameQuery(sample_name_search_restore_name_);
     ClearSampleNameSearch();
 }
 
 void ShellUi::CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name)
 {
     CopyToBuffer(sample_name_query_buffer_, matched_name);
-    session_.navigation().SetSampleNameQuery(matched_name);
-    (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row));
+    SourceCollectionNavigationAction action = session_.CommitSampleNameSelection(target_row, matched_name);
+    HandleSessionAction(action.action);
     ClearSampleNameSearch();
 }
 
@@ -1031,18 +1032,15 @@ void ShellUi::RenderNavigationPanel()
         return;
     }
 
-    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
-    SampleNavigationController& navigation = session_.navigation();
-    if (!snapshot || snapshot->source.path.empty() || snapshot->collection.spectrum_count == 0) {
+    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    if (!navigation.has_active_source) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return;
     }
 
-    const std::size_t navigation_index =
-        navigation.current_index().value_or(snapshot->collection.current_index);
-    const std::size_t navigation_count =
-        navigation.spectrum_count().value_or(snapshot->collection.spectrum_count);
+    const std::size_t navigation_index = navigation.current_index.value_or(0);
+    const std::size_t navigation_count = navigation.sample_count;
 
     ImGui::TextUnformatted("sample:");
     ImGui::SameLine();
@@ -1070,8 +1068,8 @@ void ShellUi::RenderNavigationPanel()
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
     ImGui::SameLine();
-    const bool can_previous = navigation.can_move_previous();
-    const bool can_next = navigation.can_move_next();
+    const bool can_previous = navigation.can_move_previous;
+    const bool can_next = navigation.can_move_next;
     const ImVec2 sample_step_button_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
     if (!can_previous) {
         ImGui::BeginDisabled();
@@ -1100,7 +1098,7 @@ void ShellUi::RenderNavigationPanel()
 
 void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
 {
-    SampleNavigationController& navigation = session_.navigation();
+    SourceCollectionNavigationView navigation = session_.NavigationView();
     ImGui::TextUnformatted("name:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
@@ -1118,30 +1116,21 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
         BeginSampleNameSearch();
     }
 
-    const SampleCollectionContext* context = navigation.active_context();
     if (sample_name_changed) {
-        navigation.SetSampleNameQuery(sample_name_query_buffer_.data());
-        const std::vector<std::size_t>& matches = navigation.sample_name_matches();
-        const std::string typed_name = sample_name_query_buffer_.data();
-        if (context != nullptr && !context->sample_names.empty() && !typed_name.empty() && !matches.empty()) {
-            const SampleNameAutocompleteEvaluation evaluation =
-                EvaluateSampleNameAutocomplete(context->sample_names, matches, typed_name);
-            if (evaluation.exact_match) {
-                CommitSampleNameSearch(*evaluation.exact_match, context->sample_names[*evaluation.exact_match]);
-                return;
-            }
+        (void)session_.SetSampleNameQuery(sample_name_query_buffer_.data());
+        navigation = session_.NavigationView();
+        if (navigation.exact_sample_name_match) {
+            CommitSampleNameSearch(*navigation.exact_sample_name_match, navigation.exact_sample_name);
+            return;
+        }
+        if (navigation.has_partial_sample_name_matches) {
             sample_name_matches_open_ = true;
         } else {
             sample_name_matches_open_ = false;
         }
     }
 
-    const std::vector<std::size_t>& matches = navigation.sample_name_matches();
-    const std::string typed_name = sample_name_query_buffer_.data();
-    const SampleNameAutocompleteEvaluation evaluation =
-        context == nullptr ? SampleNameAutocompleteEvaluation{}
-                           : EvaluateSampleNameAutocomplete(context->sample_names, matches, typed_name);
-    const bool has_partial_matches = evaluation.has_partial_matches;
+    const bool has_partial_matches = navigation.has_partial_sample_name_matches;
     if (has_partial_matches && sample_name_input_active) {
         sample_name_matches_open_ = true;
     } else if (!has_partial_matches) {
@@ -1153,7 +1142,7 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
     std::string selected_name;
     if (sample_name_matches_open_ && has_partial_matches) {
         const float row_height = ImGui::GetTextLineHeightWithSpacing();
-        const std::size_t visible_rows = std::min<std::size_t>(matches.size(), 12);
+        const std::size_t visible_rows = std::min<std::size_t>(navigation.sample_name_matches.size(), 12);
         const float dropdown_height =
             row_height * static_cast<float>(visible_rows) + ImGui::GetStyle().WindowPadding.y * 2.0f;
         const ImVec2 dropdown_min(sample_name_input_left, sample_name_input_bottom);
@@ -1171,14 +1160,11 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
             sample_name_dropdown_interacting =
                 sample_name_dropdown_interacting ||
                 ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-            for (const std::size_t row : matches) {
-                if (row >= context->sample_names.size()) {
-                    continue;
-                }
-                ImGui::PushID(static_cast<int>(row));
-                if (ImGui::Selectable(context->sample_names[row].c_str(), row == navigation_index)) {
-                    selected_row = row;
-                    selected_name = context->sample_names[row];
+            for (const SourceCollectionSampleNameMatchView& match : navigation.sample_name_matches) {
+                ImGui::PushID(static_cast<int>(match.row));
+                if (ImGui::Selectable(match.name.c_str(), match.row == navigation_index)) {
+                    selected_row = match.row;
+                    selected_name = match.name;
                 }
                 ImGui::PopID();
             }
@@ -1208,22 +1194,21 @@ void ShellUi::RenderAnnotationsPanel()
     }
 
     const SpectrumSnapshotHandle& snapshot = session_.snapshot();
-    const SampleNavigationController& navigation = session_.navigation();
-    const SampleCollectionContext* context = navigation.active_context();
-    if (!snapshot || context == nullptr || snapshot->source.path.empty()) {
+    const SourceCollectionNavigationView navigation = session_.NavigationView();
+    if (!snapshot || !navigation.has_active_source || snapshot->source.path.empty()) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return;
     }
 
-    if (!context->messages.empty()) {
-        for (const std::string& message : context->messages) {
+    if (!navigation.annotation_messages.empty()) {
+        for (const std::string& message : navigation.annotation_messages) {
             ImGui::TextDisabled("%s", message.c_str());
         }
         ImGui::Separator();
     }
 
-    if (context->annotations.empty()) {
+    if (navigation.current_annotations.empty()) {
         ImGui::TextDisabled("No read-only annotations");
         ImGui::End();
         return;
@@ -1237,9 +1222,7 @@ void ShellUi::RenderAnnotationsPanel()
         ImGui::TableSetupColumn("Value");
         ImGui::TableHeadersRow();
 
-        const std::size_t current_index =
-            navigation.current_index().value_or(snapshot->collection.current_index);
-        for (const SampleAnnotationResult& annotation : context->annotations) {
+        for (const SourceCollectionAnnotationValueView& annotation : navigation.current_annotations) {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted(annotation.name.c_str());
@@ -1249,10 +1232,10 @@ void ShellUi::RenderAnnotationsPanel()
             }
 
             ImGui::TableSetColumnIndex(1);
-            if (current_index < annotation.values.size()) {
-                ImGui::TextUnformatted(annotation.values[current_index].display_text.c_str());
-            } else {
+            if (annotation.missing) {
                 ImGui::TextDisabled("(missing)");
+            } else {
+                ImGui::TextUnformatted(annotation.display_text.c_str());
             }
         }
 
@@ -1264,21 +1247,18 @@ void ShellUi::RenderAnnotationsPanel()
 
 void ShellUi::RenderLabelingPanel()
 {
-    sample_workflow_panel_ui_.RenderLabeling(
+    HandleSessionAction(sample_workflow_panel_ui_.RenderLabeling(
         session_,
         label_shortcut_context_active_,
         &panel_visibility_.labeling,
-        [this](const SampleNavigationRequest& request) {
-            return RequestSampleNavigation(request);
-        },
         []() {
             return ShowLabelOutputFilePicker();
-        });
+        }));
 }
 
 void ShellUi::RenderFiltersPanel()
 {
-    sample_workflow_panel_ui_.RenderFilters(session_, &panel_visibility_.filters);
+    HandleSessionAction(sample_workflow_panel_ui_.RenderFilters(session_, &panel_visibility_.filters));
 }
 
 void ShellUi::RenderSmoothingPanel()

@@ -120,20 +120,6 @@ std::string LabelButtonText(const SampleLabelDefinition& label)
     return text;
 }
 
-SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
-{
-    if (!task.skip_labeled_on_advance) {
-        return SampleNavigationRequest::LabelAdvance();
-    }
-
-    std::vector<bool> eligible_samples;
-    eligible_samples.reserve(task.values.size());
-    for (int value : task.values) {
-        eligible_samples.push_back(value == kUnlabeledSampleLabelCode);
-    }
-    return SampleNavigationRequest::LabelAdvanceToEligible(std::move(eligible_samples));
-}
-
 }  // namespace
 
 const char* SampleWorkflowPanelUi::LabelingWindowName()
@@ -154,115 +140,113 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     new_label_shortcut_buffer_.fill('\0');
 }
 
-void SampleWorkflowPanelUi::RenderLabeling(
+SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     SourceCollectionSession& session,
     bool plot_shortcut_context_active,
     bool* open,
-    const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
 {
+    SourceCollectionSessionAction action;
     if (!ImGui::Begin(kLabelingWindow, open)) {
         ImGui::End();
-        return;
+        return action;
     }
     const bool labeling_context_active =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
 
-    const SpectrumSnapshotHandle& snapshot = session.snapshot();
-    SampleNavigationController& navigation = session.navigation();
-    SampleLabelingController& labeling = session.labeling();
-    const std::optional<std::size_t> current_index = navigation.current_index();
-    if (!snapshot || snapshot->source.path.empty() || !current_index) {
+    const SourceCollectionLabelingView labeling_view = session.LabelingView();
+    const std::optional<std::size_t> current_index = labeling_view.current_index;
+    if (!labeling_view.has_active_source || !current_index) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
-        return;
+        return action;
     }
 
-    SampleLabelingTask* task = labeling.active_task();
-    if (task == nullptr) {
+    if (!labeling_view.has_active_task) {
         if (ImGui::Button("Create task")) {
-            task = labeling.CreateTask("manual-labeling", "Manual labeling");
+            MergeSourceCollectionSessionAction(action, session.CreateDefaultLabelingTask());
         }
-        if (task == nullptr) {
-            ImGui::TextDisabled("No active task");
-            ImGui::End();
-            return;
-        }
+        ImGui::TextDisabled("No active task");
+        ImGui::End();
+        return action;
     }
 
-    const int current_code =
-        *current_index < task->values.size() ? task->values[*current_index] : kUnlabeledSampleLabelCode;
-    ImGui::TextUnformatted(task->task_name.c_str());
+    const int current_code = labeling_view.current_code;
+    ImGui::TextUnformatted(labeling_view.task_name.c_str());
     ImGui::Text(
         "Progress: %llu labeled / %llu",
-        static_cast<unsigned long long>(CountLabeledSamples(*task)),
-        static_cast<unsigned long long>(task->values.size()));
-    const std::string current_value = FormatSampleLabelValue(task->label_set, current_code);
+        static_cast<unsigned long long>(labeling_view.labeled_count),
+        static_cast<unsigned long long>(labeling_view.sample_count));
+    const std::string current_value = FormatSampleLabelValue(labeling_view.label_set, current_code);
     ImGui::Text("Current: %s", current_value.c_str());
-    if (task->remembered_position && *task->remembered_position < task->values.size() &&
-        *task->remembered_position != *current_index) {
+    if (labeling_view.remembered_position && *labeling_view.remembered_position < labeling_view.sample_count &&
+        *labeling_view.remembered_position != *current_index) {
         ImGui::Text(
             "Remembered row: %llu",
-            static_cast<unsigned long long>(*task->remembered_position));
+            static_cast<unsigned long long>(*labeling_view.remembered_position));
         ImGui::SameLine();
         if (ImGui::Button("Resume")) {
-            (void)request_navigation(SampleNavigationRequest::LocateRow(*task->remembered_position));
+            MergeSourceCollectionSessionAction(
+                action,
+                session.RequestSampleNavigation(SampleNavigationRequest::LocateRow(*labeling_view.remembered_position))
+                    .action);
         }
     }
 
-    const std::string_view save_state = SaveStateLabel(task->save_state.kind);
-    if (task->save_state.kind == SampleLabelSaveStateKind::Pending ||
-        task->save_state.kind == SampleLabelSaveStateKind::Failed) {
+    const std::string_view save_state = SaveStateLabel(labeling_view.save_state.kind);
+    if (labeling_view.save_state.kind == SampleLabelSaveStateKind::Pending ||
+        labeling_view.save_state.kind == SampleLabelSaveStateKind::Failed) {
         ImGui::Text(
             "Save: %.*s (%llu)",
             static_cast<int>(save_state.size()),
             save_state.data(),
-            static_cast<unsigned long long>(task->save_state.pending_count));
+            static_cast<unsigned long long>(labeling_view.save_state.pending_count));
     } else {
         ImGui::Text("Save: %.*s", static_cast<int>(save_state.size()), save_state.data());
     }
-    if (!task->save_state.message.empty()) {
-        ImGui::TextDisabled("%s", task->save_state.message.c_str());
+    if (!labeling_view.save_state.message.empty()) {
+        ImGui::TextDisabled("%s", labeling_view.save_state.message.c_str());
     }
-    if (labeling.state_save_failed()) {
-        const std::string_view error = labeling.state_save_error();
+    if (labeling_view.state_save_failed) {
+        const std::string_view error = labeling_view.state_save_error;
         ImGui::TextDisabled(
             "Local task record: %.*s",
             static_cast<int>(error.size()),
             error.data());
     }
-    if (!labeling.state_load_warning().empty()) {
-        const std::string_view warning = labeling.state_load_warning();
+    if (!labeling_view.state_load_warning.empty()) {
+        const std::string_view warning = labeling_view.state_load_warning;
         ImGui::TextDisabled(
             "Local task record: %.*s",
             static_cast<int>(warning.size()),
             warning.data());
     }
-    if (task->output_path) {
-        const std::string path = PathToUtf8(*task->output_path);
+    if (labeling_view.output_path) {
+        const std::string path = PathToUtf8(*labeling_view.output_path);
         ImGui::TextDisabled("%s", path.c_str());
     }
 
     ImGui::Spacing();
-    if (ImGui::Checkbox("Auto-advance", &task->auto_advance)) {
-        (void)labeling.PersistActiveTaskRecord();
+    bool auto_advance = labeling_view.auto_advance;
+    if (ImGui::Checkbox("Auto-advance", &auto_advance)) {
+        MergeSourceCollectionSessionAction(action, session.SetActiveLabelingAutoAdvance(auto_advance));
     }
     ImGui::SameLine();
-    if (!task->auto_advance) {
+    if (!auto_advance) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Checkbox("Skip labeled", &task->skip_labeled_on_advance)) {
-        (void)labeling.PersistActiveTaskRecord();
+    bool skip_labeled_on_advance = labeling_view.skip_labeled_on_advance;
+    if (ImGui::Checkbox("Skip labeled", &skip_labeled_on_advance)) {
+        MergeSourceCollectionSessionAction(action, session.SetActiveLabelingSkipLabeledOnAdvance(skip_labeled_on_advance));
     }
-    if (!task->auto_advance) {
+    if (!auto_advance) {
         ImGui::EndDisabled();
     }
     ImGui::SameLine();
     if (ImGui::Button("Choose output...")) {
         if (std::optional<std::filesystem::path> path = choose_output_path()) {
-            (void)labeling.SetActiveTaskOutputPath(*path);
-            (void)labeling.PersistActiveTask();
+            MergeSourceCollectionSessionAction(action, session.SetActiveLabelingOutputPath(*path));
         }
     }
 
@@ -276,36 +260,41 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::optional<int> new_code = ParseInt(new_label_code_buffer_.data());
     if (ImGui::Button("Add label") && new_code) {
         const char shortcut = new_label_shortcut_buffer_[0];
-        if (labeling.UpsertActiveLabel(SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut})) {
+        SourceCollectionCommandResult result =
+            session.UpsertActiveLabel(SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut});
+        MergeSourceCollectionSessionAction(action, result.action);
+        if (result.changed) {
+            const SourceCollectionLabelingView refreshed_view = session.LabelingView();
+            const SampleLabelSet& label_set =
+                refreshed_view.has_active_task ? refreshed_view.label_set : labeling_view.label_set;
             std::snprintf(
                 new_label_code_buffer_.data(),
                 new_label_code_buffer_.size(),
                 "%d",
-                NextAvailableSampleLabelCode(task->label_set));
+                NextAvailableSampleLabelCode(label_set));
             new_label_shortcut_buffer_.fill('\0');
-            session.ApplySampleFilters();
         }
     }
 
     ImGui::Separator();
-    bool wrote_label = false;
-    SampleLabelWriteResult write_result;
-    for (const SampleLabelDefinition& label : task->label_set.labels) {
+    std::optional<int> label_code_to_assign;
+    bool clear_label_requested = false;
+    for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
         if (IsLabelShortcutPressed(label.shortcut, labeling_context_active || plot_shortcut_context_active)) {
-            write_result = labeling.AssignLabel(*current_index, label.code);
-            wrote_label = write_result.changed;
+            label_code_to_assign = label.code;
+            clear_label_requested = false;
         }
     }
 
-    for (const SampleLabelDefinition& label : task->label_set.labels) {
+    for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
         const bool selected = current_code == label.code;
         if (selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_Header));
         }
         const std::string text = LabelButtonText(label);
         if (ImGui::Button(text.c_str())) {
-            write_result = labeling.AssignLabel(*current_index, label.code);
-            wrote_label = write_result.changed;
+            label_code_to_assign = label.code;
+            clear_label_requested = false;
         }
         if (selected) {
             ImGui::PopStyleColor();
@@ -317,100 +306,86 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("Clear")) {
-        write_result = labeling.ClearLabel(*current_index);
-        wrote_label = write_result.changed;
+        label_code_to_assign.reset();
+        clear_label_requested = true;
     }
     if (clear_disabled) {
         ImGui::EndDisabled();
     }
 
-    if (wrote_label) {
-        const std::optional<SampleNavigationRequest> advance_request =
-            write_result.advance_requested ? std::optional<SampleNavigationRequest>(BuildAutoAdvanceRequest(*task))
-                                           : std::nullopt;
-        if (task->output_path) {
-            (void)labeling.PersistActiveTask();
-        }
-        if (advance_request) {
-            (void)request_navigation(*advance_request);
-        }
-        session.ApplySampleFilters();
+    if (label_code_to_assign) {
+        MergeSourceCollectionSessionAction(action, session.AssignActiveLabelToCurrentSample(*label_code_to_assign));
+    } else if (clear_label_requested) {
+        MergeSourceCollectionSessionAction(action, session.ClearActiveLabelForCurrentSample());
     }
 
     ImGui::End();
+    return action;
 }
 
-void SampleWorkflowPanelUi::RenderFilters(SourceCollectionSession& session, bool* open)
+SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(SourceCollectionSession& session, bool* open)
 {
+    SourceCollectionSessionAction action;
     if (!ImGui::Begin(kFiltersWindow, open)) {
         ImGui::End();
-        return;
+        return action;
     }
 
-    const SpectrumSnapshotHandle& snapshot = session.snapshot();
-    SampleNavigationController& navigation = session.navigation();
-    SampleLabelingController& labeling = session.labeling();
-    const std::size_t sample_count =
-        navigation.spectrum_count().value_or(snapshot ? snapshot->collection.spectrum_count : 0);
-    if (!snapshot || snapshot->source.path.empty() || sample_count == 0) {
+    SourceCollectionFilterView filter_view = session.FilterView();
+    if (!filter_view.has_active_source) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
-        return;
+        return action;
     }
 
-    if (labeling.active_task() != nullptr) {
-        bool use_labeling_source = session.active_labeling_filter_source_selected();
+    if (filter_view.has_active_labeling_task) {
+        bool use_labeling_source = filter_view.active_labeling_filter_source_selected;
         if (ImGui::Checkbox("Use active labeling task", &use_labeling_source)) {
-            session.SetActiveLabelingFilterSourceSelected(use_labeling_source);
+            MergeSourceCollectionSessionAction(action, session.SetActiveLabelingFilterSourceSelected(use_labeling_source));
+            filter_view = session.FilterView();
         }
         if (!use_labeling_source) {
             ImGui::TextDisabled("Labeling task filters are not selected.");
         }
     }
 
-    const std::vector<SampleFilterSource> sources = session.BuildSampleFilterSources();
-    const SampleFilterEvaluation evaluation = session.EvaluateSampleFilters();
     ImGui::Text(
         "Visible: %llu / %llu",
-        static_cast<unsigned long long>(evaluation.included_count),
-        static_cast<unsigned long long>(sample_count));
-    if (navigation.filter_active() && !navigation.current_sample_in_filter()) {
+        static_cast<unsigned long long>(filter_view.evaluation.included_count),
+        static_cast<unsigned long long>(filter_view.sample_count));
+    if (filter_view.navigation_filter_active && !filter_view.current_sample_in_filter) {
         ImGui::TextDisabled("Current sample is outside the active filter");
     }
     if (ImGui::Button("Clear filters")) {
-        session.ClearFilters();
+        MergeSourceCollectionSessionAction(action, session.ClearFilters());
+        filter_view = session.FilterView();
     }
 
-    for (const std::string& message : evaluation.messages) {
+    for (const std::string& message : filter_view.evaluation.messages) {
         ImGui::TextDisabled("%s", message.c_str());
     }
 
     ImGui::Separator();
     bool has_filterable_source = false;
-    for (const SampleFilterSource& source : sources) {
-        if (!source.filterable) {
+    for (const SourceCollectionFilterSourceView& source_view : filter_view.sources) {
+        if (!source_view.filterable) {
             continue;
         }
         has_filterable_source = true;
-        const SampleFilterCondition* condition = session.filters().FindCondition(source.id);
-        std::unordered_set<std::string> selected_values =
-            condition == nullptr ? std::unordered_set<std::string>{} : condition->allowed_value_keys;
 
-        ImGui::PushID(source.id.c_str());
-        if (ImGui::TreeNodeEx(source.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-            for (const SampleFilterValueOption& option : source.options) {
-                bool selected = selected_values.find(option.key) != selected_values.end();
+        ImGui::PushID(source_view.id.c_str());
+        if (ImGui::TreeNodeEx(source_view.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (const SampleFilterValueOption& option : source_view.options) {
+                bool selected = source_view.selected_value_keys.find(option.key) !=
+                                source_view.selected_value_keys.end();
                 std::string label = option.display_text;
                 label += "  ";
                 label += std::to_string(option.sample_count);
                 ImGui::PushID(option.key.c_str());
                 if (ImGui::Checkbox(label.c_str(), &selected)) {
-                    if (selected) {
-                        selected_values.insert(option.key);
-                    } else {
-                        selected_values.erase(option.key);
-                    }
-                    session.SetFilterCondition(source.id, selected_values);
+                    MergeSourceCollectionSessionAction(
+                        action,
+                        session.SetFilterValueSelected(source_view.id, option.key, selected));
                 }
                 ImGui::PopID();
             }
@@ -424,6 +399,7 @@ void SampleWorkflowPanelUi::RenderFilters(SourceCollectionSession& session, bool
     }
 
     ImGui::End();
+    return action;
 }
 
 }  // namespace specforge

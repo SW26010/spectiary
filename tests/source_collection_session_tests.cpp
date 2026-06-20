@@ -83,8 +83,8 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(session.sources().size() == 1, "opening a source should add one source entry");
     Require(session.snapshot()->collection.current_index == 0, "opened snapshot should start at requested index");
 
-    specforge::SampleLabelingTask* task = session.labeling().CreateTask("manual-labeling", "Manual labeling");
-    Require(task != nullptr, "active source should accept a labeling task");
+    (void)session.CreateDefaultLabelingTask();
+    Require(session.LabelingView().has_active_task, "active source should accept a labeling task");
 
     const specforge::SourceCollectionNavigationAction next_action =
         session.RequestSampleNavigation(specforge::SampleNavigationRequest::Next());
@@ -94,14 +94,40 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(next_action.action.navigation_inputs_changed, "moving should refresh navigation inputs");
     Require(session.snapshot()->collection.current_index == 1, "session should expose the reloaded snapshot");
 
-    const specforge::SampleLabelingTask* active_task = session.labeling().active_task();
-    Require(active_task != nullptr, "labeling task should remain active after navigation");
+    const specforge::SourceCollectionLabelingView active_labeling = session.LabelingView();
+    Require(active_labeling.has_active_task, "labeling task should remain active after navigation");
     Require(
-        active_task->remembered_position && *active_task->remembered_position == 1,
+        active_labeling.remembered_position && *active_labeling.remembered_position == 1,
         "session navigation should sync the labeling remembered position");
     Require(
         loaded_indices == std::vector<std::size_t>({0, 1}),
         "session should load only the opened and navigated sample snapshots");
+}
+
+void TestAssigningLabelAutoAdvancesInsideSession()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)session.OpenSource(source_path, 0);
+
+    (void)session.CreateDefaultLabelingTask();
+    Require(
+        session.UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'}).changed,
+        "bad label should be accepted");
+    (void)session.SetActiveLabelingAutoAdvance(true);
+
+    const specforge::SourceCollectionSessionAction assign_action = session.AssignActiveLabelToCurrentSample(1);
+    Require(assign_action.snapshot_changed, "auto-advance should load the next sample snapshot");
+    Require(assign_action.navigation_inputs_changed, "auto-advance should refresh navigation inputs");
+    Require(session.snapshot()->collection.current_index == 1, "auto-advance should move to row 1");
+
+    Require(session.LabelingView().has_active_task, "task should remain active after auto-advance");
+    (void)session.RequestSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0));
+    Require(session.LabelingView().current_code == 1, "current sample label should be written before advance");
+    Require(
+        loaded_indices == std::vector<std::size_t>({0, 1, 0}),
+        "session should load only the opened, auto-advanced, and verified sample snapshots");
 }
 
 void TestLabelingFilterSelectionAppliesToNavigation()
@@ -111,28 +137,35 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)session.OpenSource(source_path, 0);
 
-    specforge::SampleLabelingTask* task = session.labeling().CreateTask("manual-labeling", "Manual labeling");
-    Require(task != nullptr, "active source should accept a labeling task");
+    (void)session.CreateDefaultLabelingTask();
+    Require(session.LabelingView().has_active_task, "active source should accept a labeling task");
     Require(
-        session.labeling().UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'}),
+        session.UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'}).changed,
         "bad label should be accepted");
     Require(
-        session.labeling().UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'}),
+        session.UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'}).changed,
         "good label should be accepted");
-    Require(session.labeling().AssignLabel(0, 1).changed, "sample 0 should be labeled bad");
-    Require(session.labeling().AssignLabel(1, 2).changed, "sample 1 should be labeled good");
-    Require(session.labeling().AssignLabel(2, 2).changed, "sample 2 should be labeled good");
+    (void)session.AssignActiveLabelToCurrentSample(1);
+    Require(session.LabelingView().current_code == 1, "sample 0 should be labeled bad");
+    (void)session.RequestSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1));
+    (void)session.AssignActiveLabelToCurrentSample(2);
+    Require(session.LabelingView().current_code == 2, "sample 1 should be labeled good");
+    (void)session.RequestSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2));
+    (void)session.AssignActiveLabelToCurrentSample(2);
+    Require(session.LabelingView().current_code == 2, "sample 2 should be labeled good");
+    (void)session.RequestSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0));
 
-    session.SetActiveLabelingFilterSourceSelected(true);
-    Require(session.active_labeling_filter_source_selected(), "labeling filter source should be selected");
-    const std::vector<specforge::SampleFilterSource> sources = session.BuildSampleFilterSources();
-    Require(sources.size() == 1, "selected labeling task should be the only filter source in this fixture");
-    Require(sources[0].id == "labeling:manual-labeling", "labeling filter source should use the task id");
+    (void)session.SetActiveLabelingFilterSourceSelected(true);
+    specforge::SourceCollectionFilterView filter_view = session.FilterView();
+    Require(filter_view.active_labeling_filter_source_selected, "labeling filter source should be selected");
+    Require(filter_view.sources.size() == 1, "selected labeling task should be the only filter source in this fixture");
+    Require(filter_view.sources[0].id == "labeling:manual-labeling", "labeling filter source should use the task id");
 
-    session.SetFilterCondition("labeling:manual-labeling", std::unordered_set<std::string>{"2"});
-    Require(session.navigation().filter_active(), "labeling condition should activate navigation filtering");
-    Require(session.navigation().filtered_sample_count() == 2, "filter should include the two good samples");
-    Require(!session.navigation().current_sample_in_filter(), "current bad sample should be outside the filter");
+    (void)session.SetFilterValueSelected("labeling:manual-labeling", "2", true);
+    specforge::SourceCollectionNavigationView navigation_view = session.NavigationView();
+    Require(navigation_view.filter_active, "labeling condition should activate navigation filtering");
+    Require(navigation_view.filtered_sample_count == 2, "filter should include the two good samples");
+    Require(!navigation_view.current_sample_in_filter, "current bad sample should be outside the filter");
 
     const specforge::SourceCollectionNavigationAction locate_action =
         session.RequestSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1));
@@ -144,8 +177,8 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     Require(next_action.navigation.target_found, "filtered next should find a visible target");
     Require(next_action.navigation.current_index == 2, "filtered next should move to the next good sample");
 
-    session.SetActiveLabelingFilterSourceSelected(false);
-    Require(!session.navigation().filter_active(), "deselecting labeling source should clear its navigation filter");
+    (void)session.SetActiveLabelingFilterSourceSelected(false);
+    Require(!session.NavigationView().filter_active, "deselecting labeling source should clear its navigation filter");
 }
 
 }  // namespace
@@ -153,6 +186,7 @@ void TestLabelingFilterSelectionAppliesToNavigation()
 int main()
 {
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
+    TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
     return 0;
 }

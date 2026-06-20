@@ -2,8 +2,6 @@
 
 #include "domain/sample_filter.h"
 #include "domain/spectrum_snapshot.h"
-#include "ui/sample_labeling_controller.h"
-#include "ui/sample_navigation_controller.h"
 #include "ui/source_collection_session.h"
 
 #include <array>
@@ -22,14 +20,13 @@ public:
 
     void ResetForSampleWorkflow();
 
-    void RenderLabeling(
+    [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
         SourceCollectionSession& session,
         bool plot_shortcut_context_active,
         bool* open,
-        const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
 
-    void RenderFilters(SourceCollectionSession& session, bool* open);
+    [[nodiscard]] SourceCollectionSessionAction RenderFilters(SourceCollectionSession& session, bool* open);
 
 private:
     std::array<char, 96> new_label_name_buffer_ = {};
