@@ -13,9 +13,6 @@
 
 namespace specforge {
 
-using SourceCollectionCommandSubmitter =
-    std::function<SourceCollectionSessionResult(SourceCollectionSessionCommand)>;
-
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();

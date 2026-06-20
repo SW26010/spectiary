@@ -95,6 +95,9 @@ struct SourceCollectionSessionResult {
     std::string message;
 };
 
+using SourceCollectionCommandSubmitter =
+    std::function<SourceCollectionSessionResult(SourceCollectionSessionCommand)>;
+
 class SourceCollectionSession {
 public:
     using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;

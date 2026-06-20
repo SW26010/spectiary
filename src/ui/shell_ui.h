@@ -2,6 +2,7 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "plot/spectrum_plot.h"
+#include "ui/source_collection_panel.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
@@ -9,7 +10,6 @@
 
 #include <imgui.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -60,7 +60,6 @@ private:
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
-    void RenderSampleNameSearch(const SourceCollectionNavigationView& navigation_view);
     void RenderAnnotationsPanel();
     void RenderLabelingPanel();
     void RenderFiltersPanel();
@@ -71,23 +70,13 @@ private:
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionCommand command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
     void ResetPlotStateForSnapshotChange();
-    [[nodiscard]] SampleNavigationResult RequestSampleNavigation(const SampleNavigationRequest& request);
-    void SyncNavigationInputs();
-    void BeginSampleNameSearch();
-    void ClearSampleNameSearch();
-    void RestoreFailedSampleNameSearch();
-    void CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name);
 
     SourceCollectionSession session_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
-    std::array<char, 32> row_index_buffer_ = {};
-    std::array<char, 128> sample_name_query_buffer_ = {};
-    bool sample_name_matches_open_ = false;
-    bool sample_name_search_active_ = false;
-    std::string sample_name_search_restore_name_;
+    SourceCollectionPanelUi source_collection_panel_ui_;
     bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
     PanelVisibility panel_visibility_;

@@ -108,6 +108,8 @@ add_executable(specforge_native WIN32
     src/ui/sample_workflow_coordinator.h
     src/ui/sample_workflow_panel.cpp
     src/ui/sample_workflow_panel.h
+    src/ui/source_collection_panel.cpp
+    src/ui/source_collection_panel.h
     src/ui/source_collection_roster.cpp
     src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp
