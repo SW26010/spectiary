@@ -104,10 +104,15 @@ add_executable(specforge_native WIN32
     src/ui/sample_labeling_controller.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_workflow_coordinator.cpp
+    src/ui/sample_workflow_coordinator.h
     src/ui/sample_workflow_panel.cpp
     src/ui/sample_workflow_panel.h
+    src/ui/source_collection_roster.cpp
+    src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp
     src/ui/source_collection_session.h
+    src/ui/source_collection_session_types.h
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_grouping_view.h
     src/ui/spectral_lines_panel.cpp
@@ -306,8 +311,13 @@ add_executable(specforge_source_collection_session_tests
     src/ui/sample_labeling_controller.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_workflow_coordinator.cpp
+    src/ui/sample_workflow_coordinator.h
+    src/ui/source_collection_roster.cpp
+    src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp
     src/ui/source_collection_session.h
+    src/ui/source_collection_session_types.h
 )
 
 target_include_directories(specforge_source_collection_session_tests PRIVATE src)

@@ -22,6 +22,11 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+struct LoadedSourceSnapshot {
+    std::filesystem::path path;
+    std::size_t index = 0;
+};
+
 std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -66,6 +71,32 @@ specforge::SourceCollectionSession MakeSession(
             Require(path == source_path, "session should reload the active source path");
             loaded_indices.push_back(spectrum_index);
             return MakeSnapshot(source_path, sample_count, spectrum_index);
+        },
+        navigation_cache,
+        labeling_cache);
+}
+
+specforge::SourceCollectionSession MakeMultiSourceSession(
+    std::vector<LoadedSourceSnapshot>& loaded_snapshots,
+    const std::filesystem::path& first_source_path,
+    std::size_t first_sample_count,
+    const std::filesystem::path& second_source_path,
+    std::size_t second_sample_count)
+{
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    return specforge::SourceCollectionSession(
+        [&loaded_snapshots, first_source_path, first_sample_count, second_source_path, second_sample_count](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == first_source_path || path == second_source_path,
+                "multi-source session should reload a known source path");
+            loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            if (path == first_source_path) {
+                return MakeSnapshot(first_source_path, first_sample_count, spectrum_index);
+            }
+            return MakeSnapshot(second_source_path, second_sample_count, spectrum_index);
         },
         navigation_cache,
         labeling_cache);
@@ -216,6 +247,75 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     Require(!result.view.navigation.filter_active, "deselecting labeling source should clear its navigation filter");
 }
 
+void TestRemovingActiveSourceActivatesNextSourceWorkflow()
+{
+    const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
+    const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    specforge::SourceCollectionSession session = MakeMultiSourceSession(
+        loaded_snapshots,
+        first_source_path,
+        3,
+        second_source_path,
+        2);
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(first_source_path, 1));
+    Require(result.view.current_source_index && *result.view.current_source_index == 0, "first source should be active");
+    Require(result.view.snapshot->source.path == first_source_path, "first source snapshot should be visible");
+    Require(result.view.snapshot->collection.current_index == 1, "first source should open at requested row");
+    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    Require(
+        Submit(
+            session,
+            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+                specforge::SampleLabelDefinition{10, "first-label", 'f'}))
+            .changed,
+        "first source should accept its own active label");
+
+    result = Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(second_source_path, 0));
+    Require(result.view.current_source_index && *result.view.current_source_index == 1, "second source should be active");
+    Require(result.view.snapshot->source.path == second_source_path, "second source snapshot should be visible");
+    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    Require(
+        Submit(
+            session,
+            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+                specforge::SampleLabelDefinition{20, "second-label", 's'}))
+            .changed,
+        "second source should accept its own active label");
+
+    result = Submit(session, specforge::SourceCollectionSessionCommand::ActivateSource(0));
+    Require(result.action.snapshot_changed, "activating first source should swap to its cached snapshot");
+    Require(
+        result.view.current_source_index && *result.view.current_source_index == 0,
+        "first source should be active again");
+    Require(result.view.snapshot->source.path == first_source_path, "reactivated snapshot should be the first source");
+    Require(result.view.snapshot->collection.current_index == 1, "reactivated first source should keep its cached row");
+    Require(result.view.labeling.has_active_task, "first source labeling task should be restored");
+    Require(result.view.labeling.label_set.labels.size() == 1, "first source should expose its own label set");
+    Require(result.view.labeling.label_set.labels[0].code == 10, "first source label set should not come from second source");
+
+    const std::size_t loaded_count_before_remove = loaded_snapshots.size();
+    result = Submit(session, specforge::SourceCollectionSessionCommand::RemoveSource(0));
+    Require(result.action.snapshot_changed, "removing active first source should activate the next source snapshot");
+    Require(result.action.workflow_changed, "removing active first source should resync the workflow");
+    Require(result.action.navigation_inputs_changed, "removing active first source should refresh navigation inputs");
+    Require(result.view.sources.size() == 1, "removing first source should leave one source");
+    Require(result.view.sources[0].path == second_source_path, "remaining source should be the second source");
+    Require(
+        result.view.current_source_index && *result.view.current_source_index == 0,
+        "second source should become index 0");
+    Require(result.view.snapshot->source.path == second_source_path, "second source snapshot should be visible after removal");
+    Require(result.view.snapshot->collection.current_index == 0, "second source cached row should be preserved");
+    Require(result.view.labeling.has_active_task, "second source labeling task should be restored after removal");
+    Require(result.view.labeling.label_set.labels.size() == 1, "second source should expose its own label set");
+    Require(result.view.labeling.label_set.labels[0].code == 20, "second source label set should survive first removal");
+    Require(
+        loaded_snapshots.size() == loaded_count_before_remove,
+        "removing active source should activate the next cached source without reloading");
+}
+
 }  // namespace
 
 int main()
@@ -223,5 +323,6 @@ int main()
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
+    TestRemovingActiveSourceActivatesNextSourceWorkflow();
     return 0;
 }
