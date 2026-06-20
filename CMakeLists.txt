@@ -60,10 +60,14 @@ add_executable(specforge_native WIN32
     src/domain/sample_labeling.h
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_fixture.h
+    src/domain/fits_spectrum_loader.cpp
+    src/domain/fits_spectrum_loader.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
     src/domain/spectrum_format_adapters.cpp
     src/domain/spectrum_format_adapters.h
+    src/domain/spectrum_loader_support.cpp
+    src/domain/spectrum_loader_support.h
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
@@ -150,10 +154,14 @@ add_executable(specforge_loader_tests
     tests/spectrum_loader_tests.cpp
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
+    src/domain/fits_spectrum_loader.cpp
+    src/domain/fits_spectrum_loader.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
     src/domain/spectrum_format_adapters.cpp
     src/domain/spectrum_format_adapters.h
+    src/domain/spectrum_loader_support.cpp
+    src/domain/spectrum_loader_support.h
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
