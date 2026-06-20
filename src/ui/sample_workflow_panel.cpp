@@ -152,40 +152,13 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     std::snprintf(new_label_name_buffer_.data(), new_label_name_buffer_.size(), "%s", "bad");
     std::snprintf(new_label_code_buffer_.data(), new_label_code_buffer_.size(), "%d", 0);
     new_label_shortcut_buffer_.fill('\0');
-    selected_labeling_filter_source_id_.reset();
-}
-
-std::vector<SampleFilterSource> SampleWorkflowPanelUi::BuildFilterSources(
-    const SampleNavigationController& navigation,
-    const SampleLabelingController& labeling) const
-{
-    std::vector<SampleFilterSource> sources;
-    const SampleCollectionContext* context = navigation.active_context();
-    if (context != nullptr) {
-        sources.reserve(context->annotations.size() + 1);
-        for (const SampleAnnotationResult& annotation : context->annotations) {
-            sources.push_back(BuildAnnotationFilterSource(annotation));
-        }
-    }
-
-    if (const SampleLabelingTask* task = labeling.active_task()) {
-        SampleFilterSource labeling_source = BuildLabelingFilterSource(*task);
-        if (selected_labeling_filter_source_id_ &&
-            *selected_labeling_filter_source_id_ == labeling_source.id) {
-            sources.push_back(std::move(labeling_source));
-        }
-    }
-    return sources;
 }
 
 void SampleWorkflowPanelUi::RenderLabeling(
-    const SpectrumSnapshotHandle& snapshot,
-    SampleNavigationController& navigation,
-    SampleLabelingController& labeling,
+    SourceCollectionSession& session,
     bool plot_shortcut_context_active,
     bool* open,
     const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
-    const std::function<void()>& apply_filters,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
 {
     if (!ImGui::Begin(kLabelingWindow, open)) {
@@ -196,6 +169,9 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
 
+    const SpectrumSnapshotHandle& snapshot = session.snapshot();
+    SampleNavigationController& navigation = session.navigation();
+    SampleLabelingController& labeling = session.labeling();
     const std::optional<std::size_t> current_index = navigation.current_index();
     if (!snapshot || snapshot->source.path.empty() || !current_index) {
         ImGui::TextDisabled("No active source");
@@ -307,7 +283,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 "%d",
                 NextAvailableSampleLabelCode(task->label_set));
             new_label_shortcut_buffer_.fill('\0');
-            apply_filters();
+            session.ApplySampleFilters();
         }
     }
 
@@ -356,30 +332,24 @@ void SampleWorkflowPanelUi::RenderLabeling(
             (void)labeling.PersistActiveTask();
         }
         if (advance_request) {
-            const SampleNavigationResult advance_result = request_navigation(*advance_request);
-            if (advance_result.has_active_source) {
-                (void)labeling.RememberActivePosition(advance_result.current_index);
-            }
+            (void)request_navigation(*advance_request);
         }
-        apply_filters();
+        session.ApplySampleFilters();
     }
 
     ImGui::End();
 }
 
-void SampleWorkflowPanelUi::RenderFilters(
-    const SpectrumSnapshotHandle& snapshot,
-    SampleNavigationController& navigation,
-    SampleLabelingController& labeling,
-    SampleFilterController& filters,
-    bool* open,
-    const std::function<void()>& apply_filters)
+void SampleWorkflowPanelUi::RenderFilters(SourceCollectionSession& session, bool* open)
 {
     if (!ImGui::Begin(kFiltersWindow, open)) {
         ImGui::End();
         return;
     }
 
+    const SpectrumSnapshotHandle& snapshot = session.snapshot();
+    SampleNavigationController& navigation = session.navigation();
+    SampleLabelingController& labeling = session.labeling();
     const std::size_t sample_count =
         navigation.spectrum_count().value_or(snapshot ? snapshot->collection.spectrum_count : 0);
     if (!snapshot || snapshot->source.path.empty() || sample_count == 0) {
@@ -388,30 +358,18 @@ void SampleWorkflowPanelUi::RenderFilters(
         return;
     }
 
-    if (const SampleLabelingTask* task = labeling.active_task()) {
-        const SampleFilterSource active_labeling_source = BuildLabelingFilterSource(*task);
-        bool use_labeling_source = selected_labeling_filter_source_id_ &&
-                                   *selected_labeling_filter_source_id_ == active_labeling_source.id;
+    if (labeling.active_task() != nullptr) {
+        bool use_labeling_source = session.active_labeling_filter_source_selected();
         if (ImGui::Checkbox("Use active labeling task", &use_labeling_source)) {
-            if (selected_labeling_filter_source_id_ &&
-                *selected_labeling_filter_source_id_ != active_labeling_source.id) {
-                filters.ClearCondition(*selected_labeling_filter_source_id_);
-            }
-            if (use_labeling_source) {
-                selected_labeling_filter_source_id_ = active_labeling_source.id;
-            } else {
-                filters.ClearCondition(active_labeling_source.id);
-                selected_labeling_filter_source_id_.reset();
-            }
-            apply_filters();
+            session.SetActiveLabelingFilterSourceSelected(use_labeling_source);
         }
         if (!use_labeling_source) {
             ImGui::TextDisabled("Labeling task filters are not selected.");
         }
     }
 
-    const std::vector<SampleFilterSource> sources = BuildFilterSources(navigation, labeling);
-    const SampleFilterEvaluation evaluation = filters.Evaluate(sources, sample_count);
+    const std::vector<SampleFilterSource> sources = session.BuildSampleFilterSources();
+    const SampleFilterEvaluation evaluation = session.EvaluateSampleFilters();
     ImGui::Text(
         "Visible: %llu / %llu",
         static_cast<unsigned long long>(evaluation.included_count),
@@ -420,8 +378,7 @@ void SampleWorkflowPanelUi::RenderFilters(
         ImGui::TextDisabled("Current sample is outside the active filter");
     }
     if (ImGui::Button("Clear filters")) {
-        filters.Clear();
-        apply_filters();
+        session.ClearFilters();
     }
 
     for (const std::string& message : evaluation.messages) {
@@ -435,7 +392,7 @@ void SampleWorkflowPanelUi::RenderFilters(
             continue;
         }
         has_filterable_source = true;
-        const SampleFilterCondition* condition = filters.FindCondition(source.id);
+        const SampleFilterCondition* condition = session.filters().FindCondition(source.id);
         std::unordered_set<std::string> selected_values =
             condition == nullptr ? std::unordered_set<std::string>{} : condition->allowed_value_keys;
 
@@ -453,8 +410,7 @@ void SampleWorkflowPanelUi::RenderFilters(
                     } else {
                         selected_values.erase(option.key);
                     }
-                    filters.SetCondition(source.id, selected_values);
-                    apply_filters();
+                    session.SetFilterCondition(source.id, selected_values);
                 }
                 ImGui::PopID();
             }

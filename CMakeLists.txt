@@ -98,6 +98,8 @@ add_executable(specforge_native WIN32
     src/ui/sample_navigation_controller.h
     src/ui/sample_workflow_panel.cpp
     src/ui/sample_workflow_panel.h
+    src/ui/source_collection_session.cpp
+    src/ui/source_collection_session.h
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_grouping_view.h
     src/ui/spectral_lines_panel.cpp
@@ -238,6 +240,37 @@ else()
 endif()
 
 add_test(NAME specforge_sample_labeling_filter_tests COMMAND specforge_sample_labeling_filter_tests)
+
+add_executable(specforge_source_collection_session_tests
+    tests/source_collection_session_tests.cpp
+    src/domain/npy_array_io.cpp
+    src/domain/npy_array_io.h
+    src/domain/sample_annotation_io.cpp
+    src/domain/sample_annotation_io.h
+    src/domain/sample_filter.cpp
+    src/domain/sample_filter.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
+    src/domain/spectrum_fixture.cpp
+    src/domain/spectrum_fixture.h
+    src/domain/spectrum_snapshot.h
+    src/ui/sample_labeling_controller.cpp
+    src/ui/sample_labeling_controller.h
+    src/ui/sample_navigation_controller.cpp
+    src/ui/sample_navigation_controller.h
+    src/ui/source_collection_session.cpp
+    src/ui/source_collection_session.h
+)
+
+target_include_directories(specforge_source_collection_session_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_source_collection_session_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_source_collection_session_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_source_collection_session_tests COMMAND specforge_source_collection_session_tests)
 
 add_executable(specforge_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp

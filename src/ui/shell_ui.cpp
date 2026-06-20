@@ -1,6 +1,5 @@
 #include "ui/shell_ui.h"
 
-#include "domain/spectrum_fixture.h"
 #include "domain/spectrum_loader.h"
 #include "plot/spectrum_plot.h"
 #include "ui/sample_name_autocomplete.h"
@@ -20,8 +19,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <utility>
 #include <vector>
 
 namespace specforge {
@@ -121,20 +118,6 @@ void RenderStatusBar(const ShellStatus& status, const ImVec2& size)
     }
 }
 
-std::string FileNameToUtf8(const std::filesystem::path& path)
-{
-    const std::filesystem::path filename = path.filename();
-    return filename.empty() ? PathToUtf8(path) : PathToUtf8(filename);
-}
-
-std::string LowerAscii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
-
 std::string TrimAscii(std::string_view value)
 {
     const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
@@ -187,13 +170,6 @@ void CopyToBuffer(std::array<char, Size>& buffer, std::string_view text)
     std::fill(buffer.begin(), buffer.end(), '\0');
     const std::size_t copy_size = std::min(text.size(), Size - 1);
     std::copy_n(text.begin(), copy_size, buffer.begin());
-}
-
-std::string SourceKey(const std::filesystem::path& path)
-{
-    std::error_code error;
-    const std::filesystem::path absolute_path = std::filesystem::absolute(path, error);
-    return LowerAscii(PathToUtf8(error ? path : absolute_path));
 }
 
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
@@ -395,70 +371,6 @@ std::string_view DiagnosticCodeLabel(SpectrumDiagnosticCode code)
     default:
         return "none";
     }
-}
-
-bool HasDiagnosticAtLeast(const SpectrumSnapshotHandle& snapshot, SpectrumDiagnosticSeverity minimum)
-{
-    if (!snapshot) {
-        return false;
-    }
-    const auto rank = [](SpectrumDiagnosticSeverity severity) {
-        switch (severity) {
-        case SpectrumDiagnosticSeverity::Error:
-            return 2;
-        case SpectrumDiagnosticSeverity::Warning:
-            return 1;
-        case SpectrumDiagnosticSeverity::Info:
-        default:
-            return 0;
-        }
-    };
-    const int minimum_rank = rank(minimum);
-    return std::any_of(snapshot->diagnostics.begin(), snapshot->diagnostics.end(), [rank, minimum_rank](const auto& d) {
-        return rank(d.severity) >= minimum_rank;
-    });
-}
-
-std::string_view SourceStateLabel(const SpectrumSnapshotHandle& snapshot)
-{
-    if (!snapshot) {
-        return "none";
-    }
-    if (HasDiagnosticAtLeast(snapshot, SpectrumDiagnosticSeverity::Error)) {
-        return "error";
-    }
-    if (snapshot->capabilities.can_plot_current_spectrum) {
-        return snapshot->diagnostics.empty() ? "loaded" : "loaded with diagnostics";
-    }
-    return "not plottable";
-}
-
-std::string SnapshotDisplayNameText(const SpectrumSnapshotHandle& snapshot, const std::filesystem::path& path)
-{
-    if (snapshot && !snapshot->source.display_name.empty()) {
-        return snapshot->source.display_name;
-    }
-    return FileNameToUtf8(path);
-}
-
-std::string SnapshotTypeLabelText(const SpectrumSnapshotHandle& snapshot)
-{
-    if (!snapshot) {
-        return "unknown";
-    }
-
-    const std::string_view format = MetadataValue(snapshot->source.metadata, "format");
-    if (!format.empty()) {
-        return std::string{format};
-    }
-
-    const std::string_view source_type = MetadataValue(snapshot->source.metadata, "source_type");
-    return source_type.empty() ? std::string{"unknown"} : std::string{source_type};
-}
-
-std::string SnapshotStateLabelText(const SpectrumSnapshotHandle& snapshot)
-{
-    return std::string{SourceStateLabel(snapshot)};
 }
 
 bool CreateOpenDialog(ComPtr<IFileOpenDialog>& dialog)
@@ -762,14 +674,14 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 }  // namespace
 
 ShellUi::ShellUi()
-    : snapshot_(MakeSmallSyntheticSpectrumSnapshot())
+    : session_(LoadSpectrumSnapshotFromPath)
 {
     RefreshSystemColors();
 }
 
 ShellUi::~ShellUi()
 {
-    (void)sample_labeling_.FlushStateCache();
+    (void)session_.FlushStateCaches();
     spectral_lines_panel_.FlushCache();
 }
 
@@ -803,7 +715,7 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
-    sample_labeling_.MaybeSaveStateCache(status.frame_index);
+    session_.MaybeSaveStateCaches(status.frame_index);
     spectral_lines_panel_.MaybeSaveCache(status.frame_index);
 }
 
@@ -814,95 +726,12 @@ void ShellUi::RefreshSystemColors()
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    SpectrumSnapshotHandle loaded_snapshot = LoadSpectrumSnapshotFromPath(path, spectrum_index);
-    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = source_index;
-    SetSnapshot(std::move(loaded_snapshot));
-    EnsureSnapshotMatchesNavigation();
+    HandleSessionAction(session_.OpenSource(path, spectrum_index));
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
-    return snapshot_;
-}
-
-std::size_t ShellUi::AddOrUpdateSource(
-    const std::filesystem::path& path,
-    SpectrumSnapshotHandle snapshot,
-    std::size_t spectrum_index)
-{
-    const std::string key = SourceKey(path);
-    const auto match = std::find_if(sources_.begin(), sources_.end(), [&key](const SourceListEntry& entry) {
-        return entry.key == key;
-    });
-    if (match != sources_.end()) {
-        match->path = path;
-        match->display_name = SnapshotDisplayNameText(snapshot, path);
-        match->type_label = SnapshotTypeLabelText(snapshot);
-        match->state_label = SnapshotStateLabelText(snapshot);
-        match->cached_snapshot = std::move(snapshot);
-        match->last_spectrum_index = spectrum_index;
-        return static_cast<std::size_t>(std::distance(sources_.begin(), match));
-    }
-
-    SourceListEntry entry;
-    entry.path = path;
-    entry.key = key;
-    entry.display_name = SnapshotDisplayNameText(snapshot, path);
-    entry.type_label = SnapshotTypeLabelText(snapshot);
-    entry.state_label = SnapshotStateLabelText(snapshot);
-    entry.cached_snapshot = std::move(snapshot);
-    entry.last_spectrum_index = spectrum_index;
-    sources_.push_back(std::move(entry));
-    return sources_.size() - 1;
-}
-
-void ShellUi::ActivateSource(std::size_t source_index)
-{
-    if (source_index >= sources_.size()) {
-        return;
-    }
-
-    SourceListEntry& entry = sources_[source_index];
-    current_source_index_ = source_index;
-    SetSnapshot(entry.cached_snapshot);
-    EnsureSnapshotMatchesNavigation();
-}
-
-void ShellUi::RemoveSource(std::size_t source_index)
-{
-    if (source_index >= sources_.size()) {
-        return;
-    }
-
-    const bool removed_current = current_source_index_ && *current_source_index_ == source_index;
-    sample_navigation_.RemoveSource(sources_[source_index].key);
-    std::optional<std::size_t> next_current_index;
-    if (removed_current && sources_.size() > 1) {
-        next_current_index = source_index + 1 < sources_.size() ? source_index : source_index - 1;
-    }
-
-    sources_.erase(sources_.begin() + static_cast<std::ptrdiff_t>(source_index));
-
-    if (removed_current) {
-        current_source_index_.reset();
-        sample_labeling_.ClearActiveSource();
-        sample_filters_.Clear();
-        active_sample_workflow_identity_.reset();
-        sample_workflow_panel_ui_.ResetForSampleWorkflow();
-        if (next_current_index) {
-            ActivateSource(*next_current_index);
-        } else {
-            SetSnapshot(MakeSmallSyntheticSpectrumSnapshot());
-            sample_navigation_.ClearActiveSource();
-            SyncNavigationInputs();
-        }
-        return;
-    }
-
-    if (current_source_index_ && *current_source_index_ > source_index) {
-        current_source_index_ = *current_source_index_ - 1;
-    }
+    return session_.snapshot();
 }
 
 void ShellUi::OpenSourceFromFilePicker()
@@ -923,91 +752,47 @@ void ShellUi::OpenAnnotationFromFilePicker()
 {
     if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
         std::string message;
-        (void)sample_navigation_.AddReadOnlyAnnotationToActiveSource(*path, &message);
+        (void)session_.AddReadOnlyAnnotationToActiveSource(*path, &message);
         panel_visibility_.annotations = true;
-        ApplySampleFiltersToNavigation();
     }
 }
 
-void ShellUi::SetSnapshot(SpectrumSnapshotHandle snapshot)
+void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
+{
+    if (action.snapshot_changed) {
+        ResetPlotStateForSnapshotChange();
+    }
+    if (action.workflow_changed) {
+        sample_workflow_panel_ui_.ResetForSampleWorkflow();
+    }
+    if (action.navigation_inputs_changed) {
+        SyncNavigationInputs();
+    }
+}
+
+void ShellUi::ResetPlotStateForSnapshotChange()
 {
     const bool show_smoothed = plot_state_.show_smoothed;
     const bool show_raw_when_smoothed = plot_state_.show_raw_when_smoothed;
     const SpectrumSmoothingSettings smoothing = plot_state_.smoothing;
-    snapshot_ = std::move(snapshot);
     plot_state_ = SpectrumPlotState{};
     plot_state_.show_smoothed = show_smoothed;
     plot_state_.show_raw_when_smoothed = show_raw_when_smoothed;
     plot_state_.smoothing = smoothing;
 }
 
-void ShellUi::EnsureSnapshotMatchesNavigation()
-{
-    SyncSampleNavigationSession();
-    const std::optional<std::size_t> navigation_index = sample_navigation_.current_index();
-    if (navigation_index && snapshot_ && snapshot_->collection.spectrum_count > 0 &&
-        snapshot_->collection.current_index != *navigation_index) {
-        LoadActiveSourceAt(*navigation_index);
-        return;
-    }
-    SyncNavigationInputs();
-}
-
-void ShellUi::LoadActiveSourceAt(std::size_t spectrum_index)
-{
-    const bool has_active_source =
-        current_source_index_ && *current_source_index_ < sources_.size() && !sources_[*current_source_index_].path.empty();
-    if (!has_active_source) {
-        return;
-    }
-
-    const std::filesystem::path path = sources_[*current_source_index_].path;
-    SpectrumSnapshotHandle loaded_snapshot = LoadSpectrumSnapshotFromPath(path, spectrum_index);
-    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = source_index;
-    SetSnapshot(std::move(loaded_snapshot));
-    SyncSampleNavigationSession();
-    SyncNavigationInputs();
-}
-
 SampleNavigationResult ShellUi::RequestSampleNavigation(const SampleNavigationRequest& request)
 {
-    const SampleNavigationResult result = sample_navigation_.Navigate(request);
-    if (result.has_active_source && result.target_found &&
-        (request.kind == SampleNavigationRequestKind::Previous || request.kind == SampleNavigationRequestKind::Next)) {
-        (void)sample_labeling_.RememberActivePosition(result.current_index);
-    }
-    if (result.has_active_source && result.target_found) {
-        if (!snapshot_ || snapshot_->collection.current_index != result.current_index) {
-            LoadActiveSourceAt(result.current_index);
-        } else {
-            SyncNavigationInputs();
-        }
-    }
-    return result;
-}
-
-void ShellUi::SyncSampleNavigationSession()
-{
-    const bool has_active_source =
-        current_source_index_ && *current_source_index_ < sources_.size() && snapshot_ && !snapshot_->source.path.empty();
-    if (!has_active_source) {
-        sample_navigation_.ClearActiveSource();
-        sample_labeling_.ClearActiveSource();
-        sample_filters_.Clear();
-        active_sample_workflow_identity_.reset();
-        sample_workflow_panel_ui_.ResetForSampleWorkflow();
-        return;
-    }
-
-    sample_navigation_.ActivateSource(sources_[*current_source_index_].key, snapshot_);
-    SyncSampleWorkflowSession();
-    ApplySampleFiltersToNavigation();
+    SourceCollectionNavigationAction action = session_.RequestSampleNavigation(request);
+    HandleSessionAction(action.action);
+    return action.navigation;
 }
 
 void ShellUi::SyncNavigationInputs()
 {
-    const std::optional<std::size_t> navigation_index = sample_navigation_.current_index();
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    SampleNavigationController& navigation = session_.navigation();
+    const std::optional<std::size_t> navigation_index = navigation.current_index();
     if (navigation_index) {
         std::snprintf(
             row_index_buffer_.data(),
@@ -1017,12 +802,12 @@ void ShellUi::SyncNavigationInputs()
     } else {
         row_index_buffer_.fill('\0');
     }
-    if (snapshot_) {
-        CopyToBuffer(sample_name_query_buffer_, snapshot_->current_spectrum.name);
-        sample_navigation_.SetSampleNameQuery(snapshot_->current_spectrum.name);
+    if (snapshot) {
+        CopyToBuffer(sample_name_query_buffer_, snapshot->current_spectrum.name);
+        navigation.SetSampleNameQuery(snapshot->current_spectrum.name);
     } else {
         sample_name_query_buffer_.fill('\0');
-        sample_navigation_.SetSampleNameQuery({});
+        navigation.SetSampleNameQuery({});
     }
     ClearSampleNameSearch();
 }
@@ -1030,7 +815,8 @@ void ShellUi::SyncNavigationInputs()
 void ShellUi::BeginSampleNameSearch()
 {
     sample_name_search_active_ = true;
-    sample_name_search_restore_name_ = snapshot_ ? snapshot_->current_spectrum.name : std::string{};
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    sample_name_search_restore_name_ = snapshot ? snapshot->current_spectrum.name : std::string{};
 }
 
 void ShellUi::ClearSampleNameSearch()
@@ -1043,57 +829,16 @@ void ShellUi::ClearSampleNameSearch()
 void ShellUi::RestoreFailedSampleNameSearch()
 {
     CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
-    sample_navigation_.SetSampleNameQuery(sample_name_search_restore_name_);
+    session_.navigation().SetSampleNameQuery(sample_name_search_restore_name_);
     ClearSampleNameSearch();
 }
 
 void ShellUi::CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name)
 {
     CopyToBuffer(sample_name_query_buffer_, matched_name);
-    sample_navigation_.SetSampleNameQuery(matched_name);
+    session_.navigation().SetSampleNameQuery(matched_name);
     (void)RequestSampleNavigation(SampleNavigationRequest::LocateRow(target_row));
     ClearSampleNameSearch();
-}
-
-void ShellUi::SyncSampleWorkflowSession()
-{
-    if (!snapshot_ || snapshot_->source.path.empty() || snapshot_->collection.spectrum_count == 0) {
-        sample_labeling_.ClearActiveSource();
-        sample_filters_.Clear();
-        active_sample_workflow_identity_.reset();
-        sample_workflow_panel_ui_.ResetForSampleWorkflow();
-        return;
-    }
-
-    const SampleCollectionIdentity identity = BuildSampleCollectionIdentity(*snapshot_);
-    if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
-        sample_filters_.Clear();
-        sample_workflow_panel_ui_.ResetForSampleWorkflow();
-        active_sample_workflow_identity_ = identity.id;
-    }
-    sample_labeling_.ActivateSource(identity.id, identity.spectrum_count);
-}
-
-std::vector<SampleFilterSource> ShellUi::BuildSampleFilterSources() const
-{
-    return sample_workflow_panel_ui_.BuildFilterSources(sample_navigation_, sample_labeling_);
-}
-
-void ShellUi::ApplySampleFiltersToNavigation()
-{
-    const std::size_t sample_count =
-        sample_navigation_.spectrum_count().value_or(snapshot_ ? snapshot_->collection.spectrum_count : 0);
-    if (sample_count == 0) {
-        sample_navigation_.ClearSampleFilter();
-        return;
-    }
-
-    const SampleFilterEvaluation evaluation = sample_filters_.Evaluate(BuildSampleFilterSources(), sample_count);
-    if (evaluation.active) {
-        sample_navigation_.SetSampleFilter(evaluation.included_samples);
-    } else {
-        sample_navigation_.ClearSampleFilter();
-    }
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)
@@ -1149,8 +894,7 @@ void ShellUi::RenderMainMenuBar()
         if (ImGui::MenuItem("Open Folder...")) {
             OpenSourceFromFolderPicker();
         }
-        const bool can_open_annotation =
-            sample_navigation_.active_context() != nullptr && sample_navigation_.spectrum_count().value_or(0) > 0;
+        const bool can_open_annotation = session_.can_add_read_only_annotation();
         if (!can_open_annotation) {
             ImGui::BeginDisabled();
         }
@@ -1207,14 +951,17 @@ void ShellUi::RenderFilesPanel()
         OpenSourceFromFolderPicker();
     }
     ImGui::SameLine();
+    const std::vector<SourceCollectionSession::SourceListEntry>& sources = session_.sources();
+    const std::optional<std::size_t> current_source_index = session_.current_source_index();
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
     const std::string source_count =
-        std::to_string(sources_.size()) + (sources_.size() == 1 ? " source" : " sources");
+        std::to_string(sources.size()) + (sources.size() == 1 ? " source" : " sources");
     RenderDisabledText(source_count);
 
     ImGui::Spacing();
     const bool has_active_source =
-        !sources_.empty() && current_source_index_ && *current_source_index_ < sources_.size() && snapshot_ &&
-        !snapshot_->source.path.empty();
+        !sources.empty() && current_source_index && *current_source_index < sources.size() && snapshot &&
+        !snapshot->source.path.empty();
     if (!has_active_source) {
         ImGui::TextDisabled("No sources added in this session.");
     } else if (ImGui::BeginTable(
@@ -1229,9 +976,9 @@ void ShellUi::RenderFilesPanel()
         ImGui::TableHeadersRow();
 
         std::optional<std::size_t> source_to_remove;
-        for (std::size_t index = 0; index < sources_.size(); ++index) {
-            const SourceListEntry& entry = sources_[index];
-            const bool is_current = current_source_index_ && *current_source_index_ == index;
+        for (std::size_t index = 0; index < sources.size(); ++index) {
+            const SourceCollectionSession::SourceListEntry& entry = sources[index];
+            const bool is_current = current_source_index && *current_source_index == index;
 
             ImGui::TableNextRow();
             if (is_current) {
@@ -1241,7 +988,7 @@ void ShellUi::RenderFilesPanel()
             ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(index));
             if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
-                ActivateSource(index);
+                HandleSessionAction(session_.ActivateSource(index));
             }
             if (ImGui::IsItemHovered()) {
                 const std::string path = NarrowPath(entry.path);
@@ -1250,13 +997,13 @@ void ShellUi::RenderFilesPanel()
 
             ImGui::TableSetColumnIndex(1);
             if (TableCellTextButton("type", entry.type_label, ImGui::GetColorU32(ImGuiCol_Text))) {
-                ActivateSource(index);
+                HandleSessionAction(session_.ActivateSource(index));
             }
 
             ImGui::TableSetColumnIndex(2);
             ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             if (TableCellTextButton("state", entry.state_label, state_color)) {
-                ActivateSource(index);
+                HandleSessionAction(session_.ActivateSource(index));
             }
 
             ImGui::TableSetColumnIndex(3);
@@ -1271,7 +1018,7 @@ void ShellUi::RenderFilesPanel()
         ImGui::EndTable();
 
         if (source_to_remove) {
-            RemoveSource(*source_to_remove);
+            HandleSessionAction(session_.RemoveSource(*source_to_remove));
         }
     }
     ImGui::End();
@@ -1284,16 +1031,18 @@ void ShellUi::RenderNavigationPanel()
         return;
     }
 
-    if (!snapshot_ || snapshot_->source.path.empty() || snapshot_->collection.spectrum_count == 0) {
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    SampleNavigationController& navigation = session_.navigation();
+    if (!snapshot || snapshot->source.path.empty() || snapshot->collection.spectrum_count == 0) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return;
     }
 
     const std::size_t navigation_index =
-        sample_navigation_.current_index().value_or(snapshot_->collection.current_index);
+        navigation.current_index().value_or(snapshot->collection.current_index);
     const std::size_t navigation_count =
-        sample_navigation_.spectrum_count().value_or(snapshot_->collection.spectrum_count);
+        navigation.spectrum_count().value_or(snapshot->collection.spectrum_count);
 
     ImGui::TextUnformatted("sample:");
     ImGui::SameLine();
@@ -1321,8 +1070,8 @@ void ShellUi::RenderNavigationPanel()
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
     ImGui::SameLine();
-    const bool can_previous = sample_navigation_.can_move_previous();
-    const bool can_next = sample_navigation_.can_move_next();
+    const bool can_previous = navigation.can_move_previous();
+    const bool can_next = navigation.can_move_next();
     const ImVec2 sample_step_button_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
     if (!can_previous) {
         ImGui::BeginDisabled();
@@ -1351,6 +1100,7 @@ void ShellUi::RenderNavigationPanel()
 
 void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
 {
+    SampleNavigationController& navigation = session_.navigation();
     ImGui::TextUnformatted("name:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
@@ -1368,10 +1118,10 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
         BeginSampleNameSearch();
     }
 
-    const SampleCollectionContext* context = sample_navigation_.active_context();
+    const SampleCollectionContext* context = navigation.active_context();
     if (sample_name_changed) {
-        sample_navigation_.SetSampleNameQuery(sample_name_query_buffer_.data());
-        const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
+        navigation.SetSampleNameQuery(sample_name_query_buffer_.data());
+        const std::vector<std::size_t>& matches = navigation.sample_name_matches();
         const std::string typed_name = sample_name_query_buffer_.data();
         if (context != nullptr && !context->sample_names.empty() && !typed_name.empty() && !matches.empty()) {
             const SampleNameAutocompleteEvaluation evaluation =
@@ -1386,7 +1136,7 @@ void ShellUi::RenderSampleNameSearch(std::size_t navigation_index)
         }
     }
 
-    const std::vector<std::size_t>& matches = sample_navigation_.sample_name_matches();
+    const std::vector<std::size_t>& matches = navigation.sample_name_matches();
     const std::string typed_name = sample_name_query_buffer_.data();
     const SampleNameAutocompleteEvaluation evaluation =
         context == nullptr ? SampleNameAutocompleteEvaluation{}
@@ -1457,8 +1207,10 @@ void ShellUi::RenderAnnotationsPanel()
         return;
     }
 
-    const SampleCollectionContext* context = sample_navigation_.active_context();
-    if (!snapshot_ || context == nullptr || snapshot_->source.path.empty()) {
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    const SampleNavigationController& navigation = session_.navigation();
+    const SampleCollectionContext* context = navigation.active_context();
+    if (!snapshot || context == nullptr || snapshot->source.path.empty()) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return;
@@ -1486,7 +1238,7 @@ void ShellUi::RenderAnnotationsPanel()
         ImGui::TableHeadersRow();
 
         const std::size_t current_index =
-            sample_navigation_.current_index().value_or(snapshot_->collection.current_index);
+            navigation.current_index().value_or(snapshot->collection.current_index);
         for (const SampleAnnotationResult& annotation : context->annotations) {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -1513,16 +1265,11 @@ void ShellUi::RenderAnnotationsPanel()
 void ShellUi::RenderLabelingPanel()
 {
     sample_workflow_panel_ui_.RenderLabeling(
-        snapshot_,
-        sample_navigation_,
-        sample_labeling_,
+        session_,
         label_shortcut_context_active_,
         &panel_visibility_.labeling,
         [this](const SampleNavigationRequest& request) {
             return RequestSampleNavigation(request);
-        },
-        [this]() {
-            ApplySampleFiltersToNavigation();
         },
         []() {
             return ShowLabelOutputFilePicker();
@@ -1531,15 +1278,7 @@ void ShellUi::RenderLabelingPanel()
 
 void ShellUi::RenderFiltersPanel()
 {
-    sample_workflow_panel_ui_.RenderFilters(
-        snapshot_,
-        sample_navigation_,
-        sample_labeling_,
-        sample_filters_,
-        &panel_visibility_.filters,
-        [this]() {
-            ApplySampleFiltersToNavigation();
-        });
+    sample_workflow_panel_ui_.RenderFilters(session_, &panel_visibility_.filters);
 }
 
 void ShellUi::RenderSmoothingPanel()
@@ -1552,7 +1291,8 @@ void ShellUi::RenderSmoothingPanel()
     ImGui::TextUnformatted("Smoothing");
     ImGui::Separator();
 
-    if (!snapshot_ || !snapshot_->capabilities.can_plot_current_spectrum) {
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
         ImGui::TextDisabled("No plottable spectrum");
         ImGui::End();
         return;
@@ -1594,7 +1334,7 @@ void ShellUi::RenderSmoothingPanel()
             ClearSmoothingCache(plot_state_);
         }
         const int effective_kernel_size =
-            EffectiveMedianKernelSize(plot_state_.smoothing.median_kernel_size, snapshot_->current_spectrum.point_count);
+            EffectiveMedianKernelSize(plot_state_.smoothing.median_kernel_size, snapshot->current_spectrum.point_count);
         if (effective_kernel_size != plot_state_.smoothing.median_kernel_size) {
             ImGui::TextDisabled("Effective kernel: %d", effective_kernel_size);
         }
@@ -1624,37 +1364,38 @@ void ShellUi::RenderInfoTagsPanel()
 
     ImGui::TextUnformatted("Information");
     ImGui::Separator();
-    if (snapshot_) {
-        const CurrentSpectrumSnapshot& current = snapshot_->current_spectrum;
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
+    if (snapshot) {
+        const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
         ImGui::Text("Name: %s", current.name.empty() ? "(none)" : current.name.c_str());
         ImGui::Text("Points: %zu", current.point_count);
-        ImGui::Text("X: %s", snapshot_->axis.x_label.empty() ? "unknown" : snapshot_->axis.x_label.c_str());
-        ImGui::Text("Y: %s", snapshot_->axis.y_label.empty() ? "unknown" : snapshot_->axis.y_label.c_str());
-        RenderMetadataLine("Wavelength medium", MetadataValue(snapshot_->source.metadata, "wavelength_medium"));
+        ImGui::Text("X: %s", snapshot->axis.x_label.empty() ? "unknown" : snapshot->axis.x_label.c_str());
+        ImGui::Text("Y: %s", snapshot->axis.y_label.empty() ? "unknown" : snapshot->axis.y_label.c_str());
+        RenderMetadataLine("Wavelength medium", MetadataValue(snapshot->source.metadata, "wavelength_medium"));
         RenderMetadataLine(
             "Observer correction",
-            MetadataValue(snapshot_->source.metadata, "observer_frame_correction"));
+            MetadataValue(snapshot->source.metadata, "observer_frame_correction"));
         RenderMetadataLine(
             "Radial velocity",
-            MetadataValue(snapshot_->source.metadata, "radial_velocity_km_s"),
+            MetadataValue(snapshot->source.metadata, "radial_velocity_km_s"),
             "km/s");
-        RenderMetadataLine("RV source", MetadataValue(snapshot_->source.metadata, "radial_velocity_source"));
-        RenderMetadataLine("Redshift", MetadataValue(snapshot_->source.metadata, "redshift"));
-        RenderMetadataLine("Redshift warning", MetadataValue(snapshot_->source.metadata, "redshift_warning"));
-        RenderMetadataLine("Target z", MetadataValue(snapshot_->source.metadata, "target_redshift"));
-        RenderMetadataLine("Target z source", MetadataValue(snapshot_->source.metadata, "target_redshift_source"));
-        RenderMetadataLine("Target z status", MetadataValue(snapshot_->source.metadata, "target_redshift_status"));
-        RenderMetadataLine("Target z warning", MetadataValue(snapshot_->source.metadata, "target_redshift_warning"));
+        RenderMetadataLine("RV source", MetadataValue(snapshot->source.metadata, "radial_velocity_source"));
+        RenderMetadataLine("Redshift", MetadataValue(snapshot->source.metadata, "redshift"));
+        RenderMetadataLine("Redshift warning", MetadataValue(snapshot->source.metadata, "redshift_warning"));
+        RenderMetadataLine("Target z", MetadataValue(snapshot->source.metadata, "target_redshift"));
+        RenderMetadataLine("Target z source", MetadataValue(snapshot->source.metadata, "target_redshift_source"));
+        RenderMetadataLine("Target z status", MetadataValue(snapshot->source.metadata, "target_redshift_status"));
+        RenderMetadataLine("Target z warning", MetadataValue(snapshot->source.metadata, "target_redshift_warning"));
         RenderMetadataLine(
             "Heliocentric correction",
-            MetadataValue(snapshot_->source.metadata, "heliocentric_correction_km_s"),
+            MetadataValue(snapshot->source.metadata, "heliocentric_correction_km_s"),
             "km/s");
         RenderMetadataLine(
             "Target rest frame",
-            MetadataValue(snapshot_->source.metadata, "target_rest_frame_status"));
+            MetadataValue(snapshot->source.metadata, "target_rest_frame_status"));
         RenderMetadataLine(
             "Rest-frame correction",
-            MetadataValue(snapshot_->source.metadata, "rest_frame_correction_status"));
+            MetadataValue(snapshot->source.metadata, "rest_frame_correction_status"));
     } else {
         ImGui::TextDisabled("No snapshot");
     }
@@ -1668,7 +1409,7 @@ void ShellUi::RenderInfoTagsPanel()
     ImGui::Spacing();
     ImGui::TextUnformatted("Diagnostics");
     ImGui::Separator();
-    RenderDiagnosticRows(snapshot_);
+    RenderDiagnosticRows(snapshot);
 
     ImGui::End();
 }
@@ -1679,10 +1420,11 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     label_shortcut_context_active_ =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    const SpectrumSnapshotHandle& snapshot = session_.snapshot();
     const std::vector<const SpectralLineMarker*> spectral_lines =
-        spectral_lines_panel_.FilteredMarkers(snapshot_, false);
+        spectral_lines_panel_.FilteredMarkers(snapshot, false);
     RenderSpectrumPlot(
-        snapshot_,
+        snapshot,
         plot_state_,
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         plot_style_,
@@ -1692,7 +1434,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
 
 void ShellUi::RenderSpectralLinesPanel()
 {
-    spectral_lines_panel_ui_.Render(spectral_lines_panel_, snapshot_, &panel_visibility_.spectral_lines);
+    spectral_lines_panel_ui_.Render(spectral_lines_panel_, session_.snapshot(), &panel_visibility_.spectral_lines);
 }
 
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)

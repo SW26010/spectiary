@@ -1,13 +1,11 @@
 #pragma once
 
 #include "domain/spectrum_snapshot.h"
-#include "domain/sample_filter.h"
 #include "plot/spectrum_plot.h"
-#include "ui/sample_labeling_controller.h"
-#include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
+#include "ui/source_collection_session.h"
 
 #include <imgui.h>
 
@@ -43,20 +41,6 @@ public:
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
-    struct SourceListEntry {
-        std::filesystem::path path;
-        std::string key;
-        std::string display_name;
-        std::string type_label;
-        std::string state_label;
-        // Stores the last domain snapshot for this source so reactivation can use
-        // an explicit cache instead of reloading. Do not remove as a summary-only
-        // optimization without retesting CSV/folder error snapshots: that change
-        // reproduced 0xc0000005 shared_ptr refcount crashes.
-        SpectrumSnapshotHandle cached_snapshot;
-        std::size_t last_spectrum_index = 0;
-    };
-
     struct PanelVisibility {
         bool files = true;
         bool navigation = true;
@@ -68,12 +52,6 @@ private:
         bool spectral_lines = true;
     };
 
-    std::size_t AddOrUpdateSource(
-        const std::filesystem::path& path,
-        SpectrumSnapshotHandle snapshot,
-        std::size_t spectrum_index);
-    void ActivateSource(std::size_t source_index);
-    void RemoveSource(std::size_t source_index);
     void OpenSourceFromFilePicker();
     void OpenSourceFromFolderPicker();
     void OpenAnnotationFromFilePicker();
@@ -90,33 +68,22 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
-    void SetSnapshot(SpectrumSnapshotHandle snapshot);
-    void EnsureSnapshotMatchesNavigation();
-    void LoadActiveSourceAt(std::size_t spectrum_index);
+    void HandleSessionAction(const SourceCollectionSessionAction& action);
+    void ResetPlotStateForSnapshotChange();
     [[nodiscard]] SampleNavigationResult RequestSampleNavigation(const SampleNavigationRequest& request);
     void SyncNavigationInputs();
     void BeginSampleNameSearch();
     void ClearSampleNameSearch();
     void RestoreFailedSampleNameSearch();
     void CommitSampleNameSearch(std::size_t target_row, const std::string& matched_name);
-    void SyncSampleNavigationSession();
-    void SyncSampleWorkflowSession();
-    [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
-    void ApplySampleFiltersToNavigation();
 
-    SpectrumSnapshotHandle snapshot_;
+    SourceCollectionSession session_;
     SpectrumPlotState plot_state_;
     SpectrumPlotStyle plot_style_;
-    SampleLabelingController sample_labeling_;
-    SampleFilterController sample_filters_;
-    SampleNavigationController sample_navigation_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
-    std::vector<SourceListEntry> sources_;
-    std::optional<std::size_t> current_source_index_;
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};
-    std::optional<std::string> active_sample_workflow_identity_;
     bool sample_name_matches_open_ = false;
     bool sample_name_search_active_ = false;
     std::string sample_name_search_restore_name_;

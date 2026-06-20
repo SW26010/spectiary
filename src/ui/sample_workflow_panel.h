@@ -4,6 +4,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/source_collection_session.h"
 
 #include <array>
 #include <filesystem>
@@ -21,33 +22,19 @@ public:
 
     void ResetForSampleWorkflow();
 
-    [[nodiscard]] std::vector<SampleFilterSource> BuildFilterSources(
-        const SampleNavigationController& navigation,
-        const SampleLabelingController& labeling) const;
-
     void RenderLabeling(
-        const SpectrumSnapshotHandle& snapshot,
-        SampleNavigationController& navigation,
-        SampleLabelingController& labeling,
+        SourceCollectionSession& session,
         bool plot_shortcut_context_active,
         bool* open,
         const std::function<SampleNavigationResult(const SampleNavigationRequest&)>& request_navigation,
-        const std::function<void()>& apply_filters,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
 
-    void RenderFilters(
-        const SpectrumSnapshotHandle& snapshot,
-        SampleNavigationController& navigation,
-        SampleLabelingController& labeling,
-        SampleFilterController& filters,
-        bool* open,
-        const std::function<void()>& apply_filters);
+    void RenderFilters(SourceCollectionSession& session, bool* open);
 
 private:
     std::array<char, 96> new_label_name_buffer_ = {};
     std::array<char, 16> new_label_code_buffer_ = {};
     std::array<char, 8> new_label_shortcut_buffer_ = {};
-    std::optional<std::string> selected_labeling_filter_source_id_;
 };
 
 }  // namespace specforge
