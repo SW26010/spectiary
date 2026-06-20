@@ -215,12 +215,6 @@ SpectrumSmoothingMethod SmoothingMethodFromIndex(int index)
     }
 }
 
-void ClearSmoothingCache(SpectrumPlotState& state)
-{
-    state.smoothing_cache_source.reset();
-    state.smoothed_y_values.reset();
-}
-
 float RelativeLuminance(const ImVec4& color)
 {
     return 0.2126f * color.x + 0.7152f * color.y + 0.0722f * color.z;
@@ -551,7 +545,7 @@ void ShellUi::Render(const ShellStatus& status)
 
 void ShellUi::RefreshSystemColors()
 {
-    plot_style_ = ReadSystemSpectrumPlotStyle();
+    spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotStyle(ReadSystemSpectrumPlotStyle()));
 }
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
@@ -599,7 +593,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSess
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
 {
     if (action.snapshot_changed) {
-        ResetPlotStateForSnapshotChange();
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::ResetForSnapshotChange());
     }
     if (action.workflow_changed) {
         sample_workflow_panel_ui_.ResetForSampleWorkflow();
@@ -609,17 +603,6 @@ void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
             return session_.Submit(std::move(command));
         });
     }
-}
-
-void ShellUi::ResetPlotStateForSnapshotChange()
-{
-    const bool show_smoothed = plot_state_.show_smoothed;
-    const bool show_raw_when_smoothed = plot_state_.show_raw_when_smoothed;
-    const SpectrumSmoothingSettings smoothing = plot_state_.smoothing;
-    plot_state_ = SpectrumPlotState{};
-    plot_state_.show_smoothed = show_smoothed;
-    plot_state_.show_raw_when_smoothed = show_raw_when_smoothed;
-    plot_state_.smoothing = smoothing;
 }
 
 void ShellUi::RenderDockHost(const ShellStatus& status)
@@ -791,57 +774,59 @@ void ShellUi::RenderSmoothingPanel()
         return;
     }
 
-    ImGui::Checkbox("Show smoothed curve", &plot_state_.show_smoothed);
+    SpectrumViewSessionView view = spectrum_view_session_.View();
+    bool show_smoothed = view.show_smoothed;
+    if (ImGui::Checkbox("Show smoothed curve", &show_smoothed)) {
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowSmoothed(show_smoothed));
+        view = spectrum_view_session_.View();
+    }
     ImGui::SameLine();
     if (ImGui::Button("Reset")) {
-        plot_state_.show_smoothed = false;
-        plot_state_.show_raw_when_smoothed = true;
-        plot_state_.smoothing = SpectrumSmoothingSettings{};
-        ClearSmoothingCache(plot_state_);
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::ResetSmoothing());
+        view = spectrum_view_session_.View();
     }
 
     static constexpr const char* kMethodLabels[] = {"None", "Gaussian", "Median"};
-    int method_index = SmoothingMethodIndex(plot_state_.smoothing.method);
+    int method_index = SmoothingMethodIndex(view.smoothing.method);
     if (ImGui::Combo("Method", &method_index, kMethodLabels, IM_ARRAYSIZE(kMethodLabels))) {
-        plot_state_.smoothing.method = SmoothingMethodFromIndex(method_index);
-        ClearSmoothingCache(plot_state_);
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetSmoothingMethod(SmoothingMethodFromIndex(method_index)));
+        view = spectrum_view_session_.View();
     }
 
-    if (plot_state_.smoothing.method == SpectrumSmoothingMethod::Gaussian) {
-        float sigma = static_cast<float>(plot_state_.smoothing.gaussian_sigma);
+    if (view.smoothing.method == SpectrumSmoothingMethod::Gaussian) {
+        float sigma = static_cast<float>(view.smoothing.gaussian_sigma);
         ImGui::SetNextItemWidth(120.0f);
         if (ImGui::DragFloat("Sigma", &sigma, 0.05f, 0.01f, 100.0f, "%.2f")) {
-            plot_state_.smoothing.gaussian_sigma = std::max(0.01, static_cast<double>(sigma));
-            ClearSmoothingCache(plot_state_);
+            spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetGaussianSigma(static_cast<double>(sigma)));
+            view = spectrum_view_session_.View();
         }
-    } else if (plot_state_.smoothing.method == SpectrumSmoothingMethod::Median) {
-        const int normalized_kernel_size = NormalizeMedianKernelSize(plot_state_.smoothing.median_kernel_size);
-        if (normalized_kernel_size != plot_state_.smoothing.median_kernel_size) {
-            plot_state_.smoothing.median_kernel_size = normalized_kernel_size;
-            ClearSmoothingCache(plot_state_);
-        }
-        int kernel_size = plot_state_.smoothing.median_kernel_size;
+    } else if (view.smoothing.method == SpectrumSmoothingMethod::Median) {
+        int kernel_size = view.smoothing.median_kernel_size;
         ImGui::SetNextItemWidth(120.0f);
         if (ImGui::InputInt("Kernel size", &kernel_size, 2, 10)) {
-            plot_state_.smoothing.median_kernel_size = NormalizeMedianKernelSize(kernel_size);
-            ClearSmoothingCache(plot_state_);
+            spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetMedianKernelSize(kernel_size));
+            view = spectrum_view_session_.View();
         }
         const int effective_kernel_size =
-            EffectiveMedianKernelSize(plot_state_.smoothing.median_kernel_size, snapshot->current_spectrum.point_count);
-        if (effective_kernel_size != plot_state_.smoothing.median_kernel_size) {
+            spectrum_view_session_.EffectiveMedianKernelSize(snapshot->current_spectrum.point_count);
+        if (effective_kernel_size != view.smoothing.median_kernel_size) {
             ImGui::TextDisabled("Effective kernel: %d", effective_kernel_size);
         }
     }
 
-    if (plot_state_.smoothing.method == SpectrumSmoothingMethod::None && plot_state_.show_smoothed) {
+    if (view.smoothing.method == SpectrumSmoothingMethod::None && view.show_smoothed) {
         ImGui::TextDisabled("No smoothing method selected");
     }
 
-    if (!plot_state_.show_smoothed || plot_state_.smoothing.method == SpectrumSmoothingMethod::None) {
+    if (!view.smoothing_active) {
         ImGui::BeginDisabled();
     }
-    ImGui::Checkbox("Show raw overlay", &plot_state_.show_raw_when_smoothed);
-    if (!plot_state_.show_smoothed || plot_state_.smoothing.method == SpectrumSmoothingMethod::None) {
+    bool show_raw_when_smoothed = view.show_raw_when_smoothed;
+    if (ImGui::Checkbox("Show raw overlay", &show_raw_when_smoothed)) {
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowRawWhenSmoothed(show_raw_when_smoothed));
+    }
+    if (!view.smoothing_active) {
         ImGui::EndDisabled();
     }
 
@@ -895,9 +880,12 @@ void ShellUi::RenderInfoTagsPanel()
 
     ImGui::Spacing();
     if (ImGui::Button("Fit view")) {
-        plot_state_.fit_next_frame = true;
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::RequestFitView());
     }
-    ImGui::Checkbox("Show points", &plot_state_.show_points);
+    bool show_points = spectrum_view_session_.View().show_points;
+    if (ImGui::Checkbox("Show points", &show_points)) {
+        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowPoints(show_points));
+    }
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Diagnostics");
@@ -918,9 +906,9 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         spectral_lines_panel_.FilteredMarkers(snapshot, false);
     RenderSpectrumPlot(
         snapshot,
-        plot_state_,
+        spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
-        plot_style_,
+        spectrum_view_session_.PlotStyleForRender(),
         SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()});
     ImGui::End();
 }

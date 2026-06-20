@@ -115,6 +115,8 @@ add_executable(specforge_native WIN32
     src/ui/source_collection_session.cpp
     src/ui/source_collection_session.h
     src/ui/source_collection_session_types.h
+    src/ui/spectrum_view_session.cpp
+    src/ui/spectrum_view_session.h
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_grouping_view.h
     src/ui/spectral_lines_panel.cpp
@@ -347,6 +349,25 @@ else()
 endif()
 
 add_test(NAME specforge_spectrum_smoothing_tests COMMAND specforge_spectrum_smoothing_tests)
+
+add_executable(specforge_spectrum_view_session_tests
+    tests/spectrum_view_session_tests.cpp
+    src/domain/spectrum_smoothing.cpp
+    src/domain/spectrum_smoothing.h
+    src/ui/spectrum_view_session.cpp
+    src/ui/spectrum_view_session.h
+)
+
+target_include_directories(specforge_spectrum_view_session_tests PRIVATE src)
+target_link_libraries(specforge_spectrum_view_session_tests PRIVATE imgui::imgui)
+
+if(MSVC)
+    target_compile_options(specforge_spectrum_view_session_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_spectrum_view_session_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_spectrum_view_session_tests COMMAND specforge_spectrum_view_session_tests)
 
 add_executable(specforge_spectral_line_catalog_tests
     tests/spectral_line_catalog_tests.cpp

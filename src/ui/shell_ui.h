@@ -1,12 +1,12 @@
 #pragma once
 
 #include "domain/spectrum_snapshot.h"
-#include "plot/spectrum_plot.h"
 #include "ui/source_collection_panel.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_session.h"
+#include "ui/spectrum_view_session.h"
 
 #include <imgui.h>
 
@@ -69,11 +69,9 @@ private:
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionCommand command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
-    void ResetPlotStateForSnapshotChange();
 
     SourceCollectionSession session_;
-    SpectrumPlotState plot_state_;
-    SpectrumPlotStyle plot_style_;
+    SpectrumViewSession spectrum_view_session_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
