@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #ifdef _WIN32
@@ -39,6 +41,33 @@ std::filesystem::path DefaultLocalUserStateRoot()
 std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path)
 {
     return DefaultLocalUserStateRoot() / std::move(relative_path);
+}
+
+void LocalUserStateSaveStatus::Clear()
+{
+    failed_ = false;
+    message_.clear();
+}
+
+void LocalUserStateSaveStatus::MarkFailed(std::string message)
+{
+    failed_ = true;
+    message_ = std::move(message);
+}
+
+bool LocalUserStateSaveStatus::failed() const
+{
+    return failed_;
+}
+
+const std::string& LocalUserStateSaveStatus::message() const
+{
+    return message_;
+}
+
+std::string_view LocalUserStateSaveStatus::message_view() const
+{
+    return message_;
 }
 
 LocalUserStateSaveScheduler::LocalUserStateSaveScheduler(
@@ -78,10 +107,25 @@ void LocalUserStateSaveScheduler::MarkSaveSucceeded()
     next_save_frame_ = 0;
 }
 
+void LocalUserStateSaveScheduler::MarkSaveSucceeded(LocalUserStateSaveStatus& status)
+{
+    MarkSaveSucceeded();
+    status.Clear();
+}
+
 void LocalUserStateSaveScheduler::MarkSaveFailed(std::uint64_t frame_index)
 {
     dirty_ = true;
     next_save_frame_ = frame_index + retry_frames_;
+}
+
+void LocalUserStateSaveScheduler::MarkSaveFailed(
+    std::uint64_t frame_index,
+    LocalUserStateSaveStatus& status,
+    std::string message)
+{
+    MarkSaveFailed(frame_index);
+    status.MarkFailed(std::move(message));
 }
 
 bool LocalUserStateSaveScheduler::dirty() const

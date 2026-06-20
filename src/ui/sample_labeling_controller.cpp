@@ -281,13 +281,7 @@ bool SaveStateCacheFile(
         return false;
     }
 
-    std::vector<std::string> keys;
-    keys.reserve(sources.size());
-    for (const auto& [key, state] : sources) {
-        (void)state;
-        keys.push_back(key);
-    }
-    std::sort(keys.begin(), keys.end());
+    const std::vector<std::string> keys = SortedCacheKeys(sources);
 
     return WriteVersionedJsonCacheFile(
         path,
@@ -669,8 +663,7 @@ void SampleLabelingController::EnsureStateCacheLoaded()
 void SampleLabelingController::QueueStateSave()
 {
     state_cache_save_scheduler_.MarkDirty();
-    state_cache_save_failed_ = false;
-    state_cache_error_.clear();
+    state_cache_save_status_.Clear();
 }
 
 void SampleLabelingController::QueueOutputRetry()
@@ -759,13 +752,10 @@ bool SampleLabelingController::TrySaveStateCache()
     const bool saved = SaveStateCacheFile(state_cache_path_, sources_to_write);
     if (saved) {
         normalize_saved_states(sources_);
-        state_cache_save_scheduler_.MarkSaveSucceeded();
-        state_cache_save_failed_ = false;
-        state_cache_error_.clear();
+        state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
     } else {
         state_cache_save_scheduler_.MarkDirty();
-        state_cache_save_failed_ = true;
-        state_cache_error_ = "could not write local sample-labeling task record";
+        state_cache_save_status_.MarkFailed("could not write local sample-labeling task record");
     }
     return saved;
 }
@@ -804,12 +794,12 @@ bool SampleLabelingController::state_save_pending() const
 
 bool SampleLabelingController::state_save_failed() const
 {
-    return state_cache_save_failed_;
+    return state_cache_save_status_.failed();
 }
 
 std::string_view SampleLabelingController::state_save_error() const
 {
-    return state_cache_error_;
+    return state_cache_save_status_.message_view();
 }
 
 std::string_view SampleLabelingController::state_load_warning() const

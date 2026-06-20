@@ -429,12 +429,14 @@ void SpectralLinesPanelController::FlushCache()
     user_state_cache_.catalog_panel_state[catalog_identity_.id] = panel_state_;
     std::string error;
     if (!SaveCatalogUserStateCache(user_state_cache_path_, user_state_cache_, error)) {
-        warning_ = "Could not save spectral-line grouping cache: " + error;
-        cache_save_scheduler_.MarkSaveFailed(frame_index_);
+        cache_save_scheduler_.MarkSaveFailed(
+            frame_index_,
+            cache_save_status_,
+            "Could not save spectral-line grouping cache: " + error);
         return;
     }
     warning_.clear();
-    cache_save_scheduler_.MarkSaveSucceeded();
+    cache_save_scheduler_.MarkSaveSucceeded(cache_save_status_);
 }
 
 const SpectralLineCatalog& SpectralLinesPanelController::catalog() const
@@ -494,6 +496,9 @@ bool SpectralLinesPanelController::show_labels() const
 
 const std::string& SpectralLinesPanelController::warning() const
 {
+    if (cache_save_status_.failed()) {
+        return cache_save_status_.message();
+    }
     return warning_;
 }
 

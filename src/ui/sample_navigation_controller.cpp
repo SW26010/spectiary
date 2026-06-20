@@ -66,13 +66,7 @@ bool SaveStateCacheFile(
         return false;
     }
 
-    std::vector<std::string> keys;
-    keys.reserve(indices.size());
-    for (const auto& [key, value] : indices) {
-        (void)value;
-        keys.push_back(key);
-    }
-    std::sort(keys.begin(), keys.end());
+    const std::vector<std::string> keys = SortedCacheKeys(indices);
 
     return WriteVersionedJsonCacheFile(
         path,

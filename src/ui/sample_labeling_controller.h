@@ -64,12 +64,11 @@ private:
     std::unordered_map<std::string, SourceState> sources_;
     std::filesystem::path state_cache_path_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
+    LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
     bool state_cache_loaded_ = false;
-    bool state_cache_save_failed_ = false;
     bool output_retry_pending_ = false;
     std::uint64_t next_output_retry_frame_ = 0;
-    std::string state_cache_error_;
     std::string state_cache_load_warning_;
 };
 

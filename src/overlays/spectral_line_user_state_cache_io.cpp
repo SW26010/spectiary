@@ -277,47 +277,11 @@ void WriteGroupingViews(std::ostream& stream, const std::vector<GroupingView>& v
     stream << "]";
 }
 
-std::vector<std::string> SortedMapKeys(const std::unordered_map<std::string, bool>& values)
-{
-    std::vector<std::string> keys;
-    keys.reserve(values.size());
-    for (const auto& [key, value] : values) {
-        (void)value;
-        keys.push_back(key);
-    }
-    std::sort(keys.begin(), keys.end());
-    return keys;
-}
-
 std::vector<std::string> SortedSetValues(const std::unordered_set<std::string>& values)
 {
     std::vector<std::string> sorted(values.begin(), values.end());
     std::sort(sorted.begin(), sorted.end());
     return sorted;
-}
-
-std::vector<std::string> SortedCatalogKeys(const CatalogUserStateCache& cache)
-{
-    std::vector<std::string> keys;
-    keys.reserve(cache.catalogs.size());
-    for (const auto& [key, state] : cache.catalogs) {
-        (void)state;
-        keys.push_back(key);
-    }
-    std::sort(keys.begin(), keys.end());
-    return keys;
-}
-
-std::vector<std::string> SortedCatalogPanelKeys(const CatalogUserStateCache& cache)
-{
-    std::vector<std::string> keys;
-    keys.reserve(cache.catalog_panel_state.size());
-    for (const auto& [key, state] : cache.catalog_panel_state) {
-        (void)state;
-        keys.push_back(key);
-    }
-    std::sort(keys.begin(), keys.end());
-    return keys;
 }
 
 }  // namespace
@@ -395,8 +359,8 @@ bool SaveCatalogUserStateCache(
         return false;
     }
 
-    const std::vector<std::string> catalog_keys = SortedCatalogKeys(cache);
-    const std::vector<std::string> panel_keys = SortedCatalogPanelKeys(cache);
+    const std::vector<std::string> catalog_keys = SortedCacheKeys(cache.catalogs);
+    const std::vector<std::string> panel_keys = SortedCacheKeys(cache.catalog_panel_state);
     return WriteVersionedJsonCacheFile(
         path,
         kCacheFormatKind,
@@ -418,7 +382,7 @@ bool SaveCatalogUserStateCache(
                 stream << ",\n";
 
                 stream << "      \"marker_visibility\": {";
-                const std::vector<std::string> marker_ids = SortedMapKeys(state.marker_visibility);
+                const std::vector<std::string> marker_ids = SortedCacheKeys(state.marker_visibility);
                 if (!marker_ids.empty()) {
                     stream << "\n";
                 }

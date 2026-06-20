@@ -2,10 +2,26 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <string_view>
 
 namespace specforge {
 
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
+
+class LocalUserStateSaveStatus {
+public:
+    void Clear();
+    void MarkFailed(std::string message);
+
+    [[nodiscard]] bool failed() const;
+    [[nodiscard]] const std::string& message() const;
+    [[nodiscard]] std::string_view message_view() const;
+
+private:
+    bool failed_ = false;
+    std::string message_;
+};
 
 class LocalUserStateSaveScheduler {
 public:
@@ -16,7 +32,9 @@ public:
     void MarkDirty(std::uint64_t frame_index);
     [[nodiscard]] bool ShouldAttemptSave(std::uint64_t frame_index);
     void MarkSaveSucceeded();
+    void MarkSaveSucceeded(LocalUserStateSaveStatus& status);
     void MarkSaveFailed(std::uint64_t frame_index);
+    void MarkSaveFailed(std::uint64_t frame_index, LocalUserStateSaveStatus& status, std::string message);
 
     [[nodiscard]] bool dirty() const;
 

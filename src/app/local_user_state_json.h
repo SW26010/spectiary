@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <initializer_list>
@@ -41,6 +42,19 @@ struct JsonValue {
 
 [[nodiscard]] std::string JsonEscape(std::string_view value);
 void WriteJsonString(std::ostream& stream, std::string_view value);
+
+template <typename AssociativeContainer>
+[[nodiscard]] std::vector<std::string> SortedCacheKeys(const AssociativeContainer& values)
+{
+    std::vector<std::string> keys;
+    keys.reserve(values.size());
+    for (const auto& [key, value] : values) {
+        (void)value;
+        keys.push_back(key);
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
 
 struct VersionedJsonCacheDocument {
     JsonValue root;

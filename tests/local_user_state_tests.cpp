@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -217,6 +219,40 @@ void TestVersionedJsonCacheShellRejectsUnsupportedSchema()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
+void TestSortedCacheKeysReturnsStableOrder()
+{
+    const std::unordered_map<std::string, int> values = {
+        {"zeta", 1},
+        {"alpha", 2},
+        {"middle", 3},
+    };
+
+    const std::vector<std::string> keys = specforge::SortedCacheKeys(values);
+    Require(keys == std::vector<std::string>({"alpha", "middle", "zeta"}), "cache keys should be sorted");
+}
+
+void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
+{
+    specforge::LocalUserStateSaveScheduler scheduler(30, 120);
+    specforge::LocalUserStateSaveStatus status;
+
+    scheduler.MarkDirty();
+    status.MarkFailed("could not write state");
+    Require(scheduler.dirty(), "failed status save should leave the scheduler dirty");
+    Require(status.failed(), "failed status save should expose failure state");
+    Require(status.message() == "could not write state", "failed status save should store the error message");
+
+    scheduler.MarkSaveSucceeded(status);
+    Require(!scheduler.dirty(), "successful status save should clear pending state");
+    Require(!status.failed(), "successful status save should clear failure state");
+    Require(status.message().empty(), "successful status save should clear the error message");
+
+    scheduler.MarkSaveFailed(10, status, "retry later");
+    Require(status.failed(), "retry failure should expose failure state");
+    Require(!scheduler.ShouldAttemptSave(129), "retry failure should respect retry backoff");
+    Require(scheduler.ShouldAttemptSave(130), "retry failure should flush after backoff");
+}
+
 void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
 {
     specforge::LocalUserStateSaveScheduler scheduler(30, 120);
@@ -258,6 +294,8 @@ int main()
     TestVersionedJsonCacheShellRoundTripsDocument();
     TestVersionedJsonCacheShellReportsCorruptCacheWarning();
     TestVersionedJsonCacheShellRejectsUnsupportedSchema();
+    TestSortedCacheKeysReturnsStableOrder();
+    TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
     TestLocalUserStateSaveSchedulerDebouncesAndRetries();
     TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown();
     return 0;

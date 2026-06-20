@@ -94,6 +94,7 @@ private:
     CatalogPanelState panel_state_;
     std::filesystem::path user_state_cache_path_;
     LocalUserStateSaveScheduler cache_save_scheduler_;
+    LocalUserStateSaveStatus cache_save_status_;
     std::string warning_;
     bool tab_selection_requested_ = true;
     std::uint64_t frame_index_ = 0;
