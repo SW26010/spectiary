@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
 #include <utility>
 
 namespace specforge {
@@ -15,6 +16,43 @@ std::string LowerAscii(std::string value)
         return static_cast<char>(std::tolower(character));
     });
     return value;
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::string AnnotationFilterSourceId(const SampleAnnotationResult& annotation)
+{
+    return annotation.path.empty() ? "annotation:" + annotation.name : "annotation:" + PathToUtf8(annotation.path);
+}
+
+std::string LabelingFilterSourceId(const SampleLabelingTask& task)
+{
+    return "labeling:" + task.task_id;
+}
+
+void AddFilterValueOption(
+    std::vector<SampleFilterValueOption>& options,
+    std::unordered_map<std::string, std::size_t>& option_indices,
+    std::string key,
+    std::string display_text)
+{
+    const auto existing = option_indices.find(key);
+    if (existing != option_indices.end()) {
+        ++options[existing->second].sample_count;
+        return;
+    }
+
+    const std::size_t index = options.size();
+    option_indices.emplace(key, index);
+    SampleFilterValueOption option;
+    option.key = std::move(key);
+    option.display_text = std::move(display_text);
+    option.sample_count = 1;
+    options.push_back(std::move(option));
 }
 
 bool ShouldRememberLabelingPosition(SampleNavigationRequestKind kind)
@@ -35,6 +73,63 @@ SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
         eligible_samples.push_back(value == kUnlabeledSampleLabelCode);
     }
     return SampleNavigationRequest::LabelAdvanceToEligible(std::move(eligible_samples));
+}
+
+SourceCollectionFilterSourceView BuildAnnotationFilterSourceView(const SampleAnnotationResult& annotation)
+{
+    // Keep this view builder light: the domain filter source builders also fill
+    // value_keys_by_sample for evaluation, which should not be rebuilt for the
+    // per-frame filter panel view.
+    SourceCollectionFilterSourceView view;
+    view.id = AnnotationFilterSourceId(annotation);
+    view.name = annotation.name;
+    view.filterable = annotation.kind != SampleAnnotationKind::ContinuousFloat;
+    if (!view.filterable) {
+        return view;
+    }
+
+    std::unordered_map<std::string, std::size_t> option_indices;
+    for (const SampleAnnotationValue& value : annotation.values) {
+        AddFilterValueOption(view.options, option_indices, value.display_text, value.display_text);
+    }
+    return view;
+}
+
+SourceCollectionFilterSourceView BuildLabelingFilterSourceView(const SampleLabelingTask& task)
+{
+    SourceCollectionFilterSourceView view;
+    view.id = LabelingFilterSourceId(task);
+    view.name = task.task_name;
+    view.filterable = true;
+
+    std::unordered_map<std::string, std::size_t> option_indices;
+    for (const int value : task.values) {
+        const std::string key = std::to_string(value);
+        AddFilterValueOption(view.options, option_indices, key, FormatSampleLabelValue(task.label_set, value));
+    }
+
+    for (const SampleLabelDefinition& label : task.label_set.labels) {
+        const std::string key = std::to_string(label.code);
+        if (option_indices.find(key) == option_indices.end()) {
+            SampleFilterValueOption option;
+            option.key = key;
+            option.display_text = FormatSampleLabelValue(task.label_set, label.code);
+            option.sample_count = 0;
+            option_indices.emplace(key, view.options.size());
+            view.options.push_back(std::move(option));
+        }
+    }
+
+    const std::string unlabeled_key = std::to_string(kUnlabeledSampleLabelCode);
+    if (option_indices.find(unlabeled_key) == option_indices.end()) {
+        SampleFilterValueOption option;
+        option.key = unlabeled_key;
+        option.display_text = FormatSampleLabelValue(task.label_set, kUnlabeledSampleLabelCode);
+        option.sample_count = 0;
+        view.options.push_back(std::move(option));
+    }
+
+    return view;
 }
 
 }  // namespace
@@ -257,15 +352,15 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingFilter
         return action;
     }
 
-    const SampleFilterSource active_labeling_source = BuildLabelingFilterSource(*task);
-    if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ != active_labeling_source.id) {
+    const std::string active_labeling_source_id = LabelingFilterSourceId(*task);
+    if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ != active_labeling_source_id) {
         filters_.ClearCondition(*selected_labeling_filter_source_id_);
     }
 
     if (selected) {
-        selected_labeling_filter_source_id_ = active_labeling_source.id;
+        selected_labeling_filter_source_id_ = active_labeling_source_id;
     } else {
-        filters_.ClearCondition(active_labeling_source.id);
+        filters_.ClearCondition(active_labeling_source_id);
         selected_labeling_filter_source_id_.reset();
     }
     ApplySampleFilters(snapshot);
@@ -360,20 +455,7 @@ SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumS
     view.navigation_filter_active = navigation_.filter_active();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
     view.evaluation = EvaluateSampleFilters(snapshot);
-
-    std::vector<SampleFilterSource> sources = BuildSampleFilterSources();
-    view.sources.reserve(sources.size());
-    for (SampleFilterSource& source : sources) {
-        SourceCollectionFilterSourceView source_view;
-        if (const SampleFilterCondition* condition = filters_.FindCondition(source.id)) {
-            source_view.selected_value_keys = condition->allowed_value_keys;
-        }
-        source_view.id = std::move(source.id);
-        source_view.name = std::move(source.name);
-        source_view.filterable = source.filterable;
-        source_view.options = std::move(source.options);
-        view.sources.push_back(std::move(source_view));
-    }
+    view.sources = BuildSampleFilterSourceViews();
     return view;
 }
 
@@ -432,6 +514,10 @@ void SampleWorkflowCoordinator::ApplySampleFilters(const SpectrumSnapshotHandle&
         navigation_.ClearSampleFilter();
         return;
     }
+    if (filters_.conditions().empty()) {
+        navigation_.ClearSampleFilter();
+        return;
+    }
 
     const SampleFilterEvaluation evaluation = filters_.Evaluate(BuildSampleFilterSources(), sample_count);
     if (evaluation.active) {
@@ -463,6 +549,11 @@ SampleFilterEvaluation SampleWorkflowCoordinator::EvaluateSampleFilters(const Sp
     if (sample_count == 0) {
         return {};
     }
+    if (filters_.conditions().empty()) {
+        SampleFilterEvaluation evaluation;
+        evaluation.included_count = sample_count;
+        return evaluation;
+    }
     return filters_.Evaluate(BuildSampleFilterSources(), sample_count);
 }
 
@@ -472,7 +563,7 @@ bool SampleWorkflowCoordinator::active_labeling_filter_source_selected() const
     if (task == nullptr || !selected_labeling_filter_source_id_) {
         return false;
     }
-    return *selected_labeling_filter_source_id_ == BuildLabelingFilterSource(*task).id;
+    return *selected_labeling_filter_source_id_ == LabelingFilterSourceId(*task);
 }
 
 std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSources() const
@@ -493,6 +584,33 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
         }
     }
     return filter_sources;
+}
+
+std::vector<SourceCollectionFilterSourceView> SampleWorkflowCoordinator::BuildSampleFilterSourceViews() const
+{
+    std::vector<SourceCollectionFilterSourceView> source_views;
+    const SampleCollectionContext* context = navigation_.active_context();
+    if (context != nullptr) {
+        source_views.reserve(context->annotations.size() + 1);
+        for (const SampleAnnotationResult& annotation : context->annotations) {
+            SourceCollectionFilterSourceView source_view = BuildAnnotationFilterSourceView(annotation);
+            if (const SampleFilterCondition* condition = filters_.FindCondition(source_view.id)) {
+                source_view.selected_value_keys = condition->allowed_value_keys;
+            }
+            source_views.push_back(std::move(source_view));
+        }
+    }
+
+    if (const SampleLabelingTask* task = labeling_.active_task()) {
+        SourceCollectionFilterSourceView labeling_source = BuildLabelingFilterSourceView(*task);
+        if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ == labeling_source.id) {
+            if (const SampleFilterCondition* condition = filters_.FindCondition(labeling_source.id)) {
+                labeling_source.selected_value_keys = condition->allowed_value_keys;
+            }
+            source_views.push_back(std::move(labeling_source));
+        }
+    }
+    return source_views;
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(

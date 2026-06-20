@@ -115,5 +115,5 @@ For the standard ImPlot pan/drag responsiveness flow, see
 [docs/performance_testing.md](docs/performance_testing.md). The short path is:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetMs 6.9444
+powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -InitialSource "C:\path\to\source.npy"
 ```

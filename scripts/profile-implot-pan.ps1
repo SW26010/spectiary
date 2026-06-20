@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Executable = '',
-    [double]$BudgetMs = 6.9444,
+    [string]$InitialSource = '',
+    [double]$BudgetMs = 7.6923,
     [double]$MinDragMs = 10000.0,
     [int]$MinInputSamples = 100,
     [switch]$SkipAnalyze,
@@ -9,6 +10,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Quote-StartProcessArgument {
+    param([Parameter(Mandatory = $true)] [string]$Value)
+
+    if ($Value.Contains('"')) {
+        throw "Cannot pass an argument containing a double quote to Start-Process: $Value"
+    }
+    return '"' + $Value + '"'
+}
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
@@ -25,6 +35,9 @@ $logDir = Join-Path $repoRoot 'logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
 Write-Host 'SpecForge ImPlot pan-drag profile'
+if ($InitialSource) {
+    Write-Host "Initial source: $InitialSource"
+}
 Write-Host '1. In the Spectrum plot, left-drag pan for 10-15 seconds.'
 Write-Host '2. Keep the interaction focused: avoid wheel zoom, docking changes, and side panels.'
 Write-Host '3. Close SpecForge to run the analyzer.'
@@ -36,7 +49,17 @@ $env:SPECFORGE_PROFILE = '1'
 $env:SPECFORGE_PROFILE_DIR = $logDir
 $launchTime = Get-Date
 try {
-    $process = Start-Process -FilePath $resolvedExecutable.Path -WorkingDirectory $repoRoot -Wait -PassThru
+    $startProcessArguments = @{
+        FilePath = $resolvedExecutable.Path
+        WorkingDirectory = $repoRoot
+        Wait = $true
+        PassThru = $true
+    }
+    if ($InitialSource) {
+        $resolvedInitialSource = Resolve-Path -LiteralPath $InitialSource -ErrorAction Stop
+        $startProcessArguments.ArgumentList = @(Quote-StartProcessArgument $resolvedInitialSource.Path)
+    }
+    $process = Start-Process @startProcessArguments
     if ($process.ExitCode -ne 0) {
         throw "SpecForge exited with code $($process.ExitCode)."
     }
@@ -70,17 +93,14 @@ Write-Host ''
 Write-Host "Profile log: $($latestLog.FullName)"
 
 if (-not $SkipAnalyze) {
-    $analyzerArgs = @(
-        $latestLog.FullName,
-        '-BudgetMs',
-        $BudgetMs,
-        '-MinDragMs',
-        $MinDragMs,
-        '-MinInputSamples',
-        $MinInputSamples
-    )
+    $analyzerArgs = @{
+        Profile = $latestLog.FullName
+        BudgetMs = $BudgetMs
+        MinDragMs = $MinDragMs
+        MinInputSamples = $MinInputSamples
+    }
     if ($ReportOnly) {
-        $analyzerArgs += '-ReportOnly'
+        $analyzerArgs.ReportOnly = $true
     }
 
     & (Join-Path $scriptRoot 'analyze-profile.ps1') @analyzerArgs

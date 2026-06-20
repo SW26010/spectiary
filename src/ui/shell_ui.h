@@ -67,7 +67,9 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
+    [[nodiscard]] const SourceCollectionSessionView& SessionView();
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionCommand command);
+    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(SourceCollectionSessionCommand command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
 
     SourceCollectionSession session_;
@@ -79,6 +81,8 @@ private:
     bool layout_seeded_ = false;
     PanelVisibility panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
+    std::optional<SourceCollectionSessionView> session_view_cache_;
+    bool session_view_cache_dirty_ = false;
 };
 
 }  // namespace specforge

@@ -35,6 +35,7 @@
 默认预算：
 
 - 120Hz: p95 <= 8.3333 ms。
+- 130Hz acceptance: p95 <= 7.6923 ms。
 - 144Hz stretch: p95 <= 6.9444 ms。
 
 一次结果只有在 `win32 drag move interval`、`implot pan sample interval`、`present interval`、`input -> axis limits`、`input -> present` 都满足同一预算时，才能说该 pan/drag 场景达到了对应刷新率目标。
@@ -55,10 +56,22 @@
 cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
 ```
 
-运行 144Hz stretch 采集：
+运行 130Hz 验收采集：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetMs 6.9444
+powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1
+```
+
+用真实数据采集时直接传入初始 source：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -InitialSource "C:\path\to\source.npy"
+```
+
+运行 144Hz stretch 采集时显式传入 6.9444 ms 预算：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetMs 6.9444 -InitialSource "C:\path\to\source.npy"
 ```
 
 程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
@@ -80,13 +93,19 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -ReportO
 手动分析某个日志：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -BudgetMs 6.9444
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl
 ```
 
 手动只看报告：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -BudgetMs 6.9444 -ReportOnly
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -ReportOnly
+```
+
+144Hz stretch 预算：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -BudgetMs 6.9444
 ```
 
 120Hz 预算：
@@ -105,6 +124,17 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specfo
 4. 结果：列出 `win32 drag move interval p95`、`input -> axis limits p95`、`input -> present p95`、`present interval p95`、`implot pan sample interval p95`。
 5. 诊断：如果失败，说明失败发生在输入到达、ImPlot 采样、render pass 还是 Present。
 6. 结论：使用脚本末尾 `Result: PASS/FAIL`，只声明该日志证明的刷新率目标，不外推到真实数据或其他交互。
+
+## 当前真实数据基线
+
+截至 2026-06-21，`logs/specforge-profile-20260621-064415.jsonl` 来自真实 `.npy` 数据
+`carbon_net_increment_loglam_V0.31_X.npy` 的主图 pan/drag 采集。该日志在 130Hz 预算
+`BudgetMs 7.6923` 下通过，在 144Hz stretch 预算 `BudgetMs 6.9444` 下失败。
+
+144Hz 失败项是 `win32 drag move interval p95=7.099 ms`、`implot pan sample interval p95=7.268 ms`
+和 `present interval p95=7.115 ms`；`input -> present p95=6.940 ms` 和
+`view_update duration p95=5.039 ms` 仍满足 144Hz 预算。因此当前可以声明该真实数据 pan/drag
+场景通过 130Hz 验收，不能声明 144Hz stretch 已达标。
 
 ## 失败解释规则
 

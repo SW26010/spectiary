@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Profile,
 
-    [double]$BudgetMs = 6.9444,
+    [double]$BudgetMs = 7.6923,
 
     [double]$MinDragMs = 10000.0,
 

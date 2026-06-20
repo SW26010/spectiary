@@ -11,11 +11,13 @@
 - 已有第一版公开谱线表 `config/spectral_lines.public.tsv`，由 Spectral Lines 面板筛选，并在主图中显示 line/band 参考 overlay；公开表不包含 subtype 组合、窗口预设或私有判据。
 - 可选 JSONL profile sink 已经接入，用于解释输入、view update、draw、render/present 的基本链路。
 
-当前仍不声明真实数据性能达标；任何刷新率或延迟结论必须来自真实数据和新日志。
+当前最新真实数据 profile 只证明主图 pan/drag 在 130Hz 预算下通过；144Hz 仍是未达标的 stretch target。任何刷新率或延迟结论必须来自真实数据和新日志。
 
 ## 产品目标
 
 SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、跟手、克制、专业，用户可以长时间反复检查真实光谱数据，而不会被布局噪音、延迟或不稳定交互打断。
+
+UI 跟手程度是产品基础能力，不是可以被其它功能换取的优化项。任何 loader、overlay、filter、labeling、面板状态或本地状态功能，都不能让主图 pan、wheel zoom、上一条/下一条、range navigation 等实时交互退化；需要重计算、IO 或状态构造时，必须隔离、缓存、延后，或用真实数据 profile 证明不影响交互预算。
 
 目标技术栈：
 
@@ -50,6 +52,7 @@ SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、�
 - 所有用户可见文案使用领域语言，不暴露 backend 名称。
 - profiling 是产品能力，不是可选开发工具。
 - 真实性能结论必须来自真实数据和新日志。
+- 实时交互响应优先于附加功能；功能验收必须证明没有牺牲主图 pan、zoom、spectrum switch、range navigation 的跟手程度。
 - 旧实验只能作为参考，不作为新产品主线。
 
 ## 对交接稿的取舍
