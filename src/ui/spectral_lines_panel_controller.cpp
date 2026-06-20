@@ -30,7 +30,8 @@ SpectralLinesPanelController::SpectralLinesPanelController()
     : catalog_(LoadDefaultSpectralLineCatalog()),
       catalog_identity_(PublicSpectralLineCatalogIdentity()),
       catalog_grouping_view_(BuildCatalogGroupingView(catalog_, catalog_identity_)),
-      user_state_cache_path_(DefaultCatalogUserStateCachePath())
+      user_state_cache_path_(DefaultCatalogUserStateCachePath()),
+      cache_save_scheduler_(kSaveDebounceFrames, kSaveRetryFrames)
 {
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
     user_state_cache_ = std::move(load_result.cache);
@@ -408,17 +409,12 @@ std::string SpectralLinesPanelController::NextUserGroupId()
 
 void SpectralLinesPanelController::MarkCacheDirty()
 {
-    cache_dirty_ = true;
-    cache_dirty_frame_ = frame_index_;
-    cache_next_save_frame_ = std::max(cache_next_save_frame_, cache_dirty_frame_ + kSaveDebounceFrames);
+    cache_save_scheduler_.MarkDirty(frame_index_);
 }
 
 void SpectralLinesPanelController::MaybeSaveCache(std::uint64_t frame_index)
 {
-    if (!cache_dirty_) {
-        return;
-    }
-    if (frame_index < cache_next_save_frame_) {
+    if (!cache_save_scheduler_.ShouldAttemptSave(frame_index)) {
         return;
     }
     FlushCache();
@@ -426,7 +422,7 @@ void SpectralLinesPanelController::MaybeSaveCache(std::uint64_t frame_index)
 
 void SpectralLinesPanelController::FlushCache()
 {
-    if (!cache_dirty_) {
+    if (!cache_save_scheduler_.dirty()) {
         return;
     }
     user_state_cache_.catalogs[catalog_identity_.id] = user_state_;
@@ -434,12 +430,11 @@ void SpectralLinesPanelController::FlushCache()
     std::string error;
     if (!SaveCatalogUserStateCache(user_state_cache_path_, user_state_cache_, error)) {
         warning_ = "Could not save spectral-line grouping cache: " + error;
-        cache_next_save_frame_ = frame_index_ + kSaveRetryFrames;
+        cache_save_scheduler_.MarkSaveFailed(frame_index_);
         return;
     }
     warning_.clear();
-    cache_dirty_ = false;
-    cache_next_save_frame_ = 0;
+    cache_save_scheduler_.MarkSaveSucceeded();
 }
 
 const SpectralLineCatalog& SpectralLinesPanelController::catalog() const

@@ -1,28 +1,16 @@
 #include "ui/sample_navigation_controller.h"
 
+#include "app/local_user_state.h"
+#include "app/local_user_state_json.h"
+
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <filesystem>
-#include <fstream>
-#include <limits>
 #include <optional>
-#include <sstream>
 #include <string>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
 
 namespace specforge {
 namespace {
@@ -44,247 +32,30 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
-std::string JsonEscape(std::string_view value)
-{
-    std::string escaped;
-    escaped.reserve(value.size() + 2);
-    for (const char character : value) {
-        switch (character) {
-        case '"':
-            escaped += "\\\"";
-            break;
-        case '\\':
-            escaped += "\\\\";
-            break;
-        case '\n':
-            escaped += "\\n";
-            break;
-        case '\r':
-            escaped += "\\r";
-            break;
-        case '\t':
-            escaped += "\\t";
-            break;
-        default:
-            escaped.push_back(character);
-            break;
-        }
-    }
-    return escaped;
-}
-
-void WriteJsonString(std::ostream& stream, std::string_view value)
-{
-    stream << '"' << JsonEscape(value) << '"';
-}
-
-void SkipJsonWhitespace(std::string_view text, std::size_t& position)
-{
-    while (position < text.size()) {
-        const char character = text[position];
-        if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
-            break;
-        }
-        ++position;
-    }
-}
-
-std::optional<std::string> ParseJsonString(std::string_view text, std::size_t& position)
-{
-    SkipJsonWhitespace(text, position);
-    if (position >= text.size() || text[position] != '"') {
-        return std::nullopt;
-    }
-
-    ++position;
-    std::string value;
-    while (position < text.size()) {
-        const char character = text[position++];
-        if (character == '"') {
-            return value;
-        }
-        if (character != '\\') {
-            value.push_back(character);
-            continue;
-        }
-        if (position >= text.size()) {
-            return std::nullopt;
-        }
-        const char escaped = text[position++];
-        switch (escaped) {
-        case '"':
-        case '\\':
-        case '/':
-            value.push_back(escaped);
-            break;
-        case 'n':
-            value.push_back('\n');
-            break;
-        case 'r':
-            value.push_back('\r');
-            break;
-        case 't':
-            value.push_back('\t');
-            break;
-        default:
-            value.push_back(escaped);
-            break;
-        }
-    }
-    return std::nullopt;
-}
-
-std::optional<std::size_t> ParseJsonSize(std::string_view text, std::size_t& position)
-{
-    SkipJsonWhitespace(text, position);
-    if (position >= text.size() || text[position] < '0' || text[position] > '9') {
-        return std::nullopt;
-    }
-
-    std::size_t value = 0;
-    while (position < text.size() && text[position] >= '0' && text[position] <= '9') {
-        const std::size_t digit = static_cast<std::size_t>(text[position] - '0');
-        if (value > (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
-            return std::nullopt;
-        }
-        value = value * 10U + digit;
-        ++position;
-    }
-    return value;
-}
-
-std::size_t FindJsonMemberValue(std::string_view text, std::string_view key, std::size_t search_position)
-{
-    std::string token = "\"";
-    token += key;
-    token += "\"";
-
-    while (search_position < text.size()) {
-        const std::size_t key_position = text.find(token, search_position);
-        if (key_position == std::string_view::npos) {
-            return std::string_view::npos;
-        }
-
-        std::size_t position = key_position + token.size();
-        SkipJsonWhitespace(text, position);
-        if (position < text.size() && text[position] == ':') {
-            ++position;
-            SkipJsonWhitespace(text, position);
-            return position;
-        }
-        search_position = key_position + 1;
-    }
-    return std::string_view::npos;
-}
-
-std::optional<std::string> FindJsonStringMember(
-    std::string_view text,
-    std::string_view key,
-    std::size_t search_position,
-    std::size_t& after_value)
-{
-    std::size_t position = FindJsonMemberValue(text, key, search_position);
-    if (position == std::string_view::npos) {
-        return std::nullopt;
-    }
-
-    std::optional<std::string> value = ParseJsonString(text, position);
-    if (!value) {
-        return std::nullopt;
-    }
-    after_value = position;
-    return value;
-}
-
-std::optional<std::size_t> FindJsonSizeMember(
-    std::string_view text,
-    std::string_view key,
-    std::size_t search_position,
-    std::size_t& after_value)
-{
-    std::size_t position = FindJsonMemberValue(text, key, search_position);
-    if (position == std::string_view::npos) {
-        return std::nullopt;
-    }
-
-    std::optional<std::size_t> value = ParseJsonSize(text, position);
-    if (!value) {
-        return std::nullopt;
-    }
-    after_value = position;
-    return value;
-}
-
 std::unordered_map<std::string, std::size_t> LoadStateCache(const std::filesystem::path& path)
 {
     std::unordered_map<std::string, std::size_t> indices;
-    if (path.empty()) {
+    VersionedJsonCacheLoadResult result =
+        LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample navigation state cache");
+    if (!result.document) {
         return indices;
     }
 
-    std::error_code exists_error;
-    if (!std::filesystem::exists(path, exists_error) || exists_error) {
+    const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
+    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
         return indices;
     }
-
-    std::ifstream stream(path);
-    if (!stream.good()) {
-        return indices;
-    }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    const std::string contents = buffer.str();
-    if (contents.find(kStateFormatKind) == std::string::npos) {
-        return indices;
-    }
-
-    std::size_t position = 0;
-    while (position < contents.size()) {
-        std::size_t after_identity = 0;
-        std::optional<std::string> identity =
-            FindJsonStringMember(contents, "identity", position, after_identity);
-        if (!identity) {
-            break;
+    for (const JsonValue& source_object : sources->array) {
+        if (source_object.kind != JsonValue::Kind::Object) {
+            continue;
         }
-
-        std::size_t after_index = 0;
-        std::optional<std::size_t> index =
-            FindJsonSizeMember(contents, "last_index", after_identity, after_index);
-        if (index && !identity->empty()) {
+        const std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");
+        const std::optional<std::size_t> index = ReadJsonSizeMember(source_object, "last_index");
+        if (identity && !identity->empty() && index) {
             indices[*identity] = *index;
         }
-        position = index ? after_index : after_identity;
     }
     return indices;
-}
-
-std::filesystem::path TemporaryCachePath(const std::filesystem::path& path)
-{
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::filesystem::path temporary = path;
-    temporary += ".tmp.";
-#ifdef _WIN32
-    temporary += std::to_string(GetCurrentProcessId());
-#else
-    temporary += "pid";
-#endif
-    temporary += ".";
-    temporary += std::to_string(timestamp);
-    return temporary;
-}
-
-bool ReplaceFileAtomically(const std::filesystem::path& temporary_path, const std::filesystem::path& target_path)
-{
-#ifdef _WIN32
-    return MoveFileExW(
-               temporary_path.c_str(),
-               target_path.c_str(),
-               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-    std::error_code rename_error;
-    std::filesystem::rename(temporary_path, target_path, rename_error);
-    return !rename_error;
-#endif
 }
 
 bool SaveStateCacheFile(
@@ -295,15 +66,6 @@ bool SaveStateCacheFile(
         return false;
     }
 
-    std::error_code filesystem_error;
-    const std::filesystem::path parent = path.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, filesystem_error);
-        if (filesystem_error) {
-            return false;
-        }
-    }
-
     std::vector<std::string> keys;
     keys.reserve(indices.size());
     for (const auto& [key, value] : indices) {
@@ -312,63 +74,34 @@ bool SaveStateCacheFile(
     }
     std::sort(keys.begin(), keys.end());
 
-    const std::filesystem::path temporary_path = TemporaryCachePath(path);
-    std::ofstream stream(temporary_path, std::ios::trunc);
-    if (!stream.good()) {
-        return false;
-    }
-
-    stream << "{\n";
-    stream << "  \"format_kind\": ";
-    WriteJsonString(stream, kStateFormatKind);
-    stream << ",\n";
-    stream << "  \"schema_version\": " << kStateSchemaVersion << ",\n";
-    stream << "  \"sources\": [";
-    if (!keys.empty()) {
-        stream << "\n";
-    }
-    for (std::size_t index = 0; index < keys.size(); ++index) {
-        stream << "    { \"identity\": ";
-        WriteJsonString(stream, keys[index]);
-        stream << ", \"last_index\": " << indices.at(keys[index]) << " }";
-        stream << (index + 1 == keys.size() ? "\n" : ",\n");
-    }
-    if (!keys.empty()) {
-        stream << "  ";
-    }
-    stream << "]\n";
-    stream << "}\n";
-    if (!stream.good()) {
-        stream.close();
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    stream.close();
-    if (!stream.good()) {
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    if (!ReplaceFileAtomically(temporary_path, path)) {
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    return true;
+    return WriteVersionedJsonCacheFile(
+        path,
+        kStateFormatKind,
+        kStateSchemaVersion,
+        "sample navigation state cache",
+        [&](std::ostream& stream, std::string&) {
+            stream << ",\n";
+            stream << "  \"sources\": [";
+            if (!keys.empty()) {
+                stream << "\n";
+            }
+            for (std::size_t index = 0; index < keys.size(); ++index) {
+                stream << "    { \"identity\": ";
+                WriteJsonString(stream, keys[index]);
+                stream << ", \"last_index\": " << indices.at(keys[index]) << " }";
+                stream << (index + 1 == keys.size() ? "\n" : ",\n");
+            }
+            if (!keys.empty()) {
+                stream << "  ";
+            }
+            stream << "]\n";
+            return true;
+        });
 }
 
 std::filesystem::path DefaultSampleNavigationStatePath()
 {
-#ifdef _WIN32
-    DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
-    if (required > 0) {
-        std::wstring value(required, L'\0');
-        const DWORD written = GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(), required);
-        if (written > 0 && written < required) {
-            value.resize(written);
-            return std::filesystem::path(value) / L"SpecForge" / L"sample-navigation-state.json";
-        }
-    }
-#endif
-    return std::filesystem::temp_directory_path() / "SpecForge" / "sample-navigation-state.json";
+    return DefaultLocalUserStatePath("sample-navigation-state.json");
 }
 
 }  // namespace

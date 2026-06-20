@@ -1,28 +1,17 @@
 #include "ui/sample_labeling_controller.h"
 
+#include "app/local_user_state.h"
+#include "app/local_user_state_json.h"
+
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
 
 namespace specforge {
 namespace {
@@ -39,40 +28,6 @@ bool ShouldRetryOutputSave(const SampleLabelingTask& task)
             task.save_state.kind == SampleLabelSaveStateKind::Failed);
 }
 
-std::string JsonEscape(std::string_view value)
-{
-    std::string escaped;
-    escaped.reserve(value.size() + 2);
-    for (const char character : value) {
-        switch (character) {
-        case '"':
-            escaped += "\\\"";
-            break;
-        case '\\':
-            escaped += "\\\\";
-            break;
-        case '\n':
-            escaped += "\\n";
-            break;
-        case '\r':
-            escaped += "\\r";
-            break;
-        case '\t':
-            escaped += "\\t";
-            break;
-        default:
-            escaped.push_back(character);
-            break;
-        }
-    }
-    return escaped;
-}
-
-void WriteJsonString(std::ostream& stream, std::string_view value)
-{
-    stream << '"' << JsonEscape(value) << '"';
-}
-
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
@@ -84,416 +39,29 @@ std::filesystem::path Utf8ToPath(const std::string& value)
     return std::filesystem::path(std::u8string(value.begin(), value.end()));
 }
 
-struct JsonValue {
-    enum class Kind {
-        Null,
-        Object,
-        Array,
-        String,
-        Bool,
-        Integer,
-    };
-
-    Kind kind = Kind::Null;
-    std::unordered_map<std::string, JsonValue> object;
-    std::vector<JsonValue> array;
-    std::string string_value;
-    bool bool_value = false;
-    std::int64_t integer_value = 0;
-};
-
-class JsonParser {
-public:
-    explicit JsonParser(std::string_view text)
-        : text_(text)
-    {
-    }
-
-    std::optional<JsonValue> Parse(std::string& error)
-    {
-        JsonValue value;
-        if (!ParseValue(value, error)) {
-            return std::nullopt;
-        }
-        SkipWhitespace();
-        if (position_ != text_.size()) {
-            error = "unexpected trailing JSON content";
-            return std::nullopt;
-        }
-        return value;
-    }
-
-private:
-    void SkipWhitespace()
-    {
-        while (position_ < text_.size()) {
-            const char character = text_[position_];
-            if (character != ' ' && character != '\t' && character != '\r' && character != '\n') {
-                break;
-            }
-            ++position_;
-        }
-    }
-
-    bool ParseValue(JsonValue& value, std::string& error)
-    {
-        SkipWhitespace();
-        if (position_ >= text_.size()) {
-            error = "unexpected end of JSON";
-            return false;
-        }
-
-        const char character = text_[position_];
-        if (character == '{') {
-            return ParseObject(value, error);
-        }
-        if (character == '[') {
-            return ParseArray(value, error);
-        }
-        if (character == '"') {
-            value.kind = JsonValue::Kind::String;
-            return ParseString(value.string_value, error);
-        }
-        if (StartsWith("true")) {
-            position_ += 4;
-            value.kind = JsonValue::Kind::Bool;
-            value.bool_value = true;
-            return true;
-        }
-        if (StartsWith("false")) {
-            position_ += 5;
-            value.kind = JsonValue::Kind::Bool;
-            value.bool_value = false;
-            return true;
-        }
-        if (StartsWith("null")) {
-            position_ += 4;
-            value.kind = JsonValue::Kind::Null;
-            return true;
-        }
-        if (character == '-' || (character >= '0' && character <= '9')) {
-            return ParseInteger(value, error);
-        }
-
-        error = "unexpected JSON token";
-        return false;
-    }
-
-    bool ParseObject(JsonValue& value, std::string& error)
-    {
-        value.kind = JsonValue::Kind::Object;
-        ++position_;
-        SkipWhitespace();
-        if (Consume('}')) {
-            return true;
-        }
-
-        for (;;) {
-            std::string key;
-            if (!ParseString(key, error)) {
-                return false;
-            }
-            SkipWhitespace();
-            if (!Consume(':')) {
-                error = "expected ':' after JSON object key";
-                return false;
-            }
-
-            JsonValue member;
-            if (!ParseValue(member, error)) {
-                return false;
-            }
-            value.object.emplace(std::move(key), std::move(member));
-
-            SkipWhitespace();
-            if (Consume('}')) {
-                return true;
-            }
-            if (!Consume(',')) {
-                error = "expected ',' or '}' in JSON object";
-                return false;
-            }
-            SkipWhitespace();
-        }
-    }
-
-    bool ParseArray(JsonValue& value, std::string& error)
-    {
-        value.kind = JsonValue::Kind::Array;
-        ++position_;
-        SkipWhitespace();
-        if (Consume(']')) {
-            return true;
-        }
-
-        for (;;) {
-            JsonValue item;
-            if (!ParseValue(item, error)) {
-                return false;
-            }
-            value.array.push_back(std::move(item));
-
-            SkipWhitespace();
-            if (Consume(']')) {
-                return true;
-            }
-            if (!Consume(',')) {
-                error = "expected ',' or ']' in JSON array";
-                return false;
-            }
-        }
-    }
-
-    static int HexDigit(char value)
-    {
-        if (value >= '0' && value <= '9') {
-            return value - '0';
-        }
-        if (value >= 'a' && value <= 'f') {
-            return value - 'a' + 10;
-        }
-        if (value >= 'A' && value <= 'F') {
-            return value - 'A' + 10;
-        }
-        return -1;
-    }
-
-    static void AppendUtf8(std::string& value, char32_t code_point)
-    {
-        if (code_point <= 0x7F) {
-            value.push_back(static_cast<char>(code_point));
-            return;
-        }
-        if (code_point <= 0x7FF) {
-            value.push_back(static_cast<char>(0xC0 | (code_point >> 6)));
-            value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-            return;
-        }
-        if (code_point <= 0xFFFF) {
-            value.push_back(static_cast<char>(0xE0 | (code_point >> 12)));
-            value.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-            value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-            return;
-        }
-        value.push_back(static_cast<char>(0xF0 | (code_point >> 18)));
-        value.push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
-        value.push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
-        value.push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
-    }
-
-    bool ParseUnicodeEscape(char32_t& code_point, std::string& error)
-    {
-        if (position_ + 4 > text_.size()) {
-            error = "short JSON unicode escape";
-            return false;
-        }
-
-        code_point = 0;
-        for (int index = 0; index < 4; ++index) {
-            const int digit = HexDigit(text_[position_++]);
-            if (digit < 0) {
-                error = "invalid JSON unicode escape";
-                return false;
-            }
-            code_point = (code_point << 4) | static_cast<char32_t>(digit);
-        }
-        return true;
-    }
-
-    bool ParseString(std::string& value, std::string& error)
-    {
-        SkipWhitespace();
-        if (!Consume('"')) {
-            error = "expected JSON string";
-            return false;
-        }
-
-        value.clear();
-        while (position_ < text_.size()) {
-            const char character = text_[position_++];
-            if (character == '"') {
-                return true;
-            }
-            if (static_cast<unsigned char>(character) < 0x20) {
-                error = "unescaped control character in JSON string";
-                return false;
-            }
-            if (character != '\\') {
-                value.push_back(character);
-                continue;
-            }
-            if (position_ >= text_.size()) {
-                error = "unterminated JSON string escape";
-                return false;
-            }
-            const char escaped = text_[position_++];
-            switch (escaped) {
-            case '"':
-            case '\\':
-            case '/':
-                value.push_back(escaped);
-                break;
-            case 'b':
-                value.push_back('\b');
-                break;
-            case 'f':
-                value.push_back('\f');
-                break;
-            case 'n':
-                value.push_back('\n');
-                break;
-            case 'r':
-                value.push_back('\r');
-                break;
-            case 't':
-                value.push_back('\t');
-                break;
-            case 'u': {
-                char32_t code_point = 0;
-                if (!ParseUnicodeEscape(code_point, error)) {
-                    return false;
-                }
-                if (code_point >= 0xD800 && code_point <= 0xDBFF) {
-                    const bool has_low_surrogate =
-                        position_ + 6 <= text_.size() && text_[position_] == '\\' &&
-                        text_[position_ + 1] == 'u';
-                    if (!has_low_surrogate) {
-                        error = "expected JSON low surrogate";
-                        return false;
-                    }
-                    position_ += 2;
-                    char32_t low_surrogate = 0;
-                    if (!ParseUnicodeEscape(low_surrogate, error)) {
-                        return false;
-                    }
-                    if (low_surrogate < 0xDC00 || low_surrogate > 0xDFFF) {
-                        error = "invalid JSON low surrogate";
-                        return false;
-                    }
-                    code_point =
-                        0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
-                } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
-                    error = "unexpected JSON low surrogate";
-                    return false;
-                }
-                AppendUtf8(value, code_point);
-                break;
-            }
-            default:
-                error = "unsupported JSON string escape";
-                return false;
-            }
-        }
-
-        error = "unterminated JSON string";
-        return false;
-    }
-
-    bool ParseInteger(JsonValue& value, std::string& error)
-    {
-        bool negative = false;
-        if (position_ < text_.size() && text_[position_] == '-') {
-            negative = true;
-            ++position_;
-        }
-        if (position_ >= text_.size() || text_[position_] < '0' || text_[position_] > '9') {
-            error = "invalid JSON number";
-            return false;
-        }
-
-        const std::uint64_t limit = negative
-            ? static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1U
-            : static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
-        std::uint64_t magnitude = 0;
-        while (position_ < text_.size() && text_[position_] >= '0' && text_[position_] <= '9') {
-            const auto digit = static_cast<std::uint64_t>(text_[position_] - '0');
-            if (magnitude > (limit - digit) / 10U) {
-                error = "JSON integer is out of range";
-                return false;
-            }
-            magnitude = magnitude * 10U + digit;
-            ++position_;
-        }
-        value.kind = JsonValue::Kind::Integer;
-        if (negative) {
-            if (magnitude == limit) {
-                value.integer_value = std::numeric_limits<std::int64_t>::min();
-            } else {
-                value.integer_value = -static_cast<std::int64_t>(magnitude);
-            }
-        } else {
-            value.integer_value = static_cast<std::int64_t>(magnitude);
-        }
-        return true;
-    }
-
-    bool Consume(char expected)
-    {
-        if (position_ >= text_.size() || text_[position_] != expected) {
-            return false;
-        }
-        ++position_;
-        return true;
-    }
-
-    bool StartsWith(std::string_view value) const
-    {
-        return text_.substr(position_, value.size()) == value;
-    }
-
-    std::string_view text_;
-    std::size_t position_ = 0;
-};
-
 const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
 {
-    if (value.kind != JsonValue::Kind::Object) {
-        return nullptr;
-    }
-    const auto match = value.object.find(std::string(key));
-    return match == value.object.end() ? nullptr : &match->second;
+    return JsonObjectMember(value, key);
 }
 
 std::optional<std::string> ReadStringMember(const JsonValue& value, std::string_view key)
 {
-    const JsonValue* member = ObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::String) {
-        return std::nullopt;
-    }
-    return member->string_value;
+    return ReadJsonStringMember(value, key);
 }
 
 std::optional<std::size_t> ReadSizeMember(const JsonValue& value, std::string_view key)
 {
-    const JsonValue* member = ObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Integer || member->integer_value < 0) {
-        return std::nullopt;
-    }
-    const auto unsigned_value = static_cast<std::uint64_t>(member->integer_value);
-    if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-        return std::nullopt;
-    }
-    return static_cast<std::size_t>(unsigned_value);
+    return ReadJsonSizeMember(value, key);
 }
 
 std::optional<int> ReadIntMember(const JsonValue& value, std::string_view key)
 {
-    const JsonValue* member = ObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Integer ||
-        member->integer_value < std::numeric_limits<int>::min() ||
-        member->integer_value > std::numeric_limits<int>::max()) {
-        return std::nullopt;
-    }
-    return static_cast<int>(member->integer_value);
+    return ReadJsonIntMember(value, key);
 }
 
 bool ReadBoolMember(const JsonValue& value, std::string_view key, bool fallback)
 {
-    const JsonValue* member = ObjectMember(value, key);
-    if (member == nullptr || member->kind != JsonValue::Kind::Bool) {
-        return fallback;
-    }
-    return member->bool_value;
+    return ReadJsonBoolMember(value, key, fallback);
 }
 
 SampleLabelSaveStateKind ParseSaveStateKind(std::string_view text)
@@ -657,41 +225,14 @@ struct LoadStateCacheResult {
 LoadStateCacheResult LoadStateCache(const std::filesystem::path& path)
 {
     LoadStateCacheResult result;
-    if (path.empty()) {
+    VersionedJsonCacheLoadResult cache =
+        LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample-labeling task record");
+    if (!cache.document) {
+        result.warning = std::move(cache.warning);
         return result;
     }
 
-    std::error_code exists_error;
-    if (!std::filesystem::exists(path, exists_error) || exists_error) {
-        return result;
-    }
-
-    std::ifstream stream(path);
-    if (!stream.good()) {
-        result.warning = "Could not read sample-labeling task record.";
-        return result;
-    }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    const std::string contents = buffer.str();
-
-    std::string parse_error;
-    JsonParser parser(contents);
-    const std::optional<JsonValue> root = parser.Parse(parse_error);
-    if (!root || root->kind != JsonValue::Kind::Object) {
-        result.warning = "Ignored sample-labeling task record: " + parse_error;
-        return result;
-    }
-
-    const std::optional<std::string> format_kind = ReadStringMember(*root, "format_kind");
-    const std::optional<int> schema_version = ReadIntMember(*root, "schema_version");
-    if (!format_kind || *format_kind != kStateFormatKind || !schema_version ||
-        *schema_version != kStateSchemaVersion) {
-        result.warning = "Ignored unsupported sample-labeling task record.";
-        return result;
-    }
-
-    const JsonValue* sources = ObjectMember(*root, "sources");
+    const JsonValue* sources = ObjectMember(cache.document->root, "sources");
     if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
         return result;
     }
@@ -732,50 +273,12 @@ LoadStateCacheResult LoadStateCache(const std::filesystem::path& path)
     return result;
 }
 
-std::filesystem::path TemporaryCachePath(const std::filesystem::path& path)
-{
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::filesystem::path temporary = path;
-    temporary += ".tmp.";
-#ifdef _WIN32
-    temporary += std::to_string(GetCurrentProcessId());
-#else
-    temporary += "pid";
-#endif
-    temporary += ".";
-    temporary += std::to_string(timestamp);
-    return temporary;
-}
-
-bool ReplaceFileAtomically(const std::filesystem::path& temporary_path, const std::filesystem::path& target_path)
-{
-#ifdef _WIN32
-    return MoveFileExW(
-               temporary_path.c_str(),
-               target_path.c_str(),
-               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-    std::error_code rename_error;
-    std::filesystem::rename(temporary_path, target_path, rename_error);
-    return !rename_error;
-#endif
-}
-
 bool SaveStateCacheFile(
     const std::filesystem::path& path,
     const std::unordered_map<std::string, SampleLabelingController::SourceState>& sources)
 {
     if (path.empty()) {
         return false;
-    }
-
-    std::error_code filesystem_error;
-    const std::filesystem::path parent = path.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, filesystem_error);
-        if (filesystem_error) {
-            return false;
-        }
     }
 
     std::vector<std::string> keys;
@@ -786,157 +289,130 @@ bool SaveStateCacheFile(
     }
     std::sort(keys.begin(), keys.end());
 
-    const std::filesystem::path temporary_path = TemporaryCachePath(path);
-    std::ofstream stream(temporary_path, std::ios::trunc);
-    if (!stream.good()) {
-        return false;
-    }
-
-    stream << "{\n";
-    stream << "  \"format_kind\": ";
-    WriteJsonString(stream, kStateFormatKind);
-    stream << ",\n";
-    stream << "  \"schema_version\": " << kStateSchemaVersion << ",\n";
-    stream << "  \"sources\": [";
-    if (!keys.empty()) {
-        stream << "\n";
-    }
-
-    for (std::size_t source_index = 0; source_index < keys.size(); ++source_index) {
-        const std::string& key = keys[source_index];
-        const SampleLabelingController::SourceState& state = sources.at(key);
-        stream << "    {\n";
-        stream << "      \"identity\": ";
-        WriteJsonString(stream, key);
-        stream << ",\n";
-        stream << "      \"sample_count\": " << state.sample_count << ",\n";
-        stream << "      \"active_task_id\": ";
-        WriteJsonString(stream, state.active_task_id.value_or(""));
-        stream << ",\n";
-        stream << "      \"tasks\": [";
-        if (!state.tasks.empty()) {
-            stream << "\n";
-        }
-        for (std::size_t task_index = 0; task_index < state.tasks.size(); ++task_index) {
-            const SampleLabelingTask& task = state.tasks[task_index];
-            stream << "        {\n";
-            stream << "          \"task_id\": ";
-            WriteJsonString(stream, task.task_id);
+    return WriteVersionedJsonCacheFile(
+        path,
+        kStateFormatKind,
+        kStateSchemaVersion,
+        "sample-labeling task record",
+        [&](std::ostream& stream, std::string&) {
             stream << ",\n";
-            stream << "          \"task_name\": ";
-            WriteJsonString(stream, task.task_name);
-            stream << ",\n";
-            stream << "          \"auto_advance\": " << (task.auto_advance ? "true" : "false") << ",\n";
-            stream << "          \"skip_labeled_on_advance\": " << (task.skip_labeled_on_advance ? "true" : "false")
-                   << ",\n";
-            stream << "          \"remembered_position\": ";
-            if (task.remembered_position) {
-                stream << *task.remembered_position;
-            } else {
-                stream << "null";
-            }
-            stream << ",\n";
-            stream << "          \"output_path\": ";
-            WriteJsonString(stream, task.output_path ? PathToUtf8(*task.output_path) : std::string_view{});
-            stream << ",\n";
-            stream << "          \"labels\": [";
-            if (!task.label_set.labels.empty()) {
+            stream << "  \"sources\": [";
+            if (!keys.empty()) {
                 stream << "\n";
             }
-            for (std::size_t label_index = 0; label_index < task.label_set.labels.size(); ++label_index) {
-                const SampleLabelDefinition& label = task.label_set.labels[label_index];
-                stream << "            { \"code\": " << label.code << ", \"name\": ";
-                WriteJsonString(stream, label.name);
-                stream << ", \"shortcut\": ";
-                const std::string shortcut = label.shortcut == '\0' ? std::string{} : std::string(1, label.shortcut);
-                WriteJsonString(stream, shortcut);
-                stream << " }" << (label_index + 1 == task.label_set.labels.size() ? "\n" : ",\n");
-            }
-            if (!task.label_set.labels.empty()) {
-                stream << "          ";
-            }
-            stream << "],\n";
-            stream << "          \"save_state\": ";
-            WriteJsonString(stream, SaveStateKindText(task.save_state.kind));
-            stream << ",\n";
-            stream << "          \"save_message\": ";
-            WriteJsonString(stream, task.save_state.message);
-            if (!task.output_path) {
-                stream << ",\n";
-                stream << "          \"values\": [";
-                for (std::size_t value_index = 0; value_index < task.values.size(); ++value_index) {
-                    stream << task.values[value_index];
-                    if (value_index + 1 != task.values.size()) {
-                        stream << ", ";
-                    }
-                }
-                stream << "]";
-            } else if (!task.pending_sample_indices.empty()) {
-                std::vector<std::size_t> pending_indices(
-                    task.pending_sample_indices.begin(),
-                    task.pending_sample_indices.end());
-                std::sort(pending_indices.begin(), pending_indices.end());
 
+            for (std::size_t source_index = 0; source_index < keys.size(); ++source_index) {
+                const std::string& key = keys[source_index];
+                const SampleLabelingController::SourceState& state = sources.at(key);
+                stream << "    {\n";
+                stream << "      \"identity\": ";
+                WriteJsonString(stream, key);
                 stream << ",\n";
-                stream << "          \"pending_values\": [";
-                bool wrote_pending_value = false;
-                for (const std::size_t sample_index : pending_indices) {
-                    if (sample_index >= task.values.size()) {
-                        continue;
-                    }
-                    if (wrote_pending_value) {
-                        stream << ", ";
-                    }
-                    stream << "{ \"index\": " << sample_index << ", \"value\": " << task.values[sample_index] << " }";
-                    wrote_pending_value = true;
+                stream << "      \"sample_count\": " << state.sample_count << ",\n";
+                stream << "      \"active_task_id\": ";
+                WriteJsonString(stream, state.active_task_id.value_or(""));
+                stream << ",\n";
+                stream << "      \"tasks\": [";
+                if (!state.tasks.empty()) {
+                    stream << "\n";
                 }
-                stream << "]";
+                for (std::size_t task_index = 0; task_index < state.tasks.size(); ++task_index) {
+                    const SampleLabelingTask& task = state.tasks[task_index];
+                    stream << "        {\n";
+                    stream << "          \"task_id\": ";
+                    WriteJsonString(stream, task.task_id);
+                    stream << ",\n";
+                    stream << "          \"task_name\": ";
+                    WriteJsonString(stream, task.task_name);
+                    stream << ",\n";
+                    stream << "          \"auto_advance\": " << (task.auto_advance ? "true" : "false") << ",\n";
+                    stream << "          \"skip_labeled_on_advance\": "
+                           << (task.skip_labeled_on_advance ? "true" : "false") << ",\n";
+                    stream << "          \"remembered_position\": ";
+                    if (task.remembered_position) {
+                        stream << *task.remembered_position;
+                    } else {
+                        stream << "null";
+                    }
+                    stream << ",\n";
+                    stream << "          \"output_path\": ";
+                    WriteJsonString(stream, task.output_path ? PathToUtf8(*task.output_path) : std::string_view{});
+                    stream << ",\n";
+                    stream << "          \"labels\": [";
+                    if (!task.label_set.labels.empty()) {
+                        stream << "\n";
+                    }
+                    for (std::size_t label_index = 0; label_index < task.label_set.labels.size(); ++label_index) {
+                        const SampleLabelDefinition& label = task.label_set.labels[label_index];
+                        stream << "            { \"code\": " << label.code << ", \"name\": ";
+                        WriteJsonString(stream, label.name);
+                        stream << ", \"shortcut\": ";
+                        const std::string shortcut =
+                            label.shortcut == '\0' ? std::string{} : std::string(1, label.shortcut);
+                        WriteJsonString(stream, shortcut);
+                        stream << " }" << (label_index + 1 == task.label_set.labels.size() ? "\n" : ",\n");
+                    }
+                    if (!task.label_set.labels.empty()) {
+                        stream << "          ";
+                    }
+                    stream << "],\n";
+                    stream << "          \"save_state\": ";
+                    WriteJsonString(stream, SaveStateKindText(task.save_state.kind));
+                    stream << ",\n";
+                    stream << "          \"save_message\": ";
+                    WriteJsonString(stream, task.save_state.message);
+                    if (!task.output_path) {
+                        stream << ",\n";
+                        stream << "          \"values\": [";
+                        for (std::size_t value_index = 0; value_index < task.values.size(); ++value_index) {
+                            stream << task.values[value_index];
+                            if (value_index + 1 != task.values.size()) {
+                                stream << ", ";
+                            }
+                        }
+                        stream << "]";
+                    } else if (!task.pending_sample_indices.empty()) {
+                        std::vector<std::size_t> pending_indices(
+                            task.pending_sample_indices.begin(),
+                            task.pending_sample_indices.end());
+                        std::sort(pending_indices.begin(), pending_indices.end());
+
+                        stream << ",\n";
+                        stream << "          \"pending_values\": [";
+                        bool wrote_pending_value = false;
+                        for (const std::size_t sample_index : pending_indices) {
+                            if (sample_index >= task.values.size()) {
+                                continue;
+                            }
+                            if (wrote_pending_value) {
+                                stream << ", ";
+                            }
+                            stream << "{ \"index\": " << sample_index << ", \"value\": " << task.values[sample_index]
+                                   << " }";
+                            wrote_pending_value = true;
+                        }
+                        stream << "]";
+                    }
+                    stream << "\n";
+                    stream << "        }" << (task_index + 1 == state.tasks.size() ? "\n" : ",\n");
+                }
+                if (!state.tasks.empty()) {
+                    stream << "      ";
+                }
+                stream << "]\n";
+                stream << "    }" << (source_index + 1 == keys.size() ? "\n" : ",\n");
             }
-            stream << "\n";
-            stream << "        }" << (task_index + 1 == state.tasks.size() ? "\n" : ",\n");
-        }
-        if (!state.tasks.empty()) {
-            stream << "      ";
-        }
-        stream << "]\n";
-        stream << "    }" << (source_index + 1 == keys.size() ? "\n" : ",\n");
-    }
-    if (!keys.empty()) {
-        stream << "  ";
-    }
-    stream << "]\n";
-    stream << "}\n";
-    if (!stream.good()) {
-        stream.close();
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    stream.close();
-    if (!stream.good()) {
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    if (!ReplaceFileAtomically(temporary_path, path)) {
-        std::filesystem::remove(temporary_path, filesystem_error);
-        return false;
-    }
-    return true;
+            if (!keys.empty()) {
+                stream << "  ";
+            }
+            stream << "]\n";
+            return true;
+        });
 }
 
 std::filesystem::path DefaultSampleLabelingStatePath()
 {
-#ifdef _WIN32
-    DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
-    if (required > 0) {
-        std::wstring value(required, L'\0');
-        const DWORD written = GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(), required);
-        if (written > 0 && written < required) {
-            value.resize(written);
-            return std::filesystem::path(value) / L"SpecForge" / L"sample-labeling-tasks.json";
-        }
-    }
-#endif
-    return std::filesystem::temp_directory_path() / "SpecForge" / "sample-labeling-tasks.json";
+    return DefaultLocalUserStatePath("sample-labeling-tasks.json");
 }
 
 }  // namespace
@@ -947,7 +423,8 @@ SampleLabelingController::SampleLabelingController()
 }
 
 SampleLabelingController::SampleLabelingController(std::filesystem::path state_cache_path)
-    : state_cache_path_(std::move(state_cache_path))
+    : state_cache_path_(std::move(state_cache_path)),
+      state_cache_save_scheduler_(kStateSaveDebounceFrames, kStateSaveRetryFrames)
 {
 }
 
@@ -1191,7 +668,7 @@ void SampleLabelingController::EnsureStateCacheLoaded()
 
 void SampleLabelingController::QueueStateSave()
 {
-    state_cache_dirty_ = true;
+    state_cache_save_scheduler_.MarkDirty();
     state_cache_save_failed_ = false;
     state_cache_error_.clear();
 }
@@ -1282,12 +759,11 @@ bool SampleLabelingController::TrySaveStateCache()
     const bool saved = SaveStateCacheFile(state_cache_path_, sources_to_write);
     if (saved) {
         normalize_saved_states(sources_);
-        state_cache_dirty_ = false;
+        state_cache_save_scheduler_.MarkSaveSucceeded();
         state_cache_save_failed_ = false;
-        next_state_save_frame_ = 0;
         state_cache_error_.clear();
     } else {
-        state_cache_dirty_ = true;
+        state_cache_save_scheduler_.MarkDirty();
         state_cache_save_failed_ = true;
         state_cache_error_ = "could not write local sample-labeling task record";
     }
@@ -1297,32 +773,25 @@ bool SampleLabelingController::TrySaveStateCache()
 void SampleLabelingController::MaybeSaveStateCache(std::uint64_t frame_index)
 {
     const bool output_retry_attempted = MaybeRetryOutputSaves(frame_index);
-    if (output_retry_attempted && state_cache_dirty_) {
+    if (output_retry_attempted && state_cache_save_scheduler_.dirty()) {
         if (!TrySaveStateCache()) {
-            next_state_save_frame_ = frame_index + kStateSaveRetryFrames;
+            state_cache_save_scheduler_.MarkSaveFailed(frame_index);
         }
         return;
     }
 
-    if (!state_cache_dirty_) {
-        return;
-    }
-    if (next_state_save_frame_ == 0) {
-        next_state_save_frame_ = frame_index + kStateSaveDebounceFrames;
-        return;
-    }
-    if (frame_index < next_state_save_frame_) {
+    if (!state_cache_save_scheduler_.ShouldAttemptSave(frame_index)) {
         return;
     }
 
     if (!TrySaveStateCache()) {
-        next_state_save_frame_ = frame_index + kStateSaveRetryFrames;
+        state_cache_save_scheduler_.MarkSaveFailed(frame_index);
     }
 }
 
 bool SampleLabelingController::FlushStateCache()
 {
-    if (!state_cache_dirty_) {
+    if (!state_cache_save_scheduler_.dirty()) {
         return true;
     }
     return TrySaveStateCache();
@@ -1330,7 +799,7 @@ bool SampleLabelingController::FlushStateCache()
 
 bool SampleLabelingController::state_save_pending() const
 {
-    return state_cache_dirty_;
+    return state_cache_save_scheduler_.dirty();
 }
 
 bool SampleLabelingController::state_save_failed() const

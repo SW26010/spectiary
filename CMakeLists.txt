@@ -50,6 +50,10 @@ function(specforge_use_embedded_resources target_name)
 endfunction()
 
 add_executable(specforge_native WIN32
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/app/specforge_app.cpp
     src/app/specforge_app.h
     src/domain/sample_filter.cpp
@@ -79,6 +83,8 @@ add_executable(specforge_native WIN32
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/overlays/spectral_line_user_state.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
     src/platform/win32_window.cpp
     src/platform/win32_window.h
     ${SPECFORGE_MANIFEST}
@@ -152,6 +158,26 @@ endif()
 
 enable_testing()
 
+add_executable(specforge_local_user_state_tests
+    tests/local_user_state_tests.cpp
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
+)
+
+target_include_directories(specforge_local_user_state_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_local_user_state_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_local_user_state_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_local_user_state_tests COMMAND specforge_local_user_state_tests)
+
 add_executable(specforge_loader_tests
     tests/spectrum_loader_tests.cpp
     src/domain/npy_array_io.cpp
@@ -182,10 +208,16 @@ add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
 
 add_executable(specforge_sample_navigation_controller_tests
     tests/sample_navigation_controller_tests.cpp
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
     src/domain/spectrum_snapshot.h
@@ -219,6 +251,10 @@ add_test(NAME specforge_sample_name_autocomplete_tests COMMAND specforge_sample_
 
 add_executable(specforge_sample_labeling_filter_tests
     tests/sample_labeling_filter_tests.cpp
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_filter.cpp
@@ -227,6 +263,8 @@ add_executable(specforge_sample_labeling_filter_tests
     src/domain/sample_labeling.h
     src/domain/sample_annotation_io.h
     src/domain/spectrum_snapshot.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
 )
@@ -243,6 +281,10 @@ add_test(NAME specforge_sample_labeling_filter_tests COMMAND specforge_sample_la
 
 add_executable(specforge_source_collection_session_tests
     tests/source_collection_session_tests.cpp
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
@@ -254,6 +296,8 @@ add_executable(specforge_source_collection_session_tests
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_fixture.h
     src/domain/spectrum_snapshot.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
     src/ui/sample_navigation_controller.cpp
@@ -320,11 +364,17 @@ add_test(NAME specforge_spectral_line_catalog_tests COMMAND specforge_spectral_l
 
 add_executable(specforge_spectral_line_user_state_tests
     tests/spectral_line_user_state_tests.cpp
+    src/app/local_user_state.cpp
+    src/app/local_user_state.h
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/overlays/spectral_line_user_state.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
 )
 
 target_include_directories(specforge_spectral_line_user_state_tests PRIVATE src)

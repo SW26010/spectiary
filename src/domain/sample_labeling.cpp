@@ -1,29 +1,15 @@
 #include "domain/sample_labeling.h"
 
 #include "domain/npy_array_io.h"
+#include "platform/atomic_file.h"
 
 #include <algorithm>
-#include <array>
-#include <chrono>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <limits>
-#include <sstream>
 #include <string>
-#include <system_error>
 #include <utility>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
 
 namespace specforge {
 namespace {
@@ -58,108 +44,20 @@ void RefreshPendingSaveState(SampleLabelingTask& task)
     }
 }
 
-std::filesystem::path TemporaryOutputPath(const std::filesystem::path& path)
-{
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    std::filesystem::path temporary = path;
-    temporary += ".tmp.";
-#ifdef _WIN32
-    temporary += std::to_string(GetCurrentProcessId());
-#else
-    temporary += "pid";
-#endif
-    temporary += ".";
-    temporary += std::to_string(timestamp);
-    return temporary;
-}
-
-bool ReplaceFileAtomically(
-    const std::filesystem::path& temporary_path,
-    const std::filesystem::path& target_path,
-    std::string* error_message)
-{
-#ifdef _WIN32
-    if (MoveFileExW(
-            temporary_path.c_str(),
-            target_path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
-        return true;
-    }
-    if (error_message != nullptr) {
-        *error_message = "could not replace output file: " + std::system_category().message(GetLastError());
-    }
-    return false;
-#else
-    std::error_code rename_error;
-    std::filesystem::rename(temporary_path, target_path, rename_error);
-    if (!rename_error) {
-        return true;
-    }
-    if (error_message != nullptr) {
-        *error_message = "could not replace output file: " + rename_error.message();
-    }
-    return false;
-#endif
-}
-
-bool WriteInt32NpyFile(const std::filesystem::path& path, const std::vector<int>& values, std::string* error_message)
-{
-    std::error_code filesystem_error;
-    const std::filesystem::path parent = path.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, filesystem_error);
-        if (filesystem_error) {
-            if (error_message != nullptr) {
-                *error_message = "could not create output directory";
-            }
-            return false;
-        }
-    }
-
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    if (!stream.good()) {
-        if (error_message != nullptr) {
-            *error_message = "could not open output file";
-        }
-        return false;
-    }
-
-    try {
-        WriteNpyInt32Vector(stream, values);
-    } catch (const NpyArrayError& error) {
-        if (error_message != nullptr) {
-            *error_message = error.what();
-        }
-        return false;
-    }
-
-    if (!stream.good()) {
-        if (error_message != nullptr) {
-            *error_message = "could not write output file";
-        }
-        return false;
-    }
-    return true;
-}
-
 bool WriteInt32Npy(const std::filesystem::path& path, const std::vector<int>& values, std::string* error_message)
 {
-    if (error_message != nullptr) {
-        error_message->clear();
-    }
-
-    const std::filesystem::path temporary_path = TemporaryOutputPath(path);
-    if (!WriteInt32NpyFile(temporary_path, values, error_message)) {
-        std::error_code cleanup_error;
-        std::filesystem::remove(temporary_path, cleanup_error);
-        return false;
-    }
-    if (!ReplaceFileAtomically(temporary_path, path, error_message)) {
-        std::error_code cleanup_error;
-        std::filesystem::remove(temporary_path, cleanup_error);
-        return false;
-    }
-    return true;
+    AtomicFileWriteOptions options;
+    options.open_mode = std::ios::binary | std::ios::trunc;
+    options.target_description = "sample label result";
+    return WriteFileAtomically(path, options, [&values](std::ostream& stream, std::string& error_message) {
+        try {
+            WriteNpyInt32Vector(stream, values);
+        } catch (const NpyArrayError& error) {
+            error_message = error.what();
+            return false;
+        }
+        return true;
+    }, error_message);
 }
 
 std::optional<std::vector<int>> ReadInt32Npy(

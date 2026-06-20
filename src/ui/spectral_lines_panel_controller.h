@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
 #include "overlays/spectral_line_catalog.h"
 #include "overlays/spectral_line_user_state.h"
@@ -92,11 +93,9 @@ private:
     CatalogUserState user_state_;
     CatalogPanelState panel_state_;
     std::filesystem::path user_state_cache_path_;
+    LocalUserStateSaveScheduler cache_save_scheduler_;
     std::string warning_;
-    bool cache_dirty_ = false;
     bool tab_selection_requested_ = true;
-    std::uint64_t cache_dirty_frame_ = 0;
-    std::uint64_t cache_next_save_frame_ = 0;
     std::uint64_t frame_index_ = 0;
     int next_view_index_ = 1;
     int next_group_index_ = 1;
