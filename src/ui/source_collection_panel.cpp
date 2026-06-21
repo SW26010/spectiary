@@ -217,7 +217,6 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionCommandSubmitter& submit)
 {
-    const SpectrumSnapshotHandle& snapshot = session_view.snapshot;
     const SourceCollectionNavigationView& navigation = session_view.navigation;
     const std::optional<std::size_t> navigation_index = navigation.current_index;
     if (navigation_index) {
@@ -229,13 +228,8 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
     } else {
         row_index_buffer_.fill('\0');
     }
-    if (snapshot) {
-        CopyToBuffer(sample_name_query_buffer_, snapshot->current_spectrum.name);
-        (void)submit(SourceCollectionSessionCommand::SetSampleNameQuery(snapshot->current_spectrum.name));
-    } else {
-        sample_name_query_buffer_.fill('\0');
-        (void)submit(SourceCollectionSessionCommand::SetSampleNameQuery({}));
-    }
+    CopyToBuffer(sample_name_query_buffer_, navigation.current_sample_name);
+    (void)submit(SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_name));
     ClearSampleNameSearch();
 }
 
@@ -438,6 +432,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     if (!can_next) {
         ImGui::EndDisabled();
     }
+    if (navigation.current_sample_name.empty() && !navigation.current_sample_display_name.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", navigation.current_sample_display_name.c_str());
+    }
 
     view.navigation = std::move(navigation);
     MergeSourceCollectionSessionAction(action, RenderSampleNameSearch(std::move(view), submit));
@@ -612,8 +610,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
 void SourceCollectionPanelUi::BeginSampleNameSearch(const SourceCollectionSessionView& session_view)
 {
     sample_name_search_active_ = true;
-    const SpectrumSnapshotHandle& snapshot = session_view.snapshot;
-    sample_name_search_restore_name_ = snapshot ? snapshot->current_spectrum.name : std::string{};
+    sample_name_search_restore_name_ = session_view.navigation.current_sample_name;
 }
 
 void SourceCollectionPanelUi::ClearSampleNameSearch()

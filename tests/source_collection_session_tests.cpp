@@ -312,6 +312,51 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     Require(!result.view.navigation.filter_active, "deselecting labeling source should clear its navigation filter");
 }
 
+void TestNavigationViewSeparatesSampleNameFromDisplayName()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+    specforge::SourceCollectionNavigationView navigation = result.view.navigation;
+    Require(navigation.current_sample_display_name == "sample-1", "view should expose the current display name");
+    Require(navigation.current_sample_name.empty(), "unnamed samples should not expose a searchable sample name");
+
+    result = Submit(
+        session,
+        specforge::SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_display_name));
+    navigation = result.view.navigation;
+    Require(!navigation.exact_sample_name_match, "fallback display names should not be exact sample-name matches");
+    Require(navigation.sample_name_matches.empty(), "fallback display names should not be sample-name search matches");
+}
+
+void TestNavigationViewExposesSourceProvidedSampleName()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_folder");
+    std::filesystem::create_directories(source_path);
+    TouchFile(source_path / "alpha.csv");
+    TouchFile(source_path / "beta.csv");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 2);
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+    specforge::SourceCollectionNavigationView navigation = result.view.navigation;
+    Require(navigation.has_sample_names, "folder source should expose source-provided sample names");
+    Require(navigation.current_sample_name == "alpha.csv", "view should expose the current source-provided sample name");
+    Require(navigation.current_sample_display_name == "sample-1", "display text should remain separate from sample name");
+
+    result = Submit(
+        session,
+        specforge::SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_name));
+    navigation = result.view.navigation;
+    Require(
+        navigation.exact_sample_name_match && *navigation.exact_sample_name_match == 0,
+        "source-provided sample names should remain searchable");
+}
+
 void TestRemovingActiveSourceActivatesNextSourceWorkflow()
 {
     const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
@@ -565,6 +610,8 @@ int main()
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
+    TestNavigationViewSeparatesSampleNameFromDisplayName();
+    TestNavigationViewExposesSourceProvidedSampleName();
     TestRemovingActiveSourceActivatesNextSourceWorkflow();
     TestSourceSessionRestoresSourcesAndActiveIndex();
     TestSourceSessionSkipsMissingSourcePathsOnRestore();

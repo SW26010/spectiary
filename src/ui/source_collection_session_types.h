@@ -49,6 +49,8 @@ struct SourceCollectionNavigationView {
     bool filter_active = false;
     std::size_t filtered_sample_count = 0;
     bool current_sample_in_filter = true;
+    std::string current_sample_name;
+    std::string current_sample_display_name;
     bool has_sample_names = false;
     std::optional<std::size_t> exact_sample_name_match;
     std::string exact_sample_name;

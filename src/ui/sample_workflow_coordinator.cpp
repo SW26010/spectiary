@@ -379,11 +379,17 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     view.filter_active = navigation_.filter_active();
     view.filtered_sample_count = navigation_.filtered_sample_count();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
+    if (snapshot) {
+        view.current_sample_display_name = snapshot->current_spectrum.name;
+    }
+    const std::size_t current_index = view.current_index.value_or(snapshot ? snapshot->collection.current_index : 0);
     if (const SampleCollectionContext* context = navigation_.active_context()) {
         view.has_sample_names = !context->sample_names.empty();
         view.annotation_messages = context->messages;
+        if (current_index < context->sample_names.size()) {
+            view.current_sample_name = context->sample_names[current_index];
+        }
 
-        const std::size_t current_index = view.current_index.value_or(snapshot ? snapshot->collection.current_index : 0);
         view.current_annotations.reserve(context->annotations.size());
         for (const SampleAnnotationResult& annotation : context->annotations) {
             SourceCollectionAnnotationValueView annotation_view;
