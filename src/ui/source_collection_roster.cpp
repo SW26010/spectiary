@@ -163,6 +163,19 @@ std::vector<SourceCollectionSourceView> SourceCollectionRoster::SourceViews() co
     return views;
 }
 
+std::vector<SourceCollectionSavedSource> SourceCollectionRoster::SavedSources() const
+{
+    std::vector<SourceCollectionSavedSource> sources;
+    sources.reserve(sources_.size());
+    for (const SourceListEntry& entry : sources_) {
+        SourceCollectionSavedSource source;
+        source.path = entry.path;
+        source.last_spectrum_index = entry.last_spectrum_index;
+        sources.push_back(std::move(source));
+    }
+    return sources;
+}
+
 SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)

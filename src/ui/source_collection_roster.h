@@ -31,6 +31,7 @@ public:
     [[nodiscard]] std::optional<std::string> current_source_key() const;
     [[nodiscard]] bool has_active_source() const;
     [[nodiscard]] std::vector<SourceCollectionSourceView> SourceViews() const;
+    [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSources() const;
 
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
         const std::filesystem::path& path,

@@ -1,12 +1,108 @@
 #include "ui/source_collection_session.h"
 
+#include "app/local_user_state.h"
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/source_collection_roster.h"
+#include "ui/source_collection_session_state_cache_io.h"
 
+#include <cstdint>
 #include <memory>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 namespace specforge {
+namespace {
+
+constexpr std::uint64_t kSourceSessionSaveDebounceFrames = 30;
+constexpr std::uint64_t kSourceSessionSaveRetryFrames = 120;
+
+bool IsRestorableSourcePath(const std::filesystem::path& path)
+{
+    if (path.empty()) {
+        return false;
+    }
+    std::error_code error;
+    return std::filesystem::exists(path, error) && !error;
+}
+
+}  // namespace
+
+class SourceCollectionSessionStatePersistence {
+public:
+    explicit SourceCollectionSessionStatePersistence(std::filesystem::path cache_path)
+        : cache_path_(std::move(cache_path)),
+          save_scheduler_(kSourceSessionSaveDebounceFrames, kSourceSessionSaveRetryFrames)
+    {
+    }
+
+    [[nodiscard]] SourceCollectionSessionStateCache Load() const
+    {
+        if (cache_path_.empty()) {
+            return {};
+        }
+        return LoadSourceCollectionSessionStateCache(cache_path_);
+    }
+
+    void BeginRestore()
+    {
+        restoring_ = true;
+    }
+
+    void EndRestore()
+    {
+        restoring_ = false;
+    }
+
+    void MarkDirty()
+    {
+        if (!restoring_ && !cache_path_.empty()) {
+            save_scheduler_.MarkDirty();
+        }
+    }
+
+    void MaybeSave(
+        std::uint64_t frame_index,
+        const std::vector<SourceCollectionSavedSource>& sources,
+        std::optional<std::size_t> active_source_index)
+    {
+        if (!save_scheduler_.ShouldAttemptSave(frame_index)) {
+            return;
+        }
+        if (Save(sources, active_source_index)) {
+            save_scheduler_.MarkSaveSucceeded();
+        } else {
+            save_scheduler_.MarkSaveFailed(frame_index);
+        }
+    }
+
+    [[nodiscard]] bool Flush(
+        const std::vector<SourceCollectionSavedSource>& sources,
+        std::optional<std::size_t> active_source_index)
+    {
+        if (!save_scheduler_.dirty()) {
+            return true;
+        }
+        if (Save(sources, active_source_index)) {
+            save_scheduler_.MarkSaveSucceeded();
+            return true;
+        }
+        save_scheduler_.MarkSaveFailed(0);
+        return false;
+    }
+
+private:
+    [[nodiscard]] bool Save(
+        const std::vector<SourceCollectionSavedSource>& sources,
+        std::optional<std::size_t> active_source_index) const
+    {
+        return SaveSourceCollectionSessionStateCache(cache_path_, sources, active_source_index);
+    }
+
+    std::filesystem::path cache_path_;
+    LocalUserStateSaveScheduler save_scheduler_;
+    bool restoring_ = false;
+};
 
 SourceCollectionSessionCommand SourceCollectionSessionCommand::OpenSource(
     std::filesystem::path path,
@@ -155,8 +251,11 @@ SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabeling
 
 SourceCollectionSession::SourceCollectionSession(SnapshotLoader snapshot_loader)
     : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
-      workflow_(std::make_unique<SampleWorkflowCoordinator>())
+      workflow_(std::make_unique<SampleWorkflowCoordinator>()),
+      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
+          DefaultSourceCollectionSessionStateCachePath()))
 {
+    RestoreSourceSessionCache();
 }
 
 SourceCollectionSession::SourceCollectionSession(
@@ -166,8 +265,24 @@ SourceCollectionSession::SourceCollectionSession(
     : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
-          std::move(labeling_state_cache_path)))
+          std::move(labeling_state_cache_path))),
+      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(std::filesystem::path{}))
 {
+}
+
+SourceCollectionSession::SourceCollectionSession(
+    SnapshotLoader snapshot_loader,
+    std::filesystem::path source_session_state_cache_path,
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path)
+    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
+      workflow_(std::make_unique<SampleWorkflowCoordinator>(
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path))),
+      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
+          std::move(source_session_state_cache_path)))
+{
+    RestoreSourceSessionCache();
 }
 
 SourceCollectionSession::~SourceCollectionSession() = default;
@@ -260,6 +375,7 @@ SourceCollectionSessionAction SourceCollectionSession::OpenSource(
 {
     SourceCollectionSessionAction action = roster_->OpenSource(path, spectrum_index);
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    MarkSourceSessionCacheDirty();
     return action;
 }
 
@@ -271,6 +387,7 @@ SourceCollectionSessionAction SourceCollectionSession::ActivateSource(std::size_
 
     SourceCollectionSessionAction action = roster_->ActivateSource(source_index);
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    MarkSourceSessionCacheDirty();
     return action;
 }
 
@@ -283,6 +400,7 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(std::size_t 
         return action;
     }
 
+    MarkSourceSessionCacheDirty();
     workflow_->RemoveSource(remove_result.removed_source_key);
     if (remove_result.removed_current) {
         MergeSourceCollectionSessionAction(action, workflow_->ClearActiveWorkflow());
@@ -392,12 +510,16 @@ SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingFilterSo
 
 void SourceCollectionSession::MaybeSaveStateCaches(std::uint64_t frame_index)
 {
+    source_session_state_->MaybeSave(frame_index, roster_->SavedSources(), roster_->current_source_index());
     workflow_->MaybeSaveStateCaches(frame_index);
 }
 
 bool SourceCollectionSession::FlushStateCaches()
 {
-    return workflow_->FlushStateCaches();
+    const bool source_session_saved =
+        source_session_state_->Flush(roster_->SavedSources(), roster_->current_source_index());
+    const bool workflow_saved = workflow_->FlushStateCaches();
+    return source_session_saved && workflow_saved;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::EnsureSnapshotMatchesNavigation()
@@ -426,7 +548,40 @@ SourceCollectionSessionAction SourceCollectionSession::LoadActiveSourceAt(std::s
         action,
         workflow_->SyncActiveSource(roster_->current_source_key(), roster_->snapshot()));
     action.navigation_inputs_changed = true;
+    MarkSourceSessionCacheDirty();
     return action;
+}
+
+void SourceCollectionSession::RestoreSourceSessionCache()
+{
+    const SourceCollectionSessionStateCache state = source_session_state_->Load();
+    if (state.sources.empty()) {
+        return;
+    }
+
+    source_session_state_->BeginRestore();
+    std::optional<std::size_t> restored_active_source_index;
+    for (std::size_t source_index = 0; source_index < state.sources.size(); ++source_index) {
+        const SourceCollectionSavedSource& source = state.sources[source_index];
+        if (!IsRestorableSourcePath(source.path)) {
+            continue;
+        }
+
+        (void)OpenSource(source.path, source.last_spectrum_index);
+        if (state.active_source_index && *state.active_source_index == source_index) {
+            restored_active_source_index = roster_->current_source_index();
+        }
+    }
+
+    if (restored_active_source_index && roster_->has_source(*restored_active_source_index)) {
+        (void)ActivateSource(*restored_active_source_index);
+    }
+    source_session_state_->EndRestore();
+}
+
+void SourceCollectionSession::MarkSourceSessionCacheDirty()
+{
+    source_session_state_->MarkDirty();
 }
 
 void SourceCollectionSession::ApplyWorkflowCommandResult(

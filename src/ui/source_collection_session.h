@@ -18,6 +18,7 @@ namespace specforge {
 class SampleWorkflowCoordinator;
 struct SampleWorkflowCommandResult;
 class SourceCollectionRoster;
+class SourceCollectionSessionStatePersistence;
 
 enum class SourceCollectionSessionCommandKind {
     OpenSource,
@@ -107,6 +108,11 @@ public:
         SnapshotLoader snapshot_loader,
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path);
+    SourceCollectionSession(
+        SnapshotLoader snapshot_loader,
+        std::filesystem::path source_session_state_cache_path,
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
@@ -157,6 +163,8 @@ private:
 
     [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation();
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
+    void RestoreSourceSessionCache();
+    void MarkSourceSessionCacheDirty();
     void ApplyWorkflowCommandResult(
         SourceCollectionSessionAction& action,
         const SampleWorkflowCommandResult& command_result,
@@ -164,6 +172,7 @@ private:
 
     std::unique_ptr<SourceCollectionRoster> roster_;
     std::unique_ptr<SampleWorkflowCoordinator> workflow_;
+    std::unique_ptr<SourceCollectionSessionStatePersistence> source_session_state_;
 };
 
 }  // namespace specforge

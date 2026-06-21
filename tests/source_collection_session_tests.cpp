@@ -1,10 +1,13 @@
 #include "domain/sample_labeling.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/source_collection_session.h"
+#include "ui/source_collection_session_state_cache_io.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -27,6 +30,11 @@ struct LoadedSourceSnapshot {
     std::size_t index = 0;
 };
 
+struct SourceFixture {
+    std::filesystem::path path;
+    std::size_t sample_count = 0;
+};
+
 std::filesystem::path UniqueTempPath(std::string_view suffix)
 {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -35,6 +43,12 @@ std::filesystem::path UniqueTempPath(std::string_view suffix)
     path += std::to_string(now);
     path += std::string(suffix);
     return path;
+}
+
+void TouchFile(const std::filesystem::path& path)
+{
+    std::ofstream stream(path);
+    Require(stream.good(), "could not create source fixture file");
 }
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
@@ -98,6 +112,57 @@ specforge::SourceCollectionSession MakeMultiSourceSession(
             }
             return MakeSnapshot(second_source_path, second_sample_count, spectrum_index);
         },
+        navigation_cache,
+        labeling_cache);
+}
+
+specforge::SourceCollectionSession MakePersistentMultiSourceSession(
+    std::vector<LoadedSourceSnapshot>& loaded_snapshots,
+    const std::filesystem::path& source_session_cache,
+    const std::filesystem::path& navigation_cache,
+    const std::filesystem::path& labeling_cache,
+    const std::filesystem::path& first_source_path,
+    std::size_t first_sample_count,
+    const std::filesystem::path& second_source_path,
+    std::size_t second_sample_count)
+{
+    return specforge::SourceCollectionSession(
+        [&loaded_snapshots, first_source_path, first_sample_count, second_source_path, second_sample_count](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == first_source_path || path == second_source_path,
+                "persistent session should reload a known source path");
+            loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            if (path == first_source_path) {
+                return MakeSnapshot(first_source_path, first_sample_count, spectrum_index);
+            }
+            return MakeSnapshot(second_source_path, second_sample_count, spectrum_index);
+        },
+        source_session_cache,
+        navigation_cache,
+        labeling_cache);
+}
+
+specforge::SourceCollectionSession MakePersistentSession(
+    std::vector<LoadedSourceSnapshot>& loaded_snapshots,
+    const std::filesystem::path& source_session_cache,
+    const std::filesystem::path& navigation_cache,
+    const std::filesystem::path& labeling_cache,
+    std::vector<SourceFixture> fixtures)
+{
+    return specforge::SourceCollectionSession(
+        [&loaded_snapshots, fixtures = std::move(fixtures)](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            const auto match = std::find_if(fixtures.begin(), fixtures.end(), [&path](const SourceFixture& fixture) {
+                return fixture.path == path;
+            });
+            Require(match != fixtures.end(), "persistent session should reload a known source path");
+            loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            return MakeSnapshot(match->path, match->sample_count, spectrum_index);
+        },
+        source_session_cache,
         navigation_cache,
         labeling_cache);
 }
@@ -316,6 +381,183 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         "removing active source should activate the next cached source without reloading");
 }
 
+void TestSourceSessionRestoresSourcesAndActiveIndex()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
+    const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
+    TouchFile(first_source_path);
+    TouchFile(second_source_path);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded_snapshots;
+        specforge::SourceCollectionSession session = MakePersistentMultiSourceSession(
+            loaded_snapshots,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            first_source_path,
+            3,
+            second_source_path,
+            2);
+
+        (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(first_source_path, 1));
+        (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(second_source_path, 0));
+        (void)Submit(session, specforge::SourceCollectionSessionCommand::ActivateSource(0));
+        specforge::SourceCollectionSessionResult navigate_result =
+            Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+                                specforge::SampleNavigationRequest::Next()));
+        Require(navigate_result.view.snapshot->source.path == first_source_path, "first source should be active");
+        Require(navigate_result.view.snapshot->collection.current_index == 2, "first source should reach row 2");
+        Require(session.FlushStateCaches(), "session state caches should flush");
+    }
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = MakePersistentMultiSourceSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        first_source_path,
+        3,
+        second_source_path,
+        2);
+
+    const specforge::SourceCollectionSessionView view = restored.View();
+    Require(view.sources.size() == 2, "restored session should reload both source entries");
+    Require(view.sources[0].path == first_source_path, "first restored source should keep its path");
+    Require(view.sources[1].path == second_source_path, "second restored source should keep its path");
+    Require(view.current_source_index && *view.current_source_index == 0, "restored active source should be first");
+    Require(view.snapshot->source.path == first_source_path, "restored snapshot should be the active first source");
+    Require(view.snapshot->collection.current_index == 2, "restored first source should keep its last sample index");
+    Require(restored_loads.size() == 2, "restoring two cached sources should load each source once");
+    Require(restored_loads[0].path == first_source_path && restored_loads[0].index == 2, "first source should restore row 2");
+    Require(restored_loads[1].path == second_source_path && restored_loads[1].index == 0, "second source should restore row 0");
+
+    std::filesystem::remove(source_session_cache);
+    Require(restored.FlushStateCaches(), "flush after restore should succeed without a dirty source session");
+    Require(
+        !std::filesystem::exists(source_session_cache),
+        "restore should not mark the source session cache dirty immediately");
+}
+
+void TestSourceSessionSkipsMissingSourcePathsOnRestore()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path missing_source_path = UniqueTempPath("_missing.npy");
+    const std::filesystem::path existing_source_path = UniqueTempPath("_existing.npy");
+    TouchFile(existing_source_path);
+
+    std::vector<specforge::SourceCollectionSavedSource> saved_sources = {
+        specforge::SourceCollectionSavedSource{missing_source_path, 3},
+        specforge::SourceCollectionSavedSource{existing_source_path, 1},
+    };
+    Require(
+        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_sources, 1),
+        "source session fixture should save");
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = MakePersistentSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        {SourceFixture{existing_source_path, 3}});
+
+    const specforge::SourceCollectionSessionView view = restored.View();
+    Require(view.sources.size() == 1, "restore should skip missing source paths");
+    Require(view.sources[0].path == existing_source_path, "existing source should remain after missing source skip");
+    Require(view.current_source_index && *view.current_source_index == 0, "remaining source should become active");
+    Require(view.snapshot->source.path == existing_source_path, "active snapshot should use the existing source");
+    Require(view.snapshot->collection.current_index == 1, "existing source should restore its last row");
+    Require(restored_loads.size() == 1, "missing source should not be loaded");
+}
+
+void TestSourceSessionRestoresAtMostThirtyTwoSources()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    std::vector<SourceFixture> fixtures;
+    std::vector<specforge::SourceCollectionSavedSource> saved_sources;
+    for (std::size_t index = 0; index < 35; ++index) {
+        std::filesystem::path source_path = UniqueTempPath(std::string("_cap_") + std::to_string(index) + ".npy");
+        TouchFile(source_path);
+        fixtures.push_back(SourceFixture{source_path, 4});
+        saved_sources.push_back(specforge::SourceCollectionSavedSource{source_path, index % 4});
+    }
+    Require(
+        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_sources, 34),
+        "source session cap fixture should save");
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = MakePersistentSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        fixtures);
+
+    const specforge::SourceCollectionSessionView view = restored.View();
+    Require(view.sources.size() == 32, "restore should cap the source list at 32 entries");
+    Require(restored_loads.size() == 32, "restore should load only 32 source snapshots");
+    Require(view.sources.back().path == saved_sources[31].path, "last restored source should be the 32nd entry");
+    Require(view.current_source_index && *view.current_source_index == 31, "out-of-cap active source should not restore");
+    Require(view.snapshot->source.path == saved_sources[31].path, "last restored source should remain active");
+}
+
+void TestSourceSessionFlushFailureKeepsDirtyState()
+{
+    const std::filesystem::path blocker = UniqueTempPath("_blocked");
+    const std::filesystem::path source_session_cache = blocker / "source-session.json";
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path source_path = UniqueTempPath("_source.npy");
+    TouchFile(blocker);
+    TouchFile(source_path);
+
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    specforge::SourceCollectionSession session = MakePersistentSession(
+        loaded_snapshots,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        {SourceFixture{source_path, 3}});
+    (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+
+    Require(!session.FlushStateCaches(), "flush should fail when the source cache path is blocked by a file");
+    {
+        std::vector<LoadedSourceSnapshot> reloaded_snapshots;
+        specforge::SourceCollectionSession reloaded = specforge::SourceCollectionSession(
+            [&reloaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
+                Require(path == source_path, "labeling cache reload should use the source fixture");
+                reloaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+                return MakeSnapshot(source_path, 3, spectrum_index);
+            },
+            navigation_cache,
+            labeling_cache);
+        const specforge::SourceCollectionSessionResult reload_result =
+            Submit(reloaded, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+        Require(
+            reload_result.view.labeling.has_active_task,
+            "workflow flush should save labeling state even when source cache flush fails");
+    }
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    Require(session.FlushStateCaches(), "flush should retry dirty source state after the path is fixed");
+
+    const specforge::SourceCollectionSessionStateCache restored_state =
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+    Require(restored_state.sources.size() == 1, "retry flush should write the source session cache");
+    Require(restored_state.sources[0].path == source_path, "retry flush should persist the source path");
+}
+
 }  // namespace
 
 int main()
@@ -324,5 +566,9 @@ int main()
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
     TestRemovingActiveSourceActivatesNextSourceWorkflow();
+    TestSourceSessionRestoresSourcesAndActiveIndex();
+    TestSourceSessionSkipsMissingSourcePathsOnRestore();
+    TestSourceSessionRestoresAtMostThirtyTwoSources();
+    TestSourceSessionFlushFailureKeepsDirtyState();
     return 0;
 }

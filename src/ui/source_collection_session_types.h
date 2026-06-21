@@ -103,6 +103,11 @@ struct SourceCollectionSourceView {
     std::string state_label;
 };
 
+struct SourceCollectionSavedSource {
+    std::filesystem::path path;
+    std::size_t last_spectrum_index = 0;
+};
+
 struct SourceCollectionSessionView {
     SpectrumSnapshotHandle snapshot;
     std::vector<SourceCollectionSourceView> sources;

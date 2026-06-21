@@ -114,6 +114,8 @@ add_executable(specforge_native WIN32
     src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp
     src/ui/source_collection_session.h
+    src/ui/source_collection_session_state_cache_io.cpp
+    src/ui/source_collection_session_state_cache_io.h
     src/ui/source_collection_session_types.h
     src/ui/spectrum_view_session.cpp
     src/ui/spectrum_view_session.h
@@ -321,6 +323,8 @@ add_executable(specforge_source_collection_session_tests
     src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp
     src/ui/source_collection_session.h
+    src/ui/source_collection_session_state_cache_io.cpp
+    src/ui/source_collection_session_state_cache_io.h
     src/ui/source_collection_session_types.h
 )
 
