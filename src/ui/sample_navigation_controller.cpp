@@ -1,5 +1,7 @@
 #include "ui/sample_navigation_controller.h"
 
+#include "domain/sample_annotation_io.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -91,7 +93,7 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     }
 
     EnsureStateCacheLoaded();
-    const SampleCollectionIdentity identity = BuildSampleCollectionIdentity(*snapshot);
+    const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
     SourceSession& session = sessions_[identity.id];
     const bool new_session = session.source_collection_identity.empty();
     const bool context_changed = session.context_fingerprint != identity.context_fingerprint;
@@ -104,7 +106,7 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     session.context_fingerprint = identity.context_fingerprint;
     session.spectrum_count = identity.spectrum_count;
     if (context_changed) {
-        session.context = LoadSampleCollectionContext(*snapshot);
+        session.manifest = LoadSourceCollectionManifest(*snapshot);
     }
     session.sample_name_query = previous_query;
     if (session.spectrum_count > 0) {
@@ -170,7 +172,7 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
         LoadSampleAnnotationResultFromPath(path, session->spectrum_count, &load_error);
     if (!annotation) {
         std::string ignored_message = "Ignored " + PathToUtf8(path.filename()) + ": " + load_error + ".";
-        session->context.messages.push_back(ignored_message);
+        session->manifest.messages.push_back(ignored_message);
         if (message != nullptr) {
             *message = std::move(ignored_message);
         }
@@ -180,11 +182,11 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
     const auto same_path = [&path](const SampleAnnotationResult& existing) {
         return existing.path == path;
     };
-    auto existing = std::find_if(session->context.annotations.begin(), session->context.annotations.end(), same_path);
-    if (existing != session->context.annotations.end()) {
+    auto existing = std::find_if(session->manifest.annotations.begin(), session->manifest.annotations.end(), same_path);
+    if (existing != session->manifest.annotations.end()) {
         *existing = std::move(*annotation);
     } else {
-        session->context.annotations.push_back(std::move(*annotation));
+        session->manifest.annotations.push_back(std::move(*annotation));
     }
     if (message != nullptr) {
         *message = {};
@@ -364,10 +366,10 @@ const std::vector<std::size_t>& SampleNavigationController::sample_name_matches(
     return session == nullptr ? kEmptyMatches : session->sample_name_matches;
 }
 
-const SampleCollectionContext* SampleNavigationController::active_context() const
+const SourceCollectionManifest* SampleNavigationController::active_context() const
 {
     const SourceSession* session = ActiveSession();
-    return session == nullptr ? nullptr : &session->context;
+    return session == nullptr ? nullptr : &session->manifest;
 }
 
 SampleNavigationController::SourceSession* SampleNavigationController::ActiveSession()
@@ -392,24 +394,24 @@ std::optional<std::size_t> SampleNavigationController::FindSampleNameIndex(
     const SourceSession& session,
     std::string_view sample_name)
 {
-    if (sample_name.empty() || session.context.sample_names.empty()) {
+    if (sample_name.empty() || session.manifest.sample_names.empty()) {
         return std::nullopt;
     }
 
     const std::string target = LowerAscii(std::string(sample_name));
-    for (std::size_t index = 0; index < session.context.sample_names.size(); ++index) {
+    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
         if (!IsSampleInFilter(session, index)) {
             continue;
         }
-        if (LowerAscii(session.context.sample_names[index]) == target) {
+        if (LowerAscii(session.manifest.sample_names[index]) == target) {
             return index;
         }
     }
-    for (std::size_t index = 0; index < session.context.sample_names.size(); ++index) {
+    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
         if (!IsSampleInFilter(session, index)) {
             continue;
         }
-        if (LowerAscii(session.context.sample_names[index]).find(target) != std::string::npos) {
+        if (LowerAscii(session.manifest.sample_names[index]).find(target) != std::string::npos) {
             return index;
         }
     }
@@ -516,16 +518,16 @@ bool SampleNavigationController::SaveStateCache()
 void SampleNavigationController::RecomputeMatches(SourceSession& session)
 {
     session.sample_name_matches.clear();
-    if (session.sample_name_query.empty() || session.context.sample_names.empty()) {
+    if (session.sample_name_query.empty() || session.manifest.sample_names.empty()) {
         return;
     }
 
     const std::string query = LowerAscii(session.sample_name_query);
-    for (std::size_t index = 0; index < session.context.sample_names.size(); ++index) {
+    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
         if (!IsSampleInFilter(session, index)) {
             continue;
         }
-        if (LowerAscii(session.context.sample_names[index]).find(query) != std::string::npos) {
+        if (LowerAscii(session.manifest.sample_names[index]).find(query) != std::string::npos) {
             session.sample_name_matches.push_back(index);
         }
     }

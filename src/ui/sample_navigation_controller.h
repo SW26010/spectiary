@@ -1,6 +1,6 @@
 #pragma once
 
-#include "domain/sample_annotation_io.h"
+#include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_navigation_state_cache_io.h"
 
@@ -72,7 +72,7 @@ public:
     void SetSampleNameQuery(std::string query);
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
-    [[nodiscard]] const SampleCollectionContext* active_context() const;
+    [[nodiscard]] const SourceCollectionManifest* active_context() const;
 
 private:
     struct SourceSession {
@@ -82,7 +82,7 @@ private:
         std::string context_fingerprint;
         std::size_t spectrum_count = 0;
         std::size_t current_index = 0;
-        SampleCollectionContext context;
+        SourceCollectionManifest manifest;
         std::string sample_name_query;
         std::vector<std::size_t> sample_name_matches;
         bool filter_active = false;

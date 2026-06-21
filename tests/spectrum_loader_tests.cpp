@@ -1,5 +1,6 @@
 #include "domain/spectrum_loader.h"
 #include "domain/sample_annotation_io.h"
+#include "domain/source_collection_manifest.h"
 
 #include <algorithm>
 #include <array>
@@ -604,14 +605,14 @@ void TestLoadsNpySampleAnnotationContext()
 
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 1);
     Require(snapshot->current_spectrum.name == "beta", "plain NPY source should use same-prefix sample name");
-    const specforge::SampleCollectionIdentity identity = specforge::BuildSampleCollectionIdentity(*snapshot);
+    const specforge::SourceCollectionIdentity identity = specforge::BuildSourceCollectionIdentity(*snapshot);
     Require(
         identity.source_name == PathToUtf8(path.filename()),
         "sample collection identity should use the source filename as its display name");
     Require(
         identity.id.find(PathToUtf8(path.parent_path())) == std::string::npos,
         "sample collection identity id should not include the absolute source directory");
-    const specforge::SampleCollectionContext context = specforge::LoadSampleCollectionContext(*snapshot);
+    const specforge::SourceCollectionManifest context = specforge::LoadSourceCollectionManifest(*snapshot);
     Require(context.sample_names.size() == 2, "sample context should load companion sample names");
     Require(context.sample_names[0] == "alpha", "first sample name should be decoded");
     Require(context.sample_names[1] == "beta", "second sample name should be decoded");
@@ -631,7 +632,7 @@ void TestLoadsReadOnlyAnnotationDtypes()
     WriteNpy(float_annotation_path, "<f4", {2}, BytesFor<float>({1.25F, -2.5F}));
 
     const SpectrumSnapshotHandle float_snapshot = specforge::LoadSpectrumSnapshotFromPath(float_path, 0);
-    const specforge::SampleCollectionContext float_context = specforge::LoadSampleCollectionContext(*float_snapshot);
+    const specforge::SourceCollectionManifest float_context = specforge::LoadSourceCollectionManifest(*float_snapshot);
     Require(float_context.annotations.size() == 1, "float y annotation should be loaded");
     Require(
         float_context.annotations[0].kind == SampleAnnotationKind::ContinuousFloat,
@@ -645,7 +646,7 @@ void TestLoadsReadOnlyAnnotationDtypes()
     WriteNpy(string_annotation_path, "<U4", {2}, UnicodeNpyBytesFor({"good", "bad"}, 4));
 
     const SpectrumSnapshotHandle string_snapshot = specforge::LoadSpectrumSnapshotFromPath(string_path, 0);
-    const specforge::SampleCollectionContext string_context = specforge::LoadSampleCollectionContext(*string_snapshot);
+    const specforge::SourceCollectionManifest string_context = specforge::LoadSourceCollectionManifest(*string_snapshot);
     Require(string_context.annotations.size() == 1, "string y annotation should be loaded");
     Require(string_context.annotations[0].kind == SampleAnnotationKind::Text, "string y should stay read-only text");
     Require(string_context.annotations[0].values[0].display_text == "good", "string annotation should be decoded");
@@ -660,7 +661,7 @@ void TestRejectsMismatchedSampleAnnotationLength()
     WriteNpy(annotation_path, "<i4", {1}, BytesFor<std::int32_t>({1}));
 
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
-    const specforge::SampleCollectionContext context = specforge::LoadSampleCollectionContext(*snapshot);
+    const specforge::SourceCollectionManifest context = specforge::LoadSourceCollectionManifest(*snapshot);
     Require(context.annotations.empty(), "mismatched annotation length must not attach to the source collection");
     Require(!context.messages.empty(), "mismatched annotation length should explain why it was ignored");
 }

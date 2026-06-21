@@ -2,7 +2,7 @@
 
 #include "domain/fits_spectrum_loader.h"
 #include "domain/npy_array_io.h"
-#include "domain/sample_annotation_io.h"
+#include "domain/source_collection_manifest.h"
 #include "domain/spectrum_loader_support.h"
 
 #include <algorithm>
@@ -183,59 +183,6 @@ NpyRow ReadNpyRow(const std::filesystem::path& path, std::size_t requested_index
     };
 }
 
-std::optional<std::string> ReadNpyNameForRow(
-    const std::filesystem::path& spectrum_path,
-    std::size_t expected_row_count,
-    std::size_t row_index)
-{
-    const std::optional<std::filesystem::path> name_path = SampleCollectionCompanionNamePath(spectrum_path);
-    if (!name_path) {
-        return std::nullopt;
-    }
-
-    std::error_code exists_error;
-    if (!std::filesystem::exists(*name_path, exists_error) || exists_error) {
-        return std::nullopt;
-    }
-
-    std::ifstream stream(*name_path, std::ios::binary);
-    if (!stream) {
-        return std::nullopt;
-    }
-
-    try {
-        const NpyHeader header = ReadNpyHeader(stream);
-        if (header.shape.size() != 1 || header.shape[0] != expected_row_count || row_index >= header.shape[0]) {
-            return std::nullopt;
-        }
-        const std::optional<NpyScalarType> scalar_type = ParseNpyScalarType(header.descr);
-        if (!scalar_type || (scalar_type->kind != NpyScalarKind::Bytes && scalar_type->kind != NpyScalarKind::Unicode)) {
-            return std::nullopt;
-        }
-        const std::uint64_t row_offset =
-            header.data_offset + static_cast<std::uint64_t>(row_index) * scalar_type->item_size;
-        if (row_offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max())) {
-            return std::nullopt;
-        }
-        stream.seekg(static_cast<std::streamoff>(row_offset), std::ios::beg);
-        if (!stream) {
-            return std::nullopt;
-        }
-        std::string bytes(scalar_type->item_size, '\0');
-        stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        if (!stream) {
-            return std::nullopt;
-        }
-        std::string decoded = DecodeNpyString(bytes, *scalar_type);
-        if (decoded.empty()) {
-            return std::nullopt;
-        }
-        return decoded;
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
-}
-
 SpectrumSnapshotHandle MakeNpyErrorSnapshot(
     const std::filesystem::path& path,
     SpectrumDiagnosticCode code,
@@ -253,7 +200,7 @@ SpectrumSnapshotHandle MakeNpyErrorSnapshot(
 
 bool IsAuxiliaryNpyArrayName(const std::filesystem::path& path)
 {
-    return IsSampleCollectionAuxiliaryNpyArrayName(path);
+    return IsSourceCollectionAuxiliaryNpyArrayName(path);
 }
 
 std::vector<double> MakeXValues(std::size_t column_count, bool has_loglam_grid)
@@ -329,7 +276,8 @@ SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::s
     snapshot->collection.can_move_previous = row.current_index > 0;
     snapshot->collection.can_move_next = row.current_index + 1 < row.row_count;
 
-    const std::optional<std::string> sample_name = ReadNpyNameForRow(path, row.row_count, row.current_index);
+    const std::optional<std::string> sample_name =
+        LoadSourceCollectionNpySampleName(path, row.row_count, row.current_index);
     snapshot->current_spectrum.name = sample_name ? *sample_name
                                           : row.row_count > 1
                                                 ? FileNameToUtf8(path) + " row " + std::to_string(row.current_index)
@@ -520,34 +468,6 @@ SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
     return MakeLoadedSpectrumSnapshot(path, std::move(loaded));
 }
 
-bool IsCsvSourceFile(const std::filesystem::path& path)
-{
-    return ExtensionLower(path) == ".csv";
-}
-
-struct FolderSpectrumFile {
-    std::filesystem::path path;
-    std::string format;
-};
-
-struct FolderScanResult {
-    std::vector<FolderSpectrumFile> spectra;
-    std::size_t csv_count = 0;
-    std::size_t fits_count = 0;
-    std::size_t ignored_file_count = 0;
-    std::size_t ignored_directory_count = 0;
-    std::vector<std::string> ignored_file_examples;
-    std::vector<std::string> ignored_directory_examples;
-};
-
-void PushExample(std::vector<std::string>& examples, const std::filesystem::path& path)
-{
-    constexpr std::size_t kMaxExamples = 3;
-    if (examples.size() < kMaxExamples) {
-        examples.push_back(FileNameToUtf8(path));
-    }
-}
-
 std::string JoinExamples(const std::vector<std::string>& examples)
 {
     std::string joined;
@@ -560,56 +480,7 @@ std::string JoinExamples(const std::vector<std::string>& examples)
     return joined;
 }
 
-FolderScanResult ScanFolderSource(const std::filesystem::path& path)
-{
-    FolderScanResult scan;
-    std::error_code iterator_error;
-    std::filesystem::directory_iterator iterator(
-        path,
-        std::filesystem::directory_options::none,
-        iterator_error);
-    if (iterator_error) {
-        throw SpectrumFileLoadError(SpectrumDiagnosticCode::OpenFailed, "Could not enumerate the input folder.");
-    }
-
-    for (const std::filesystem::directory_entry& entry : iterator) {
-        std::error_code type_error;
-        if (entry.is_directory(type_error)) {
-            ++scan.ignored_directory_count;
-            PushExample(scan.ignored_directory_examples, entry.path());
-            continue;
-        }
-        if (type_error) {
-            ++scan.ignored_file_count;
-            PushExample(scan.ignored_file_examples, entry.path());
-            continue;
-        }
-
-        if (!entry.is_regular_file(type_error) || type_error) {
-            ++scan.ignored_file_count;
-            PushExample(scan.ignored_file_examples, entry.path());
-            continue;
-        }
-
-        if (IsCsvSourceFile(entry.path())) {
-            ++scan.csv_count;
-            scan.spectra.push_back(FolderSpectrumFile{entry.path(), "csv"});
-        } else if (IsFitsSourcePath(entry.path())) {
-            ++scan.fits_count;
-            scan.spectra.push_back(FolderSpectrumFile{entry.path(), SourceFormatLabel(entry.path())});
-        } else {
-            ++scan.ignored_file_count;
-            PushExample(scan.ignored_file_examples, entry.path());
-        }
-    }
-
-    std::stable_sort(scan.spectra.begin(), scan.spectra.end(), [](const FolderSpectrumFile& left, const FolderSpectrumFile& right) {
-        return LowerAscii(FileNameToUtf8(left.path)) < LowerAscii(FileNameToUtf8(right.path));
-    });
-    return scan;
-}
-
-std::vector<SpectrumDiagnostic> FolderWarnings(const FolderScanResult& scan)
+std::vector<SpectrumDiagnostic> FolderWarnings(const SourceCollectionFolderListing& scan)
 {
     std::vector<SpectrumDiagnostic> warnings;
     if (scan.ignored_directory_count > 0) {
@@ -639,7 +510,9 @@ std::vector<SpectrumDiagnostic> FolderWarnings(const FolderScanResult& scan)
     return warnings;
 }
 
-std::vector<SpectrumMetadataEntry> FolderSourceMetadata(const FolderScanResult& scan, const FolderSpectrumFile* current_file)
+std::vector<SpectrumMetadataEntry> FolderSourceMetadata(
+    const SourceCollectionFolderListing& scan,
+    const SourceCollectionFolderSpectrumFile* current_file)
 {
     std::vector<SpectrumMetadataEntry> metadata = {
         {"format", "folder", "domain"},
@@ -659,11 +532,14 @@ std::vector<SpectrumMetadataEntry> FolderSourceMetadata(const FolderScanResult& 
 
 SpectrumSnapshotHandle LoadFolderSnapshot(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    FolderScanResult scan;
-    try {
-        scan = ScanFolderSource(path);
-    } catch (const SpectrumFileLoadError& error) {
-        return MakeErrorSnapshot(path, error.code(), error.what(), {}, "folder");
+    const SourceCollectionFolderListing scan = ScanSourceCollectionFolder(path);
+    if (!scan.readable) {
+        return MakeErrorSnapshot(
+            path,
+            SpectrumDiagnosticCode::OpenFailed,
+            scan.error_message.empty() ? "Could not enumerate the input folder." : scan.error_message,
+            {},
+            "folder");
     }
 
     std::vector<SpectrumDiagnostic> folder_warnings = FolderWarnings(scan);
@@ -694,7 +570,7 @@ SpectrumSnapshotHandle LoadFolderSnapshot(const std::filesystem::path& path, std
             FolderSourceMetadata(scan, nullptr));
     }
 
-    const FolderSpectrumFile& selected = scan.spectra[spectrum_index];
+    const SourceCollectionFolderSpectrumFile& selected = scan.spectra[spectrum_index];
     SpectrumSnapshotHandle selected_snapshot =
         selected.format == "csv" ? LoadCsvSnapshot(selected.path) : LoadFitsSnapshot(selected.path, 0);
 

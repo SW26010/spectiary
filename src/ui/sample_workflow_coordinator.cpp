@@ -1,6 +1,7 @@
 #include "ui/sample_workflow_coordinator.h"
 
 #include "domain/sample_annotation_io.h"
+#include "domain/source_collection_manifest.h"
 
 #include <algorithm>
 #include <cctype>
@@ -383,7 +384,7 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
         view.current_sample_display_name = snapshot->current_spectrum.name;
     }
     const std::size_t current_index = view.current_index.value_or(snapshot ? snapshot->collection.current_index : 0);
-    if (const SampleCollectionContext* context = navigation_.active_context()) {
+    if (const SourceCollectionManifest* context = navigation_.active_context()) {
         view.has_sample_names = !context->sample_names.empty();
         view.annotation_messages = context->messages;
         if (current_index < context->sample_names.size()) {
@@ -494,7 +495,7 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
         return;
     }
 
-    const SampleCollectionIdentity identity = BuildSampleCollectionIdentity(*snapshot);
+    const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
     if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
         filters_.Clear();
         selected_labeling_filter_source_id_.reset();
@@ -575,7 +576,7 @@ bool SampleWorkflowCoordinator::active_labeling_filter_source_selected() const
 std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSources() const
 {
     std::vector<SampleFilterSource> filter_sources;
-    const SampleCollectionContext* context = navigation_.active_context();
+    const SourceCollectionManifest* context = navigation_.active_context();
     if (context != nullptr) {
         filter_sources.reserve(context->annotations.size() + 1);
         for (const SampleAnnotationResult& annotation : context->annotations) {
@@ -595,7 +596,7 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
 std::vector<SourceCollectionFilterSourceView> SampleWorkflowCoordinator::BuildSampleFilterSourceViews() const
 {
     std::vector<SourceCollectionFilterSourceView> source_views;
-    const SampleCollectionContext* context = navigation_.active_context();
+    const SourceCollectionManifest* context = navigation_.active_context();
     if (context != nullptr) {
         source_views.reserve(context->annotations.size() + 1);
         for (const SampleAnnotationResult& annotation : context->annotations) {

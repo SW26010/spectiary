@@ -274,7 +274,7 @@ void TestControllerReloadsCompanionContextOnReactivate()
 
     specforge::SampleNavigationController controller(cache_path);
     controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
-    const specforge::SampleCollectionContext* context = controller.active_context();
+    const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr, "active context should exist");
     Require(context->sample_names[0] == "alpha", "initial name should load");
     Require(context->annotations[0].values[0].display_text == "1", "initial annotation should load");
@@ -320,7 +320,7 @@ void TestControllerAddsManualAnnotationToActiveContext()
     Require(
         controller.AddReadOnlyAnnotationToActiveSource(annotation_path, &message),
         "manual annotation should attach to active source");
-    const specforge::SampleCollectionContext* context = controller.active_context();
+    const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr, "active context should exist after manual annotation");
     Require(context->annotations.size() == 1, "manual annotation should be appended");
     Require(context->annotations[0].name == "specforge_nav_manual_annotation_score.npy", "annotation name should be file name");
@@ -394,7 +394,7 @@ void TestControllerLoadsLongFolderIdentityState()
     }
 
     specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(folder_path, "folder:long-identity", kSampleCount, 0);
-    const std::string identity = specforge::BuildSampleCollectionIdentity(*snapshot).id;
+    const std::string identity = specforge::BuildSourceCollectionIdentity(*snapshot).id;
     Require(identity.size() > 1000, "test identity should be long enough to cover regex stack risk");
 
     {

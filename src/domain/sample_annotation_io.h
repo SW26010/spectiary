@@ -1,7 +1,5 @@
 #pragma once
 
-#include "domain/spectrum_snapshot.h"
-
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -29,29 +27,10 @@ struct SampleAnnotationResult {
     std::vector<SampleAnnotationValue> values;
 };
 
-struct SampleCollectionContext {
-    std::vector<std::string> sample_names;
-    std::vector<SampleAnnotationResult> annotations;
-    std::vector<std::string> messages;
-};
-
-struct SampleCollectionIdentity {
-    std::string id;
-    std::string source_name;
-    std::string source_fingerprint;
-    std::string context_fingerprint;
-    std::size_t spectrum_count = 0;
-};
-
-[[nodiscard]] SampleCollectionContext LoadSampleCollectionContext(const SpectrumSnapshot& snapshot);
 [[nodiscard]] std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPath(
     const std::filesystem::path& path,
     std::size_t expected_count,
     std::string* error_message = nullptr);
-[[nodiscard]] SampleCollectionIdentity BuildSampleCollectionIdentity(const SpectrumSnapshot& snapshot);
-[[nodiscard]] bool IsSampleCollectionAuxiliaryNpyArrayName(const std::filesystem::path& source_path);
-[[nodiscard]] std::optional<std::filesystem::path> SampleCollectionCompanionNamePath(
-    const std::filesystem::path& source_path);
 [[nodiscard]] std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind);
 
 }  // namespace specforge

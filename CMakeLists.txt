@@ -70,6 +70,8 @@ add_executable(specforge_native WIN32
     src/domain/fits_spectrum_loader.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/source_collection_manifest.cpp
+    src/domain/source_collection_manifest.h
     src/domain/spectrum_format_adapters.cpp
     src/domain/spectrum_format_adapters.h
     src/domain/spectrum_loader_support.cpp
@@ -206,6 +208,8 @@ add_executable(specforge_loader_tests
     src/domain/fits_spectrum_loader.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/source_collection_manifest.cpp
+    src/domain/source_collection_manifest.h
     src/domain/spectrum_format_adapters.cpp
     src/domain/spectrum_format_adapters.h
     src/domain/spectrum_loader_support.cpp
@@ -236,6 +240,8 @@ add_executable(specforge_sample_navigation_controller_tests
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/source_collection_manifest.cpp
+    src/domain/source_collection_manifest.h
     src/platform/atomic_file.cpp
     src/platform/atomic_file.h
     src/ui/sample_navigation_controller.cpp
@@ -313,6 +319,8 @@ add_executable(specforge_source_collection_session_tests
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/source_collection_manifest.cpp
+    src/domain/source_collection_manifest.h
     src/domain/sample_filter.cpp
     src/domain/sample_filter.h
     src/domain/sample_labeling.cpp
