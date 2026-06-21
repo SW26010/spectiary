@@ -295,6 +295,16 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     Require(filter_view.active_labeling_filter_source_selected, "labeling filter source should be selected");
     Require(filter_view.sources.size() == 1, "selected labeling task should be the only filter source in this fixture");
     Require(filter_view.sources[0].id == "labeling:manual-labeling", "labeling filter source should use the task id");
+    Require(filter_view.sources[0].options.size() == 3, "labeling filter view should expose label and unlabeled options");
+    Require(
+        filter_view.sources[0].options[0].key == "1" && filter_view.sources[0].options[0].sample_count == 1,
+        "labeling filter view should reuse source counts for the bad label");
+    Require(
+        filter_view.sources[0].options[1].key == "2" && filter_view.sources[0].options[1].sample_count == 2,
+        "labeling filter view should reuse source counts for the good label");
+    Require(
+        filter_view.sources[0].options[2].key == "-1" && filter_view.sources[0].options[2].sample_count == 0,
+        "labeling filter view should keep zero-count unlabeled option from the source builder");
 
     result = Submit(
         session,

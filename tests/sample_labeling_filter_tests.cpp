@@ -618,6 +618,12 @@ void TestSampleFiltersStackCategoricalConditions()
 
     const specforge::SampleFilterSource annotation_source = specforge::BuildAnnotationFilterSource(annotation);
     const specforge::SampleFilterSource label_source = specforge::BuildLabelingFilterSource(task);
+    Require(
+        annotation_source.id == specforge::BuildAnnotationFilterSourceId(annotation),
+        "annotation filter source id should come from the shared builder");
+    Require(
+        label_source.id == specforge::BuildLabelingFilterSourceId(task),
+        "labeling filter source id should come from the shared builder");
 
     specforge::SampleFilterController filters;
     filters.SetCondition(annotation_source.id, std::unordered_set<std::string>{"1"});

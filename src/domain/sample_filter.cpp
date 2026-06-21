@@ -141,10 +141,20 @@ SampleFilterEvaluation SampleFilterController::Evaluate(
     return evaluation;
 }
 
+std::string BuildAnnotationFilterSourceId(const SampleAnnotationResult& annotation)
+{
+    return annotation.path.empty() ? "annotation:" + annotation.name : "annotation:" + PathToUtf8(annotation.path);
+}
+
+std::string BuildLabelingFilterSourceId(const SampleLabelingTask& task)
+{
+    return "labeling:" + task.task_id;
+}
+
 SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& annotation)
 {
     SampleFilterSource source;
-    source.id = annotation.path.empty() ? "annotation:" + annotation.name : "annotation:" + PathToUtf8(annotation.path);
+    source.id = BuildAnnotationFilterSourceId(annotation);
     source.name = annotation.name;
     source.kind = annotation.kind;
     source.filterable = annotation.kind != SampleAnnotationKind::ContinuousFloat;
@@ -163,7 +173,7 @@ SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& ann
 SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task)
 {
     SampleFilterSource source;
-    source.id = "labeling:" + task.task_id;
+    source.id = BuildLabelingFilterSourceId(task);
     source.name = task.task_name;
     source.kind = SampleAnnotationKind::CategoricalInteger;
     source.filterable = true;

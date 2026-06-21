@@ -87,7 +87,6 @@ private:
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool active_labeling_filter_source_selected() const;
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
-    [[nodiscard]] std::vector<SourceCollectionFilterSourceView> BuildSampleFilterSourceViews() const;
     [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
         const SampleLabelWriteResult& result);

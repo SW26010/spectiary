@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <unordered_map>
 #include <utility>
 
 namespace specforge {
@@ -17,43 +16,6 @@ std::string LowerAscii(std::string value)
         return static_cast<char>(std::tolower(character));
     });
     return value;
-}
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const auto utf8 = path.u8string();
-    return std::string(utf8.begin(), utf8.end());
-}
-
-std::string AnnotationFilterSourceId(const SampleAnnotationResult& annotation)
-{
-    return annotation.path.empty() ? "annotation:" + annotation.name : "annotation:" + PathToUtf8(annotation.path);
-}
-
-std::string LabelingFilterSourceId(const SampleLabelingTask& task)
-{
-    return "labeling:" + task.task_id;
-}
-
-void AddFilterValueOption(
-    std::vector<SampleFilterValueOption>& options,
-    std::unordered_map<std::string, std::size_t>& option_indices,
-    std::string key,
-    std::string display_text)
-{
-    const auto existing = option_indices.find(key);
-    if (existing != option_indices.end()) {
-        ++options[existing->second].sample_count;
-        return;
-    }
-
-    const std::size_t index = options.size();
-    option_indices.emplace(key, index);
-    SampleFilterValueOption option;
-    option.key = std::move(key);
-    option.display_text = std::move(display_text);
-    option.sample_count = 1;
-    options.push_back(std::move(option));
 }
 
 bool ShouldRememberLabelingPosition(SampleNavigationRequestKind kind)
@@ -76,60 +38,34 @@ SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
     return SampleNavigationRequest::LabelAdvanceToEligible(std::move(eligible_samples));
 }
 
-SourceCollectionFilterSourceView BuildAnnotationFilterSourceView(const SampleAnnotationResult& annotation)
+SampleFilterEvaluation EvaluateFilterSources(
+    const SampleFilterController& filters,
+    const std::vector<SampleFilterSource>& filter_sources,
+    std::size_t sample_count)
 {
-    // Keep this view builder light: the domain filter source builders also fill
-    // value_keys_by_sample for evaluation, which should not be rebuilt for the
-    // per-frame filter panel view.
-    SourceCollectionFilterSourceView view;
-    view.id = AnnotationFilterSourceId(annotation);
-    view.name = annotation.name;
-    view.filterable = annotation.kind != SampleAnnotationKind::ContinuousFloat;
-    if (!view.filterable) {
-        return view;
+    if (sample_count == 0) {
+        return {};
     }
-
-    std::unordered_map<std::string, std::size_t> option_indices;
-    for (const SampleAnnotationValue& value : annotation.values) {
-        AddFilterValueOption(view.options, option_indices, value.display_text, value.display_text);
+    if (filters.conditions().empty()) {
+        SampleFilterEvaluation evaluation;
+        evaluation.included_count = sample_count;
+        return evaluation;
     }
-    return view;
+    return filters.Evaluate(filter_sources, sample_count);
 }
 
-SourceCollectionFilterSourceView BuildLabelingFilterSourceView(const SampleLabelingTask& task)
+SourceCollectionFilterSourceView BuildFilterSourceView(
+    const SampleFilterSource& source,
+    const SampleFilterController& filters)
 {
     SourceCollectionFilterSourceView view;
-    view.id = LabelingFilterSourceId(task);
-    view.name = task.task_name;
-    view.filterable = true;
-
-    std::unordered_map<std::string, std::size_t> option_indices;
-    for (const int value : task.values) {
-        const std::string key = std::to_string(value);
-        AddFilterValueOption(view.options, option_indices, key, FormatSampleLabelValue(task.label_set, value));
+    view.id = source.id;
+    view.name = source.name;
+    view.filterable = source.filterable;
+    view.options = source.options;
+    if (const SampleFilterCondition* condition = filters.FindCondition(source.id)) {
+        view.selected_value_keys = condition->allowed_value_keys;
     }
-
-    for (const SampleLabelDefinition& label : task.label_set.labels) {
-        const std::string key = std::to_string(label.code);
-        if (option_indices.find(key) == option_indices.end()) {
-            SampleFilterValueOption option;
-            option.key = key;
-            option.display_text = FormatSampleLabelValue(task.label_set, label.code);
-            option.sample_count = 0;
-            option_indices.emplace(key, view.options.size());
-            view.options.push_back(std::move(option));
-        }
-    }
-
-    const std::string unlabeled_key = std::to_string(kUnlabeledSampleLabelCode);
-    if (option_indices.find(unlabeled_key) == option_indices.end()) {
-        SampleFilterValueOption option;
-        option.key = unlabeled_key;
-        option.display_text = FormatSampleLabelValue(task.label_set, kUnlabeledSampleLabelCode);
-        option.sample_count = 0;
-        view.options.push_back(std::move(option));
-    }
-
     return view;
 }
 
@@ -353,7 +289,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingFilter
         return action;
     }
 
-    const std::string active_labeling_source_id = LabelingFilterSourceId(*task);
+    const std::string active_labeling_source_id = BuildLabelingFilterSourceId(*task);
     if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ != active_labeling_source_id) {
         filters_.ClearCondition(*selected_labeling_filter_source_id_);
     }
@@ -461,8 +397,12 @@ SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumS
     view.active_labeling_filter_source_selected = active_labeling_filter_source_selected();
     view.navigation_filter_active = navigation_.filter_active();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
-    view.evaluation = EvaluateSampleFilters(snapshot);
-    view.sources = BuildSampleFilterSourceViews();
+    const std::vector<SampleFilterSource> filter_sources = BuildSampleFilterSources();
+    view.evaluation = EvaluateFilterSources(filters_, filter_sources, view.sample_count);
+    view.sources.reserve(filter_sources.size());
+    for (const SampleFilterSource& source : filter_sources) {
+        view.sources.push_back(BuildFilterSourceView(source, filters_));
+    }
     return view;
 }
 
@@ -526,7 +466,8 @@ void SampleWorkflowCoordinator::ApplySampleFilters(const SpectrumSnapshotHandle&
         return;
     }
 
-    const SampleFilterEvaluation evaluation = filters_.Evaluate(BuildSampleFilterSources(), sample_count);
+    const std::vector<SampleFilterSource> filter_sources = BuildSampleFilterSources();
+    const SampleFilterEvaluation evaluation = filters_.Evaluate(filter_sources, sample_count);
     if (evaluation.active) {
         navigation_.SetSampleFilter(evaluation.included_samples);
     } else {
@@ -553,15 +494,7 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ActiveSampleIndex(const Sp
 SampleFilterEvaluation SampleWorkflowCoordinator::EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const
 {
     const std::size_t sample_count = ActiveSampleCount(snapshot);
-    if (sample_count == 0) {
-        return {};
-    }
-    if (filters_.conditions().empty()) {
-        SampleFilterEvaluation evaluation;
-        evaluation.included_count = sample_count;
-        return evaluation;
-    }
-    return filters_.Evaluate(BuildSampleFilterSources(), sample_count);
+    return EvaluateFilterSources(filters_, BuildSampleFilterSources(), sample_count);
 }
 
 bool SampleWorkflowCoordinator::active_labeling_filter_source_selected() const
@@ -570,7 +503,7 @@ bool SampleWorkflowCoordinator::active_labeling_filter_source_selected() const
     if (task == nullptr || !selected_labeling_filter_source_id_) {
         return false;
     }
-    return *selected_labeling_filter_source_id_ == LabelingFilterSourceId(*task);
+    return *selected_labeling_filter_source_id_ == BuildLabelingFilterSourceId(*task);
 }
 
 std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSources() const
@@ -585,39 +518,12 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
     }
 
     if (const SampleLabelingTask* task = labeling_.active_task()) {
-        SampleFilterSource labeling_source = BuildLabelingFilterSource(*task);
-        if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ == labeling_source.id) {
-            filter_sources.push_back(std::move(labeling_source));
+        if (selected_labeling_filter_source_id_ &&
+            *selected_labeling_filter_source_id_ == BuildLabelingFilterSourceId(*task)) {
+            filter_sources.push_back(BuildLabelingFilterSource(*task));
         }
     }
     return filter_sources;
-}
-
-std::vector<SourceCollectionFilterSourceView> SampleWorkflowCoordinator::BuildSampleFilterSourceViews() const
-{
-    std::vector<SourceCollectionFilterSourceView> source_views;
-    const SourceCollectionManifest* context = navigation_.active_context();
-    if (context != nullptr) {
-        source_views.reserve(context->annotations.size() + 1);
-        for (const SampleAnnotationResult& annotation : context->annotations) {
-            SourceCollectionFilterSourceView source_view = BuildAnnotationFilterSourceView(annotation);
-            if (const SampleFilterCondition* condition = filters_.FindCondition(source_view.id)) {
-                source_view.selected_value_keys = condition->allowed_value_keys;
-            }
-            source_views.push_back(std::move(source_view));
-        }
-    }
-
-    if (const SampleLabelingTask* task = labeling_.active_task()) {
-        SourceCollectionFilterSourceView labeling_source = BuildLabelingFilterSourceView(*task);
-        if (selected_labeling_filter_source_id_ && *selected_labeling_filter_source_id_ == labeling_source.id) {
-            if (const SampleFilterCondition* condition = filters_.FindCondition(labeling_source.id)) {
-                labeling_source.selected_value_keys = condition->allowed_value_keys;
-            }
-            source_views.push_back(std::move(labeling_source));
-        }
-    }
-    return source_views;
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(

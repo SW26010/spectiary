@@ -53,6 +53,8 @@ private:
     std::vector<SampleFilterCondition> conditions_;
 };
 
+[[nodiscard]] std::string BuildAnnotationFilterSourceId(const SampleAnnotationResult& annotation);
+[[nodiscard]] std::string BuildLabelingFilterSourceId(const SampleLabelingTask& task);
 [[nodiscard]] SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& annotation);
 [[nodiscard]] SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task);
 
