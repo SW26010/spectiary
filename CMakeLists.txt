@@ -83,6 +83,7 @@ add_executable(specforge_native WIN32
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
     src/overlays/spectral_line_user_state_cache_io.cpp
+    src/overlays/spectral_line_user_state_cache_io.h
     src/overlays/spectral_line_user_state.cpp
     src/overlays/spectral_line_user_state.h
     src/platform/atomic_file.cpp
@@ -102,8 +103,12 @@ add_executable(specforge_native WIN32
     src/ui/sample_name_autocomplete.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
+    src/ui/sample_labeling_state_cache_io.cpp
+    src/ui/sample_labeling_state_cache_io.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_state_cache_io.cpp
+    src/ui/sample_navigation_state_cache_io.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
     src/ui/sample_workflow_panel.cpp
@@ -235,6 +240,8 @@ add_executable(specforge_sample_navigation_controller_tests
     src/platform/atomic_file.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_state_cache_io.cpp
+    src/ui/sample_navigation_state_cache_io.h
     src/domain/spectrum_snapshot.h
 )
 
@@ -282,6 +289,8 @@ add_executable(specforge_sample_labeling_filter_tests
     src/platform/atomic_file.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
+    src/ui/sample_labeling_state_cache_io.cpp
+    src/ui/sample_labeling_state_cache_io.h
 )
 
 target_include_directories(specforge_sample_labeling_filter_tests PRIVATE src)
@@ -315,8 +324,12 @@ add_executable(specforge_source_collection_session_tests
     src/platform/atomic_file.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
+    src/ui/sample_labeling_state_cache_io.cpp
+    src/ui/sample_labeling_state_cache_io.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_state_cache_io.cpp
+    src/ui/sample_navigation_state_cache_io.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
     src/ui/source_collection_roster.cpp
@@ -412,6 +425,7 @@ add_executable(specforge_spectral_line_user_state_tests
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
     src/overlays/spectral_line_user_state_cache_io.cpp
+    src/overlays/spectral_line_user_state_cache_io.h
     src/overlays/spectral_line_user_state.cpp
     src/overlays/spectral_line_user_state.h
     src/platform/atomic_file.cpp

@@ -1,5 +1,7 @@
 #include "ui/spectral_lines_panel_controller.h"
 
+#include "overlays/spectral_line_user_state_cache_io.h"
+
 #include <algorithm>
 #include <cctype>
 #include <utility>

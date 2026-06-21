@@ -21,7 +21,6 @@ struct SourceCollectionSessionStateCache {
 
 [[nodiscard]] bool SaveSourceCollectionSessionStateCache(
     const std::filesystem::path& path,
-    const std::vector<SourceCollectionSavedSource>& sources,
-    std::optional<std::size_t> active_source_index);
+    const SourceCollectionSessionStateCache& cache);
 
 }  // namespace specforge

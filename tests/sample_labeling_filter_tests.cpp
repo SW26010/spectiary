@@ -1,16 +1,20 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_labeling.h"
 #include "ui/sample_labeling_controller.h"
+#include "ui/sample_labeling_state_cache_io.h"
 
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -86,6 +90,80 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
     Require(stream.good(), "could not open text file for writing");
     stream << contents;
     Require(stream.good(), "could not write text file");
+}
+
+void TestSampleLabelingStateCacheRoundTrip()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_adapter_roundtrip.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        "adapter fixture should accept label");
+    task.auto_advance = true;
+    task.skip_labeled_on_advance = true;
+    Require(specforge::AssignSampleLabel(task, 1, 5).accepted, "adapter fixture should accept sample value");
+    specforge::MarkSampleLabelTaskPersisted(task, specforge::SampleLabelSaveStateKind::InternalDraftOnly);
+    task.remembered_position = 2;
+
+    specforge::SampleLabelingStateCache cache;
+    specforge::SampleLabelingSourceState state;
+    state.sample_count = 3;
+    state.active_task_id = "quality";
+    state.tasks.push_back(std::move(task));
+    cache.sources.emplace("source-identity", std::move(state));
+    Require(specforge::SaveSampleLabelingStateCache(cache_path, cache), "sample-labeling cache should save");
+
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(loaded.warning.empty(), loaded.warning);
+    const auto source = loaded.cache.sources.find("source-identity");
+    Require(source != loaded.cache.sources.end(), "sample-labeling cache should restore source state");
+    Require(source->second.active_task_id && *source->second.active_task_id == "quality", "active task should restore");
+    Require(source->second.tasks.size() == 1, "task should restore");
+    const specforge::SampleLabelingTask& restored_task = source->second.tasks.front();
+    Require(restored_task.auto_advance, "auto-advance should round-trip");
+    Require(restored_task.skip_labeled_on_advance, "skip-labeled setting should round-trip");
+    Require(
+        restored_task.remembered_position && *restored_task.remembered_position == 2,
+        "remembered position should round-trip");
+    Require(
+        specforge::FindSampleLabel(restored_task.label_set, 5) != nullptr,
+        "label set should round-trip");
+    Require(restored_task.values.size() == 3 && restored_task.values[1] == 5, "draft values should round-trip");
+}
+
+void TestSampleLabelingStateCacheReportsCorruptJson()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_adapter_corrupt.json";
+    WriteTextFile(cache_path, "{ invalid json");
+
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(!loaded.warning.empty(), "corrupt sample-labeling cache should report a warning");
+    Require(loaded.cache.sources.empty(), "corrupt sample-labeling cache should be ignored");
+}
+
+void TestSampleLabelingStateCacheReportsUnsupportedSchema()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_adapter_schema.json";
+    WriteTextFile(
+        cache_path,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_labeling_tasks.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": []\n"
+        "}\n");
+
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(!loaded.warning.empty(), "unsupported sample-labeling cache schema should report a warning");
+    Require(loaded.cache.sources.empty(), "unsupported sample-labeling cache schema should be ignored");
 }
 
 void TestSampleLabelTaskWritesStableCodes()
@@ -578,18 +656,26 @@ void TestFloatingAnnotationsAreNotFilterable()
 
 int main()
 {
-    TestSampleLabelTaskWritesStableCodes();
-    TestSampleLabelResultWritesCompactNpy();
-    TestFailedNpySaveDoesNotDamageExistingOutput();
-    TestSampleLabelingControllerAutosavesDraftRecord();
-    TestTaskRecordFlushKeepsActiveTaskAddressStable();
-    TestExternalOutputIsResultSourceOfTruth();
-    TestMissingExternalOutputRestoresFailedState();
-    TestDraftOutputFailureKeepsDraftRecoveryValues();
-    TestCorruptLocalTaskRecordIsIgnored();
-    TestFailedExternalOutputPersistsPendingOverlay();
-    TestFailedExternalOutputRetriesAfterBackoff();
-    TestSampleFiltersStackCategoricalConditions();
-    TestFloatingAnnotationsAreNotFilterable();
+    try {
+        TestSampleLabelingStateCacheRoundTrip();
+        TestSampleLabelingStateCacheReportsCorruptJson();
+        TestSampleLabelingStateCacheReportsUnsupportedSchema();
+        TestSampleLabelTaskWritesStableCodes();
+        TestSampleLabelResultWritesCompactNpy();
+        TestFailedNpySaveDoesNotDamageExistingOutput();
+        TestSampleLabelingControllerAutosavesDraftRecord();
+        TestTaskRecordFlushKeepsActiveTaskAddressStable();
+        TestExternalOutputIsResultSourceOfTruth();
+        TestMissingExternalOutputRestoresFailedState();
+        TestDraftOutputFailureKeepsDraftRecoveryValues();
+        TestCorruptLocalTaskRecordIsIgnored();
+        TestFailedExternalOutputPersistsPendingOverlay();
+        TestFailedExternalOutputRetriesAfterBackoff();
+        TestSampleFiltersStackCategoricalConditions();
+        TestFloatingAnnotationsAreNotFilterable();
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
     return 0;
 }

@@ -75,8 +75,7 @@ SourceCollectionSessionStateCache LoadSourceCollectionSessionStateCache(const st
 
 bool SaveSourceCollectionSessionStateCache(
     const std::filesystem::path& path,
-    const std::vector<SourceCollectionSavedSource>& sources,
-    std::optional<std::size_t> active_source_index)
+    const SourceCollectionSessionStateCache& cache)
 {
     if (path.empty()) {
         return true;
@@ -90,23 +89,23 @@ bool SaveSourceCollectionSessionStateCache(
         [&](std::ostream& stream, std::string&) {
             stream << ",\n";
             stream << "  \"active_source_index\": ";
-            if (active_source_index) {
-                stream << *active_source_index;
+            if (cache.active_source_index) {
+                stream << *cache.active_source_index;
             } else {
                 stream << "null";
             }
             stream << ",\n";
             stream << "  \"sources\": [";
-            if (!sources.empty()) {
+            if (!cache.sources.empty()) {
                 stream << "\n";
             }
-            for (std::size_t index = 0; index < sources.size(); ++index) {
+            for (std::size_t index = 0; index < cache.sources.size(); ++index) {
                 stream << "    { \"path\": ";
-                WriteJsonString(stream, PathToUtf8(sources[index].path));
-                stream << ", \"last_index\": " << sources[index].last_spectrum_index << " }";
-                stream << (index + 1 == sources.size() ? "\n" : ",\n");
+                WriteJsonString(stream, PathToUtf8(cache.sources[index].path));
+                stream << ", \"last_index\": " << cache.sources[index].last_spectrum_index << " }";
+                stream << (index + 1 == cache.sources.size() ? "\n" : ",\n");
             }
-            if (!sources.empty()) {
+            if (!cache.sources.empty()) {
                 stream << "  ";
             }
             stream << "]\n";

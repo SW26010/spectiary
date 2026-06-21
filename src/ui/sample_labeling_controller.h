@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/local_user_state.h"
-#include "domain/sample_labeling.h"
+#include "ui/sample_labeling_state_cache_io.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,11 +16,7 @@ namespace specforge {
 
 class SampleLabelingController {
 public:
-    struct SourceState {
-        std::size_t sample_count = 0;
-        std::vector<SampleLabelingTask> tasks;
-        std::optional<std::string> active_task_id;
-    };
+    using SourceState = SampleLabelingSourceState;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);

@@ -1,4 +1,5 @@
 #include "overlays/spectral_line_user_state.h"
+#include "overlays/spectral_line_user_state_cache_io.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -714,6 +715,27 @@ void TestCorruptCacheIsWarningOnly()
     Require(loaded.cache.catalogs.empty(), "corrupt cache should be ignored");
 }
 
+void TestUnsupportedCacheSchemaIsWarningOnly()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_spectral_line_user_state_schema_cache_test.json";
+    {
+        std::ofstream stream(path);
+        stream << "{\n";
+        stream << "  \"format_kind\": \"specforge.catalog_user_state.cache\",\n";
+        stream << "  \"schema_version\": 999,\n";
+        stream << "  \"catalogs\": {}\n";
+        stream << "}\n";
+    }
+
+    const specforge::CatalogUserStateCacheLoadResult loaded = specforge::LoadCatalogUserStateCache(path);
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
+
+    Require(!loaded.warning.empty(), "unsupported cache schema should produce a non-blocking warning");
+    Require(loaded.cache.catalogs.empty(), "unsupported cache schema should be ignored");
+}
+
 }  // namespace
 
 int main()
@@ -736,5 +758,6 @@ int main()
     TestLegacyExpandedGroupsMigrateToPanelState();
     TestCacheReadsUnicodeEscapes();
     TestCorruptCacheIsWarningOnly();
+    TestUnsupportedCacheSchemaIsWarningOnly();
     return 0;
 }

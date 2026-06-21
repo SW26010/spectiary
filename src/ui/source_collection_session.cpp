@@ -96,7 +96,10 @@ private:
         const std::vector<SourceCollectionSavedSource>& sources,
         std::optional<std::size_t> active_source_index) const
     {
-        return SaveSourceCollectionSessionStateCache(cache_path_, sources, active_source_index);
+        SourceCollectionSessionStateCache cache;
+        cache.sources = sources;
+        cache.active_source_index = active_source_index;
+        return SaveSourceCollectionSessionStateCache(cache_path_, cache);
     }
 
     std::filesystem::path cache_path_;

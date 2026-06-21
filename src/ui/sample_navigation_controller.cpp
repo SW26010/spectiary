@@ -1,8 +1,5 @@
 #include "ui/sample_navigation_controller.h"
 
-#include "app/local_user_state.h"
-#include "app/local_user_state_json.h"
-
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -14,9 +11,6 @@
 
 namespace specforge {
 namespace {
-
-constexpr const char* kStateFormatKind = "specforge.sample_navigation_state.cache";
-constexpr int kStateSchemaVersion = 1;
 
 std::string LowerAscii(std::string value)
 {
@@ -30,72 +24,6 @@ std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
-}
-
-std::unordered_map<std::string, std::size_t> LoadStateCache(const std::filesystem::path& path)
-{
-    std::unordered_map<std::string, std::size_t> indices;
-    VersionedJsonCacheLoadResult result =
-        LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample navigation state cache");
-    if (!result.document) {
-        return indices;
-    }
-
-    const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
-    if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
-        return indices;
-    }
-    for (const JsonValue& source_object : sources->array) {
-        if (source_object.kind != JsonValue::Kind::Object) {
-            continue;
-        }
-        const std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");
-        const std::optional<std::size_t> index = ReadJsonSizeMember(source_object, "last_index");
-        if (identity && !identity->empty() && index) {
-            indices[*identity] = *index;
-        }
-    }
-    return indices;
-}
-
-bool SaveStateCacheFile(
-    const std::filesystem::path& path,
-    const std::unordered_map<std::string, std::size_t>& indices)
-{
-    if (path.empty()) {
-        return false;
-    }
-
-    const std::vector<std::string> keys = SortedCacheKeys(indices);
-
-    return WriteVersionedJsonCacheFile(
-        path,
-        kStateFormatKind,
-        kStateSchemaVersion,
-        "sample navigation state cache",
-        [&](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            stream << "  \"sources\": [";
-            if (!keys.empty()) {
-                stream << "\n";
-            }
-            for (std::size_t index = 0; index < keys.size(); ++index) {
-                stream << "    { \"identity\": ";
-                WriteJsonString(stream, keys[index]);
-                stream << ", \"last_index\": " << indices.at(keys[index]) << " }";
-                stream << (index + 1 == keys.size() ? "\n" : ",\n");
-            }
-            if (!keys.empty()) {
-                stream << "  ";
-            }
-            stream << "]\n";
-            return true;
-        });
-}
-
-std::filesystem::path DefaultSampleNavigationStatePath()
-{
-    return DefaultLocalUserStatePath("sample-navigation-state.json");
 }
 
 }  // namespace
@@ -146,7 +74,7 @@ SampleNavigationRequest SampleNavigationRequest::LocateSampleName(std::string sa
 }
 
 SampleNavigationController::SampleNavigationController()
-    : SampleNavigationController(DefaultSampleNavigationStatePath())
+    : SampleNavigationController(DefaultSampleNavigationStateCachePath())
 {
 }
 
@@ -180,8 +108,9 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     }
     session.sample_name_query = previous_query;
     if (session.spectrum_count > 0) {
-        const auto persisted = persisted_indices_.find(identity.id);
-        if (new_session && persisted != persisted_indices_.end() && persisted->second < session.spectrum_count) {
+        const auto persisted = state_cache_.last_indices_by_source_identity.find(identity.id);
+        if (new_session && persisted != state_cache_.last_indices_by_source_identity.end() &&
+            persisted->second < session.spectrum_count) {
             session.current_index = persisted->second;
         } else if (new_session) {
             session.current_index = std::min(snapshot->collection.current_index, session.spectrum_count - 1);
@@ -566,7 +495,7 @@ void SampleNavigationController::EnsureStateCacheLoaded()
         return;
     }
     state_cache_loaded_ = true;
-    persisted_indices_ = LoadStateCache(state_cache_path_);
+    state_cache_ = LoadSampleNavigationStateCache(state_cache_path_);
 }
 
 void SampleNavigationController::PersistActiveIndex()
@@ -575,13 +504,13 @@ void SampleNavigationController::PersistActiveIndex()
     if (session == nullptr || session->source_collection_identity.empty() || session->spectrum_count == 0) {
         return;
     }
-    persisted_indices_[session->source_collection_identity] = session->current_index;
+    state_cache_.last_indices_by_source_identity[session->source_collection_identity] = session->current_index;
     SaveStateCache();
 }
 
 bool SampleNavigationController::SaveStateCache()
 {
-    return SaveStateCacheFile(state_cache_path_, persisted_indices_);
+    return SaveSampleNavigationStateCache(state_cache_path_, state_cache_);
 }
 
 void SampleNavigationController::RecomputeMatches(SourceSession& session)

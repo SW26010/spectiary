@@ -51,6 +51,14 @@ void TouchFile(const std::filesystem::path& path)
     Require(stream.good(), "could not create source fixture file");
 }
 
+void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
+{
+    std::ofstream stream(path, std::ios::trunc);
+    Require(stream.good(), "could not open text file for writing");
+    stream << contents;
+    Require(stream.good(), "could not write text file");
+}
+
 specforge::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_count,
@@ -488,6 +496,64 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
         "restore should not mark the source session cache dirty immediately");
 }
 
+void TestSourceSessionStateCacheRoundTrip()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_sources.json");
+    const std::filesystem::path first_source_path = UniqueTempPath("_adapter_first.npy");
+    const std::filesystem::path second_source_path = UniqueTempPath("_adapter_second.npy");
+
+    specforge::SourceCollectionSessionStateCache cache;
+    cache.sources = {
+        specforge::SourceCollectionSavedSource{first_source_path, 2},
+        specforge::SourceCollectionSavedSource{second_source_path, 0},
+    };
+    cache.active_source_index = 1;
+    Require(
+        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, cache),
+        "source session cache should save");
+
+    const specforge::SourceCollectionSessionStateCache loaded =
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+    Require(loaded.sources.size() == 2, "source session cache should restore all sources");
+    Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
+    Require(loaded.sources[0].last_spectrum_index == 2, "first source index should round-trip");
+    Require(loaded.sources[1].path == second_source_path, "second source path should round-trip");
+    Require(
+        loaded.active_source_index && *loaded.active_source_index == 1,
+        "active source index should round-trip");
+}
+
+void TestSourceSessionStateCacheIgnoresCorruptJson()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_corrupt_sources.json");
+    WriteTextFile(source_session_cache, "{ invalid json");
+
+    const specforge::SourceCollectionSessionStateCache loaded =
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+    Require(loaded.sources.empty(), "corrupt source session cache should be ignored");
+    Require(!loaded.active_source_index, "corrupt source session cache should not restore an active source");
+}
+
+void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_schema_sources.json");
+    WriteTextFile(
+        source_session_cache,
+        "{\n"
+        "  \"format_kind\": \"specforge.source_collection_session.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"active_source_index\": 0,\n"
+        "  \"sources\": []\n"
+        "}\n");
+
+    const specforge::SourceCollectionSessionStateCache loaded =
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+    Require(loaded.sources.empty(), "unsupported source session cache schema should be ignored");
+    Require(
+        !loaded.active_source_index,
+        "unsupported source session cache schema should not restore an active source");
+}
+
 void TestSourceSessionSkipsMissingSourcePathsOnRestore()
 {
     const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
@@ -497,12 +563,14 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
     const std::filesystem::path existing_source_path = UniqueTempPath("_existing.npy");
     TouchFile(existing_source_path);
 
-    std::vector<specforge::SourceCollectionSavedSource> saved_sources = {
+    specforge::SourceCollectionSessionStateCache saved_state;
+    saved_state.sources = {
         specforge::SourceCollectionSavedSource{missing_source_path, 3},
         specforge::SourceCollectionSavedSource{existing_source_path, 1},
     };
+    saved_state.active_source_index = 1;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_sources, 1),
+        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
         "source session fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -528,15 +596,16 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
     const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
     std::vector<SourceFixture> fixtures;
-    std::vector<specforge::SourceCollectionSavedSource> saved_sources;
+    specforge::SourceCollectionSessionStateCache saved_state;
     for (std::size_t index = 0; index < 35; ++index) {
         std::filesystem::path source_path = UniqueTempPath(std::string("_cap_") + std::to_string(index) + ".npy");
         TouchFile(source_path);
         fixtures.push_back(SourceFixture{source_path, 4});
-        saved_sources.push_back(specforge::SourceCollectionSavedSource{source_path, index % 4});
+        saved_state.sources.push_back(specforge::SourceCollectionSavedSource{source_path, index % 4});
     }
+    saved_state.active_source_index = 34;
     Require(
-        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_sources, 34),
+        specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
         "source session cap fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
@@ -550,9 +619,9 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
     const specforge::SourceCollectionSessionView view = restored.View();
     Require(view.sources.size() == 32, "restore should cap the source list at 32 entries");
     Require(restored_loads.size() == 32, "restore should load only 32 source snapshots");
-    Require(view.sources.back().path == saved_sources[31].path, "last restored source should be the 32nd entry");
+    Require(view.sources.back().path == saved_state.sources[31].path, "last restored source should be the 32nd entry");
     Require(view.current_source_index && *view.current_source_index == 31, "out-of-cap active source should not restore");
-    Require(view.snapshot->source.path == saved_sources[31].path, "last restored source should remain active");
+    Require(view.snapshot->source.path == saved_state.sources[31].path, "last restored source should remain active");
 }
 
 void TestSourceSessionFlushFailureKeepsDirtyState()
@@ -614,6 +683,9 @@ int main()
     TestNavigationViewExposesSourceProvidedSampleName();
     TestRemovingActiveSourceActivatesNextSourceWorkflow();
     TestSourceSessionRestoresSourcesAndActiveIndex();
+    TestSourceSessionStateCacheRoundTrip();
+    TestSourceSessionStateCacheIgnoresCorruptJson();
+    TestSourceSessionStateCacheIgnoresUnsupportedSchema();
     TestSourceSessionSkipsMissingSourcePathsOnRestore();
     TestSourceSessionRestoresAtMostThirtyTwoSources();
     TestSourceSessionFlushFailureKeepsDirtyState();

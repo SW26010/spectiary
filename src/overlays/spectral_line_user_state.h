@@ -52,11 +52,6 @@ struct CatalogUserStateCache {
     std::unordered_map<std::string, CatalogPanelState> catalog_panel_state;
 };
 
-struct CatalogUserStateCacheLoadResult {
-    CatalogUserStateCache cache;
-    std::string warning;
-};
-
 enum class GroupVisibilityState {
     Empty,
     AllVisible,
@@ -152,12 +147,5 @@ bool CopyMarkerReference(
     std::string_view marker_id,
     std::string_view target_group_id);
 [[nodiscard]] std::string GroupExpansionKey(std::string_view view_id, std::string_view group_id);
-
-[[nodiscard]] std::filesystem::path DefaultCatalogUserStateCachePath();
-[[nodiscard]] CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem::path& path);
-bool SaveCatalogUserStateCache(
-    const std::filesystem::path& path,
-    const CatalogUserStateCache& cache,
-    std::string& error);
 
 }  // namespace specforge

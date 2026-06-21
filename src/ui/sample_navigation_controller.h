@@ -2,6 +2,7 @@
 
 #include "domain/sample_annotation_io.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/sample_navigation_state_cache_io.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -110,7 +111,7 @@ private:
 
     std::unordered_map<std::string, SourceSession> sessions_;
     std::unordered_map<std::string, std::string> source_key_to_session_key_;
-    std::unordered_map<std::string, std::size_t> persisted_indices_;
+    SampleNavigationStateCache state_cache_;
     std::filesystem::path state_cache_path_;
     std::optional<std::string> active_source_key_;
     bool state_cache_loaded_ = false;

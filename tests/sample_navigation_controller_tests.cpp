@@ -1,5 +1,6 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/sample_navigation_state_cache_io.h"
 
 #include <chrono>
 #include <cstdint>
@@ -136,6 +137,73 @@ std::string ReadTextFile(const std::filesystem::path& path)
     std::ostringstream buffer;
     buffer << stream.rdbuf();
     return buffer.str();
+}
+
+void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
+{
+    std::ofstream stream(path, std::ios::trunc);
+    Require(stream.good(), "could not open text file for writing");
+    stream << contents;
+    Require(stream.good(), "could not write text file");
+}
+
+void TestNavigationStateCacheRoundTrip()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_adapter_roundtrip.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleNavigationStateCache cache;
+    cache.last_indices_by_source_identity.emplace("source-a", 2);
+    cache.last_indices_by_source_identity.emplace("source-b", 0);
+    Require(specforge::SaveSampleNavigationStateCache(cache_path, cache), "navigation cache should save");
+
+    const specforge::SampleNavigationStateCache loaded =
+        specforge::LoadSampleNavigationStateCache(cache_path);
+    Require(
+        loaded.last_indices_by_source_identity.size() == 2,
+        "navigation cache should restore all source indices");
+    Require(
+        loaded.last_indices_by_source_identity.at("source-a") == 2,
+        "navigation cache should restore source-a index");
+    Require(
+        loaded.last_indices_by_source_identity.at("source-b") == 0,
+        "navigation cache should restore source-b index");
+}
+
+void TestNavigationStateCacheIgnoresCorruptJson()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_adapter_corrupt.json";
+    WriteTextFile(cache_path, "{ invalid json");
+
+    const specforge::SampleNavigationStateCache loaded =
+        specforge::LoadSampleNavigationStateCache(cache_path);
+    Require(
+        loaded.last_indices_by_source_identity.empty(),
+        "corrupt navigation cache should be ignored");
+}
+
+void TestNavigationStateCacheIgnoresUnsupportedSchema()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_adapter_schema.json";
+    WriteTextFile(
+        cache_path,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": [\n"
+        "    { \"identity\": \"source-a\", \"last_index\": 2 }\n"
+        "  ]\n"
+        "}\n");
+
+    const specforge::SampleNavigationStateCache loaded =
+        specforge::LoadSampleNavigationStateCache(cache_path);
+    Require(
+        loaded.last_indices_by_source_identity.empty(),
+        "unsupported navigation cache schema should be ignored");
 }
 
 void TestControllerOwnsNavigationState()
@@ -457,6 +525,9 @@ void TestFilterConstrainsSequentialNavigation()
 
 int main()
 {
+    TestNavigationStateCacheRoundTrip();
+    TestNavigationStateCacheIgnoresCorruptJson();
+    TestNavigationStateCacheIgnoresUnsupportedSchema();
     TestControllerOwnsNavigationState();
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerAddsManualAnnotationToActiveContext();
