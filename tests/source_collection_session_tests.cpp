@@ -177,9 +177,83 @@ specforge::SourceCollectionSession MakePersistentSession(
 
 specforge::SourceCollectionSessionResult Submit(
     specforge::SourceCollectionSession& session,
-    specforge::SourceCollectionSessionCommand command)
+    specforge::SourceCollectionSessionIntent intent)
 {
-    return session.Submit(std::move(command));
+    return session.Submit(std::move(intent));
+}
+
+specforge::SourceCollectionSessionIntent OpenSourceCollection(
+    std::filesystem::path path,
+    std::size_t spectrum_index = 0)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::Open(std::move(path), spectrum_index));
+}
+
+specforge::SourceCollectionSessionIntent SwitchSourceCollection(std::size_t source_index)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::SwitchActive(source_index));
+}
+
+specforge::SourceCollectionSessionIntent RemoveSourceCollection(std::size_t source_index)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::Remove(source_index));
+}
+
+specforge::SourceCollectionSessionIntent MoveSampleNavigation(specforge::SampleNavigationRequest request)
+{
+    return specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+        specforge::SampleNavigationIntent::Move(std::move(request)));
+}
+
+specforge::SourceCollectionSessionIntent SetSampleNameQuery(std::string query)
+{
+    return specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+        specforge::SampleNavigationIntent::SetSampleNameQuery(std::move(query)));
+}
+
+specforge::SourceCollectionSessionIntent CreateDefaultLabelingTask()
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::CreateDefaultLabelingTask());
+}
+
+specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabelDefinition label)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(std::move(label)));
+}
+
+specforge::SourceCollectionSessionIntent SetActiveLabelingAutoAdvance(bool enabled)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(enabled));
+}
+
+specforge::SourceCollectionSessionIntent AssignActiveLabelToCurrentSample(int code)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(code));
+}
+
+specforge::SourceCollectionSessionIntent SetActiveLabelingFilterSourceSelected(bool selected)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
+        specforge::SampleFilteringIntent::SetActiveLabelingSourceSelected(selected));
+}
+
+specforge::SourceCollectionSessionIntent SetFilterValueSelected(
+    std::string source_id,
+    std::string value_key,
+    bool selected)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
+        specforge::SampleFilteringIntent::SetFilterValueSelected(
+            std::move(source_id),
+            std::move(value_key),
+            selected));
 }
 
 void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
@@ -189,7 +263,7 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
 
     const specforge::SourceCollectionSessionResult open_result =
-        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+        Submit(session, OpenSourceCollection(source_path, 0));
     const specforge::SourceCollectionSessionAction& open_action = open_result.action;
     Require(open_action.snapshot_changed, "opening a source should change the displayed snapshot");
     Require(open_action.workflow_changed, "opening a source should activate a workflow identity");
@@ -197,11 +271,11 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(open_result.view.sources.size() == 1, "opening a source should add one source entry");
     Require(open_result.view.snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
 
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, CreateDefaultLabelingTask());
     Require(session.View().labeling.has_active_task, "active source should accept a labeling task");
 
     const specforge::SourceCollectionSessionResult next_result =
-        Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+        Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::Next()));
     Require(next_result.navigation.target_found, "next navigation should find a target");
     Require(next_result.navigation.current_index == 1, "next navigation should move to row 1");
@@ -224,20 +298,20 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(
             session,
-            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+            UpsertActiveLabel(
                 specforge::SampleLabelDefinition{1, "bad", 'b'}))
             .changed,
         "bad label should be accepted");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::SetActiveLabelingAutoAdvance(true));
+    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
 
     const specforge::SourceCollectionSessionResult assign_result =
-        Submit(session, specforge::SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(1));
+        Submit(session, AssignActiveLabelToCurrentSample(1));
     const specforge::SourceCollectionSessionAction& assign_action = assign_result.action;
     Require(assign_action.snapshot_changed, "auto-advance should load the next sample snapshot");
     Require(assign_action.navigation_inputs_changed, "auto-advance should refresh navigation inputs");
@@ -245,7 +319,7 @@ void TestAssigningLabelAutoAdvancesInsideSession()
 
     Require(assign_result.view.labeling.has_active_task, "task should remain active after auto-advance");
     const specforge::SourceCollectionSessionResult locate_result =
-        Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+        Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::LocateRow(0)));
     Require(locate_result.view.labeling.current_code == 1, "current sample label should be written before advance");
     Require(
@@ -258,39 +332,39 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, CreateDefaultLabelingTask());
     Require(session.View().labeling.has_active_task, "active source should accept a labeling task");
     Require(
         Submit(
             session,
-            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+            UpsertActiveLabel(
                 specforge::SampleLabelDefinition{1, "bad", 'b'}))
             .changed,
         "bad label should be accepted");
     Require(
         Submit(
             session,
-            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+            UpsertActiveLabel(
                 specforge::SampleLabelDefinition{2, "good", 'g'}))
             .changed,
         "good label should be accepted");
     specforge::SourceCollectionSessionResult result =
-        Submit(session, specforge::SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(1));
+        Submit(session, AssignActiveLabelToCurrentSample(1));
     Require(result.view.labeling.current_code == 1, "sample 0 should be labeled bad");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+    (void)Submit(session, MoveSampleNavigation(
                               specforge::SampleNavigationRequest::LocateRow(1)));
-    result = Submit(session, specforge::SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(2));
+    result = Submit(session, AssignActiveLabelToCurrentSample(2));
     Require(result.view.labeling.current_code == 2, "sample 1 should be labeled good");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+    (void)Submit(session, MoveSampleNavigation(
                               specforge::SampleNavigationRequest::LocateRow(2)));
-    result = Submit(session, specforge::SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(2));
+    result = Submit(session, AssignActiveLabelToCurrentSample(2));
     Require(result.view.labeling.current_code == 2, "sample 2 should be labeled good");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+    (void)Submit(session, MoveSampleNavigation(
                               specforge::SampleNavigationRequest::LocateRow(0)));
 
-    result = Submit(session, specforge::SourceCollectionSessionCommand::SetActiveLabelingFilterSourceSelected(true));
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(true));
     specforge::SourceCollectionFilterView filter_view = result.view.filter;
     Require(filter_view.active_labeling_filter_source_selected, "labeling filter source should be selected");
     Require(filter_view.sources.size() == 1, "selected labeling task should be the only filter source in this fixture");
@@ -308,26 +382,74 @@ void TestLabelingFilterSelectionAppliesToNavigation()
 
     result = Submit(
         session,
-        specforge::SourceCollectionSessionCommand::SetFilterValueSelected("labeling:manual-labeling", "2", true));
+        SetFilterValueSelected("labeling:manual-labeling", "2", true));
     specforge::SourceCollectionNavigationView navigation_view = result.view.navigation;
     Require(navigation_view.filter_active, "labeling condition should activate navigation filtering");
     Require(navigation_view.filtered_sample_count == 2, "filter should include the two good samples");
     Require(!navigation_view.current_sample_in_filter, "current bad sample should be outside the filter");
 
     const specforge::SourceCollectionSessionResult locate_action =
-        Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+        Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::LocateRow(1)));
     Require(locate_action.navigation.target_found, "locating the first included sample should resolve");
     Require(locate_action.navigation.current_index == 1, "locate should move to the first good sample");
 
     const specforge::SourceCollectionSessionResult next_action =
-        Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+        Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::Next()));
     Require(next_action.navigation.target_found, "filtered next should find a visible target");
     Require(next_action.navigation.current_index == 2, "filtered next should move to the next good sample");
 
-    result = Submit(session, specforge::SourceCollectionSessionCommand::SetActiveLabelingFilterSourceSelected(false));
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(false));
     Require(!result.view.navigation.filter_active, "deselecting labeling source should clear its navigation filter");
+}
+
+void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
+{
+    const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
+    const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    specforge::SourceCollectionSession session = MakeMultiSourceSession(
+        loaded_snapshots,
+        first_source_path,
+        3,
+        second_source_path,
+        2);
+
+    (void)Submit(session, OpenSourceCollection(first_source_path, 0));
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{1, "bad", 'b'}))
+            .changed,
+        "first source collection should accept a label definition");
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, AssignActiveLabelToCurrentSample(1));
+    Require(result.view.labeling.current_code == 1, "first sample should be labeled before filtering");
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(true));
+    Require(
+        result.view.filter.active_labeling_filter_source_selected,
+        "active sample workflow should be available as a filter source");
+    result = Submit(
+        session,
+        SetFilterValueSelected("labeling:manual-labeling", "1", true));
+    Require(result.view.navigation.filter_active, "labeling filter should affect sample navigation");
+    Require(result.view.navigation.filtered_sample_count == 1, "filter should include the one labeled sample");
+
+    result = Submit(session, OpenSourceCollection(second_source_path, 0));
+    Require(result.action.workflow_changed, "opening another source collection should change the active workflow");
+    Require(!result.view.labeling.has_active_task, "second source collection should not inherit the first workflow");
+    Require(!result.view.filter.active_labeling_filter_source_selected, "source switch should clear selected filter source");
+    Require(!result.view.navigation.filter_active, "source switch should clear navigation filtering");
+
+    result = Submit(session, SwitchSourceCollection(0));
+    Require(result.action.workflow_changed, "switching back should reactivate the first workflow");
+    Require(result.view.labeling.has_active_task, "first source collection workflow should be restored");
+    Require(result.view.labeling.current_code == 1, "first source collection label result should be restored");
+    Require(!result.view.filter.active_labeling_filter_source_selected, "workflow restore should not restore old filter source");
+    Require(!result.view.navigation.filter_active, "workflow restore should leave sample filtering cleared");
 }
 
 void TestNavigationViewSeparatesSampleNameFromDisplayName()
@@ -337,14 +459,14 @@ void TestNavigationViewSeparatesSampleNameFromDisplayName()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
 
     specforge::SourceCollectionSessionResult result =
-        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+        Submit(session, OpenSourceCollection(source_path, 0));
     specforge::SourceCollectionNavigationView navigation = result.view.navigation;
     Require(navigation.current_sample_display_name == "sample-1", "view should expose the current display name");
     Require(navigation.current_sample_name.empty(), "unnamed samples should not expose a searchable sample name");
 
     result = Submit(
         session,
-        specforge::SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_display_name));
+        SetSampleNameQuery(navigation.current_sample_display_name));
     navigation = result.view.navigation;
     Require(!navigation.exact_sample_name_match, "fallback display names should not be exact sample-name matches");
     Require(navigation.sample_name_matches.empty(), "fallback display names should not be sample-name search matches");
@@ -360,7 +482,7 @@ void TestNavigationViewExposesSourceProvidedSampleName()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 2);
 
     specforge::SourceCollectionSessionResult result =
-        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+        Submit(session, OpenSourceCollection(source_path, 0));
     specforge::SourceCollectionNavigationView navigation = result.view.navigation;
     Require(navigation.has_sample_names, "folder source should expose source-provided sample names");
     Require(navigation.current_sample_name == "alpha.csv", "view should expose the current source-provided sample name");
@@ -368,7 +490,7 @@ void TestNavigationViewExposesSourceProvidedSampleName()
 
     result = Submit(
         session,
-        specforge::SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_name));
+        SetSampleNameQuery(navigation.current_sample_name));
     navigation = result.view.navigation;
     Require(
         navigation.exact_sample_name_match && *navigation.exact_sample_name_match == 0,
@@ -388,32 +510,32 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         2);
 
     specforge::SourceCollectionSessionResult result =
-        Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(first_source_path, 1));
+        Submit(session, OpenSourceCollection(first_source_path, 1));
     Require(result.view.current_source_index && *result.view.current_source_index == 0, "first source should be active");
     Require(result.view.snapshot->source.path == first_source_path, "first source snapshot should be visible");
     Require(result.view.snapshot->collection.current_index == 1, "first source should open at requested row");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(
             session,
-            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+            UpsertActiveLabel(
                 specforge::SampleLabelDefinition{10, "first-label", 'f'}))
             .changed,
         "first source should accept its own active label");
 
-    result = Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(second_source_path, 0));
+    result = Submit(session, OpenSourceCollection(second_source_path, 0));
     Require(result.view.current_source_index && *result.view.current_source_index == 1, "second source should be active");
     Require(result.view.snapshot->source.path == second_source_path, "second source snapshot should be visible");
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(
             session,
-            specforge::SourceCollectionSessionCommand::UpsertActiveLabel(
+            UpsertActiveLabel(
                 specforge::SampleLabelDefinition{20, "second-label", 's'}))
             .changed,
         "second source should accept its own active label");
 
-    result = Submit(session, specforge::SourceCollectionSessionCommand::ActivateSource(0));
+    result = Submit(session, SwitchSourceCollection(0));
     Require(result.action.snapshot_changed, "activating first source should swap to its cached snapshot");
     Require(
         result.view.current_source_index && *result.view.current_source_index == 0,
@@ -425,7 +547,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
     Require(result.view.labeling.label_set.labels[0].code == 10, "first source label set should not come from second source");
 
     const std::size_t loaded_count_before_remove = loaded_snapshots.size();
-    result = Submit(session, specforge::SourceCollectionSessionCommand::RemoveSource(0));
+    result = Submit(session, RemoveSourceCollection(0));
     Require(result.action.snapshot_changed, "removing active first source should activate the next source snapshot");
     Require(result.action.workflow_changed, "removing active first source should resync the workflow");
     Require(result.action.navigation_inputs_changed, "removing active first source should refresh navigation inputs");
@@ -466,11 +588,11 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
             second_source_path,
             2);
 
-        (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(first_source_path, 1));
-        (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(second_source_path, 0));
-        (void)Submit(session, specforge::SourceCollectionSessionCommand::ActivateSource(0));
+        (void)Submit(session, OpenSourceCollection(first_source_path, 1));
+        (void)Submit(session, OpenSourceCollection(second_source_path, 0));
+        (void)Submit(session, SwitchSourceCollection(0));
         specforge::SourceCollectionSessionResult navigate_result =
-            Submit(session, specforge::SourceCollectionSessionCommand::NavigateSample(
+            Submit(session, MoveSampleNavigation(
                                 specforge::SampleNavigationRequest::Next()));
         Require(navigate_result.view.snapshot->source.path == first_source_path, "first source should be active");
         Require(navigate_result.view.snapshot->collection.current_index == 2, "first source should reach row 2");
@@ -651,8 +773,8 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
         navigation_cache,
         labeling_cache,
         {SourceFixture{source_path, 3}});
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
-    (void)Submit(session, specforge::SourceCollectionSessionCommand::CreateDefaultLabelingTask());
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, CreateDefaultLabelingTask());
 
     Require(!session.FlushStateCaches(), "flush should fail when the source cache path is blocked by a file");
     {
@@ -666,7 +788,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
             navigation_cache,
             labeling_cache);
         const specforge::SourceCollectionSessionResult reload_result =
-            Submit(reloaded, specforge::SourceCollectionSessionCommand::OpenSource(source_path, 0));
+            Submit(reloaded, OpenSourceCollection(source_path, 0));
         Require(
             reload_result.view.labeling.has_active_task,
             "workflow flush should save labeling state even when source cache flush fails");
@@ -689,6 +811,7 @@ int main()
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
+    TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters();
     TestNavigationViewSeparatesSampleNameFromDisplayName();
     TestNavigationViewExposesSourceProvidedSampleName();
     TestRemovingActiveSourceActivatesNextSourceWorkflow();

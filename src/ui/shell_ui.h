@@ -68,8 +68,8 @@ private:
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     [[nodiscard]] const SourceCollectionSessionView& SessionView();
-    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionCommand command);
-    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(SourceCollectionSessionCommand command);
+    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionIntent command);
+    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(SourceCollectionSessionIntent command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
 
     SourceCollectionSession session_;

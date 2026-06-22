@@ -20,14 +20,27 @@ struct SampleWorkflowCommandResult;
 class SourceCollectionRoster;
 class SourceCollectionSessionStatePersistence;
 
-enum class SourceCollectionSessionCommandKind {
-    OpenSource,
-    ActivateSource,
-    RemoveSource,
-    NavigateSample,
-    AddReadOnlyAnnotation,
+enum class SourceCollectionSessionIntentKind {
+    SourceCollection,
+    SampleNavigation,
+    ActiveSampleWorkflow,
+    SampleFiltering,
+};
+
+enum class SourceCollectionIntentKind {
+    Open,
+    SwitchActive,
+    Remove,
+    AddReadOnlyAnnotationResult,
+};
+
+enum class SampleNavigationIntentKind {
+    Move,
     SetSampleNameQuery,
     CommitSampleNameSelection,
+};
+
+enum class ActiveSampleWorkflowIntentKind {
     CreateDefaultLabelingTask,
     UpsertActiveLabel,
     SetActiveLabelingAutoAdvance,
@@ -35,56 +48,112 @@ enum class SourceCollectionSessionCommandKind {
     SetActiveLabelingOutputPath,
     AssignActiveLabelToCurrentSample,
     ClearActiveLabelForCurrentSample,
+};
+
+enum class SampleFilteringIntentKind {
     ClearFilters,
     SetFilterValueSelected,
     SetActiveLabelingFilterSourceSelected,
 };
 
-struct SourceCollectionSessionCommand {
-    [[nodiscard]] static SourceCollectionSessionCommand OpenSource(
+struct SourceCollectionIntent {
+    [[nodiscard]] static SourceCollectionIntent Open(
         std::filesystem::path path,
         std::size_t spectrum_index = 0);
-    [[nodiscard]] static SourceCollectionSessionCommand ActivateSource(std::size_t source_index);
-    [[nodiscard]] static SourceCollectionSessionCommand RemoveSource(std::size_t source_index);
-    [[nodiscard]] static SourceCollectionSessionCommand NavigateSample(SampleNavigationRequest request);
-    [[nodiscard]] static SourceCollectionSessionCommand AddReadOnlyAnnotation(std::filesystem::path path);
-    [[nodiscard]] static SourceCollectionSessionCommand SetSampleNameQuery(std::string query);
-    [[nodiscard]] static SourceCollectionSessionCommand CommitSampleNameSelection(
+    [[nodiscard]] static SourceCollectionIntent SwitchActive(std::size_t source_index);
+    [[nodiscard]] static SourceCollectionIntent Remove(std::size_t source_index);
+    [[nodiscard]] static SourceCollectionIntent AddReadOnlyAnnotationResult(std::filesystem::path path);
+
+private:
+    friend class SourceCollectionSession;
+    friend struct SourceCollectionSessionIntent;
+
+    SourceCollectionIntent() = default;
+
+    SourceCollectionIntentKind kind = SourceCollectionIntentKind::Open;
+    std::filesystem::path path;
+    std::size_t spectrum_index = 0;
+    std::size_t source_index = 0;
+};
+
+struct SampleNavigationIntent {
+    [[nodiscard]] static SampleNavigationIntent Move(SampleNavigationRequest request);
+    [[nodiscard]] static SampleNavigationIntent SetSampleNameQuery(std::string query);
+    [[nodiscard]] static SampleNavigationIntent CommitSampleNameSelection(
         std::size_t target_row,
         std::string matched_name);
-    [[nodiscard]] static SourceCollectionSessionCommand CreateDefaultLabelingTask();
-    [[nodiscard]] static SourceCollectionSessionCommand UpsertActiveLabel(SampleLabelDefinition label);
-    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingAutoAdvance(bool enabled);
-    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
-    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingOutputPath(std::filesystem::path output_path);
-    [[nodiscard]] static SourceCollectionSessionCommand AssignActiveLabelToCurrentSample(int code);
-    [[nodiscard]] static SourceCollectionSessionCommand ClearActiveLabelForCurrentSample();
-    [[nodiscard]] static SourceCollectionSessionCommand ClearFilters();
-    [[nodiscard]] static SourceCollectionSessionCommand SetFilterValueSelected(
+
+private:
+    friend class SourceCollectionSession;
+    friend struct SourceCollectionSessionIntent;
+
+    SampleNavigationIntent() = default;
+
+    SampleNavigationIntentKind kind = SampleNavigationIntentKind::Move;
+    SampleNavigationRequest request;
+    std::string query;
+    std::size_t target_row = 0;
+    std::string matched_name;
+};
+
+struct ActiveSampleWorkflowIntent {
+    [[nodiscard]] static ActiveSampleWorkflowIntent CreateDefaultLabelingTask();
+    [[nodiscard]] static ActiveSampleWorkflowIntent UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
+    [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
+    [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] static ActiveSampleWorkflowIntent AssignActiveLabelToCurrentSample(int code);
+    [[nodiscard]] static ActiveSampleWorkflowIntent ClearActiveLabelForCurrentSample();
+
+private:
+    friend class SourceCollectionSession;
+    friend struct SourceCollectionSessionIntent;
+
+    ActiveSampleWorkflowIntent() = default;
+
+    ActiveSampleWorkflowIntentKind kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
+    std::filesystem::path path;
+    SampleLabelDefinition label;
+    bool enabled = false;
+    int label_code = kUnlabeledSampleLabelCode;
+};
+
+struct SampleFilteringIntent {
+    [[nodiscard]] static SampleFilteringIntent Clear();
+    [[nodiscard]] static SampleFilteringIntent SetFilterValueSelected(
         std::string source_id,
         std::string value_key,
         bool selected);
-    [[nodiscard]] static SourceCollectionSessionCommand SetActiveLabelingFilterSourceSelected(bool selected);
+    [[nodiscard]] static SampleFilteringIntent SetActiveLabelingSourceSelected(bool selected);
+
+private:
+    friend class SourceCollectionSession;
+    friend struct SourceCollectionSessionIntent;
+
+    SampleFilteringIntent() = default;
+
+    SampleFilteringIntentKind kind = SampleFilteringIntentKind::ClearFilters;
+    std::string source_id;
+    std::string value_key;
+    bool selected = false;
+};
+
+struct SourceCollectionSessionIntent {
+    [[nodiscard]] static SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent);
+    [[nodiscard]] static SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent);
+    [[nodiscard]] static SourceCollectionSessionIntent ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent intent);
+    [[nodiscard]] static SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent);
 
 private:
     friend class SourceCollectionSession;
 
-    SourceCollectionSessionCommand() = default;
+    SourceCollectionSessionIntent() = default;
 
-    SourceCollectionSessionCommandKind kind = SourceCollectionSessionCommandKind::SetSampleNameQuery;
-    std::filesystem::path path;
-    std::size_t spectrum_index = 0;
-    std::size_t source_index = 0;
-    SampleNavigationRequest navigation_request;
-    std::string query;
-    std::size_t target_row = 0;
-    std::string matched_name;
-    SampleLabelDefinition label;
-    bool enabled = false;
-    int label_code = kUnlabeledSampleLabelCode;
-    std::string filter_source_id;
-    std::string filter_value_key;
-    bool selected = false;
+    SourceCollectionSessionIntentKind kind = SourceCollectionSessionIntentKind::SourceCollection;
+    SourceCollectionIntent source_collection;
+    SampleNavigationIntent sample_navigation;
+    ActiveSampleWorkflowIntent active_sample_workflow;
+    SampleFilteringIntent sample_filtering;
 };
 
 struct SourceCollectionSessionResult {
@@ -96,8 +165,8 @@ struct SourceCollectionSessionResult {
     std::string message;
 };
 
-using SourceCollectionCommandSubmitter =
-    std::function<SourceCollectionSessionResult(SourceCollectionSessionCommand)>;
+using SourceCollectionSessionIntentSubmitter =
+    std::function<SourceCollectionSessionResult(SourceCollectionSessionIntent)>;
 
 class SourceCollectionSession {
 public:
@@ -120,7 +189,7 @@ public:
     SourceCollectionSession(const SourceCollectionSession&) = delete;
     SourceCollectionSession& operator=(const SourceCollectionSession&) = delete;
 
-    [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionCommand command);
+    [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionIntent intent);
     [[nodiscard]] SourceCollectionSessionView View() const;
 
     void MaybeSaveStateCaches(std::uint64_t frame_index);

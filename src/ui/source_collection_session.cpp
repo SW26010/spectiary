@@ -107,149 +107,182 @@ private:
     bool restoring_ = false;
 };
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::OpenSource(
+SourceCollectionIntent SourceCollectionIntent::Open(
     std::filesystem::path path,
     std::size_t spectrum_index)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::OpenSource;
-    command.path = std::move(path);
-    command.spectrum_index = spectrum_index;
-    return command;
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::Open;
+    intent.path = std::move(path);
+    intent.spectrum_index = spectrum_index;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::ActivateSource(std::size_t source_index)
+SourceCollectionIntent SourceCollectionIntent::SwitchActive(std::size_t source_index)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::ActivateSource;
-    command.source_index = source_index;
-    return command;
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::SwitchActive;
+    intent.source_index = source_index;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::RemoveSource(std::size_t source_index)
+SourceCollectionIntent SourceCollectionIntent::Remove(std::size_t source_index)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::RemoveSource;
-    command.source_index = source_index;
-    return command;
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::Remove;
+    intent.source_index = source_index;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::NavigateSample(SampleNavigationRequest request)
+SourceCollectionIntent SourceCollectionIntent::AddReadOnlyAnnotationResult(std::filesystem::path path)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::NavigateSample;
-    command.navigation_request = std::move(request);
-    return command;
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::AddReadOnlyAnnotationResult;
+    intent.path = std::move(path);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::AddReadOnlyAnnotation(std::filesystem::path path)
+SampleNavigationIntent SampleNavigationIntent::Move(SampleNavigationRequest request)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::AddReadOnlyAnnotation;
-    command.path = std::move(path);
-    return command;
+    SampleNavigationIntent intent;
+    intent.kind = SampleNavigationIntentKind::Move;
+    intent.request = std::move(request);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetSampleNameQuery(std::string query)
+SampleNavigationIntent SampleNavigationIntent::SetSampleNameQuery(std::string query)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetSampleNameQuery;
-    command.query = std::move(query);
-    return command;
+    SampleNavigationIntent intent;
+    intent.kind = SampleNavigationIntentKind::SetSampleNameQuery;
+    intent.query = std::move(query);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::CommitSampleNameSelection(
+SampleNavigationIntent SampleNavigationIntent::CommitSampleNameSelection(
     std::size_t target_row,
     std::string matched_name)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::CommitSampleNameSelection;
-    command.target_row = target_row;
-    command.matched_name = std::move(matched_name);
-    return command;
+    SampleNavigationIntent intent;
+    intent.kind = SampleNavigationIntentKind::CommitSampleNameSelection;
+    intent.target_row = target_row;
+    intent.matched_name = std::move(matched_name);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::CreateDefaultLabelingTask()
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::CreateDefaultLabelingTask()
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::CreateDefaultLabelingTask;
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::UpsertActiveLabel(SampleLabelDefinition label)
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::UpsertActiveLabel(SampleLabelDefinition label)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::UpsertActiveLabel;
-    command.label = std::move(label);
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::UpsertActiveLabel;
+    intent.label = std::move(label);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingAutoAdvance(bool enabled)
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(bool enabled)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingAutoAdvance;
-    command.enabled = enabled;
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::SetActiveLabelingAutoAdvance;
+    intent.enabled = enabled;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingSkipLabeledOnAdvance;
-    command.enabled = enabled;
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::SetActiveLabelingSkipLabeledOnAdvance;
+    intent.enabled = enabled;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingOutputPath(
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(
     std::filesystem::path output_path)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingOutputPath;
-    command.path = std::move(output_path);
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath;
+    intent.path = std::move(output_path);
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::AssignActiveLabelToCurrentSample(int code)
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(int code)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::AssignActiveLabelToCurrentSample;
-    command.label_code = code;
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample;
+    intent.label_code = code;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::ClearActiveLabelForCurrentSample()
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::ClearActiveLabelForCurrentSample;
-    return command;
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::ClearFilters()
+SampleFilteringIntent SampleFilteringIntent::Clear()
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::ClearFilters;
-    return command;
+    SampleFilteringIntent intent;
+    intent.kind = SampleFilteringIntentKind::ClearFilters;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetFilterValueSelected(
+SampleFilteringIntent SampleFilteringIntent::SetFilterValueSelected(
     std::string source_id,
     std::string value_key,
     bool selected)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetFilterValueSelected;
-    command.filter_source_id = std::move(source_id);
-    command.filter_value_key = std::move(value_key);
-    command.selected = selected;
-    return command;
+    SampleFilteringIntent intent;
+    intent.kind = SampleFilteringIntentKind::SetFilterValueSelected;
+    intent.source_id = std::move(source_id);
+    intent.value_key = std::move(value_key);
+    intent.selected = selected;
+    return intent;
 }
 
-SourceCollectionSessionCommand SourceCollectionSessionCommand::SetActiveLabelingFilterSourceSelected(bool selected)
+SampleFilteringIntent SampleFilteringIntent::SetActiveLabelingSourceSelected(bool selected)
 {
-    SourceCollectionSessionCommand command;
-    command.kind = SourceCollectionSessionCommandKind::SetActiveLabelingFilterSourceSelected;
-    command.selected = selected;
-    return command;
+    SampleFilteringIntent intent;
+    intent.kind = SampleFilteringIntentKind::SetActiveLabelingFilterSourceSelected;
+    intent.selected = selected;
+    return intent;
+}
+
+SourceCollectionSessionIntent SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent intent)
+{
+    SourceCollectionSessionIntent session_intent;
+    session_intent.kind = SourceCollectionSessionIntentKind::SourceCollection;
+    session_intent.source_collection = std::move(intent);
+    return session_intent;
+}
+
+SourceCollectionSessionIntent SourceCollectionSessionIntent::UpdateSampleNavigation(SampleNavigationIntent intent)
+{
+    SourceCollectionSessionIntent session_intent;
+    session_intent.kind = SourceCollectionSessionIntentKind::SampleNavigation;
+    session_intent.sample_navigation = std::move(intent);
+    return session_intent;
+}
+
+SourceCollectionSessionIntent SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+    ActiveSampleWorkflowIntent intent)
+{
+    SourceCollectionSessionIntent session_intent;
+    session_intent.kind = SourceCollectionSessionIntentKind::ActiveSampleWorkflow;
+    session_intent.active_sample_workflow = std::move(intent);
+    return session_intent;
+}
+
+SourceCollectionSessionIntent SourceCollectionSessionIntent::ApplySampleFiltering(SampleFilteringIntent intent)
+{
+    SourceCollectionSessionIntent session_intent;
+    session_intent.kind = SourceCollectionSessionIntentKind::SampleFiltering;
+    session_intent.sample_filtering = std::move(intent);
+    return session_intent;
 }
 
 SourceCollectionSession::SourceCollectionSession(SnapshotLoader snapshot_loader)
@@ -294,64 +327,86 @@ SourceCollectionSession::SourceCollectionSession(SourceCollectionSession&&) noex
 
 SourceCollectionSession& SourceCollectionSession::operator=(SourceCollectionSession&&) noexcept = default;
 
-SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSessionCommand command)
+SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSessionIntent intent)
 {
     SourceCollectionSessionResult result;
-    switch (command.kind) {
-    case SourceCollectionSessionCommandKind::OpenSource:
-        result.action = OpenSource(command.path, command.spectrum_index);
+    switch (intent.kind) {
+    case SourceCollectionSessionIntentKind::SourceCollection:
+        switch (intent.source_collection.kind) {
+        case SourceCollectionIntentKind::Open:
+            result.action =
+                OpenSource(intent.source_collection.path, intent.source_collection.spectrum_index);
+            break;
+        case SourceCollectionIntentKind::SwitchActive:
+            result.action = ActivateSource(intent.source_collection.source_index);
+            break;
+        case SourceCollectionIntentKind::Remove:
+            result.action = RemoveSource(intent.source_collection.source_index);
+            break;
+        case SourceCollectionIntentKind::AddReadOnlyAnnotationResult:
+            result.action = AddReadOnlyAnnotationToActiveSource(
+                intent.source_collection.path,
+                &result.loaded,
+                &result.message);
+            break;
+        }
         break;
-    case SourceCollectionSessionCommandKind::ActivateSource:
-        result.action = ActivateSource(command.source_index);
+    case SourceCollectionSessionIntentKind::SampleNavigation:
+        switch (intent.sample_navigation.kind) {
+        case SampleNavigationIntentKind::Move:
+            result.action = RequestSampleNavigation(intent.sample_navigation.request, &result.navigation);
+            break;
+        case SampleNavigationIntentKind::SetSampleNameQuery:
+            result.action = SetSampleNameQuery(std::move(intent.sample_navigation.query));
+            break;
+        case SampleNavigationIntentKind::CommitSampleNameSelection:
+            result.action = CommitSampleNameSelection(
+                intent.sample_navigation.target_row,
+                std::move(intent.sample_navigation.matched_name),
+                &result.navigation);
+            break;
+        }
         break;
-    case SourceCollectionSessionCommandKind::RemoveSource:
-        result.action = RemoveSource(command.source_index);
+    case SourceCollectionSessionIntentKind::ActiveSampleWorkflow:
+        switch (intent.active_sample_workflow.kind) {
+        case ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask:
+            result.action = CreateDefaultLabelingTask();
+            break;
+        case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
+            result.action = UpsertActiveLabel(std::move(intent.active_sample_workflow.label), &result.changed);
+            break;
+        case ActiveSampleWorkflowIntentKind::SetActiveLabelingAutoAdvance:
+            result.action = SetActiveLabelingAutoAdvance(intent.active_sample_workflow.enabled);
+            break;
+        case ActiveSampleWorkflowIntentKind::SetActiveLabelingSkipLabeledOnAdvance:
+            result.action = SetActiveLabelingSkipLabeledOnAdvance(intent.active_sample_workflow.enabled);
+            break;
+        case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
+            result.action = SetActiveLabelingOutputPath(std::move(intent.active_sample_workflow.path));
+            break;
+        case ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample:
+            result.action = AssignActiveLabelToCurrentSample(intent.active_sample_workflow.label_code);
+            break;
+        case ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample:
+            result.action = ClearActiveLabelForCurrentSample();
+            break;
+        }
         break;
-    case SourceCollectionSessionCommandKind::NavigateSample:
-        result.action = RequestSampleNavigation(command.navigation_request, &result.navigation);
-        break;
-    case SourceCollectionSessionCommandKind::AddReadOnlyAnnotation:
-        result.action = AddReadOnlyAnnotationToActiveSource(command.path, &result.loaded, &result.message);
-        break;
-    case SourceCollectionSessionCommandKind::SetSampleNameQuery:
-        result.action = SetSampleNameQuery(std::move(command.query));
-        break;
-    case SourceCollectionSessionCommandKind::CommitSampleNameSelection:
-        result.action =
-            CommitSampleNameSelection(command.target_row, std::move(command.matched_name), &result.navigation);
-        break;
-    case SourceCollectionSessionCommandKind::CreateDefaultLabelingTask:
-        result.action = CreateDefaultLabelingTask();
-        break;
-    case SourceCollectionSessionCommandKind::UpsertActiveLabel:
-        result.action = UpsertActiveLabel(std::move(command.label), &result.changed);
-        break;
-    case SourceCollectionSessionCommandKind::SetActiveLabelingAutoAdvance:
-        result.action = SetActiveLabelingAutoAdvance(command.enabled);
-        break;
-    case SourceCollectionSessionCommandKind::SetActiveLabelingSkipLabeledOnAdvance:
-        result.action = SetActiveLabelingSkipLabeledOnAdvance(command.enabled);
-        break;
-    case SourceCollectionSessionCommandKind::SetActiveLabelingOutputPath:
-        result.action = SetActiveLabelingOutputPath(std::move(command.path));
-        break;
-    case SourceCollectionSessionCommandKind::AssignActiveLabelToCurrentSample:
-        result.action = AssignActiveLabelToCurrentSample(command.label_code);
-        break;
-    case SourceCollectionSessionCommandKind::ClearActiveLabelForCurrentSample:
-        result.action = ClearActiveLabelForCurrentSample();
-        break;
-    case SourceCollectionSessionCommandKind::ClearFilters:
-        result.action = ClearFilters();
-        break;
-    case SourceCollectionSessionCommandKind::SetFilterValueSelected:
-        result.action = SetFilterValueSelected(
-            std::move(command.filter_source_id),
-            std::move(command.filter_value_key),
-            command.selected);
-        break;
-    case SourceCollectionSessionCommandKind::SetActiveLabelingFilterSourceSelected:
-        result.action = SetActiveLabelingFilterSourceSelected(command.selected);
+    case SourceCollectionSessionIntentKind::SampleFiltering:
+        switch (intent.sample_filtering.kind) {
+        case SampleFilteringIntentKind::ClearFilters:
+            result.action = ClearFilters();
+            break;
+        case SampleFilteringIntentKind::SetFilterValueSelected:
+            result.action = SetFilterValueSelected(
+                std::move(intent.sample_filtering.source_id),
+                std::move(intent.sample_filtering.value_key),
+                intent.sample_filtering.selected);
+            break;
+        case SampleFilteringIntentKind::SetActiveLabelingFilterSourceSelected:
+            result.action = SetActiveLabelingFilterSourceSelected(intent.sample_filtering.selected);
+            break;
+        }
         break;
     }
     result.view = View();

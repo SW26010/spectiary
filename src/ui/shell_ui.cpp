@@ -501,6 +501,14 @@ ShellUi::ShellUi()
     : session_(LoadSpectrumSnapshotFromPath)
 {
     RefreshSystemColors();
+    const SourceCollectionSessionView& restored_view = SessionView();
+    if (restored_view.navigation.has_active_source) {
+        source_collection_panel_ui_.SyncNavigationInputs(
+            restored_view,
+            [this](SourceCollectionSessionIntent intent) {
+                return SubmitSessionCommandForPanel(std::move(intent));
+            });
+    }
 }
 
 ShellUi::~ShellUi()
@@ -554,7 +562,8 @@ void ShellUi::RefreshSystemColors()
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    (void)SubmitSessionCommand(SourceCollectionSessionCommand::OpenSource(path, spectrum_index));
+    (void)SubmitSessionCommand(
+        SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Open(path, spectrum_index)));
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
@@ -580,7 +589,8 @@ void ShellUi::OpenAnnotationFromFilePicker()
 {
     if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
         SourceCollectionSessionResult result =
-            SubmitSessionCommand(SourceCollectionSessionCommand::AddReadOnlyAnnotation(*path));
+            SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
+                SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
         if (result.loaded) {
             panel_visibility_.annotations = true;
         }
@@ -596,7 +606,7 @@ const SourceCollectionSessionView& ShellUi::SessionView()
     return *session_view_cache_;
 }
 
-SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionCommand command)
+SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionIntent command)
 {
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
     session_view_cache_dirty_ = true;
@@ -604,7 +614,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSess
     return result;
 }
 
-SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(SourceCollectionSessionCommand command)
+SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(SourceCollectionSessionIntent command)
 {
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
     session_view_cache_dirty_ = true;
@@ -620,7 +630,7 @@ void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
         sample_workflow_panel_ui_.ResetForSampleWorkflow();
     }
     if (action.navigation_inputs_changed) {
-        source_collection_panel_ui_.SyncNavigationInputs(SessionView(), [this](SourceCollectionSessionCommand command) {
+        source_collection_panel_ui_.SyncNavigationInputs(SessionView(), [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         });
     }
@@ -723,7 +733,7 @@ void ShellUi::RenderFilesPanel()
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(source_collection_panel_ui_.RenderFiles(
         view,
-        [this](SourceCollectionSessionCommand command) {
+        [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
         &panel_visibility_.files,
@@ -740,7 +750,7 @@ void ShellUi::RenderNavigationPanel()
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(source_collection_panel_ui_.RenderNavigation(
         view,
-        [this](SourceCollectionSessionCommand command) {
+        [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
         &panel_visibility_.navigation));
@@ -757,7 +767,7 @@ void ShellUi::RenderLabelingPanel()
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(sample_workflow_panel_ui_.RenderLabeling(
         view,
-        [this](SourceCollectionSessionCommand command) {
+        [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
         label_shortcut_context_active_,
@@ -772,7 +782,7 @@ void ShellUi::RenderFiltersPanel()
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(sample_workflow_panel_ui_.RenderFilters(
         view,
-        [this](SourceCollectionSessionCommand command) {
+        [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
         &panel_visibility_.filters));

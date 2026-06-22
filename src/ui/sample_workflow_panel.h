@@ -22,14 +22,14 @@ public:
 
     [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
         const SourceCollectionSessionView& session_view,
-        const SourceCollectionCommandSubmitter& submit,
+        const SourceCollectionSessionIntentSubmitter& submit,
         bool plot_shortcut_context_active,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
 
     [[nodiscard]] SourceCollectionSessionAction RenderFilters(
         const SourceCollectionSessionView& session_view,
-        const SourceCollectionCommandSubmitter& submit,
+        const SourceCollectionSessionIntentSubmitter& submit,
         bool* open);
 
 private:

@@ -22,6 +22,16 @@ constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kSampleNavigationNameMatchesWindow = "Sample name matches###SpecForgeSampleNameMatchesV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 
+SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent)
+{
+    return SourceCollectionSessionIntent::EditSourceCollection(std::move(intent));
+}
+
+SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent)
+{
+    return SourceCollectionSessionIntent::UpdateSampleNavigation(std::move(intent));
+}
+
 enum class ActionIcon {
     Trash,
 };
@@ -215,7 +225,7 @@ const char* SourceCollectionPanelUi::AnnotationsWindowName()
 
 void SourceCollectionPanelUi::SyncNavigationInputs(
     const SourceCollectionSessionView& session_view,
-    const SourceCollectionCommandSubmitter& submit)
+    const SourceCollectionSessionIntentSubmitter& submit)
 {
     const SourceCollectionNavigationView& navigation = session_view.navigation;
     const std::optional<std::size_t> navigation_index = navigation.current_index;
@@ -229,13 +239,13 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
         row_index_buffer_.fill('\0');
     }
     CopyToBuffer(sample_name_query_buffer_, navigation.current_sample_name);
-    (void)submit(SourceCollectionSessionCommand::SetSampleNameQuery(navigation.current_sample_name));
+    (void)submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(navigation.current_sample_name)));
     ClearSampleNameSearch();
 }
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionSessionView& session_view,
-    const SourceCollectionCommandSubmitter& submit,
+    const SourceCollectionSessionIntentSubmitter& submit,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
     const SourceCollectionPathPicker& choose_source_folder)
@@ -253,7 +263,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     if (ImGui::Button("Add file...")) {
         if (std::optional<std::filesystem::path> path = choose_source_file()) {
             SourceCollectionSessionResult result =
-                submit(SourceCollectionSessionCommand::OpenSource(*path));
+                submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
             MergeSourceCollectionSessionAction(action, result.action);
             view = std::move(result.view);
         }
@@ -262,7 +272,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     if (ImGui::Button("Add folder...")) {
         if (std::optional<std::filesystem::path> path = choose_source_folder()) {
             SourceCollectionSessionResult result =
-                submit(SourceCollectionSessionCommand::OpenSource(*path));
+                submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
             MergeSourceCollectionSessionAction(action, result.action);
             view = std::move(result.view);
         }
@@ -306,7 +316,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             ImGui::PushID(static_cast<int>(index));
             if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
                 SourceCollectionSessionResult result =
-                    submit(SourceCollectionSessionCommand::ActivateSource(index));
+                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
                 MergeSourceCollectionSessionAction(action, result.action);
             }
             if (ImGui::IsItemHovered()) {
@@ -317,7 +327,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             ImGui::TableSetColumnIndex(1);
             if (TableCellTextButton("type", entry.type_label, ImGui::GetColorU32(ImGuiCol_Text))) {
                 SourceCollectionSessionResult result =
-                    submit(SourceCollectionSessionCommand::ActivateSource(index));
+                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
                 MergeSourceCollectionSessionAction(action, result.action);
             }
 
@@ -325,7 +335,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
             if (TableCellTextButton("state", entry.state_label, state_color)) {
                 SourceCollectionSessionResult result =
-                    submit(SourceCollectionSessionCommand::ActivateSource(index));
+                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
                 MergeSourceCollectionSessionAction(action, result.action);
             }
 
@@ -342,7 +352,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 
         if (source_to_remove) {
             SourceCollectionSessionResult result =
-                submit(SourceCollectionSessionCommand::RemoveSource(*source_to_remove));
+                submit(EditSourceCollection(SourceCollectionIntent::Remove(*source_to_remove)));
             MergeSourceCollectionSessionAction(action, result.action);
         }
     }
@@ -352,7 +362,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const SourceCollectionSessionView& session_view,
-    const SourceCollectionCommandSubmitter& submit,
+    const SourceCollectionSessionIntentSubmitter& submit,
     bool* open)
 {
     SourceCollectionSessionAction action;
@@ -389,7 +399,8 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
             const std::size_t target_row = *target_sample - 1;
             if (target_row != navigation_index) {
                 SourceCollectionSessionResult result =
-                    submit(SourceCollectionSessionCommand::NavigateSample(SampleNavigationRequest::LocateRow(target_row)));
+                    submit(UpdateSampleNavigation(SampleNavigationIntent::Move(
+                        SampleNavigationRequest::LocateRow(target_row))));
                 MergeSourceCollectionSessionAction(action, result.action);
                 view = std::move(result.view);
                 navigation = view.navigation;
@@ -410,7 +421,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     }
     if (ImGui::Button("-##PreviousSample", sample_step_button_size)) {
         SourceCollectionSessionResult result =
-            submit(SourceCollectionSessionCommand::NavigateSample(SampleNavigationRequest::Previous()));
+            submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
         MergeSourceCollectionSessionAction(action, result.action);
         view = std::move(result.view);
         navigation = view.navigation;
@@ -424,7 +435,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     }
     if (ImGui::Button("+##NextSample", sample_step_button_size)) {
         SourceCollectionSessionResult result =
-            submit(SourceCollectionSessionCommand::NavigateSample(SampleNavigationRequest::Next()));
+            submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
         MergeSourceCollectionSessionAction(action, result.action);
         view = std::move(result.view);
         navigation = view.navigation;
@@ -446,7 +457,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
     SourceCollectionSessionView session_view,
-    const SourceCollectionCommandSubmitter& submit)
+    const SourceCollectionSessionIntentSubmitter& submit)
 {
     SourceCollectionSessionAction action;
     SourceCollectionNavigationView navigation = std::move(session_view.navigation);
@@ -470,7 +481,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
 
     if (sample_name_changed) {
         SourceCollectionSessionResult result =
-            submit(SourceCollectionSessionCommand::SetSampleNameQuery(sample_name_query_buffer_.data()));
+            submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(sample_name_query_buffer_.data())));
         MergeSourceCollectionSessionAction(action, result.action);
         navigation = result.view.navigation;
         if (navigation.exact_sample_name_match) {
@@ -621,11 +632,11 @@ void SourceCollectionPanelUi::ClearSampleNameSearch()
 }
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RestoreFailedSampleNameSearch(
-    const SourceCollectionCommandSubmitter& submit)
+    const SourceCollectionSessionIntentSubmitter& submit)
 {
     CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
     SourceCollectionSessionResult result =
-        submit(SourceCollectionSessionCommand::SetSampleNameQuery(sample_name_search_restore_name_));
+        submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(sample_name_search_restore_name_)));
     ClearSampleNameSearch();
     return result.action;
 }
@@ -633,11 +644,11 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RestoreFailedSampleNameSe
 SourceCollectionSessionAction SourceCollectionPanelUi::CommitSampleNameSearch(
     std::size_t target_row,
     const std::string& matched_name,
-    const SourceCollectionCommandSubmitter& submit)
+    const SourceCollectionSessionIntentSubmitter& submit)
 {
     CopyToBuffer(sample_name_query_buffer_, matched_name);
     SourceCollectionSessionResult result =
-        submit(SourceCollectionSessionCommand::CommitSampleNameSelection(target_row, matched_name));
+        submit(UpdateSampleNavigation(SampleNavigationIntent::CommitSampleNameSelection(target_row, matched_name)));
     ClearSampleNameSearch();
     return result.action;
 }
