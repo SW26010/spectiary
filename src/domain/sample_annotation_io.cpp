@@ -56,17 +56,45 @@ std::string FormatFloatingValue(double value)
     return stream.str();
 }
 
+std::string DtypeName(const NpyScalarType& scalar_type)
+{
+    switch (scalar_type.kind) {
+    case NpyScalarKind::SignedInteger:
+        return "int" + std::to_string(scalar_type.item_size * 8U);
+    case NpyScalarKind::UnsignedInteger:
+        return "uint" + std::to_string(scalar_type.item_size * 8U);
+    case NpyScalarKind::Float:
+        return "float" + std::to_string(scalar_type.item_size * 8U);
+    case NpyScalarKind::Bytes:
+        return "bytes";
+    case NpyScalarKind::Unicode:
+        return "unicode";
+    default:
+        return "unknown";
+    }
+}
+
 template <typename T>
 void AssignIntegralValues(SampleAnnotationResult& result, std::ifstream& stream, std::size_t value_count)
 {
     const std::vector<T> typed_values = ReadNpyTypedValues<T>(stream, value_count);
     result.values.reserve(value_count);
     for (const T value : typed_values) {
+        SampleAnnotationValue annotation_value;
         if constexpr (std::is_signed_v<T>) {
-            result.values.push_back({std::to_string(static_cast<long long>(value))});
+            const auto widened = static_cast<long long>(value);
+            annotation_value.display_text = std::to_string(widened);
+            if (widened >= std::numeric_limits<int>::min() && widened <= std::numeric_limits<int>::max()) {
+                annotation_value.integer_value = static_cast<int>(widened);
+            }
         } else {
-            result.values.push_back({std::to_string(static_cast<unsigned long long>(value))});
+            const auto widened = static_cast<unsigned long long>(value);
+            annotation_value.display_text = std::to_string(widened);
+            if (widened <= static_cast<unsigned long long>(std::numeric_limits<int>::max())) {
+                annotation_value.integer_value = static_cast<int>(widened);
+            }
         }
+        result.values.push_back(std::move(annotation_value));
     }
 }
 
@@ -90,6 +118,39 @@ void AssignStringValues(SampleAnnotationResult& result, std::ifstream& stream, c
             throw NpyAnnotationError("NPY string data is truncated");
         }
         result.values.push_back({DecodeNpyString(bytes, scalar_type)});
+    }
+}
+
+void ApplyLabelResultMetadata(SampleAnnotationResult& result, const std::filesystem::path& path, std::size_t expected_count)
+{
+    if (result.kind != SampleAnnotationKind::CategoricalInteger) {
+        return;
+    }
+
+    SampleLabelResultMetadataLoadResult metadata_result =
+        LoadSampleLabelResultMetadataForResult(path, expected_count, result.dtype_name);
+    if (!metadata_result.warning.empty()) {
+        result.metadata_warning =
+            "Ignored " + FileNameToUtf8(SampleLabelResultMetadataPathForResult(path).filename()) +
+            ": " + metadata_result.warning + ".";
+        return;
+    }
+    if (!metadata_result.metadata) {
+        return;
+    }
+
+    result.label_metadata = std::move(metadata_result.metadata);
+    result.relationship = SampleAnnotationWorkflowRelationship::ExternalLabelResult;
+    if (!result.label_metadata->task_name.empty()) {
+        result.name = result.label_metadata->task_name;
+    }
+    for (SampleAnnotationValue& value : result.values) {
+        if (value.integer_value) {
+            value.display_text = FormatSampleLabelValue(
+                result.label_metadata->label_set,
+                *value.integer_value,
+                result.label_metadata->unlabeled_sentinel);
+        }
     }
 }
 
@@ -122,6 +183,7 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
     result.name = FileNameToUtf8(path.filename());
     result.path = path;
     result.dtype = header.descr;
+    result.dtype_name = DtypeName(*scalar_type);
 
     switch (scalar_type->kind) {
     case NpyScalarKind::SignedInteger:
@@ -181,6 +243,7 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
         throw NpyAnnotationError("NPY dtype is not supported for read-only sample annotations");
     }
 
+    ApplyLabelResultMetadata(result, path, expected_count);
     return result;
 }
 
@@ -210,6 +273,20 @@ std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind)
         return "text";
     case SampleAnnotationKind::ContinuousFloat:
         return "continuous";
+    default:
+        return "unknown";
+    }
+}
+
+std::string_view SampleAnnotationWorkflowRelationshipLabel(SampleAnnotationWorkflowRelationship relationship)
+{
+    switch (relationship) {
+    case SampleAnnotationWorkflowRelationship::PlainAnnotation:
+        return "plain";
+    case SampleAnnotationWorkflowRelationship::ExternalLabelResult:
+        return "external";
+    case SampleAnnotationWorkflowRelationship::LocalLabelingTask:
+        return "local";
     default:
         return "unknown";
     }

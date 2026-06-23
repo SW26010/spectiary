@@ -209,6 +209,13 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingOutputPa
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask()
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask;
+    return intent;
+}
+
 ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(int code)
 {
     ActiveSampleWorkflowIntent intent;
@@ -384,6 +391,9 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
             result.action = SetActiveLabelingOutputPath(std::move(intent.active_sample_workflow.path));
             break;
+        case ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask:
+            result.action = DeactivateActiveLabelingTask();
+            break;
         case ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample:
             result.action = AssignActiveLabelToCurrentSample(intent.active_sample_workflow.label_code);
             break;
@@ -528,6 +538,11 @@ SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingSkipLabe
 SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingOutputPath(std::filesystem::path output_path)
 {
     return workflow_->SetActiveLabelingOutputPath(std::move(output_path));
+}
+
+SourceCollectionSessionAction SourceCollectionSession::DeactivateActiveLabelingTask()
+{
+    return workflow_->DeactivateActiveLabelingTask();
 }
 
 SourceCollectionSessionAction SourceCollectionSession::AssignActiveLabelToCurrentSample(int code)

@@ -46,6 +46,7 @@ enum class ActiveSampleWorkflowIntentKind {
     SetActiveLabelingAutoAdvance,
     SetActiveLabelingSkipLabeledOnAdvance,
     SetActiveLabelingOutputPath,
+    DeactivateActiveLabelingTask,
     AssignActiveLabelToCurrentSample,
     ClearActiveLabelForCurrentSample,
 };
@@ -102,6 +103,7 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] static ActiveSampleWorkflowIntent DeactivateActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] static ActiveSampleWorkflowIntent ClearActiveLabelForCurrentSample();
 
@@ -221,6 +223,7 @@ private:
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample();
     [[nodiscard]] SourceCollectionSessionAction ClearFilters();

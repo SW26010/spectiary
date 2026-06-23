@@ -1,10 +1,13 @@
 #include "ui/sample_labeling_controller.h"
 
+#include "domain/source_collection_manifest.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -14,11 +17,43 @@ namespace {
 constexpr std::uint64_t kStateSaveDebounceFrames = 30;
 constexpr std::uint64_t kStateSaveRetryFrames = 120;
 
+bool HasPendingOutputSave(const SampleLabelingTask& task)
+{
+    return !task.pending_sample_indices.empty() || task.metadata_save_pending;
+}
+
 bool ShouldRetryOutputSave(const SampleLabelingTask& task)
 {
-    return task.output_path && !task.pending_sample_indices.empty() &&
+    return task.output_path && HasPendingOutputSave(task) &&
            (task.save_state.kind == SampleLabelSaveStateKind::Pending ||
             task.save_state.kind == SampleLabelSaveStateKind::Failed);
+}
+
+bool OutputPathMatches(const std::filesystem::path& left, const std::filesystem::path& right)
+{
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    std::error_code left_exists_error;
+    std::error_code right_exists_error;
+    const bool left_exists = std::filesystem::exists(left, left_exists_error) && !left_exists_error;
+    const bool right_exists = std::filesystem::exists(right, right_exists_error) && !right_exists_error;
+    std::error_code equivalent_error;
+    if (left_exists && right_exists &&
+        std::filesystem::equivalent(left, right, equivalent_error) && !equivalent_error) {
+        return true;
+    }
+    return left.lexically_normal() == right.lexically_normal();
+}
+
+SampleLabelResultMetadataSource SourceMetadataFromState(const SampleLabelingController::SourceState& state)
+{
+    SampleLabelResultMetadataSource source;
+    source.source_name = state.source_name;
+    source.source_fingerprint = state.source_fingerprint;
+    source.context_fingerprint = state.context_fingerprint;
+    source.spectrum_count = state.sample_count;
+    return source;
 }
 
 }  // namespace
@@ -52,6 +87,19 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
     }
+}
+
+void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& identity)
+{
+    ActivateSource(identity.id, identity.spectrum_count);
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return;
+    }
+    state->source_name = identity.source_name;
+    state->source_fingerprint = identity.source_fingerprint;
+    state->context_fingerprint = identity.context_fingerprint;
+    QueueStateSave();
 }
 
 void SampleLabelingController::ClearActiveSource()
@@ -97,6 +145,29 @@ const SampleLabelingTask* SampleLabelingController::active_task() const
     return match == state->tasks.end() ? nullptr : &*match;
 }
 
+const std::vector<SampleLabelingTask>* SampleLabelingController::active_source_tasks() const
+{
+    const SourceState* state = ActiveSource();
+    return state == nullptr ? nullptr : &state->tasks;
+}
+
+const SampleLabelingTask* SampleLabelingController::FindActiveSourceTaskByOutputPath(
+    const std::filesystem::path& output_path,
+    std::string_view task_id,
+    std::size_t sample_count) const
+{
+    const SourceState* state = ActiveSource();
+    if (state == nullptr || output_path.empty()) {
+        return nullptr;
+    }
+
+    const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& task) {
+        return task.output_path && task.task_id == task_id && task.values.size() == sample_count &&
+               OutputPathMatches(*task.output_path, output_path);
+    });
+    return match == state->tasks.end() ? nullptr : &*match;
+}
+
 SampleLabelingTask* SampleLabelingController::CreateTask(std::string task_id, std::string task_name)
 {
     SourceState* state = ActiveSource();
@@ -122,6 +193,10 @@ bool SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
     if (task == nullptr || !UpsertSampleLabel(task->label_set, std::move(label))) {
         return false;
     }
+    MarkSampleLabelTaskMetadataPending(*task);
+    if (ShouldRetryOutputSave(*task)) {
+        QueueOutputRetry();
+    }
     QueueStateSave();
     return true;
 }
@@ -132,10 +207,46 @@ bool SampleLabelingController::SetActiveTaskOutputPath(std::filesystem::path out
     if (task == nullptr || output_path.empty()) {
         return false;
     }
+    SourceState* state = ActiveSource();
+    if (state != nullptr) {
+        const auto conflict = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& existing) {
+            return existing.task_id != task->task_id && existing.output_path &&
+                   OutputPathMatches(*existing.output_path, output_path);
+        });
+        if (conflict != state->tasks.end()) {
+            task->save_state.message = "Output path is already used by another local labeling task.";
+            QueueStateSave();
+            return false;
+        }
+    }
     SelectSampleLabelTaskOutputPath(*task, std::move(output_path));
     if (ShouldRetryOutputSave(*task)) {
         QueueOutputRetry();
     }
+    QueueStateSave();
+    return true;
+}
+
+bool SampleLabelingController::CanDeactivateActiveTask() const
+{
+    const SampleLabelingTask* task = active_task();
+    if (task == nullptr) {
+        return false;
+    }
+    if (!task->output_path) {
+        return true;
+    }
+    return task->save_state.kind != SampleLabelSaveStateKind::Pending &&
+           task->save_state.kind != SampleLabelSaveStateKind::Failed;
+}
+
+bool SampleLabelingController::DeactivateActiveTask()
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr || !state->active_task_id || !CanDeactivateActiveTask()) {
+        return false;
+    }
+    state->active_task_id.reset();
     QueueStateSave();
     return true;
 }
@@ -162,7 +273,12 @@ bool SampleLabelingController::PersistActiveTask()
         return PersistActiveTaskRecord();
     }
 
-    const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(*task);
+    SourceState* state = ActiveSource();
+    const SampleLabelResultMetadataSource source_metadata = state == nullptr
+        ? SampleLabelResultMetadataSource{}
+        : SourceMetadataFromState(*state);
+    const SampleLabelResultMetadataSource* source = state == nullptr ? nullptr : &source_metadata;
+    const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(*task, source);
     if (!result.output_saved && ShouldRetryOutputSave(*task)) {
         QueueOutputRetry();
     }
@@ -296,7 +412,8 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 continue;
             }
             attempted = true;
-            const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(task);
+            const SampleLabelResultMetadataSource source = SourceMetadataFromState(state);
+            const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(task, &source);
             all_succeeded = all_succeeded && result.output_saved;
         }
     }
@@ -347,10 +464,10 @@ bool SampleLabelingController::TrySaveStateCache()
                     continue;
                 }
                 task.save_state.pending_count = task.pending_sample_indices.size();
-                if (task.pending_sample_indices.empty() &&
+                if (!HasPendingOutputSave(task) &&
                     task.save_state.kind != SampleLabelSaveStateKind::Failed) {
                     MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
-                } else if (!task.pending_sample_indices.empty() &&
+                } else if (HasPendingOutputSave(task) &&
                            task.save_state.kind != SampleLabelSaveStateKind::Failed) {
                     task.save_state.kind = SampleLabelSaveStateKind::Pending;
                     task.save_state.message.clear();

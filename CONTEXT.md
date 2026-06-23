@@ -71,6 +71,12 @@ A distinct classification objective for a source collection, with its own sample
 label set and sample label result.
 _Avoid_: Only label file, global classification, spectral-line grouping
 
+**Active sample labeling task**:
+The sample labeling task currently accepting manual label writes for a source
+collection. It may be deactivated without deleting its task record, label set,
+sample label result, or output target.
+_Avoid_: Labeling window visibility, task deletion, sample annotation view
+
 **Sample navigation**:
 The user-facing control of the current spectrum sample within a source
 collection, including movement, ordering, and locating a sample.
@@ -101,6 +107,13 @@ _Avoid_: Sample name, source identity, relink key
 A classification-specific sample annotation result whose values are sample label
 values for one sample labeling task.
 _Avoid_: Label set, UI preferences, generic annotation result, continuous annotation
+
+**Sample label result metadata**:
+A portable description of a sample label result's label codes, display names,
+shortcuts, unlabeled sentinel, and expected result shape. It explains a compact
+label output file without owning the label values or local workflow recovery
+state.
+_Avoid_: Sample labeling task record, sample labeling draft, label array payload
 
 **Sample labeling draft**:
 An in-progress sample label result saved for recovery before the user writes or

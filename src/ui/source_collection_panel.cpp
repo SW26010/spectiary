@@ -588,9 +588,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
 
     if (ImGui::BeginTable(
             "sample_annotations",
-            2,
+            3,
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Result");
+        ImGui::TableSetupColumn("Type");
         ImGui::TableSetupColumn("Value");
         ImGui::TableHeadersRow();
 
@@ -604,10 +605,26 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
             }
 
             ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(annotation.relationship_label.c_str());
+
+            ImGui::TableSetColumnIndex(2);
             if (annotation.missing) {
                 ImGui::TextDisabled("(missing)");
             } else {
                 ImGui::TextUnformatted(annotation.display_text.c_str());
+            }
+            if (annotation.output_missing) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(output missing)");
+            } else if (annotation.metadata_missing) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(metadata missing)");
+            } else if (!annotation.message.empty()) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(metadata ignored)");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", annotation.message.c_str());
+                }
             }
         }
 

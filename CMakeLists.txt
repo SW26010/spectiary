@@ -200,6 +200,8 @@ add_test(NAME specforge_local_user_state_tests COMMAND specforge_local_user_stat
 
 add_executable(specforge_loader_tests
     tests/spectrum_loader_tests.cpp
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/fits_file_reader.cpp
@@ -208,6 +210,8 @@ add_executable(specforge_loader_tests
     src/domain/fits_spectrum_loader.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
     src/domain/source_collection_manifest.cpp
     src/domain/source_collection_manifest.h
     src/domain/spectrum_format_adapters.cpp
@@ -217,6 +221,8 @@ add_executable(specforge_loader_tests
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_loader.h
     src/domain/spectrum_snapshot.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
 )
 
 target_include_directories(specforge_loader_tests PRIVATE src)
@@ -240,6 +246,8 @@ add_executable(specforge_sample_navigation_controller_tests
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
     src/domain/sample_annotation_io.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
     src/domain/source_collection_manifest.cpp
     src/domain/source_collection_manifest.h
     src/platform/atomic_file.cpp
@@ -287,9 +295,10 @@ add_executable(specforge_sample_labeling_filter_tests
     src/domain/npy_array_io.h
     src/domain/sample_filter.cpp
     src/domain/sample_filter.h
+    src/domain/sample_annotation_io.cpp
+    src/domain/sample_annotation_io.h
     src/domain/sample_labeling.cpp
     src/domain/sample_labeling.h
-    src/domain/sample_annotation_io.h
     src/domain/spectrum_snapshot.h
     src/platform/atomic_file.cpp
     src/platform/atomic_file.h

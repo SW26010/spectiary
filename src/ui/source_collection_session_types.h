@@ -36,8 +36,14 @@ struct SourceCollectionSampleNameMatchView {
 struct SourceCollectionAnnotationValueView {
     std::string name;
     std::filesystem::path path;
+    SampleAnnotationWorkflowRelationship relationship =
+        SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    std::string relationship_label;
     std::string display_text;
+    std::string message;
     bool missing = false;
+    bool output_missing = false;
+    bool metadata_missing = false;
 };
 
 struct SourceCollectionNavigationView {
@@ -74,6 +80,7 @@ struct SourceCollectionLabelingView {
     std::optional<std::size_t> remembered_position;
     std::optional<std::filesystem::path> output_path;
     SampleLabelSaveState save_state;
+    bool can_deactivate_task = false;
     bool state_save_failed = false;
     std::string state_save_error;
     std::string state_load_warning;

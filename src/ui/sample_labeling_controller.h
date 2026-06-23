@@ -14,6 +14,8 @@
 
 namespace specforge {
 
+struct SourceCollectionIdentity;
+
 class SampleLabelingController {
 public:
     using SourceState = SampleLabelingSourceState;
@@ -22,15 +24,23 @@ public:
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
+    void ActivateSource(const SourceCollectionIdentity& identity);
     void ClearActiveSource();
     void RemoveSource(std::string_view source_identity);
 
     [[nodiscard]] bool has_active_source() const;
     [[nodiscard]] SampleLabelingTask* active_task();
     [[nodiscard]] const SampleLabelingTask* active_task() const;
+    [[nodiscard]] const std::vector<SampleLabelingTask>* active_source_tasks() const;
+    [[nodiscard]] const SampleLabelingTask* FindActiveSourceTaskByOutputPath(
+        const std::filesystem::path& output_path,
+        std::string_view task_id,
+        std::size_t sample_count) const;
     [[nodiscard]] SampleLabelingTask* CreateTask(std::string task_id, std::string task_name);
     [[nodiscard]] bool UpsertActiveLabel(SampleLabelDefinition label);
     [[nodiscard]] bool SetActiveTaskOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] bool CanDeactivateActiveTask() const;
+    [[nodiscard]] bool DeactivateActiveTask();
     [[nodiscard]] bool RememberActivePosition(std::size_t sample_index);
     [[nodiscard]] bool PersistActiveTask();
     [[nodiscard]] bool PersistActiveTaskRecord();

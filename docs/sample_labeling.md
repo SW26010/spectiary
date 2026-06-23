@@ -20,6 +20,8 @@ Use the terms from `CONTEXT.md`:
   collection.
 - `Sample label result`: the classification-specific form of a sample annotation
   result for one sample labeling task.
+- `Sample label result metadata`: portable metadata that explains a compact
+  sample label result.
 - `Sample labeling draft`: an in-progress label result saved for recovery.
 
 ## Staged Rollout
@@ -149,6 +151,22 @@ The visible active manual labeling window should be named `Labeling`. In this
 document, `Sample labeling task` and `active manual labeling` remain the domain
 terms for the task and workflow behind that window.
 
+Closing a sample labeling task should deactivate the active sample labeling task
+rather than hide the `Labeling` window or delete the task record. Deactivation
+leaves the task record, label set, shortcuts, selected output path, remembered
+position, and sample label result intact. After deactivation, `Labeling` has no
+active task and may accept a new task, including one converted from a categorical
+annotation in the `Annotations` window. Any filter condition that explicitly
+uses the active sample labeling task should be cleared or made inactive when
+there is no active task.
+In the first implementation, closing the active task should be disabled while
+the task has pending or failed output saves, including pending or failed metadata
+sidecar saves. The user must wait for autosave to complete or fix the output
+save problem before deactivating the task. Tasks in the internal-autosave-draft
+state may be closed because their current recovery state is owned by the local
+task record. A later implementation may allow non-blocking close with background
+retry and explicit pending-task surfacing.
+
 The visible sample filtering window should be named `Filters`. In this document,
 `Sample filtering` remains the domain term for filter ownership and behavior.
 
@@ -236,6 +254,73 @@ say this is appropriate only when the user intentionally wants to edit that data
 or when the file represents an unfinished labeling task being restored, and it
 should recommend backing up the original data first.
 
+Adjacent sample label result metadata does not by itself make an annotation file
+the current user's own labeling task. If a categorical annotation has matching
+`<stem>.sf-labels.json` metadata but no matching local sample labeling task
+record for the active source collection and output path, SpecForge should treat
+it as an external label result and still show the in-place edit warning before
+editing it. If the matching local task record exists, SpecForge may restore or
+activate that task without the in-place edit warning because the user has
+already established that file as the task's output target.
+
+The annotation view should distinguish loaded per-sample data by workflow
+relationship:
+
+- Plain annotation: no matching sample label result metadata is available.
+- External label result: matching sample label result metadata is available, but
+  no matching local sample labeling task record exists.
+- Local labeling task: matching sample label result metadata is available and a
+  matching local sample labeling task record exists.
+
+Plain annotations should display their current raw annotation value. Writable
+integer categorical plain annotations may be dragged into `Labeling`, but doing
+so follows the normal conversion flow and requires the in-place edit warning.
+String and floating-point plain annotations are read-only in the first editable
+labeling implementation and should not expose a first-version labeling drag
+action.
+
+External label results should display the mapped label value from their adjacent
+sample label result metadata and be visibly marked as external. They may be
+dragged into `Labeling`, but doing so requires the in-place edit warning. If the
+user confirms, SpecForge creates a local task record whose output path points at
+that label result file.
+
+Local labeling tasks should display the mapped label value and be visibly marked
+as local. If the task's output file or metadata sidecar is missing, the row
+should show the missing-output state and expose relink. A local labeling task may
+be clicked or dragged into `Labeling` to activate it without the in-place edit
+warning. If another sample labeling task is already active, the user must close
+or deactivate the current task before activating the local task from
+`Annotations`.
+
+A local sample labeling task match requires the active source collection
+identity to match, the local task record's normalized output path to point to the
+annotation's label result file, the sidecar `task_id` to match the local task
+record's stable task id, and the sample/value count to match. Moving or renaming
+the output `.npy`, moving or renaming the adjacent metadata file, clearing local
+user state, copying another user's `.npy` plus metadata, or relinking a source
+collection may prevent SpecForge from recognizing a file as a local labeling
+task until the user explicitly reconnects it.
+
+If a local sample labeling task record still exists but its selected output
+file, adjacent metadata file, or both are missing, SpecForge should keep the task
+record visible as a local labeling task with a missing-output state rather than
+downgrading it to a plain annotation or silently deleting it. The missing state
+may appear in the `Annotations` window for that local labeling task row, and in
+the `Labeling` window when the missing task is the active task restored from
+local state. The user should be able to manually relink the task by selecting the
+new label result file. Relink should then look for the adjacent
+`<stem>.sf-labels.json` metadata, validate the task id, source identity summary
+or explicit source relink confirmation, value count, dtype, and label-code
+compatibility, then update the local task record's output path.
+
+When the user imports or adds an annotation file, SpecForge may also use the
+same validation rules to automatically reconnect a missing local labeling task
+if the annotation file and adjacent metadata match that task record. This
+automatic relink should be limited to the imported annotation path and its
+adjacent metadata; SpecForge should not scan the broader filesystem looking for
+moved label results.
+
 Only writable first-implementation integer categorical annotation formats may be
 converted this way. Floating-point and string annotations must not be converted
 into first-version sample labeling tasks. String annotation conversion remains a
@@ -251,6 +336,14 @@ When a task is created locally inside SpecForge, it does not need the in-place
 edit warning; it starts without an external output target, but the user may write
 by selecting an output location. Locally created tasks may define and expand
 their own category sets.
+
+The first implementation should not allow two local sample labeling task records
+for the same source collection to point at the same output path. If the user
+selects an output path already used by another local task record, SpecForge
+should report the conflict and offer low-risk choices such as activating the
+existing task or choosing a different output path. Output ownership transfer,
+task takeover, or automatic unbinding of the previous task is future work and
+should not be part of the first implementation.
 
 The Labeling window accepts only a sample label result through an active sample
 labeling task. It should not display generic annotation results or inactive
@@ -411,6 +504,47 @@ as `int32`.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 
+When a numeric sample label result is written to an explicit output location,
+SpecForge should also write portable sample label result metadata beside the
+compact `.npy` output. This metadata is a data-contract sidecar, not a copy of
+the local sample labeling task record. It should include a format kind, schema
+version, referenced result file, stable task id, expected value count, expected
+dtype, unlabeled sentinel, task name, label code/name/shortcut entries, and the
+source collection identity summary when available. The referenced result file
+should be stored as a path relative to the metadata file's directory, normally
+just the result file name, so the `.npy` plus metadata pair remains portable
+when moved together. The source collection identity summary should reuse the
+same source collection identity fields used by SpecForge's source/file
+management flow, such as source name, source fingerprint, context fingerprint,
+and spectrum count. It must not store the label value array, pending values,
+local autosave draft, active task state, window visibility, filter state, save
+retry state, or a local absolute source path.
+For an output file named `<stem>.npy`, the adjacent metadata file should be
+named `<stem>.sf-labels.json`.
+
+After an output location is selected, `autosaved to output` means the compact
+label result and its portable metadata have both been saved successfully. If the
+label result is saved but metadata save fails, the task remains pending or
+failed rather than claiming a complete output save.
+When a task has an output location, metadata-only changes such as task name,
+label code/name/shortcut changes, unlabeled sentinel changes, or source identity
+summary changes should rewrite the adjacent sample label result metadata even
+when the label value array is unchanged. Such changes should enter the same
+pending or failed save-state path until the metadata sidecar is saved
+successfully.
+
+When loading an existing numeric label result, SpecForge should use adjacent
+sample label result metadata when it matches the label result file, value count,
+and dtype. If matching metadata is absent, SpecForge may still load and display
+the raw numeric label values, but it should not invent label names or shortcuts.
+If adjacent metadata exists but does not match the label result, SpecForge
+should warn and fall back to raw numeric label values instead of applying stale
+or unrelated mappings. The first implementation should not allow the user to
+force-bind mismatched metadata to a label result. The user may choose the correct
+label result and matching metadata pair, but overriding metadata binding is
+future work because an incorrect binding can silently change the meaning of
+stored label codes.
+
 The first labeling workflow is single-label classification. A label array has
 one element per spectrum sample; each element is either one label value or the
 task's unlabeled sentinel. Multi-label, multi-task, confidence, and per-sample
@@ -455,8 +589,10 @@ not need a separate "clean-exit" or "crash-exit" marker.
 If the user selects an external output path for a task, the local task record
 stores that path. The associated internal draft should no longer be exposed as a
 separate auto-discovered file, auto-loaded label result, or load option when the
-user manually loads external label files. External label result files do not
-carry task identity in the first implementation.
+user manually loads external label files. External label result metadata may
+carry a stable task id, but that task id does not restore local workflow
+ownership unless it also matches a local task record for the active source
+collection and output path.
 
 A sample labeling context should include the source collection identity, the
 sample labeling task id, and the output path when one has been selected. The
@@ -465,9 +601,11 @@ a directory listing summary for folder collections; a later implementation may
 upgrade it to a content hash when the extra cost is justified.
 
 The recovery path must not silently overwrite an explicit sample label result.
-Because external label result files do not carry task identity in the first
-implementation, SpecForge should not infer draft ownership from a bare label
-file path alone.
+Because a bare external label result path does not prove task ownership,
+SpecForge should not infer draft ownership from a label file path alone. Adjacent
+sample label result metadata may carry a stable task id, but it only identifies a
+local task when it also matches a local task record for the active source
+collection and output path.
 
 ## Save State Indicator
 

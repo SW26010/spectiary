@@ -54,6 +54,7 @@ public:
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
     [[nodiscard]] SampleWorkflowCommandResult AssignActiveLabelToCurrentSample(
         const SpectrumSnapshotHandle& snapshot,
         int code);

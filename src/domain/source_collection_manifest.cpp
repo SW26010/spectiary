@@ -275,6 +275,9 @@ void LoadNpyAutoAnnotations(
     std::optional<SampleAnnotationResult> annotation =
         LoadSampleAnnotationResultFromPath(*annotation_path, spectrum_count, &error_message);
     if (annotation) {
+        if (!annotation->metadata_warning.empty()) {
+            manifest.messages.push_back(annotation->metadata_warning);
+        }
         manifest.annotations.push_back(std::move(*annotation));
     } else {
         manifest.messages.push_back("Ignored " + FileNameToUtf8(annotation_path->filename()) + ": " + error_message + ".");

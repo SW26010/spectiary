@@ -13,6 +13,9 @@ namespace specforge {
 
 struct SampleLabelingSourceState {
     std::size_t sample_count = 0;
+    std::string source_name;
+    std::string source_fingerprint;
+    std::string context_fingerprint;
     std::vector<SampleLabelingTask> tasks;
     std::optional<std::string> active_task_id;
 };
@@ -36,4 +39,3 @@ struct SampleLabelingStateCacheLoadResult {
     const SampleLabelingStateCache& cache);
 
 }  // namespace specforge
-

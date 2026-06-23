@@ -179,6 +179,7 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
         return false;
     }
 
+    const std::string metadata_warning = annotation->metadata_warning;
     const auto same_path = [&path](const SampleAnnotationResult& existing) {
         return existing.path == path;
     };
@@ -187,6 +188,9 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
         *existing = std::move(*annotation);
     } else {
         session->manifest.annotations.push_back(std::move(*annotation));
+    }
+    if (!metadata_warning.empty()) {
+        session->manifest.messages.push_back(metadata_warning);
     }
     if (message != nullptr) {
         *message = {};

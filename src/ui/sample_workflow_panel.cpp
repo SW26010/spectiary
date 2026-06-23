@@ -192,6 +192,24 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
 
     const int current_code = labeling_view.current_code;
     ImGui::TextUnformatted(labeling_view.task_name.c_str());
+    ImGui::SameLine();
+    if (!labeling_view.can_deactivate_task) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Close task")) {
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask()))
+                .action);
+        ImGui::End();
+        return action;
+    }
+    if (!labeling_view.can_deactivate_task) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Output autosave must finish before this task can be closed.");
+        }
+    }
     ImGui::Text(
         "Progress: %llu labeled / %llu",
         static_cast<unsigned long long>(labeling_view.labeled_count),

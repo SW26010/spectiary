@@ -232,6 +232,12 @@ specforge::SourceCollectionSessionIntent SetActiveLabelingAutoAdvance(bool enabl
         specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(enabled));
 }
 
+specforge::SourceCollectionSessionIntent DeactivateActiveLabelingTask()
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask());
+}
+
 specforge::SourceCollectionSessionIntent AssignActiveLabelToCurrentSample(int code)
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
@@ -402,6 +408,37 @@ void TestLabelingFilterSelectionAppliesToNavigation()
 
     result = Submit(session, SetActiveLabelingFilterSourceSelected(false));
     Require(!result.view.navigation.filter_active, "deselecting labeling source should clear its navigation filter");
+}
+
+void TestDeactivatingLabelingTaskClearsActiveTaskFilter()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, SetActiveLabelingFilterSourceSelected(true));
+    Require(result.view.filter.active_labeling_filter_source_selected, "test should select active task filter");
+    result = Submit(session, SetFilterValueSelected("labeling:manual-labeling", "1", true));
+    Require(result.view.navigation.filter_active, "test should activate the label filter");
+    Require(result.view.labeling.can_deactivate_task, "draft-only active task should be closable");
+
+    result = Submit(session, DeactivateActiveLabelingTask());
+    Require(result.action.workflow_changed, "deactivating active task should report workflow change");
+    Require(!result.view.labeling.has_active_task, "deactivation should leave no active task");
+    Require(!result.view.filter.has_active_labeling_task, "filter view should no longer expose an active task");
+    Require(!result.view.filter.active_labeling_filter_source_selected, "deactivation should clear selected task filter source");
+    Require(!result.view.navigation.filter_active, "deactivation should clear navigation filtering from the active task");
+
+    result = Submit(session, CreateDefaultLabelingTask());
+    Require(result.view.labeling.has_active_task, "task record should remain available after deactivation");
+    Require(result.view.labeling.current_code == 1, "reactivated task should keep its label result");
 }
 
 void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
@@ -811,6 +848,7 @@ int main()
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
+    TestDeactivatingLabelingTaskClearsActiveTaskFilter();
     TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters();
     TestNavigationViewSeparatesSampleNameFromDisplayName();
     TestNavigationViewExposesSourceProvidedSampleName();

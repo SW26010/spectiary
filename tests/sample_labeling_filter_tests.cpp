@@ -1,4 +1,5 @@
 #include "domain/sample_filter.h"
+#include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_labeling_state_cache_io.h"
@@ -82,6 +83,12 @@ std::string ReadTextFile(const std::filesystem::path& path)
         contents += '\n';
     }
     return contents;
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
 }
 
 void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
@@ -246,6 +253,113 @@ void TestSampleLabelResultWritesCompactNpy()
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
 }
 
+void TestSampleLabelResultWritesMetadataSidecar()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}), "label should be accepted");
+    Require(specforge::AssignSampleLabel(task, 0, 5).accepted, "first sample should be labelable");
+    Require(specforge::AssignSampleLabel(task, 2, 5).accepted, "third sample should be labelable");
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_sample_label_result_metadata.npy";
+    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(path);
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+
+    specforge::SelectSampleLabelTaskOutputPath(task, path);
+    specforge::SampleLabelResultMetadataSource source;
+    source.source_name = "source.npy";
+    source.source_fingerprint = "size=12;mtime=1;dtype=<f8;shape=3x2";
+    source.context_fingerprint = "context";
+    source.spectrum_count = 3;
+    const specforge::SampleLabelTaskPersistResult result =
+        specforge::PersistSampleLabelingTaskResult(task, &source);
+    Require(result.output_saved, result.message.empty() ? "metadata-backed output should save" : result.message);
+    Require(task.pending_sample_indices.empty(), "successful metadata-backed output should clear pending samples");
+    Require(!task.metadata_save_pending, "successful metadata-backed output should clear metadata pending");
+    Require(
+        task.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "successful metadata-backed output should be clean");
+
+    const std::string metadata = ReadTextFile(metadata_path);
+    Require(
+        metadata.find("\"format_kind\": \"specforge.sample_label_result.metadata\"") != std::string::npos,
+        "metadata should identify the sidecar format");
+    Require(metadata.find("\"result_file\": \"specforge_sample_label_result_metadata.npy\"") != std::string::npos, "metadata should reference the result relatively");
+    Require(metadata.find("\"task_id\": \"quality\"") != std::string::npos, "metadata should carry the stable task id");
+    Require(metadata.find("\"expected_dtype\": \"int32\"") != std::string::npos, "metadata should carry the expected dtype");
+    Require(metadata.find("\"source_name\": \"source.npy\"") != std::string::npos, "metadata should carry source summary");
+    Require(metadata.find(PathToUtf8(std::filesystem::temp_directory_path())) == std::string::npos, "metadata must not store a local absolute source path");
+}
+
+void TestSampleAnnotationUsesMatchingLabelMetadata()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}), "label should be accepted");
+    Require(specforge::AssignSampleLabel(task, 0, 5).accepted, "first sample should be labelable");
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_sample_annotation_metadata.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(path), cleanup_error);
+
+    specforge::SelectSampleLabelTaskOutputPath(task, path);
+    const specforge::SampleLabelTaskPersistResult saved = specforge::PersistSampleLabelingTaskResult(task);
+    Require(saved.output_saved, saved.message.empty() ? "label result should save" : saved.message);
+
+    std::string error;
+    std::optional<specforge::SampleAnnotationResult> annotation =
+        specforge::LoadSampleAnnotationResultFromPath(path, 3, &error);
+    Require(annotation.has_value(), error.empty() ? "metadata-backed annotation should load" : error);
+    Require(
+        annotation->relationship == specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+        "matching metadata should mark annotation as an external label result");
+    Require(annotation->name == "Quality", "metadata task name should become the row name");
+    Require(annotation->values[0].display_text == "bad (5)", "metadata should map numeric codes to labels");
+    Require(annotation->values[1].display_text == "Unlabeled (-1)", "metadata should map the unlabeled sentinel");
+    Require(annotation->label_metadata && annotation->label_metadata->task_id == "quality", "metadata should be attached to the annotation");
+}
+
+void TestMismatchedLabelMetadataFallsBackToRawAnnotationValues()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}), "label should be accepted");
+    Require(specforge::AssignSampleLabel(task, 0, 5).accepted, "first sample should be labelable");
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_sample_annotation_bad_metadata.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(path);
+    std::filesystem::remove(metadata_path, cleanup_error);
+    std::string error;
+    Require(specforge::SaveSampleLabelResultNpy(path, task, &error), error.empty() ? "NPY save failed" : error);
+    WriteTextFile(
+        metadata_path,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_label_result.metadata\",\n"
+        "  \"schema_version\": 1,\n"
+        "  \"result_file\": \"another.npy\",\n"
+        "  \"task_id\": \"quality\",\n"
+        "  \"value_count\": 3,\n"
+        "  \"expected_dtype\": \"int32\",\n"
+        "  \"unlabeled_sentinel\": -1,\n"
+        "  \"task_name\": \"Quality\",\n"
+        "  \"labels\": [{ \"code\": 5, \"name\": \"bad\", \"shortcut\": \"b\" }]\n"
+        "}\n");
+
+    std::optional<specforge::SampleAnnotationResult> annotation =
+        specforge::LoadSampleAnnotationResultFromPath(path, 3, &error);
+    Require(annotation.has_value(), error.empty() ? "annotation should still load" : error);
+    Require(
+        annotation->relationship == specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+        "mismatched metadata should not be applied");
+    Require(annotation->values[0].display_text == "5", "mismatched metadata should fall back to raw numeric value");
+    Require(!annotation->metadata_warning.empty(), "mismatched metadata should produce a warning");
+}
+
 void TestFailedNpySaveDoesNotDamageExistingOutput()
 {
     const std::filesystem::path path =
@@ -395,6 +509,75 @@ void TestExternalOutputIsResultSourceOfTruth()
         Require(task->output_path && *task->output_path == output_path, "output path should restore");
         Require(task->values.size() == 3 && task->values[1] == 5, "output-backed task should load values from NPY");
     }
+}
+
+void TestMetadataOnlyChangesRewriteSidecarOnRetry()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_metadata_retry_state.json";
+    const std::filesystem::path output_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_metadata_retry_result.npy";
+    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(output_path);
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("source-identity", 3);
+    Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+    Require(
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        "controller should add initial label");
+    Require(controller.AssignLabel(1, 5).accepted, "controller should label a sample");
+    Require(controller.SetActiveTaskOutputPath(output_path), "controller should select output path");
+    Require(controller.PersistActiveTask(), "controller should persist initial output and metadata");
+    Require(ReadTextFile(metadata_path).find("\"name\": \"bad\"") != std::string::npos, "initial metadata should contain the first label name");
+
+    Require(
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "excellent", 'e'}),
+        "renaming an output-backed label should be accepted");
+    const specforge::SampleLabelingTask* task = controller.active_task();
+    Require(task != nullptr && task->metadata_save_pending, "metadata-only edit should mark metadata pending");
+    Require(
+        task->save_state.kind == specforge::SampleLabelSaveStateKind::Pending,
+        "metadata-only edit should enter pending save state");
+    Require(task->save_state.pending_count == 0, "metadata-only pending state should not invent pending samples");
+
+    controller.MaybeSaveStateCache(10);
+    controller.MaybeSaveStateCache(140);
+    task = controller.active_task();
+    Require(task != nullptr && !task->metadata_save_pending, "metadata retry should clear metadata pending");
+    Require(
+        task->save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "metadata retry should restore clean output save state");
+    const std::string metadata = ReadTextFile(metadata_path);
+    Require(metadata.find("\"name\": \"excellent\"") != std::string::npos, "metadata retry should write the renamed label");
+    Require(metadata.find("\"name\": \"bad\"") == std::string::npos, "metadata retry should replace the old label name");
+}
+
+void TestOutputPathConflictIsRejectedWithinSource()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_output_conflict_state.json";
+    const std::filesystem::path output_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_output_conflict.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(output_path), cleanup_error);
+
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("source-identity", 3);
+    Require(controller.CreateTask("first", "First") != nullptr, "first task should be created");
+    Require(controller.SetActiveTaskOutputPath(output_path), "first task should claim the output path");
+    Require(controller.CreateTask("second", "Second") != nullptr, "second task should be created");
+    Require(!controller.SetActiveTaskOutputPath(output_path), "second task must not claim an already-owned output path");
+    const specforge::SampleLabelingTask* second = controller.active_task();
+    Require(second != nullptr && !second->output_path, "conflicting output path should not be stored on the second task");
+    Require(
+        second != nullptr && second->save_state.message.find("already used") != std::string::npos,
+        "conflicting output path should leave a user-visible message");
 }
 
 void TestMissingExternalOutputRestoresFailedState()
@@ -668,10 +851,15 @@ int main()
         TestSampleLabelingStateCacheReportsUnsupportedSchema();
         TestSampleLabelTaskWritesStableCodes();
         TestSampleLabelResultWritesCompactNpy();
+        TestSampleLabelResultWritesMetadataSidecar();
+        TestSampleAnnotationUsesMatchingLabelMetadata();
+        TestMismatchedLabelMetadataFallsBackToRawAnnotationValues();
         TestFailedNpySaveDoesNotDamageExistingOutput();
         TestSampleLabelingControllerAutosavesDraftRecord();
         TestTaskRecordFlushKeepsActiveTaskAddressStable();
         TestExternalOutputIsResultSourceOfTruth();
+        TestMetadataOnlyChangesRewriteSidecarOnRetry();
+        TestOutputPathConflictIsRejectedWithinSource();
         TestMissingExternalOutputRestoresFailedState();
         TestDraftOutputFailureKeepsDraftRecoveryValues();
         TestCorruptLocalTaskRecordIsIgnored();

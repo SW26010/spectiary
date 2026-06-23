@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -19,6 +20,29 @@ struct SampleLabelDefinition {
 
 struct SampleLabelSet {
     std::vector<SampleLabelDefinition> labels;
+};
+
+struct SampleLabelResultMetadataSource {
+    std::string source_name;
+    std::string source_fingerprint;
+    std::string context_fingerprint;
+    std::size_t spectrum_count = 0;
+};
+
+struct SampleLabelResultMetadata {
+    std::string result_file;
+    std::string task_id;
+    std::size_t value_count = 0;
+    std::string expected_dtype;
+    int unlabeled_sentinel = kUnlabeledSampleLabelCode;
+    std::string task_name;
+    SampleLabelSet label_set;
+    std::optional<SampleLabelResultMetadataSource> source;
+};
+
+struct SampleLabelResultMetadataLoadResult {
+    std::optional<SampleLabelResultMetadata> metadata;
+    std::string warning;
 };
 
 enum class SampleLabelSaveStateKind {
@@ -44,6 +68,7 @@ struct SampleLabelingTask {
     std::optional<std::size_t> remembered_position;
     std::optional<std::filesystem::path> output_path;
     std::unordered_set<std::size_t> pending_sample_indices;
+    bool metadata_save_pending = false;
     SampleLabelSaveState save_state;
 };
 
@@ -74,7 +99,10 @@ struct SampleLabelTaskPersistResult {
 [[nodiscard]] int NextAvailableSampleLabelCode(const SampleLabelSet& label_set);
 [[nodiscard]] bool UpsertSampleLabel(SampleLabelSet& label_set, SampleLabelDefinition label);
 [[nodiscard]] std::optional<int> SampleLabelCodeForShortcut(const SampleLabelSet& label_set, char shortcut);
-[[nodiscard]] std::string FormatSampleLabelValue(const SampleLabelSet& label_set, int code);
+[[nodiscard]] std::string FormatSampleLabelValue(
+    const SampleLabelSet& label_set,
+    int code,
+    int unlabeled_sentinel = kUnlabeledSampleLabelCode);
 [[nodiscard]] std::size_t CountLabeledSamples(const SampleLabelingTask& task);
 [[nodiscard]] std::size_t CountUnlabeledSamples(const SampleLabelingTask& task);
 
@@ -84,9 +112,12 @@ struct SampleLabelTaskPersistResult {
     int code);
 [[nodiscard]] SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sample_index);
 void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path);
+void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task);
 void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveStateKind clean_state);
 void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message);
-[[nodiscard]] SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(SampleLabelingTask& task);
+[[nodiscard]] SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
+    SampleLabelingTask& task,
+    const SampleLabelResultMetadataSource* source = nullptr);
 [[nodiscard]] bool SaveSampleLabelResultNpy(
     const std::filesystem::path& path,
     const SampleLabelingTask& task,
@@ -95,5 +126,16 @@ void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message
     const std::filesystem::path& path,
     std::size_t expected_count,
     std::string* error_message = nullptr);
+[[nodiscard]] std::filesystem::path SampleLabelResultMetadataPathForResult(
+    const std::filesystem::path& result_path);
+[[nodiscard]] bool SaveSampleLabelResultMetadataSidecar(
+    const std::filesystem::path& result_path,
+    const SampleLabelingTask& task,
+    const SampleLabelResultMetadataSource* source = nullptr,
+    std::string* error_message = nullptr);
+[[nodiscard]] SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResult(
+    const std::filesystem::path& result_path,
+    std::size_t expected_count,
+    std::string_view expected_dtype);
 
 }  // namespace specforge
