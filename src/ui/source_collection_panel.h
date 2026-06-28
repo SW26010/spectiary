@@ -36,7 +36,9 @@ public:
 
     [[nodiscard]] SourceCollectionSessionAction RenderAnnotations(
         const SourceCollectionSessionView& session_view,
-        bool* open);
+        const SourceCollectionSessionIntentSubmitter& submit,
+        bool* open,
+        const SourceCollectionPathPicker& choose_annotation_file);
 
 private:
     void BeginSampleNameSearch(const SourceCollectionSessionView& session_view);

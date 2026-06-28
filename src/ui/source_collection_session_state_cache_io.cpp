@@ -68,6 +68,15 @@ SourceCollectionSessionStateCache LoadSourceCollectionSessionStateCache(const st
         SourceCollectionSavedSource source;
         source.path = PathFromUtf8(*path_text);
         source.last_spectrum_index = ReadJsonSizeMember(source_object, "last_index").value_or(0);
+        const JsonValue* annotation_paths = JsonObjectMember(source_object, "annotation_paths");
+        if (annotation_paths != nullptr && annotation_paths->kind == JsonValue::Kind::Array) {
+            for (const JsonValue& path_value : annotation_paths->array) {
+                if (path_value.kind != JsonValue::Kind::String || path_value.string_value.empty()) {
+                    continue;
+                }
+                source.annotation_paths.push_back(PathFromUtf8(path_value.string_value));
+            }
+        }
         state.sources.push_back(std::move(source));
     }
     return state;
@@ -102,7 +111,20 @@ bool SaveSourceCollectionSessionStateCache(
             for (std::size_t index = 0; index < cache.sources.size(); ++index) {
                 stream << "    { \"path\": ";
                 WriteJsonString(stream, PathToUtf8(cache.sources[index].path));
-                stream << ", \"last_index\": " << cache.sources[index].last_spectrum_index << " }";
+                stream << ", \"last_index\": " << cache.sources[index].last_spectrum_index;
+                if (!cache.sources[index].annotation_paths.empty()) {
+                    stream << ", \"annotation_paths\": [";
+                    for (std::size_t path_index = 0;
+                         path_index < cache.sources[index].annotation_paths.size();
+                         ++path_index) {
+                        if (path_index > 0) {
+                            stream << ", ";
+                        }
+                        WriteJsonString(stream, PathToUtf8(cache.sources[index].annotation_paths[path_index]));
+                    }
+                    stream << "]";
+                }
+                stream << " }";
                 stream << (index + 1 == cache.sources.size() ? "\n" : ",\n");
             }
             if (!cache.sources.empty()) {

@@ -58,6 +58,11 @@ public:
     [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
         std::string* message = nullptr);
+    [[nodiscard]] bool RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path);
+    [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
+        const std::vector<std::filesystem::path>& paths);
+    [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
+        AnnotationPathsBySourceKey() const;
 
     [[nodiscard]] SampleNavigationResult Navigate(const SampleNavigationRequest& request);
     [[nodiscard]] std::optional<std::size_t> current_index() const;
@@ -104,6 +109,10 @@ private:
         const SourceSession& session,
         const std::vector<bool>& eligible_samples,
         bool& blocked_by_filter);
+    [[nodiscard]] static bool LoadReadOnlyAnnotationIntoSession(
+        SourceSession& session,
+        const std::filesystem::path& path,
+        std::string* message = nullptr);
     void EnsureStateCacheLoaded();
     void PersistActiveIndex();
     bool SaveStateCache();

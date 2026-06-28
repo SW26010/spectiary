@@ -347,6 +347,36 @@ void TestControllerAddsManualAnnotationToActiveContext()
         "rejected annotation should add a visible context message");
 }
 
+void TestControllerRestoresAndRemovesProvidedAnnotations()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_nav_provided_annotation_source.npy";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_provided_annotation_state.json";
+    const std::filesystem::path annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_provided_annotation_result.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {3, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+    WriteNpy(annotation_path, "<i4", {3}, BytesFor<std::int32_t>({5, -1, 7}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 3, 0));
+    Require(
+        controller.RestoreReadOnlyAnnotationsForActiveSource({annotation_path}),
+        "provided annotation should restore into active navigation context");
+    const specforge::SourceCollectionManifest* context = controller.active_context();
+    Require(context != nullptr && context->annotations.size() == 1, "provided annotation should be visible");
+    Require(context->annotations[0].path == annotation_path, "restored annotation should keep its path");
+    Require(context->annotations[0].values[0].display_text == "5", "restored annotation should reload values");
+
+    Require(
+        controller.RemoveReadOnlyAnnotationFromActiveSource(annotation_path),
+        "provided annotation should be removable");
+    context = controller.active_context();
+    Require(context != nullptr && context->annotations.empty(), "removed annotation should leave active context");
+}
+
 void TestControllerPersistsLastIndexBySourceIdentity()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_persist.npy";
@@ -531,6 +561,7 @@ int main()
     TestControllerOwnsNavigationState();
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerAddsManualAnnotationToActiveContext();
+    TestControllerRestoresAndRemovesProvidedAnnotations();
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();

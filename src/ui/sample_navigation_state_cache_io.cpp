@@ -3,6 +3,7 @@
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
 
+#include <algorithm>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -55,7 +56,13 @@ bool SaveSampleNavigationStateCache(
         return false;
     }
 
-    const std::vector<std::string> keys = SortedCacheKeys(cache.last_indices_by_source_identity);
+    std::vector<std::string> keys;
+    keys.reserve(cache.last_indices_by_source_identity.size());
+    for (const auto& [identity, index] : cache.last_indices_by_source_identity) {
+        (void)index;
+        keys.push_back(identity);
+    }
+    std::sort(keys.begin(), keys.end());
 
     return WriteVersionedJsonCacheFile(
         path,
@@ -69,9 +76,13 @@ bool SaveSampleNavigationStateCache(
                 stream << "\n";
             }
             for (std::size_t index = 0; index < keys.size(); ++index) {
+                const std::string& identity = keys[index];
                 stream << "    { \"identity\": ";
-                WriteJsonString(stream, keys[index]);
-                stream << ", \"last_index\": " << cache.last_indices_by_source_identity.at(keys[index]) << " }";
+                WriteJsonString(stream, identity);
+                const auto last_index = cache.last_indices_by_source_identity.find(identity);
+                stream << ", \"last_index\": "
+                       << (last_index == cache.last_indices_by_source_identity.end() ? 0 : last_index->second);
+                stream << " }";
                 stream << (index + 1 == keys.size() ? "\n" : ",\n");
             }
             if (!keys.empty()) {
@@ -83,4 +94,3 @@ bool SaveSampleNavigationStateCache(
 }
 
 }  // namespace specforge
-

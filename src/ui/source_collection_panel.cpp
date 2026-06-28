@@ -21,6 +21,7 @@ constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kSampleNavigationNameMatchesWindow = "Sample name matches###SpecForgeSampleNameMatchesV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
+constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 
 SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent)
 {
@@ -119,6 +120,27 @@ bool TableCellTextButton(const char* id, std::string_view text, ImU32 text_color
     const ImVec2 max(min.x + width, min.y + height);
     const float text_y = min.y + std::max(0.0f, (height - ImGui::GetTextLineHeight()) * 0.5f);
     const ImVec2 text_pos(min.x + style.FramePadding.x, text_y);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImGui::PushClipRect(min, max, true);
+    draw_list->AddText(text_pos, text_color, text.data(), text.data() + text.size());
+    ImGui::PopClipRect();
+
+    return clicked;
+}
+
+bool TableCellRightAlignedTextButton(const char* id, std::string_view text, ImU32 text_color)
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetCursorScreenPos();
+    const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    const float height = ImGui::GetFrameHeight();
+
+    const bool clicked = ImGui::InvisibleButton(id, ImVec2(width, height));
+    const ImVec2 max(min.x + width, min.y + height);
+    const ImVec2 text_size = ImGui::CalcTextSize(text.data(), text.data() + text.size());
+    const float text_y = min.y + std::max(0.0f, (height - ImGui::GetTextLineHeight()) * 0.5f);
+    const ImVec2 text_pos(max.x - style.FramePadding.x - text_size.x, text_y);
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImGui::PushClipRect(min, max, true);
@@ -557,7 +579,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
     const SourceCollectionSessionView& session_view,
-    bool* open)
+    const SourceCollectionSessionIntentSubmitter& submit,
+    bool* open,
+    const SourceCollectionPathPicker& choose_annotation_file)
 {
     SourceCollectionSessionAction action;
     if (!ImGui::Begin(kAnnotationsWindow, open)) {
@@ -571,6 +595,14 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return action;
+    }
+
+    if (ImGui::Button("Add file...")) {
+        if (std::optional<std::filesystem::path> path = choose_annotation_file()) {
+            SourceCollectionSessionResult result = submit(EditSourceCollection(
+                SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
+            MergeSourceCollectionSessionAction(action, result.action);
+        }
     }
 
     if (!navigation.annotation_messages.empty()) {
@@ -588,47 +620,85 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
 
     if (ImGui::BeginTable(
             "sample_annotations",
-            3,
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Result");
-        ImGui::TableSetupColumn("Type");
-        ImGui::TableSetupColumn("Value");
+            4,
+            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX)) {
+        ImGui::TableSetupColumn("Result", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableHeadersRow();
 
-        for (const SourceCollectionAnnotationValueView& annotation : navigation.current_annotations) {
+        std::optional<std::filesystem::path> annotation_to_remove;
+        for (std::size_t annotation_index = 0; annotation_index < navigation.current_annotations.size();
+             ++annotation_index) {
+            const SourceCollectionAnnotationValueView& annotation =
+                navigation.current_annotations[annotation_index];
+            ImGui::PushID(static_cast<int>(annotation_index));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted(annotation.name.c_str());
+            (void)TableCellRightAlignedTextButton(
+                "annotation_name",
+                annotation.name,
+                ImGui::GetColorU32(ImGuiCol_Text));
             if (ImGui::IsItemHovered()) {
                 const std::string path = NarrowPath(annotation.path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
+            if (annotation.can_activate_labeling && !annotation.path.empty() && ImGui::BeginDragDropSource()) {
+                const std::string payload = PathToUtf8(annotation.path);
+                ImGui::SetDragDropPayload(
+                    kSampleAnnotationDragPayload,
+                    payload.c_str(),
+                    payload.size() + 1);
+                ImGui::TextUnformatted(annotation.name.c_str());
+                ImGui::EndDragDropSource();
+            }
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(annotation.relationship_label.c_str());
+            (void)TableCellTextButton(
+                "annotation_type",
+                annotation.relationship_label,
+                ImGui::GetColorU32(ImGuiCol_Text));
 
             ImGui::TableSetColumnIndex(2);
-            if (annotation.missing) {
-                ImGui::TextDisabled("(missing)");
-            } else {
-                ImGui::TextUnformatted(annotation.display_text.c_str());
+            std::string value_text = annotation.missing ? "(missing)" : annotation.display_text;
+            if (!annotation.missing && annotation.output_missing) {
+                value_text += " (output missing)";
+            } else if (!annotation.missing && annotation.metadata_missing) {
+                value_text += " (metadata missing)";
+            } else if (!annotation.missing && !annotation.message.empty()) {
+                value_text += " (metadata ignored)";
             }
-            if (annotation.output_missing) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(output missing)");
-            } else if (annotation.metadata_missing) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(metadata missing)");
-            } else if (!annotation.message.empty()) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(metadata ignored)");
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", annotation.message.c_str());
+            const bool disabled_value =
+                annotation.missing || annotation.output_missing || annotation.metadata_missing ||
+                !annotation.message.empty();
+            (void)TableCellTextButton(
+                "annotation_value",
+                value_text,
+                ImGui::GetColorU32(disabled_value ? ImGuiCol_TextDisabled : ImGuiCol_Text));
+            if (!annotation.message.empty() && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", annotation.message.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            if (annotation.can_remove_annotation) {
+                const ImRect remove_cell =
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                if (TrashIconButton("remove_annotation", remove_cell)) {
+                    annotation_to_remove = annotation.path;
                 }
             }
+            ImGui::PopID();
         }
 
         ImGui::EndTable();
+
+        if (annotation_to_remove) {
+            SourceCollectionSessionResult result = submit(EditSourceCollection(
+                SourceCollectionIntent::RemoveReadOnlyAnnotationResult(*annotation_to_remove)));
+            MergeSourceCollectionSessionAction(action, result.action);
+        }
     }
 
     ImGui::End();

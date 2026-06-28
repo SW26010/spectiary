@@ -56,6 +56,15 @@ SampleLabelResultMetadataSource SourceMetadataFromState(const SampleLabelingCont
     return source;
 }
 
+bool CanDeleteTask(const SampleLabelingTask& task)
+{
+    if (!task.output_path) {
+        return true;
+    }
+    return task.save_state.kind != SampleLabelSaveStateKind::Pending &&
+           task.save_state.kind != SampleLabelSaveStateKind::Failed;
+}
+
 }  // namespace
 
 SampleLabelingController::SampleLabelingController()
@@ -187,12 +196,99 @@ SampleLabelingTask* SampleLabelingController::CreateTask(std::string task_id, st
     return active_task();
 }
 
+SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
+    std::string task_id,
+    std::string task_name,
+    SampleLabelSet label_set,
+    std::vector<int> values,
+    std::filesystem::path output_path,
+    bool metadata_clean)
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr || task_id.empty() || output_path.empty() || values.size() != state->sample_count) {
+        return nullptr;
+    }
+
+    const auto output_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& task) {
+        return task.output_path && task.values.size() == state->sample_count &&
+               OutputPathMatches(*task.output_path, output_path);
+    });
+    if (output_match != state->tasks.end()) {
+        if (output_match->task_id != task_id) {
+            return nullptr;
+        }
+        state->active_task_id = output_match->task_id;
+        QueueStateSave();
+        return active_task();
+    }
+
+    const auto id_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
+        return task.task_id == task_id;
+    });
+    if (id_match != state->tasks.end()) {
+        return nullptr;
+    }
+
+    SampleLabelingTask task = CreateSampleLabelingTask(std::move(task_id), std::move(task_name), state->sample_count);
+    task.label_set = std::move(label_set);
+    task.values = std::move(values);
+    task.output_path = std::move(output_path);
+    if (metadata_clean) {
+        MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
+    } else {
+        MarkSampleLabelTaskMetadataPending(task);
+    }
+
+    state->tasks.push_back(std::move(task));
+    state->active_task_id = state->tasks.back().task_id;
+    if (ShouldRetryOutputSave(state->tasks.back())) {
+        QueueOutputRetry();
+    }
+    QueueStateSave();
+    return active_task();
+}
+
+bool SampleLabelingController::ActivateTask(std::string_view task_id)
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr || task_id.empty()) {
+        return false;
+    }
+
+    const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [task_id](const auto& task) {
+        return task.task_id == task_id;
+    });
+    if (match == state->tasks.end()) {
+        return false;
+    }
+
+    state->active_task_id = match->task_id;
+    QueueStateSave();
+    return true;
+}
+
 bool SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
 {
     SampleLabelingTask* task = active_task();
     if (task == nullptr || !UpsertSampleLabel(task->label_set, std::move(label))) {
         return false;
     }
+    MarkSampleLabelTaskMetadataPending(*task);
+    if (ShouldRetryOutputSave(*task)) {
+        QueueOutputRetry();
+    }
+    QueueStateSave();
+    return true;
+}
+
+bool SampleLabelingController::RenameActiveTask(std::string task_name)
+{
+    SampleLabelingTask* task = active_task();
+    if (task == nullptr || task_name.empty() || task->task_name == task_name) {
+        return false;
+    }
+
+    task->task_name = std::move(task_name);
     MarkSampleLabelTaskMetadataPending(*task);
     if (ShouldRetryOutputSave(*task)) {
         QueueOutputRetry();
@@ -233,11 +329,12 @@ bool SampleLabelingController::CanDeactivateActiveTask() const
     if (task == nullptr) {
         return false;
     }
-    if (!task->output_path) {
-        return true;
-    }
-    return task->save_state.kind != SampleLabelSaveStateKind::Pending &&
-           task->save_state.kind != SampleLabelSaveStateKind::Failed;
+    return CanDeleteTask(*task);
+}
+
+bool SampleLabelingController::CanDeleteActiveTask() const
+{
+    return CanDeactivateActiveTask();
 }
 
 bool SampleLabelingController::DeactivateActiveTask()
@@ -246,6 +343,24 @@ bool SampleLabelingController::DeactivateActiveTask()
     if (state == nullptr || !state->active_task_id || !CanDeactivateActiveTask()) {
         return false;
     }
+    state->active_task_id.reset();
+    QueueStateSave();
+    return true;
+}
+
+bool SampleLabelingController::DeleteActiveTask()
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr || !state->active_task_id || !CanDeleteActiveTask()) {
+        return false;
+    }
+
+    const std::string task_id = *state->active_task_id;
+    state->tasks.erase(
+        std::remove_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
+            return task.task_id == task_id;
+        }),
+        state->tasks.end());
     state->active_task_id.reset();
     QueueStateSave();
     return true;

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace specforge {
 
@@ -20,4 +21,3 @@ struct SampleNavigationStateCache {
     const SampleNavigationStateCache& cache);
 
 }  // namespace specforge
-

@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -42,12 +43,23 @@ public:
         const std::filesystem::path& path,
         bool* loaded = nullptr,
         std::string* message = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
+        const std::filesystem::path& path);
+    [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
+        const std::vector<std::filesystem::path>& paths);
+    [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
+        AnnotationPathsBySourceKey() const;
     [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
     [[nodiscard]] SampleWorkflowCommandResult CommitSampleNameSelection(
         std::size_t target_row,
         std::string matched_name,
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction CreateDefaultLabelingTask();
+    [[nodiscard]] SourceCollectionSessionAction CreateLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
+        std::filesystem::path annotation_path);
+    [[nodiscard]] SourceCollectionSessionAction RenameActiveLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,
         bool* changed = nullptr);

@@ -16,6 +16,11 @@ namespace {
 
 constexpr const char* kLabelingWindow = "Labeling###SpecForgeLabelingV1";
 constexpr const char* kFiltersWindow = "Filters###SpecForgeFiltersV1";
+constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
+constexpr const char* kAnnotationToLabelingPopup =
+    "Use annotation as labeling task?###SpecForgeAnnotationToLabelingPopup";
+constexpr const char* kDeleteLabelingTaskPopup =
+    "Delete labeling task?###SpecForgeDeleteLabelingTaskPopup";
 
 SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent)
 {
@@ -36,6 +41,47 @@ std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
+}
+
+std::filesystem::path Utf8ToPath(const std::string& value)
+{
+    return std::filesystem::path(std::u8string(value.begin(), value.end()));
+}
+
+template <std::size_t Size>
+void CopyToBuffer(std::array<char, Size>& buffer, std::string_view text)
+{
+    static_assert(Size > 0);
+    std::fill(buffer.begin(), buffer.end(), '\0');
+    const std::size_t copy_size = std::min(text.size(), Size - 1);
+    std::copy_n(text.begin(), copy_size, buffer.begin());
+}
+
+std::string PayloadString(const ImGuiPayload& payload)
+{
+    const char* data = static_cast<const char*>(payload.Data);
+    if (data == nullptr || payload.DataSize <= 0) {
+        return {};
+    }
+    std::string text(data, data + payload.DataSize);
+    if (!text.empty() && text.back() == '\0') {
+        text.pop_back();
+    }
+    return text;
+}
+
+const SourceCollectionAnnotationValueView* FindAnnotationViewByPath(
+    const SourceCollectionSessionView& session_view,
+    const std::filesystem::path& path)
+{
+    const std::string path_text = PathToUtf8(path);
+    const auto match = std::find_if(
+        session_view.navigation.current_annotations.begin(),
+        session_view.navigation.current_annotations.end(),
+        [&path_text](const SourceCollectionAnnotationValueView& annotation) {
+            return PathToUtf8(annotation.path) == path_text;
+        });
+    return match == session_view.navigation.current_annotations.end() ? nullptr : &*match;
 }
 
 std::string TrimAscii(std::string_view value)
@@ -101,6 +147,27 @@ std::string_view SaveStateLabel(SampleLabelSaveStateKind kind)
     }
 }
 
+std::string SaveStateReminder(const SourceCollectionLabelingView& labeling_view)
+{
+    switch (labeling_view.save_state.kind) {
+    case SampleLabelSaveStateKind::InternalDraftOnly:
+        return "State: local draft only; choose an output path to create a reusable annotation result.";
+    case SampleLabelSaveStateKind::AutosavedToOutput:
+        return "State: output file and metadata sidecar are saved.";
+    case SampleLabelSaveStateKind::Pending:
+        return "State: output/metadata autosave is pending; close is disabled until it finishes.";
+    case SampleLabelSaveStateKind::Failed:
+        return "State: output/metadata autosave failed; close is disabled until the save succeeds.";
+    default:
+        return "State: unknown save state.";
+    }
+}
+
+bool AnnotationActivationNeedsConfirmation(SampleAnnotationWorkflowRelationship relationship)
+{
+    return relationship != SampleAnnotationWorkflowRelationship::LocalLabelingTask;
+}
+
 bool IsLabelShortcutPressed(char shortcut, bool context_active)
 {
     if (!context_active) {
@@ -149,10 +216,18 @@ const char* SampleWorkflowPanelUi::FiltersWindowName()
 
 void SampleWorkflowPanelUi::ResetForSampleWorkflow()
 {
+    std::fill(new_task_name_buffer_.begin(), new_task_name_buffer_.end(), '\0');
+    std::snprintf(new_task_name_buffer_.data(), new_task_name_buffer_.size(), "%s", "Manual labeling");
+    active_task_name_buffer_.fill('\0');
+    active_task_name_buffer_task_id_.clear();
     std::fill(new_label_name_buffer_.begin(), new_label_name_buffer_.end(), '\0');
     std::snprintf(new_label_name_buffer_.data(), new_label_name_buffer_.size(), "%s", "bad");
     std::snprintf(new_label_code_buffer_.data(), new_label_code_buffer_.size(), "%d", 0);
     new_label_shortcut_buffer_.fill('\0');
+    pending_annotation_activation_path_.clear();
+    pending_annotation_activation_name_.clear();
+    pending_delete_task_name_.clear();
+    pending_annotation_activation_relationship_ = SampleAnnotationWorkflowRelationship::PlainAnnotation;
 }
 
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
@@ -179,11 +254,94 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         return action;
     }
 
+    const float drop_target_width = std::max(160.0f, ImGui::GetContentRegionAvail().x);
+    const float drop_target_height = ImGui::GetFrameHeightWithSpacing();
+    const ImVec2 drop_min = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("annotation_drop_target", ImVec2(drop_target_width, drop_target_height));
+    const ImVec2 drop_max(drop_min.x + drop_target_width, drop_min.y + drop_target_height);
+    const bool drop_hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRect(
+        drop_min,
+        drop_max,
+        ImGui::GetColorU32(drop_hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Border),
+        3.0f);
+    const char* drop_text =
+        labeling_view.has_active_task ? "Close task to use annotation" : "Annotation target: start task";
+    draw_list->AddText(
+        ImVec2(drop_min.x + 8.0f, drop_min.y + 0.5f * (drop_target_height - ImGui::GetTextLineHeight())),
+        ImGui::GetColorU32(ImGuiCol_TextDisabled),
+        drop_text);
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSampleAnnotationDragPayload)) {
+            const std::filesystem::path annotation_path = Utf8ToPath(PayloadString(*payload));
+            if (const SourceCollectionAnnotationValueView* annotation =
+                    FindAnnotationViewByPath(session_view, annotation_path);
+                annotation != nullptr && annotation->can_activate_labeling && !labeling_view.has_active_task) {
+                if (AnnotationActivationNeedsConfirmation(annotation->relationship)) {
+                    pending_annotation_activation_path_ = annotation->path;
+                    pending_annotation_activation_name_ = annotation->name;
+                    pending_annotation_activation_relationship_ = annotation->relationship;
+                    ImGui::OpenPopup(kAnnotationToLabelingPopup);
+                } else {
+                    MergeSourceCollectionSessionAction(
+                        action,
+                        submit(ChangeActiveSampleWorkflow(
+                                   ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(annotation->path)))
+                            .action);
+                }
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    if (ImGui::BeginPopupModal(kAnnotationToLabelingPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Make \"%s\" editable in Labeling. Future autosaves will write to this annotation result and its "
+            "metadata sidecar.",
+            pending_annotation_activation_name_.c_str());
+        ImGui::TextWrapped(
+            "This edits the selected annotation result in place. Back up the file first if you need to preserve "
+            "the original labels.");
+        if (pending_annotation_activation_relationship_ ==
+            SampleAnnotationWorkflowRelationship::PlainAnnotation) {
+            ImGui::TextDisabled("No metadata sidecar is present; one will be created on save.");
+        } else {
+            ImGui::TextDisabled("Existing label metadata will be reused.");
+        }
+        if (ImGui::Button("Use annotation")) {
+            MergeSourceCollectionSessionAction(
+                action,
+                submit(ChangeActiveSampleWorkflow(
+                           ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(
+                               pending_annotation_activation_path_)))
+                    .action);
+            pending_annotation_activation_path_.clear();
+            pending_annotation_activation_name_.clear();
+            pending_annotation_activation_relationship_ =
+                SampleAnnotationWorkflowRelationship::PlainAnnotation;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            pending_annotation_activation_path_.clear();
+            pending_annotation_activation_name_.clear();
+            pending_annotation_activation_relationship_ =
+                SampleAnnotationWorkflowRelationship::PlainAnnotation;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     if (!labeling_view.has_active_task) {
+        ImGui::SetNextItemWidth(220.0f);
+        ImGui::InputText("Task name", new_task_name_buffer_.data(), new_task_name_buffer_.size());
         if (ImGui::Button("Create task")) {
             MergeSourceCollectionSessionAction(
                 action,
-                submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::CreateDefaultLabelingTask())).action);
+                submit(ChangeActiveSampleWorkflow(
+                           ActiveSampleWorkflowIntent::CreateLabelingTask(new_task_name_buffer_.data())))
+                    .action);
         }
         ImGui::TextDisabled("No active task");
         ImGui::End();
@@ -191,7 +349,28 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     }
 
     const int current_code = labeling_view.current_code;
-    ImGui::TextUnformatted(labeling_view.task_name.c_str());
+    if (active_task_name_buffer_task_id_ != labeling_view.task_id) {
+        active_task_name_buffer_task_id_ = labeling_view.task_id;
+        CopyToBuffer(active_task_name_buffer_, labeling_view.task_name);
+    }
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputText("Task name##ActiveLabelingTaskName", active_task_name_buffer_.data(), active_task_name_buffer_.size());
+    ImGui::SameLine();
+    const std::string requested_task_name = TrimAscii(active_task_name_buffer_.data());
+    const bool rename_disabled = requested_task_name.empty() || requested_task_name == labeling_view.task_name;
+    if (rename_disabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Rename")) {
+        MergeSourceCollectionSessionAction(
+            action,
+            submit(ChangeActiveSampleWorkflow(
+                       ActiveSampleWorkflowIntent::RenameActiveLabelingTask(requested_task_name)))
+                .action);
+    }
+    if (rename_disabled) {
+        ImGui::EndDisabled();
+    }
     ImGui::SameLine();
     if (!labeling_view.can_deactivate_task) {
         ImGui::BeginDisabled();
@@ -209,6 +388,42 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Output autosave must finish before this task can be closed.");
         }
+    }
+    ImGui::SameLine();
+    if (!labeling_view.can_delete_task) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Delete")) {
+        pending_delete_task_name_ = labeling_view.task_name;
+        ImGui::OpenPopup(kDeleteLabelingTaskPopup);
+    }
+    if (!labeling_view.can_delete_task) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Output autosave must finish before this task can be deleted.");
+        }
+    }
+    if (ImGui::BeginPopupModal(kDeleteLabelingTaskPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Delete local task \"%s\". Output files are not deleted.",
+            pending_delete_task_name_.c_str());
+        if (ImGui::Button("Delete task")) {
+            MergeSourceCollectionSessionAction(
+                action,
+                submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::DeleteActiveLabelingTask()))
+                    .action);
+            pending_delete_task_name_.clear();
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            ImGui::End();
+            return action;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            pending_delete_task_name_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
     ImGui::Text(
         "Progress: %llu labeled / %llu",
@@ -245,6 +460,8 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     if (!labeling_view.save_state.message.empty()) {
         ImGui::TextDisabled("%s", labeling_view.save_state.message.c_str());
     }
+    const std::string save_state_reminder = SaveStateReminder(labeling_view);
+    ImGui::TextDisabled("%s", save_state_reminder.c_str());
     if (labeling_view.state_save_failed) {
         const std::string_view error = labeling_view.state_save_error;
         ImGui::TextDisabled(

@@ -37,10 +37,21 @@ public:
         std::string_view task_id,
         std::size_t sample_count) const;
     [[nodiscard]] SampleLabelingTask* CreateTask(std::string task_id, std::string task_name);
+    [[nodiscard]] SampleLabelingTask* CreateTaskFromAnnotation(
+        std::string task_id,
+        std::string task_name,
+        SampleLabelSet label_set,
+        std::vector<int> values,
+        std::filesystem::path output_path,
+        bool metadata_clean);
+    [[nodiscard]] bool ActivateTask(std::string_view task_id);
     [[nodiscard]] bool UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] bool RenameActiveTask(std::string task_name);
     [[nodiscard]] bool SetActiveTaskOutputPath(std::filesystem::path output_path);
     [[nodiscard]] bool CanDeactivateActiveTask() const;
+    [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] bool DeactivateActiveTask();
+    [[nodiscard]] bool DeleteActiveTask();
     [[nodiscard]] bool RememberActivePosition(std::size_t sample_index);
     [[nodiscard]] bool PersistActiveTask();
     [[nodiscard]] bool PersistActiveTaskRecord();

@@ -176,6 +176,16 @@ std::vector<SourceCollectionSavedSource> SourceCollectionRoster::SavedSources() 
     return sources;
 }
 
+std::vector<std::string> SourceCollectionRoster::SavedSourceKeys() const
+{
+    std::vector<std::string> keys;
+    keys.reserve(sources_.size());
+    for (const SourceListEntry& entry : sources_) {
+        keys.push_back(entry.key);
+    }
+    return keys;
+}
+
 SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)

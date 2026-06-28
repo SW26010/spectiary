@@ -75,7 +75,8 @@ _Avoid_: Only label file, global classification, spectral-line grouping
 The sample labeling task currently accepting manual label writes for a source
 collection. It may be deactivated without deleting its task record, label set,
 sample label result, or output target.
-_Avoid_: Labeling window visibility, task deletion, sample annotation view
+_Avoid_: Labeling window visibility, implicit task deletion, sample annotation
+view
 
 **Sample navigation**:
 The user-facing control of the current spectrum sample within a source

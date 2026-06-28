@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace specforge {
 
@@ -32,6 +33,7 @@ enum class SourceCollectionIntentKind {
     SwitchActive,
     Remove,
     AddReadOnlyAnnotationResult,
+    RemoveReadOnlyAnnotationResult,
 };
 
 enum class SampleNavigationIntentKind {
@@ -42,6 +44,10 @@ enum class SampleNavigationIntentKind {
 
 enum class ActiveSampleWorkflowIntentKind {
     CreateDefaultLabelingTask,
+    CreateLabelingTask,
+    ActivateLabelingTaskFromAnnotation,
+    RenameActiveLabelingTask,
+    DeleteActiveLabelingTask,
     UpsertActiveLabel,
     SetActiveLabelingAutoAdvance,
     SetActiveLabelingSkipLabeledOnAdvance,
@@ -64,6 +70,7 @@ struct SourceCollectionIntent {
     [[nodiscard]] static SourceCollectionIntent SwitchActive(std::size_t source_index);
     [[nodiscard]] static SourceCollectionIntent Remove(std::size_t source_index);
     [[nodiscard]] static SourceCollectionIntent AddReadOnlyAnnotationResult(std::filesystem::path path);
+    [[nodiscard]] static SourceCollectionIntent RemoveReadOnlyAnnotationResult(std::filesystem::path path);
 
 private:
     friend class SourceCollectionSession;
@@ -99,6 +106,11 @@ private:
 
 struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent CreateDefaultLabelingTask();
+    [[nodiscard]] static ActiveSampleWorkflowIntent CreateLabelingTask(std::string task_name);
+    [[nodiscard]] static ActiveSampleWorkflowIntent ActivateLabelingTaskFromAnnotation(
+        std::filesystem::path annotation_path);
+    [[nodiscard]] static ActiveSampleWorkflowIntent RenameActiveLabelingTask(std::string task_name);
+    [[nodiscard]] static ActiveSampleWorkflowIntent DeleteActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent UpsertActiveLabel(SampleLabelDefinition label);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
@@ -115,6 +127,7 @@ private:
 
     ActiveSampleWorkflowIntentKind kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
     std::filesystem::path path;
+    std::string task_name;
     SampleLabelDefinition label;
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;
@@ -210,6 +223,8 @@ private:
         const std::filesystem::path& path,
         bool* loaded = nullptr,
         std::string* message = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
+        const std::filesystem::path& path);
 
     [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
     [[nodiscard]] SourceCollectionSessionAction CommitSampleNameSelection(
@@ -217,6 +232,11 @@ private:
         std::string matched_name,
         SampleNavigationResult* navigation_result = nullptr);
     [[nodiscard]] SourceCollectionSessionAction CreateDefaultLabelingTask();
+    [[nodiscard]] SourceCollectionSessionAction CreateLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
+        std::filesystem::path annotation_path);
+    [[nodiscard]] SourceCollectionSessionAction RenameActiveLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,
         bool* changed = nullptr);
@@ -235,6 +255,7 @@ private:
 
     [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation();
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
+    [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
     void RestoreSourceSessionCache();
     void MarkSourceSessionCacheDirty();
     void ApplyWorkflowCommandResult(

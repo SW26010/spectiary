@@ -759,7 +759,15 @@ void ShellUi::RenderNavigationPanel()
 void ShellUi::RenderAnnotationsPanel()
 {
     const SourceCollectionSessionView& view = SessionView();
-    HandleSessionAction(source_collection_panel_ui_.RenderAnnotations(view, &panel_visibility_.annotations));
+    HandleSessionAction(source_collection_panel_ui_.RenderAnnotations(
+        view,
+        [this](SourceCollectionSessionIntent command) {
+            return SubmitSessionCommandForPanel(std::move(command));
+        },
+        &panel_visibility_.annotations,
+        []() {
+            return ShowAnnotationFilePicker();
+        }));
 }
 
 void ShellUi::RenderLabelingPanel()

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -26,6 +27,25 @@ std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
+}
+
+bool PathExists(const std::filesystem::path& path)
+{
+    std::error_code error;
+    return std::filesystem::exists(path, error) && !error;
+}
+
+bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesystem::path& right)
+{
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    std::error_code equivalent_error;
+    if (PathExists(left) && PathExists(right) &&
+        std::filesystem::equivalent(left, right, equivalent_error) && !equivalent_error) {
+        return true;
+    }
+    return left.lexically_normal() == right.lexically_normal();
 }
 
 }  // namespace
@@ -106,7 +126,31 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     session.context_fingerprint = identity.context_fingerprint;
     session.spectrum_count = identity.spectrum_count;
     if (context_changed) {
+        std::vector<std::filesystem::path> retained_annotation_paths;
+        for (const SampleAnnotationResult& annotation : session.manifest.annotations) {
+            if (annotation.path.empty() ||
+                std::any_of(
+                    retained_annotation_paths.begin(),
+                    retained_annotation_paths.end(),
+                    [&annotation](const std::filesystem::path& existing) {
+                        return PathsReferToSameFile(existing, annotation.path);
+                    })) {
+                continue;
+            }
+            retained_annotation_paths.push_back(annotation.path);
+        }
         session.manifest = LoadSourceCollectionManifest(*snapshot);
+        for (const std::filesystem::path& annotation_path : retained_annotation_paths) {
+            if (std::any_of(
+                    session.manifest.annotations.begin(),
+                    session.manifest.annotations.end(),
+                    [&annotation_path](const SampleAnnotationResult& existing) {
+                        return PathsReferToSameFile(existing.path, annotation_path);
+                    })) {
+                continue;
+            }
+            (void)LoadReadOnlyAnnotationIntoSession(session, annotation_path);
+        }
     }
     session.sample_name_query = previous_query;
     if (session.spectrum_count > 0) {
@@ -167,35 +211,54 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
         return false;
     }
 
-    std::string load_error;
-    std::optional<SampleAnnotationResult> annotation =
-        LoadSampleAnnotationResultFromPath(path, session->spectrum_count, &load_error);
-    if (!annotation) {
-        std::string ignored_message = "Ignored " + PathToUtf8(path.filename()) + ": " + load_error + ".";
-        session->manifest.messages.push_back(ignored_message);
-        if (message != nullptr) {
-            *message = std::move(ignored_message);
-        }
+    return LoadReadOnlyAnnotationIntoSession(*session, path, message);
+}
+
+bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || path.empty()) {
         return false;
     }
 
-    const std::string metadata_warning = annotation->metadata_warning;
-    const auto same_path = [&path](const SampleAnnotationResult& existing) {
-        return existing.path == path;
-    };
-    auto existing = std::find_if(session->manifest.annotations.begin(), session->manifest.annotations.end(), same_path);
-    if (existing != session->manifest.annotations.end()) {
-        *existing = std::move(*annotation);
-    } else {
-        session->manifest.annotations.push_back(std::move(*annotation));
+    const auto previous_size = session->manifest.annotations.size();
+    session->manifest.annotations.erase(
+        std::remove_if(
+            session->manifest.annotations.begin(),
+            session->manifest.annotations.end(),
+            [&path](const SampleAnnotationResult& annotation) {
+                return PathsReferToSameFile(annotation.path, path);
+            }),
+        session->manifest.annotations.end());
+    if (session->manifest.annotations.size() == previous_size) {
+        return false;
     }
-    if (!metadata_warning.empty()) {
-        session->manifest.messages.push_back(metadata_warning);
-    }
-    if (message != nullptr) {
-        *message = {};
-    }
+
     return true;
+}
+
+bool SampleNavigationController::RestoreReadOnlyAnnotationsForActiveSource(
+    const std::vector<std::filesystem::path>& paths)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || session->spectrum_count == 0) {
+        return false;
+    }
+
+    bool restored = false;
+    for (const std::filesystem::path& path : paths) {
+        if (path.empty() ||
+            std::any_of(
+                session->manifest.annotations.begin(),
+                session->manifest.annotations.end(),
+                [&path](const SampleAnnotationResult& existing) {
+                    return PathsReferToSameFile(existing.path, path);
+                })) {
+            continue;
+        }
+        restored = LoadReadOnlyAnnotationIntoSession(*session, path) || restored;
+    }
+    return restored;
 }
 
 SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigationRequest& request)
@@ -376,6 +439,33 @@ const SourceCollectionManifest* SampleNavigationController::active_context() con
     return session == nullptr ? nullptr : &session->manifest;
 }
 
+std::unordered_map<std::string, std::vector<std::filesystem::path>>
+SampleNavigationController::AnnotationPathsBySourceKey() const
+{
+    std::unordered_map<std::string, std::vector<std::filesystem::path>> paths_by_source_key;
+    for (const auto& [source_key, session_key] : source_key_to_session_key_) {
+        const auto session = sessions_.find(session_key);
+        if (session == sessions_.end()) {
+            continue;
+        }
+
+        std::vector<std::filesystem::path> paths;
+        for (const SampleAnnotationResult& annotation : session->second.manifest.annotations) {
+            if (annotation.path.empty() ||
+                std::any_of(paths.begin(), paths.end(), [&annotation](const std::filesystem::path& existing) {
+                    return PathsReferToSameFile(existing, annotation.path);
+                })) {
+                continue;
+            }
+            paths.push_back(annotation.path);
+        }
+        if (!paths.empty()) {
+            paths_by_source_key.emplace(source_key, std::move(paths));
+        }
+    }
+    return paths_by_source_key;
+}
+
 SampleNavigationController::SourceSession* SampleNavigationController::ActiveSession()
 {
     if (!active_source_key_) {
@@ -493,6 +583,42 @@ std::optional<std::size_t> SampleNavigationController::FindLabelAdvanceTarget(
         }
     }
     return session.current_index;
+}
+
+bool SampleNavigationController::LoadReadOnlyAnnotationIntoSession(
+    SourceSession& session,
+    const std::filesystem::path& path,
+    std::string* message)
+{
+    std::string load_error;
+    std::optional<SampleAnnotationResult> annotation =
+        LoadSampleAnnotationResultFromPath(path, session.spectrum_count, &load_error);
+    if (!annotation) {
+        std::string ignored_message = "Ignored " + PathToUtf8(path.filename()) + ": " + load_error + ".";
+        session.manifest.messages.push_back(ignored_message);
+        if (message != nullptr) {
+            *message = std::move(ignored_message);
+        }
+        return false;
+    }
+
+    const std::string metadata_warning = annotation->metadata_warning;
+    const auto same_path = [&path](const SampleAnnotationResult& existing) {
+        return PathsReferToSameFile(existing.path, path);
+    };
+    auto existing = std::find_if(session.manifest.annotations.begin(), session.manifest.annotations.end(), same_path);
+    if (existing != session.manifest.annotations.end()) {
+        *existing = std::move(*annotation);
+    } else {
+        session.manifest.annotations.push_back(std::move(*annotation));
+    }
+    if (!metadata_warning.empty()) {
+        session.manifest.messages.push_back(metadata_warning);
+    }
+    if (message != nullptr) {
+        *message = {};
+    }
+    return true;
 }
 
 void SampleNavigationController::EnsureStateCacheLoaded()

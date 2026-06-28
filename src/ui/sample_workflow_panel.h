@@ -33,9 +33,17 @@ public:
         bool* open);
 
 private:
+    std::array<char, 128> new_task_name_buffer_ = {};
+    std::array<char, 128> active_task_name_buffer_ = {};
+    std::string active_task_name_buffer_task_id_;
     std::array<char, 96> new_label_name_buffer_ = {};
     std::array<char, 16> new_label_code_buffer_ = {};
     std::array<char, 8> new_label_shortcut_buffer_ = {};
+    std::filesystem::path pending_annotation_activation_path_;
+    std::string pending_annotation_activation_name_;
+    std::string pending_delete_task_name_;
+    SampleAnnotationWorkflowRelationship pending_annotation_activation_relationship_ =
+        SampleAnnotationWorkflowRelationship::PlainAnnotation;
 };
 
 }  // namespace specforge

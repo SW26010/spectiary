@@ -5,9 +5,11 @@
 #include "ui/source_collection_roster.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -142,6 +144,14 @@ SourceCollectionIntent SourceCollectionIntent::AddReadOnlyAnnotationResult(std::
     return intent;
 }
 
+SourceCollectionIntent SourceCollectionIntent::RemoveReadOnlyAnnotationResult(std::filesystem::path path)
+{
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult;
+    intent.path = std::move(path);
+    return intent;
+}
+
 SampleNavigationIntent SampleNavigationIntent::Move(SampleNavigationRequest request)
 {
     SampleNavigationIntent intent;
@@ -173,6 +183,38 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::CreateDefaultLabelingTask
 {
     ActiveSampleWorkflowIntent intent;
     intent.kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::CreateLabelingTask(std::string task_name)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::CreateLabelingTask;
+    intent.task_name = std::move(task_name);
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(
+    std::filesystem::path annotation_path)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation;
+    intent.path = std::move(annotation_path);
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::RenameActiveLabelingTask(std::string task_name)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask;
+    intent.task_name = std::move(task_name);
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::DeleteActiveLabelingTask()
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask;
     return intent;
 }
 
@@ -356,6 +398,9 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
                 &result.loaded,
                 &result.message);
             break;
+        case SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult:
+            result.action = RemoveReadOnlyAnnotationFromActiveSource(intent.source_collection.path);
+            break;
         }
         break;
     case SourceCollectionSessionIntentKind::SampleNavigation:
@@ -378,6 +423,18 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         switch (intent.active_sample_workflow.kind) {
         case ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask:
             result.action = CreateDefaultLabelingTask();
+            break;
+        case ActiveSampleWorkflowIntentKind::CreateLabelingTask:
+            result.action = CreateLabelingTask(std::move(intent.active_sample_workflow.task_name));
+            break;
+        case ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation:
+            result.action = ActivateLabelingTaskFromAnnotation(std::move(intent.active_sample_workflow.path));
+            break;
+        case ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask:
+            result.action = RenameActiveLabelingTask(std::move(intent.active_sample_workflow.task_name));
+            break;
+        case ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask:
+            result.action = DeleteActiveLabelingTask();
             break;
         case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
             result.action = UpsertActiveLabel(std::move(intent.active_sample_workflow.label), &result.changed);
@@ -494,7 +551,26 @@ SourceCollectionSessionAction SourceCollectionSession::AddReadOnlyAnnotationToAc
     bool* loaded,
     std::string* message)
 {
-    return workflow_->AddReadOnlyAnnotationToActiveSource(path, loaded, message);
+    bool annotation_loaded = false;
+    SourceCollectionSessionAction action =
+        workflow_->AddReadOnlyAnnotationToActiveSource(path, &annotation_loaded, message);
+    if (loaded != nullptr) {
+        *loaded = annotation_loaded;
+    }
+    if (annotation_loaded) {
+        MarkSourceSessionCacheDirty();
+    }
+    return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RemoveReadOnlyAnnotationFromActiveSource(
+    const std::filesystem::path& path)
+{
+    SourceCollectionSessionAction action = workflow_->RemoveReadOnlyAnnotationFromActiveSource(path);
+    if (action.navigation_inputs_changed || action.workflow_changed || action.snapshot_changed) {
+        MarkSourceSessionCacheDirty();
+    }
+    return action;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::SetSampleNameQuery(std::string query)
@@ -518,6 +594,27 @@ SourceCollectionSessionAction SourceCollectionSession::CommitSampleNameSelection
 SourceCollectionSessionAction SourceCollectionSession::CreateDefaultLabelingTask()
 {
     return workflow_->CreateDefaultLabelingTask();
+}
+
+SourceCollectionSessionAction SourceCollectionSession::CreateLabelingTask(std::string task_name)
+{
+    return workflow_->CreateLabelingTask(std::move(task_name));
+}
+
+SourceCollectionSessionAction SourceCollectionSession::ActivateLabelingTaskFromAnnotation(
+    std::filesystem::path annotation_path)
+{
+    return workflow_->ActivateLabelingTaskFromAnnotation(std::move(annotation_path));
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RenameActiveLabelingTask(std::string task_name)
+{
+    return workflow_->RenameActiveLabelingTask(std::move(task_name));
+}
+
+SourceCollectionSessionAction SourceCollectionSession::DeleteActiveLabelingTask()
+{
+    return workflow_->DeleteActiveLabelingTask();
 }
 
 SourceCollectionSessionAction SourceCollectionSession::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
@@ -583,14 +680,14 @@ SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingFilterSo
 
 void SourceCollectionSession::MaybeSaveStateCaches(std::uint64_t frame_index)
 {
-    source_session_state_->MaybeSave(frame_index, roster_->SavedSources(), roster_->current_source_index());
+    source_session_state_->MaybeSave(frame_index, SavedSourcesWithAnnotations(), roster_->current_source_index());
     workflow_->MaybeSaveStateCaches(frame_index);
 }
 
 bool SourceCollectionSession::FlushStateCaches()
 {
     const bool source_session_saved =
-        source_session_state_->Flush(roster_->SavedSources(), roster_->current_source_index());
+        source_session_state_->Flush(SavedSourcesWithAnnotations(), roster_->current_source_index());
     const bool workflow_saved = workflow_->FlushStateCaches();
     return source_session_saved && workflow_saved;
 }
@@ -625,6 +722,23 @@ SourceCollectionSessionAction SourceCollectionSession::LoadActiveSourceAt(std::s
     return action;
 }
 
+std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWithAnnotations() const
+{
+    std::vector<SourceCollectionSavedSource> sources = roster_->SavedSources();
+    const std::vector<std::string> source_keys = roster_->SavedSourceKeys();
+    const std::unordered_map<std::string, std::vector<std::filesystem::path>> annotation_paths_by_source_key =
+        workflow_->AnnotationPathsBySourceKey();
+
+    const std::size_t count = std::min(sources.size(), source_keys.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto paths = annotation_paths_by_source_key.find(source_keys[index]);
+        if (paths != annotation_paths_by_source_key.end()) {
+            sources[index].annotation_paths = paths->second;
+        }
+    }
+    return sources;
+}
+
 void SourceCollectionSession::RestoreSourceSessionCache()
 {
     const SourceCollectionSessionStateCache state = source_session_state_->Load();
@@ -641,6 +755,7 @@ void SourceCollectionSession::RestoreSourceSessionCache()
         }
 
         (void)OpenSource(source.path, source.last_spectrum_index);
+        (void)workflow_->RestoreReadOnlyAnnotationsForActiveSource(source.annotation_paths);
         if (state.active_source_index && *state.active_source_index == source_index) {
             restored_active_source_index = roster_->current_source_index();
         }

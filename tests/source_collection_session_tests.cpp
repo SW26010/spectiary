@@ -1,5 +1,7 @@
 #include "domain/sample_labeling.h"
+#include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/sample_labeling_state_cache_io.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -57,6 +59,30 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
     Require(stream.good(), "could not open text file for writing");
     stream << contents;
     Require(stream.good(), "could not write text file");
+}
+
+void SaveLabelResultFixture(
+    const std::filesystem::path& path,
+    std::string task_id,
+    std::string task_name,
+    std::vector<int> values,
+    specforge::SampleLabelSet label_set,
+    bool write_metadata)
+{
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), values.size());
+    task.values = std::move(values);
+    task.label_set = std::move(label_set);
+    std::string error;
+    Require(
+        specforge::SaveSampleLabelResultNpy(path, task, &error),
+        error.empty() ? "label result fixture NPY should save" : error);
+    if (write_metadata) {
+        error.clear();
+        Require(
+            specforge::SaveSampleLabelResultMetadataSidecar(path, task, nullptr, &error),
+            error.empty() ? "label result fixture metadata should save" : error);
+    }
 }
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
@@ -202,6 +228,18 @@ specforge::SourceCollectionSessionIntent RemoveSourceCollection(std::size_t sour
         specforge::SourceCollectionIntent::Remove(source_index));
 }
 
+specforge::SourceCollectionSessionIntent AddReadOnlyAnnotation(std::filesystem::path path)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::AddReadOnlyAnnotationResult(std::move(path)));
+}
+
+specforge::SourceCollectionSessionIntent RemoveReadOnlyAnnotation(std::filesystem::path path)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::RemoveReadOnlyAnnotationResult(std::move(path)));
+}
+
 specforge::SourceCollectionSessionIntent MoveSampleNavigation(specforge::SampleNavigationRequest request)
 {
     return specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
@@ -218,6 +256,36 @@ specforge::SourceCollectionSessionIntent CreateDefaultLabelingTask()
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
         specforge::ActiveSampleWorkflowIntent::CreateDefaultLabelingTask());
+}
+
+specforge::SourceCollectionSessionIntent CreateLabelingTask(std::string task_name)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::CreateLabelingTask(std::move(task_name)));
+}
+
+specforge::SourceCollectionSessionIntent ActivateLabelingTaskFromAnnotation(std::filesystem::path annotation_path)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(std::move(annotation_path)));
+}
+
+specforge::SourceCollectionSessionIntent RenameActiveLabelingTask(std::string task_name)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::RenameActiveLabelingTask(std::move(task_name)));
+}
+
+specforge::SourceCollectionSessionIntent DeleteActiveLabelingTask()
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::DeleteActiveLabelingTask());
+}
+
+specforge::SourceCollectionSessionIntent SetActiveLabelingOutputPath(std::filesystem::path output_path)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(std::move(output_path)));
 }
 
 specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabelDefinition label)
@@ -441,6 +509,313 @@ void TestDeactivatingLabelingTaskClearsActiveTaskFilter()
     Require(result.view.labeling.current_code == 1, "reactivated task should keep its label result");
 }
 
+void TestCreateLabelingTaskUsesCustomName()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, CreateLabelingTask("  Quality review  "));
+    Require(result.view.labeling.has_active_task, "custom labeling task should become active");
+    Require(result.view.labeling.task_name == "Quality review", "custom task name should be trimmed and exposed");
+
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(true));
+    Require(result.view.filter.sources.size() == 1, "custom task should be available as a filter source");
+    Require(result.view.filter.sources[0].id == "labeling:quality-review", "custom task id should derive from name");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        "custom task should accept labels");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+
+    (void)Submit(session, DeactivateActiveLabelingTask());
+    result = Submit(session, CreateLabelingTask("Quality review"));
+    Require(result.view.labeling.has_active_task, "same custom task should reactivate");
+    Require(result.view.labeling.current_code == 3, "reactivated custom task should keep its draft values");
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(true));
+    Require(
+        result.view.filter.sources[0].id == "labeling:quality-review",
+        "reactivated custom task should keep the same filter source id");
+}
+
+void TestRenameAndDeleteActiveLabelingTask()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateLabelingTask("Quality review"));
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        "task should accept a label before rename/delete");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, RenameActiveLabelingTask(" Reviewed set "));
+    Require(result.view.labeling.has_active_task, "renamed task should remain active");
+    Require(result.view.labeling.task_name == "Reviewed set", "rename should trim and expose the new task name");
+    result = Submit(session, SetActiveLabelingFilterSourceSelected(true));
+    Require(
+        result.view.filter.sources[0].id == "labeling:quality-review",
+        "rename should keep the stable task id");
+    Require(
+        result.view.filter.sources[0].name == "Reviewed set",
+        "rename should update the filter source display name");
+
+    result = Submit(session, DeleteActiveLabelingTask());
+    Require(result.action.workflow_changed, "delete should report workflow change");
+    Require(!result.view.labeling.has_active_task, "delete should clear the active task");
+    Require(!result.view.filter.has_active_labeling_task, "deleted task should no longer be a filter source");
+
+    result = Submit(session, CreateLabelingTask("Quality review"));
+    Require(result.view.labeling.has_active_task, "creating after delete should create a fresh task");
+    Require(
+        result.view.labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "deleted draft values should not come back");
+}
+
+void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_quality.npy");
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
+    label_set.labels.push_back(specforge::SampleLabelDefinition{9, "good", 'g'});
+    SaveLabelResultFixture(
+        annotation_path,
+        "quality-review",
+        "Quality review",
+        {5, -1, 9},
+        label_set,
+        true);
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(result.loaded, "external label result annotation should load");
+    Require(result.view.navigation.current_annotations.size() == 1, "loaded annotation should appear in navigation");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+        "metadata-backed annotation should start as external");
+    Require(
+        result.view.navigation.current_annotations[0].can_activate_labeling,
+        "categorical annotation should be draggable into labeling");
+
+    result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(result.view.labeling.has_active_task, "annotation activation should create an active task");
+    Require(result.view.labeling.task_name == "Quality review", "annotation metadata task name should be reused");
+    Require(result.view.labeling.current_code == 5, "labeling task should reuse annotation values");
+    Require(result.view.labeling.output_path && *result.view.labeling.output_path == annotation_path, "task should bind output path");
+    Require(
+        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "metadata-backed annotation activation should be clean");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+        "activated annotation should be shown as a local labeling task");
+
+    result = Submit(session, RemoveReadOnlyAnnotation(annotation_path));
+    Require(!result.action.workflow_changed, "removing an annotation should not delete the local task");
+    Require(result.view.navigation.current_annotations.size() == 1, "local task should remain visible after annotation removal");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+        "remaining row should come from the local task record");
+    Require(result.view.labeling.has_active_task, "removing an annotation should not remove the active local task");
+}
+
+void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_blocked_activation.npy");
+    const std::filesystem::path blocked_output_path = UniqueTempPath("_blocked_output");
+    std::filesystem::create_directories(blocked_output_path);
+
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
+    SaveLabelResultFixture(
+        annotation_path,
+        "external-task",
+        "External task",
+        {5, -1, 5},
+        label_set,
+        true);
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    specforge::SourceCollectionSessionResult result = Submit(session, CreateLabelingTask("Current task"));
+    Require(result.view.labeling.has_active_task, "current task should be active before activation attempt");
+    Require(result.view.labeling.task_id == "current-task", "test should start with the current task");
+    result = Submit(session, SetActiveLabelingOutputPath(blocked_output_path));
+    Require(
+        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        "current task should have a failed save guard");
+
+    result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(result.loaded, "external annotation should load before blocked activation");
+    result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(result.view.labeling.has_active_task, "blocked activation should keep the active task");
+    Require(result.view.labeling.task_id == "current-task", "annotation activation must not switch active tasks");
+    Require(
+        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        "blocked activation should preserve the failed save state");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+        "blocked activation should leave the annotation external");
+}
+
+void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_plain.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "plain-fixture",
+        "Plain fixture",
+        {7, -1, 5},
+        {},
+        false);
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(result.loaded, "plain integer annotation should load");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
+        "annotation without metadata should start as plain");
+
+    result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(result.view.labeling.has_active_task, "plain annotation activation should create an active task");
+    Require(result.view.labeling.current_code == 7, "plain annotation values should become editable label values");
+    Require(result.view.labeling.label_set.labels.size() == 2, "plain annotation unique values should become labels");
+    Require(result.view.labeling.label_set.labels[0].code == 5, "plain annotation labels should include value 5");
+    Require(result.view.labeling.label_set.labels[1].code == 7, "plain annotation labels should include value 7");
+    Require(
+        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "plain annotation activation should write its new metadata sidecar");
+    Require(
+        std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
+        "plain annotation activation should create metadata sidecar");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+        "plain annotation should become local after activation");
+}
+
+void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_missing_metadata.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "plain-fixture",
+        "Plain fixture",
+        {7, -1, 5},
+        {},
+        false);
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, AddReadOnlyAnnotation(annotation_path));
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(result.view.labeling.has_active_task, "plain annotation should become a local task");
+    Require(
+        std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
+        "test should start with a converted metadata sidecar");
+
+    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(annotation_path));
+    result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(
+        result.view.navigation.current_annotations.size() == 1,
+        "same loaded output path should render as one annotation row");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
+        "loaded output path owned by a local task should stay local when metadata is missing");
+    Require(
+        result.view.navigation.current_annotations[0].metadata_missing,
+        "missing local metadata sidecar should be surfaced in the annotation row");
+    Require(
+        result.view.navigation.current_annotations[0].display_text == "7 (7)",
+        "local task values should drive the row after missing metadata fallback");
+}
+
+void TestAnnotationLocalMatchRequiresSidecarTaskId()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_task_id_mismatch.npy");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    TouchFile(source_path);
+
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
+    SaveLabelResultFixture(
+        annotation_path,
+        "external-task",
+        "External task",
+        {5, -1},
+        label_set,
+        true);
+
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*MakeSnapshot(source_path, 2, 0));
+    specforge::SampleLabelingTask local_task =
+        specforge::CreateSampleLabelingTask("local-task", "Local task", 2);
+    local_task.output_path = annotation_path;
+    local_task.values = {5, -1};
+
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = identity.spectrum_count;
+    source_state.source_name = identity.source_name;
+    source_state.source_fingerprint = identity.source_fingerprint;
+    source_state.context_fingerprint = identity.context_fingerprint;
+    source_state.tasks.push_back(std::move(local_task));
+    source_state.active_task_id = "local-task";
+
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(identity.id, std::move(source_state));
+    Require(specforge::SaveSampleLabelingStateCache(labeling_cache, cache), "labeling cache fixture should save");
+
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    specforge::SourceCollectionSession session(
+        [&loaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
+            Require(path == source_path, "mismatch fixture should load the source path");
+            loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            return MakeSnapshot(source_path, 2, spectrum_index);
+        },
+        navigation_cache,
+        labeling_cache);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(result.loaded, "metadata-backed annotation should load");
+    Require(result.view.labeling.has_active_task, "local cache fixture should restore the local task");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+        "same path and sample count should not make a local match without matching sidecar task id");
+
+    result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(
+        result.view.labeling.task_id == "local-task",
+        "activation should not switch to a same-path task when the sidecar task id differs");
+    Require(
+        result.view.navigation.current_annotations[0].relationship ==
+            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
+        "mismatched sidecar task id should keep the annotation external");
+}
+
 void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
 {
     const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
@@ -610,8 +985,12 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
     const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
     const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
+    const std::filesystem::path first_annotation_path = UniqueTempPath("_first_annotation.npy");
+    const std::filesystem::path second_annotation_path = UniqueTempPath("_second_annotation.npy");
     TouchFile(first_source_path);
     TouchFile(second_source_path);
+    SaveLabelResultFixture(first_annotation_path, "first-annotation", "First annotation", {1, 2, 3}, {}, false);
+    SaveLabelResultFixture(second_annotation_path, "second-annotation", "Second annotation", {4, 5}, {}, false);
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
@@ -626,7 +1005,9 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
             2);
 
         (void)Submit(session, OpenSourceCollection(first_source_path, 1));
+        (void)Submit(session, AddReadOnlyAnnotation(first_annotation_path));
         (void)Submit(session, OpenSourceCollection(second_source_path, 0));
+        (void)Submit(session, AddReadOnlyAnnotation(second_annotation_path));
         (void)Submit(session, SwitchSourceCollection(0));
         specforge::SourceCollectionSessionResult navigate_result =
             Submit(session, MoveSampleNavigation(
@@ -654,6 +1035,10 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
     Require(view.current_source_index && *view.current_source_index == 0, "restored active source should be first");
     Require(view.snapshot->source.path == first_source_path, "restored snapshot should be the active first source");
     Require(view.snapshot->collection.current_index == 2, "restored first source should keep its last sample index");
+    Require(view.navigation.current_annotations.size() == 1, "restored first source should restore annotations");
+    Require(
+        view.navigation.current_annotations[0].path == first_annotation_path,
+        "restored first source annotation path should come from source session state");
     Require(restored_loads.size() == 2, "restoring two cached sources should load each source once");
     Require(restored_loads[0].path == first_source_path && restored_loads[0].index == 2, "first source should restore row 2");
     Require(restored_loads[1].path == second_source_path && restored_loads[1].index == 0, "second source should restore row 0");
@@ -663,6 +1048,15 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
     Require(
         !std::filesystem::exists(source_session_cache),
         "restore should not mark the source session cache dirty immediately");
+
+    const specforge::SourceCollectionSessionResult second_result =
+        Submit(restored, SwitchSourceCollection(1));
+    Require(
+        second_result.view.navigation.current_annotations.size() == 1,
+        "restored second source should restore its own annotations");
+    Require(
+        second_result.view.navigation.current_annotations[0].path == second_annotation_path,
+        "restored second source annotation path should come from source session state");
 }
 
 void TestSourceSessionStateCacheRoundTrip()
@@ -670,12 +1064,12 @@ void TestSourceSessionStateCacheRoundTrip()
     const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_sources.json");
     const std::filesystem::path first_source_path = UniqueTempPath("_adapter_first.npy");
     const std::filesystem::path second_source_path = UniqueTempPath("_adapter_second.npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_adapter_annotation.npy");
 
     specforge::SourceCollectionSessionStateCache cache;
-    cache.sources = {
-        specforge::SourceCollectionSavedSource{first_source_path, 2},
-        specforge::SourceCollectionSavedSource{second_source_path, 0},
-    };
+    specforge::SourceCollectionSavedSource first_source{first_source_path, 2};
+    first_source.annotation_paths.push_back(annotation_path);
+    cache.sources = {first_source, specforge::SourceCollectionSavedSource{second_source_path, 0}};
     cache.active_source_index = 1;
     Require(
         specforge::SaveSourceCollectionSessionStateCache(source_session_cache, cache),
@@ -686,6 +1080,10 @@ void TestSourceSessionStateCacheRoundTrip()
     Require(loaded.sources.size() == 2, "source session cache should restore all sources");
     Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
     Require(loaded.sources[0].last_spectrum_index == 2, "first source index should round-trip");
+    Require(loaded.sources[0].annotation_paths.size() == 1, "first source annotation paths should round-trip");
+    Require(
+        loaded.sources[0].annotation_paths[0] == annotation_path,
+        "first source annotation path should round-trip");
     Require(loaded.sources[1].path == second_source_path, "second source path should round-trip");
     Require(
         loaded.active_source_index && *loaded.active_source_index == 1,
@@ -849,6 +1247,13 @@ int main()
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
     TestDeactivatingLabelingTaskClearsActiveTaskFilter();
+    TestCreateLabelingTaskUsesCustomName();
+    TestRenameAndDeleteActiveLabelingTask();
+    TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
+    TestAnnotationActivationRequiresCurrentTaskToBeClosed();
+    TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
+    TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing();
+    TestAnnotationLocalMatchRequiresSidecarTaskId();
     TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters();
     TestNavigationViewSeparatesSampleNameFromDisplayName();
     TestNavigationViewExposesSourceProvidedSampleName();

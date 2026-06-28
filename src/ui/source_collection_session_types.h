@@ -44,6 +44,8 @@ struct SourceCollectionAnnotationValueView {
     bool missing = false;
     bool output_missing = false;
     bool metadata_missing = false;
+    bool can_activate_labeling = false;
+    bool can_remove_annotation = false;
 };
 
 struct SourceCollectionNavigationView {
@@ -70,6 +72,7 @@ struct SourceCollectionLabelingView {
     bool has_active_source = false;
     std::optional<std::size_t> current_index;
     bool has_active_task = false;
+    std::string task_id;
     std::string task_name;
     SampleLabelSet label_set;
     std::size_t labeled_count = 0;
@@ -81,6 +84,7 @@ struct SourceCollectionLabelingView {
     std::optional<std::filesystem::path> output_path;
     SampleLabelSaveState save_state;
     bool can_deactivate_task = false;
+    bool can_delete_task = false;
     bool state_save_failed = false;
     std::string state_save_error;
     std::string state_load_warning;
@@ -115,6 +119,7 @@ struct SourceCollectionSourceView {
 struct SourceCollectionSavedSource {
     std::filesystem::path path;
     std::size_t last_spectrum_index = 0;
+    std::vector<std::filesystem::path> annotation_paths;
 };
 
 struct SourceCollectionSessionView {

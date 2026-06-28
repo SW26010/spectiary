@@ -167,6 +167,15 @@ state may be closed because their current recovery state is owned by the local
 task record. A later implementation may allow non-blocking close with background
 retry and explicit pending-task surfacing.
 
+Deleting a sample labeling task is a separate explicit operation from closing
+or deactivating it. Delete removes the local task record, its internal draft,
+and any active filter condition that targets that task. It must not delete the
+task's selected output `.npy` file or adjacent portable metadata sidecar. If the
+same output file is still loaded as an annotation later, SpecForge should treat
+it according to the normal plain/external/local matching rules rather than
+silently resurrecting the deleted local task record. Delete should be disabled
+while the task has pending or failed output saves, matching close/deactivate.
+
 The visible sample filtering window should be named `Filters`. In this document,
 `Sample filtering` remains the domain term for filter ownership and behavior.
 
@@ -428,6 +437,9 @@ identity. It persists the last shown sample index for the source collection
 regardless of which sample labeling task is active. Activating or switching a
 sample labeling task must not overwrite that navigation state or use the task's
 remembered labeling position as the source collection's current sample index.
+Loaded annotation paths are source collection session state, not sample
+navigation cache state. They should be restored with the user's current source
+collection session and kept separate from the last-index navigation cache.
 
 A source collection identity for task-record lookup should include source name,
 source fingerprint, and spectrum count. For NPY sources, the source name is the
