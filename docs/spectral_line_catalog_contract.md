@@ -47,7 +47,7 @@ are valid.
 | `id` | yes | Unique stable ASCII id for UI state, tests, and local overlays. |
 | `label` | yes | Domain label shown in the UI and plot annotations. |
 | `kind` | yes | `line` or `band`. |
-| `group` | yes | Public filter group such as `Balmer`, `Ca II`, `CN`, or `Isotope`. Required for the built-in public catalog. |
+| `group` | yes | Public catalog group such as `Balmer`, `Ca II`, `CN`, or `Isotope`. Required for the built-in public catalog. |
 | `vacuum_angstrom` | for `line` | Positive finite rest vacuum wavelength for a single line. |
 | `start_vacuum_angstrom` | for `band` | Positive finite rest vacuum start for a band marker. |
 | `end_vacuum_angstrom` | for `band` | Positive finite rest vacuum end for a band marker. |
@@ -73,9 +73,9 @@ implementation has one active catalog at a time. The panel should expose:
 - text search over marker identity and display fields;
 - a plot-label toggle.
 
-There is no separate public `group` filter contract. Catalog groups and user
-groups are tree organization surfaces with bulk visibility controls; they do
-not create independent plot state. Hiding every marker in the active catalog is
+There is no separate public `group` selection contract. Catalog groups and user
+groups are tree organization surfaces with bulk visibility controls; they do not
+create independent plot state. Hiding every marker in the active catalog is
 represented by marker visibility state, not by a separate "hide public catalog"
 switch.
 

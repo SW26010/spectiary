@@ -5,6 +5,37 @@ physical reference data from user-owned display organization.
 
 ## Language
 
+### Sample Filtering Language Standard
+
+SpecForge reserves this word family for user-authored sample subset selection.
+Always qualify new user-facing text and new documentation as `sample filter`,
+`sample filtering`, or `Sample Filters`. Tests and domain-facing code should
+move toward the same qualification as related areas are touched, but existing
+names may be migrated in orderly follow-up work. Unqualified forms such as
+`filter`, `filtering`, `filtered`, `Filters`, `active filter`,
+`filter condition`, and `filtered set` are terminology defects in new product
+language unless they are part of an explicit alias list or migration note.
+
+Do not use this word family for display transforms, loader validity rules,
+spectral-line search, or overlay visibility:
+
+- A display-only curve transform is **Spectrum smoothing**.
+- A domain rule that keeps only plottable spectrum points is **Valid-point
+  selection**.
+- A point excluded by finite-value, wavelength, mask, or ivar rules is a
+  **Rejected pixel**.
+- Text matching inside a spectral-line grouping view is **Grouping view search**.
+- Showing or hiding spectral-line markers is **Marker visibility**.
+
+The shorthand rule is: sample filters select samples; smoothing transforms
+displayed values; validity rules reject bad pixels; search matches text;
+visibility shows or hides overlays.
+Searches for unqualified forms in product text or new documentation should
+treat them as terminology defects except inside this standard's explicit invalid
+examples, alias lists, and migration notes. Existing code and test hits should
+be treated as terminology migration candidates rather than immediate definition
+violations.
+
 **Spectral-line catalog**:
 A set of physical spectral reference markers with stable marker identifiers,
 optional grouping supplied by the catalog, and declared wavelength semantics.
@@ -83,10 +114,43 @@ The user-facing control of the current spectrum sample within a source
 collection, including movement, ordering, and locating a sample.
 _Avoid_: Labeling window, label set, plot pan
 
+**Sample navigation sequence**:
+The ordered set of spectrum sample row indexes that sequential sample
+navigation consumes. Without active sample filtering or sorting, it is the
+source collection's full sample ordering. With active sample filtering or
+sorting, previous, next, navigation-list movement, and labeling auto-advance
+operate within this sequence while the current sample remains identified by its
+source row index. An empty sample navigation sequence is a valid active sequence
+state that provides no current sample to downstream sample workflow or plot
+surfaces.
+_Avoid_: Source collection, narrowed-sequence index, labeling queue
+
 **Sample filtering**:
 The user-facing selection of a subset of spectrum samples from a source
 collection.
-_Avoid_: Sample navigation, labeling task, plot zoom
+_Avoid_: Unqualified filter language, spectrum smoothing, valid-point
+selection, grouping view search, marker visibility, plot zoom
+
+**Sample sorting**:
+The user-facing choice of the order used by the sample navigation sequence.
+Sample sorting never changes which samples belong to the sequence.
+_Avoid_: Source row index, sample filtering, source collection identity
+
+**Spectrum smoothing**:
+A display-only plot transform that draws a derived curve from current spectrum
+y values without changing the current snapshot.
+_Avoid_: Spectrum-filter language, pixel-filter language, domain-filter language
+
+**Valid-point selection**:
+A domain loading rule that keeps only spectrum points eligible for plotting,
+including finite-value, positive-wavelength, mask, and ivar checks.
+_Avoid_: Pixel-filter language, mask-filter language, ivar-filter language,
+smoothing
+
+**Rejected pixel**:
+A spectrum point excluded by valid-point selection because its values, mask, or
+ivar make it unplottable.
+_Avoid_: Filtered-pixel language, smoothed point, hidden marker
 
 **Sample annotation view**:
 The user-facing display of loaded sample annotation results for the current
@@ -144,7 +208,7 @@ _Avoid_: Duplicate marker, conflicting marker
 **Move marker reference**:
 A user action that transfers a marker reference from one user group to another
 within the same editable user grouping view, including while that view is
-filtered by grouping view search.
+narrowed by grouping view search.
 _Avoid_: Edit catalog group, rewrite marker
 
 **Copy marker reference**:
@@ -165,7 +229,7 @@ _Avoid_: Deleted line, invalid catalog row
 **Grouping view**:
 A tree-shaped organization of spectral-line marker references for one catalog
 identity. Its marker visibility controls are shared catalog user state.
-_Avoid_: Plot filter, catalog content
+_Avoid_: Plot-filter language, catalog content
 
 **User grouping view**:
 A named, editable grouping view whose marker membership belongs to the user. It
@@ -199,14 +263,14 @@ _Avoid_: Catalog group, missing markers
 **User group visibility control**:
 A bulk control on a user group that changes marker visibility for the group's
 resolved marker references. It is not separate visibility state for the group,
-and it has a non-actionable search state when the visible group contents are
-filtered by search.
+and it has a non-actionable search state when search narrows the visible group
+contents.
 _Avoid_: Group visibility state, per-group overlay state
 
 **Grouping view search**:
-A text filter applied to the active grouping view tree. It preserves user group
+A text search applied to the active grouping view tree. It preserves user group
 structure and only expands groups whose marker references match.
-_Avoid_: Global catalog search, flat result list
+_Avoid_: Global-catalog-filter language, flat result list, sample filter
 
 **Grouping view set**:
 The user's optional collection of alternative user grouping views for one

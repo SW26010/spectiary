@@ -122,14 +122,14 @@ Each group has a bulk visibility control:
 - all resolved markers visible;
 - all resolved markers hidden;
 - mixed visibility;
-- non-actionable search state while the tree is filtered.
+- non-actionable search state while search is active.
 
 The bulk control changes marker visibility for resolved marker references. It is
 not separate group visibility state.
 
 ## Search And Dragging
 
-Search filters the active grouping view tree while preserving group structure.
+Search narrows the active grouping view tree while preserving group structure.
 Groups with matching marker references may be expanded; groups without matching
 children should not be expanded merely because search is active.
 

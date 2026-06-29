@@ -184,7 +184,7 @@ SDSS 还有两个坑：
 打开 FITS 时建议按这个顺序：
 
 1. 找 table HDU：必须有 `flux`，并且有 `loglam` 或 `wavelength`。
-2. 找受限 image fallback：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时按 `ivar > 0` 过滤；第 4 行存在时按 `ormask == 0` 过滤；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
+2. 找受限 image fallback：必须有 `COEFF0/COEFF1`；第 0 行是 flux；第 1 行存在时只保留 `ivar > 0` 的点；第 4 行存在时只保留 `ormask == 0` 的点；不使用 `CRVAL1/CD1_1` 猜测 log10 wavelength。
 3. 读取可验证的目标 RV 或红移元数据，挡住无效 redshift，标记不可靠 redshift，并记录当前是否有可用的 `target_redshift`；不要使用 `HELIO_RV` 作为目标速度。
 4. 清理非有限 wavelength/flux、非正 wavelength，并按 wavelength 升序画。
 5. 如果找不到这些信息，提示“这是 catalog 或不支持的 FITS，不是单条光谱”。

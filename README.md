@@ -14,8 +14,8 @@ synthetic spectrum fixture, and optional JSONL profile output.
 - The main plot consumes `SpectrumSnapshotHandle` snapshots from the domain
   layer; the synthetic fixture and `.npy` loader use the same UI/plot path.
 - A versioned public spectral-line catalog is loaded from
-  `config/spectral_lines.public.tsv`; the Spectral Lines panel filters it and
-  the main plot renders line and band reference overlays.
+  `config/spectral_lines.public.tsv`; the Spectral Lines panel searches and
+  organizes it, and the main plot renders line and band reference overlays.
 - The real-data loader supports `.npy` spectrum matrices, simple
   wavelength/flux `.csv` files, and recognized single-spectrum FITS files
   focused on LAMOST/SDSS table spectra. Limited COEFF0/COEFF1 FITS image

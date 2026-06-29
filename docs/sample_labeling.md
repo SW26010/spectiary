@@ -23,6 +23,10 @@ Use the terms from `CONTEXT.md`:
 - `Sample label result metadata`: portable metadata that explains a compact
   sample label result.
 - `Sample labeling draft`: an in-progress label result saved for recovery.
+- `Sample filtering`: user-authored sample subset selection. In SpecForge, this
+  word family should be qualified in new product and documentation language and
+  must not refer to spectrum smoothing, valid-point selection, spectral-line
+  search, or marker visibility.
 
 ## Staged Rollout
 
@@ -117,17 +121,19 @@ floating-point annotations may be displayed read-only, but they should not be
 edited or saved as first-version sample labeling tasks.
 
 Auto-advance after labeling is a global workflow setting for the active sample
-labeling task, not a per-label setting. When auto-advance is enabled, the default
-target is the next sample in source order. A separate skip-labeled option may
-make auto-advance jump to the next unlabeled sample instead.
+labeling task, not a per-label setting. When auto-advance is enabled, the
+default target is the next sample in the current sample navigation sequence.
+Without active sample filtering or sorting, that sequence is source order. A
+separate skip-labeled option may make auto-advance jump to the next unlabeled
+sample in the current sample navigation sequence instead.
 Because sample navigation is owned outside the Labeling window, assigning a
 label should emit an advance request rather than directly changing the current
 sample. The sample navigation surface decides and performs the actual switch,
-including skip-labeled behavior. Labeling does not inspect filter or
-out-of-filter state before issuing the request. After a Labeling navigation
-request, Navigation should return a navigation result with the actual current
-sample index and whether movement occurred. Labeling uses the returned actual
-index to update the task's remembered labeling position. If Navigation does not
+including skip-labeled behavior. Labeling does not inspect sample-filter or
+sample navigation sequence state before issuing the request. After a Labeling
+navigation request, Navigation should return a navigation result with the actual
+current sample index and whether movement occurred. Labeling uses the returned
+actual index to update the task's remembered labeling position. If Navigation does not
 move, the returned index is still the current sample, so the write applies there
 and the remembered labeling position remains there. The movement flag is program
 state for control flow and tests, not a source for Labeling-owned user feedback.
@@ -156,7 +162,7 @@ rather than hide the `Labeling` window or delete the task record. Deactivation
 leaves the task record, label set, shortcuts, selected output path, remembered
 position, and sample label result intact. After deactivation, `Labeling` has no
 active task and may accept a new task, including one converted from a categorical
-annotation in the `Annotations` window. Any filter condition that explicitly
+annotation in the `Annotations` window. Any sample-filter condition that explicitly
 uses the active sample labeling task should be cleared or made inactive when
 there is no active task.
 In the first implementation, closing the active task should be disabled while
@@ -169,15 +175,25 @@ retry and explicit pending-task surfacing.
 
 Deleting a sample labeling task is a separate explicit operation from closing
 or deactivating it. Delete removes the local task record, its internal draft,
-and any active filter condition that targets that task. It must not delete the
+and any active sample-filter condition that targets that task. It must not delete the
 task's selected output `.npy` file or adjacent portable metadata sidecar. If the
 same output file is still loaded as an annotation later, SpecForge should treat
 it according to the normal plain/external/local matching rules rather than
 silently resurrecting the deleted local task record. Delete should be disabled
 while the task has pending or failed output saves, matching close/deactivate.
 
-The visible sample filtering window should be named `Filters`. In this document,
-`Sample filtering` remains the domain term for filter ownership and behavior.
+The visible sample filtering window should be named `Sample Filters`. In this
+document, `Sample filtering` remains the domain term for sample-filter ownership
+and behavior. The unqualified window label is invalid because it can be
+confused with spectrum smoothing or loader validity rules.
+
+The visible sample sorting panel should be named `Sample Sorting`. In this
+document, `Sample sorting` remains the domain term for choosing the order used
+by the sample navigation sequence. It is a separate dockable ImGui panel because
+sorting is a first-class sample workflow surface in the dock layout, not a hidden
+subsection of `Navigation` or `Sample Filters`. It is separate from `Sample
+Filters` because sample filtering owns which samples are included, while sample
+sorting owns only their navigation order.
 
 Sample navigation owns the current sample index, previous/next movement,
 ordering, and locating samples by index or sample name. In the first
@@ -214,31 +230,80 @@ Future sample navigation sorting modes may include sample name and annotation
 value from a user-selected annotation result or sample labeling task. Sorting by
 annotation value must not implicitly follow the active editable task, because
 changing the active task should not unexpectedly reorder sample navigation.
+Sample sorting belongs to the separate `Sample Sorting` panel. That panel
+submits the active sample-sorting choice; it does not own the materialized sample
+navigation sequence.
 Annotation-value sorting should support ascending and descending order. Read-only
 string annotations may be sorted by lexical order, and floating-point
-annotations may be sorted by numeric value.
+annotations may be sorted by numeric value. Integer annotations without
+sample-label-result evidence may be sorted by numeric value. Integer annotations
+with sample-label-result evidence must not be available for sample sorting in
+the first implementation, because their stored codes identify labels rather than
+rank. Sample-label-result evidence includes a matching local sample labeling
+task record, matching adjacent sample label result metadata such as
+`<stem>.sf-labels.json`, or a loaded annotation relationship that marks the
+values as an external or local sample label result.
+In the first implementation, an annotation should be available as a
+sample-sorting source only when every sample has a comparable value for that
+annotation. Annotation results with missing values, NaN values, or values that
+cannot be compared consistently should not be exposed for sample sorting.
+Applying or changing sorting creates an active sample navigation sequence even
+when sample filtering is not active. It should keep the current sample selected
+when that sample remains in the sequence, recompute its sequence position, and
+make previous/next navigation, navigation lists, sample-name location, and
+labeling auto-advance follow the sorted sequence. Sample sorting never changes
+which samples belong to the sample navigation sequence.
 
-Sample filtering belongs to a separate filtering window. It should support
-stacking multiple filter conditions. Categorical filters may use annotation
-values from a user-selected annotation result or sample labeling task, and must
-not implicitly follow the active editable task. Categorical filtering should
-support selecting multiple values at once, including the unlabeled sentinel for
-labeling tasks. For numeric categorical values with a label set or mapping, the
-filter UI should show the label name with the numeric code, such as `bad (1)`.
+Sample filtering belongs to the separate `Sample Filters` window. It should
+support stacking multiple sample-filter conditions. Categorical sample filters
+may use annotation values from a user-selected annotation result or sample
+labeling task, and must not implicitly follow the active editable task.
+Categorical sample filtering should support selecting multiple values at once,
+including the unlabeled sentinel for labeling tasks. For numeric categorical
+values with a label set or mapping, the sample-filter UI should show the label
+name with the numeric code, such as `bad (1)`.
 Without a mapping, it should show the raw code. Read-only string annotations may
-be filtered by selecting multiple string values. Floating-point annotations
-should not be filterable in the first implementation.
+participate in sample filtering by selecting multiple string values.
+Floating-point annotations should not be available for sample filtering in the
+first implementation. Multiple active sample-filter conditions use AND
+semantics: a sample is included only when it satisfies every active condition.
 
-When filtering is active, previous/next navigation, navigation lists, and
-auto-advance should operate within the filtered sample set. Direct row-index
-location may still jump to a sample outside the filtered set, but the navigation
-surface should make that out-of-filter state visible. While the current sample is
-outside the filtered set, Navigation should not execute previous/next movement or
-navigation-list movement, because there is no current position inside the
-filtered sequence. The user must clear or change the filter, direct-locate a
-sample inside the filtered set, or use another explicit direct locate action.
+When sample filtering is active, previous/next navigation, navigation lists,
+sample-name location, and auto-advance should operate within the sample
+navigation sequence. Applying or changing sample-filter conditions is a strong
+workflow action. If the current sample remains in the new sample navigation
+sequence, Navigation should keep it current and update its sequence position. If
+the current sample is excluded from the new sample navigation sequence,
+Navigation should remember it as the last sample before entering active sample
+filtering and automatically move to the first sample in the new sequence. While
+sample filtering remains active, changing sample-filter conditions or navigating
+within the sequence must not replace that remembered sample. Clearing sample
+filters should restore the last sample before entering active sample filtering
+when it is still valid. An empty sample navigation sequence is a valid active
+state; in that state no current sample should be displayed for the sample
+workflow or main plot until the user clears or changes the sample-filter
+conditions. The main plot must not keep rendering the last spectrum as fallback,
+because Navigation has not provided a current source row for that state.
+When sample filtering and sample sorting are both active, the sample navigation
+sequence should first apply all active sample-filter conditions and then sort the
+included samples. Sorting must not change which samples are included. Samples
+with equal sort values should keep source order as a stable tie-break.
+The construction of the sample navigation sequence should live behind one
+navigation-owned logic boundary rather than being reimplemented by the `Sample
+Filters`, `Sample Sorting`, `Navigation`, or `Labeling` panels. That boundary
+should take the source collection rows, active sample-filter conditions, and
+active sample-sorting choice, then produce the ordered row indexes, active or
+empty sequence state, current sequence position, previous/next targets, and
+sample-name matches scoped to the sequence.
+As a first-implementation UX constraint, row-index location should be disabled
+whenever sample filtering or sorting makes the sample navigation sequence differ
+from the source collection's full source ordering. This is not a long-term
+sample navigation definition. A later implementation may allow row-index
+location within the active sample navigation sequence, but it must not jump to a
+sample outside that sequence.
 Requests from Labeling are still resolved by Navigation under these same
-navigation rules; Labeling does not bypass or reinterpret the active filter.
+navigation rules; Labeling does not bypass or reinterpret the active sample
+filter or sample navigation sequence.
 
 The sample annotation view should be an independent `Annotations` window, not a
 section inside the Files or Info windows. In this document, `Sample annotation
@@ -357,7 +422,7 @@ should not be part of the first implementation.
 The Labeling window accepts only a sample label result through an active sample
 labeling task. It should not display generic annotation results or inactive
 annotation results, and it should not own or display the current sample index,
-sample ordering, previous/next controls, or filters. It may show task-level
+sample ordering, previous/next controls, or sample filters. It may show task-level
 labeling progress such as labeled count, unlabeled count, pending count, and save
 state. Keyboard shortcuts, clear-label behavior, auto-advance, autosave status,
 and save-state indication belong only to the active editable task.
@@ -379,10 +444,11 @@ Labeling requests Navigation to jump. The action means resume labeling at the
 remembered sample; it is not a restore of Navigation state and should not be
 named Back or Restore. Direct locate actions in Navigation do not by themselves
 update the task's remembered labeling position or dismiss the resume action.
-If the remembered sample is outside the active filter, the resume action may
-still be shown; confirming it sends a direct locate request to Navigation, which
-then enters the visible out-of-filter state rather than changing or bypassing the
-filter.
+If the remembered sample is outside the active sample navigation sequence, the
+resume action must not bypass the sequence. In the first active-sequence
+implementation, the resume action should be unavailable until the user clears or
+changes the sample filter so the remembered sample is part of the active
+sequence again.
 Sequential move actions in Navigation do update the active task's remembered
 labeling position, because moving one sample at a time is treated as part of the
 active labeling workflow. Once the user labels or clears the current sample
@@ -485,7 +551,7 @@ retried after non-blocking save failures.
 ## Annotation I/O
 
 The sample-labeling model should treat annotation storage formats as adapters.
-Core labeling, navigation, filtering, and annotation display should work with a
+Core labeling, navigation, sample filtering, and annotation display should work with a
 loaded sample annotation result: one value per spectrum sample, with a known
 value kind such as categorical integer, categorical string, or continuous
 floating point.
@@ -529,7 +595,7 @@ when moved together. The source collection identity summary should reuse the
 same source collection identity fields used by SpecForge's source/file
 management flow, such as source name, source fingerprint, context fingerprint,
 and spectrum count. It must not store the label value array, pending values,
-local autosave draft, active task state, window visibility, filter state, save
+local autosave draft, active task state, window visibility, sample-filter state, save
 retry state, or a local absolute source path.
 For an output file named `<stem>.npy`, the adjacent metadata file should be
 named `<stem>.sf-labels.json`.

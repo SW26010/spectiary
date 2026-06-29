@@ -8,7 +8,7 @@
 - Win32 + DirectX 11 + Dear ImGui docking + ImPlot shell。
 - 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture、`.npy`、CSV 和 FITS loader 使用同一条 UI/plot 路径。
 - loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱。
-- 已有第一版公开谱线表 `config/spectral_lines.public.tsv`，由 Spectral Lines 面板筛选，并在主图中显示 line/band 参考 overlay；公开表不包含 subtype 组合、窗口预设或私有判据。
+- 已有第一版公开谱线表 `config/spectral_lines.public.tsv`，由 Spectral Lines 面板搜索和组织，并在主图中显示 line/band 参考 overlay；公开表不包含 subtype 组合、窗口预设或私有判据。
 - 可选 JSONL profile sink 已经接入，用于解释输入、view update、draw、render/present 的基本链路。
 
 当前最新真实数据 profile 只证明主图 pan/drag 在 130Hz 预算下通过；144Hz 仍是未达标的 stretch target。任何刷新率或延迟结论必须来自真实数据和新日志。
@@ -17,7 +17,7 @@
 
 SpecForge 是一个本地 Windows 光谱查看工具。目标体验是优雅、跟手、克制、专业，用户可以长时间反复检查真实光谱数据，而不会被布局噪音、延迟或不稳定交互打断。
 
-UI 跟手程度是产品基础能力，不是可以被其它功能换取的优化项。任何 loader、overlay、filter、labeling、面板状态或本地状态功能，都不能让主图 pan、wheel zoom、上一条/下一条、range navigation 等实时交互退化；需要重计算、IO 或状态构造时，必须隔离、缓存、延后，或用真实数据 profile 证明不影响交互预算。
+UI 跟手程度是产品基础能力，不是可以被其它功能换取的优化项。任何 loader、overlay、sample filtering、labeling、面板状态或本地状态功能，都不能让主图 pan、wheel zoom、上一条/下一条、range navigation 等实时交互退化；需要重计算、IO 或状态构造时，必须隔离、缓存、延后，或用真实数据 profile 证明不影响交互预算。
 
 目标技术栈：
 
@@ -149,7 +149,7 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 
 ### Milestone 4: Overlay And Readiness
 
-状态：已完成第一版公开线表、UI 筛选和主图 reference overlay；hidden/local overlay、窗口预设和 profile attribution 仍待后续收敛。
+状态：已完成第一版公开线表、UI 搜索/组织和主图 reference overlay；hidden/local overlay、窗口预设和 profile attribution 仍待后续收敛。
 
 范围：
 

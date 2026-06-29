@@ -7,10 +7,10 @@ snapshot at a time; they do not parse FITS/NPY, do not know loader types, and do
 not depend on whether the snapshot was produced by native C++, Python, IPC, or an
 external preprocessing step.
 
-Opening a new source, changing the current spectrum index, or applying domain
-filtering creates a new snapshot. Existing snapshots are not mutated in place, so
-rendering code can safely keep reading the current state for the duration of a
-frame.
+Opening a new source, changing the current spectrum index, or applying a domain
+operation that changes the current spectrum data creates a new snapshot. Existing
+snapshots are not mutated in place, so rendering code can safely keep reading
+the current state for the duration of a frame.
 
 The C++ interface is `src/domain/spectrum_snapshot.h`.
 Snapshot producers should hand snapshots to consumers as `SpectrumSnapshotHandle`
@@ -30,7 +30,7 @@ Snapshot producers should hand snapshots to consumers as `SpectrumSnapshotHandle
 - `capabilities`: domain-derived feature flags that let UI decide what controls,
   overlays, and warnings are valid.
 - `diagnostics`: domain-level reasons for failure, unsupported format, empty
-  data, invalid shape, and mask/ivar filtering.
+  data, invalid shape, and mask/ivar pixel rejection.
 
 ## Invariants
 
@@ -52,9 +52,9 @@ An error snapshot must satisfy:
 - `diagnostics` includes at least one `Error` diagnostic explaining the domain
   reason.
 
-Filtering diagnostics are allowed on otherwise plottable snapshots. For example,
-mask or ivar filtering can remove invalid pixels and still produce a valid
-current spectrum, but the snapshot should record that filtering happened.
+Pixel-rejection diagnostics are allowed on otherwise plottable snapshots. For
+example, mask or ivar validity rules can reject invalid pixels and still produce
+a valid current spectrum, but the snapshot should record that rejection happened.
 
 ## Axis And Capabilities
 
@@ -85,9 +85,12 @@ in `docs/spectral_line_catalog_contract.md`.
 
 ## Display-Only Plot Transforms
 
-Plot smoothing is view state, not a domain filter. It must not mutate
+Plot smoothing is view state, not sample filtering or any other domain-level
+sample subset operation. It must not mutate
 `current_spectrum.x_values`, `current_spectrum.y_values`, diagnostics, or source
 metadata, and it must not be serialized as part of a `SpectrumSnapshot`.
+In SpecForge terminology, this word family is reserved for qualified
+sample-filter language; see `CONTEXT.md`.
 
 Gaussian smoothing uses sigma in loaded sample-index units. A sigma value of `2`
 means two adjacent plotted samples, regardless of the x-axis unit or spacing; it

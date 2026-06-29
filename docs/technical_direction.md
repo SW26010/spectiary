@@ -4,7 +4,7 @@
 
 - 使用官方推荐 backend 和库能力，不自造基础设施。
 - 优先使用 ImGui/ImPlot 原生交互。
-- UI 跟手程度是基础约束。任何 loader、overlay、filter、labeling、panel orchestration 或本地状态功能，都不能以牺牲 pan、zoom、spectrum switch、range navigation 的实时响应为代价。
+- UI 跟手程度是基础约束。任何 loader、overlay、sample filtering、labeling、panel orchestration 或本地状态功能，都不能以牺牲 pan、zoom、spectrum switch、range navigation 的实时响应为代价。
 - 只在被真实 profile 证明后才引入更复杂的渲染或数据路径。
 - 代码结构保持普通、可读、可维护，避免过早抽象。
 
@@ -83,7 +83,7 @@ JSONL profile 至少区分：
 - 130Hz 是当前真实数据 pan/drag 验收线。
 - 144Hz 是 stretch target。
 - 没有真实数据和新日志，不声明达标。
-- 触碰每帧 UI、plot、overlay、filter、labeling 或 source/session view 构造的功能改动，必须用真实数据 profile 证明交互预算未退化；不能只用单元测试或 synthetic fixture 代替。
+- 触碰每帧 UI、plot、overlay、sample filtering、labeling 或 source/session view 构造的功能改动，必须用真实数据 profile 证明交互预算未退化；不能只用单元测试或 synthetic fixture 代替。
 
 ## 工程边界
 
