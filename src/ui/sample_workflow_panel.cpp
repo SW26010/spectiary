@@ -10,12 +10,14 @@
 #include <string_view>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
 
 constexpr const char* kLabelingWindow = "Labeling###SpecForgeLabelingV1";
-constexpr const char* kFiltersWindow = "Filters###SpecForgeFiltersV1";
+constexpr const char* kFiltersWindow = "Sample Filters###SpecForgeFiltersV1";
+constexpr const char* kSortingWindow = "Sample Sorting###SpecForgeSampleSortingV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 constexpr const char* kAnnotationToLabelingPopup =
     "Use annotation as labeling task?###SpecForgeAnnotationToLabelingPopup";
@@ -35,6 +37,28 @@ SourceCollectionSessionIntent ChangeActiveSampleWorkflow(ActiveSampleWorkflowInt
 SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent)
 {
     return SourceCollectionSessionIntent::ApplySampleFiltering(std::move(intent));
+}
+
+SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent)
+{
+    return SourceCollectionSessionIntent::ApplySampleSorting(std::move(intent));
+}
+
+bool CanResumeRememberedRow(
+    const SourceCollectionNavigationView& navigation,
+    std::size_t remembered_row,
+    std::size_t sample_count)
+{
+    if (remembered_row >= sample_count) {
+        return false;
+    }
+    if (!navigation.sequence_active) {
+        return true;
+    }
+    return std::find(
+               navigation.sequence_rows.begin(),
+               navigation.sequence_rows.end(),
+               remembered_row) != navigation.sequence_rows.end();
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -212,6 +236,11 @@ const char* SampleWorkflowPanelUi::LabelingWindowName()
 const char* SampleWorkflowPanelUi::FiltersWindowName()
 {
     return kFiltersWindow;
+}
+
+const char* SampleWorkflowPanelUi::SortingWindowName()
+{
+    return kSortingWindow;
 }
 
 void SampleWorkflowPanelUi::ResetForSampleWorkflow()
@@ -437,12 +466,22 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             "Remembered row: %llu",
             static_cast<unsigned long long>(*labeling_view.remembered_position));
         ImGui::SameLine();
+        const bool resume_available = CanResumeRememberedRow(
+            session_view.navigation,
+            *labeling_view.remembered_position,
+            labeling_view.sample_count);
+        if (!resume_available) {
+            ImGui::BeginDisabled();
+        }
         if (ImGui::Button("Resume")) {
             MergeSourceCollectionSessionAction(
                 action,
                 submit(UpdateSampleNavigation(SampleNavigationIntent::Move(
-                           SampleNavigationRequest::LocateRow(*labeling_view.remembered_position))))
+                           SampleNavigationRequest::LocateSourceRowInSequence(*labeling_view.remembered_position))))
                     .action);
+        }
+        if (!resume_available) {
+            ImGui::EndDisabled();
         }
     }
 
@@ -680,6 +719,89 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
 
     if (!has_filterable_source) {
         ImGui::TextDisabled("No filterable annotations");
+    }
+
+    ImGui::End();
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
+    const SourceCollectionSessionView& session_view,
+    const SourceCollectionSessionIntentSubmitter& submit,
+    bool* open)
+{
+    SourceCollectionSessionAction action;
+    if (!ImGui::Begin(kSortingWindow, open)) {
+        ImGui::End();
+        return action;
+    }
+
+    SourceCollectionSampleSortingView sorting_view = session_view.sorting;
+    SourceCollectionNavigationView navigation = session_view.navigation;
+    if (!sorting_view.has_active_source) {
+        ImGui::TextDisabled("No active source");
+        ImGui::End();
+        return action;
+    }
+
+    if (navigation.sequence_active) {
+        if (navigation.current_sequence_position) {
+            ImGui::Text(
+                "Position: %llu / %llu",
+                static_cast<unsigned long long>(*navigation.current_sequence_position + 1),
+                static_cast<unsigned long long>(navigation.sequence_count));
+        } else {
+            ImGui::Text("Position: - / %llu", static_cast<unsigned long long>(navigation.sequence_count));
+        }
+        ImGui::Text(
+            "Source rows: %llu / %llu",
+            static_cast<unsigned long long>(navigation.sequence_count),
+            static_cast<unsigned long long>(navigation.sample_count));
+    } else {
+        ImGui::TextDisabled("Source order");
+    }
+    ImGui::Separator();
+
+    if (ImGui::RadioButton("Source order", !sorting_view.active)) {
+        SourceCollectionSessionResult result =
+            submit(ApplySampleSorting(SampleSortingIntent::Clear()));
+        MergeSourceCollectionSessionAction(action, result.action);
+        sorting_view = result.view.sorting;
+        navigation = result.view.navigation;
+    }
+
+    bool has_sort_source = false;
+    const std::vector<SourceCollectionSampleSortSourceView> sort_sources = sorting_view.sources;
+    for (const SourceCollectionSampleSortSourceView& source_view : sort_sources) {
+        has_sort_source = true;
+        ImGui::PushID(source_view.id.c_str());
+        if (ImGui::RadioButton(source_view.name.c_str(), source_view.selected)) {
+            SourceCollectionSessionResult result =
+                submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_view.id)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+            navigation = result.view.navigation;
+        }
+        ImGui::PopID();
+    }
+    if (!has_sort_source) {
+        ImGui::TextDisabled("No comparable sort sources");
+    }
+
+    ImGui::Separator();
+    const bool ascending = sorting_view.direction == SampleNavigationSortDirection::Ascending;
+    if (ImGui::RadioButton("Ascending", ascending)) {
+        SourceCollectionSessionResult result = submit(ApplySampleSorting(
+            SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Ascending)));
+        MergeSourceCollectionSessionAction(action, result.action);
+        sorting_view = result.view.sorting;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Descending", !ascending)) {
+        SourceCollectionSessionResult result = submit(ApplySampleSorting(
+            SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Descending)));
+        MergeSourceCollectionSessionAction(action, result.action);
+        sorting_view = result.view.sorting;
     }
 
     ImGui::End();

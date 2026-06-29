@@ -3,7 +3,6 @@
 #include "domain/sample_annotation_io.h"
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -14,14 +13,6 @@
 
 namespace specforge {
 namespace {
-
-std::string LowerAscii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
 
 std::string PathToUtf8(const std::filesystem::path& path)
 {
@@ -87,10 +78,29 @@ SampleNavigationRequest SampleNavigationRequest::LocateRow(std::size_t row_index
     return request;
 }
 
+SampleNavigationRequest SampleNavigationRequest::LocateSourceRowInSequence(std::size_t row_index)
+{
+    SampleNavigationRequest request;
+    request.kind = SampleNavigationRequestKind::LocateSourceRowInSequence;
+    request.row_index = row_index;
+    return request;
+}
+
 SampleNavigationRequest SampleNavigationRequest::LocateSampleName(std::string sample_name)
 {
     SampleNavigationRequest request;
     request.kind = SampleNavigationRequestKind::LocateSampleName;
+    request.sample_name = std::move(sample_name);
+    return request;
+}
+
+SampleNavigationRequest SampleNavigationRequest::LocateSampleNameMatch(
+    std::size_t row_index,
+    std::string sample_name)
+{
+    SampleNavigationRequest request;
+    request.kind = SampleNavigationRequestKind::LocateSampleNameMatch;
+    request.row_index = row_index;
     request.sample_name = std::move(sample_name);
     return request;
 }
@@ -118,7 +128,7 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     const bool new_session = session.source_collection_identity.empty();
     const bool context_changed = session.context_fingerprint != identity.context_fingerprint;
     const std::string previous_query = std::move(session.sample_name_query);
-    const std::size_t previous_index = session.current_index;
+    const std::optional<std::size_t> previous_index = session.current_index;
 
     session.source_collection_identity = identity.id;
     session.source_name = identity.source_name;
@@ -160,17 +170,21 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
             session.current_index = persisted->second;
         } else if (new_session) {
             session.current_index = std::min(snapshot->collection.current_index, session.spectrum_count - 1);
+        } else if (previous_index) {
+            session.current_index = std::min(*previous_index, session.spectrum_count - 1);
         } else {
-            session.current_index = std::min(previous_index, session.spectrum_count - 1);
+            session.current_index = std::min(snapshot->collection.current_index, session.spectrum_count - 1);
         }
     } else {
-        session.current_index = 0;
+        session.current_index.reset();
     }
     if (session.filter_active && session.filter_included_samples.size() != session.spectrum_count) {
         session.filter_active = false;
         session.filter_included_samples.clear();
         session.filtered_sample_count = 0;
+        session.index_before_active_filter.reset();
     }
+    (void)ReconcileCurrentWithSequence(session);
     RecomputeMatches(session);
 
     source_key_to_session_key_[source_key] = identity.id;
@@ -270,11 +284,10 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 
     SampleNavigationResult result;
     result.has_active_source = true;
-    result.previous_index = session->current_index;
-    result.current_index = session->current_index;
-    result.current_sample_in_filter = IsSampleInFilter(*session, session->current_index);
-    result.filtered_sample_count =
-        session->filter_active ? session->filtered_sample_count : session->spectrum_count;
+    result.previous_index = session->current_index.value_or(0);
+    result.current_index = session->current_index.value_or(0);
+    SampleNavigationSequence sequence = BuildSequence(*session);
+    PopulateResultFromSequence(result, *session, sequence);
     if (session->spectrum_count == 0) {
         return result;
     }
@@ -282,21 +295,34 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
     std::optional<std::size_t> target_index;
     switch (request.kind) {
     case SampleNavigationRequestKind::Previous:
-        target_index = FindSequentialTarget(*session, false, result.blocked_by_filter);
+        target_index = sequence.previous_target;
         break;
     case SampleNavigationRequestKind::Next:
-        target_index = FindSequentialTarget(*session, true, result.blocked_by_filter);
+        target_index = sequence.next_target;
         break;
     case SampleNavigationRequestKind::LabelAdvance:
-        target_index = FindLabelAdvanceTarget(*session, request.eligible_samples, result.blocked_by_filter);
+        target_index = sequence.LabelAdvanceTarget(request.eligible_samples);
         break;
     case SampleNavigationRequestKind::LocateRow:
-        if (request.row_index < session->spectrum_count) {
-            target_index = request.row_index;
+        target_index = sequence.LocateSourceRow(request.row_index);
+        if (!target_index && request.row_index < session->spectrum_count && !sequence.row_location_available) {
+            result.blocked_by_filter = session->filter_active;
+        }
+        break;
+    case SampleNavigationRequestKind::LocateSourceRowInSequence:
+        target_index = sequence.LocateSourceRowInSequence(request.row_index);
+        if (!target_index && request.row_index < session->spectrum_count && sequence.active) {
+            result.blocked_by_filter = session->filter_active;
         }
         break;
     case SampleNavigationRequestKind::LocateSampleName:
-        target_index = FindSampleNameIndex(*session, request.sample_name);
+        target_index = sequence.LocateSampleName(session->manifest.sample_names, request.sample_name);
+        break;
+    case SampleNavigationRequestKind::LocateSampleNameMatch:
+        target_index = sequence.LocateSampleNameMatch(
+            session->manifest.sample_names,
+            request.row_index,
+            request.sample_name);
         break;
     default:
         break;
@@ -308,11 +334,10 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 
     result.target_found = true;
     session->current_index = *target_index;
-    result.current_index = session->current_index;
+    result.current_index = *session->current_index;
     result.moved = result.current_index != result.previous_index;
-    result.current_sample_in_filter = IsSampleInFilter(*session, session->current_index);
-    result.filtered_sample_count =
-        session->filter_active ? session->filtered_sample_count : session->spectrum_count;
+    sequence = BuildSequence(*session);
+    PopulateResultFromSequence(result, *session, sequence);
     PersistActiveIndex();
     return result;
 }
@@ -320,7 +345,7 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 std::optional<std::size_t> SampleNavigationController::current_index() const
 {
     const SourceSession* session = ActiveSession();
-    if (session == nullptr || session->spectrum_count == 0) {
+    if (session == nullptr || session->spectrum_count == 0 || !session->current_index) {
         return std::nullopt;
     }
     return session->current_index;
@@ -341,9 +366,8 @@ bool SampleNavigationController::can_move_previous() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    bool blocked_by_filter = false;
-    const std::optional<std::size_t> target = FindSequentialTarget(*session, false, blocked_by_filter);
-    return target && *target != session->current_index;
+    const SampleNavigationSequence sequence = BuildSequence(*session);
+    return sequence.previous_target && session->current_index && *sequence.previous_target != *session->current_index;
 }
 
 bool SampleNavigationController::can_move_next() const
@@ -352,41 +376,62 @@ bool SampleNavigationController::can_move_next() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    bool blocked_by_filter = false;
-    const std::optional<std::size_t> target = FindSequentialTarget(*session, true, blocked_by_filter);
-    return target && *target != session->current_index;
+    const SampleNavigationSequence sequence = BuildSequence(*session);
+    return sequence.next_target && session->current_index && *sequence.next_target != *session->current_index;
 }
 
-void SampleNavigationController::SetSampleFilter(std::vector<bool> included_samples)
+std::optional<std::size_t> SampleNavigationController::SetSampleFilter(std::vector<bool> included_samples)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
-        return;
+        return std::nullopt;
     }
     if (included_samples.size() != session->spectrum_count) {
-        ClearSampleFilter();
-        return;
+        return ClearSampleFilter();
     }
 
+    const std::optional<std::size_t> previous_index = session->current_index;
+    if (!session->filter_active) {
+        session->index_before_active_filter = session->current_index;
+    }
     session->filter_active = true;
     session->filter_included_samples = std::move(included_samples);
     session->filtered_sample_count = static_cast<std::size_t>(std::count(
         session->filter_included_samples.begin(),
         session->filter_included_samples.end(),
         true));
+    (void)ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (session->current_index != previous_index) {
+        PersistActiveIndex();
+        return session->current_index;
+    }
+    return std::nullopt;
 }
 
-void SampleNavigationController::ClearSampleFilter()
+std::optional<std::size_t> SampleNavigationController::ClearSampleFilter()
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
-        return;
+        return std::nullopt;
     }
+    const std::optional<std::size_t> previous_index = session->current_index;
     session->filter_active = false;
     session->filter_included_samples.clear();
     session->filtered_sample_count = 0;
+    if (session->index_before_active_filter && *session->index_before_active_filter < session->spectrum_count) {
+        session->current_index = *session->index_before_active_filter;
+    } else if (!session->current_index && session->spectrum_count > 0) {
+        session->current_index = 0;
+    }
+    session->index_before_active_filter.reset();
+    (void)ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (session->current_index != previous_index) {
+        PersistActiveIndex();
+        return session->current_index;
+    }
+    return std::nullopt;
 }
 
 bool SampleNavigationController::filter_active() const
@@ -401,13 +446,70 @@ std::size_t SampleNavigationController::filtered_sample_count() const
     if (session == nullptr) {
         return 0;
     }
-    return session->filter_active ? session->filtered_sample_count : session->spectrum_count;
+    return BuildSequence(*session).ordered_rows.size();
 }
 
 bool SampleNavigationController::current_sample_in_filter() const
 {
     const SourceSession* session = ActiveSession();
-    return session == nullptr || IsSampleInFilter(*session, session->current_index);
+    if (session == nullptr || !session->filter_active) {
+        return true;
+    }
+    return session->current_index && IsSampleInFilter(*session, *session->current_index);
+}
+
+std::optional<std::size_t> SampleNavigationController::SetSampleSorting(
+    SampleNavigationSortChoice sort_choice)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || sort_choice.values.size() != session->spectrum_count) {
+        return ClearSampleSorting();
+    }
+
+    const std::optional<std::size_t> previous_index = session->current_index;
+    session->sort_choice = std::move(sort_choice);
+    session->sort_choice.active = true;
+    (void)ReconcileCurrentWithSequence(*session);
+    RecomputeMatches(*session);
+    if (session->current_index != previous_index) {
+        PersistActiveIndex();
+        return session->current_index;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::size_t> SampleNavigationController::ClearSampleSorting()
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr) {
+        return std::nullopt;
+    }
+
+    const std::optional<std::size_t> previous_index = session->current_index;
+    session->sort_choice = {};
+    (void)ReconcileCurrentWithSequence(*session);
+    RecomputeMatches(*session);
+    if (session->current_index != previous_index) {
+        PersistActiveIndex();
+        return session->current_index;
+    }
+    return std::nullopt;
+}
+
+bool SampleNavigationController::sorting_active() const
+{
+    const SourceSession* session = ActiveSession();
+    return session != nullptr && session->sort_choice.active &&
+           session->sort_choice.values.size() == session->spectrum_count;
+}
+
+SampleNavigationSequence SampleNavigationController::current_sequence() const
+{
+    const SourceSession* session = ActiveSession();
+    if (session == nullptr) {
+        return {};
+    }
+    return BuildSequence(*session);
 }
 
 void SampleNavigationController::SetSampleNameQuery(std::string query)
@@ -484,32 +586,35 @@ const SampleNavigationController::SourceSession* SampleNavigationController::Act
     return match == sessions_.end() ? nullptr : &match->second;
 }
 
-std::optional<std::size_t> SampleNavigationController::FindSampleNameIndex(
-    const SourceSession& session,
-    std::string_view sample_name)
+SampleNavigationSequence SampleNavigationController::BuildSequence(const SourceSession& session)
 {
-    if (sample_name.empty() || session.manifest.sample_names.empty()) {
-        return std::nullopt;
+    SampleNavigationSequenceInput input;
+    input.source_row_count = session.spectrum_count;
+    input.sample_names = session.manifest.sample_names;
+    input.filter_active = session.filter_active;
+    input.included_samples = &session.filter_included_samples;
+    input.sort_choice = &session.sort_choice;
+    input.current_source_row = session.current_index;
+    input.sample_name_query = session.sample_name_query;
+    return BuildSampleNavigationSequence(input);
+}
+
+std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSequence(SourceSession& session)
+{
+    const std::optional<std::size_t> previous_index = session.current_index;
+    const SampleNavigationSequence sequence = BuildSequence(session);
+    if (sequence.current_source_row) {
+        session.current_index = sequence.current_source_row;
+    } else if (!sequence.ordered_rows.empty()) {
+        session.current_index = sequence.ordered_rows.front();
+    } else {
+        session.current_index.reset();
     }
 
-    const std::string target = LowerAscii(std::string(sample_name));
-    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
-        if (!IsSampleInFilter(session, index)) {
-            continue;
-        }
-        if (LowerAscii(session.manifest.sample_names[index]) == target) {
-            return index;
-        }
+    if (session.current_index == previous_index) {
+        return std::nullopt;
     }
-    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
-        if (!IsSampleInFilter(session, index)) {
-            continue;
-        }
-        if (LowerAscii(session.manifest.sample_names[index]).find(target) != std::string::npos) {
-            return index;
-        }
-    }
-    return std::nullopt;
+    return session.current_index;
 }
 
 bool SampleNavigationController::IsSampleInFilter(const SourceSession& session, std::size_t sample_index)
@@ -520,69 +625,25 @@ bool SampleNavigationController::IsSampleInFilter(const SourceSession& session, 
     return sample_index < session.filter_included_samples.size() && session.filter_included_samples[sample_index];
 }
 
-std::optional<std::size_t> SampleNavigationController::FindSequentialTarget(
+void SampleNavigationController::PopulateResultFromSequence(
+    SampleNavigationResult& result,
     const SourceSession& session,
-    bool forward,
-    bool& blocked_by_filter)
+    const SampleNavigationSequence& sequence)
 {
-    blocked_by_filter = false;
-    if (session.spectrum_count == 0) {
-        return std::nullopt;
+    result.has_current_sample = sequence.current_source_row.has_value();
+    result.current_source_row = sequence.current_source_row;
+    result.current_sequence_position = sequence.current_sequence_position;
+    result.sequence_active = sequence.active;
+    result.sequence_empty = sequence.empty;
+    result.sequence_count = sequence.ordered_rows.size();
+    result.filtered_sample_count = sequence.ordered_rows.size();
+    result.row_location_available = sequence.row_location_available;
+    result.current_sample_in_filter = !session.filter_active || sequence.current_source_row.has_value();
+    if (sequence.current_source_row) {
+        result.current_index = *sequence.current_source_row;
+    } else {
+        result.current_index = session.current_index.value_or(0);
     }
-
-    if (!session.filter_active) {
-        if (forward) {
-            return session.current_index + 1 < session.spectrum_count ? session.current_index + 1 : session.current_index;
-        }
-        return session.current_index > 0 ? session.current_index - 1 : session.current_index;
-    }
-
-    if (!IsSampleInFilter(session, session.current_index)) {
-        blocked_by_filter = true;
-        return std::nullopt;
-    }
-
-    if (forward) {
-        for (std::size_t index = session.current_index + 1; index < session.spectrum_count; ++index) {
-            if (IsSampleInFilter(session, index)) {
-                return index;
-            }
-        }
-        return session.current_index;
-    }
-
-    for (std::size_t index = session.current_index; index > 0; --index) {
-        const std::size_t candidate = index - 1;
-        if (IsSampleInFilter(session, candidate)) {
-            return candidate;
-        }
-    }
-    return session.current_index;
-}
-
-std::optional<std::size_t> SampleNavigationController::FindLabelAdvanceTarget(
-    const SourceSession& session,
-    const std::vector<bool>& eligible_samples,
-    bool& blocked_by_filter)
-{
-    blocked_by_filter = false;
-    if (session.spectrum_count == 0) {
-        return std::nullopt;
-    }
-    if (session.filter_active && !IsSampleInFilter(session, session.current_index)) {
-        blocked_by_filter = true;
-        return std::nullopt;
-    }
-
-    const auto eligible = [&eligible_samples](std::size_t index) {
-        return eligible_samples.empty() || (index < eligible_samples.size() && eligible_samples[index]);
-    };
-    for (std::size_t index = session.current_index + 1; index < session.spectrum_count; ++index) {
-        if (IsSampleInFilter(session, index) && eligible(index)) {
-            return index;
-        }
-    }
-    return session.current_index;
 }
 
 bool SampleNavigationController::LoadReadOnlyAnnotationIntoSession(
@@ -633,10 +694,11 @@ void SampleNavigationController::EnsureStateCacheLoaded()
 void SampleNavigationController::PersistActiveIndex()
 {
     const SourceSession* session = ActiveSession();
-    if (session == nullptr || session->source_collection_identity.empty() || session->spectrum_count == 0) {
+    if (session == nullptr || session->source_collection_identity.empty() || session->spectrum_count == 0 ||
+        !session->current_index) {
         return;
     }
-    state_cache_.last_indices_by_source_identity[session->source_collection_identity] = session->current_index;
+    state_cache_.last_indices_by_source_identity[session->source_collection_identity] = *session->current_index;
     SaveStateCache();
 }
 
@@ -651,16 +713,7 @@ void SampleNavigationController::RecomputeMatches(SourceSession& session)
     if (session.sample_name_query.empty() || session.manifest.sample_names.empty()) {
         return;
     }
-
-    const std::string query = LowerAscii(session.sample_name_query);
-    for (std::size_t index = 0; index < session.manifest.sample_names.size(); ++index) {
-        if (!IsSampleInFilter(session, index)) {
-            continue;
-        }
-        if (LowerAscii(session.manifest.sample_names[index]).find(query) != std::string::npos) {
-            session.sample_name_matches.push_back(index);
-        }
-    }
+    session.sample_name_matches = BuildSequence(session).sample_name_matches;
 }
 
 }  // namespace specforge

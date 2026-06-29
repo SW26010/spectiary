@@ -3,6 +3,7 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_labeling.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/sample_navigation_sequence.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -57,6 +58,13 @@ struct SourceCollectionNavigationView {
     bool filter_active = false;
     std::size_t filtered_sample_count = 0;
     bool current_sample_in_filter = true;
+    bool sequence_active = false;
+    bool sequence_empty = false;
+    std::size_t sequence_count = 0;
+    std::vector<std::size_t> sequence_rows;
+    std::optional<std::size_t> current_sequence_position;
+    std::optional<std::size_t> current_source_row;
+    bool row_location_available = true;
     std::string current_sample_name;
     std::string current_sample_display_name;
     bool has_sample_names = false;
@@ -109,6 +117,20 @@ struct SourceCollectionFilterView {
     std::vector<SourceCollectionFilterSourceView> sources;
 };
 
+struct SourceCollectionSampleSortSourceView {
+    std::string id;
+    std::string name;
+    bool selected = false;
+};
+
+struct SourceCollectionSampleSortingView {
+    bool has_active_source = false;
+    bool active = false;
+    std::string active_source_id;
+    SampleNavigationSortDirection direction = SampleNavigationSortDirection::Ascending;
+    std::vector<SourceCollectionSampleSortSourceView> sources;
+};
+
 struct SourceCollectionSourceView {
     std::filesystem::path path;
     std::string display_name;
@@ -124,12 +146,14 @@ struct SourceCollectionSavedSource {
 
 struct SourceCollectionSessionView {
     SpectrumSnapshotHandle snapshot;
+    SpectrumSnapshotHandle current_sample_snapshot;
     std::vector<SourceCollectionSourceView> sources;
     std::optional<std::size_t> current_source_index;
     bool can_add_read_only_annotation = false;
     SourceCollectionNavigationView navigation;
     SourceCollectionLabelingView labeling;
     SourceCollectionFilterView filter;
+    SourceCollectionSampleSortingView sorting;
 };
 
 }  // namespace specforge

@@ -47,6 +47,7 @@ private:
         bool annotations = true;
         bool labeling = true;
         bool filters = true;
+        bool sorting = true;
         bool smoothing = true;
         bool info = true;
         bool spectral_lines = true;
@@ -63,6 +64,7 @@ private:
     void RenderAnnotationsPanel();
     void RenderLabelingPanel();
     void RenderFiltersPanel();
+    void RenderSortingPanel();
     void RenderSmoothingPanel();
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();

@@ -543,6 +543,9 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.filters) {
         RenderFiltersPanel();
     }
+    if (panel_visibility_.sorting) {
+        RenderSortingPanel();
+    }
     if (panel_visibility_.info) {
         RenderInfoTagsPanel();
     }
@@ -709,6 +712,7 @@ void ShellUi::RenderMainMenuBar()
             panel_visibility_.annotations = true;
             panel_visibility_.labeling = true;
             panel_visibility_.filters = true;
+            panel_visibility_.sorting = true;
             panel_visibility_.smoothing = true;
             panel_visibility_.info = true;
             panel_visibility_.spectral_lines = true;
@@ -718,7 +722,8 @@ void ShellUi::RenderMainMenuBar()
         ImGui::MenuItem("Navigation", nullptr, &panel_visibility_.navigation);
         ImGui::MenuItem("Annotations", nullptr, &panel_visibility_.annotations);
         ImGui::MenuItem("Labeling", nullptr, &panel_visibility_.labeling);
-        ImGui::MenuItem("Filters", nullptr, &panel_visibility_.filters);
+        ImGui::MenuItem("Sample Filters", nullptr, &panel_visibility_.filters);
+        ImGui::MenuItem("Sample Sorting", nullptr, &panel_visibility_.sorting);
         ImGui::MenuItem("Smoothing", nullptr, &panel_visibility_.smoothing);
         ImGui::MenuItem("Information", nullptr, &panel_visibility_.info);
         ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility_.spectral_lines);
@@ -796,6 +801,17 @@ void ShellUi::RenderFiltersPanel()
         &panel_visibility_.filters));
 }
 
+void ShellUi::RenderSortingPanel()
+{
+    const SourceCollectionSessionView& view = SessionView();
+    HandleSessionAction(sample_workflow_panel_ui_.RenderSorting(
+        view,
+        [this](SourceCollectionSessionIntent command) {
+            return SubmitSessionCommandForPanel(std::move(command));
+        },
+        &panel_visibility_.sorting));
+}
+
 void ShellUi::RenderSmoothingPanel()
 {
     if (!ImGui::Begin(kSmoothingWindow, &panel_visibility_.smoothing)) {
@@ -806,7 +822,7 @@ void ShellUi::RenderSmoothingPanel()
     ImGui::TextUnformatted("Smoothing");
     ImGui::Separator();
 
-    const SpectrumSnapshotHandle snapshot = SessionView().snapshot;
+    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
     if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
         ImGui::TextDisabled("No plottable spectrum");
         ImGui::End();
@@ -881,7 +897,7 @@ void ShellUi::RenderInfoTagsPanel()
 
     ImGui::TextUnformatted("Information");
     ImGui::Separator();
-    const SpectrumSnapshotHandle snapshot = SessionView().snapshot;
+    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
     if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
         ImGui::Text("Name: %s", current.name.empty() ? "(none)" : current.name.c_str());
@@ -940,7 +956,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     label_shortcut_context_active_ =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    const SpectrumSnapshotHandle snapshot = SessionView().snapshot;
+    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
     const std::vector<const SpectralLineMarker*> spectral_lines =
         spectral_lines_panel_.FilteredMarkers(snapshot, false);
     RenderSpectrumPlot(
@@ -954,7 +970,10 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
 
 void ShellUi::RenderSpectralLinesPanel()
 {
-    spectral_lines_panel_ui_.Render(spectral_lines_panel_, SessionView().snapshot, &panel_visibility_.spectral_lines);
+    spectral_lines_panel_ui_.Render(
+        spectral_lines_panel_,
+        SessionView().current_sample_snapshot,
+        &panel_visibility_.spectral_lines);
 }
 
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
@@ -977,6 +996,7 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGuiID annotations_id = 0;
     ImGuiID labeling_id = 0;
     ImGuiID filters_id = 0;
+    ImGuiID sorting_id = 0;
     ImGuiID right_upper_id = 0;
     ImGuiID spectral_lines_id = 0;
 
@@ -988,12 +1008,14 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.38f, &right_upper_id, &spectral_lines_id);
     ImGui::DockBuilderSplitNode(right_upper_id, ImGuiDir_Down, 0.50f, &labeling_id, &annotations_id);
     ImGui::DockBuilderSplitNode(labeling_id, ImGuiDir_Down, 0.50f, &filters_id, &labeling_id);
+    ImGui::DockBuilderSplitNode(filters_id, ImGuiDir_Down, 0.50f, &sorting_id, &filters_id);
 
     ImGui::DockBuilderDockWindow(SourceCollectionPanelUi::FilesWindowName(), files_id);
     ImGui::DockBuilderDockWindow(SourceCollectionPanelUi::NavigationWindowName(), navigation_id);
     ImGui::DockBuilderDockWindow(SourceCollectionPanelUi::AnnotationsWindowName(), annotations_id);
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::LabelingWindowName(), labeling_id);
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::FiltersWindowName(), filters_id);
+    ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::SortingWindowName(), sorting_id);
     ImGui::DockBuilderDockWindow(kInfoTagsWindow, info_tags_id);
     ImGui::DockBuilderDockWindow(kSmoothingWindow, smoothing_id);
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);

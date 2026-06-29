@@ -17,6 +17,7 @@ class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();
     [[nodiscard]] static const char* FiltersWindowName();
+    [[nodiscard]] static const char* SortingWindowName();
 
     void ResetForSampleWorkflow();
 
@@ -28,6 +29,11 @@ public:
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
 
     [[nodiscard]] SourceCollectionSessionAction RenderFilters(
+        const SourceCollectionSessionView& session_view,
+        const SourceCollectionSessionIntentSubmitter& submit,
+        bool* open);
+
+    [[nodiscard]] SourceCollectionSessionAction RenderSorting(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
         bool* open);

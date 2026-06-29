@@ -486,21 +486,13 @@ void TestFilterConstrainsSequentialNavigation()
     controller.SetSampleFilter({false, true, false, true, false});
     Require(controller.filter_active(), "filter should be active");
     Require(controller.filtered_sample_count() == 2, "filter should count included samples");
-    Require(!controller.current_sample_in_filter(), "initial row should be outside the filter");
-    Require(!controller.can_move_next(), "out-of-filter row should not move next");
-
-    specforge::SampleNavigationResult result =
-        controller.Navigate(specforge::SampleNavigationRequest::Next());
-    Require(result.blocked_by_filter, "out-of-filter sequential move should be blocked");
-    Require(!result.target_found, "blocked filtered move should not produce a target");
-    Require(result.current_index == 0, "blocked filtered move should keep the current row");
-
-    result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(1));
-    Require(result.target_found && result.current_sample_in_filter, "direct row locate can enter the filter");
+    Require(controller.current_index() && *controller.current_index() == 1, "filter should move to the first included row");
+    Require(controller.current_sample_in_filter(), "current row should be inside the sequence after filter reconciliation");
     Require(controller.can_move_next(), "first filtered row should move next");
     Require(!controller.can_move_previous(), "first filtered row should not move previous inside the filter");
 
-    result = controller.Navigate(specforge::SampleNavigationRequest::Next());
+    specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::Next());
     Require(result.target_found && result.moved, "filtered next should move to the next included row");
     Require(result.current_index == 3, "filtered next should skip excluded rows");
     Require(!controller.can_move_next(), "last filtered row should not move next");
@@ -535,20 +527,47 @@ void TestFilterConstrainsSequentialNavigation()
     Require(matches[0] == 1 && matches[1] == 3, "filtered sample-name matches should preserve source order");
 
     result = controller.Navigate(specforge::SampleNavigationRequest::LocateRow(4));
-    Require(result.target_found, "direct row locate can jump outside the filter");
-    Require(!result.current_sample_in_filter, "direct row locate should expose out-of-filter state");
-    result = controller.Navigate(specforge::SampleNavigationRequest::LabelAdvance());
-    Require(result.blocked_by_filter, "label advance should be blocked when the current row is outside the filter");
-    Require(!result.target_found, "blocked label advance should not produce a target");
-    Require(result.current_index == 4, "blocked label advance should keep the current row");
+    Require(result.blocked_by_filter, "row locate should be blocked while filtering changes the sequence");
+    Require(!result.target_found, "blocked row locate should not produce a target");
+    Require(result.current_index == 1, "blocked row locate should keep the current sequence row");
 
     result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("omega"));
     Require(!result.target_found, "sample-name locate should not jump to an excluded exact match");
-    Require(result.current_index == 4, "excluded sample-name locate should keep the current row");
+    Require(result.current_index == 1, "excluded sample-name locate should keep the current row");
 
     result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("beta"));
     Require(result.target_found && result.current_sample_in_filter, "sample-name locate should jump to an included match");
     Require(result.current_index == 1, "sample-name locate should return the filtered match");
+}
+
+void TestEmptyFilterClearsCurrentSequenceRow()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_empty_filter.npy";
+    const std::filesystem::path cache_path = std::filesystem::temp_directory_path() / "specforge_nav_empty_filter_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {3, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 3, 1));
+    Require(controller.current_index() && *controller.current_index() == 1, "test should start at row 1");
+
+    controller.SetSampleFilter({false, false, false});
+    Require(controller.filter_active(), "empty filter should still be active");
+    Require(controller.filtered_sample_count() == 0, "empty filter should expose zero sequence rows");
+    Require(!controller.current_index(), "empty active sequence should not expose a current row");
+    Require(!controller.current_sample_in_filter(), "empty active filter should not report an in-filter current row");
+    Require(!controller.can_move_previous() && !controller.can_move_next(), "empty sequence should not move");
+
+    const specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::Next());
+    Require(result.has_active_source, "empty sequence should still belong to the active source");
+    Require(result.sequence_active && result.sequence_empty, "result should expose empty active sequence state");
+    Require(!result.has_current_sample, "empty sequence result should not expose a current sample");
+    Require(!result.target_found, "empty sequence navigation should not produce a target");
+
+    controller.ClearSampleFilter();
+    Require(controller.current_index() && *controller.current_index() == 1, "clearing filter should restore the pre-filter row");
 }
 
 }  // namespace
@@ -566,5 +585,6 @@ int main()
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
+    TestEmptyFilterClearsCurrentSequenceRow();
     return 0;
 }

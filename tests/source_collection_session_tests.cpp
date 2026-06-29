@@ -8,8 +8,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -59,6 +62,80 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
     Require(stream.good(), "could not open text file for writing");
     stream << contents;
     Require(stream.good(), "could not write text file");
+}
+
+void WriteUnicodeNameNpy(
+    const std::filesystem::path& path,
+    std::initializer_list<std::string_view> values,
+    std::size_t code_units)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open name NPY fixture for writing");
+
+    std::string header = "{'descr': '<U";
+    header += std::to_string(code_units);
+    header += "', 'fortran_order': False, 'shape': (";
+    header += std::to_string(values.size());
+    header += ",), }";
+
+    constexpr std::size_t kPreambleSize = 10;
+    const std::size_t header_with_newline = header.size() + 1;
+    const std::size_t padding = (16 - ((kPreambleSize + header_with_newline) % 16)) % 16;
+    header.append(padding, ' ');
+    header.push_back('\n');
+    Require(header.size() <= std::numeric_limits<std::uint16_t>::max(), "test NPY header is too large");
+
+    constexpr unsigned char kMagic[] = {0x93, 'N', 'U', 'M', 'P', 'Y'};
+    stream.write(reinterpret_cast<const char*>(kMagic), static_cast<std::streamsize>(sizeof(kMagic)));
+    constexpr char kVersion[] = {1, 0};
+    stream.write(kVersion, static_cast<std::streamsize>(sizeof(kVersion)));
+
+    const auto header_length = static_cast<std::uint16_t>(header.size());
+    const char length_bytes[] = {
+        static_cast<char>(header_length & 0xffU),
+        static_cast<char>((header_length >> 8U) & 0xffU),
+    };
+    stream.write(length_bytes, static_cast<std::streamsize>(sizeof(length_bytes)));
+    stream.write(header.data(), static_cast<std::streamsize>(header.size()));
+    for (std::string_view value : values) {
+        for (std::size_t index = 0; index < code_units; ++index) {
+            const std::uint32_t code_point =
+                index < value.size() ? static_cast<unsigned char>(value[index]) : 0U;
+            const char bytes[] = {
+                static_cast<char>(code_point & 0xffU),
+                static_cast<char>((code_point >> 8U) & 0xffU),
+                static_cast<char>((code_point >> 16U) & 0xffU),
+                static_cast<char>((code_point >> 24U) & 0xffU),
+            };
+            stream.write(bytes, static_cast<std::streamsize>(sizeof(bytes)));
+        }
+    }
+    Require(stream.good(), "could not write name NPY fixture");
+}
+
+std::filesystem::path CompanionNamePath(const std::filesystem::path& source_path)
+{
+    return source_path.parent_path() / (source_path.stem().string() + "_name.npy");
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::string AnnotationSourceId(const std::filesystem::path& path)
+{
+    return "annotation:" + PathToUtf8(path);
+}
+
+bool HasSortSource(
+    const specforge::SourceCollectionSampleSortingView& view,
+    std::string_view source_id)
+{
+    return std::any_of(view.sources.begin(), view.sources.end(), [source_id](const auto& source) {
+        return source.id == source_id;
+    });
 }
 
 void SaveLabelResultFixture(
@@ -330,6 +407,25 @@ specforge::SourceCollectionSessionIntent SetFilterValueSelected(
             selected));
 }
 
+specforge::SourceCollectionSessionIntent ClearSampleSorting()
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
+        specforge::SampleSortingIntent::Clear());
+}
+
+specforge::SourceCollectionSessionIntent SetSampleSortSource(std::string source_id)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
+        specforge::SampleSortingIntent::SetSortSource(std::move(source_id)));
+}
+
+specforge::SourceCollectionSessionIntent SetSampleSortDirection(
+    specforge::SampleNavigationSortDirection direction)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
+        specforge::SampleSortingIntent::SetSortDirection(direction));
+}
+
 void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -460,13 +556,25 @@ void TestLabelingFilterSelectionAppliesToNavigation()
     specforge::SourceCollectionNavigationView navigation_view = result.view.navigation;
     Require(navigation_view.filter_active, "labeling condition should activate navigation filtering");
     Require(navigation_view.filtered_sample_count == 2, "filter should include the two good samples");
-    Require(!navigation_view.current_sample_in_filter, "current bad sample should be outside the filter");
+    Require(navigation_view.sequence_active, "filter should expose an active navigation sequence");
+    Require(navigation_view.sequence_count == 2, "sequence should include the two good samples");
+    Require(
+        navigation_view.current_index && *navigation_view.current_index == 1,
+        "filter should move navigation to the first included sample");
+    Require(
+        navigation_view.current_sequence_position && *navigation_view.current_sequence_position == 0,
+        "first included sample should be sequence position 0");
+    Require(navigation_view.current_sample_in_filter, "reconciled current sample should be inside the filter");
+    Require(!navigation_view.row_location_available, "row-index location should be disabled for filtered sequence");
+    Require(result.action.snapshot_changed, "filter should load the first included sample snapshot");
+    Require(result.view.snapshot->collection.current_index == 1, "filter should display the first included sample");
 
     const specforge::SourceCollectionSessionResult locate_action =
         Submit(session, MoveSampleNavigation(
-                            specforge::SampleNavigationRequest::LocateRow(1)));
-    Require(locate_action.navigation.target_found, "locating the first included sample should resolve");
-    Require(locate_action.navigation.current_index == 1, "locate should move to the first good sample");
+                            specforge::SampleNavigationRequest::LocateRow(0)));
+    Require(locate_action.navigation.blocked_by_filter, "row locate should be blocked while filtering changes order");
+    Require(!locate_action.navigation.target_found, "blocked row locate should not resolve");
+    Require(locate_action.navigation.current_index == 1, "blocked row locate should keep the sequence current row");
 
     const specforge::SourceCollectionSessionResult next_action =
         Submit(session, MoveSampleNavigation(
@@ -476,6 +584,191 @@ void TestLabelingFilterSelectionAppliesToNavigation()
 
     result = Submit(session, SetActiveLabelingFilterSourceSelected(false));
     Require(!result.view.navigation.filter_active, "deselecting labeling source should clear its navigation filter");
+}
+
+void TestResumeLocateRespectsActiveFilterSequence()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "bad label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        "good label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, SetActiveLabelingFilterSourceSelected(true));
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, SetFilterValueSelected("labeling:manual-labeling", "2", true));
+    Require(result.view.navigation.sequence_active, "test should activate the filtered sequence");
+    Require(
+        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2}),
+        "test should include only the good samples");
+    Require(
+        result.view.navigation.current_index && *result.view.navigation.current_index == 1,
+        "filter should reconcile to the first included row");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+    Require(!result.navigation.target_found, "ordinary row locate remains blocked when sequence order differs");
+    Require(result.navigation.blocked_by_filter, "ordinary row locate should report the active filter block");
+    Require(result.navigation.current_index == 1, "blocked ordinary locate should keep the current row");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(2)));
+    Require(result.navigation.target_found, "resume locate should allow a remembered row inside the sequence");
+    Require(result.navigation.current_index == 2, "resume locate should jump to the remembered in-sequence row");
+    Require(result.view.snapshot->collection.current_index == 2, "resume locate should load the remembered row snapshot");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(0)));
+    Require(!result.navigation.target_found, "resume locate should not bypass the active sequence");
+    Require(result.navigation.blocked_by_filter, "out-of-sequence resume locate should report the filter block");
+    Require(result.navigation.current_index == 2, "blocked resume locate should keep the current sequence row");
+}
+
+void TestSampleSortingIntentAppliesNavigationSequence()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(CompanionNamePath(source_path), {"gamma", "alpha", "beta"}, 6);
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, OpenSourceCollection(source_path, 0));
+    Require(result.view.sorting.has_active_source, "sorting view should attach to the active source");
+    Require(HasSortSource(result.view.sorting, "sample-name"), "sample names should be available as a sort source");
+
+    result = Submit(session, SetSampleSortSource("sample-name"));
+    Require(result.view.sorting.active, "selecting sample-name sorting should activate sorting view state");
+    Require(
+        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2, 0}),
+        "sample-name sorting should order rows lexically by source-provided names");
+    Require(!result.view.navigation.row_location_available, "sorted sequence should disable ordinary row locate");
+    Require(
+        result.view.navigation.current_sequence_position &&
+            *result.view.navigation.current_sequence_position == 2,
+        "current row should keep selection and update its sorted sequence position");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    Require(result.navigation.target_found && result.navigation.current_index == 2, "previous should follow sorted order");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    Require(!result.navigation.target_found, "ordinary row locate should be blocked for sorted sequence");
+    Require(result.navigation.current_index == 2, "blocked row locate should keep the sorted current row");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(1)));
+    Require(result.navigation.target_found && result.navigation.current_index == 1, "sequence locate should allow sorted in-sequence rows");
+
+    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    Require(
+        result.view.navigation.sequence_rows == std::vector<std::size_t>({0, 2, 1}),
+        "descending sample-name sorting should reverse the source names with stable row targets");
+
+    result = Submit(session, ClearSampleSorting());
+    Require(!result.view.sorting.active, "clearing sorting should return sorting view to source order");
+    Require(!result.view.navigation.sequence_active, "clearing sorting without filters should deactivate sequence state");
+    Require(result.view.navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
+}
+
+void TestAnnotationSortingSourcesRequireComparablePlainValues()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path rank_path = UniqueTempPath("_rank.npy");
+    const std::filesystem::path label_result_path = UniqueTempPath("_quality.npy");
+    TouchFile(source_path);
+    SaveLabelResultFixture(
+        rank_path,
+        "rank",
+        "Rank",
+        {2, 1, 1},
+        specforge::SampleLabelSet{},
+        false);
+
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(specforge::SampleLabelDefinition{1, "bad", 'b'});
+    label_set.labels.push_back(specforge::SampleLabelDefinition{2, "good", 'g'});
+    SaveLabelResultFixture(
+        label_result_path,
+        "quality",
+        "Quality",
+        {2, 1, 1},
+        label_set,
+        true);
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+    Require(result.loaded, "plain integer annotation should load");
+    Require(
+        HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "plain integer annotation should be available as a sort source");
+
+    result = Submit(session, AddReadOnlyAnnotation(label_result_path));
+    Require(result.loaded, "metadata-backed label result annotation should load");
+    Require(
+        !HasSortSource(result.view.sorting, AnnotationSourceId(label_result_path)),
+        "label-result integer annotation should not be available as a sort source");
+
+    result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
+    Require(result.view.sorting.active, "plain annotation sort source should be selectable");
+    Require(
+        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2, 0}),
+        "plain annotation sorting should use numeric values with source-order tie break");
+
+    (void)Submit(session, CreateDefaultLabelingTask());
+    result = Submit(session, SetActiveLabelingOutputPath(rank_path));
+    Require(
+        !HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "annotation should stop being a sort source after it becomes the active local task output");
+    Require(!result.view.sorting.active, "invalidated annotation sorting should be cleared");
+    Require(!result.view.navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
+    Require(result.view.navigation.row_location_available, "cleared sorting should restore ordinary row location");
+}
+
+void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "bad label should be accepted");
+    (void)Submit(session, SetActiveLabelingFilterSourceSelected(true));
+
+    const specforge::SourceCollectionSessionResult result =
+        Submit(session, SetFilterValueSelected("labeling:manual-labeling", "1", true));
+    const specforge::SourceCollectionNavigationView& navigation = result.view.navigation;
+    Require(navigation.filter_active, "zero-match condition should still activate navigation filtering");
+    Require(navigation.sequence_active && navigation.sequence_empty, "zero-match condition should expose empty sequence");
+    Require(navigation.sequence_count == 0, "empty sequence should expose zero sequence rows");
+    Require(!navigation.current_index, "empty sequence should not expose a current index");
+    Require(!navigation.current_source_row, "empty sequence should not expose a source row");
+    Require(!navigation.current_sequence_position, "empty sequence should not expose a sequence position");
+    Require(navigation.current_sample_display_name.empty(), "empty sequence should not display the stale snapshot sample");
+    Require(navigation.current_annotations.empty(), "empty sequence should not display stale current annotations");
+    Require(
+        result.view.snapshot != nullptr,
+        "empty sequence should keep the source snapshot available to source-management views");
+    Require(
+        result.view.current_sample_snapshot == nullptr,
+        "empty sequence should suppress the stale snapshot for sample displays");
+    Require(!result.view.labeling.current_index, "labeling should not receive a fallback current row");
+    Require(!result.action.snapshot_changed, "empty sequence should not load a fallback sample snapshot");
+    Require(loaded_indices == std::vector<std::size_t>({0}), "empty sequence should not call LoadActiveSourceAt");
 }
 
 void TestDeactivatingLabelingTaskClearsActiveTaskFilter()
@@ -1246,6 +1539,10 @@ int main()
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
+    TestResumeLocateRespectsActiveFilterSequence();
+    TestSampleSortingIntentAppliesNavigationSequence();
+    TestAnnotationSortingSourcesRequireComparablePlainValues();
+    TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskClearsActiveTaskFilter();
     TestCreateLabelingTaskUsesCustomName();
     TestRenameAndDeleteActiveLabelingTask();

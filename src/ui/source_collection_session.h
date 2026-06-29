@@ -26,6 +26,7 @@ enum class SourceCollectionSessionIntentKind {
     SampleNavigation,
     ActiveSampleWorkflow,
     SampleFiltering,
+    SampleSorting,
 };
 
 enum class SourceCollectionIntentKind {
@@ -61,6 +62,12 @@ enum class SampleFilteringIntentKind {
     ClearFilters,
     SetFilterValueSelected,
     SetActiveLabelingFilterSourceSelected,
+};
+
+enum class SampleSortingIntentKind {
+    ClearSorting,
+    SetSortSource,
+    SetSortDirection,
 };
 
 struct SourceCollectionIntent {
@@ -153,11 +160,28 @@ private:
     bool selected = false;
 };
 
+struct SampleSortingIntent {
+    [[nodiscard]] static SampleSortingIntent Clear();
+    [[nodiscard]] static SampleSortingIntent SetSortSource(std::string source_id);
+    [[nodiscard]] static SampleSortingIntent SetSortDirection(SampleNavigationSortDirection direction);
+
+private:
+    friend class SourceCollectionSession;
+    friend struct SourceCollectionSessionIntent;
+
+    SampleSortingIntent() = default;
+
+    SampleSortingIntentKind kind = SampleSortingIntentKind::ClearSorting;
+    std::string source_id;
+    SampleNavigationSortDirection direction = SampleNavigationSortDirection::Ascending;
+};
+
 struct SourceCollectionSessionIntent {
     [[nodiscard]] static SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent);
+    [[nodiscard]] static SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent);
 
 private:
     friend class SourceCollectionSession;
@@ -169,6 +193,7 @@ private:
     SampleNavigationIntent sample_navigation;
     ActiveSampleWorkflowIntent active_sample_workflow;
     SampleFilteringIntent sample_filtering;
+    SampleSortingIntent sample_sorting;
 };
 
 struct SourceCollectionSessionResult {
@@ -252,6 +277,9 @@ private:
         std::string value_key,
         bool selected);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingFilterSourceSelected(bool selected);
+    [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting();
+    [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);
 
     [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation();
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);

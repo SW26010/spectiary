@@ -409,13 +409,19 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const float sample_input_width =
         std::max(72.0f, ImGui::CalcTextSize("000000").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     ImGui::SetNextItemWidth(sample_input_width);
+    if (!navigation.row_location_available) {
+        ImGui::BeginDisabled();
+    }
     const bool index_changed = ImGui::InputText(
         "##SampleNavigationSample",
         row_index_buffer_.data(),
         row_index_buffer_.size(),
         ImGuiInputTextFlags_CharsDecimal);
+    if (!navigation.row_location_available) {
+        ImGui::EndDisabled();
+    }
     const bool index_deactivated_after_edit = ImGui::IsItemDeactivatedAfterEdit();
-    if (index_changed) {
+    if (index_changed && navigation.row_location_available) {
         const std::optional<std::size_t> target_sample = ParseSampleNumber(row_index_buffer_.data());
         if (target_sample && *target_sample <= navigation_count) {
             const std::size_t target_row = *target_sample - 1;
@@ -468,6 +474,24 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     if (navigation.current_sample_name.empty() && !navigation.current_sample_display_name.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", navigation.current_sample_display_name.c_str());
+    }
+    if (navigation.sequence_active) {
+        if (navigation.current_sequence_position) {
+            ImGui::Text(
+                "sequence: %llu / %llu",
+                static_cast<unsigned long long>(*navigation.current_sequence_position + 1),
+                static_cast<unsigned long long>(navigation.sequence_count));
+        } else {
+            ImGui::Text("sequence: - / %llu", static_cast<unsigned long long>(navigation.sequence_count));
+        }
+        if (navigation.current_source_row) {
+            ImGui::Text(
+                "source row: %llu / %llu",
+                static_cast<unsigned long long>(*navigation.current_source_row + 1),
+                static_cast<unsigned long long>(navigation.sample_count));
+        } else {
+            ImGui::Text("source row: - / %llu", static_cast<unsigned long long>(navigation.sample_count));
+        }
     }
 
     view.navigation = std::move(navigation);

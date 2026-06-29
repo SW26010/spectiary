@@ -109,6 +109,8 @@ add_executable(specforge_native WIN32
     src/ui/sample_labeling_state_cache_io.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_sequence.cpp
+    src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_navigation_state_cache_io.h
     src/ui/sample_workflow_coordinator.cpp
@@ -254,6 +256,8 @@ add_executable(specforge_sample_navigation_controller_tests
     src/platform/atomic_file.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_sequence.cpp
+    src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_navigation_state_cache_io.h
     src/domain/spectrum_snapshot.h
@@ -268,6 +272,22 @@ else()
 endif()
 
 add_test(NAME specforge_sample_navigation_controller_tests COMMAND specforge_sample_navigation_controller_tests)
+
+add_executable(specforge_sample_navigation_sequence_tests
+    tests/sample_navigation_sequence_tests.cpp
+    src/ui/sample_navigation_sequence.cpp
+    src/ui/sample_navigation_sequence.h
+)
+
+target_include_directories(specforge_sample_navigation_sequence_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_sample_navigation_sequence_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_sample_navigation_sequence_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_sample_navigation_sequence_tests COMMAND specforge_sample_navigation_sequence_tests)
 
 add_executable(specforge_sample_name_autocomplete_tests
     tests/sample_name_autocomplete_tests.cpp
@@ -345,6 +365,8 @@ add_executable(specforge_source_collection_session_tests
     src/ui/sample_labeling_state_cache_io.h
     src/ui/sample_navigation_controller.cpp
     src/ui/sample_navigation_controller.h
+    src/ui/sample_navigation_sequence.cpp
+    src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_navigation_state_cache_io.h
     src/ui/sample_workflow_coordinator.cpp

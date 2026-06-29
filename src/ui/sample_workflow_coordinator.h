@@ -81,10 +81,18 @@ public:
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingFilterSourceSelected(
         const SpectrumSnapshotHandle& snapshot,
         bool selected);
+    [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting(const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(
+        const SpectrumSnapshotHandle& snapshot,
+        SampleNavigationSortDirection direction);
 
     [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionFilterView FilterView(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] SourceCollectionSampleSortingView SortingView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
 
@@ -94,7 +102,8 @@ public:
 private:
     void SyncSampleWorkflowSession(const SpectrumSnapshotHandle& snapshot, SourceCollectionSessionAction& action);
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
-    void ApplySampleFilters(const SpectrumSnapshotHandle& snapshot);
+    std::optional<std::size_t> ApplySampleFilters(const SpectrumSnapshotHandle& snapshot);
+    std::optional<std::size_t> ApplySampleSorting(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::size_t ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] std::optional<std::size_t> ActiveSampleIndex(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
@@ -109,6 +118,9 @@ private:
     SampleFilterController filters_;
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> selected_labeling_filter_source_id_;
+    std::optional<std::string> selected_sample_sort_source_id_;
+    SampleNavigationSortDirection selected_sample_sort_direction_ =
+        SampleNavigationSortDirection::Ascending;
 };
 
 }  // namespace specforge
