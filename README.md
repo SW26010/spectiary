@@ -54,7 +54,7 @@ Required tools:
 Set `VCPKG_ROOT` to your vcpkg checkout:
 
 ```powershell
-[Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\dev\vcpkg', 'User')
+[Environment]::SetEnvironmentVariable('VCPKG_ROOT', (Join-Path $env:USERPROFILE 'vcpkg'), 'User')
 ```
 
 Open a new terminal after setting it.

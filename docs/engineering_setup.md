@@ -27,7 +27,7 @@ Folder source 非递归加载第一层 CSV/FITS 文件，子文件夹、其它�
 设置 `VCPKG_ROOT`：
 
 ```powershell
-[Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\dev\vcpkg', 'User')
+[Environment]::SetEnvironmentVariable('VCPKG_ROOT', (Join-Path $env:USERPROFILE 'vcpkg'), 'User')
 ```
 
 重新打开终端后确认：
@@ -68,6 +68,36 @@ Build native shell：
 
 ```powershell
 cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+```
+
+### Ninja/MSVC 卡住排查
+
+`ninja-msvc-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
+里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
+
+在 Codex 或其它只允许写仓库目录的受限环境里，configure/build 需要用同一套 `vcvars64.bat` 命令形态并允许写
+workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可能写入
+`$env:VCPKG_ROOT\buildtrees\0.vcpkg_dep_info.cmake`、`buildtrees/`、`packages/`、下载缓存或 MSVC
+工具链缓存；如果沙箱拦住这些 workspace 外写入，表现可能是 configure 失败或后续 build 看起来卡住。
+
+受限环境中的正确处理方式是把 configure 和 build 都作为需要外部工具链/cache 写入权限的命令执行：
+
+```powershell
+cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --preset ninja-msvc-debug"
+cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+```
+
+如果一次构建被中断，后续命令可能卡在 Ninja lock。先查是否有残留构建进程：
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match 'cmake|ninja|cl|link|ctest|msbuild' } |
+  Select-Object Id,ProcessName,CPU,StartTime,Path
+```
+
+确认是旧的 `cmake.exe`/`ninja.exe` 持锁后，只终止对应进程，再重跑上面的 `vcvars64.bat` configure/build 命令：
+
+```powershell
+Stop-Process -Id <cmakeId>,<ninjaId> -Force
 ```
 
 生成程序位于：
