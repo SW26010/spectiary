@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <system_error>
@@ -15,6 +16,9 @@
 
 namespace specforge {
 namespace {
+
+constexpr std::uint64_t kWorkflowStateSaveDebounceFrames = 30;
+constexpr std::uint64_t kWorkflowStateSaveRetryFrames = 120;
 
 std::string LowerAscii(std::string value)
 {
@@ -179,13 +183,29 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
 
 }  // namespace
 
-SampleWorkflowCoordinator::SampleWorkflowCoordinator() = default;
+SampleWorkflowCoordinator::SampleWorkflowCoordinator()
+    : workflow_state_cache_path_(DefaultSampleWorkflowStateCachePath()),
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
+{
+}
 
 SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path)
     : navigation_(std::move(navigation_state_cache_path)),
-      labeling_(std::move(labeling_state_cache_path))
+      labeling_(std::move(labeling_state_cache_path)),
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
+{
+}
+
+SampleWorkflowCoordinator::SampleWorkflowCoordinator(
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path)
+    : navigation_(std::move(navigation_state_cache_path)),
+      labeling_(std::move(labeling_state_cache_path)),
+      workflow_state_cache_path_(std::move(workflow_state_cache_path)),
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
 {
 }
 
@@ -224,6 +244,16 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ClearActiveWorkflow()
     SourceCollectionSessionAction action;
     ClearSampleWorkflow(action);
     return action;
+}
+
+void SampleWorkflowCoordinator::BeginRestoringSourceSession()
+{
+    restoring_source_session_ = true;
+}
+
+void SampleWorkflowCoordinator::EndRestoringSourceSession()
+{
+    restoring_source_session_ = false;
 }
 
 void SampleWorkflowCoordinator::RemoveSource(std::string_view source_key)
@@ -285,6 +315,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
 
     InvalidateSampleSortingSourceCache();
     filters_.Clear();
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -466,6 +497,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTas
         filters_.ClearCondition(active_labeling_source_id);
     }
     selected_labeling_filter_source_id_.reset();
+    MarkActiveWorkflowStateDirty();
     InvalidateSampleSortingSourceCache();
     ApplyNavigationInputEffects(
         action,
@@ -552,6 +584,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelin
         filters_.ClearCondition(active_labeling_source_id);
     }
     selected_labeling_filter_source_id_.reset();
+    MarkActiveWorkflowStateDirty();
     InvalidateSampleSortingSourceCache();
     ApplyNavigationInputEffects(
         action,
@@ -589,6 +622,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ClearFilters(const Spec
 {
     SourceCollectionSessionAction action;
     filters_.Clear();
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -614,6 +648,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetFilterValueSelected(
         allowed_value_keys.erase(value_key);
     }
     filters_.SetCondition(std::move(source_id), std::move(allowed_value_keys));
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -633,6 +668,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingFilter
             filters_.ClearCondition(*selected_labeling_filter_source_id_);
         }
         selected_labeling_filter_source_id_.reset();
+        MarkActiveWorkflowStateDirty();
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -652,6 +688,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingFilter
         filters_.ClearCondition(active_labeling_source_id);
         selected_labeling_filter_source_id_.reset();
     }
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -665,6 +702,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ClearSampleSorting(
 {
     SourceCollectionSessionAction action;
     selected_sample_sort_source_id_.reset();
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -683,6 +721,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortSource(
     }
 
     selected_sample_sort_source_id_ = std::move(source_id);
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -697,6 +736,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortDirection(
 {
     SourceCollectionSessionAction action;
     selected_sample_sort_direction_ = direction;
+    MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -866,11 +906,21 @@ std::optional<std::size_t> SampleWorkflowCoordinator::current_index() const
 void SampleWorkflowCoordinator::MaybeSaveStateCaches(std::uint64_t frame_index)
 {
     labeling_.MaybeSaveStateCache(frame_index);
+    if (!workflow_state_save_scheduler_.ShouldAttemptSave(frame_index)) {
+        return;
+    }
+    if (SaveWorkflowStateCache()) {
+        workflow_state_save_scheduler_.MarkSaveSucceeded();
+    } else {
+        workflow_state_save_scheduler_.MarkSaveFailed(frame_index);
+    }
 }
 
 bool SampleWorkflowCoordinator::FlushStateCaches()
 {
-    return labeling_.FlushStateCache();
+    const bool labeling_saved = labeling_.FlushStateCache();
+    const bool workflow_saved = FlushWorkflowStateCache();
+    return labeling_saved && workflow_saved;
 }
 
 void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
@@ -884,23 +934,24 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
 
     const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
     if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
-        filters_.Clear();
-        selected_labeling_filter_source_id_.reset();
-        selected_sample_sort_source_id_.reset();
-        selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
         active_sample_workflow_identity_ = identity.id;
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
+        labeling_.ActivateSource(identity);
+        RestoreActiveWorkflowState(identity.id);
+        InvalidateSampleFilterViewCache();
         InvalidateSampleSortingSourceCache();
         action.workflow_changed = true;
     } else if (
         !active_sample_workflow_context_fingerprint_ ||
         *active_sample_workflow_context_fingerprint_ != identity.context_fingerprint) {
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
+        labeling_.ActivateSource(identity);
         InvalidateSampleFilterViewCache();
         InvalidateSampleSortingSourceCache();
         action.workflow_changed = true;
+    } else {
+        labeling_.ActivateSource(identity);
     }
-    labeling_.ActivateSource(identity);
 }
 
 void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionAction& action)
@@ -990,7 +1041,10 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleSorting(
         sample_count,
         *selected_sample_sort_source_id_);
     if (!source) {
-        selected_sample_sort_source_id_.reset();
+        if (!restoring_source_session_) {
+            selected_sample_sort_source_id_.reset();
+            MarkActiveWorkflowStateDirty();
+        }
         return navigation_.ClearSampleSorting();
     }
 
@@ -1099,6 +1153,89 @@ SampleWorkflowCoordinator::CachedSampleSortingSourceViews(std::size_t sample_cou
 void SampleWorkflowCoordinator::InvalidateSampleSortingSourceCache()
 {
     sample_sorting_source_cache_valid_ = false;
+}
+
+void SampleWorkflowCoordinator::EnsureWorkflowStateCacheLoaded()
+{
+    if (workflow_state_cache_loaded_) {
+        return;
+    }
+    workflow_state_cache_loaded_ = true;
+    workflow_state_cache_ = LoadSampleWorkflowStateCache(workflow_state_cache_path_);
+}
+
+void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view source_identity)
+{
+    EnsureWorkflowStateCacheLoaded();
+
+    filters_.Clear();
+    selected_labeling_filter_source_id_.reset();
+    selected_sample_sort_source_id_.reset();
+    selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
+
+    const auto match = workflow_state_cache_.sources_by_identity.find(std::string(source_identity));
+    if (match == workflow_state_cache_.sources_by_identity.end()) {
+        return;
+    }
+
+    for (const SampleFilterCondition& condition : match->second.filter_conditions) {
+        filters_.SetCondition(condition.source_id, condition.allowed_value_keys);
+    }
+    selected_labeling_filter_source_id_ = match->second.selected_labeling_filter_source_id;
+    selected_sample_sort_source_id_ = match->second.selected_sample_sort_source_id;
+    selected_sample_sort_direction_ = match->second.selected_sample_sort_direction;
+}
+
+void SampleWorkflowCoordinator::StoreActiveWorkflowState()
+{
+    if (!active_sample_workflow_identity_ || active_sample_workflow_identity_->empty()) {
+        return;
+    }
+    EnsureWorkflowStateCacheLoaded();
+
+    SampleWorkflowSourceState state;
+    state.filter_conditions = filters_.conditions();
+    state.selected_labeling_filter_source_id = selected_labeling_filter_source_id_;
+    state.selected_sample_sort_source_id = selected_sample_sort_source_id_;
+    state.selected_sample_sort_direction = selected_sample_sort_direction_;
+
+    const bool has_state =
+        !state.filter_conditions.empty() ||
+        (state.selected_labeling_filter_source_id && !state.selected_labeling_filter_source_id->empty()) ||
+        (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
+        state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
+    if (has_state) {
+        workflow_state_cache_.sources_by_identity[*active_sample_workflow_identity_] = std::move(state);
+    } else {
+        workflow_state_cache_.sources_by_identity.erase(*active_sample_workflow_identity_);
+    }
+}
+
+void SampleWorkflowCoordinator::MarkActiveWorkflowStateDirty()
+{
+    if (workflow_state_cache_path_.empty()) {
+        return;
+    }
+    StoreActiveWorkflowState();
+    workflow_state_save_scheduler_.MarkDirty();
+}
+
+bool SampleWorkflowCoordinator::SaveWorkflowStateCache()
+{
+    return SaveSampleWorkflowStateCache(workflow_state_cache_path_, workflow_state_cache_);
+}
+
+bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
+{
+    if (!workflow_state_save_scheduler_.dirty()) {
+        return true;
+    }
+    if (SaveWorkflowStateCache()) {
+        workflow_state_save_scheduler_.MarkSaveSucceeded();
+        return true;
+    }
+    workflow_state_save_scheduler_.MarkSaveFailed(0);
+    return false;
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(

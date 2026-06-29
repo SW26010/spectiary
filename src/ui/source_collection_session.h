@@ -222,6 +222,12 @@ public:
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path);
+    SourceCollectionSession(
+        SnapshotLoader snapshot_loader,
+        std::filesystem::path source_session_state_cache_path,
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;

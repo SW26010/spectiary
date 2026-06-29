@@ -2,8 +2,10 @@
 
 #include "domain/sample_filter.h"
 #include "domain/spectrum_snapshot.h"
+#include "app/local_user_state.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/sample_workflow_state_cache_io.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -29,11 +31,17 @@ public:
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path);
+    SampleWorkflowCoordinator(
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path);
 
     [[nodiscard]] SourceCollectionSessionAction SyncActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveWorkflow();
+    void BeginRestoringSourceSession();
+    void EndRestoringSourceSession();
     void RemoveSource(std::string_view source_key);
 
     [[nodiscard]] SampleWorkflowCommandResult RequestSampleNavigation(
@@ -135,6 +143,12 @@ private:
     [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSampleSortingSourceViews(
         std::size_t sample_count) const;
     void InvalidateSampleSortingSourceCache();
+    void EnsureWorkflowStateCacheLoaded();
+    void RestoreActiveWorkflowState(std::string_view source_identity);
+    void StoreActiveWorkflowState();
+    void MarkActiveWorkflowStateDirty();
+    [[nodiscard]] bool SaveWorkflowStateCache();
+    [[nodiscard]] bool FlushWorkflowStateCache();
     [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
         const SampleLabelWriteResult& result);
@@ -148,6 +162,11 @@ private:
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =
         SampleNavigationSortDirection::Ascending;
+    std::filesystem::path workflow_state_cache_path_;
+    SampleWorkflowStateCache workflow_state_cache_;
+    LocalUserStateSaveScheduler workflow_state_save_scheduler_;
+    bool workflow_state_cache_loaded_ = false;
+    bool restoring_source_session_ = false;
     mutable bool sample_sorting_source_cache_valid_ = false;
     mutable std::size_t sample_sorting_source_cache_sample_count_ = 0;
     mutable const SourceCollectionManifest* sample_sorting_source_cache_context_ = nullptr;

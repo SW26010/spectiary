@@ -278,6 +278,28 @@ specforge::SourceCollectionSession MakePersistentSession(
         labeling_cache);
 }
 
+specforge::SourceCollectionSession MakeWorkflowPersistentSession(
+    std::vector<LoadedSourceSnapshot>& loaded_snapshots,
+    const std::filesystem::path& navigation_cache,
+    const std::filesystem::path& labeling_cache,
+    const std::filesystem::path& workflow_cache,
+    const std::filesystem::path& source_path,
+    std::size_t sample_count)
+{
+    return specforge::SourceCollectionSession(
+        [&loaded_snapshots, source_path, sample_count](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(path == source_path, "workflow-persistent session should reload the active source path");
+            loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            return MakeSnapshot(source_path, sample_count, spectrum_index);
+        },
+        std::filesystem::path{},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+}
+
 specforge::SourceCollectionSessionResult Submit(
     specforge::SourceCollectionSession& session,
     specforge::SourceCollectionSessionIntent intent)
@@ -745,6 +767,108 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     Require(result.view.navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
 }
 
+void TestSampleWorkflowStateRestoresFiltersAndSorting()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path workflow_cache = UniqueTempPath("_workflow.json");
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(CompanionNamePath(source_path), {"gamma", "alpha", "beta"}, 6);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded_snapshots;
+        specforge::SourceCollectionSession session = MakeWorkflowPersistentSession(
+            loaded_snapshots,
+            navigation_cache,
+            labeling_cache,
+            workflow_cache,
+            source_path,
+            3);
+
+        (void)Submit(session, OpenSourceCollection(source_path, 0));
+        (void)Submit(session, CreateDefaultLabelingTask());
+        Require(
+            Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+            "bad label should be accepted");
+        Require(
+            Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+            "good label should be accepted");
+        (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+        (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+        (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+        (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+        (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+        (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+
+        specforge::SourceCollectionSessionResult result =
+            Submit(session, SetActiveLabelingFilterSourceSelected(true));
+        Require(result.view.filter.active_labeling_filter_source_selected, "test should select the active labeling filter source");
+        result = Submit(session, SetFilterValueSelected("labeling:manual-labeling", "2", true));
+        Require(result.view.navigation.filter_active, "test should activate a label-value sample filter");
+        Require(result.view.navigation.sequence_count == 2, "test should keep only the two good samples");
+
+        result = Submit(session, SetSampleSortSource("sample-name"));
+        Require(result.view.sorting.active, "test should activate sample-name sorting");
+        result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+        Require(
+            result.view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+            "test should switch sorting to descending");
+        Require(
+            result.view.navigation.current_sequence_position &&
+                *result.view.navigation.current_sequence_position == 1,
+            "descending filtered sequence should place alpha after beta");
+
+        Require(session.FlushStateCaches(), "session flush should save label and workflow state");
+        Require(std::filesystem::exists(workflow_cache), "workflow state flush should create the workflow cache");
+    }
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = MakeWorkflowPersistentSession(
+        restored_loads,
+        navigation_cache,
+        labeling_cache,
+        workflow_cache,
+        source_path,
+        3);
+
+    const specforge::SourceCollectionSessionResult result =
+        Submit(restored, OpenSourceCollection(source_path, 0));
+    const specforge::SourceCollectionSessionView& view = result.view;
+    Require(view.labeling.has_active_task, "restored source should reload the local labeling task");
+    Require(view.filter.active_labeling_filter_source_selected, "restored workflow should select the active labeling filter source");
+    Require(view.filter.sources.size() == 1, "restored workflow should expose the active labeling filter source");
+    Require(
+        view.filter.sources[0].selected_value_keys.find("2") != view.filter.sources[0].selected_value_keys.end(),
+        "restored workflow should preserve the selected good-label value");
+    Require(view.navigation.filter_active, "restored workflow should reactivate navigation filtering");
+    Require(view.navigation.sequence_count == 2, "restored filter should still include two samples");
+    Require(view.sorting.active, "restored workflow should reactivate sample sorting");
+    Require(
+        view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+        "restored workflow should preserve descending sorting direction");
+    Require(
+        std::any_of(view.sorting.sources.begin(), view.sorting.sources.end(), [](const auto& source) {
+            return source.id == "sample-name" && source.selected;
+        }),
+        "restored workflow should preserve the sample-name sort source");
+    Require(
+        view.navigation.current_index && *view.navigation.current_index == 1,
+        "restored workflow should reconcile to the first filtered sample");
+    Require(
+        view.navigation.current_sequence_position && *view.navigation.current_sequence_position == 1,
+        "restored descending sequence should keep alpha at position 1");
+    Require(
+        view.snapshot->collection.current_index == 1,
+        "restored source should load the reconciled filtered sample snapshot");
+
+    const specforge::SourceCollectionSessionResult previous_result =
+        Submit(restored, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    Require(
+        previous_result.navigation.target_found && previous_result.navigation.current_index == 2,
+        "restored previous navigation should follow the descending filtered sequence");
+}
+
 void TestAnnotationSortingSourcesRequireComparablePlainValues()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -801,6 +925,85 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     Require(!result.view.sorting.active, "invalidated annotation sorting should be cleared");
     Require(!result.view.navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
     Require(result.view.navigation.row_location_available, "cleared sorting should restore ordinary row location");
+}
+
+void TestSourceSessionRestoresAnnotationSortingState()
+{
+    const std::filesystem::path source_session_cache = UniqueTempPath("_sources.json");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path workflow_cache = UniqueTempPath("_workflow.json");
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path rank_path = UniqueTempPath("_rank.npy");
+    TouchFile(source_path);
+    SaveLabelResultFixture(
+        rank_path,
+        "rank",
+        "Rank",
+        {3, 1, 2},
+        specforge::SampleLabelSet{},
+        false);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded_snapshots;
+        specforge::SourceCollectionSession session = specforge::SourceCollectionSession(
+            [&loaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
+                Require(path == source_path, "session should reload the source fixture");
+                loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
+                return MakeSnapshot(source_path, 3, spectrum_index);
+            },
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            workflow_cache);
+
+        (void)Submit(session, OpenSourceCollection(source_path, 0));
+        specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+        Require(result.loaded, "plain integer annotation should load before selecting ordering");
+        result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
+        Require(result.view.sorting.active, "annotation ordering should be active before saving");
+        Require(
+            result.view.navigation.current_sequence_position &&
+                *result.view.navigation.current_sequence_position == 2,
+            "annotation ordering should put row 0 last before saving");
+        Require(session.FlushStateCaches(), "session flush should save source and workflow state");
+    }
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = specforge::SourceCollectionSession(
+        [&restored_loads, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
+            Require(path == source_path, "restored session should reload the source fixture");
+            restored_loads.push_back(LoadedSourceSnapshot{path, spectrum_index});
+            return MakeSnapshot(source_path, 3, spectrum_index);
+        },
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+
+    const specforge::SourceCollectionSessionView view = restored.View();
+    Require(view.sources.size() == 1, "restored session should restore the source entry");
+    Require(
+        view.navigation.current_annotations.size() == 1 &&
+            view.navigation.current_annotations[0].path == rank_path,
+        "restored session should restore the annotation used for ordering");
+    Require(
+        HasSortSource(view.sorting, AnnotationSourceId(rank_path)),
+        "restored sorting view should expose the annotation ordering source");
+    Require(view.sorting.active, "restored workflow should keep annotation ordering active");
+    Require(
+        view.sorting.active_source_id == AnnotationSourceId(rank_path),
+        "restored workflow should keep the annotation ordering source selected");
+    Require(view.navigation.sequence_active, "restored annotation ordering should activate the navigation sequence");
+    Require(
+        view.navigation.current_sequence_position && *view.navigation.current_sequence_position == 2,
+        "restored annotation ordering should put row 0 last");
+
+    const specforge::SourceCollectionSessionResult previous_result =
+        Submit(restored, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    Require(
+        previous_result.navigation.target_found && previous_result.navigation.current_index == 2,
+        "restored previous navigation should follow the annotation ordering");
 }
 
 void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
@@ -1610,7 +1813,9 @@ int main()
     TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows();
     TestRememberedPositionResumableTracksActiveSequence();
     TestSampleSortingIntentAppliesNavigationSequence();
+    TestSampleWorkflowStateRestoresFiltersAndSorting();
     TestAnnotationSortingSourcesRequireComparablePlainValues();
+    TestSourceSessionRestoresAnnotationSortingState();
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskClearsActiveTaskFilter();
     TestCreateLabelingTaskUsesCustomName();

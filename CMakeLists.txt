@@ -119,6 +119,8 @@ add_executable(specforge_native WIN32
     src/ui/sample_sorting_sources.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
+    src/ui/sample_workflow_state_cache_io.cpp
+    src/ui/sample_workflow_state_cache_io.h
     src/ui/sample_workflow_panel.cpp
     src/ui/sample_workflow_panel.h
     src/ui/source_collection_panel.cpp
@@ -413,6 +415,8 @@ add_executable(specforge_source_collection_session_tests
     src/ui/sample_sorting_sources.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
+    src/ui/sample_workflow_state_cache_io.cpp
+    src/ui/sample_workflow_state_cache_io.h
     src/ui/source_collection_roster.cpp
     src/ui/source_collection_roster.h
     src/ui/source_collection_session.cpp

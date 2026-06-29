@@ -401,6 +401,23 @@ SourceCollectionSession::SourceCollectionSession(
     RestoreSourceSessionCache();
 }
 
+SourceCollectionSession::SourceCollectionSession(
+    SnapshotLoader snapshot_loader,
+    std::filesystem::path source_session_state_cache_path,
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path)
+    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
+      workflow_(std::make_unique<SampleWorkflowCoordinator>(
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path),
+          std::move(workflow_state_cache_path))),
+      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
+          std::move(source_session_state_cache_path)))
+{
+    RestoreSourceSessionCache();
+}
+
 SourceCollectionSession::~SourceCollectionSession() = default;
 
 SourceCollectionSession::SourceCollectionSession(SourceCollectionSession&&) noexcept = default;
@@ -844,6 +861,7 @@ void SourceCollectionSession::RestoreSourceSessionCache()
     }
 
     source_session_state_->BeginRestore();
+    workflow_->BeginRestoringSourceSession();
     std::optional<std::size_t> restored_active_source_index;
     for (std::size_t source_index = 0; source_index < state.sources.size(); ++source_index) {
         const SourceCollectionSavedSource& source = state.sources[source_index];
@@ -861,6 +879,7 @@ void SourceCollectionSession::RestoreSourceSessionCache()
     if (restored_active_source_index && roster_->has_source(*restored_active_source_index)) {
         (void)ActivateSource(*restored_active_source_index);
     }
+    workflow_->EndRestoringSourceSession();
     source_session_state_->EndRestore();
 }
 
