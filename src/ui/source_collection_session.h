@@ -231,6 +231,7 @@ public:
 
     [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionIntent intent);
     [[nodiscard]] SourceCollectionSessionView View() const;
+    [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
 
     void MaybeSaveStateCaches(std::uint64_t frame_index);
     [[nodiscard]] bool FlushStateCaches();

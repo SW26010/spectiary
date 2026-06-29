@@ -45,20 +45,14 @@ SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent)
 }
 
 bool CanResumeRememberedRow(
-    const SourceCollectionNavigationView& navigation,
+    const SourceCollectionLabelingView& labeling,
     std::size_t remembered_row,
     std::size_t sample_count)
 {
     if (remembered_row >= sample_count) {
         return false;
     }
-    if (!navigation.sequence_active) {
-        return true;
-    }
-    return std::find(
-               navigation.sequence_rows.begin(),
-               navigation.sequence_rows.end(),
-               remembered_row) != navigation.sequence_rows.end();
+    return labeling.remembered_position_resumable;
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -467,7 +461,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             static_cast<unsigned long long>(*labeling_view.remembered_position));
         ImGui::SameLine();
         const bool resume_available = CanResumeRememberedRow(
-            session_view.navigation,
+            labeling_view,
             *labeling_view.remembered_position,
             labeling_view.sample_count);
         if (!resume_available) {

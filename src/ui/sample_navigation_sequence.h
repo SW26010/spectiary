@@ -27,6 +27,7 @@ struct SampleNavigationSequenceInput {
     std::size_t source_row_count = 0;
     std::span<const std::string> sample_names;
     bool filter_active = false;
+    bool materialize_source_order = true;
     const std::vector<bool>* included_samples = nullptr;
     const SampleNavigationSortChoice* sort_choice = nullptr;
     std::optional<std::size_t> current_source_row;
@@ -37,7 +38,9 @@ struct SampleNavigationSequence {
     bool active = false;
     bool empty = false;
     bool row_location_available = true;
+    std::size_t source_row_count = 0;
     std::vector<std::size_t> ordered_rows;
+    std::vector<bool> included_rows;
     std::optional<std::size_t> current_source_row;
     std::optional<std::size_t> current_sequence_position;
     std::optional<std::size_t> previous_target;

@@ -611,9 +611,8 @@ void TestResumeLocateRespectsActiveFilterSequence()
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected("labeling:manual-labeling", "2", true));
     Require(result.view.navigation.sequence_active, "test should activate the filtered sequence");
-    Require(
-        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2}),
-        "test should include only the good samples");
+    Require(result.view.navigation.sequence_count == 2, "test should include only the two good samples");
+    Require(result.view.navigation.sequence_rows.empty(), "active sequence rows should stay out of the per-frame view");
     Require(
         result.view.navigation.current_index && *result.view.navigation.current_index == 1,
         "filter should reconcile to the first included row");
@@ -634,6 +633,71 @@ void TestResumeLocateRespectsActiveFilterSequence()
     Require(result.navigation.current_index == 2, "blocked resume locate should keep the current sequence row");
 }
 
+void TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    TouchFile(source_path);
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 4);
+
+    const specforge::SourceCollectionSessionResult result =
+        Submit(session, OpenSourceCollection(source_path, 0));
+    const specforge::SourceCollectionNavigationView& navigation = result.view.navigation;
+
+    Require(!navigation.sequence_active, "source order should not expose an active sequence");
+    Require(navigation.sequence_count == 4, "source-order sequence count should still match sample count");
+    Require(navigation.filtered_sample_count == 4, "source-order filtered count should still match sample count");
+    Require(navigation.sequence_rows.empty(), "source-order view should not materialize rows");
+    Require(
+        navigation.current_sequence_position && *navigation.current_sequence_position == 0,
+        "source-order current position should remain available");
+    Require(navigation.row_location_available, "source-order row location should remain available");
+}
+
+void TestRememberedPositionResumableTracksActiveSequence()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "bad label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        "good label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, SetActiveLabelingFilterSourceSelected(true));
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, SetFilterValueSelected("labeling:manual-labeling", "2", true));
+    Require(result.view.navigation.sequence_count == 2, "good filter should include rows 1 and 2");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+    Require(result.navigation.target_found && result.navigation.current_index == 2, "next should remember row 2");
+    Require(
+        result.view.labeling.remembered_position && *result.view.labeling.remembered_position == 2,
+        "next navigation should remember row 2");
+    Require(result.view.labeling.remembered_position_resumable, "remembered in-sequence row should be resumable");
+
+    (void)Submit(session, SetFilterValueSelected("labeling:manual-labeling", "2", false));
+    result = Submit(session, SetFilterValueSelected("labeling:manual-labeling", "1", true));
+    Require(result.view.navigation.sequence_count == 1, "bad filter should include only row 0");
+    Require(
+        result.view.labeling.remembered_position && *result.view.labeling.remembered_position == 2,
+        "remembered row should survive filter changes");
+    Require(
+        !result.view.labeling.remembered_position_resumable,
+        "remembered out-of-sequence row should not be resumable");
+}
+
 void TestSampleSortingIntentAppliesNavigationSequence()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -649,9 +713,8 @@ void TestSampleSortingIntentAppliesNavigationSequence()
 
     result = Submit(session, SetSampleSortSource("sample-name"));
     Require(result.view.sorting.active, "selecting sample-name sorting should activate sorting view state");
-    Require(
-        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2, 0}),
-        "sample-name sorting should order rows lexically by source-provided names");
+    Require(result.view.navigation.sequence_count == 3, "sample-name sorting should keep all rows in the sequence");
+    Require(result.view.navigation.sequence_rows.empty(), "sorted rows should stay out of the per-frame view");
     Require(!result.view.navigation.row_location_available, "sorted sequence should disable ordinary row locate");
     Require(
         result.view.navigation.current_sequence_position &&
@@ -670,8 +733,11 @@ void TestSampleSortingIntentAppliesNavigationSequence()
 
     result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
     Require(
-        result.view.navigation.sequence_rows == std::vector<std::size_t>({0, 2, 1}),
-        "descending sample-name sorting should reverse the source names with stable row targets");
+        result.view.navigation.current_sequence_position &&
+            *result.view.navigation.current_sequence_position == 2,
+        "descending sample-name sorting should place alpha after gamma and beta");
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    Require(result.navigation.target_found && result.navigation.current_index == 2, "previous should follow descending sorted order");
 
     result = Submit(session, ClearSampleSorting());
     Require(!result.view.sorting.active, "clearing sorting should return sorting view to source order");
@@ -723,7 +789,8 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
     Require(result.view.sorting.active, "plain annotation sort source should be selectable");
     Require(
-        result.view.navigation.sequence_rows == std::vector<std::size_t>({1, 2, 0}),
+        result.view.navigation.current_sequence_position &&
+            *result.view.navigation.current_sequence_position == 2,
         "plain annotation sorting should use numeric values with source-order tie break");
 
     (void)Submit(session, CreateDefaultLabelingTask());
@@ -1540,6 +1607,8 @@ int main()
     TestAssigningLabelAutoAdvancesInsideSession();
     TestLabelingFilterSelectionAppliesToNavigation();
     TestResumeLocateRespectsActiveFilterSequence();
+    TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows();
+    TestRememberedPositionResumableTracksActiveSequence();
     TestSampleSortingIntentAppliesNavigationSequence();
     TestAnnotationSortingSourcesRequireComparablePlainValues();
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();

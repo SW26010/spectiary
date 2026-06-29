@@ -822,7 +822,7 @@ void ShellUi::RenderSmoothingPanel()
     ImGui::TextUnformatted("Smoothing");
     ImGui::Separator();
 
-    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
+    const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
         ImGui::TextDisabled("No plottable spectrum");
         ImGui::End();
@@ -897,7 +897,7 @@ void ShellUi::RenderInfoTagsPanel()
 
     ImGui::TextUnformatted("Information");
     ImGui::Separator();
-    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
+    const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
         ImGui::Text("Name: %s", current.name.empty() ? "(none)" : current.name.c_str());
@@ -956,7 +956,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     label_shortcut_context_active_ =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    const SpectrumSnapshotHandle snapshot = SessionView().current_sample_snapshot;
+    const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const std::vector<const SpectralLineMarker*> spectral_lines =
         spectral_lines_panel_.FilteredMarkers(snapshot, false);
     RenderSpectrumPlot(
@@ -972,7 +972,7 @@ void ShellUi::RenderSpectralLinesPanel()
 {
     spectral_lines_panel_ui_.Render(
         spectral_lines_panel_,
-        SessionView().current_sample_snapshot,
+        session_.CurrentSampleSnapshot(),
         &panel_visibility_.spectral_lines);
 }
 

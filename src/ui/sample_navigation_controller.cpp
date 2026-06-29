@@ -225,7 +225,11 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
         return false;
     }
 
-    return LoadReadOnlyAnnotationIntoSession(*session, path, message);
+    const bool loaded = LoadReadOnlyAnnotationIntoSession(*session, path, message);
+    if (loaded) {
+        InvalidateSequence(*session);
+    }
+    return loaded;
 }
 
 bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path)
@@ -248,6 +252,7 @@ bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const 
         return false;
     }
 
+    InvalidateSequence(*session);
     return true;
 }
 
@@ -272,6 +277,9 @@ bool SampleNavigationController::RestoreReadOnlyAnnotationsForActiveSource(
         }
         restored = LoadReadOnlyAnnotationIntoSession(*session, path) || restored;
     }
+    if (restored) {
+        InvalidateSequence(*session);
+    }
     return restored;
 }
 
@@ -286,7 +294,7 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
     result.has_active_source = true;
     result.previous_index = session->current_index.value_or(0);
     result.current_index = session->current_index.value_or(0);
-    SampleNavigationSequence sequence = BuildSequence(*session);
+    const SampleNavigationSequence& sequence = CachedSequence(*session);
     PopulateResultFromSequence(result, *session, sequence);
     if (session->spectrum_count == 0) {
         return result;
@@ -334,10 +342,10 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 
     result.target_found = true;
     session->current_index = *target_index;
+    InvalidateSequence(*session);
     result.current_index = *session->current_index;
     result.moved = result.current_index != result.previous_index;
-    sequence = BuildSequence(*session);
-    PopulateResultFromSequence(result, *session, sequence);
+    PopulateResultFromSequence(result, *session, CachedSequence(*session));
     PersistActiveIndex();
     return result;
 }
@@ -366,7 +374,7 @@ bool SampleNavigationController::can_move_previous() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    const SampleNavigationSequence sequence = BuildSequence(*session);
+    const SampleNavigationSequence& sequence = CachedSequence(*session);
     return sequence.previous_target && session->current_index && *sequence.previous_target != *session->current_index;
 }
 
@@ -376,7 +384,7 @@ bool SampleNavigationController::can_move_next() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    const SampleNavigationSequence sequence = BuildSequence(*session);
+    const SampleNavigationSequence& sequence = CachedSequence(*session);
     return sequence.next_target && session->current_index && *sequence.next_target != *session->current_index;
 }
 
@@ -446,7 +454,8 @@ std::size_t SampleNavigationController::filtered_sample_count() const
     if (session == nullptr) {
         return 0;
     }
-    return BuildSequence(*session).ordered_rows.size();
+    const SampleNavigationSequence& sequence = CachedSequence(*session);
+    return sequence.active ? sequence.ordered_rows.size() : session->spectrum_count;
 }
 
 bool SampleNavigationController::current_sample_in_filter() const
@@ -503,13 +512,14 @@ bool SampleNavigationController::sorting_active() const
            session->sort_choice.values.size() == session->spectrum_count;
 }
 
-SampleNavigationSequence SampleNavigationController::current_sequence() const
+const SampleNavigationSequence& SampleNavigationController::current_sequence() const
 {
+    static const SampleNavigationSequence kEmptySequence;
     const SourceSession* session = ActiveSession();
     if (session == nullptr) {
-        return {};
+        return kEmptySequence;
     }
-    return BuildSequence(*session);
+    return CachedSequence(*session);
 }
 
 void SampleNavigationController::SetSampleNameQuery(std::string query)
@@ -519,6 +529,7 @@ void SampleNavigationController::SetSampleNameQuery(std::string query)
         return;
     }
     session->sample_name_query = std::move(query);
+    InvalidateSequence(*session);
     RecomputeMatches(*session);
 }
 
@@ -592,6 +603,7 @@ SampleNavigationSequence SampleNavigationController::BuildSequence(const SourceS
     input.source_row_count = session.spectrum_count;
     input.sample_names = session.manifest.sample_names;
     input.filter_active = session.filter_active;
+    input.materialize_source_order = false;
     input.included_samples = &session.filter_included_samples;
     input.sort_choice = &session.sort_choice;
     input.current_source_row = session.current_index;
@@ -599,12 +611,29 @@ SampleNavigationSequence SampleNavigationController::BuildSequence(const SourceS
     return BuildSampleNavigationSequence(input);
 }
 
+const SampleNavigationSequence& SampleNavigationController::CachedSequence(const SourceSession& session)
+{
+    if (!session.sequence_cache_valid) {
+        session.sequence_cache = BuildSequence(session);
+        session.sequence_cache_valid = true;
+    }
+    return session.sequence_cache;
+}
+
+void SampleNavigationController::InvalidateSequence(SourceSession& session)
+{
+    session.sequence_cache_valid = false;
+}
+
 std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSequence(SourceSession& session)
 {
     const std::optional<std::size_t> previous_index = session.current_index;
-    const SampleNavigationSequence sequence = BuildSequence(session);
+    InvalidateSequence(session);
+    const SampleNavigationSequence& sequence = CachedSequence(session);
     if (sequence.current_source_row) {
         session.current_index = sequence.current_source_row;
+    } else if (!sequence.active && session.spectrum_count > 0) {
+        session.current_index = 0;
     } else if (!sequence.ordered_rows.empty()) {
         session.current_index = sequence.ordered_rows.front();
     } else {
@@ -614,6 +643,7 @@ std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSeque
     if (session.current_index == previous_index) {
         return std::nullopt;
     }
+    InvalidateSequence(session);
     return session.current_index;
 }
 
@@ -635,8 +665,9 @@ void SampleNavigationController::PopulateResultFromSequence(
     result.current_sequence_position = sequence.current_sequence_position;
     result.sequence_active = sequence.active;
     result.sequence_empty = sequence.empty;
-    result.sequence_count = sequence.ordered_rows.size();
-    result.filtered_sample_count = sequence.ordered_rows.size();
+    const std::size_t sequence_count = sequence.active ? sequence.ordered_rows.size() : session.spectrum_count;
+    result.sequence_count = sequence_count;
+    result.filtered_sample_count = sequence_count;
     result.row_location_available = sequence.row_location_available;
     result.current_sample_in_filter = !session.filter_active || sequence.current_source_row.has_value();
     if (sequence.current_source_row) {
@@ -713,7 +744,7 @@ void SampleNavigationController::RecomputeMatches(SourceSession& session)
     if (session.sample_name_query.empty() || session.manifest.sample_names.empty()) {
         return;
     }
-    session.sample_name_matches = BuildSequence(session).sample_name_matches;
+    session.sample_name_matches = CachedSequence(session).sample_name_matches;
 }
 
 }  // namespace specforge

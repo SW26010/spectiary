@@ -540,6 +540,15 @@ SourceCollectionSessionView SourceCollectionSession::View() const
     return view;
 }
 
+SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
+{
+    const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
+    if (!snapshot || snapshot->source.path.empty() || !workflow_->current_index()) {
+        return nullptr;
+    }
+    return snapshot;
+}
+
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
@@ -706,7 +715,6 @@ SourceCollectionSessionAction SourceCollectionSession::AssignActiveLabelToCurren
 {
     SourceCollectionSessionAction action;
     ApplyWorkflowCommandResult(action, workflow_->AssignActiveLabelToCurrentSample(roster_->snapshot(), code));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
     return action;
 }
 
@@ -714,7 +722,6 @@ SourceCollectionSessionAction SourceCollectionSession::ClearActiveLabelForCurren
 {
     SourceCollectionSessionAction action;
     ApplyWorkflowCommandResult(action, workflow_->ClearActiveLabelForCurrentSample(roster_->snapshot()));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
     return action;
 }
 
@@ -807,9 +814,6 @@ SourceCollectionSessionAction SourceCollectionSession::LoadActiveSourceAt(std::s
     }
 
     SourceCollectionSessionAction action = roster_->LoadActiveSourceAt(spectrum_index);
-    MergeSourceCollectionSessionAction(
-        action,
-        workflow_->SyncActiveSource(roster_->current_source_key(), roster_->snapshot()));
     action.navigation_inputs_changed = true;
     MarkSourceSessionCacheDirty();
     return action;

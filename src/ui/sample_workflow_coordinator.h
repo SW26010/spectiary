@@ -109,6 +109,11 @@ private:
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool active_labeling_filter_source_selected() const;
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
+    [[nodiscard]] const SourceCollectionFilterView& CachedSampleFilterView(std::size_t sample_count) const;
+    void InvalidateSampleFilterViewCache();
+    [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSampleSortingSourceViews(
+        std::size_t sample_count) const;
+    void InvalidateSampleSortingSourceCache();
     [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
         const SampleLabelWriteResult& result);
@@ -117,10 +122,19 @@ private:
     SampleLabelingController labeling_;
     SampleFilterController filters_;
     std::optional<std::string> active_sample_workflow_identity_;
+    std::optional<std::string> active_sample_workflow_context_fingerprint_;
     std::optional<std::string> selected_labeling_filter_source_id_;
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =
         SampleNavigationSortDirection::Ascending;
+    mutable bool sample_sorting_source_cache_valid_ = false;
+    mutable std::size_t sample_sorting_source_cache_sample_count_ = 0;
+    mutable const SourceCollectionManifest* sample_sorting_source_cache_context_ = nullptr;
+    mutable std::vector<SourceCollectionSampleSortSourceView> sample_sorting_source_cache_;
+    mutable bool sample_filter_view_cache_valid_ = false;
+    mutable std::size_t sample_filter_view_cache_sample_count_ = 0;
+    mutable const SourceCollectionManifest* sample_filter_view_cache_context_ = nullptr;
+    mutable SourceCollectionFilterView sample_filter_view_cache_;
 };
 
 }  // namespace specforge

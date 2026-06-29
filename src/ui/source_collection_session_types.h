@@ -89,6 +89,7 @@ struct SourceCollectionLabelingView {
     bool auto_advance = false;
     bool skip_labeled_on_advance = false;
     std::optional<std::size_t> remembered_position;
+    bool remembered_position_resumable = false;
     std::optional<std::filesystem::path> output_path;
     SampleLabelSaveState save_state;
     bool can_deactivate_task = false;

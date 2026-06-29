@@ -91,7 +91,7 @@ public:
     std::optional<std::size_t> SetSampleSorting(SampleNavigationSortChoice sort_choice);
     std::optional<std::size_t> ClearSampleSorting();
     [[nodiscard]] bool sorting_active() const;
-    [[nodiscard]] SampleNavigationSequence current_sequence() const;
+    [[nodiscard]] const SampleNavigationSequence& current_sequence() const;
     void SetSampleNameQuery(std::string query);
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
@@ -113,11 +113,15 @@ private:
         std::size_t filtered_sample_count = 0;
         std::optional<std::size_t> index_before_active_filter;
         SampleNavigationSortChoice sort_choice;
+        mutable bool sequence_cache_valid = false;
+        mutable SampleNavigationSequence sequence_cache;
     };
 
     [[nodiscard]] SourceSession* ActiveSession();
     [[nodiscard]] const SourceSession* ActiveSession() const;
     [[nodiscard]] static SampleNavigationSequence BuildSequence(const SourceSession& session);
+    [[nodiscard]] static const SampleNavigationSequence& CachedSequence(const SourceSession& session);
+    static void InvalidateSequence(SourceSession& session);
     static std::optional<std::size_t> ReconcileCurrentWithSequence(SourceSession& session);
     [[nodiscard]] static bool IsSampleInFilter(const SourceSession& session, std::size_t sample_index);
     static void PopulateResultFromSequence(

@@ -112,7 +112,9 @@ auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`, and
 ## Interaction Profiling
 
 For the standard ImPlot pan/drag responsiveness flow, see
-[docs/performance_testing.md](docs/performance_testing.md). The short path is:
+[docs/performance_testing.md](docs/performance_testing.md). For implementation
+constraints and regression case studies, see
+[docs/ui_responsiveness.md](docs/ui_responsiveness.md). The short path is:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -InitialSource "C:\path\to\source.npy"
