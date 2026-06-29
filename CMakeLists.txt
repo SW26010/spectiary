@@ -103,6 +103,8 @@ add_executable(specforge_native WIN32
     src/ui/shell_ui.h
     src/ui/sample_name_autocomplete.cpp
     src/ui/sample_name_autocomplete.h
+    src/ui/sample_annotation_labeling_rules.cpp
+    src/ui/sample_annotation_labeling_rules.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
     src/ui/sample_labeling_state_cache_io.cpp
@@ -113,6 +115,8 @@ add_executable(specforge_native WIN32
     src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_navigation_state_cache_io.h
+    src/ui/sample_sorting_sources.cpp
+    src/ui/sample_sorting_sources.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
     src/ui/sample_workflow_panel.cpp
@@ -289,6 +293,40 @@ endif()
 
 add_test(NAME specforge_sample_navigation_sequence_tests COMMAND specforge_sample_navigation_sequence_tests)
 
+add_executable(specforge_sample_workflow_rules_tests
+    tests/sample_workflow_rules_tests.cpp
+    src/app/local_user_state_json.cpp
+    src/app/local_user_state_json.h
+    src/domain/npy_array_io.cpp
+    src/domain/npy_array_io.h
+    src/domain/sample_annotation_io.h
+    src/domain/sample_filter.cpp
+    src/domain/sample_filter.h
+    src/domain/sample_labeling.cpp
+    src/domain/sample_labeling.h
+    src/domain/source_collection_manifest.h
+    src/domain/spectrum_snapshot.h
+    src/platform/atomic_file.cpp
+    src/platform/atomic_file.h
+    src/ui/sample_annotation_labeling_rules.cpp
+    src/ui/sample_annotation_labeling_rules.h
+    src/ui/sample_navigation_sequence.cpp
+    src/ui/sample_navigation_sequence.h
+    src/ui/sample_sorting_sources.cpp
+    src/ui/sample_sorting_sources.h
+    src/ui/source_collection_session_types.h
+)
+
+target_include_directories(specforge_sample_workflow_rules_tests PRIVATE src)
+
+if(MSVC)
+    target_compile_options(specforge_sample_workflow_rules_tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(specforge_sample_workflow_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME specforge_sample_workflow_rules_tests COMMAND specforge_sample_workflow_rules_tests)
+
 add_executable(specforge_sample_name_autocomplete_tests
     tests/sample_name_autocomplete_tests.cpp
     src/ui/sample_name_autocomplete.cpp
@@ -359,6 +397,8 @@ add_executable(specforge_source_collection_session_tests
     src/domain/spectrum_snapshot.h
     src/platform/atomic_file.cpp
     src/platform/atomic_file.h
+    src/ui/sample_annotation_labeling_rules.cpp
+    src/ui/sample_annotation_labeling_rules.h
     src/ui/sample_labeling_controller.cpp
     src/ui/sample_labeling_controller.h
     src/ui/sample_labeling_state_cache_io.cpp
@@ -369,6 +409,8 @@ add_executable(specforge_source_collection_session_tests
     src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_navigation_state_cache_io.h
+    src/ui/sample_sorting_sources.cpp
+    src/ui/sample_sorting_sources.h
     src/ui/sample_workflow_coordinator.cpp
     src/ui/sample_workflow_coordinator.h
     src/ui/source_collection_roster.cpp

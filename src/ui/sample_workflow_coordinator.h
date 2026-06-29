@@ -100,8 +100,29 @@ public:
     [[nodiscard]] bool FlushStateCaches();
 
 private:
+    struct NavigationInputReconcileRequest {
+        bool workflow_changed = false;
+        bool filters_changed = false;
+        bool sorting_changed = false;
+    };
+
+    struct NavigationInputReconcileEffects {
+        bool workflow_changed = false;
+        bool navigation_inputs_changed = false;
+        std::optional<std::size_t> snapshot_index_to_load;
+    };
+
     void SyncSampleWorkflowSession(const SpectrumSnapshotHandle& snapshot, SourceCollectionSessionAction& action);
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
+    [[nodiscard]] NavigationInputReconcileEffects ReconcileNavigationInputs(
+        const SpectrumSnapshotHandle& snapshot,
+        NavigationInputReconcileRequest request);
+    static void ApplyNavigationInputEffects(
+        SourceCollectionSessionAction& action,
+        const NavigationInputReconcileEffects& effects);
+    static void ApplyNavigationInputEffects(
+        SampleWorkflowCommandResult& result,
+        const NavigationInputReconcileEffects& effects);
     std::optional<std::size_t> ApplySampleFilters(const SpectrumSnapshotHandle& snapshot);
     std::optional<std::size_t> ApplySampleSorting(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::size_t ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const;
