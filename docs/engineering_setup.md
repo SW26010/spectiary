@@ -53,7 +53,7 @@ DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`
 Ninja configure check：
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --preset ninja-msvc-debug"
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
 ```
 
 Visual Studio configure check：
@@ -67,7 +67,7 @@ Configure success 验证依赖和生成文件，build success 验证 native shel
 Build native shell：
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
 ```
 
 ### Ninja/MSVC 卡住排查
@@ -80,11 +80,13 @@ workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可
 `$env:VCPKG_ROOT\buildtrees\0.vcpkg_dep_info.cmake`、`buildtrees/`、`packages/`、下载缓存或 MSVC
 工具链缓存；如果沙箱拦住这些 workspace 外写入，表现可能是 configure 失败或后续 build 看起来卡住。
 
-受限环境中的正确处理方式是把 configure 和 build 都作为需要外部工具链/cache 写入权限的命令执行：
+受限环境中的正确处理方式是把 configure 和 build 都作为需要外部工具链/cache 写入权限的命令执行，并优先使用
+`scripts/build-ninja-msvc-debug.ps1`。这个脚本会加载 `vcvars64.bat`、记录 stdout/stderr 到 `logs/build/`，
+并在超时后终止它自己启动的进程树，避免 agent 无限等待：
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --preset ninja-msvc-debug"
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure -TimeoutSec 180
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_source_collection_session_tests -TimeoutSec 60 -Explain
 ```
 
 如果一次构建被中断，后续命令可能卡在 Ninja lock。先查是否有残留构建进程：

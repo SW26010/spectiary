@@ -64,7 +64,7 @@ Open a new terminal after setting it.
 Use the Ninja preset from a terminal with the MSVC environment loaded:
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --preset ninja-msvc-debug"
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
 ```
 
 Or use the Visual Studio generator preset:
@@ -80,7 +80,7 @@ Configure success verifies the dependency stack and generated build files.
 Use the Ninja preset from a terminal with the MSVC environment loaded:
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
 ```
 
 The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
