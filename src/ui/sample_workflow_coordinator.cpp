@@ -133,6 +133,11 @@ bool HasSelectedSourceId(const std::vector<std::string>& source_ids, std::string
     });
 }
 
+bool IsDefaultSampleSortSourceId(std::string_view source_id)
+{
+    return source_id == "source-order" || source_id == "sample-name";
+}
+
 bool AddSelectedSourceId(std::vector<std::string>& source_ids, std::string source_id)
 {
     if (source_id.empty() || HasSelectedSourceId(source_ids, source_id)) {
@@ -220,6 +225,15 @@ bool IsSampleFilterSourceAvailable(
            FindLabelingFilterSourceById(active_source_tasks, sample_count, source_id) != nullptr;
 }
 
+bool IsSampleSortSourceAvailable(
+    const SourceCollectionManifest* context,
+    const std::vector<SampleLabelingTask>* active_source_tasks,
+    std::size_t sample_count,
+    std::string_view source_id)
+{
+    return BuildSampleSortingSource(context, active_source_tasks, sample_count, source_id).has_value();
+}
+
 std::optional<SampleLabelResultMetadata> LoadVerifiedLabelMetadataForAnnotation(
     const SampleAnnotationResult& annotation)
 {
@@ -260,6 +274,9 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     }
     view.can_activate_labeling = local_task != nullptr || annotation.kind == SampleAnnotationKind::CategoricalInteger;
     view.can_filter_samples = local_task != nullptr || annotation.kind != SampleAnnotationKind::ContinuousFloat;
+    view.can_sort_samples = local_task == nullptr &&
+                            annotation.relationship == SampleAnnotationWorkflowRelationship::PlainAnnotation &&
+                            !annotation.label_metadata;
     view.can_remove_annotation = local_task == nullptr;
     if (local_task != nullptr && local_task->output_path) {
         view.output_missing = !PathExists(*local_task->output_path);
@@ -284,6 +301,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     }
     view.can_activate_labeling = task.output_path.has_value();
     view.can_filter_samples = task.output_path.has_value();
+    view.can_sort_samples = false;
     view.can_remove_annotation = false;
     if (task.output_path) {
         view.output_missing = !PathExists(*task.output_path);
@@ -435,6 +453,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
     if (removed_source_id) {
         filters_.ClearCondition(*removed_source_id);
         (void)RemoveSelectedSourceId(selected_filter_source_ids_, *removed_source_id);
+        (void)RemoveSelectedSampleSortSource(*removed_source_id);
     }
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
@@ -690,6 +709,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
                 const std::string source_id = BuildAnnotationFilterSourceId(*annotation);
                 filters_.ClearCondition(source_id);
                 (void)RemoveSelectedSourceId(selected_filter_source_ids_, source_id);
+                (void)RemoveSelectedSampleSortSource(source_id);
             }
         }
         MarkActiveWorkflowStateDirty();
@@ -846,6 +866,50 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ClearSampleSorting(
 {
     SourceCollectionSessionAction action;
     selected_sample_sort_source_id_.reset();
+    selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
+    SetSampleSortSourceDirection("source-order", SampleNavigationSortDirection::Ascending);
+    MarkActiveWorkflowStateDirty();
+    ApplyNavigationInputEffects(
+        action,
+        ReconcileNavigationInputs(
+            snapshot,
+            NavigationInputReconcileRequest{.sorting_changed = true}));
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::AddSampleSortSource(
+    const SpectrumSnapshotHandle& snapshot,
+    std::string source_id)
+{
+    SourceCollectionSessionAction action;
+    if (IsDefaultSampleSortSourceId(source_id) ||
+        !IsSampleSortSourceAvailable(
+            navigation_.active_context(),
+            labeling_.active_source_tasks(),
+            ActiveSampleCount(snapshot),
+            source_id)) {
+        return action;
+    }
+
+    if (!AddSelectedSourceId(selected_sample_sort_source_ids_, std::move(source_id))) {
+        return action;
+    }
+
+    SetSampleSortSourceDirection(selected_sample_sort_source_ids_.back(), SampleNavigationSortDirection::Ascending);
+    MarkActiveWorkflowStateDirty();
+    action.workflow_changed = true;
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveSampleSortSource(
+    const SpectrumSnapshotHandle& snapshot,
+    std::string source_id)
+{
+    SourceCollectionSessionAction action;
+    if (IsDefaultSampleSortSourceId(source_id) || !RemoveSelectedSampleSortSource(source_id)) {
+        return action;
+    }
+
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
@@ -863,7 +927,18 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortSource(
     if (source_id.empty()) {
         return ClearSampleSorting(snapshot);
     }
+    if (!IsSampleSortSourceAvailable(
+            navigation_.active_context(),
+            labeling_.active_source_tasks(),
+            ActiveSampleCount(snapshot),
+            source_id)) {
+        return action;
+    }
 
+    if (!IsDefaultSampleSortSourceId(source_id)) {
+        (void)AddSelectedSourceId(selected_sample_sort_source_ids_, source_id);
+    }
+    selected_sample_sort_direction_ = SampleSortSourceDirection(source_id);
     selected_sample_sort_source_id_ = std::move(source_id);
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
@@ -880,6 +955,11 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortDirection(
 {
     SourceCollectionSessionAction action;
     selected_sample_sort_direction_ = direction;
+    if (selected_sample_sort_source_id_) {
+        SetSampleSortSourceDirection(*selected_sample_sort_source_id_, direction);
+    } else {
+        SetSampleSortSourceDirection("source-order", direction);
+    }
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
         action,
@@ -1019,18 +1099,60 @@ SourceCollectionSampleSortingView SampleWorkflowCoordinator::SortingView(
     SourceCollectionSampleSortingView view;
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     view.direction = selected_sample_sort_direction_;
-    const std::vector<SourceCollectionSampleSortSourceView>& sources =
+    view.source_order_direction = SampleSortSourceDirection("source-order");
+    const std::vector<SourceCollectionSampleSortSourceView>& all_sources =
         CachedSampleSortingSourceViews(ActiveSampleCount(snapshot));
-    view.sources.reserve(sources.size());
-    for (const SourceCollectionSampleSortSourceView& source : sources) {
-        SourceCollectionSampleSortSourceView source_view = source;
+    view.sources.reserve(selected_sample_sort_source_ids_.size() + 1);
+    view.available_sources.reserve(all_sources.size());
+
+    const auto find_source = [&all_sources](std::string_view source_id) {
+        return std::find_if(
+            all_sources.begin(),
+            all_sources.end(),
+            [source_id](const SourceCollectionSampleSortSourceView& source) {
+                return source.id == source_id;
+            });
+    };
+    const auto add_source_view = [this, &view](SourceCollectionSampleSortSourceView source_view) {
         source_view.selected = selected_sample_sort_source_id_ &&
                                *selected_sample_sort_source_id_ == source_view.id;
+        source_view.removable = !IsDefaultSampleSortSourceId(source_view.id);
+        source_view.direction = source_view.selected
+            ? selected_sample_sort_direction_
+            : SampleSortSourceDirection(source_view.id);
         view.active = view.active || source_view.selected;
         if (source_view.selected) {
             view.active_source_id = source_view.id;
         }
         view.sources.push_back(std::move(source_view));
+    };
+
+    const auto sample_name_source = find_source("sample-name");
+    if (sample_name_source != all_sources.end()) {
+        add_source_view(*sample_name_source);
+    }
+
+    for (const std::string& source_id : selected_sample_sort_source_ids_) {
+        if (IsDefaultSampleSortSourceId(source_id)) {
+            continue;
+        }
+        const auto source = find_source(source_id);
+        if (source != all_sources.end()) {
+            add_source_view(*source);
+        }
+    }
+
+    for (const SourceCollectionSampleSortSourceView& source : all_sources) {
+        if (IsDefaultSampleSortSourceId(source.id) || IsSelectedSampleSortSource(source.id)) {
+            continue;
+        }
+        SourceCollectionSampleSortSourceView source_view = source;
+        source_view.direction = SampleSortSourceDirection(source_view.id);
+        view.available_sources.push_back(std::move(source_view));
+    }
+    if (selected_sample_sort_source_id_ && *selected_sample_sort_source_id_ == "source-order") {
+        view.active = true;
+        view.active_source_id = *selected_sample_sort_source_id_;
     }
     return view;
 }
@@ -1103,6 +1225,8 @@ void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionActio
     active_sample_workflow_identity_.reset();
     active_sample_workflow_context_fingerprint_.reset();
     selected_filter_source_ids_.clear();
+    selected_sample_sort_source_ids_.clear();
+    sample_sort_source_directions_.clear();
     selected_sample_sort_source_id_.reset();
     selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
     InvalidateSampleFilterViewCache();
@@ -1184,7 +1308,8 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleSorting(
         *selected_sample_sort_source_id_);
     if (!source) {
         if (!restoring_source_session_) {
-            selected_sample_sort_source_id_.reset();
+            const std::string removed_source_id = *selected_sample_sort_source_id_;
+            (void)RemoveSelectedSampleSortSource(removed_source_id);
             MarkActiveWorkflowStateDirty();
         }
         return navigation_.ClearSampleSorting();
@@ -1222,6 +1347,45 @@ SampleFilterEvaluation SampleWorkflowCoordinator::EvaluateSampleFilters(const Sp
 bool SampleWorkflowCoordinator::IsSelectedFilterSource(std::string_view source_id) const
 {
     return HasSelectedSourceId(selected_filter_source_ids_, source_id);
+}
+
+bool SampleWorkflowCoordinator::IsSelectedSampleSortSource(std::string_view source_id) const
+{
+    return HasSelectedSourceId(selected_sample_sort_source_ids_, source_id);
+}
+
+SampleNavigationSortDirection SampleWorkflowCoordinator::SampleSortSourceDirection(
+    std::string_view source_id) const
+{
+    const auto match = sample_sort_source_directions_.find(std::string(source_id));
+    if (match != sample_sort_source_directions_.end()) {
+        return match->second;
+    }
+    return SampleNavigationSortDirection::Ascending;
+}
+
+void SampleWorkflowCoordinator::SetSampleSortSourceDirection(
+    std::string_view source_id,
+    SampleNavigationSortDirection direction)
+{
+    if (source_id.empty()) {
+        return;
+    }
+    sample_sort_source_directions_[std::string(source_id)] = direction;
+}
+
+bool SampleWorkflowCoordinator::RemoveSelectedSampleSortSource(std::string_view source_id)
+{
+    bool changed = RemoveSelectedSourceId(selected_sample_sort_source_ids_, source_id);
+    if (!IsDefaultSampleSortSourceId(source_id)) {
+        sample_sort_source_directions_.erase(std::string(source_id));
+    }
+    if (selected_sample_sort_source_id_ && *selected_sample_sort_source_id_ == source_id) {
+        selected_sample_sort_source_id_.reset();
+        selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
+        changed = true;
+    }
+    return changed;
 }
 
 std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSources() const
@@ -1390,6 +1554,8 @@ void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view sour
 
     filters_.Clear();
     selected_filter_source_ids_.clear();
+    selected_sample_sort_source_ids_.clear();
+    sample_sort_source_directions_.clear();
     selected_sample_sort_source_id_.reset();
     selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
 
@@ -1410,8 +1576,19 @@ void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view sour
             (void)AddSelectedSourceId(selected_filter_source_ids_, condition.source_id);
         }
     }
+    for (const std::string& source_id : match->second.selected_sample_sort_source_ids) {
+        if (!IsDefaultSampleSortSourceId(source_id)) {
+            (void)AddSelectedSourceId(selected_sample_sort_source_ids_, source_id);
+        }
+    }
     selected_sample_sort_source_id_ = match->second.selected_sample_sort_source_id;
+    if (selected_sample_sort_source_id_ && !IsDefaultSampleSortSourceId(*selected_sample_sort_source_id_)) {
+        (void)AddSelectedSourceId(selected_sample_sort_source_ids_, *selected_sample_sort_source_id_);
+    }
     selected_sample_sort_direction_ = match->second.selected_sample_sort_direction;
+    if (selected_sample_sort_source_id_) {
+        SetSampleSortSourceDirection(*selected_sample_sort_source_id_, selected_sample_sort_direction_);
+    }
 }
 
 void SampleWorkflowCoordinator::StoreActiveWorkflowState()
@@ -1424,12 +1601,14 @@ void SampleWorkflowCoordinator::StoreActiveWorkflowState()
     SampleWorkflowSourceState state;
     state.filter_conditions = filters_.conditions();
     state.selected_filter_source_ids = selected_filter_source_ids_;
+    state.selected_sample_sort_source_ids = selected_sample_sort_source_ids_;
     state.selected_sample_sort_source_id = selected_sample_sort_source_id_;
     state.selected_sample_sort_direction = selected_sample_sort_direction_;
 
     const bool has_state =
         !state.filter_conditions.empty() ||
         !state.selected_filter_source_ids.empty() ||
+        !state.selected_sample_sort_source_ids.empty() ||
         (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
         state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
     if (has_state) {

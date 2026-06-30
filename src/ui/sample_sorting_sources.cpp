@@ -8,11 +8,15 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 namespace specforge {
 namespace {
+
+constexpr std::string_view kSourceOrderSortSourceId = "source-order";
 
 std::string TrimAscii(std::string value)
 {
@@ -45,11 +49,15 @@ std::optional<double> ParseFiniteDouble(std::string_view text)
     return value;
 }
 
-SourceCollectionSampleSortSourceView MakeSampleSortSourceView(std::string id, std::string name)
+SourceCollectionSampleSortSourceView MakeSampleSortSourceView(
+    std::string id,
+    std::string name,
+    std::filesystem::path annotation_path = {})
 {
     SourceCollectionSampleSortSourceView view;
     view.id = std::move(id);
     view.name = std::move(name);
+    view.annotation_path = std::move(annotation_path);
     return view;
 }
 
@@ -77,6 +85,22 @@ std::optional<SampleSortingSource> BuildSampleNameSortingSource(
     source.values.reserve(context.sample_names.size());
     for (const std::string& sample_name : context.sample_names) {
         source.values.push_back(MakeSampleNavigationSortValue(sample_name));
+    }
+    return source;
+}
+
+std::optional<SampleSortingSource> BuildSourceOrderSortingSource(std::size_t sample_count)
+{
+    if (sample_count == 0) {
+        return std::nullopt;
+    }
+
+    SampleSortingSource source;
+    source.id = std::string{kSourceOrderSortSourceId};
+    source.name = "Source order";
+    source.values.reserve(sample_count);
+    for (std::size_t row = 0; row < sample_count; ++row) {
+        source.values.push_back(MakeSampleNavigationSortValue(static_cast<double>(row)));
     }
     return source;
 }
@@ -151,7 +175,8 @@ std::vector<SourceCollectionSampleSortSourceView> BuildSampleSortingSourceViews(
                 BuildAnnotationSortingSource(active_source_tasks, annotation, sample_count)) {
             sources.push_back(MakeSampleSortSourceView(
                 std::move(annotation_source->id),
-                std::move(annotation_source->name)));
+                std::move(annotation_source->name),
+                annotation.path));
         }
     }
     return sources;
@@ -163,6 +188,9 @@ std::optional<SampleSortingSource> BuildSampleSortingSource(
     std::size_t sample_count,
     std::string_view source_id)
 {
+    if (source_id == kSourceOrderSortSourceId) {
+        return BuildSourceOrderSortingSource(sample_count);
+    }
     if (context == nullptr || sample_count == 0) {
         return std::nullopt;
     }

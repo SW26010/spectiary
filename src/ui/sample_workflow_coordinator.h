@@ -93,6 +93,12 @@ public:
         std::string value_key,
         bool selected);
     [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting(const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SourceCollectionSessionAction AddSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction RemoveSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(
         const SpectrumSnapshotHandle& snapshot,
         std::string source_id);
@@ -140,7 +146,11 @@ private:
     [[nodiscard]] std::optional<std::size_t> ActiveSampleIndex(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool IsSelectedFilterSource(std::string_view source_id) const;
+    [[nodiscard]] bool IsSelectedSampleSortSource(std::string_view source_id) const;
+    [[nodiscard]] SampleNavigationSortDirection SampleSortSourceDirection(std::string_view source_id) const;
+    void SetSampleSortSourceDirection(std::string_view source_id, SampleNavigationSortDirection direction);
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
+    [[nodiscard]] bool RemoveSelectedSampleSortSource(std::string_view source_id);
     [[nodiscard]] const SourceCollectionFilterView& CachedSampleFilterView(std::size_t sample_count) const;
     void InvalidateSampleFilterViewCache();
     [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSampleSortingSourceViews(
@@ -162,6 +172,8 @@ private:
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
     std::vector<std::string> selected_filter_source_ids_;
+    std::vector<std::string> selected_sample_sort_source_ids_;
+    std::unordered_map<std::string, SampleNavigationSortDirection> sample_sort_source_directions_;
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =
         SampleNavigationSortDirection::Ascending;

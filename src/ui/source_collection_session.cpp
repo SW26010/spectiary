@@ -316,6 +316,22 @@ SampleSortingIntent SampleSortingIntent::Clear()
     return intent;
 }
 
+SampleSortingIntent SampleSortingIntent::AddSource(std::string source_id)
+{
+    SampleSortingIntent intent;
+    intent.kind = SampleSortingIntentKind::AddSortSource;
+    intent.source_id = std::move(source_id);
+    return intent;
+}
+
+SampleSortingIntent SampleSortingIntent::RemoveSource(std::string source_id)
+{
+    SampleSortingIntent intent;
+    intent.kind = SampleSortingIntentKind::RemoveSortSource;
+    intent.source_id = std::move(source_id);
+    return intent;
+}
+
 SampleSortingIntent SampleSortingIntent::SetSortSource(std::string source_id)
 {
     SampleSortingIntent intent;
@@ -538,6 +554,12 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         switch (intent.sample_sorting.kind) {
         case SampleSortingIntentKind::ClearSorting:
             result.action = ClearSampleSorting();
+            break;
+        case SampleSortingIntentKind::AddSortSource:
+            result.action = AddSampleSortSource(std::move(intent.sample_sorting.source_id));
+            break;
+        case SampleSortingIntentKind::RemoveSortSource:
+            result.action = RemoveSampleSortSource(std::move(intent.sample_sorting.source_id));
             break;
         case SampleSortingIntentKind::SetSortSource:
             result.action = SetSampleSortSource(std::move(intent.sample_sorting.source_id));
@@ -790,6 +812,22 @@ SourceCollectionSessionAction SourceCollectionSession::SetFilterValueSelected(
 SourceCollectionSessionAction SourceCollectionSession::ClearSampleSorting()
 {
     SourceCollectionSessionAction action = workflow_->ClearSampleSorting(roster_->snapshot());
+    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::AddSampleSortSource(std::string source_id)
+{
+    SourceCollectionSessionAction action =
+        workflow_->AddSampleSortSource(roster_->snapshot(), std::move(source_id));
+    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RemoveSampleSortSource(std::string source_id)
+{
+    SourceCollectionSessionAction action =
+        workflow_->RemoveSampleSortSource(roster_->snapshot(), std::move(source_id));
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
     return action;
 }

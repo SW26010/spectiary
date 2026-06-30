@@ -138,6 +138,25 @@ bool HasSortSource(
     });
 }
 
+bool HasAvailableSortSource(
+    const specforge::SourceCollectionSampleSortingView& view,
+    std::string_view source_id)
+{
+    return std::any_of(view.available_sources.begin(), view.available_sources.end(), [source_id](const auto& source) {
+        return source.id == source_id;
+    });
+}
+
+const specforge::SourceCollectionSampleSortSourceView* FindSortSource(
+    const specforge::SourceCollectionSampleSortingView& view,
+    std::string_view source_id)
+{
+    const auto match = std::find_if(view.sources.begin(), view.sources.end(), [source_id](const auto& source) {
+        return source.id == source_id;
+    });
+    return match == view.sources.end() ? nullptr : &*match;
+}
+
 void SaveLabelResultFixture(
     const std::filesystem::path& path,
     std::string task_id,
@@ -475,6 +494,18 @@ specforge::SourceCollectionSessionIntent ClearSampleSorting()
         specforge::SampleSortingIntent::Clear());
 }
 
+specforge::SourceCollectionSessionIntent AddSampleSortSource(std::string source_id)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
+        specforge::SampleSortingIntent::AddSource(std::move(source_id)));
+}
+
+specforge::SourceCollectionSessionIntent RemoveSampleSortSource(std::string source_id)
+{
+    return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
+        specforge::SampleSortingIntent::RemoveSource(std::move(source_id)));
+}
+
 specforge::SourceCollectionSessionIntent SetSampleSortSource(std::string source_id)
 {
     return specforge::SourceCollectionSessionIntent::ApplySampleSorting(
@@ -806,8 +837,109 @@ void TestSampleSortingIntentAppliesNavigationSequence()
 
     result = Submit(session, ClearSampleSorting());
     Require(!result.view.sorting.active, "clearing sorting should return sorting view to source order");
+    Require(
+        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        "clearing sorting should restore ascending source order");
     Require(!result.view.navigation.sequence_active, "clearing sorting without filters should deactivate sequence state");
     Require(result.view.navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
+
+    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    result = Submit(session, SetSampleSortSource("source-order"));
+    Require(result.view.sorting.active, "descending source-order sorting should activate sorting view state");
+    Require(
+        result.view.sorting.active_source_id == "source-order",
+        "source-order sorting should use the source-order source id");
+    Require(result.view.navigation.sequence_active, "descending source-order sorting should activate navigation sequence");
+    Require(!result.view.navigation.row_location_available, "descending source order should disable ordinary row locate");
+    Require(
+        result.view.navigation.current_sequence_position &&
+            *result.view.navigation.current_sequence_position == 0,
+        "descending source order should place row 2 at the first sequence position");
+
+    result = Submit(session, SetSampleSortSource("sample-name"));
+    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Ascending));
+    Require(
+        result.view.sorting.source_order_direction == specforge::SampleNavigationSortDirection::Descending,
+        "inactive source-order sorting should retain its own descending direction");
+
+    result = Submit(session, SetSampleSortSource("source-order"));
+    Require(
+        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+        "reactivating source-order sorting should use its cached direction");
+
+    result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+    Require(
+        result.navigation.target_found && result.navigation.current_index == 1,
+        "next should follow descending source order");
+}
+
+void TestSampleSortingSourcesRequireExplicitAddition()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path rank_path = UniqueTempPath("_rank.npy");
+    const std::string rank_source_id = AnnotationSourceId(rank_path);
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(CompanionNamePath(source_path), {"gamma", "alpha", "beta"}, 6);
+    SaveLabelResultFixture(
+        rank_path,
+        "rank",
+        "Rank",
+        {2, 1, 1},
+        specforge::SampleLabelSet{},
+        false);
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
+    Require(result.loaded, "plain integer annotation should load");
+    Require(HasSortSource(result.view.sorting, "sample-name"), "sample-name should be a default sort entry");
+    Require(!HasSortSource(result.view.sorting, rank_source_id), "annotation sorting should not be selected by default");
+    Require(
+        HasAvailableSortSource(result.view.sorting, rank_source_id),
+        "plain annotation sorting should be available to add");
+
+    result = Submit(session, AddSampleSortSource(rank_source_id));
+    Require(!result.view.sorting.active, "adding a sort entry should not activate sorting by itself");
+    Require(HasSortSource(result.view.sorting, rank_source_id), "added annotation sorting should enter the visible list");
+    Require(
+        !HasAvailableSortSource(result.view.sorting, rank_source_id),
+        "added annotation sorting should leave the addable list");
+    Require(result.view.sorting.sources.back().removable, "added annotation sorting should be removable");
+
+    result = Submit(session, SetSampleSortSource("sample-name"));
+    result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    const specforge::SourceCollectionSampleSortSourceView* rank_before_activation =
+        FindSortSource(result.view.sorting, rank_source_id);
+    Require(rank_before_activation != nullptr, "added annotation sorting should remain visible");
+    Require(
+        rank_before_activation->direction == specforge::SampleNavigationSortDirection::Ascending,
+        "inactive annotation sorting should keep its own ascending direction");
+
+    result = Submit(session, SetSampleSortSource(rank_source_id));
+    Require(result.view.sorting.active, "activating an added sort entry should turn sorting on");
+    Require(
+        result.view.sorting.active_source_id == rank_source_id,
+        "the added annotation should become the active sort source");
+    Require(
+        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        "activating annotation sorting should use its cached direction");
+    const specforge::SourceCollectionSampleSortSourceView* sample_name_after_activation =
+        FindSortSource(result.view.sorting, "sample-name");
+    Require(sample_name_after_activation != nullptr, "sample-name sorting should stay visible");
+    Require(
+        sample_name_after_activation->direction == specforge::SampleNavigationSortDirection::Descending,
+        "inactive sample-name sorting should retain its own descending direction");
+    Require(result.view.navigation.sequence_active, "active annotation sorting should reorder navigation");
+
+    result = Submit(session, RemoveSampleSortSource(rank_source_id));
+    Require(!HasSortSource(result.view.sorting, rank_source_id), "removed annotation sorting should leave the visible list");
+    Require(
+        HasAvailableSortSource(result.view.sorting, rank_source_id),
+        "removed annotation sorting should become available to add again");
+    Require(!result.view.sorting.active, "removing the active sort entry should clear active sorting");
+    Require(!result.view.navigation.sequence_active, "removing active sorting should restore source-order navigation");
 }
 
 void TestSampleWorkflowStateRestoresFiltersAndSorting()
@@ -944,17 +1076,26 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
     Require(result.loaded, "plain integer annotation should load");
     Require(
-        HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
-        "plain integer annotation should be available as a sort source");
+        !HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "plain integer annotation should not enter the visible sort list by default");
+    Require(
+        HasAvailableSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "plain integer annotation should be available to add as a sort source");
 
     result = Submit(session, AddReadOnlyAnnotation(label_result_path));
     Require(result.loaded, "metadata-backed label result annotation should load");
     Require(
         !HasSortSource(result.view.sorting, AnnotationSourceId(label_result_path)),
-        "label-result integer annotation should not be available as a sort source");
+        "label-result integer annotation should not enter the visible sort list");
+    Require(
+        !HasAvailableSortSource(result.view.sorting, AnnotationSourceId(label_result_path)),
+        "label-result integer annotation should not be available to add as a sort source");
 
     result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
     Require(result.view.sorting.active, "plain annotation sort source should be selectable");
+    Require(
+        HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "activating plain annotation sorting should add it to the visible list");
     Require(
         result.view.navigation.current_sequence_position &&
             *result.view.navigation.current_sequence_position == 2,
@@ -965,6 +1106,9 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     Require(
         !HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
         "annotation should stop being a sort source after it becomes the active local task output");
+    Require(
+        !HasAvailableSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        "local task output annotation should not remain addable for sorting");
     Require(!result.view.sorting.active, "invalidated annotation sorting should be cleared");
     Require(!result.view.navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
     Require(result.view.navigation.row_location_available, "cleared sorting should restore ordinary row location");
@@ -1843,6 +1987,7 @@ int main()
     TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows();
     TestRememberedPositionResumableTracksActiveSequence();
     TestSampleSortingIntentAppliesNavigationSequence();
+    TestSampleSortingSourcesRequireExplicitAddition();
     TestSampleWorkflowStateRestoresFiltersAndSorting();
     TestAnnotationSortingSourcesRequireComparablePlainValues();
     TestSourceSessionRestoresAnnotationSortingState();

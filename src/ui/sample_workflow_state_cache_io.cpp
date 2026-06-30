@@ -64,6 +64,7 @@ bool HasState(const SampleWorkflowSourceState& state)
 {
     return !state.filter_conditions.empty() ||
            !state.selected_filter_source_ids.empty() ||
+           !state.selected_sample_sort_source_ids.empty() ||
            (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
@@ -252,6 +253,8 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
         state.filter_conditions = ParseFilterConditions(source_object);
         state.selected_filter_source_ids =
             ParseStringArrayMember(source_object, "selected_filter_source_ids");
+        state.selected_sample_sort_source_ids =
+            ParseStringArrayMember(source_object, "selected_sample_sort_source_ids");
         ParseSortState(source_object, state);
         if (HasState(state)) {
             cache.sources_by_identity.emplace(std::move(*identity), std::move(state));
@@ -300,6 +303,11 @@ bool SaveSampleWorkflowStateCache(
                     stream,
                     "selected_filter_source_ids",
                     state.selected_filter_source_ids,
+                    wrote_member);
+                WriteStringArrayMember(
+                    stream,
+                    "selected_sample_sort_source_ids",
+                    state.selected_sample_sort_source_ids,
                     wrote_member);
                 WriteSortState(stream, state, wrote_member);
                 stream << "\n";

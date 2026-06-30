@@ -25,11 +25,19 @@ constexpr const char* kAnnotationToLabelingPopup =
     "Use annotation as labeling task?###SpecForgeAnnotationToLabelingPopup";
 constexpr const char* kAddSampleFilterSourcePopup =
     "Add sample filter source###SpecForgeAddSampleFilterSourcePopup";
+constexpr const char* kAddSampleSortSourcePopup =
+    "Add sample sort source###SpecForgeAddSampleSortSourcePopup";
 constexpr const char* kDeleteLabelingTaskPopup =
     "Delete labeling task?###SpecForgeDeleteLabelingTaskPopup";
 
 enum class ActionIcon {
     Minus,
+};
+
+struct SampleSortSourceRowAction {
+    bool activate = false;
+    bool toggle_direction = false;
+    bool remove = false;
 };
 
 SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent)
@@ -124,6 +132,20 @@ const SourceCollectionFilterSourceView* FindAvailableFilterSourceByPath(
     return match == filter_view.available_sources.end() ? nullptr : &*match;
 }
 
+const SourceCollectionSampleSortSourceView* FindAvailableSortSourceByPath(
+    const SourceCollectionSampleSortingView& sorting_view,
+    const std::filesystem::path& path)
+{
+    const std::string path_text = PathToUtf8(path);
+    const auto match = std::find_if(
+        sorting_view.available_sources.begin(),
+        sorting_view.available_sources.end(),
+        [&path_text](const SourceCollectionSampleSortSourceView& source) {
+            return PathToUtf8(source.annotation_path) == path_text;
+        });
+    return match == sorting_view.available_sources.end() ? nullptr : &*match;
+}
+
 float ActionIconButtonWidth()
 {
     return ImGui::GetFrameHeight() * 0.5f;
@@ -177,6 +199,101 @@ bool HiddenActionIconButton(
     return clicked;
 }
 
+bool ActionIconButton(
+    const char* id,
+    const ImVec2& size,
+    ActionIcon icon,
+    const char* tooltip,
+    bool reveal_icon)
+{
+    const ImVec2 button_min = ImGui::GetCursorScreenPos();
+    const bool clicked = ImGui::InvisibleButton(id, size);
+    const ImRect hit_rect(button_min, ImVec2(button_min.x + size.x, button_min.y + size.y));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool held = ImGui::IsItemActive();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    if (hovered || held) {
+        const ImU32 background = ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
+        draw_list->AddRectFilled(hit_rect.Min, hit_rect.Max, background, 3.0f);
+    }
+
+    const bool draw_icon = reveal_icon || hovered || held;
+    const ImU32 icon_color = ImGui::GetColorU32(ImGuiCol_Text);
+    const float icon_width = std::min(ActionIconButtonWidth(), std::max(1.0f, hit_rect.GetWidth()));
+    const float icon_left = hit_rect.Min.x + std::max(0.0f, (hit_rect.GetWidth() - icon_width) * 0.5f);
+    const float stroke = 1.35f;
+
+    if (draw_icon && icon == ActionIcon::Minus) {
+        const float y = hit_rect.Min.y + hit_rect.GetHeight() * 0.5f;
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.18f, y),
+            ImVec2(icon_left + icon_width * 0.82f, y),
+            icon_color,
+            stroke);
+    }
+
+    if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
+        ImGui::SetTooltip("%s", tooltip);
+    }
+    return clicked;
+}
+
+bool DirectionIconButton(
+    const char* id,
+    SampleNavigationSortDirection direction,
+    bool active,
+    const char* tooltip)
+{
+    const ImVec2 size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    ImGui::PushID(id);
+    ImGui::PushStyleColor(
+        ImGuiCol_Button,
+        active ? style.Colors[ImGuiCol_HeaderActive] : style.Colors[ImGuiCol_FrameBg]);
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonHovered,
+        active ? style.Colors[ImGuiCol_HeaderHovered] : style.Colors[ImGuiCol_ButtonHovered]);
+    ImGui::PushStyleColor(
+        ImGuiCol_ButtonActive,
+        active ? style.Colors[ImGuiCol_HeaderActive] : style.Colors[ImGuiCol_ButtonActive]);
+    ImGui::PushStyleColor(
+        ImGuiCol_Text,
+        active ? style.Colors[ImGuiCol_Text] : style.Colors[ImGuiCol_TextDisabled]);
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_FrameBorderSize,
+        active ? std::max(1.0f, style.FrameBorderSize) : style.FrameBorderSize);
+    const bool clicked = ImGui::Button("##button", size);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(4);
+
+    const ImRect hit_rect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    const ImU32 icon_color = ImGui::GetColorU32(active ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float center_x = hit_rect.Min.x + hit_rect.GetWidth() * 0.5f;
+    const float top = hit_rect.Min.y + hit_rect.GetHeight() * 0.24f;
+    const float bottom = hit_rect.Min.y + hit_rect.GetHeight() * 0.76f;
+    const float head_width = hit_rect.GetWidth() * 0.20f;
+    const float head_height = hit_rect.GetHeight() * 0.18f;
+    const float stroke = active ? 1.8f : 1.35f;
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    if (direction == SampleNavigationSortDirection::Ascending) {
+        draw_list->AddLine(ImVec2(center_x, bottom), ImVec2(center_x, top), icon_color, stroke);
+        draw_list->AddLine(ImVec2(center_x, top), ImVec2(center_x - head_width, top + head_height), icon_color, stroke);
+        draw_list->AddLine(ImVec2(center_x, top), ImVec2(center_x + head_width, top + head_height), icon_color, stroke);
+    } else {
+        draw_list->AddLine(ImVec2(center_x, top), ImVec2(center_x, bottom), icon_color, stroke);
+        draw_list->AddLine(ImVec2(center_x, bottom), ImVec2(center_x - head_width, bottom - head_height), icon_color, stroke);
+        draw_list->AddLine(ImVec2(center_x, bottom), ImVec2(center_x + head_width, bottom - head_height), icon_color, stroke);
+    }
+
+    if (ImGui::IsItemHovered() && tooltip != nullptr && tooltip[0] != '\0') {
+        ImGui::SetTooltip("%s", tooltip);
+    }
+    ImGui::PopID();
+    return clicked;
+}
+
 std::optional<std::string> AcceptSampleFilterSourceDrop(
     const SourceCollectionFilterView& filter_view,
     bool& accepted)
@@ -223,6 +340,126 @@ std::optional<std::string> RenderSampleFilterDropTarget(
             2.0f);
     }
     return dropped_source;
+}
+
+std::optional<std::string> AcceptSampleSortSourceDrop(
+    const SourceCollectionSampleSortingView& sorting_view,
+    bool& accepted)
+{
+    accepted = false;
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSampleAnnotationDragPayload, flags)) {
+        const std::filesystem::path annotation_path = Utf8ToPath(PayloadString(*payload));
+        const SourceCollectionSampleSortSourceView* source =
+            FindAvailableSortSourceByPath(sorting_view, annotation_path);
+        if (source == nullptr) {
+            return std::nullopt;
+        }
+        accepted = true;
+        if (payload->IsDelivery()) {
+            return source->id;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> RenderSampleSortDropTarget(
+    const SourceCollectionSampleSortingView& sorting_view,
+    const ImRect& hit_rect)
+{
+    if (hit_rect.GetWidth() <= 0.0f || hit_rect.GetHeight() <= 0.0f) {
+        return std::nullopt;
+    }
+
+    bool accepted = false;
+    std::optional<std::string> dropped_source;
+    if (ImGui::BeginDragDropTargetCustom(hit_rect, ImGui::GetID("sample_sort_panel_drop_target"))) {
+        dropped_source = AcceptSampleSortSourceDrop(sorting_view, accepted);
+        ImGui::EndDragDropTarget();
+    }
+    if (accepted) {
+        ImGui::GetWindowDrawList()->AddRect(
+            hit_rect.Min,
+            hit_rect.Max,
+            ImGui::GetColorU32(ImGuiCol_DragDropTarget),
+            3.0f,
+            0,
+            2.0f);
+    }
+    return dropped_source;
+}
+
+SampleNavigationSortDirection OppositeSortDirection(SampleNavigationSortDirection direction)
+{
+    return direction == SampleNavigationSortDirection::Ascending
+        ? SampleNavigationSortDirection::Descending
+        : SampleNavigationSortDirection::Ascending;
+}
+
+const char* SortDirectionTooltip(SampleNavigationSortDirection direction)
+{
+    return direction == SampleNavigationSortDirection::Ascending
+        ? "Ascending"
+        : "Descending";
+}
+
+SampleSortSourceRowAction RenderSampleSortSourceRow(
+    const SourceCollectionSampleSortSourceView& source_view,
+    SampleNavigationSortDirection direction)
+{
+    SampleSortSourceRowAction action;
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float frame_height = ImGui::GetFrameHeight();
+    const float remove_width = source_view.removable ? frame_height : 0.0f;
+    const float inner_spacing = style.ItemInnerSpacing.x;
+    const float available_width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    const float reserved_width =
+        frame_height + inner_spacing +
+        (source_view.removable ? remove_width + inner_spacing : 0.0f);
+    const float label_width = std::max(1.0f, available_width - reserved_width);
+
+    ImGui::PushID(source_view.id.c_str());
+    if (DirectionIconButton("direction", direction, source_view.selected, SortDirectionTooltip(direction))) {
+        if (source_view.selected) {
+            action.toggle_direction = true;
+        } else {
+            action.activate = true;
+        }
+    }
+
+    ImGui::SameLine(0.0f, inner_spacing);
+    const ImVec2 label_min = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("label", ImVec2(label_width, frame_height));
+    if (ImGui::IsItemClicked() && !source_view.selected) {
+        action.activate = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", source_view.name.c_str());
+    }
+    const ImRect label_rect(label_min, ImVec2(label_min.x + label_width, label_min.y + frame_height));
+    ImGui::RenderTextClipped(
+        label_rect.Min,
+        label_rect.Max,
+        source_view.name.c_str(),
+        nullptr,
+        nullptr,
+        ImVec2(0.0f, 0.5f),
+        &label_rect);
+
+    if (source_view.removable) {
+        ImGui::SameLine(0.0f, inner_spacing);
+        if (ActionIconButton(
+                "remove_sort_source",
+                ImVec2(remove_width, frame_height),
+                ActionIcon::Minus,
+                "Remove sample sorting",
+                true)) {
+            action.remove = true;
+        }
+    }
+    ImGui::PopID();
+    return action;
 }
 
 std::string TrimAscii(std::string_view value)
@@ -929,69 +1166,151 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
     }
 
     SourceCollectionSampleSortingView sorting_view = session_view.sorting;
-    SourceCollectionNavigationView navigation = session_view.navigation;
     if (!sorting_view.has_active_source) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
         return action;
     }
 
-    if (navigation.sequence_active) {
-        if (navigation.current_sequence_position) {
-            ImGui::Text(
-                "Position: %llu / %llu",
-                static_cast<unsigned long long>(*navigation.current_sequence_position + 1),
-                static_cast<unsigned long long>(navigation.sequence_count));
-        } else {
-            ImGui::Text("Position: - / %llu", static_cast<unsigned long long>(navigation.sequence_count));
-        }
-        ImGui::Text(
-            "Source rows: %llu / %llu",
-            static_cast<unsigned long long>(navigation.sequence_count),
-            static_cast<unsigned long long>(navigation.sample_count));
-    } else {
-        ImGui::TextDisabled("Source order");
+    if (ImGui::SmallButton("+##AddSampleSortSource")) {
+        ImGui::OpenPopup(kAddSampleSortSourcePopup);
     }
-    ImGui::Separator();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Add annotation sample sorting");
+    }
 
-    if (ImGui::RadioButton("Source order", !sorting_view.active)) {
+    ImGui::SameLine();
+    bool reset_sorting_checked =
+        !sorting_view.active ||
+        (sorting_view.active_source_id == "source-order" &&
+            sorting_view.direction == SampleNavigationSortDirection::Ascending);
+    if (ImGui::Checkbox("Reset sorting", &reset_sorting_checked) && reset_sorting_checked) {
         SourceCollectionSessionResult result =
             submit(ApplySampleSorting(SampleSortingIntent::Clear()));
         MergeSourceCollectionSessionAction(action, result.action);
         sorting_view = result.view.sorting;
-        navigation = result.view.navigation;
+    }
+
+    if (ImGui::BeginPopup(kAddSampleSortSourcePopup)) {
+        if (sorting_view.available_sources.empty()) {
+            ImGui::TextDisabled("No available annotations");
+        }
+        std::optional<std::string> source_to_add;
+        for (const SourceCollectionSampleSortSourceView& source_view : sorting_view.available_sources) {
+            ImGui::PushID(source_view.id.c_str());
+            if (ImGui::Selectable(source_view.name.c_str())) {
+                source_to_add = source_view.id;
+            }
+            if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
+                const std::string path = PathToUtf8(source_view.annotation_path);
+                ImGui::SetTooltip("%s", path.c_str());
+            }
+            ImGui::PopID();
+            if (source_to_add) {
+                break;
+            }
+        }
+        if (source_to_add) {
+            SourceCollectionSessionResult result =
+                submit(ApplySampleSorting(SampleSortingIntent::AddSource(*source_to_add)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 sort_drop_min(window->WorkRect.Min.x, ImGui::GetCursorScreenPos().y);
+    SourceCollectionSampleSortSourceView source_order_view;
+    source_order_view.id = "source-order";
+    source_order_view.name = "Source order";
+    source_order_view.selected = !sorting_view.active || sorting_view.active_source_id == source_order_view.id;
+    const SampleNavigationSortDirection source_order_direction =
+        source_order_view.selected ? sorting_view.direction : sorting_view.source_order_direction;
+    const SampleSortSourceRowAction source_order_action =
+        RenderSampleSortSourceRow(source_order_view, source_order_direction);
+    if (source_order_action.toggle_direction) {
+        if (sorting_view.active && sorting_view.active_source_id == source_order_view.id) {
+            SourceCollectionSessionResult result =
+                sorting_view.direction == SampleNavigationSortDirection::Descending
+                    ? submit(ApplySampleSorting(SampleSortingIntent::Clear()))
+                    : submit(ApplySampleSorting(SampleSortingIntent::SetSortDirection(
+                          SampleNavigationSortDirection::Descending)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+        } else if (source_order_view.selected) {
+            SourceCollectionSessionResult result = submit(ApplySampleSorting(
+                SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Descending)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+            result = submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_order_view.id)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+        } else {
+            SourceCollectionSessionResult result =
+                submit(ApplySampleSorting(SampleSortingIntent::Clear()));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+        }
+    } else if (source_order_action.activate) {
+        SourceCollectionSessionResult result = source_order_direction == SampleNavigationSortDirection::Descending
+            ? submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_order_view.id)))
+            : submit(ApplySampleSorting(SampleSortingIntent::Clear()));
+        MergeSourceCollectionSessionAction(action, result.action);
+        sorting_view = result.view.sorting;
     }
 
     bool has_sort_source = false;
+    bool stop_rendering_sources = false;
     const std::vector<SourceCollectionSampleSortSourceView> sort_sources = sorting_view.sources;
     for (const SourceCollectionSampleSortSourceView& source_view : sort_sources) {
         has_sort_source = true;
-        ImGui::PushID(source_view.id.c_str());
-        if (ImGui::RadioButton(source_view.name.c_str(), source_view.selected)) {
+        const SampleSortSourceRowAction row_action =
+            RenderSampleSortSourceRow(source_view, source_view.direction);
+        if (row_action.remove) {
+            SourceCollectionSessionResult result =
+                submit(ApplySampleSorting(SampleSortingIntent::RemoveSource(source_view.id)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+            stop_rendering_sources = true;
+        } else if (row_action.toggle_direction) {
+            const SampleNavigationSortDirection next_direction = source_view.selected
+                ? OppositeSortDirection(source_view.direction)
+                : source_view.direction;
+            SourceCollectionSessionResult result =
+                submit(ApplySampleSorting(source_view.selected
+                    ? SampleSortingIntent::SetSortDirection(next_direction)
+                    : SampleSortingIntent::SetSortSource(source_view.id)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            sorting_view = result.view.sorting;
+        } else if (row_action.activate) {
             SourceCollectionSessionResult result =
                 submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
             sorting_view = result.view.sorting;
-            navigation = result.view.navigation;
         }
-        ImGui::PopID();
+        if (stop_rendering_sources) {
+            break;
+        }
     }
     if (!has_sort_source) {
         ImGui::TextDisabled("No comparable sort sources");
     }
 
-    ImGui::Separator();
-    const bool ascending = sorting_view.direction == SampleNavigationSortDirection::Ascending;
-    if (ImGui::RadioButton("Ascending", ascending)) {
-        SourceCollectionSessionResult result = submit(ApplySampleSorting(
-            SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Ascending)));
-        MergeSourceCollectionSessionAction(action, result.action);
-        sorting_view = result.view.sorting;
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Descending", !ascending)) {
-        SourceCollectionSessionResult result = submit(ApplySampleSorting(
-            SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Descending)));
+    const ImVec2 sort_drop_content_end = ImGui::GetCursorScreenPos();
+    const ImRect sort_drop_rect(
+        sort_drop_min,
+        ImVec2(
+            window->WorkRect.Max.x,
+            std::max(sort_drop_content_end.y + ImGui::GetStyle().ItemSpacing.y, window->WorkRect.Max.y)));
+    if (std::optional<std::string> dropped_source =
+            RenderSampleSortDropTarget(sorting_view, sort_drop_rect)) {
+        SourceCollectionSessionResult result =
+            submit(ApplySampleSorting(SampleSortingIntent::AddSource(*dropped_source)));
         MergeSourceCollectionSessionAction(action, result.action);
         sorting_view = result.view.sorting;
     }

@@ -199,7 +199,12 @@ void TestSampleNameSortingSource()
     manifest.sample_names = {"gamma", "alpha", "beta"};
 
     std::optional<specforge::SampleSortingSource> source =
-        specforge::BuildSampleSortingSource(&manifest, nullptr, 3, "sample-name");
+        specforge::BuildSampleSortingSource(nullptr, nullptr, 3, "source-order");
+    Require(source.has_value(), "source-order should build without annotation context");
+    Require(source->id == "source-order", "source-order source should use the fixed id");
+    Require(std::get<double>(source->values[2]) == 2.0, "source-order values should preserve row indexes");
+
+    source = specforge::BuildSampleSortingSource(&manifest, nullptr, 3, "sample-name");
 
     Require(source.has_value(), "matching sample names should build a sorting source");
     Require(source->id == "sample-name", "sample-name source should use the fixed id");

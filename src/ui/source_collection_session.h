@@ -67,6 +67,8 @@ enum class SampleFilteringIntentKind {
 
 enum class SampleSortingIntentKind {
     ClearSorting,
+    AddSortSource,
+    RemoveSortSource,
     SetSortSource,
     SetSortDirection,
 };
@@ -164,6 +166,8 @@ private:
 
 struct SampleSortingIntent {
     [[nodiscard]] static SampleSortingIntent Clear();
+    [[nodiscard]] static SampleSortingIntent AddSource(std::string source_id);
+    [[nodiscard]] static SampleSortingIntent RemoveSource(std::string source_id);
     [[nodiscard]] static SampleSortingIntent SetSortSource(std::string source_id);
     [[nodiscard]] static SampleSortingIntent SetSortDirection(SampleNavigationSortDirection direction);
 
@@ -288,6 +292,8 @@ private:
         std::string value_key,
         bool selected);
     [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting();
+    [[nodiscard]] SourceCollectionSessionAction AddSampleSortSource(std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction RemoveSampleSortSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);
 

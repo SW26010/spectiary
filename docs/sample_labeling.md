@@ -229,7 +229,25 @@ annotation value must not implicitly follow the active editable task, because
 changing the active task should not unexpectedly reorder sample navigation.
 Sample sorting belongs to the separate `Sample Sorting` panel. That panel
 submits the active sample-sorting choice; it does not own the materialized sample
-navigation sequence.
+navigation sequence and should not duplicate Navigation-owned position or source
+row counts. The first explicit-source implementation should show `Source order`
+and `Sample name` by default. `Source order` is the default ascending ordering
+and can be switched to descending source-row order from the same row-level
+control. Additional supported annotation sort sources must be added by the user
+from an add-source control in `Sample Sorting` or by dragging the annotation row
+into the sort-source area in `Sample Sorting`. The top-level reset checkbox is a
+shortcut for source-order ascending sorting and should uncheck automatically
+when another sort source becomes active. Removing an added
+sample-sorting entry should remove that entry from the visible list; if it was
+the active sort source, navigation returns to source order. This first
+implementation supports only one active sort source at a time. Multi-priority
+sorting, entry reordering, and insertion-position semantics are deferred. The
+active sort direction should be controlled from the sort-source row, using a
+compact up/down arrow rather than a separate direction control group. The active
+sort source is indicated by native selected button styling on the arrow;
+inactive sort sources show a muted clickable arrow instead of a radio-style
+selection control. Each visible sort source keeps its own cached direction, so
+changing the active source's direction must not change inactive arrows.
 Annotation-value sorting should support ascending and descending order. Read-only
 string annotations may be sorted by lexical order, and floating-point
 annotations may be sorted by numeric value. Integer annotations without
