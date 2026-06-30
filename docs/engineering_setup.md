@@ -53,7 +53,7 @@ DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`
 Ninja configure check：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
 ```
 
 Visual Studio configure check：
@@ -67,7 +67,7 @@ Configure success 验证依赖和生成文件，build success 验证 native shel
 Build native shell：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
 ```
 
 ### Ninja/MSVC 卡住排查
@@ -82,12 +82,19 @@ workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可
 
 受限环境中的正确处理方式是把 configure 和 build 都作为需要外部工具链/cache 写入权限的命令执行，并优先使用
 `scripts/build-ninja-msvc-debug.ps1`。这个脚本会加载 `vcvars64.bat`、记录 stdout/stderr 到 `logs/build/`，
-并在超时后终止它自己启动的进程树，避免 agent 无限等待：
+并把构建进程放进 Windows Job Object。启动真正的 CMake 之前，脚本会先做一次 process-kill preflight：
+创建一个短生命周期探针进程、放进同类 job，然后验证当前 shell 能用 `taskkill /T /F` 清掉这棵进程树。
+如果 preflight 失败，脚本会在进入 CMake 前直接失败；在 Codex 里这表示普通沙箱不能自救，需要用提权/非沙箱
+方式重跑，而不是重复等待同一个命令。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure -TimeoutSec 180
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_source_collection_session_tests -TimeoutSec 60 -Explain
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure -TimeoutSec 180
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Target specforge_source_collection_session_tests -TimeoutSec 60 -Explain
 ```
+
+如果看到类似 `This shell cannot kill job-assigned process trees with taskkill /T /F` 的 preflight 错误，
+不要继续在同一个普通受限 shell 里重试。对 Codex agent 来说，这个命令必须通过 sandbox escalation 执行，
+因为 vcpkg/MSVC 会写 workspace 外缓存，且超时清理需要能终止 job-assigned `cmd/cmake/ninja` 进程树。
 
 如果一次构建被中断，后续命令可能卡在 Ninja lock。先查是否有残留构建进程：
 

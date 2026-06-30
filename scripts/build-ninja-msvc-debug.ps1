@@ -47,6 +47,236 @@ function Write-LogTail {
     }
 }
 
+function Quote-PowerShellLiteral {
+    param([Parameter(Mandatory = $true)] [string]$Value)
+
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Invoke-TaskkillCommand {
+    param([Parameter(Mandatory = $true)] [int]$ProcessId)
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+
+    try {
+        $output = @(& taskkill.exe /PID $ProcessId /T /F 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = $output
+    }
+}
+
+function Invoke-TaskkillTree {
+    param(
+        [Parameter(Mandatory = $true)] [int]$ProcessId,
+        [string]$LogPath = ''
+    )
+
+    $messages = New-Object System.Collections.Generic.List[string]
+    $messages.Add(("taskkill /PID {0} /T /F" -f $ProcessId))
+
+    $taskkillResult = Invoke-TaskkillCommand -ProcessId $ProcessId
+    foreach ($line in $taskkillResult.Output) {
+        $messages.Add(("taskkill: {0}" -f $line))
+    }
+    $messages.Add(("taskkill exit code: {0}" -f $taskkillResult.ExitCode))
+
+    Start-Sleep -Milliseconds 500
+    $rootProcess = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $rootProcess) {
+        $messages.Add(("root PID {0} still alive after taskkill; trying Stop-Process" -f $ProcessId))
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+
+    $rootProcess = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $rootProcess) {
+        $messages.Add(("root PID {0} still alive after kill attempts" -f $ProcessId))
+    }
+    else {
+        $messages.Add(("root PID {0} is gone" -f $ProcessId))
+    }
+
+    foreach ($message in $messages) {
+        if ($LogPath) {
+            Add-Content -LiteralPath $LogPath -Value ("{0:o} {1}" -f (Get-Date), $message)
+        }
+        else {
+            Write-Host $message
+        }
+    }
+
+    return $null -eq $rootProcess
+}
+
+function Assert-TaskkillTreeAvailable {
+    param([Parameter(Mandatory = $true)] [string]$LogPath)
+
+    Add-Content -LiteralPath $LogPath -Value ("{0:o} starting process-kill preflight" -f (Get-Date))
+
+    $probeArguments = '/d /c "ping -n 6 127.0.0.1 >nul"'
+    $probeJobHandle = [IntPtr]::Zero
+    $probe = Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList $probeArguments `
+        -WindowStyle Hidden `
+        -PassThru
+
+    try {
+        $probeJobHandle = New-KillOnCloseJob
+        $assigned = [SpecForgeBuildJob.NativeMethods]::AssignProcessToJobObject($probeJobHandle, $probe.Handle)
+        if (-not $assigned) {
+            $message = Get-LastWin32ErrorMessage
+            Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+            throw "Preflight AssignProcessToJobObject failed: $message"
+        }
+
+        Start-Sleep -Milliseconds 300
+
+        Add-Content -LiteralPath $LogPath -Value ("{0:o} preflight probe PID: {1}" -f (Get-Date), $probe.Id)
+        $taskkillResult = Invoke-TaskkillCommand -ProcessId $probe.Id
+        foreach ($line in $taskkillResult.Output) {
+            Add-Content -LiteralPath $LogPath -Value ("{0:o} taskkill: {1}" -f (Get-Date), $line)
+        }
+        Add-Content -LiteralPath $LogPath -Value ("{0:o} taskkill exit code: {1}" -f (Get-Date), $taskkillResult.ExitCode)
+
+        Start-Sleep -Milliseconds 500
+        $probeProcess = Get-Process -Id $probe.Id -ErrorAction SilentlyContinue
+        if (($taskkillResult.ExitCode -eq 0) -and ($null -eq $probeProcess)) {
+            Add-Content -LiteralPath $LogPath -Value ("{0:o} process-kill preflight passed" -f (Get-Date))
+            return
+        }
+
+        if ($null -ne $probeProcess) {
+            Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+            [void]$probe.WaitForExit(7000)
+        }
+
+        throw "This shell cannot kill job-assigned process trees with taskkill /T /F. Run this build through Codex escalation or an unsandboxed developer shell. Preflight log: $LogPath"
+    }
+    finally {
+        Close-NativeHandle -Handle $probeJobHandle
+    }
+}
+
+if (-not ('SpecForgeBuildJob.NativeMethods' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace SpecForgeBuildJob
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public IntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    public static class NativeMethods
+    {
+        public const int JobObjectExtendedLimitInformation = 9;
+        public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetInformationJobObject(
+            IntPtr hJob,
+            int JobObjectInfoClass,
+            IntPtr lpJobObjectInfo,
+            uint cbJobObjectInfoLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr hObject);
+    }
+}
+'@
+}
+
+function Get-LastWin32ErrorMessage {
+    $errorCode = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    return "${errorCode}: $((New-Object System.ComponentModel.Win32Exception($errorCode)).Message)"
+}
+
+function Close-NativeHandle {
+    param([IntPtr]$Handle)
+
+    if ($Handle -ne [IntPtr]::Zero) {
+        [void][SpecForgeBuildJob.NativeMethods]::CloseHandle($Handle)
+    }
+}
+
+function New-KillOnCloseJob {
+    $jobHandle = [SpecForgeBuildJob.NativeMethods]::CreateJobObject([IntPtr]::Zero, $null)
+    if ($jobHandle -eq [IntPtr]::Zero) {
+        throw "CreateJobObject failed: $(Get-LastWin32ErrorMessage)"
+    }
+
+    $info = New-Object SpecForgeBuildJob.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info.BasicLimitInformation.LimitFlags = [SpecForgeBuildJob.NativeMethods]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $length = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
+    $buffer = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($length)
+
+    try {
+        [System.Runtime.InteropServices.Marshal]::StructureToPtr($info, $buffer, $false)
+        $ok = [SpecForgeBuildJob.NativeMethods]::SetInformationJobObject(
+            $jobHandle,
+            [SpecForgeBuildJob.NativeMethods]::JobObjectExtendedLimitInformation,
+            $buffer,
+            [uint32]$length)
+        if (-not $ok) {
+            $message = Get-LastWin32ErrorMessage
+            Close-NativeHandle -Handle $jobHandle
+            throw "SetInformationJobObject failed: $message"
+        }
+    }
+    finally {
+        [System.Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)
+    }
+
+    return $jobHandle
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 
@@ -109,6 +339,9 @@ $batchPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.cmd"
 $stdoutPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.out.log"
 $stderrPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.err.log"
 $exitCodePath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.exit"
+$preflightLogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.preflight.log"
+$watchdogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.watchdog.ps1"
+$watchdogLogPath = Join-Path $LogDir "specforge-$Preset-$mode-$timestamp.watchdog.log"
 
 $batchLines = @(
     '@echo off',
@@ -130,30 +363,113 @@ Write-Host "Timeout: $TimeoutSec seconds"
 Write-Host "Stdout: $stdoutPath"
 Write-Host "Stderr: $stderrPath"
 Write-Host "Exit file: $exitCodePath"
+Write-Host "Preflight: $preflightLogPath"
+Write-Host "Watchdog: $watchdogPath"
+
+Assert-TaskkillTreeAvailable -LogPath $preflightLogPath
 
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $cmdArguments = '/d /c "' + $batchPath + '"'
-$process = Start-Process -FilePath 'cmd.exe' `
-    -ArgumentList $cmdArguments `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $stdoutPath `
-    -RedirectStandardError $stderrPath `
-    -WindowStyle Hidden `
-    -PassThru
+$process = $null
+$jobHandle = [IntPtr]::Zero
+$watchdogProcess = $null
 
-Wait-Process -Id $process.Id -Timeout $TimeoutSec -ErrorAction SilentlyContinue | Out-Null
-$process.Refresh()
+try {
+    $jobHandle = New-KillOnCloseJob
+    $process = Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList $cmdArguments `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath `
+        -WindowStyle Hidden `
+        -PassThru
 
-if (-not $process.HasExited) {
-    & taskkill.exe /PID $process.Id /T /F | Out-Null
-    $stopwatch.Stop()
-    Write-LogTail -Path $stdoutPath -Label 'stdout'
-    Write-LogTail -Path $stderrPath -Label 'stderr'
-    throw "Timed out after $TimeoutSec seconds; killed process tree rooted at PID $($process.Id)."
+    $assigned = [SpecForgeBuildJob.NativeMethods]::AssignProcessToJobObject($jobHandle, $process.Handle)
+    if (-not $assigned) {
+        $message = Get-LastWin32ErrorMessage
+        [void](Invoke-TaskkillTree -ProcessId $process.Id)
+        throw "AssignProcessToJobObject failed: $message"
+    }
+
+    $watchdogLines = @(
+        '$ErrorActionPreference = ''Continue''',
+        ('$pidToWatch = ' + $process.Id),
+        ('$timeoutSec = ' + $TimeoutSec),
+        ('$exitCodePath = ' + (Quote-PowerShellLiteral $exitCodePath)),
+        ('$watchdogLogPath = ' + (Quote-PowerShellLiteral $watchdogLogPath)),
+        '$started = Get-Date',
+        'function Add-WatchdogLog {',
+        '    param([string]$Message)',
+        '    Add-Content -LiteralPath $watchdogLogPath -Value ("{0:o} {1}" -f (Get-Date), $Message)',
+        '}',
+        'Start-Sleep -Seconds $timeoutSec',
+        'if (Test-Path -LiteralPath $exitCodePath) {',
+        '    Add-WatchdogLog "exit file exists; watchdog exiting"',
+        '    exit 0',
+        '}',
+        '$process = Get-Process -Id $pidToWatch -ErrorAction SilentlyContinue',
+        'if ($null -eq $process) {',
+        '    Add-WatchdogLog "root process already exited without exit file"',
+        '    exit 0',
+        '}',
+        'Add-WatchdogLog ("timeout after {0}s; killing process tree rooted at PID {1}" -f $timeoutSec, $pidToWatch)',
+        '$taskkillOutput = @(& taskkill.exe /PID $pidToWatch /T /F 2>&1)',
+        '$taskkillExitCode = $LASTEXITCODE',
+        'foreach ($line in $taskkillOutput) { Add-WatchdogLog ("taskkill: " + $line) }',
+        'Add-WatchdogLog ("taskkill exit code: " + $taskkillExitCode)',
+        'Start-Sleep -Milliseconds 500',
+        '$process = Get-Process -Id $pidToWatch -ErrorAction SilentlyContinue',
+        'if ($null -ne $process) {',
+        '    Add-WatchdogLog ("root PID {0} still alive after taskkill; trying Stop-Process fallback" -f $pidToWatch)',
+        '    Stop-Process -Id $pidToWatch -Force -ErrorAction SilentlyContinue',
+        '    Start-Sleep -Milliseconds 500',
+        '}',
+        '$process = Get-Process -Id $pidToWatch -ErrorAction SilentlyContinue',
+        'if ($null -ne $process) {',
+        '    Add-WatchdogLog ("root PID {0} still alive after kill attempts" -f $pidToWatch)',
+        '    exit 1',
+        '}',
+        'Add-WatchdogLog ("root PID {0} is gone" -f $pidToWatch)',
+        'exit 0'
+    )
+    Set-Content -LiteralPath $watchdogPath -Value $watchdogLines -Encoding ASCII
+    $watchdogArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $watchdogPath + '"'
+    $watchdogProcess = Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList $watchdogArguments `
+        -WorkingDirectory $repoRoot `
+        -WindowStyle Hidden `
+        -PassThru
+
+    while (-not $process.WaitForExit(1000)) {
+        if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSec) {
+            Close-NativeHandle -Handle $jobHandle
+            $jobHandle = [IntPtr]::Zero
+            Start-Sleep -Milliseconds 250
+            $process.Refresh()
+            if (-not $process.HasExited) {
+                [void](Invoke-TaskkillTree -ProcessId $process.Id)
+            }
+
+            $stopwatch.Stop()
+            Write-LogTail -Path $stdoutPath -Label 'stdout'
+            Write-LogTail -Path $stderrPath -Label 'stderr'
+            throw "Timed out after $TimeoutSec seconds; killed process job rooted at PID $($process.Id)."
+        }
+    }
+
+    $process.WaitForExit()
+    $process.Refresh()
+}
+finally {
+    Close-NativeHandle -Handle $jobHandle
+    if ($null -ne $watchdogProcess) {
+        $watchdogProcess.Refresh()
+        if (-not $watchdogProcess.HasExited) {
+            Stop-Process -Id $watchdogProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
-$process.WaitForExit()
-$process.Refresh()
 $stopwatch.Stop()
 
 $exitCode = $null

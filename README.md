@@ -64,7 +64,7 @@ Open a new terminal after setting it.
 Use the Ninja preset from a terminal with the MSVC environment loaded:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
 ```
 
 Or use the Visual Studio generator preset:
@@ -80,8 +80,12 @@ Configure success verifies the dependency stack and generated build files.
 Use the Ninja preset from a terminal with the MSVC environment loaded:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
 ```
+
+In restricted agent shells such as Codex, run this script with tool escalation.
+It performs a process-kill preflight and refuses to start CMake if the current
+shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
 
 The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
 layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
