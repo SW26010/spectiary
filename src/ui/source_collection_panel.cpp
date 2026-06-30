@@ -669,7 +669,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
                 const std::string path = NarrowPath(annotation.path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
-            if (annotation.can_activate_labeling && !annotation.path.empty() && ImGui::BeginDragDropSource()) {
+            if ((annotation.can_activate_labeling || annotation.can_filter_samples) &&
+                !annotation.path.empty() &&
+                ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
                 const std::string payload = PathToUtf8(annotation.path);
                 ImGui::SetDragDropPayload(
                     kSampleAnnotationDragPayload,

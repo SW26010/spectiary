@@ -280,6 +280,22 @@ SampleFilteringIntent SampleFilteringIntent::Clear()
     return intent;
 }
 
+SampleFilteringIntent SampleFilteringIntent::AddSource(std::string source_id)
+{
+    SampleFilteringIntent intent;
+    intent.kind = SampleFilteringIntentKind::AddFilterSource;
+    intent.source_id = std::move(source_id);
+    return intent;
+}
+
+SampleFilteringIntent SampleFilteringIntent::RemoveSource(std::string source_id)
+{
+    SampleFilteringIntent intent;
+    intent.kind = SampleFilteringIntentKind::RemoveFilterSource;
+    intent.source_id = std::move(source_id);
+    return intent;
+}
+
 SampleFilteringIntent SampleFilteringIntent::SetFilterValueSelected(
     std::string source_id,
     std::string value_key,
@@ -289,14 +305,6 @@ SampleFilteringIntent SampleFilteringIntent::SetFilterValueSelected(
     intent.kind = SampleFilteringIntentKind::SetFilterValueSelected;
     intent.source_id = std::move(source_id);
     intent.value_key = std::move(value_key);
-    intent.selected = selected;
-    return intent;
-}
-
-SampleFilteringIntent SampleFilteringIntent::SetActiveLabelingSourceSelected(bool selected)
-{
-    SampleFilteringIntent intent;
-    intent.kind = SampleFilteringIntentKind::SetActiveLabelingFilterSourceSelected;
     intent.selected = selected;
     return intent;
 }
@@ -512,14 +520,17 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         case SampleFilteringIntentKind::ClearFilters:
             result.action = ClearFilters();
             break;
+        case SampleFilteringIntentKind::AddFilterSource:
+            result.action = AddFilterSource(std::move(intent.sample_filtering.source_id));
+            break;
+        case SampleFilteringIntentKind::RemoveFilterSource:
+            result.action = RemoveFilterSource(std::move(intent.sample_filtering.source_id));
+            break;
         case SampleFilteringIntentKind::SetFilterValueSelected:
             result.action = SetFilterValueSelected(
                 std::move(intent.sample_filtering.source_id),
                 std::move(intent.sample_filtering.value_key),
                 intent.sample_filtering.selected);
-            break;
-        case SampleFilteringIntentKind::SetActiveLabelingFilterSourceSelected:
-            result.action = SetActiveLabelingFilterSourceSelected(intent.sample_filtering.selected);
             break;
         }
         break;
@@ -749,6 +760,19 @@ SourceCollectionSessionAction SourceCollectionSession::ClearFilters()
     return action;
 }
 
+SourceCollectionSessionAction SourceCollectionSession::AddFilterSource(std::string source_id)
+{
+    return workflow_->AddFilterSource(roster_->snapshot(), std::move(source_id));
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RemoveFilterSource(std::string source_id)
+{
+    SourceCollectionSessionAction action =
+        workflow_->RemoveFilterSource(roster_->snapshot(), std::move(source_id));
+    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    return action;
+}
+
 SourceCollectionSessionAction SourceCollectionSession::SetFilterValueSelected(
     std::string source_id,
     std::string value_key,
@@ -759,14 +783,6 @@ SourceCollectionSessionAction SourceCollectionSession::SetFilterValueSelected(
         std::move(source_id),
         std::move(value_key),
         selected);
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingFilterSourceSelected(bool selected)
-{
-    SourceCollectionSessionAction action =
-        workflow_->SetActiveLabelingFilterSourceSelected(roster_->snapshot(), selected);
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
     return action;
 }

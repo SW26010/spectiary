@@ -162,9 +162,7 @@ rather than hide the `Labeling` window or delete the task record. Deactivation
 leaves the task record, label set, shortcuts, selected output path, remembered
 position, and sample label result intact. After deactivation, `Labeling` has no
 active task and may accept a new task, including one converted from a categorical
-annotation in the `Annotations` window. Any sample-filter condition that explicitly
-uses the active sample labeling task should be cleared or made inactive when
-there is no active task.
+annotation in the `Annotations` window.
 In the first implementation, closing the active task should be disabled while
 the task has pending or failed output saves, including pending or failed metadata
 sidecar saves. The user must wait for autosave to complete or fix the output
@@ -174,9 +172,8 @@ task record. A later implementation may allow non-blocking close with background
 retry and explicit pending-task surfacing.
 
 Deleting a sample labeling task is a separate explicit operation from closing
-or deactivating it. Delete removes the local task record, its internal draft,
-and any active sample-filter condition that targets that task. It must not delete the
-task's selected output `.npy` file or adjacent portable metadata sidecar. If the
+or deactivating it. Delete removes the local task record and its internal draft.
+It must not delete the task's selected output `.npy` file or adjacent portable metadata sidecar. If the
 same output file is still loaded as an annotation later, SpecForge should treat
 it according to the normal plain/external/local matching rules rather than
 silently resurrecting the deleted local task record. Delete should be disabled
@@ -255,13 +252,19 @@ labeling auto-advance follow the sorted sequence. Sample sorting never changes
 which samples belong to the sample navigation sequence.
 
 Sample filtering belongs to the separate `Sample Filters` window. It should
-support stacking multiple sample-filter conditions. Categorical sample filters
-may use annotation values from a user-selected annotation result or sample
-labeling task, and must not implicitly follow the active editable task.
+start with no selected sample-filter entries and support stacking multiple
+sample-filter conditions after the user explicitly adds supported annotation
+results from `Annotations`, including local labeling task rows displayed there.
+The user may add a supported annotation result from an add-source control in
+`Sample Filters` or by dragging the annotation row into `Sample Filters`.
+Removing a sample-filter entry should clear any condition for that entry.
+Resetting sample filters should remove all selected sample-filter values while
+leaving the explicit source entries available for continued filtering. Sample
+filtering must not implicitly follow the active editable task.
 Categorical sample filtering should support selecting multiple values at once,
-including the unlabeled sentinel for labeling tasks. For numeric categorical
-values with a label set or mapping, the sample-filter UI should show the label
-name with the numeric code, such as `bad (1)`.
+including an unlabeled sentinel when it is present in an annotation result. For
+numeric categorical values with a label set or mapping, the sample-filter UI
+should show the label name with the numeric code, such as `bad (1)`.
 Without a mapping, it should show the raw code. Read-only string annotations may
 participate in sample filtering by selecting multiple string values.
 Floating-point annotations should not be available for sample filtering in the

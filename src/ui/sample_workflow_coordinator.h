@@ -81,13 +81,16 @@ public:
     [[nodiscard]] SampleWorkflowCommandResult ClearActiveLabelForCurrentSample(
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction ClearFilters(const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SourceCollectionSessionAction AddFilterSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction RemoveFilterSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetFilterValueSelected(
         const SpectrumSnapshotHandle& snapshot,
         std::string source_id,
         std::string value_key,
-        bool selected);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingFilterSourceSelected(
-        const SpectrumSnapshotHandle& snapshot,
         bool selected);
     [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(
@@ -136,7 +139,7 @@ private:
     [[nodiscard]] std::size_t ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] std::optional<std::size_t> ActiveSampleIndex(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] bool active_labeling_filter_source_selected() const;
+    [[nodiscard]] bool IsSelectedFilterSource(std::string_view source_id) const;
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
     [[nodiscard]] const SourceCollectionFilterView& CachedSampleFilterView(std::size_t sample_count) const;
     void InvalidateSampleFilterViewCache();
@@ -158,7 +161,7 @@ private:
     SampleFilterController filters_;
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
-    std::optional<std::string> selected_labeling_filter_source_id_;
+    std::vector<std::string> selected_filter_source_ids_;
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =
         SampleNavigationSortDirection::Ascending;

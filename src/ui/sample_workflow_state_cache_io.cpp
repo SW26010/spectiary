@@ -46,28 +46,48 @@ std::vector<std::string> SortedAllowedValues(const std::unordered_set<std::strin
     return sorted_values;
 }
 
+std::vector<std::string> UniqueStrings(std::vector<std::string> values)
+{
+    std::vector<std::string> unique_values;
+    unique_values.reserve(values.size());
+    std::unordered_set<std::string> seen;
+    for (std::string& value : values) {
+        if (value.empty() || !seen.emplace(value).second) {
+            continue;
+        }
+        unique_values.push_back(std::move(value));
+    }
+    return unique_values;
+}
+
 bool HasState(const SampleWorkflowSourceState& state)
 {
     return !state.filter_conditions.empty() ||
-           (state.selected_labeling_filter_source_id && !state.selected_labeling_filter_source_id->empty()) ||
+           !state.selected_filter_source_ids.empty() ||
            (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
 
-void WriteOptionalStringMember(
+void WriteStringArrayMember(
     std::ostream& stream,
     const char* name,
-    const std::optional<std::string>& value,
+    const std::vector<std::string>& values,
     bool& wrote_member)
 {
-    if (!value || value->empty()) {
+    if (values.empty()) {
         return;
     }
     if (wrote_member) {
         stream << ",\n";
     }
-    stream << "      \"" << name << "\": ";
-    WriteJsonString(stream, *value);
+    stream << "      \"" << name << "\": [";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            stream << ", ";
+        }
+        WriteJsonString(stream, values[index]);
+    }
+    stream << "]";
     wrote_member = true;
 }
 
@@ -169,6 +189,21 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source
     return conditions;
 }
 
+std::vector<std::string> ParseStringArrayMember(const JsonValue& source_object, const char* name)
+{
+    std::vector<std::string> values;
+    const JsonValue* array = JsonObjectMember(source_object, name);
+    if (array == nullptr || array->kind != JsonValue::Kind::Array) {
+        return values;
+    }
+    for (const JsonValue& value : array->array) {
+        if (value.kind == JsonValue::Kind::String && !value.string_value.empty()) {
+            values.push_back(value.string_value);
+        }
+    }
+    return UniqueStrings(std::move(values));
+}
+
 void ParseSortState(const JsonValue& source_object, SampleWorkflowSourceState& state)
 {
     const JsonValue* sorting = JsonObjectMember(source_object, "sorting");
@@ -215,11 +250,8 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
 
         SampleWorkflowSourceState state;
         state.filter_conditions = ParseFilterConditions(source_object);
-        if (std::optional<std::string> selected_labeling_source =
-                ReadJsonStringMember(source_object, "selected_labeling_filter_source_id");
-            selected_labeling_source && !selected_labeling_source->empty()) {
-            state.selected_labeling_filter_source_id = std::move(*selected_labeling_source);
-        }
+        state.selected_filter_source_ids =
+            ParseStringArrayMember(source_object, "selected_filter_source_ids");
         ParseSortState(source_object, state);
         if (HasState(state)) {
             cache.sources_by_identity.emplace(std::move(*identity), std::move(state));
@@ -264,10 +296,10 @@ bool SaveSampleWorkflowStateCache(
                 WriteJsonString(stream, identity);
                 bool wrote_member = true;
                 WriteFilterConditions(stream, state.filter_conditions, wrote_member);
-                WriteOptionalStringMember(
+                WriteStringArrayMember(
                     stream,
-                    "selected_labeling_filter_source_id",
-                    state.selected_labeling_filter_source_id,
+                    "selected_filter_source_ids",
+                    state.selected_filter_source_ids,
                     wrote_member);
                 WriteSortState(stream, state, wrote_member);
                 stream << "\n";

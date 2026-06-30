@@ -1,11 +1,13 @@
 #include "ui/sample_workflow_panel.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -21,8 +23,14 @@ constexpr const char* kSortingWindow = "Sample Sorting###SpecForgeSampleSortingV
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 constexpr const char* kAnnotationToLabelingPopup =
     "Use annotation as labeling task?###SpecForgeAnnotationToLabelingPopup";
+constexpr const char* kAddSampleFilterSourcePopup =
+    "Add sample filter source###SpecForgeAddSampleFilterSourcePopup";
 constexpr const char* kDeleteLabelingTaskPopup =
     "Delete labeling task?###SpecForgeDeleteLabelingTaskPopup";
+
+enum class ActionIcon {
+    Minus,
+};
 
 SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent)
 {
@@ -100,6 +108,121 @@ const SourceCollectionAnnotationValueView* FindAnnotationViewByPath(
             return PathToUtf8(annotation.path) == path_text;
         });
     return match == session_view.navigation.current_annotations.end() ? nullptr : &*match;
+}
+
+const SourceCollectionFilterSourceView* FindAvailableFilterSourceByPath(
+    const SourceCollectionFilterView& filter_view,
+    const std::filesystem::path& path)
+{
+    const std::string path_text = PathToUtf8(path);
+    const auto match = std::find_if(
+        filter_view.available_sources.begin(),
+        filter_view.available_sources.end(),
+        [&path_text](const SourceCollectionFilterSourceView& source) {
+            return PathToUtf8(source.annotation_path) == path_text;
+        });
+    return match == filter_view.available_sources.end() ? nullptr : &*match;
+}
+
+float ActionIconButtonWidth()
+{
+    return ImGui::GetFrameHeight() * 0.5f;
+}
+
+void CollapseSampleFilterSourceTree(std::string_view source_id)
+{
+    ImGui::PushID(source_id.data(), source_id.data() + source_id.size());
+    ImGui::GetStateStorage()->SetInt(ImGui::GetID("source"), 0);
+    ImGui::PopID();
+}
+
+bool HiddenActionIconButton(
+    const char* id,
+    const ImRect& hit_rect,
+    ActionIcon icon,
+    const char* tooltip,
+    bool reveal_icon)
+{
+    const float width = std::max(1.0f, hit_rect.GetWidth());
+    const ImGuiID item_id = ImGui::GetID(id);
+    const bool item_visible = ImGui::ItemAdd(hit_rect, item_id, &hit_rect, ImGuiItemFlags_AllowOverlap);
+    bool hovered = false;
+    bool held = false;
+    const bool clicked = item_visible && ImGui::ButtonBehavior(hit_rect, item_id, &hovered, &held);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    if (hovered || held) {
+        const ImU32 background = ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered);
+        draw_list->AddRectFilled(hit_rect.Min, hit_rect.Max, background, 3.0f);
+    }
+
+    const bool draw_icon = item_visible && (reveal_icon || hovered || held);
+    const ImU32 icon_color = ImGui::GetColorU32(ImGuiCol_Text);
+    const float icon_width = std::min(ActionIconButtonWidth(), width);
+    const float icon_left = hit_rect.Min.x + std::max(0.0f, (width - icon_width) * 0.5f);
+    const float stroke = 1.35f;
+
+    if (draw_icon && icon == ActionIcon::Minus) {
+        const float y = hit_rect.Min.y + hit_rect.GetHeight() * 0.5f;
+        draw_list->AddLine(
+            ImVec2(icon_left + icon_width * 0.18f, y),
+            ImVec2(icon_left + icon_width * 0.82f, y),
+            icon_color,
+            stroke);
+    }
+
+    if (item_visible && hovered && tooltip != nullptr && tooltip[0] != '\0') {
+        ImGui::SetTooltip("%s", tooltip);
+    }
+    return clicked;
+}
+
+std::optional<std::string> AcceptSampleFilterSourceDrop(
+    const SourceCollectionFilterView& filter_view,
+    bool& accepted)
+{
+    accepted = false;
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSampleAnnotationDragPayload, flags)) {
+        const std::filesystem::path annotation_path = Utf8ToPath(PayloadString(*payload));
+        const SourceCollectionFilterSourceView* source =
+            FindAvailableFilterSourceByPath(filter_view, annotation_path);
+        if (source == nullptr) {
+            return std::nullopt;
+        }
+        accepted = true;
+        if (payload->IsDelivery()) {
+            return source->id;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> RenderSampleFilterDropTarget(
+    const SourceCollectionFilterView& filter_view,
+    const ImRect& hit_rect)
+{
+    if (hit_rect.GetWidth() <= 0.0f || hit_rect.GetHeight() <= 0.0f) {
+        return std::nullopt;
+    }
+
+    bool accepted = false;
+    std::optional<std::string> dropped_source;
+    if (ImGui::BeginDragDropTargetCustom(hit_rect, ImGui::GetID("sample_filter_panel_drop_target"))) {
+        dropped_source = AcceptSampleFilterSourceDrop(filter_view, accepted);
+        ImGui::EndDragDropTarget();
+    }
+    if (accepted) {
+        ImGui::GetWindowDrawList()->AddRect(
+            hit_rect.Min,
+            hit_rect.Max,
+            ImGui::GetColorU32(ImGuiCol_DragDropTarget),
+            3.0f,
+            0,
+            2.0f);
+    }
+    return dropped_source;
 }
 
 std::string TrimAscii(std::string_view value)
@@ -647,31 +770,61 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
         return action;
     }
 
-    if (filter_view.has_active_labeling_task) {
-        bool use_labeling_source = filter_view.active_labeling_filter_source_selected;
-        if (ImGui::Checkbox("Use active labeling task", &use_labeling_source)) {
+    if (ImGui::SmallButton("+##AddSampleFilterSource")) {
+        ImGui::OpenPopup(kAddSampleFilterSourcePopup);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Add annotation sample filter");
+    }
+    std::optional<std::string> source_to_collapse;
+    if (ImGui::BeginPopup(kAddSampleFilterSourcePopup)) {
+        if (filter_view.available_sources.empty()) {
+            ImGui::TextDisabled("No available annotations");
+        }
+        std::optional<std::string> source_to_add;
+        for (const SourceCollectionFilterSourceView& source_view : filter_view.available_sources) {
+            ImGui::PushID(source_view.id.c_str());
+            if (ImGui::Selectable(source_view.name.c_str())) {
+                source_to_add = source_view.id;
+            }
+            if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
+                const std::string path = PathToUtf8(source_view.annotation_path);
+                ImGui::SetTooltip("%s", path.c_str());
+            }
+            ImGui::PopID();
+            if (source_to_add) {
+                break;
+            }
+        }
+        if (source_to_add) {
             SourceCollectionSessionResult result =
-                submit(ApplySampleFiltering(
-                    SampleFilteringIntent::SetActiveLabelingSourceSelected(use_labeling_source)));
+                submit(ApplySampleFiltering(SampleFilteringIntent::AddSource(*source_to_add)));
             MergeSourceCollectionSessionAction(action, result.action);
             filter_view = result.view.filter;
+            source_to_collapse = *source_to_add;
+            ImGui::CloseCurrentPopup();
         }
-        if (!use_labeling_source) {
-            ImGui::TextDisabled("Labeling task filters are not selected.");
-        }
+        ImGui::EndPopup();
     }
+    if (source_to_collapse) {
+        CollapseSampleFilterSourceTree(*source_to_collapse);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset sample filters")) {
+        SourceCollectionSessionResult result = submit(ApplySampleFiltering(SampleFilteringIntent::Clear()));
+        MergeSourceCollectionSessionAction(action, result.action);
+        filter_view = result.view.filter;
+    }
+
+    ImGui::Spacing();
 
     ImGui::Text(
         "Visible: %llu / %llu",
         static_cast<unsigned long long>(filter_view.evaluation.included_count),
         static_cast<unsigned long long>(filter_view.sample_count));
     if (filter_view.navigation_filter_active && !filter_view.current_sample_in_filter) {
-        ImGui::TextDisabled("Current sample is outside the active filter");
-    }
-    if (ImGui::Button("Clear filters")) {
-        SourceCollectionSessionResult result = submit(ApplySampleFiltering(SampleFilteringIntent::Clear()));
-        MergeSourceCollectionSessionAction(action, result.action);
-        filter_view = result.view.filter;
+        ImGui::TextDisabled("Current sample is outside the active sample filters");
     }
 
     for (const std::string& message : filter_view.evaluation.messages) {
@@ -679,15 +832,42 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
     }
 
     ImGui::Separator();
-    bool has_filterable_source = false;
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 filter_drop_min(window->WorkRect.Min.x, ImGui::GetCursorScreenPos().y);
+    if (filter_view.sources.empty()) {
+        ImGui::TextDisabled("No sample filters");
+    }
+    bool stop_rendering_sources = false;
     for (const SourceCollectionFilterSourceView& source_view : filter_view.sources) {
         if (!source_view.filterable) {
             continue;
         }
-        has_filterable_source = true;
 
         ImGui::PushID(source_view.id.c_str());
-        if (ImGui::TreeNodeEx(source_view.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+        const ImGuiTreeNodeFlags source_flags =
+            ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_AllowOverlap;
+        const bool tree_open = ImGui::TreeNodeEx("source", source_flags, "%s", source_view.name.c_str());
+        const ImVec2 source_item_min = ImGui::GetItemRectMin();
+        const ImVec2 source_item_max = ImGui::GetItemRectMax();
+        const bool source_row_hovered = ImGui::IsItemHovered();
+        bool removed_source = false;
+        const float action_width = ImGui::GetFrameHeight();
+        const ImRect remove_rect(
+            ImVec2(std::max(source_item_min.x, source_item_max.x - action_width), source_item_min.y),
+            source_item_max);
+        if (HiddenActionIconButton(
+                "remove_source",
+                remove_rect,
+                ActionIcon::Minus,
+                "Remove sample filter",
+                source_row_hovered)) {
+            SourceCollectionSessionResult result =
+                submit(ApplySampleFiltering(SampleFilteringIntent::RemoveSource(source_view.id)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            filter_view = result.view.filter;
+            removed_source = true;
+        }
+        if (tree_open && !removed_source) {
             for (const SampleFilterValueOption& option : source_view.options) {
                 bool selected = source_view.selected_value_keys.find(option.key) !=
                                 source_view.selected_value_keys.end();
@@ -707,12 +887,30 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
                 ImGui::PopID();
             }
             ImGui::TreePop();
+        } else if (tree_open) {
+            ImGui::TreePop();
         }
         ImGui::PopID();
+        if (removed_source) {
+            stop_rendering_sources = true;
+        }
+        if (stop_rendering_sources) {
+            break;
+        }
     }
 
-    if (!has_filterable_source) {
-        ImGui::TextDisabled("No filterable annotations");
+    const ImVec2 filter_drop_content_end = ImGui::GetCursorScreenPos();
+    const ImRect filter_drop_rect(
+        filter_drop_min,
+        ImVec2(
+            window->WorkRect.Max.x,
+            std::max(filter_drop_content_end.y + ImGui::GetStyle().ItemSpacing.y, window->WorkRect.Max.y)));
+    if (std::optional<std::string> dropped_source =
+            RenderSampleFilterDropTarget(filter_view, filter_drop_rect)) {
+        SourceCollectionSessionResult result =
+            submit(ApplySampleFiltering(SampleFilteringIntent::AddSource(*dropped_source)));
+        MergeSourceCollectionSessionAction(action, result.action);
+        CollapseSampleFilterSourceTree(*dropped_source);
     }
 
     ImGui::End();

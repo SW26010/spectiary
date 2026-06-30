@@ -60,8 +60,9 @@ enum class ActiveSampleWorkflowIntentKind {
 
 enum class SampleFilteringIntentKind {
     ClearFilters,
+    AddFilterSource,
+    RemoveFilterSource,
     SetFilterValueSelected,
-    SetActiveLabelingFilterSourceSelected,
 };
 
 enum class SampleSortingIntentKind {
@@ -142,11 +143,12 @@ private:
 
 struct SampleFilteringIntent {
     [[nodiscard]] static SampleFilteringIntent Clear();
+    [[nodiscard]] static SampleFilteringIntent AddSource(std::string source_id);
+    [[nodiscard]] static SampleFilteringIntent RemoveSource(std::string source_id);
     [[nodiscard]] static SampleFilteringIntent SetFilterValueSelected(
         std::string source_id,
         std::string value_key,
         bool selected);
-    [[nodiscard]] static SampleFilteringIntent SetActiveLabelingSourceSelected(bool selected);
 
 private:
     friend class SourceCollectionSession;
@@ -279,11 +281,12 @@ private:
     [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample();
     [[nodiscard]] SourceCollectionSessionAction ClearFilters();
+    [[nodiscard]] SourceCollectionSessionAction AddFilterSource(std::string source_id);
+    [[nodiscard]] SourceCollectionSessionAction RemoveFilterSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetFilterValueSelected(
         std::string source_id,
         std::string value_key,
         bool selected);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingFilterSourceSelected(bool selected);
     [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting();
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);

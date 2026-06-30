@@ -13,7 +13,7 @@ namespace specforge {
 
 struct SampleWorkflowSourceState {
     std::vector<SampleFilterCondition> filter_conditions;
-    std::optional<std::string> selected_labeling_filter_source_id;
+    std::vector<std::string> selected_filter_source_ids;
     std::optional<std::string> selected_sample_sort_source_id;
     SampleNavigationSortDirection selected_sample_sort_direction =
         SampleNavigationSortDirection::Ascending;

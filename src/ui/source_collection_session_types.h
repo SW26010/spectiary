@@ -46,6 +46,7 @@ struct SourceCollectionAnnotationValueView {
     bool output_missing = false;
     bool metadata_missing = false;
     bool can_activate_labeling = false;
+    bool can_filter_samples = false;
     bool can_remove_annotation = false;
 };
 
@@ -102,6 +103,7 @@ struct SourceCollectionLabelingView {
 struct SourceCollectionFilterSourceView {
     std::string id;
     std::string name;
+    std::filesystem::path annotation_path;
     bool filterable = false;
     std::vector<SampleFilterValueOption> options;
     std::unordered_set<std::string> selected_value_keys;
@@ -110,12 +112,11 @@ struct SourceCollectionFilterSourceView {
 struct SourceCollectionFilterView {
     bool has_active_source = false;
     std::size_t sample_count = 0;
-    bool has_active_labeling_task = false;
-    bool active_labeling_filter_source_selected = false;
     bool navigation_filter_active = false;
     bool current_sample_in_filter = true;
     SampleFilterEvaluation evaluation;
     std::vector<SourceCollectionFilterSourceView> sources;
+    std::vector<SourceCollectionFilterSourceView> available_sources;
 };
 
 struct SourceCollectionSampleSortSourceView {
