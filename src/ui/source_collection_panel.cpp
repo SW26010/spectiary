@@ -404,7 +404,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const std::size_t navigation_index = navigation.current_index.value_or(0);
     const std::size_t navigation_count = navigation.sample_count;
 
-    ImGui::TextUnformatted("sample:");
+    ImGui::TextUnformatted("source sample:");
     ImGui::SameLine();
     const float sample_input_width =
         std::max(72.0f, ImGui::CalcTextSize("000000").x + ImGui::GetStyle().FramePadding.x * 2.0f);
@@ -483,14 +483,6 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
                 static_cast<unsigned long long>(navigation.sequence_count));
         } else {
             ImGui::Text("sequence: - / %llu", static_cast<unsigned long long>(navigation.sequence_count));
-        }
-        if (navigation.current_source_row) {
-            ImGui::Text(
-                "source row: %llu / %llu",
-                static_cast<unsigned long long>(*navigation.current_source_row + 1),
-                static_cast<unsigned long long>(navigation.sample_count));
-        } else {
-            ImGui::Text("source row: - / %llu", static_cast<unsigned long long>(navigation.sample_count));
         }
     }
 

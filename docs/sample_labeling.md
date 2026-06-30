@@ -152,6 +152,10 @@ The visible sample navigation window should be named `Navigation`. In this
 document, `Sample navigation` remains the domain term for that surface and its
 state ownership; `Navigation` does not refer to wavelength range navigation or
 plot pan/zoom controls.
+In the `Navigation` UI, `source sample` is a user-facing label for the current
+source row index shown as a 1-based sample number. It is distinct from
+`sequence`, which shows the current position within an active sample navigation
+sequence.
 
 The visible active manual labeling window should be named `Labeling`. In this
 document, `Sample labeling task` and `active manual labeling` remain the domain
