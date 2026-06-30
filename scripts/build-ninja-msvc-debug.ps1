@@ -1,4 +1,4 @@
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [switch]$Configure,
     [string]$Preset = 'ninja-msvc-debug',
@@ -6,10 +6,25 @@ param(
     [int]$TimeoutSec = 120,
     [switch]$Explain,
     [string]$VcvarsPath = '',
-    [string]$LogDir = ''
+    [string]$LogDir = '',
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$AdditionalTarget = @()
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($AdditionalTarget.Count -gt 0) {
+    if (-not $PSBoundParameters.ContainsKey('Target')) {
+        throw "Unexpected positional arguments: $($AdditionalTarget -join ' '). Pass build targets with -Target."
+    }
+
+    $unexpectedOptions = @($AdditionalTarget | Where-Object { $_.StartsWith('-') })
+    if ($unexpectedOptions.Count -gt 0) {
+        throw "Unexpected option after -Target: $($unexpectedOptions -join ' '). Pass build targets as plain names."
+    }
+
+    $Target += $AdditionalTarget
+}
 
 function Quote-BatchArgument {
     param([Parameter(Mandatory = $true)] [string]$Value)
