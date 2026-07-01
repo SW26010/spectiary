@@ -38,6 +38,10 @@ public:
     void Render(const ShellStatus& status);
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
     void RefreshSystemColors();
+    void EnterImmersivePlotMode();
+    void ExitImmersivePlotMode();
+    [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
+    [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
@@ -57,6 +61,7 @@ private:
     void OpenSourceFromFolderPicker();
     void OpenAnnotationFromFilePicker();
     void RenderDockHost(const ShellStatus& status);
+    void RenderImmersivePlot(const ShellStatus& status);
     void RenderMainMenuBar();
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
@@ -79,6 +84,8 @@ private:
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
+    bool immersive_plot_mode_ = false;
+    bool immersive_plot_toggle_requested_ = false;
     bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
     PanelVisibility panel_visibility_;

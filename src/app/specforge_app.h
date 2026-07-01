@@ -54,6 +54,9 @@ private:
     void ToggleFullscreen();
     void EnterFullscreen();
     void ExitFullscreen();
+    void ToggleImmersivePlotMode();
+    void EnterImmersivePlotMode();
+    void ExitImmersivePlotMode();
     void LogDisplayEnvironment(std::string_view reason);
 
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
@@ -73,6 +76,7 @@ private:
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;
     std::optional<WindowedPlacement> fullscreen_restore_;
+    bool immersive_plot_entered_fullscreen_ = false;
     std::uint64_t frame_index_ = 0;
 };
 

@@ -49,6 +49,7 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 
 - 主图是第一视觉层级。
 - 子窗口必须支持自由 docking。
+- `F11` immersive mode 是主图检查用的非 dockable presentation mode，用于临时绕过 dock host 直接全屏呈现绘图区；它不改变普通子窗口必须支持自由 docking 的默认合同。
 - 所有用户可见文案使用领域语言，不暴露 backend 名称。
 - profiling 是产品能力，不是可选开发工具。
 - 真实性能结论必须来自真实数据和新日志。
@@ -70,6 +71,7 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 - range slider 不要求照搬旧 UI。优先用 ImPlot 的轴限制、overview plot、drag rect、drag line、numeric inputs 或 lock toggles 组合出更适合 ImGui 的交互。
 - 谱线 overlay 不需要手写 canvas 系统。优先使用 ImPlot 的 line、annotation、shaded region 和 legend/selection 能力。
 - pan 和 wheel zoom 优先使用 ImPlot 的交互和 axis limits。只有证明确实不能满足光谱工作流时，才引入自定义 transform 层。
+- Immersive mode 为了 edge-to-edge plot，允许仅在 immersive display option 下使用内绘轴 overlay 和 edge-band wheel zoom；普通 docked plot 仍走 ImPlot 原生交互。
 - default layout 可以用 ImGui dockspace 建立，布局持久化交给 ImGui ini。DockBuilder 若用于初始布局，必须被隔离为一次性初始化逻辑。
 
 ### 不接受

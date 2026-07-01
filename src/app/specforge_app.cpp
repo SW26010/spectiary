@@ -435,6 +435,7 @@ void SpecForgeApp::Shutdown()
     renderer_.Shutdown();
     pending_resize_.reset();
     fullscreen_restore_.reset();
+    immersive_plot_entered_fullscreen_ = false;
     window_.ClearMessageHandler();
     window_.Destroy();
 }
@@ -459,6 +460,9 @@ void SpecForgeApp::RenderFrame()
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
         ui_.Render(status);
+        if (ui_.TakeImmersivePlotModeToggleRequest()) {
+            ToggleImmersivePlotMode();
+        }
     }
 
     {
@@ -657,6 +661,47 @@ void SpecForgeApp::ExitFullscreen()
     LogDisplayEnvironment("fullscreen_exit");
 }
 
+void SpecForgeApp::ToggleImmersivePlotMode()
+{
+    if (ui_.immersive_plot_mode()) {
+        ExitImmersivePlotMode();
+    } else {
+        EnterImmersivePlotMode();
+    }
+}
+
+void SpecForgeApp::EnterImmersivePlotMode()
+{
+    if (ui_.immersive_plot_mode()) {
+        return;
+    }
+
+    const bool was_fullscreen = fullscreen_restore_.has_value();
+    ui_.EnterImmersivePlotMode();
+    if (!was_fullscreen) {
+        EnterFullscreen();
+        immersive_plot_entered_fullscreen_ = fullscreen_restore_.has_value();
+    } else {
+        immersive_plot_entered_fullscreen_ = false;
+    }
+
+    profile_.WriteEvent("immersive_plot", {ProfileSink::Field::Bool("enabled", true)});
+}
+
+void SpecForgeApp::ExitImmersivePlotMode()
+{
+    const bool was_immersive = ui_.immersive_plot_mode();
+    ui_.ExitImmersivePlotMode();
+    if (immersive_plot_entered_fullscreen_ && fullscreen_restore_) {
+        ExitFullscreen();
+    }
+    immersive_plot_entered_fullscreen_ = false;
+
+    if (was_immersive) {
+        profile_.WriteEvent("immersive_plot", {ProfileSink::Field::Bool("enabled", false)});
+    }
+}
+
 void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 {
     if (!profile_.is_open()) {
@@ -840,7 +885,11 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     }
 
     if (message == WM_KEYDOWN && wparam == VK_F11 && IsInitialKeyDown(lparam)) {
-        ToggleFullscreen();
+        ToggleImmersivePlotMode();
+        return 0;
+    }
+    if (message == WM_KEYDOWN && wparam == VK_ESCAPE && ui_.immersive_plot_mode() && IsInitialKeyDown(lparam)) {
+        ExitImmersivePlotMode();
         return 0;
     }
     if (message == WM_KEYDOWN && wparam == VK_ESCAPE && fullscreen_restore_ && IsInitialKeyDown(lparam)) {

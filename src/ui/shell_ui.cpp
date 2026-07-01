@@ -25,6 +25,7 @@ using Microsoft::WRL::ComPtr;
 
 constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
+constexpr const char* kImmersivePlotWindow = "Spectrum###SpecForgeSpectrumImmersiveV1";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 constexpr float kStatusBarSeparatorThickness = 1.0f;
@@ -523,6 +524,14 @@ void ShellUi::Render(const ShellStatus& status)
     session_view_cache_dirty_ = false;
     label_shortcut_context_active_ = false;
     spectral_lines_panel_.SetFrameIndex(status.frame_index);
+    if (immersive_plot_mode_) {
+        RenderImmersivePlot(status);
+        session_.MaybeSaveStateCaches(status.frame_index);
+        spectral_lines_panel_.MaybeSaveCache(status.frame_index);
+        session_view_cache_.reset();
+        session_view_cache_dirty_ = false;
+        return;
+    }
     RenderDockHost(status);
     if (panel_visibility_.files) {
         RenderFilesPanel();
@@ -561,6 +570,28 @@ void ShellUi::Render(const ShellStatus& status)
 void ShellUi::RefreshSystemColors()
 {
     spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotStyle(ReadSystemSpectrumPlotStyle()));
+}
+
+void ShellUi::EnterImmersivePlotMode()
+{
+    immersive_plot_mode_ = true;
+}
+
+void ShellUi::ExitImmersivePlotMode()
+{
+    immersive_plot_mode_ = false;
+}
+
+bool ShellUi::TakeImmersivePlotModeToggleRequest()
+{
+    const bool requested = immersive_plot_toggle_requested_;
+    immersive_plot_toggle_requested_ = false;
+    return requested;
+}
+
+bool ShellUi::immersive_plot_mode() const
+{
+    return immersive_plot_mode_;
 }
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
@@ -679,6 +710,42 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::End();
 }
 
+void ShellUi::RenderImmersivePlot(const ShellStatus& status)
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoDocking |
+                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                                   ImGuiWindowFlags_NoSavedSettings;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin(kImmersivePlotWindow, nullptr, flags);
+    ImGui::PopStyleVar(3);
+
+    label_shortcut_context_active_ =
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
+    const std::vector<const SpectralLineMarker*> spectral_lines =
+        spectral_lines_panel_.FilteredMarkers(snapshot, false);
+    RenderSpectrumPlot(
+        snapshot,
+        spectrum_view_session_.PlotStateForRender(),
+        SpectrumPlotProfileContext{status.profile, status.frame_index},
+        spectrum_view_session_.PlotStyleForRender(),
+        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()},
+        SpectrumPlotDisplayOptions{true});
+
+    ImGui::End();
+}
+
 void ShellUi::RenderMainMenuBar()
 {
     if (!ImGui::BeginMenuBar()) {
@@ -706,6 +773,10 @@ void ShellUi::RenderMainMenuBar()
     }
 
     if (ImGui::BeginMenu("View")) {
+        if (ImGui::MenuItem("Immersive Plot Mode", "F11", immersive_plot_mode_)) {
+            immersive_plot_toggle_requested_ = true;
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Show all panels")) {
             panel_visibility_.files = true;
             panel_visibility_.navigation = true;

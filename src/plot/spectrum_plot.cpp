@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <string>
@@ -20,6 +21,44 @@ struct Bounds {
     double x_max = 1.0;
     double y_min = 0.0;
     double y_max = 1.0;
+};
+
+struct ScopedEdgeAxisPlotStyle {
+    explicit ScopedEdgeAxisPlotStyle(bool enabled)
+        : enabled_(enabled)
+    {
+        if (!enabled_) {
+            return;
+        }
+
+        const ImVec4 transparent(0.0f, 0.0f, 0.0f, 0.0f);
+        ImPlot::PushStyleColor(ImPlotCol_FrameBg, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_PlotBg, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_PlotBorder, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_AxisBg, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_AxisBgHovered, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_AxisBgActive, transparent);
+        ImPlot::PushStyleColor(ImPlotCol_Crosshairs, ImVec4(0.72f, 0.78f, 0.82f, 0.48f));
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0.0f, 0.0f));
+        ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(0.0f, 0.0f));
+    }
+
+    ~ScopedEdgeAxisPlotStyle()
+    {
+        if (!enabled_) {
+            return;
+        }
+
+        ImPlot::PopStyleVar(3);
+        ImPlot::PopStyleColor(7);
+    }
+
+    ScopedEdgeAxisPlotStyle(const ScopedEdgeAxisPlotStyle&) = delete;
+    ScopedEdgeAxisPlotStyle& operator=(const ScopedEdgeAxisPlotStyle&) = delete;
+
+private:
+    bool enabled_ = false;
 };
 
 bool CanPlotSnapshot(const SpectrumSnapshotHandle& snapshot)
@@ -272,6 +311,221 @@ void RenderSpectralLineOverlays(const SpectrumPlotOverlays& overlays)
     ImPlot::PopPlotClipRect();
 }
 
+int DesiredTickCount(float pixel_length, float target_spacing, int minimum, int maximum)
+{
+    if (pixel_length <= 0.0f || target_spacing <= 0.0f) {
+        return minimum;
+    }
+    return std::clamp(static_cast<int>(std::floor(pixel_length / target_spacing)), minimum, maximum);
+}
+
+double NiceTickStep(double range, int desired_count)
+{
+    if (!std::isfinite(range) || range <= 0.0 || desired_count <= 1) {
+        return 1.0;
+    }
+
+    const double raw_step = range / static_cast<double>(desired_count - 1);
+    if (!std::isfinite(raw_step) || raw_step <= 0.0) {
+        return 1.0;
+    }
+
+    const double magnitude = std::pow(10.0, std::floor(std::log10(raw_step)));
+    const double fraction = raw_step / magnitude;
+    double nice_fraction = 10.0;
+    if (fraction <= 1.0) {
+        nice_fraction = 1.0;
+    } else if (fraction <= 2.0) {
+        nice_fraction = 2.0;
+    } else if (fraction <= 5.0) {
+        nice_fraction = 5.0;
+    }
+    return nice_fraction * magnitude;
+}
+
+std::string FormatTickValue(double value, double step)
+{
+    if (std::abs(value) < std::abs(step) * 1.0e-6) {
+        value = 0.0;
+    }
+
+    char buffer[64] = {};
+    const double abs_value = std::abs(value);
+    const char* format = (abs_value >= 10000.0 || (abs_value > 0.0 && abs_value < 0.01)) ? "%.3g" : "%.4g";
+    std::snprintf(buffer, sizeof(buffer), format, value);
+    return std::string(buffer);
+}
+
+float ClampTextStart(float desired, float minimum, float maximum)
+{
+    if (maximum < minimum) {
+        return minimum;
+    }
+    return std::clamp(desired, minimum, maximum);
+}
+
+void RenderEdgeAxisTicks()
+{
+    const ImPlotRect limits = ImPlot::GetPlotLimits();
+    const ImVec2 plot_pos = ImPlot::GetPlotPos();
+    const ImVec2 plot_size = ImPlot::GetPlotSize();
+    if (plot_size.x <= 0.0f || plot_size.y <= 0.0f) {
+        return;
+    }
+
+    ImDrawList* draw_list = ImPlot::GetPlotDrawList();
+    if (draw_list == nullptr) {
+        return;
+    }
+
+    const ImVec2 plot_min = plot_pos;
+    const ImVec2 plot_max(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
+    const ImU32 tick_color = ImGui::GetColorU32(ImVec4(0.72f, 0.78f, 0.82f, 0.58f));
+    const ImU32 label_color = ImGui::GetColorU32(ImVec4(0.78f, 0.84f, 0.88f, 0.74f));
+    constexpr float kMajorTickLength = 9.0f;
+    constexpr float kTickLabelGap = 4.0f;
+
+    ImPlot::PushPlotClipRect();
+
+    const int x_tick_count = DesiredTickCount(plot_size.x, 88.0f, 6, 14);
+    const double x_step = NiceTickStep(limits.X.Max - limits.X.Min, x_tick_count);
+    const double x_start = std::ceil(limits.X.Min / x_step) * x_step;
+    for (int index = 0; index < 128; ++index) {
+        const double x = x_start + x_step * static_cast<double>(index);
+        if (x > limits.X.Max + x_step * 0.5) {
+            break;
+        }
+        if (x < limits.X.Min - x_step * 0.5) {
+            continue;
+        }
+
+        const float pixel_x = ImPlot::PlotToPixels(x, limits.Y.Min).x;
+        draw_list->AddLine(
+            ImVec2(pixel_x, plot_max.y),
+            ImVec2(pixel_x, plot_max.y - kMajorTickLength),
+            tick_color,
+            1.0f);
+
+        const std::string label = FormatTickValue(x, x_step);
+        const ImVec2 label_size = ImGui::CalcTextSize(label.c_str());
+        const float label_x = ClampTextStart(
+            pixel_x - label_size.x * 0.5f,
+            plot_min.x + 2.0f,
+            plot_max.x - label_size.x - 2.0f);
+        const float label_y = plot_max.y - kMajorTickLength - kTickLabelGap - label_size.y;
+        draw_list->AddText(ImVec2(label_x, label_y), label_color, label.c_str());
+    }
+
+    const int y_tick_count = DesiredTickCount(plot_size.y, 72.0f, 5, 12);
+    const double y_step = NiceTickStep(limits.Y.Max - limits.Y.Min, y_tick_count);
+    const double y_start = std::ceil(limits.Y.Min / y_step) * y_step;
+    for (int index = 0; index < 128; ++index) {
+        const double y = y_start + y_step * static_cast<double>(index);
+        if (y > limits.Y.Max + y_step * 0.5) {
+            break;
+        }
+        if (y < limits.Y.Min - y_step * 0.5) {
+            continue;
+        }
+
+        const float pixel_y = ImPlot::PlotToPixels(limits.X.Min, y).y;
+        draw_list->AddLine(
+            ImVec2(plot_min.x, pixel_y),
+            ImVec2(plot_min.x + kMajorTickLength, pixel_y),
+            tick_color,
+            1.0f);
+
+        const std::string label = FormatTickValue(y, y_step);
+        const ImVec2 label_size = ImGui::CalcTextSize(label.c_str());
+        const float label_x = plot_min.x + kMajorTickLength + kTickLabelGap;
+        const float label_y = ClampTextStart(
+            pixel_y - label_size.y * 0.5f,
+            plot_min.y + 2.0f,
+            plot_max.y - label_size.y - 2.0f);
+        draw_list->AddText(ImVec2(label_x, label_y), label_color, label.c_str());
+    }
+
+    ImPlot::PopPlotClipRect();
+}
+
+void StoreLastLimits(const ImPlotRect& limits, SpectrumPlotState& state)
+{
+    state.has_last_limits = true;
+    state.last_x_min = limits.X.Min;
+    state.last_x_max = limits.X.Max;
+    state.last_y_min = limits.Y.Min;
+    state.last_y_max = limits.Y.Max;
+}
+
+bool ContainsPoint(const ImVec2& min, const ImVec2& max, const ImVec2& point)
+{
+    return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y;
+}
+
+void ZoomRangeAround(double& min, double& max, double anchor, float wheel_delta)
+{
+    const double span = max - min;
+    if (!std::isfinite(span) || span <= 0.0 || !std::isfinite(anchor) || wheel_delta == 0.0f) {
+        return;
+    }
+
+    constexpr double kZoomBase = 0.88;
+    const double scale = std::pow(kZoomBase, static_cast<double>(wheel_delta));
+    min = anchor - (anchor - min) * scale;
+    max = anchor + (max - anchor) * scale;
+}
+
+bool ApplyEdgeAxisWheelZoom(
+    SpectrumPlotState& state,
+    const ImVec2& widget_pos,
+    const ImVec2& widget_size,
+    float edge_band)
+{
+    if (!state.has_last_limits || widget_size.x <= 0.0f || widget_size.y <= 0.0f) {
+        return false;
+    }
+
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.MouseWheel == 0.0f) {
+        return false;
+    }
+
+    const ImVec2 widget_max(widget_pos.x + widget_size.x, widget_pos.y + widget_size.y);
+    if (!ContainsPoint(widget_pos, widget_max, io.MousePos)) {
+        return false;
+    }
+
+    const bool in_x_axis_band = io.MousePos.y >= widget_max.y - edge_band;
+    const bool in_y_axis_band = io.MousePos.x <= widget_pos.x + edge_band;
+    if (!in_x_axis_band && !in_y_axis_band) {
+        return false;
+    }
+
+    if (in_x_axis_band) {
+        const double ratio = std::clamp(
+            static_cast<double>((io.MousePos.x - widget_pos.x) / widget_size.x),
+            0.0,
+            1.0);
+        const double anchor = state.last_x_min + (state.last_x_max - state.last_x_min) * ratio;
+        double min = state.last_x_min;
+        double max = state.last_x_max;
+        ZoomRangeAround(min, max, anchor, io.MouseWheel);
+        ImPlot::SetNextAxisLimits(ImAxis_X1, min, max, ImPlotCond_Always);
+        return true;
+    }
+
+    const double ratio = std::clamp(
+        static_cast<double>((io.MousePos.y - widget_pos.y) / widget_size.y),
+        0.0,
+        1.0);
+    const double anchor = state.last_y_max - (state.last_y_max - state.last_y_min) * ratio;
+    double min = state.last_y_min;
+    double max = state.last_y_max;
+    ZoomRangeAround(min, max, anchor, io.MouseWheel);
+    ImPlot::SetNextAxisLimits(ImAxis_Y1, min, max, ImPlotCond_Always);
+    return true;
+}
+
 }  // namespace
 
 void RenderSpectrumPlot(
@@ -279,24 +533,46 @@ void RenderSpectrumPlot(
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile,
     const SpectrumPlotStyle& style,
-    const SpectrumPlotOverlays& overlays)
+    const SpectrumPlotOverlays& overlays,
+    const SpectrumPlotDisplayOptions& display)
 {
     if (!CanPlotSnapshot(snapshot)) {
         ImGui::TextDisabled("No plottable spectrum.");
         return;
     }
 
+    const bool fit_requested = state.fit_next_frame;
     if (state.fit_next_frame) {
         const Bounds bounds = ComputeBounds(*snapshot, state);
         ImPlot::SetNextAxesLimits(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max, ImPlotCond_Always);
         state.fit_next_frame = false;
     }
 
-    if (ImPlot::BeginPlot("Spectrum##main_spectrum", ImVec2(-1.0f, -1.0f), ImPlotFlags_Crosshairs)) {
+    constexpr float kEdgeAxisBandPixels = 44.0f;
+    const ImVec2 plot_widget_pos = ImGui::GetCursorScreenPos();
+    const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
+    const bool edge_axis_wheel_zoomed =
+        display.edge_axis_overlay && !fit_requested &&
+        ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, kEdgeAxisBandPixels);
+
+    const ScopedEdgeAxisPlotStyle edge_axis_style(display.edge_axis_overlay);
+    ImPlotFlags plot_flags = ImPlotFlags_Crosshairs;
+    ImPlotAxisFlags axis_flags = ImPlotAxisFlags_None;
+    if (display.edge_axis_overlay) {
+        plot_flags |= ImPlotFlags_NoFrame | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
+        axis_flags |= ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                      ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoMenus |
+                      ImPlotAxisFlags_NoSideSwitch | ImPlotAxisFlags_NoHighlight;
+    }
+    if (edge_axis_wheel_zoomed) {
+        plot_flags |= ImPlotFlags_NoInputs;
+    }
+
+    if (ImPlot::BeginPlot("Spectrum##main_spectrum", ImVec2(-1.0f, -1.0f), plot_flags)) {
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
-        ImPlot::SetupAxis(ImAxis_X1, x_label);
-        ImPlot::SetupAxis(ImAxis_Y1, y_label);
+        ImPlot::SetupAxis(ImAxis_X1, x_label, axis_flags);
+        ImPlot::SetupAxis(ImAxis_Y1, y_label, axis_flags);
 
         const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
         const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
@@ -357,9 +633,14 @@ void RenderSpectrumPlot(
         if (snapshot->capabilities.can_show_spectral_lines) {
             RenderSpectralLineOverlays(overlays);
         }
+        if (display.edge_axis_overlay) {
+            RenderEdgeAxisTicks();
+        }
+
+        const ImPlotRect limits = ImPlot::GetPlotLimits();
+        StoreLastLimits(limits, state);
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
-            const ImPlotRect limits = ImPlot::GetPlotLimits();
             const bool hovered = ImPlot::IsPlotHovered();
             const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);

@@ -28,6 +28,11 @@ struct SpectrumPlotState {
     double profiled_x_max = 0.0;
     double profiled_y_min = 0.0;
     double profiled_y_max = 0.0;
+    bool has_last_limits = false;
+    double last_x_min = 0.0;
+    double last_x_max = 0.0;
+    double last_y_min = 0.0;
+    double last_y_max = 0.0;
 };
 
 struct SpectrumPlotProfileContext {
@@ -46,11 +51,16 @@ struct SpectrumPlotOverlays {
     bool show_spectral_line_labels = true;
 };
 
+struct SpectrumPlotDisplayOptions {
+    bool edge_axis_overlay = false;
+};
+
 void RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile = {},
     const SpectrumPlotStyle& style = {},
-    const SpectrumPlotOverlays& overlays = {});
+    const SpectrumPlotOverlays& overlays = {},
+    const SpectrumPlotDisplayOptions& display = {});
 
 }  // namespace specforge
