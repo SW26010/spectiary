@@ -55,9 +55,12 @@ private:
 
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};
+    std::array<char, 128> annotation_display_name_buffer_ = {};
     bool sample_name_matches_open_ = false;
     bool sample_name_search_active_ = false;
+    bool annotation_display_name_focus_pending_ = false;
     std::string sample_name_search_restore_name_;
+    std::string annotation_display_name_edit_key_;
 };
 
 }  // namespace specforge

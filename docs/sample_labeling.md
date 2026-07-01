@@ -336,10 +336,32 @@ view` remains the domain term for that surface. The window should display loaded
 sample annotation results, including automatically loaded `*_y.npy` data. It consumes
 the active source collection and current sample from sample navigation, but it
 does not own source selection, file management, or the current sample index. It
-should show one annotation result per row with only the task or result name and
-the current sample's annotation value or mapped label name. In the first
-read-only vertical slice, it should not show drag or convert-to-labeling
-affordances because editable sample labeling is not available yet.
+should show one annotation result per row with a display name and the current
+sample's annotation value or mapped label name. In the first read-only vertical
+slice, it should not show drag or convert-to-labeling affordances because
+editable sample labeling is not available yet.
+
+An annotation result's display name is user-facing local workflow state. It must
+not rename the underlying annotation file, change the annotation path used as a
+stable source identity, or rewrite portable sample label result metadata. The
+default display name is the loaded result name: automatically loaded plain
+annotations default to the annotation file name, metadata-backed label results
+default to the metadata task name when available, and local sample labeling task
+rows default to the local task name. The user may edit the display name in place
+from the `Annotations` table. Clearing the edited display name removes the
+custom local override and restores the default display name. A custom display
+name affects the `Annotations` row, the drag preview text, and the corresponding
+entries shown in `Sample Filters` and `Sample Sorting`; hover text should still
+reveal the original annotation path or file name so the source remains
+inspectable.
+
+Local sample labeling task names and annotation display names are separate.
+When an annotation row represents a local sample labeling task and the user has
+not customized that row's annotation display name, renaming the task updates the
+annotation row's default display name. Once the user customizes the annotation
+display name, later task renames must not overwrite it. Editing the annotation
+display name must not rename the task. Editing the task name may only affect
+annotation display through this one-way default-name relationship.
 
 After editable sample labeling exists, categorical annotation rows should expose
 a small drag affordance so the user can drag that annotation to the Labeling

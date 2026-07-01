@@ -29,6 +29,32 @@ std::string LowerAscii(std::string value)
     return value;
 }
 
+std::string TrimAscii(std::string_view value)
+{
+    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
+        return std::isspace(character) != 0;
+    });
+    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
+        return std::isspace(character) != 0;
+    }).base();
+
+    if (first >= last) {
+        return {};
+    }
+    return std::string(first, last);
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::string AnnotationDisplayNameKeyFromPath(const std::filesystem::path& path)
+{
+    return path.empty() ? std::string{} : "annotation:" + PathToUtf8(path);
+}
+
 bool ShouldRememberLabelingPosition(SampleNavigationRequestKind kind)
 {
     return kind == SampleNavigationRequestKind::Previous || kind == SampleNavigationRequestKind::Next ||
@@ -112,6 +138,19 @@ const SampleAnnotationResult* FindAnnotationByPath(
         return PathsReferToSameFile(annotation.path, path);
     });
     return match == context.annotations.end() ? nullptr : &*match;
+}
+
+const SampleLabelingTask* FindLocalTaskByOutputPath(
+    const std::vector<SampleLabelingTask>* tasks,
+    const std::filesystem::path& path)
+{
+    if (tasks == nullptr || path.empty()) {
+        return nullptr;
+    }
+    const auto match = std::find_if(tasks->begin(), tasks->end(), [&path](const SampleLabelingTask& task) {
+        return task.output_path && PathsReferToSameFile(*task.output_path, path);
+    });
+    return match == tasks->end() ? nullptr : &*match;
 }
 
 bool IsAnnotationFilterSourceId(std::string_view source_id)
@@ -255,10 +294,11 @@ std::optional<SampleLabelResultMetadata> LoadVerifiedLabelMetadataForAnnotation(
 SourceCollectionAnnotationValueView BuildAnnotationValueView(
     const SampleAnnotationResult& annotation,
     std::size_t current_index,
-    const SampleLabelingTask* local_task)
+    const SampleLabelingTask* local_task,
+    std::string display_name)
 {
     SourceCollectionAnnotationValueView view;
-    view.name = local_task == nullptr ? annotation.name : local_task->task_name;
+    view.name = std::move(display_name);
     view.path = local_task != nullptr && local_task->output_path ? *local_task->output_path : annotation.path;
     view.relationship = local_task == nullptr
         ? annotation.relationship
@@ -277,6 +317,7 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     view.can_sort_samples = local_task == nullptr &&
                             annotation.relationship == SampleAnnotationWorkflowRelationship::PlainAnnotation &&
                             !annotation.label_metadata;
+    view.can_rename_annotation = !view.path.empty();
     view.can_remove_annotation = local_task == nullptr;
     if (local_task != nullptr && local_task->output_path) {
         view.output_missing = !PathExists(*local_task->output_path);
@@ -287,10 +328,11 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
 
 SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     const SampleLabelingTask& task,
-    std::size_t current_index)
+    std::size_t current_index,
+    std::string display_name)
 {
     SourceCollectionAnnotationValueView view;
-    view.name = task.task_name;
+    view.name = std::move(display_name);
     view.path = task.output_path.value_or(std::filesystem::path{});
     view.relationship = SampleAnnotationWorkflowRelationship::LocalLabelingTask;
     view.relationship_label = std::string{SampleAnnotationWorkflowRelationshipLabel(view.relationship)};
@@ -302,6 +344,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_activate_labeling = task.output_path.has_value();
     view.can_filter_samples = task.output_path.has_value();
     view.can_sort_samples = false;
+    view.can_rename_annotation = task.output_path.has_value();
     view.can_remove_annotation = false;
     if (task.output_path) {
         view.output_missing = !PathExists(*task.output_path);
@@ -336,6 +379,30 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
 {
+}
+
+std::string SampleWorkflowCoordinator::AnnotationDisplayName(
+    const SampleAnnotationResult& annotation,
+    const SampleLabelingTask* local_task) const
+{
+    const std::string key = AnnotationDisplayNameKeyFromPath(
+        local_task != nullptr && local_task->output_path ? *local_task->output_path : annotation.path);
+    const auto override = annotation_display_names_.find(key);
+    if (override != annotation_display_names_.end()) {
+        return override->second;
+    }
+    return local_task == nullptr ? annotation.name : local_task->task_name;
+}
+
+std::string SampleWorkflowCoordinator::LocalTaskAnnotationDisplayName(
+    const SampleLabelingTask& task) const
+{
+    const std::string key = task.output_path ? AnnotationDisplayNameKeyFromPath(*task.output_path) : std::string{};
+    const auto override = annotation_display_names_.find(key);
+    if (override != annotation_display_names_.end()) {
+        return override->second;
+    }
+    return task.task_name;
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
@@ -461,6 +528,56 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
         ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::RenameAnnotationDisplayNameForActiveSource(
+    std::filesystem::path path,
+    std::string display_name)
+{
+    SourceCollectionSessionAction action;
+    display_name = TrimAscii(display_name);
+    if (path.empty()) {
+        return action;
+    }
+
+    const SourceCollectionManifest* context = navigation_.active_context();
+    const SampleAnnotationResult* annotation = context == nullptr ? nullptr : FindAnnotationByPath(*context, path);
+    const SampleLabelingTask* local_task = annotation == nullptr
+        ? FindLocalTaskByOutputPath(labeling_.active_source_tasks(), path)
+        : FindLocalTaskForLoadedAnnotation(labeling_.active_source_tasks(), *annotation);
+    if (annotation == nullptr && local_task == nullptr) {
+        return action;
+    }
+
+    const std::string key = AnnotationDisplayNameKeyFromPath(
+        local_task != nullptr && local_task->output_path ? *local_task->output_path : path);
+    if (key.empty()) {
+        return action;
+    }
+    const std::string default_display_name =
+        local_task != nullptr ? local_task->task_name : annotation->name;
+
+    bool changed = false;
+    if (display_name.empty() || display_name == default_display_name) {
+        changed = annotation_display_names_.erase(key) > 0;
+    } else {
+        auto [entry, inserted] = annotation_display_names_.emplace(key, display_name);
+        if (!inserted && entry->second != display_name) {
+            entry->second = std::move(display_name);
+            changed = true;
+        } else {
+            changed = inserted;
+        }
+    }
+
+    if (!changed) {
+        return action;
+    }
+    InvalidateSampleFilterViewCache();
+    InvalidateSampleSortingSourceCache();
+    MarkActiveWorkflowStateDirty();
+    action.workflow_changed = true;
     return action;
 }
 
@@ -613,6 +730,8 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RenameActiveLabelingTas
     SourceCollectionSessionAction action;
     if (labeling_.RenameActiveTask(DefaultedSampleLabelingTaskName(std::move(task_name)))) {
         (void)labeling_.PersistActiveTask();
+        InvalidateSampleFilterViewCache();
+        InvalidateSampleSortingSourceCache();
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -1005,7 +1124,11 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
             for (const SampleAnnotationResult& annotation : context->annotations) {
                 const SampleLabelingTask* local_task =
                     FindLocalTaskForLoadedAnnotation(labeling_.active_source_tasks(), annotation);
-                view.current_annotations.push_back(BuildAnnotationValueView(annotation, current_index, local_task));
+                view.current_annotations.push_back(BuildAnnotationValueView(
+                    annotation,
+                    current_index,
+                    local_task,
+                    AnnotationDisplayName(annotation, local_task)));
             }
 
             if (const std::vector<SampleLabelingTask>* tasks = labeling_.active_source_tasks()) {
@@ -1020,7 +1143,10 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
                             return task.output_path && PathsReferToSameFile(annotation.path, *task.output_path);
                         });
                     if (!already_loaded) {
-                        view.current_annotations.push_back(BuildLocalTaskAnnotationValueView(task, current_index));
+                        view.current_annotations.push_back(BuildLocalTaskAnnotationValueView(
+                            task,
+                            current_index,
+                            LocalTaskAnnotationDisplayName(task)));
                     }
                 }
             }
@@ -1226,6 +1352,7 @@ void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionActio
     active_sample_workflow_context_fingerprint_.reset();
     selected_filter_source_ids_.clear();
     selected_sample_sort_source_ids_.clear();
+    annotation_display_names_.clear();
     sample_sort_source_directions_.clear();
     selected_sample_sort_source_id_.reset();
     selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
@@ -1407,6 +1534,7 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
                 continue;
             }
             SampleFilterSource source = BuildLabelingFilterSource(*local_task);
+            source.name = AnnotationDisplayName(annotation, local_task);
             emitted_labeling_source_ids.insert(source.id);
             if (IsSelectedFilterSource(source.id)) {
                 filter_sources.push_back(std::move(source));
@@ -1417,6 +1545,7 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
             continue;
         }
         SampleFilterSource source = BuildAnnotationFilterSource(annotation);
+        source.name = AnnotationDisplayName(annotation);
         if (IsSelectedFilterSource(source.id)) {
             filter_sources.push_back(std::move(source));
         }
@@ -1427,6 +1556,7 @@ std::vector<SampleFilterSource> SampleWorkflowCoordinator::BuildSampleFilterSour
                 continue;
             }
             SampleFilterSource source = BuildLabelingFilterSource(task);
+            source.name = LocalTaskAnnotationDisplayName(task);
             if (emitted_labeling_source_ids.find(source.id) != emitted_labeling_source_ids.end()) {
                 continue;
             }
@@ -1460,6 +1590,7 @@ const SourceCollectionFilterView& SampleWorkflowCoordinator::CachedSampleFilterV
                         continue;
                     }
                     SampleFilterSource source = BuildLabelingFilterSource(*local_task);
+                    source.name = AnnotationDisplayName(annotation, local_task);
                     emitted_labeling_source_ids.insert(source.id);
                     SourceCollectionFilterSourceView source_view =
                         BuildFilterSourceView(source, filters_, annotation.path);
@@ -1477,6 +1608,7 @@ const SourceCollectionFilterView& SampleWorkflowCoordinator::CachedSampleFilterV
                     continue;
                 }
                 SampleFilterSource source = BuildAnnotationFilterSource(annotation);
+                source.name = AnnotationDisplayName(annotation);
                 SourceCollectionFilterSourceView source_view =
                     BuildFilterSourceView(source, filters_, annotation.path);
                 if (IsSelectedFilterSource(source.id)) {
@@ -1495,6 +1627,7 @@ const SourceCollectionFilterView& SampleWorkflowCoordinator::CachedSampleFilterV
                         continue;
                     }
                     emitted_labeling_source_ids.insert(source.id);
+                    source.name = LocalTaskAnnotationDisplayName(task);
                     SourceCollectionFilterSourceView source_view =
                         BuildFilterSourceView(source, filters_, *task.output_path);
                     if (IsSelectedFilterSource(source.id)) {
@@ -1527,6 +1660,17 @@ SampleWorkflowCoordinator::CachedSampleSortingSourceViews(std::size_t sample_cou
         sample_sorting_source_cache_sample_count_ != sample_count) {
         sample_sorting_source_cache_ =
             BuildSampleSortingSourceViews(context, labeling_.active_source_tasks(), sample_count);
+        if (context != nullptr) {
+            for (SourceCollectionSampleSortSourceView& source_view : sample_sorting_source_cache_) {
+                if (source_view.annotation_path.empty()) {
+                    continue;
+                }
+                if (const SampleAnnotationResult* annotation =
+                        FindAnnotationByPath(*context, source_view.annotation_path)) {
+                    source_view.name = AnnotationDisplayName(*annotation);
+                }
+            }
+        }
         sample_sorting_source_cache_context_ = context;
         sample_sorting_source_cache_sample_count_ = sample_count;
         sample_sorting_source_cache_valid_ = true;
@@ -1555,6 +1699,7 @@ void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view sour
     filters_.Clear();
     selected_filter_source_ids_.clear();
     selected_sample_sort_source_ids_.clear();
+    annotation_display_names_.clear();
     sample_sort_source_directions_.clear();
     selected_sample_sort_source_id_.reset();
     selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
@@ -1581,6 +1726,11 @@ void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view sour
             (void)AddSelectedSourceId(selected_sample_sort_source_ids_, source_id);
         }
     }
+    for (const SampleAnnotationDisplayNameOverride& display_name : match->second.annotation_display_names) {
+        if (IsAnnotationFilterSourceId(display_name.source_id) && !display_name.display_name.empty()) {
+            annotation_display_names_[display_name.source_id] = display_name.display_name;
+        }
+    }
     selected_sample_sort_source_id_ = match->second.selected_sample_sort_source_id;
     if (selected_sample_sort_source_id_ && !IsDefaultSampleSortSourceId(*selected_sample_sort_source_id_)) {
         (void)AddSelectedSourceId(selected_sample_sort_source_ids_, *selected_sample_sort_source_id_);
@@ -1602,6 +1752,13 @@ void SampleWorkflowCoordinator::StoreActiveWorkflowState()
     state.filter_conditions = filters_.conditions();
     state.selected_filter_source_ids = selected_filter_source_ids_;
     state.selected_sample_sort_source_ids = selected_sample_sort_source_ids_;
+    state.annotation_display_names.reserve(annotation_display_names_.size());
+    for (const auto& [source_id, display_name] : annotation_display_names_) {
+        if (IsAnnotationFilterSourceId(source_id) && !display_name.empty()) {
+            state.annotation_display_names.push_back(
+                SampleAnnotationDisplayNameOverride{source_id, display_name});
+        }
+    }
     state.selected_sample_sort_source_id = selected_sample_sort_source_id_;
     state.selected_sample_sort_direction = selected_sample_sort_direction_;
 
@@ -1609,6 +1766,7 @@ void SampleWorkflowCoordinator::StoreActiveWorkflowState()
         !state.filter_conditions.empty() ||
         !state.selected_filter_source_ids.empty() ||
         !state.selected_sample_sort_source_ids.empty() ||
+        !state.annotation_display_names.empty() ||
         (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
         state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
     if (has_state) {

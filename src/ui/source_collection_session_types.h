@@ -48,6 +48,7 @@ struct SourceCollectionAnnotationValueView {
     bool can_activate_labeling = false;
     bool can_filter_samples = false;
     bool can_sort_samples = false;
+    bool can_rename_annotation = false;
     bool can_remove_annotation = false;
 };
 

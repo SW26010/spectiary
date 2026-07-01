@@ -28,6 +28,16 @@ SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent
     return SourceCollectionSessionIntent::EditSourceCollection(std::move(intent));
 }
 
+SourceCollectionSessionIntent RenameAnnotationDisplayName(
+    std::filesystem::path path,
+    std::string display_name)
+{
+    return EditSourceCollection(
+        SourceCollectionIntent::RenameAnnotationResultDisplayName(
+            std::move(path),
+            std::move(display_name)));
+}
+
 SourceCollectionSessionIntent UpdateSampleNavigation(SampleNavigationIntent intent)
 {
     return SourceCollectionSessionIntent::UpdateSampleNavigation(std::move(intent));
@@ -639,13 +649,14 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
             4,
             ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
                 ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX)) {
-        ImGui::TableSetupColumn("Result", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+        ImGui::TableSetupColumn("Display name", ImGuiTableColumnFlags_WidthFixed, 220.0f);
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 72.0f);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 160.0f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableHeadersRow();
 
         std::optional<std::filesystem::path> annotation_to_remove;
+        std::optional<std::pair<std::filesystem::path, std::string>> annotation_to_rename;
         for (std::size_t annotation_index = 0; annotation_index < navigation.current_annotations.size();
              ++annotation_index) {
             const SourceCollectionAnnotationValueView& annotation =
@@ -653,16 +664,51 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
             ImGui::PushID(static_cast<int>(annotation_index));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            (void)TableCellRightAlignedTextButton(
-                "annotation_name",
-                annotation.name,
-                ImGui::GetColorU32(ImGuiCol_Text));
-            if (ImGui::IsItemHovered()) {
-                const std::string path = NarrowPath(annotation.path);
-                ImGui::SetTooltip("%s", path.c_str());
+            const std::string annotation_path_text = PathToUtf8(annotation.path);
+            const bool editing_annotation_name =
+                annotation.can_rename_annotation &&
+                !annotation_path_text.empty() &&
+                annotation_display_name_edit_key_ == annotation_path_text;
+            if (editing_annotation_name) {
+                ImGui::SetNextItemWidth(std::max(1.0f, ImGui::GetContentRegionAvail().x));
+                if (annotation_display_name_focus_pending_) {
+                    ImGui::SetKeyboardFocusHere();
+                    annotation_display_name_focus_pending_ = false;
+                }
+                const bool submitted = ImGui::InputText(
+                    "##annotation_display_name",
+                    annotation_display_name_buffer_.data(),
+                    annotation_display_name_buffer_.size(),
+                    ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                if (ImGui::IsItemHovered()) {
+                    const std::string path = NarrowPath(annotation.path);
+                    ImGui::SetTooltip("%s", path.c_str());
+                }
+                if (submitted || ImGui::IsItemDeactivatedAfterEdit()) {
+                    std::string requested_name = TrimAscii(annotation_display_name_buffer_.data());
+                    annotation_to_rename = std::make_pair(annotation.path, std::move(requested_name));
+                }
+                if (submitted || ImGui::IsItemDeactivated()) {
+                    annotation_display_name_edit_key_.clear();
+                }
+            } else {
+                const bool edit_requested = TableCellRightAlignedTextButton(
+                    "annotation_name",
+                    annotation.name,
+                    ImGui::GetColorU32(ImGuiCol_Text));
+                if (ImGui::IsItemHovered()) {
+                    const std::string path = NarrowPath(annotation.path);
+                    ImGui::SetTooltip("%s", path.c_str());
+                }
+                if (edit_requested && annotation.can_rename_annotation && !annotation_path_text.empty()) {
+                    annotation_display_name_edit_key_ = annotation_path_text;
+                    CopyToBuffer(annotation_display_name_buffer_, annotation.name);
+                    annotation_display_name_focus_pending_ = true;
+                }
             }
             if ((annotation.can_activate_labeling || annotation.can_filter_samples || annotation.can_sort_samples) &&
                 !annotation.path.empty() &&
+                !editing_annotation_name &&
                 ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoHoldToOpenOthers)) {
                 const std::string payload = PathToUtf8(annotation.path);
                 ImGui::SetDragDropPayload(
@@ -715,6 +761,12 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
         if (annotation_to_remove) {
             SourceCollectionSessionResult result = submit(EditSourceCollection(
                 SourceCollectionIntent::RemoveReadOnlyAnnotationResult(*annotation_to_remove)));
+            MergeSourceCollectionSessionAction(action, result.action);
+        }
+        if (annotation_to_rename) {
+            SourceCollectionSessionResult result = submit(RenameAnnotationDisplayName(
+                std::move(annotation_to_rename->first),
+                std::move(annotation_to_rename->second)));
             MergeSourceCollectionSessionAction(action, result.action);
         }
     }

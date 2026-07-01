@@ -30,6 +30,11 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+std::string Utf8(std::u8string_view value)
+{
+    return std::string(reinterpret_cast<const char*>(value.data()), value.size());
+}
+
 struct LoadedSourceSnapshot {
     std::filesystem::path path;
     std::size_t index = 0;
@@ -356,6 +361,16 @@ specforge::SourceCollectionSessionIntent RemoveReadOnlyAnnotation(std::filesyste
 {
     return specforge::SourceCollectionSessionIntent::EditSourceCollection(
         specforge::SourceCollectionIntent::RemoveReadOnlyAnnotationResult(std::move(path)));
+}
+
+specforge::SourceCollectionSessionIntent RenameAnnotationDisplayName(
+    std::filesystem::path path,
+    std::string display_name)
+{
+    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::RenameAnnotationResultDisplayName(
+            std::move(path),
+            std::move(display_name)));
 }
 
 specforge::SourceCollectionSessionIntent AddSampleFilterSource(std::string source_id)
@@ -1044,6 +1059,128 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         "restored previous navigation should follow the descending filtered sequence");
 }
 
+void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
+    const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
+    const std::filesystem::path workflow_cache = UniqueTempPath("_workflow.json");
+    const std::filesystem::path annotation_path = UniqueTempPath("_rank.npy");
+    const std::string annotation_source_id = AnnotationSourceId(annotation_path);
+    const std::string utf8_display_name = Utf8(u8"\u8d28\u91cf\u8bc4\u5206");
+    TouchFile(source_path);
+    SaveLabelResultFixture(
+        annotation_path,
+        "rank",
+        "Rank",
+        {2, 1, 3},
+        specforge::SampleLabelSet{},
+        false);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded_snapshots;
+        specforge::SourceCollectionSession session = MakeWorkflowPersistentSession(
+            loaded_snapshots,
+            navigation_cache,
+            labeling_cache,
+            workflow_cache,
+            source_path,
+            3);
+
+        (void)Submit(session, OpenSourceCollection(source_path, 0));
+        specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
+        Require(result.loaded, "test annotation should load before renaming");
+        Require(result.view.navigation.current_annotations.size() == 1, "loaded annotation should be visible");
+        Require(result.view.navigation.current_annotations[0].name != "Quality score", "test should start from the default name");
+        const std::string default_annotation_name = result.view.navigation.current_annotations[0].name;
+
+        result = Submit(session, RenameAnnotationDisplayName(annotation_path, "  Quality score  "));
+        Require(result.action.workflow_changed, "renaming an annotation display name should report workflow change");
+        Require(
+            result.view.navigation.current_annotations[0].name == "Quality score",
+            "annotation row should use the custom display name");
+        Require(
+            result.view.filter.available_sources.size() == 1 &&
+                result.view.filter.available_sources[0].name == "Quality score",
+            "sample filters should show the custom annotation display name");
+        Require(
+            HasAvailableSortSource(result.view.sorting, annotation_source_id),
+            "plain integer annotation should be available for sorting");
+        Require(
+            std::any_of(result.view.sorting.available_sources.begin(), result.view.sorting.available_sources.end(), [](const auto& source) {
+                return source.name == "Quality score";
+            }),
+            "sample sorting add-source list should show the custom display name");
+
+        result = Submit(session, AddSampleFilterSource(annotation_source_id));
+        Require(result.view.filter.sources.size() == 1, "renamed annotation should still be addable as a filter source");
+        Require(result.view.filter.sources[0].name == "Quality score", "selected sample filter source should keep the custom name");
+
+        result = Submit(session, SetSampleSortSource(annotation_source_id));
+        const specforge::SourceCollectionSampleSortSourceView* sort_source =
+            FindSortSource(result.view.sorting, annotation_source_id);
+        Require(sort_source != nullptr, "renamed annotation should still be selectable as a sort source");
+        Require(sort_source->name == "Quality score", "selected sample sort source should keep the custom name");
+
+        result = Submit(session, RenameAnnotationDisplayName(annotation_path, "   "));
+        Require(result.action.workflow_changed, "clearing an annotation display name should report workflow change");
+        Require(
+            result.view.navigation.current_annotations[0].name == default_annotation_name,
+            "cleared annotation display name should restore the default annotation name");
+        Require(
+            result.view.filter.sources.size() == 1 &&
+                result.view.filter.sources[0].name == default_annotation_name,
+            "selected sample filter source should restore the default annotation name");
+        sort_source = FindSortSource(result.view.sorting, annotation_source_id);
+        Require(sort_source != nullptr, "cleared annotation should remain the selected sort source");
+        Require(
+            sort_source->name == default_annotation_name,
+            "selected sample sort source should restore the default annotation name");
+
+        result = Submit(session, RenameAnnotationDisplayName(annotation_path, utf8_display_name));
+        Require(
+            result.view.navigation.current_annotations[0].name == utf8_display_name,
+            "annotation row should support UTF-8 display names after clearing the override");
+        Require(
+            result.view.filter.sources.size() == 1 &&
+                result.view.filter.sources[0].name == utf8_display_name,
+            "selected sample filter source should keep the UTF-8 annotation display name");
+        sort_source = FindSortSource(result.view.sorting, annotation_source_id);
+        Require(sort_source != nullptr, "UTF-8 renamed annotation should remain the selected sort source");
+        Require(
+            sort_source->name == utf8_display_name,
+            "selected sample sort source should keep the UTF-8 annotation display name");
+
+        Require(session.FlushStateCaches(), "session flush should save the custom annotation display name");
+    }
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    specforge::SourceCollectionSession restored = MakeWorkflowPersistentSession(
+        restored_loads,
+        navigation_cache,
+        labeling_cache,
+        workflow_cache,
+        source_path,
+        3);
+
+    (void)Submit(restored, OpenSourceCollection(source_path, 0));
+    const specforge::SourceCollectionSessionResult restored_result =
+        Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    Require(
+        restored_result.view.navigation.current_annotations[0].name == utf8_display_name,
+        "restored workflow should keep the UTF-8 annotation display name");
+    Require(
+        restored_result.view.filter.sources.size() == 1 &&
+            restored_result.view.filter.sources[0].name == utf8_display_name,
+        "restored selected sample filter source should keep the UTF-8 annotation display name");
+    Require(
+        std::any_of(
+            restored_result.view.sorting.available_sources.begin(),
+            restored_result.view.sorting.available_sources.end(),
+            [&utf8_display_name](const auto& source) { return source.name == utf8_display_name; }),
+        "restored available sample sort source should keep the UTF-8 annotation display name");
+}
+
 void TestAnnotationSortingSourcesRequireComparablePlainValues()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -1308,6 +1445,76 @@ void TestRenameAndDeleteActiveLabelingTask()
     Require(
         result.view.labeling.current_code == specforge::kUnlabeledSampleLabelCode,
         "deleted draft values should not come back");
+}
+
+void TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateLabelingTask("Quality review"));
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, SetActiveLabelingOutputPath(output_path));
+    Require(result.view.navigation.current_annotations.size() == 1, "local task output should appear in annotations");
+    Require(
+        result.view.navigation.current_annotations[0].name == "Quality review",
+        "local labeling annotation should default to the task name");
+    Require(
+        result.view.filter.available_sources.size() == 1 &&
+            result.view.filter.available_sources[0].name == "Quality review",
+        "local labeling filter source should default to the task name");
+
+    result = Submit(session, RenameActiveLabelingTask("Reviewed set"));
+    Require(result.view.labeling.task_name == "Reviewed set", "task rename should update the active task");
+    Require(
+        result.view.navigation.current_annotations[0].name == "Reviewed set",
+        "unmodified local labeling annotation display name should follow task rename");
+    Require(
+        result.view.filter.available_sources[0].name == "Reviewed set",
+        "unmodified local labeling filter source should follow task rename");
+
+    result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
+    Require(result.view.labeling.task_name == "Reviewed set", "annotation rename should not rename the task");
+    Require(
+        result.view.navigation.current_annotations[0].name == "Hard cases",
+        "annotation row should use the custom local-task display name");
+    Require(
+        result.view.filter.available_sources[0].name == "Hard cases",
+        "local labeling filter source should use the custom annotation display name");
+
+    result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
+    Require(result.action.workflow_changed, "clearing local-task annotation display name should report workflow change");
+    Require(result.view.labeling.task_name == "Reviewed set", "clearing annotation display should not rename the task");
+    Require(
+        result.view.navigation.current_annotations[0].name == "Reviewed set",
+        "cleared local-task annotation display name should restore the task default");
+
+    result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
+    Require(
+        result.view.navigation.current_annotations[0].name == "Hard cases",
+        "local-task annotation should support customizing again after clearing");
+
+    result = Submit(session, RenameActiveLabelingTask("Final task"));
+    Require(result.view.labeling.task_name == "Final task", "task should still be renameable after annotation customization");
+    Require(
+        result.view.navigation.current_annotations[0].name == "Hard cases",
+        "custom annotation display name should not be overwritten by later task rename");
+    Require(
+        result.view.filter.available_sources[0].name == "Hard cases",
+        "custom local labeling filter source name should not be overwritten by later task rename");
+
+    result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
+    Require(
+        result.view.navigation.current_annotations[0].name == "Final task",
+        "clearing annotation display should restore the default task name");
+
+    result = Submit(session, RenameActiveLabelingTask("Synced task"));
+    Require(
+        result.view.navigation.current_annotations[0].name == "Synced task",
+        "cleared annotation display override should follow task rename again");
 }
 
 void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
@@ -1989,12 +2196,14 @@ int main()
     TestSampleSortingIntentAppliesNavigationSequence();
     TestSampleSortingSourcesRequireExplicitAddition();
     TestSampleWorkflowStateRestoresFiltersAndSorting();
+    TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists();
     TestAnnotationSortingSourcesRequireComparablePlainValues();
     TestSourceSessionRestoresAnnotationSortingState();
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
     TestCreateLabelingTaskUsesCustomName();
     TestRenameAndDeleteActiveLabelingTask();
+    TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();

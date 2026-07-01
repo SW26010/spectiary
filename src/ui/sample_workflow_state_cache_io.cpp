@@ -65,6 +65,7 @@ bool HasState(const SampleWorkflowSourceState& state)
     return !state.filter_conditions.empty() ||
            !state.selected_filter_source_ids.empty() ||
            !state.selected_sample_sort_source_ids.empty() ||
+           !state.annotation_display_names.empty() ||
            (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) ||
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
@@ -153,6 +154,49 @@ void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state
     wrote_member = true;
 }
 
+void WriteAnnotationDisplayNames(
+    std::ostream& stream,
+    std::vector<SampleAnnotationDisplayNameOverride> display_names,
+    bool& wrote_member)
+{
+    display_names.erase(
+        std::remove_if(
+            display_names.begin(),
+            display_names.end(),
+            [](const SampleAnnotationDisplayNameOverride& display_name) {
+                return display_name.source_id.empty() || display_name.display_name.empty();
+            }),
+        display_names.end());
+    if (display_names.empty()) {
+        return;
+    }
+    std::sort(
+        display_names.begin(),
+        display_names.end(),
+        [](const SampleAnnotationDisplayNameOverride& left, const SampleAnnotationDisplayNameOverride& right) {
+            return left.source_id < right.source_id;
+        });
+
+    if (wrote_member) {
+        stream << ",\n";
+    }
+    stream << "      \"annotation_display_names\": [";
+    for (std::size_t index = 0; index < display_names.size(); ++index) {
+        const SampleAnnotationDisplayNameOverride& display_name = display_names[index];
+        if (index > 0) {
+            stream << ",";
+        }
+        stream << "\n";
+        stream << "        { \"source_id\": ";
+        WriteJsonString(stream, display_name.source_id);
+        stream << ", \"display_name\": ";
+        WriteJsonString(stream, display_name.display_name);
+        stream << " }";
+    }
+    stream << "\n      ]";
+    wrote_member = true;
+}
+
 std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source_object)
 {
     std::vector<SampleFilterCondition> conditions;
@@ -205,6 +249,31 @@ std::vector<std::string> ParseStringArrayMember(const JsonValue& source_object, 
     return UniqueStrings(std::move(values));
 }
 
+std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(const JsonValue& source_object)
+{
+    std::vector<SampleAnnotationDisplayNameOverride> display_names;
+    const JsonValue* array = JsonObjectMember(source_object, "annotation_display_names");
+    if (array == nullptr || array->kind != JsonValue::Kind::Array) {
+        return display_names;
+    }
+
+    std::unordered_set<std::string> seen;
+    for (const JsonValue& value : array->array) {
+        if (value.kind != JsonValue::Kind::Object) {
+            continue;
+        }
+        std::optional<std::string> source_id = ReadJsonStringMember(value, "source_id");
+        std::optional<std::string> display_name = ReadJsonStringMember(value, "display_name");
+        if (!source_id || source_id->empty() || !display_name || display_name->empty() ||
+            !seen.emplace(*source_id).second) {
+            continue;
+        }
+        display_names.push_back(
+            SampleAnnotationDisplayNameOverride{std::move(*source_id), std::move(*display_name)});
+    }
+    return display_names;
+}
+
 void ParseSortState(const JsonValue& source_object, SampleWorkflowSourceState& state)
 {
     const JsonValue* sorting = JsonObjectMember(source_object, "sorting");
@@ -255,6 +324,7 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
             ParseStringArrayMember(source_object, "selected_filter_source_ids");
         state.selected_sample_sort_source_ids =
             ParseStringArrayMember(source_object, "selected_sample_sort_source_ids");
+        state.annotation_display_names = ParseAnnotationDisplayNames(source_object);
         ParseSortState(source_object, state);
         if (HasState(state)) {
             cache.sources_by_identity.emplace(std::move(*identity), std::move(state));
@@ -310,6 +380,7 @@ bool SaveSampleWorkflowStateCache(
                     state.selected_sample_sort_source_ids,
                     wrote_member);
                 WriteSortState(stream, state, wrote_member);
+                WriteAnnotationDisplayNames(stream, state.annotation_display_names, wrote_member);
                 stream << "\n";
                 stream << "    }";
                 stream << (index + 1 == keys.size() ? "\n" : ",\n");

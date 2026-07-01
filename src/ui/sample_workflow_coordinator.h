@@ -53,6 +53,9 @@ public:
         std::string* message = nullptr);
     [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
         const std::filesystem::path& path);
+    [[nodiscard]] SourceCollectionSessionAction RenameAnnotationDisplayNameForActiveSource(
+        std::filesystem::path path,
+        std::string display_name);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
     [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
@@ -147,6 +150,10 @@ private:
     [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool IsSelectedFilterSource(std::string_view source_id) const;
     [[nodiscard]] bool IsSelectedSampleSortSource(std::string_view source_id) const;
+    [[nodiscard]] std::string AnnotationDisplayName(
+        const SampleAnnotationResult& annotation,
+        const SampleLabelingTask* local_task = nullptr) const;
+    [[nodiscard]] std::string LocalTaskAnnotationDisplayName(const SampleLabelingTask& task) const;
     [[nodiscard]] SampleNavigationSortDirection SampleSortSourceDirection(std::string_view source_id) const;
     void SetSampleSortSourceDirection(std::string_view source_id, SampleNavigationSortDirection direction);
     [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
@@ -173,6 +180,7 @@ private:
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
     std::vector<std::string> selected_filter_source_ids_;
     std::vector<std::string> selected_sample_sort_source_ids_;
+    std::unordered_map<std::string, std::string> annotation_display_names_;
     std::unordered_map<std::string, SampleNavigationSortDirection> sample_sort_source_directions_;
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =

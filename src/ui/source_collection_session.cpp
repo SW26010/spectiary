@@ -152,6 +152,17 @@ SourceCollectionIntent SourceCollectionIntent::RemoveReadOnlyAnnotationResult(st
     return intent;
 }
 
+SourceCollectionIntent SourceCollectionIntent::RenameAnnotationResultDisplayName(
+    std::filesystem::path path,
+    std::string display_name)
+{
+    SourceCollectionIntent intent;
+    intent.kind = SourceCollectionIntentKind::RenameAnnotationResultDisplayName;
+    intent.path = std::move(path);
+    intent.display_name = std::move(display_name);
+    return intent;
+}
+
 SampleNavigationIntent SampleNavigationIntent::Move(SampleNavigationRequest request)
 {
     SampleNavigationIntent intent;
@@ -473,6 +484,11 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         case SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult:
             result.action = RemoveReadOnlyAnnotationFromActiveSource(intent.source_collection.path);
             break;
+        case SourceCollectionIntentKind::RenameAnnotationResultDisplayName:
+            result.action = RenameAnnotationDisplayName(
+                std::move(intent.source_collection.path),
+                std::move(intent.source_collection.display_name));
+            break;
         }
         break;
     case SourceCollectionSessionIntentKind::SampleNavigation:
@@ -678,6 +694,15 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveReadOnlyAnnotationF
         MarkSourceSessionCacheDirty();
     }
     return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RenameAnnotationDisplayName(
+    std::filesystem::path path,
+    std::string display_name)
+{
+    return workflow_->RenameAnnotationDisplayNameForActiveSource(
+        std::move(path),
+        std::move(display_name));
 }
 
 SourceCollectionSessionAction SourceCollectionSession::SetSampleNameQuery(std::string query)

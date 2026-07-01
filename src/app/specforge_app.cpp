@@ -5,12 +5,15 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 #include <implot.h>
+#include <shlobj_core.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,6 +79,80 @@ std::string WideToUtf8(std::wstring_view value)
         nullptr,
         nullptr);
     return result;
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::optional<std::filesystem::path> WindowsFontsDirectory()
+{
+    PWSTR fonts_path = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_Fonts, KF_FLAG_DEFAULT, nullptr, &fonts_path)) ||
+        fonts_path == nullptr) {
+        return std::nullopt;
+    }
+
+    std::filesystem::path result(fonts_path);
+    CoTaskMemFree(fonts_path);
+    return result;
+}
+
+std::optional<std::filesystem::path> AddUiFont(ImGuiIO& io)
+{
+    io.Fonts->AddFontDefaultVector();
+    const std::optional<std::filesystem::path> fonts_directory = WindowsFontsDirectory();
+    if (!fonts_directory) {
+        return std::nullopt;
+    }
+
+    constexpr std::array<const wchar_t*, 5> kPreferredFonts = {
+        L"NotoSansSC-VF.ttf",
+        L"Deng.ttf",
+        L"simhei.ttf",
+        L"msyh.ttc",
+        L"simsun.ttc",
+    };
+    static constexpr ImWchar kCjkGlyphRanges[] = {
+        0x2000, 0x206f,  // General punctuation.
+        0x2e80, 0x2eff,  // CJK radicals supplement.
+        0x2f00, 0x2fdf,  // Kangxi radicals.
+        0x3000, 0x30ff,  // CJK symbols, punctuation, hiragana, and katakana.
+        0x31f0, 0x31ff,  // Katakana phonetic extensions.
+        0x3400, 0x4dbf,  // CJK unified ideographs extension A.
+        0x4e00, 0x9fff,  // CJK unified ideographs.
+        0xf900, 0xfaff,  // CJK compatibility ideographs.
+        0xff00, 0xffef,  // Halfwidth and fullwidth forms.
+        0,
+    };
+
+    ImFontConfig font_config;
+    font_config.MergeMode = true;
+    font_config.OversampleH = 2;
+    font_config.OversampleV = 1;
+
+    for (const wchar_t* filename : kPreferredFonts) {
+        const std::filesystem::path candidate = *fonts_directory / filename;
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(candidate, error) || error) {
+            continue;
+        }
+
+        const std::string font_path = PathToUtf8(candidate);
+        // ImGui 1.92 requires merged fonts to keep the same implicit reference-size mode
+        // as the default vector font; passing LegacySize here trips a runtime assertion.
+        if (io.Fonts->AddFontFromFileTTF(
+                font_path.c_str(),
+                0.0f,
+                &font_config,
+                kCjkGlyphRanges) != nullptr) {
+            return candidate;
+        }
+    }
+
+    return std::nullopt;
 }
 
 double RatioHz(UINT numerator, UINT denominator)
@@ -308,7 +385,7 @@ void SpecForgeApp::InitializeUiBackends()
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.ConfigViewportsNoDecoration = true;
-    io.Fonts->AddFontDefaultVector();
+    const std::optional<std::filesystem::path> ui_font_path = AddUiFont(io);
 
     ImGui::StyleColorsDark();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
@@ -323,6 +400,9 @@ void SpecForgeApp::InitializeUiBackends()
                                            ProfileSink::Field::Number(
                                                "font_scale_dpi",
                                                std::to_string(ImGui::GetStyle().FontScaleDpi)),
+                                           ProfileSink::Field::String(
+                                               "ui_font",
+                                               ui_font_path ? PathToUtf8(*ui_font_path) : "imgui_default"),
                                        });
 
     if (!ImGui_ImplWin32_Init(window_.hwnd())) {

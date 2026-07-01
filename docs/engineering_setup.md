@@ -46,6 +46,19 @@ manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT`
 
 DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`、`dwmapi` 和 `imm32`。`zlib` 只用于受限 `.fits.gz` 单光谱读取路径。
 
+## UI 文本编码与字体
+
+SpecForge 的 UI 字符串边界是 UTF-8。业务状态、JSON cache、sample name、label name、annotation display name 和
+ImGui widget buffer 都应继续使用 UTF-8 `std::string`；不要为了 Windows 输入把这些字段改成本地 ANSI code page 或在
+业务层传播 `std::wstring`。
+
+Win32 shell 必须继续使用 `RegisterClassExW`、`CreateWindowExW`、`DefWindowProcW` 和 Dear ImGui 的 Win32 backend，
+让中文输入先以 Unicode 进入 ImGui，再由 ImGui 写入 UTF-8 buffer。中文显示依赖 ImGui font atlas 覆盖 CJK glyph。
+native app 启动时先加载 ImGui 默认字体作为主字体，保留英文和 ASCII 的默认视觉；然后从 Windows Fonts 目录合并
+系统 CJK 字体作为 fallback，例如 `NotoSansSC-VF.ttf`、`Deng.ttf`、`simhei.ttf`、`msyh.ttc` 或 `simsun.ttc`。
+如果输入后的字符显示为 `?`，先检查 runtime profile 中的 `dpi_config.ui_font`，确认是否实际合并了 CJK 字体；
+不要通过把 UTF-8 文本转成本地代码页来修。
+
 ## CMake Presets
 
 共享配置写在 `CMakePresets.json`。本地个人配置写在 `CMakeUserPresets.json`，不要提交。

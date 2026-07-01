@@ -35,6 +35,7 @@ enum class SourceCollectionIntentKind {
     Remove,
     AddReadOnlyAnnotationResult,
     RemoveReadOnlyAnnotationResult,
+    RenameAnnotationResultDisplayName,
 };
 
 enum class SampleNavigationIntentKind {
@@ -81,6 +82,9 @@ struct SourceCollectionIntent {
     [[nodiscard]] static SourceCollectionIntent Remove(std::size_t source_index);
     [[nodiscard]] static SourceCollectionIntent AddReadOnlyAnnotationResult(std::filesystem::path path);
     [[nodiscard]] static SourceCollectionIntent RemoveReadOnlyAnnotationResult(std::filesystem::path path);
+    [[nodiscard]] static SourceCollectionIntent RenameAnnotationResultDisplayName(
+        std::filesystem::path path,
+        std::string display_name);
 
 private:
     friend class SourceCollectionSession;
@@ -90,6 +94,7 @@ private:
 
     SourceCollectionIntentKind kind = SourceCollectionIntentKind::Open;
     std::filesystem::path path;
+    std::string display_name;
     std::size_t spectrum_index = 0;
     std::size_t source_index = 0;
 };
@@ -263,6 +268,9 @@ private:
         std::string* message = nullptr);
     [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
         const std::filesystem::path& path);
+    [[nodiscard]] SourceCollectionSessionAction RenameAnnotationDisplayName(
+        std::filesystem::path path,
+        std::string display_name);
 
     [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
     [[nodiscard]] SourceCollectionSessionAction CommitSampleNameSelection(
