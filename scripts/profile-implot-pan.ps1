@@ -23,12 +23,12 @@ function Quote-StartProcessArgument {
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 if (-not $Executable) {
-    $Executable = Join-Path $repoRoot 'build\ninja-msvc-debug\SpecForge.exe'
+    $Executable = Join-Path $repoRoot 'build\ninja-msvc-portable-debug\SpecForge.exe'
 }
 
 $resolvedExecutable = Resolve-Path -Path $Executable -ErrorAction SilentlyContinue
 if ($null -eq $resolvedExecutable) {
-    throw "Executable not found: $Executable. Build with cmake --build --preset ninja-msvc-debug first."
+    throw "Executable not found: $Executable. Build with cmake --build --preset ninja-msvc-portable-debug first."
 }
 
 $logDir = Join-Path $repoRoot 'logs'

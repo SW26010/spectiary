@@ -1,5 +1,7 @@
 #include "app/specforge_app.h"
 
+#include "app/runtime_paths.h"
+
 #include <dwmapi.h>
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -316,12 +318,22 @@ void SpecForgeApp::Initialize(
         ui_.OpenSource(*initial_source);
     }
 
+    const RuntimePaths runtime_paths = DefaultRuntimePaths();
     profile_ = ProfileSink::CreateDefault();
     const SpectrumSnapshotHandle startup_snapshot = ui_.current_snapshot();
     const std::string source_type(
         startup_snapshot ? MetadataValue(startup_snapshot->source.metadata, "source_type") : std::string_view{});
     profile_.WriteEvent("runtime_config", {
                                             ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
+                                            ProfileSink::Field::String(
+                                                "release_profile",
+                                                ReleaseProfileName(runtime_paths.release_profile)),
+                                            ProfileSink::Field::String(
+                                                "package_root",
+                                                PathToUtf8(runtime_paths.package_root)),
+                                            ProfileSink::Field::String(
+                                                "local_user_state_root",
+                                                PathToUtf8(runtime_paths.local_user_state_root)),
                                             ProfileSink::Field::String("profile_path", profile_.path().string()),
                                             ProfileSink::Field::String(
                                                 "source",
@@ -380,7 +392,16 @@ void SpecForgeApp::InitializeUiBackends()
     ImPlot::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = "specforge-imgui-v2.ini";
+    const RuntimePaths runtime_paths = DefaultRuntimePaths();
+    std::error_code data_directory_error;
+    std::filesystem::create_directories(runtime_paths.local_user_state_root, data_directory_error);
+    if (data_directory_error) {
+        throw std::runtime_error(
+            "Failed to create SpecForge runtime data directory '" +
+            PathToUtf8(runtime_paths.local_user_state_root) + "': " + data_directory_error.message());
+    }
+    imgui_ini_path_utf8_ = PathToUtf8(runtime_paths.imgui_ini_path);
+    io.IniFilename = imgui_ini_path_utf8_.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;

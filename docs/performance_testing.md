@@ -56,7 +56,7 @@
 先 build：
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-debug"
+cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-portable-debug"
 ```
 
 运行 130Hz 验收采集：
@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 
 程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
 
-`SPECFORGE_PROFILE=1` 是唯一的 profile 开关。默认日志目录为当前工作目录下的 `logs/`；需要把 profile 写到其他位置时，设置 `SPECFORGE_PROFILE_DIR`。
+`SPECFORGE_PROFILE=1` 是唯一的 profile 开关。Portable build 不设置 `SPECFORGE_PROFILE_DIR` 时默认写入可执行文件旁的 `Data/logs/`；性能脚本会显式设置 `SPECFORGE_PROFILE_DIR`，把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态混在一起。
 
 如果只想采集、不自动分析：
 

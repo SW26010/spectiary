@@ -1,5 +1,6 @@
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/runtime_paths.h"
 #include "platform/atomic_file.h"
 
 #include <filesystem>
@@ -52,11 +53,86 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
 void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
 {
     const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json");
+    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
     Require(path.filename() == "state.json", "default local state path should keep the requested filename");
     Require(path.parent_path().filename() == "nested", "default local state path should keep relative subdirectories");
     Require(
-        path.parent_path().parent_path().filename() == "SpecForge",
-        "default local state path should live under the SpecForge local state root");
+        path == runtime_paths.local_user_state_root / "nested" / "state.json",
+        "default local state path should live under the selected release profile root");
+    if (runtime_paths.release_profile == specforge::ReleaseProfile::Portable) {
+        Require(
+            path.parent_path().parent_path().filename() == "Data",
+            "portable local state path should live under the package Data root");
+    } else {
+        Require(
+            path.parent_path().parent_path().filename() == "SpecForge",
+            "installed local state path should live under the SpecForge local app data root");
+    }
+}
+
+void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
+{
+    const std::filesystem::path package_root =
+        std::filesystem::temp_directory_path() / "specforge_runtime_path_package";
+    const std::filesystem::path installed_root =
+        std::filesystem::temp_directory_path() / "specforge_runtime_path_installed";
+
+    specforge::RuntimePathInputs inputs;
+    inputs.executable_path = package_root / "SpecForge.exe";
+    inputs.installed_local_user_state_root = installed_root;
+
+    const specforge::RuntimePaths portable_paths =
+        specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Portable, inputs);
+    Require(portable_paths.package_root == package_root, "portable package root should be the executable directory");
+    Require(portable_paths.local_user_state_root == package_root / "Data", "portable state should live under Data");
+    Require(portable_paths.profile_log_directory == package_root / "Data" / "logs", "portable logs should live under Data/logs");
+    Require(
+        portable_paths.imgui_ini_path == package_root / "Data" / "specforge-imgui-v2.ini",
+        "portable ImGui ini should live under Data");
+
+    const specforge::RuntimePaths installed_paths =
+        specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Installed, inputs);
+    Require(installed_paths.package_root == package_root, "installed package root should still be the executable directory");
+    Require(installed_paths.local_user_state_root == installed_root, "installed state should use local app data root");
+    Require(installed_paths.profile_log_directory == installed_root / "logs", "installed logs should live under installed state root");
+    Require(
+        installed_paths.imgui_ini_path == installed_root / "specforge-imgui-v2.ini",
+        "installed ImGui ini should live under installed state root");
+    Require(
+        portable_paths.local_user_state_root != installed_paths.local_user_state_root,
+        "portable and installed state roots should stay distinct");
+}
+
+void TestPortableDefaultStateWriteCreatesDataFile()
+{
+    if (specforge::BuildReleaseProfile() != specforge::ReleaseProfile::Portable) {
+        return;
+    }
+
+    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
+    const std::filesystem::path path = specforge::DefaultLocalUserStatePath("portable-default-write-smoke.txt");
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+
+    specforge::AtomicFileWriteOptions options;
+    options.target_description = "portable default state smoke file";
+    std::string error;
+    Require(
+        specforge::WriteFileAtomically(
+            path,
+            options,
+            [](std::ostream& stream, std::string&) {
+                stream << "portable";
+                return true;
+            },
+            &error),
+        error.empty() ? "portable default state write failed" : error);
+
+    Require(path.parent_path() == runtime_paths.local_user_state_root, "portable default write should target Data");
+    Require(path.parent_path().filename() == "Data", "portable default write parent should be Data");
+    Require(std::filesystem::exists(path), "portable default write should create the file under Data");
+    Require(ReadTextFile(path) == "portable", "portable default write should persist content");
+    std::filesystem::remove(path, cleanup_error);
 }
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()
@@ -289,6 +365,8 @@ void TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown()
 int main()
 {
     TestDefaultLocalUserStatePathUsesSpecForgeRoot();
+    TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
+    TestPortableDefaultStateWriteCreatesDataFile();
     TestAtomicWriteCreatesParentAndReplacesExistingFile();
     TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
     TestVersionedJsonCacheShellRoundTripsDocument();

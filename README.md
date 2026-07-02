@@ -48,7 +48,7 @@ Required tools:
 - Visual Studio 2022 Build Tools with the C++ desktop workload
 - Windows 10/11 SDK with DirectX 11 headers and libraries
 - CMake 3.24 or newer
-- Ninja, if using the `ninja-msvc-debug` preset
+- Ninja, if using the `ninja-msvc-portable-debug` preset
 - vcpkg
 
 Set `VCPKG_ROOT` to your vcpkg checkout:
@@ -70,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 Or use the Visual Studio generator preset:
 
 ```powershell
-cmake --preset vs2022-x64-debug
+cmake --preset vs2022-x64-portable-debug
 ```
 
 Configure success verifies the dependency stack and generated build files.
@@ -87,15 +87,33 @@ In restricted agent shells such as Codex, run this script with tool escalation.
 It performs a process-kill preflight and refuses to start CMake if the current
 shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
 
-The executable is written under `build/ninja-msvc-debug/SpecForge.exe`. Runtime
-layout state is `imgui.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
-JSONL profile output under `logs/`, or set `SPECFORGE_PROFILE_DIR` to write
-profile output to a specific directory.
+The executable is written under
+`build/ninja-msvc-portable-debug/SpecForge.exe`. Portable runtime state is
+owned by the executable directory's `Data` folder: ImGui layout is
+`Data/specforge-imgui-v2.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
+JSONL profile output under `Data/logs/`, or set `SPECFORGE_PROFILE_DIR` to
+write profile output to a specific directory.
+
+## Portable Package
+
+The first portable package is a no-launcher zip with `SpecForge.exe` and `Data`
+at the zip root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
+```
+
+The script invokes CMake directly with the Visual Studio portable release
+preset, so run it from a normal developer shell or an approved unsandboxed agent
+run.
+
+The package is staged under `dist\SpecForge-portable` and zipped as
+`dist\SpecForge-portable.zip` with a matching `.sha256` file.
 
 Launch with a spectrum source path to smoke-test the real-data loader:
 
 ```powershell
-.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
+.\build\ninja-msvc-portable-debug\SpecForge.exe C:\path\to\spectrum_source.fits
 ```
 
 Inside the app, the Files panel `Add file...` button opens source files through

@@ -1,5 +1,7 @@
 #include "profile/profile_sink.h"
 
+#include "app/runtime_paths.h"
+
 #include <algorithm>
 #include <charconv>
 #include <cctype>
@@ -47,7 +49,7 @@ std::filesystem::path ProfileDirectory()
     if (directory && !directory->empty()) {
         return std::filesystem::path(*directory);
     }
-    return std::filesystem::current_path() / "logs";
+    return DefaultRuntimePaths().profile_log_directory;
 }
 
 bool IsFiniteJsonNumber(std::string_view value)

@@ -7,6 +7,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
+set(SPECFORGE_RELEASE_PROFILE "" CACHE STRING "SpecForge release profile: Portable or Installed.")
+set_property(CACHE SPECFORGE_RELEASE_PROFILE PROPERTY STRINGS Portable Installed)
+
+if(NOT SPECFORGE_RELEASE_PROFILE MATCHES "^(Portable|Installed)$")
+    message(FATAL_ERROR "SPECFORGE_RELEASE_PROFILE must be exactly Portable or Installed.")
+endif()
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
@@ -49,11 +55,30 @@ function(specforge_use_embedded_resources target_name)
     endif()
 endfunction()
 
+function(specforge_apply_release_profile target_name)
+    if(SPECFORGE_RELEASE_PROFILE STREQUAL "Portable")
+        target_compile_definitions(${target_name} PRIVATE SPECFORGE_RELEASE_PROFILE_PORTABLE)
+    elseif(SPECFORGE_RELEASE_PROFILE STREQUAL "Installed")
+        target_compile_definitions(${target_name} PRIVATE SPECFORGE_RELEASE_PROFILE_INSTALLED)
+    else()
+        message(FATAL_ERROR "Unknown SPECFORGE_RELEASE_PROFILE: ${SPECFORGE_RELEASE_PROFILE}")
+    endif()
+endfunction()
+
+function(specforge_use_runtime_paths target_name)
+    specforge_apply_release_profile(${target_name})
+    if(WIN32)
+        target_link_libraries(${target_name} PRIVATE ole32 shell32)
+    endif()
+endfunction()
+
 add_executable(specforge_native WIN32
     src/app/local_user_state.cpp
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/app/specforge_app.cpp
     src/app/specforge_app.h
     src/domain/sample_filter.cpp
@@ -150,6 +175,7 @@ target_compile_definitions(specforge_native PRIVATE
     _UNICODE
     WIN32_LEAN_AND_MEAN
 )
+specforge_apply_release_profile(specforge_native)
 
 target_link_libraries(specforge_native PRIVATE
     imgui::imgui
@@ -192,11 +218,14 @@ add_executable(specforge_local_user_state_tests
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/platform/atomic_file.cpp
     src/platform/atomic_file.h
 )
 
 target_include_directories(specforge_local_user_state_tests PRIVATE src)
+specforge_use_runtime_paths(specforge_local_user_state_tests)
 
 if(MSVC)
     target_compile_options(specforge_local_user_state_tests PRIVATE /W4 /permissive-)
@@ -250,6 +279,8 @@ add_executable(specforge_sample_navigation_controller_tests
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
@@ -270,6 +301,7 @@ add_executable(specforge_sample_navigation_controller_tests
 )
 
 target_include_directories(specforge_sample_navigation_controller_tests PRIVATE src)
+specforge_use_runtime_paths(specforge_sample_navigation_controller_tests)
 
 if(MSVC)
     target_compile_options(specforge_sample_navigation_controller_tests PRIVATE /W4 /permissive-)
@@ -351,6 +383,8 @@ add_executable(specforge_sample_labeling_filter_tests
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_filter.cpp
@@ -369,6 +403,7 @@ add_executable(specforge_sample_labeling_filter_tests
 )
 
 target_include_directories(specforge_sample_labeling_filter_tests PRIVATE src)
+specforge_use_runtime_paths(specforge_sample_labeling_filter_tests)
 
 if(MSVC)
     target_compile_options(specforge_sample_labeling_filter_tests PRIVATE /W4 /permissive-)
@@ -384,6 +419,8 @@ add_executable(specforge_source_collection_session_tests
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/domain/npy_array_io.cpp
     src/domain/npy_array_io.h
     src/domain/sample_annotation_io.cpp
@@ -427,6 +464,7 @@ add_executable(specforge_source_collection_session_tests
 )
 
 target_include_directories(specforge_source_collection_session_tests PRIVATE src)
+specforge_use_runtime_paths(specforge_source_collection_session_tests)
 
 if(MSVC)
     target_compile_options(specforge_source_collection_session_tests PRIVATE /W4 /permissive-)
@@ -507,6 +545,8 @@ add_executable(specforge_spectral_line_user_state_tests
     src/app/local_user_state.h
     src/app/local_user_state_json.cpp
     src/app/local_user_state_json.h
+    src/app/runtime_paths.cpp
+    src/app/runtime_paths.h
     src/overlays/spectral_line_catalog.cpp
     src/overlays/spectral_line_catalog.h
     src/overlays/spectral_line_user_state_cache_io.cpp
@@ -518,6 +558,7 @@ add_executable(specforge_spectral_line_user_state_tests
 )
 
 target_include_directories(specforge_spectral_line_user_state_tests PRIVATE src)
+specforge_use_runtime_paths(specforge_spectral_line_user_state_tests)
 
 if(MSVC)
     target_compile_options(specforge_spectral_line_user_state_tests PRIVATE /W4 /permissive-)

@@ -67,6 +67,7 @@ private:
     ProfileSink profile_;
     ShellUi ui_;
 
+    std::string imgui_ini_path_utf8_;
     bool imgui_initialized_ = false;
     bool running_ = true;
     bool minimized_ = false;

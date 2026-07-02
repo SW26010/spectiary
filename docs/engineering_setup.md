@@ -20,7 +20,7 @@ Folder source 非递归加载第一层 CSV/FITS 文件，子文件夹、其它�
 - Windows 10/11 SDK。
 - CMake 3.24 或更新版本。
 - vcpkg。
-- Ninja，可选，仅用于 `ninja-msvc-debug` preset。
+- Ninja，可选，仅用于 `ninja-msvc-portable-debug` preset。
 
 ## vcpkg
 
@@ -72,7 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 Visual Studio configure check：
 
 ```powershell
-cmake --preset vs2022-x64-debug
+cmake --preset vs2022-x64-portable-debug
 ```
 
 Configure success 验证依赖和生成文件，build success 验证 native shell target。
@@ -85,11 +85,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 
 ### Ninja/MSVC 卡住排查
 
-`ninja-msvc-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
-里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
+`ninja-msvc-portable-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
+里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-portable-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
 
 在 Codex 或其它只允许写仓库目录的受限环境里，configure/build 需要用同一套 `vcvars64.bat` 命令形态并允许写
-workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可能写入
+workspace 外缓存。`cmake --preset ninja-msvc-portable-debug` 会调用 vcpkg，并可能写入
 `$env:VCPKG_ROOT\buildtrees\0.vcpkg_dep_info.cmake`、`buildtrees/`、`packages/`、下载缓存或 MSVC
 工具链缓存；如果沙箱拦住这些 workspace 外写入，表现可能是 configure 失败或后续 build 看起来卡住。
 
@@ -125,11 +125,25 @@ Stop-Process -Id <cmakeId>,<ninjaId> -Force
 生成程序位于：
 
 ```text
-build/ninja-msvc-debug/SpecForge.exe
+build/ninja-msvc-portable-debug/SpecForge.exe
 ```
 
-ImGui layout 写入 `imgui.ini`。设置 `SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 默认写入
-`logs/`；需要指定输出位置时，设置 `SPECFORGE_PROFILE_DIR`。
+Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgui-v2.ini`。设置
+`SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 默认写入 `Data/logs/`；需要指定输出位置时，
+设置 `SPECFORGE_PROFILE_DIR`。
+
+## Portable release
+
+第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe` 和 `Data`。构建并打包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
+```
+
+这个脚本直接调用 CMake 和 Visual Studio portable release preset，预期在正常开发 shell 或已批准的非沙箱
+agent 运行中执行；它不复用 Ninja debug wrapper 的日志、timeout 和 preflight 形态。
+
+输出位于 `dist\SpecForge-portable`，zip 为 `dist\SpecForge-portable.zip`，旁边生成 `.sha256`。
 
 ## 仓库卫生
 
@@ -140,6 +154,7 @@ ImGui layout 写入 `imgui.ini`。设置 `SPECFORGE_PROFILE=1` 后启动程序�
 - `.vs/`
 - `vcpkg_installed/`
 - `CMakeUserPresets.json`
+- `Data/`
 - `imgui.ini`
 - `logs/`
 - 本地光谱数据。

@@ -1,10 +1,12 @@
 build/
 out/
+dist/
 .vs/
 .vscode/
 CMakeUserPresets.json
 
 # Local runtime/layout state
+Data/
 imgui.ini
 specforge-imgui*.ini
 logs/
