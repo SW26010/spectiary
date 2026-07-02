@@ -501,6 +501,7 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 ShellUi::ShellUi()
     : session_(LoadSpectrumSnapshotFromPath)
 {
+    panel_visibility_ = panel_visibility_state_.Load();
     RefreshSystemColors();
     const SourceCollectionSessionView& restored_view = SessionView();
     if (restored_view.navigation.has_active_source) {
@@ -514,6 +515,7 @@ ShellUi::ShellUi()
 
 ShellUi::~ShellUi()
 {
+    (void)panel_visibility_state_.Flush(panel_visibility_);
     (void)session_.FlushStateCaches();
     spectral_lines_panel_.FlushCache();
 }
@@ -526,12 +528,14 @@ void ShellUi::Render(const ShellStatus& status)
     spectral_lines_panel_.SetFrameIndex(status.frame_index);
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
+        panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
         session_.MaybeSaveStateCaches(status.frame_index);
         spectral_lines_panel_.MaybeSaveCache(status.frame_index);
         session_view_cache_.reset();
         session_view_cache_dirty_ = false;
         return;
     }
+    const PanelVisibilityState previous_panel_visibility = panel_visibility_;
     RenderDockHost(status);
     if (panel_visibility_.files) {
         RenderFilesPanel();
@@ -555,12 +559,17 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.sorting) {
         RenderSortingPanel();
     }
-    if (panel_visibility_.info) {
+    if (panel_visibility_.information) {
         RenderInfoTagsPanel();
     }
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
+    panel_visibility_state_.MarkDirtyIfChanged(
+        previous_panel_visibility,
+        panel_visibility_,
+        status.frame_index);
+    panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
     session_.MaybeSaveStateCaches(status.frame_index);
     spectral_lines_panel_.MaybeSaveCache(status.frame_index);
     session_view_cache_.reset();
@@ -785,7 +794,7 @@ void ShellUi::RenderMainMenuBar()
             panel_visibility_.filters = true;
             panel_visibility_.sorting = true;
             panel_visibility_.smoothing = true;
-            panel_visibility_.info = true;
+            panel_visibility_.information = true;
             panel_visibility_.spectral_lines = true;
         }
         ImGui::Separator();
@@ -796,7 +805,7 @@ void ShellUi::RenderMainMenuBar()
         ImGui::MenuItem("Sample Filters", nullptr, &panel_visibility_.filters);
         ImGui::MenuItem("Sample Sorting", nullptr, &panel_visibility_.sorting);
         ImGui::MenuItem("Smoothing", nullptr, &panel_visibility_.smoothing);
-        ImGui::MenuItem("Information", nullptr, &panel_visibility_.info);
+        ImGui::MenuItem("Information", nullptr, &panel_visibility_.information);
         ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility_.spectral_lines);
         ImGui::EndMenu();
     }
@@ -961,7 +970,7 @@ void ShellUi::RenderSmoothingPanel()
 
 void ShellUi::RenderInfoTagsPanel()
 {
-    if (!ImGui::Begin(kInfoTagsWindow, &panel_visibility_.info)) {
+    if (!ImGui::Begin(kInfoTagsWindow, &panel_visibility_.information)) {
         ImGui::End();
         return;
     }

@@ -128,7 +128,8 @@ Stop-Process -Id <cmakeId>,<ninjaId> -Force
 build/ninja-msvc-portable-debug/SpecForge.exe
 ```
 
-Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgui-v2.ini`。设置
+Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgui-v2.ini`，panel 显示/隐藏状态写入
+`Data/panel-visibility.json`。设置
 `SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 默认写入 `Data/logs/`；需要指定输出位置时，
 设置 `SPECFORGE_PROFILE_DIR`。
 

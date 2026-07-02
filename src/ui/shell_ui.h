@@ -2,6 +2,7 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "ui/source_collection_panel.h"
+#include "ui/panel_visibility_state_cache_io.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
@@ -45,18 +46,6 @@ public:
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
-    struct PanelVisibility {
-        bool files = true;
-        bool navigation = true;
-        bool annotations = true;
-        bool labeling = true;
-        bool filters = true;
-        bool sorting = true;
-        bool smoothing = true;
-        bool info = true;
-        bool spectral_lines = true;
-    };
-
     void OpenSourceFromFilePicker();
     void OpenSourceFromFolderPicker();
     void OpenAnnotationFromFilePicker();
@@ -88,7 +77,8 @@ private:
     bool immersive_plot_toggle_requested_ = false;
     bool label_shortcut_context_active_ = false;
     bool layout_seeded_ = false;
-    PanelVisibility panel_visibility_;
+    PanelVisibilityStatePersistence panel_visibility_state_;
+    PanelVisibilityState panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
     std::optional<SourceCollectionSessionView> session_view_cache_;
     bool session_view_cache_dirty_ = false;

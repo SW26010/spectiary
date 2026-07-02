@@ -2,6 +2,7 @@
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 #include "platform/atomic_file.h"
+#include "ui/panel_visibility_state_cache_io.h"
 
 #include <filesystem>
 #include <fstream>
@@ -393,6 +394,86 @@ void TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown()
     Require(scheduler.ShouldAttemptSave(50), "extended debounce should flush at the latest dirty frame");
 }
 
+void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
+{
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_panel_visibility_tests";
+    const std::filesystem::path path = root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+
+    specforge::PanelVisibilityState state;
+    state.files = false;
+    state.filters = false;
+    state.information = false;
+    state.spectral_lines = false;
+
+    Require(specforge::SavePanelVisibilityStateCache(path, state), "panel visibility cache should save");
+    const specforge::PanelVisibilityState loaded = specforge::LoadPanelVisibilityStateCache(path);
+    Require(!loaded.files, "files panel hidden state should persist");
+    Require(loaded.navigation, "navigation panel visible state should persist");
+    Require(loaded.annotations, "annotations panel visible state should persist");
+    Require(loaded.labeling, "labeling panel visible state should persist");
+    Require(!loaded.filters, "filters panel hidden state should persist");
+    Require(loaded.sorting, "sorting panel visible state should persist");
+    Require(loaded.smoothing, "smoothing panel visible state should persist");
+    Require(!loaded.information, "information panel hidden state should persist");
+    Require(!loaded.spectral_lines, "spectral lines panel hidden state should persist");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / "specforge_panel_visibility_partial_tests";
+    const std::filesystem::path path = root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    WriteTextFile(
+        path,
+        "{\n"
+        "  \"format_kind\": \"specforge.panel_visibility.cache\",\n"
+        "  \"schema_version\": 1,\n"
+        "  \"files\": false\n"
+        "}\n");
+
+    const specforge::PanelVisibilityState loaded = specforge::LoadPanelVisibilityStateCache(path);
+    Require(!loaded.files, "loaded panel visibility should apply present fields");
+    Require(loaded.navigation, "missing navigation visibility should default to visible");
+    Require(loaded.annotations, "missing annotations visibility should default to visible");
+    Require(loaded.labeling, "missing labeling visibility should default to visible");
+    Require(loaded.filters, "missing filters visibility should default to visible");
+    Require(loaded.sorting, "missing sorting visibility should default to visible");
+    Require(loaded.smoothing, "missing smoothing visibility should default to visible");
+    Require(loaded.information, "missing information visibility should default to visible");
+    Require(loaded.spectral_lines, "missing spectral lines visibility should default to visible");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityPersistenceFlushesDirtyUiStateChange()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / "specforge_panel_visibility_persistence_tests";
+    const std::filesystem::path path = root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+
+    specforge::PanelVisibilityStatePersistence persistence(path, 30, 120);
+    const specforge::PanelVisibilityState previous = persistence.Load();
+    specforge::PanelVisibilityState current = previous;
+    current.files = false;
+    current.information = false;
+
+    persistence.MarkDirtyIfChanged(previous, current, 10);
+    Require(persistence.Flush(current), "dirty panel visibility should flush");
+
+    const specforge::PanelVisibilityState restored = persistence.Load();
+    Require(!restored.files, "flushed UI-hidden files panel should restore hidden");
+    Require(restored.navigation, "unchanged navigation panel should restore visible");
+    Require(!restored.information, "flushed UI-hidden information panel should restore hidden");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
 }  // namespace
 
 int main()
@@ -410,5 +491,8 @@ int main()
     TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
     TestLocalUserStateSaveSchedulerDebouncesAndRetries();
     TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown();
+    TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
+    TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
+    TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
     return 0;
 }

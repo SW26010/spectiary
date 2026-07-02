@@ -126,6 +126,8 @@ add_executable(specforge_native WIN32
     src/renderer/d3d11_renderer.h
     src/ui/shell_ui.cpp
     src/ui/shell_ui.h
+    src/ui/panel_visibility_state_cache_io.cpp
+    src/ui/panel_visibility_state_cache_io.h
     src/ui/sample_name_autocomplete.cpp
     src/ui/sample_name_autocomplete.h
     src/ui/sample_annotation_labeling_rules.cpp
@@ -222,6 +224,8 @@ add_executable(specforge_local_user_state_tests
     src/app/runtime_paths.h
     src/platform/atomic_file.cpp
     src/platform/atomic_file.h
+    src/ui/panel_visibility_state_cache_io.cpp
+    src/ui/panel_visibility_state_cache_io.h
 )
 
 target_include_directories(specforge_local_user_state_tests PRIVATE src)
