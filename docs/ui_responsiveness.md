@@ -52,6 +52,12 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 判断：这个修复是必要且规范的。它没有绕开 session boundary，也没有引入自研渲染路径，而是在 owner 边界内缓存可复用 view，并把展示用数据和 evaluation 用数据拆开。主要不足是当时的保护仍偏向 pan profile，没有把“当前 snapshot 读取必须 cheap”写成 API 约束，后续 sample navigation sequence 工作又踩到了相近问题。
 
+后续硬化：
+
+- `SourceCollectionSessionResult` 只表达 command action、navigation result、changed/loaded/message，不携带 `SourceCollectionSessionView`，避免 command 提交默认构造 full session view。
+- panel 交互如果需要继续渲染刷新后的面板状态，必须通过显式 `SessionView()` reader 读取 frame-scoped view cache。
+- plot、smoothing、information、spectral lines 等 snapshot-only surface 继续使用 `CurrentSampleSnapshot()`，不通过 full session view 取当前 sample。
+
 ## 复盘：2026-06-29 sample navigation sequence 退化
 
 范围：`7c02e87d7cb6441be8159396b05a99887349fb8f` sample navigation sequence、filtering、sorting、empty sequence 等能力接入后，用户反馈上一条/下一条、打标签和主图 pan 都有卡顿感；随后通过缩窄热路径恢复正常。

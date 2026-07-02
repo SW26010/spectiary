@@ -209,7 +209,6 @@ private:
 
 struct SourceCollectionSessionResult {
     SourceCollectionSessionAction action;
-    SourceCollectionSessionView view;
     SampleNavigationResult navigation;
     bool changed = false;
     bool loaded = false;
@@ -218,6 +217,7 @@ struct SourceCollectionSessionResult {
 
 using SourceCollectionSessionIntentSubmitter =
     std::function<SourceCollectionSessionResult(SourceCollectionSessionIntent)>;
+using SourceCollectionSessionViewReader = std::function<const SourceCollectionSessionView&()>;
 
 class SourceCollectionSession {
 public:

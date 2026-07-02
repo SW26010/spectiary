@@ -279,6 +279,7 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
     const SourceCollectionPathPicker& choose_source_folder)
@@ -298,7 +299,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             SourceCollectionSessionResult result =
                 submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
             MergeSourceCollectionSessionAction(action, result.action);
-            view = std::move(result.view);
+            view = read_view();
         }
     }
     ImGui::SameLine();
@@ -307,7 +308,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             SourceCollectionSessionResult result =
                 submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
             MergeSourceCollectionSessionAction(action, result.action);
-            view = std::move(result.view);
+            view = read_view();
         }
     }
     ImGui::SameLine();
@@ -396,6 +397,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view,
     bool* open)
 {
     SourceCollectionSessionAction action;
@@ -441,7 +443,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
                     submit(UpdateSampleNavigation(SampleNavigationIntent::Move(
                         SampleNavigationRequest::LocateRow(target_row))));
                 MergeSourceCollectionSessionAction(action, result.action);
-                view = std::move(result.view);
+                view = read_view();
                 navigation = view.navigation;
             }
         }
@@ -462,7 +464,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         SourceCollectionSessionResult result =
             submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
         MergeSourceCollectionSessionAction(action, result.action);
-        view = std::move(result.view);
+        view = read_view();
         navigation = view.navigation;
     }
     if (!can_previous) {
@@ -476,7 +478,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         SourceCollectionSessionResult result =
             submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
         MergeSourceCollectionSessionAction(action, result.action);
-        view = std::move(result.view);
+        view = read_view();
         navigation = view.navigation;
     }
     if (!can_next) {
@@ -498,7 +500,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     }
 
     view.navigation = std::move(navigation);
-    MergeSourceCollectionSessionAction(action, RenderSampleNameSearch(std::move(view), submit));
+    MergeSourceCollectionSessionAction(action, RenderSampleNameSearch(std::move(view), submit, read_view));
 
     ImGui::End();
     return action;
@@ -506,7 +508,8 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
     SourceCollectionSessionView session_view,
-    const SourceCollectionSessionIntentSubmitter& submit)
+    const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view)
 {
     SourceCollectionSessionAction action;
     SourceCollectionNavigationView navigation = std::move(session_view.navigation);
@@ -532,7 +535,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
         SourceCollectionSessionResult result =
             submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(sample_name_query_buffer_.data())));
         MergeSourceCollectionSessionAction(action, result.action);
-        navigation = result.view.navigation;
+        navigation = read_view().navigation;
         if (navigation.exact_sample_name_match) {
             MergeSourceCollectionSessionAction(
                 action,

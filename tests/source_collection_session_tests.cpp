@@ -424,8 +424,8 @@ std::string AddPlainIntegerSampleFilterSource(
     const std::string source_id = AnnotationSourceId(annotation_path);
     const specforge::SourceCollectionSessionResult result =
         Submit(session, AddSampleFilterSource(source_id));
-    Require(result.view.filter.sources.size() == 1, "sample filter source should be explicitly added");
-    Require(result.view.filter.sources[0].id == source_id, "added filter source should use the annotation id");
+    Require(session.View().filter.sources.size() == 1, "sample filter source should be explicitly added");
+    Require(session.View().filter.sources[0].id == source_id, "added filter source should use the annotation id");
     return source_id;
 }
 
@@ -556,8 +556,8 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(open_action.snapshot_changed, "opening a source should change the displayed snapshot");
     Require(open_action.workflow_changed, "opening a source should activate a workflow identity");
     Require(open_action.navigation_inputs_changed, "opening a source should refresh navigation inputs");
-    Require(open_result.view.sources.size() == 1, "opening a source should add one source entry");
-    Require(open_result.view.snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
+    Require(session.View().sources.size() == 1, "opening a source should add one source entry");
+    Require(session.View().snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
 
     (void)Submit(session, CreateDefaultLabelingTask());
     Require(session.View().labeling.has_active_task, "active source should accept a labeling task");
@@ -569,9 +569,9 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(next_result.navigation.current_index == 1, "next navigation should move to row 1");
     Require(next_result.action.snapshot_changed, "moving to another sample should reload the snapshot");
     Require(next_result.action.navigation_inputs_changed, "moving should refresh navigation inputs");
-    Require(next_result.view.snapshot->collection.current_index == 1, "session should expose the reloaded snapshot");
+    Require(session.View().snapshot->collection.current_index == 1, "session should expose the reloaded snapshot");
 
-    const specforge::SourceCollectionLabelingView active_labeling = next_result.view.labeling;
+    const specforge::SourceCollectionLabelingView active_labeling = session.View().labeling;
     Require(active_labeling.has_active_task, "labeling task should remain active after navigation");
     Require(
         active_labeling.remembered_position && *active_labeling.remembered_position == 1,
@@ -603,13 +603,13 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     const specforge::SourceCollectionSessionAction& assign_action = assign_result.action;
     Require(assign_action.snapshot_changed, "auto-advance should load the next sample snapshot");
     Require(assign_action.navigation_inputs_changed, "auto-advance should refresh navigation inputs");
-    Require(assign_result.view.snapshot->collection.current_index == 1, "auto-advance should move to row 1");
+    Require(session.View().snapshot->collection.current_index == 1, "auto-advance should move to row 1");
 
-    Require(assign_result.view.labeling.has_active_task, "task should remain active after auto-advance");
+    Require(session.View().labeling.has_active_task, "task should remain active after auto-advance");
     const specforge::SourceCollectionSessionResult locate_result =
         Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::LocateRow(0)));
-    Require(locate_result.view.labeling.current_code == 1, "current sample label should be written before advance");
+    Require(session.View().labeling.current_code == 1, "current sample label should be written before advance");
     Require(
         loaded_indices == std::vector<std::size_t>({0, 1, 0}),
         "session should load only the opened, auto-advanced, and verified sample snapshots");
@@ -632,7 +632,7 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(filter_view.available_sources[0].id == source_id, "available source should use the annotation id");
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddSampleFilterSource(source_id));
-    filter_view = result.view.filter;
+    filter_view = session.View().filter;
     Require(filter_view.sources.size() == 1, "added annotation should become a sample filter source");
     Require(filter_view.available_sources.empty(), "added annotation should leave the add-source list");
     Require(filter_view.sources[0].id == source_id, "selected filter source should use the annotation id");
@@ -647,8 +647,8 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     result = Submit(
         session,
         SetFilterValueSelected(source_id, "2", true));
-    filter_view = result.view.filter;
-    specforge::SourceCollectionNavigationView navigation_view = result.view.navigation;
+    filter_view = session.View().filter;
+    specforge::SourceCollectionNavigationView navigation_view = session.View().navigation;
     Require(navigation_view.filter_active, "annotation condition should activate navigation filtering");
     Require(navigation_view.filtered_sample_count == 2, "filter should include the two matching samples");
     Require(navigation_view.sequence_active, "filter should expose an active navigation sequence");
@@ -662,7 +662,7 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(navigation_view.current_sample_in_filter, "reconciled current sample should be inside the filter");
     Require(!navigation_view.row_location_available, "row-index location should be disabled for filtered sequence");
     Require(result.action.snapshot_changed, "filter should load the first included sample snapshot");
-    Require(result.view.snapshot->collection.current_index == 1, "filter should display the first included sample");
+    Require(session.View().snapshot->collection.current_index == 1, "filter should display the first included sample");
 
     const specforge::SourceCollectionSessionResult locate_action =
         Submit(session, MoveSampleNavigation(
@@ -678,9 +678,9 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(next_action.navigation.current_index == 2, "filtered next should move to the next matching sample");
 
     result = Submit(session, RemoveSampleFilterSource(source_id));
-    Require(!result.view.navigation.filter_active, "removing the sample filter source should clear navigation filtering");
-    Require(result.view.filter.sources.empty(), "removed source should leave no selected sample filters");
-    Require(result.view.filter.available_sources.size() == 1, "removed source should return to the add-source list");
+    Require(!session.View().navigation.filter_active, "removing the sample filter source should clear navigation filtering");
+    Require(session.View().filter.sources.empty(), "removed source should leave no selected sample filters");
+    Require(session.View().filter.available_sources.size() == 1, "removed source should return to the add-source list");
 }
 
 void TestLocalLabelingAnnotationCanBeSampleFilterSource()
@@ -709,26 +709,26 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
         Submit(session, SetActiveLabelingOutputPath(output_path));
     const std::string source_id = "labeling:quality-review";
     Require(
-        result.view.navigation.current_annotations.size() == 1 &&
-            result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations.size() == 1 &&
+            session.View().navigation.current_annotations[0].relationship ==
                 specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "local labeling task should appear as an annotation row");
     Require(
-        result.view.navigation.current_annotations[0].can_filter_samples,
+        session.View().navigation.current_annotations[0].can_filter_samples,
         "local labeling annotation row should be draggable to sample filters");
-    Require(result.view.filter.sources.empty(), "local labeling source should not be selected by default");
-    Require(result.view.filter.available_sources.size() == 1, "local labeling source should be available to add");
-    Require(result.view.filter.available_sources[0].id == source_id, "local labeling filter source should use task id");
+    Require(session.View().filter.sources.empty(), "local labeling source should not be selected by default");
+    Require(session.View().filter.available_sources.size() == 1, "local labeling source should be available to add");
+    Require(session.View().filter.available_sources[0].id == source_id, "local labeling filter source should use task id");
 
     result = Submit(session, AddSampleFilterSource(source_id));
-    Require(result.view.filter.sources.size() == 1, "local labeling source should be explicitly addable");
-    Require(result.view.filter.sources[0].options.size() == 3, "labeling source should expose labels and unlabeled");
+    Require(session.View().filter.sources.size() == 1, "local labeling source should be explicitly addable");
+    Require(session.View().filter.sources[0].options.size() == 3, "labeling source should expose labels and unlabeled");
 
     result = Submit(session, SetFilterValueSelected(source_id, "2", true));
-    Require(result.view.navigation.filter_active, "local labeling sample filter should affect navigation");
-    Require(result.view.navigation.sequence_count == 2, "local labeling filter should include the good samples");
+    Require(session.View().navigation.filter_active, "local labeling sample filter should affect navigation");
+    Require(session.View().navigation.sequence_count == 2, "local labeling filter should include the good samples");
     Require(
-        result.view.navigation.current_index && *result.view.navigation.current_index == 1,
+        session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "local labeling filter should move to the first matching sample");
 }
 
@@ -743,11 +743,11 @@ void TestResumeLocateRespectsActiveFilterSequence()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "2", true));
-    Require(result.view.navigation.sequence_active, "test should activate the filtered sequence");
-    Require(result.view.navigation.sequence_count == 2, "test should include only the two matching samples");
-    Require(result.view.navigation.sequence_rows.empty(), "active sequence rows should stay out of the per-frame view");
+    Require(session.View().navigation.sequence_active, "test should activate the filtered sequence");
+    Require(session.View().navigation.sequence_count == 2, "test should include only the two matching samples");
+    Require(session.View().navigation.sequence_rows.empty(), "active sequence rows should stay out of the per-frame view");
     Require(
-        result.view.navigation.current_index && *result.view.navigation.current_index == 1,
+        session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "filter should reconcile to the first included row");
 
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(2)));
@@ -758,7 +758,7 @@ void TestResumeLocateRespectsActiveFilterSequence()
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(2)));
     Require(result.navigation.target_found, "resume locate should allow a remembered row inside the sequence");
     Require(result.navigation.current_index == 2, "resume locate should jump to the remembered in-sequence row");
-    Require(result.view.snapshot->collection.current_index == 2, "resume locate should load the remembered row snapshot");
+    Require(session.View().snapshot->collection.current_index == 2, "resume locate should load the remembered row snapshot");
 
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateSourceRowInSequence(0)));
     Require(!result.navigation.target_found, "resume locate should not bypass the active sequence");
@@ -775,7 +775,7 @@ void TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows()
 
     const specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    const specforge::SourceCollectionNavigationView& navigation = result.view.navigation;
+    const specforge::SourceCollectionNavigationView navigation = session.View().navigation;
 
     Require(!navigation.sequence_active, "source order should not expose an active sequence");
     Require(navigation.sequence_count == 4, "source-order sequence count should still match sample count");
@@ -799,23 +799,23 @@ void TestRememberedPositionResumableTracksActiveSequence()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "2", true));
-    Require(result.view.navigation.sequence_count == 2, "annotation filter should include rows 1 and 2");
+    Require(session.View().navigation.sequence_count == 2, "annotation filter should include rows 1 and 2");
 
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
     Require(result.navigation.target_found && result.navigation.current_index == 2, "next should remember row 2");
     Require(
-        result.view.labeling.remembered_position && *result.view.labeling.remembered_position == 2,
+        session.View().labeling.remembered_position && *session.View().labeling.remembered_position == 2,
         "next navigation should remember row 2");
-    Require(result.view.labeling.remembered_position_resumable, "remembered in-sequence row should be resumable");
+    Require(session.View().labeling.remembered_position_resumable, "remembered in-sequence row should be resumable");
 
     (void)Submit(session, SetFilterValueSelected(source_id, "2", false));
     result = Submit(session, SetFilterValueSelected(source_id, "1", true));
-    Require(result.view.navigation.sequence_count == 1, "second annotation filter should include only row 0");
+    Require(session.View().navigation.sequence_count == 1, "second annotation filter should include only row 0");
     Require(
-        result.view.labeling.remembered_position && *result.view.labeling.remembered_position == 2,
+        session.View().labeling.remembered_position && *session.View().labeling.remembered_position == 2,
         "remembered row should survive filter changes");
     Require(
-        !result.view.labeling.remembered_position_resumable,
+        !session.View().labeling.remembered_position_resumable,
         "remembered out-of-sequence row should not be resumable");
 }
 
@@ -829,17 +829,17 @@ void TestSampleSortingIntentAppliesNavigationSequence()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    Require(result.view.sorting.has_active_source, "sorting view should attach to the active source");
-    Require(HasSortSource(result.view.sorting, "sample-name"), "sample names should be available as a sort source");
+    Require(session.View().sorting.has_active_source, "sorting view should attach to the active source");
+    Require(HasSortSource(session.View().sorting, "sample-name"), "sample names should be available as a sort source");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
-    Require(result.view.sorting.active, "selecting sample-name sorting should activate sorting view state");
-    Require(result.view.navigation.sequence_count == 3, "sample-name sorting should keep all rows in the sequence");
-    Require(result.view.navigation.sequence_rows.empty(), "sorted rows should stay out of the per-frame view");
-    Require(!result.view.navigation.row_location_available, "sorted sequence should disable ordinary row locate");
+    Require(session.View().sorting.active, "selecting sample-name sorting should activate sorting view state");
+    Require(session.View().navigation.sequence_count == 3, "sample-name sorting should keep all rows in the sequence");
+    Require(session.View().navigation.sequence_rows.empty(), "sorted rows should stay out of the per-frame view");
+    Require(!session.View().navigation.row_location_available, "sorted sequence should disable ordinary row locate");
     Require(
-        result.view.navigation.current_sequence_position &&
-            *result.view.navigation.current_sequence_position == 2,
+        session.View().navigation.current_sequence_position &&
+            *session.View().navigation.current_sequence_position == 2,
         "current row should keep selection and update its sorted sequence position");
 
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
@@ -854,42 +854,42 @@ void TestSampleSortingIntentAppliesNavigationSequence()
 
     result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
     Require(
-        result.view.navigation.current_sequence_position &&
-            *result.view.navigation.current_sequence_position == 2,
+        session.View().navigation.current_sequence_position &&
+            *session.View().navigation.current_sequence_position == 2,
         "descending sample-name sorting should place alpha after gamma and beta");
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
     Require(result.navigation.target_found && result.navigation.current_index == 2, "previous should follow descending sorted order");
 
     result = Submit(session, ClearSampleSorting());
-    Require(!result.view.sorting.active, "clearing sorting should return sorting view to source order");
+    Require(!session.View().sorting.active, "clearing sorting should return sorting view to source order");
     Require(
-        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        session.View().sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
         "clearing sorting should restore ascending source order");
-    Require(!result.view.navigation.sequence_active, "clearing sorting without filters should deactivate sequence state");
-    Require(result.view.navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
+    Require(!session.View().navigation.sequence_active, "clearing sorting without filters should deactivate sequence state");
+    Require(session.View().navigation.row_location_available, "source-order navigation should allow ordinary row locate again");
 
     result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
     result = Submit(session, SetSampleSortSource("source-order"));
-    Require(result.view.sorting.active, "descending source-order sorting should activate sorting view state");
+    Require(session.View().sorting.active, "descending source-order sorting should activate sorting view state");
     Require(
-        result.view.sorting.active_source_id == "source-order",
+        session.View().sorting.active_source_id == "source-order",
         "source-order sorting should use the source-order source id");
-    Require(result.view.navigation.sequence_active, "descending source-order sorting should activate navigation sequence");
-    Require(!result.view.navigation.row_location_available, "descending source order should disable ordinary row locate");
+    Require(session.View().navigation.sequence_active, "descending source-order sorting should activate navigation sequence");
+    Require(!session.View().navigation.row_location_available, "descending source order should disable ordinary row locate");
     Require(
-        result.view.navigation.current_sequence_position &&
-            *result.view.navigation.current_sequence_position == 0,
+        session.View().navigation.current_sequence_position &&
+            *session.View().navigation.current_sequence_position == 0,
         "descending source order should place row 2 at the first sequence position");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
     result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Ascending));
     Require(
-        result.view.sorting.source_order_direction == specforge::SampleNavigationSortDirection::Descending,
+        session.View().sorting.source_order_direction == specforge::SampleNavigationSortDirection::Descending,
         "inactive source-order sorting should retain its own descending direction");
 
     result = Submit(session, SetSampleSortSource("source-order"));
     Require(
-        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+        session.View().sorting.direction == specforge::SampleNavigationSortDirection::Descending,
         "reactivating source-order sorting should use its cached direction");
 
     result = Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
@@ -919,52 +919,57 @@ void TestSampleSortingSourcesRequireExplicitAddition()
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
     Require(result.loaded, "plain integer annotation should load");
-    Require(HasSortSource(result.view.sorting, "sample-name"), "sample-name should be a default sort entry");
-    Require(!HasSortSource(result.view.sorting, rank_source_id), "annotation sorting should not be selected by default");
+    specforge::SourceCollectionSessionView view = session.View();
+    Require(HasSortSource(view.sorting, "sample-name"), "sample-name should be a default sort entry");
+    Require(!HasSortSource(view.sorting, rank_source_id), "annotation sorting should not be selected by default");
     Require(
-        HasAvailableSortSource(result.view.sorting, rank_source_id),
+        HasAvailableSortSource(view.sorting, rank_source_id),
         "plain annotation sorting should be available to add");
 
     result = Submit(session, AddSampleSortSource(rank_source_id));
-    Require(!result.view.sorting.active, "adding a sort entry should not activate sorting by itself");
-    Require(HasSortSource(result.view.sorting, rank_source_id), "added annotation sorting should enter the visible list");
+    view = session.View();
+    Require(!view.sorting.active, "adding a sort entry should not activate sorting by itself");
+    Require(HasSortSource(view.sorting, rank_source_id), "added annotation sorting should enter the visible list");
     Require(
-        !HasAvailableSortSource(result.view.sorting, rank_source_id),
+        !HasAvailableSortSource(view.sorting, rank_source_id),
         "added annotation sorting should leave the addable list");
-    Require(result.view.sorting.sources.back().removable, "added annotation sorting should be removable");
+    Require(view.sorting.sources.back().removable, "added annotation sorting should be removable");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
     result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
+    view = session.View();
     const specforge::SourceCollectionSampleSortSourceView* rank_before_activation =
-        FindSortSource(result.view.sorting, rank_source_id);
+        FindSortSource(view.sorting, rank_source_id);
     Require(rank_before_activation != nullptr, "added annotation sorting should remain visible");
     Require(
         rank_before_activation->direction == specforge::SampleNavigationSortDirection::Ascending,
         "inactive annotation sorting should keep its own ascending direction");
 
     result = Submit(session, SetSampleSortSource(rank_source_id));
-    Require(result.view.sorting.active, "activating an added sort entry should turn sorting on");
+    view = session.View();
+    Require(view.sorting.active, "activating an added sort entry should turn sorting on");
     Require(
-        result.view.sorting.active_source_id == rank_source_id,
+        view.sorting.active_source_id == rank_source_id,
         "the added annotation should become the active sort source");
     Require(
-        result.view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
+        view.sorting.direction == specforge::SampleNavigationSortDirection::Ascending,
         "activating annotation sorting should use its cached direction");
     const specforge::SourceCollectionSampleSortSourceView* sample_name_after_activation =
-        FindSortSource(result.view.sorting, "sample-name");
+        FindSortSource(view.sorting, "sample-name");
     Require(sample_name_after_activation != nullptr, "sample-name sorting should stay visible");
     Require(
         sample_name_after_activation->direction == specforge::SampleNavigationSortDirection::Descending,
         "inactive sample-name sorting should retain its own descending direction");
-    Require(result.view.navigation.sequence_active, "active annotation sorting should reorder navigation");
+    Require(view.navigation.sequence_active, "active annotation sorting should reorder navigation");
 
     result = Submit(session, RemoveSampleSortSource(rank_source_id));
-    Require(!HasSortSource(result.view.sorting, rank_source_id), "removed annotation sorting should leave the visible list");
+    view = session.View();
+    Require(!HasSortSource(view.sorting, rank_source_id), "removed annotation sorting should leave the visible list");
     Require(
-        HasAvailableSortSource(result.view.sorting, rank_source_id),
+        HasAvailableSortSource(view.sorting, rank_source_id),
         "removed annotation sorting should become available to add again");
-    Require(!result.view.sorting.active, "removing the active sort entry should clear active sorting");
-    Require(!result.view.navigation.sequence_active, "removing active sorting should restore source-order navigation");
+    Require(!view.sorting.active, "removing the active sort entry should clear active sorting");
+    Require(!view.navigation.sequence_active, "removing active sorting should restore source-order navigation");
 }
 
 void TestSampleWorkflowStateRestoresFiltersAndSorting()
@@ -999,20 +1004,20 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
         Require(result.loaded, "test annotation should load before selecting sample filters");
         result = Submit(session, AddSampleFilterSource(annotation_source_id));
-        Require(result.view.filter.sources.size() == 1, "test should add the annotation sample filter source");
+        Require(session.View().filter.sources.size() == 1, "test should add the annotation sample filter source");
         result = Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
-        Require(result.view.navigation.filter_active, "test should activate an annotation-value sample filter");
-        Require(result.view.navigation.sequence_count == 2, "test should keep only the two matching samples");
+        Require(session.View().navigation.filter_active, "test should activate an annotation-value sample filter");
+        Require(session.View().navigation.sequence_count == 2, "test should keep only the two matching samples");
 
         result = Submit(session, SetSampleSortSource("sample-name"));
-        Require(result.view.sorting.active, "test should activate sample-name sorting");
+        Require(session.View().sorting.active, "test should activate sample-name sorting");
         result = Submit(session, SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending));
         Require(
-            result.view.sorting.direction == specforge::SampleNavigationSortDirection::Descending,
+            session.View().sorting.direction == specforge::SampleNavigationSortDirection::Descending,
             "test should switch sorting to descending");
         Require(
-            result.view.navigation.current_sequence_position &&
-                *result.view.navigation.current_sequence_position == 1,
+            session.View().navigation.current_sequence_position &&
+                *session.View().navigation.current_sequence_position == 1,
             "descending filtered sequence should place alpha after beta");
 
         Require(session.FlushStateCaches(), "session flush should save workflow state");
@@ -1028,12 +1033,10 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         source_path,
         3);
 
-    const specforge::SourceCollectionSessionResult result =
-        Submit(restored, OpenSourceCollection(source_path, 0));
-    Require(result.view.filter.sources.empty(), "restored workflow should wait for its annotation source to load");
-    const specforge::SourceCollectionSessionResult annotation_result =
-        Submit(restored, AddReadOnlyAnnotation(annotation_path));
-    const specforge::SourceCollectionSessionView& view = annotation_result.view;
+    (void)Submit(restored, OpenSourceCollection(source_path, 0));
+    Require(restored.View().filter.sources.empty(), "restored workflow should wait for its annotation source to load");
+    (void)Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    const specforge::SourceCollectionSessionView& view = restored.View();
     Require(view.filter.sources.size() == 1, "restored workflow should expose the annotation sample filter source");
     Require(
         view.filter.sources[0].id == annotation_source_id,
@@ -1100,62 +1103,67 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         (void)Submit(session, OpenSourceCollection(source_path, 0));
         specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
         Require(result.loaded, "test annotation should load before renaming");
-        Require(result.view.navigation.current_annotations.size() == 1, "loaded annotation should be visible");
-        Require(result.view.navigation.current_annotations[0].name != "Quality score", "test should start from the default name");
-        const std::string default_annotation_name = result.view.navigation.current_annotations[0].name;
+        Require(session.View().navigation.current_annotations.size() == 1, "loaded annotation should be visible");
+        Require(session.View().navigation.current_annotations[0].name != "Quality score", "test should start from the default name");
+        const std::string default_annotation_name = session.View().navigation.current_annotations[0].name;
 
         result = Submit(session, RenameAnnotationDisplayName(annotation_path, "  Quality score  "));
         Require(result.action.workflow_changed, "renaming an annotation display name should report workflow change");
+        specforge::SourceCollectionSessionView view = session.View();
         Require(
-            result.view.navigation.current_annotations[0].name == "Quality score",
+            view.navigation.current_annotations[0].name == "Quality score",
             "annotation row should use the custom display name");
         Require(
-            result.view.filter.available_sources.size() == 1 &&
-                result.view.filter.available_sources[0].name == "Quality score",
+            view.filter.available_sources.size() == 1 &&
+                view.filter.available_sources[0].name == "Quality score",
             "sample filters should show the custom annotation display name");
         Require(
-            HasAvailableSortSource(result.view.sorting, annotation_source_id),
+            HasAvailableSortSource(view.sorting, annotation_source_id),
             "plain integer annotation should be available for sorting");
         Require(
-            std::any_of(result.view.sorting.available_sources.begin(), result.view.sorting.available_sources.end(), [](const auto& source) {
+            std::any_of(view.sorting.available_sources.begin(), view.sorting.available_sources.end(), [](const auto& source) {
                 return source.name == "Quality score";
             }),
             "sample sorting add-source list should show the custom display name");
 
         result = Submit(session, AddSampleFilterSource(annotation_source_id));
-        Require(result.view.filter.sources.size() == 1, "renamed annotation should still be addable as a filter source");
-        Require(result.view.filter.sources[0].name == "Quality score", "selected sample filter source should keep the custom name");
+        view = session.View();
+        Require(view.filter.sources.size() == 1, "renamed annotation should still be addable as a filter source");
+        Require(view.filter.sources[0].name == "Quality score", "selected sample filter source should keep the custom name");
 
         result = Submit(session, SetSampleSortSource(annotation_source_id));
+        view = session.View();
         const specforge::SourceCollectionSampleSortSourceView* sort_source =
-            FindSortSource(result.view.sorting, annotation_source_id);
+            FindSortSource(view.sorting, annotation_source_id);
         Require(sort_source != nullptr, "renamed annotation should still be selectable as a sort source");
         Require(sort_source->name == "Quality score", "selected sample sort source should keep the custom name");
 
         result = Submit(session, RenameAnnotationDisplayName(annotation_path, "   "));
         Require(result.action.workflow_changed, "clearing an annotation display name should report workflow change");
+        view = session.View();
         Require(
-            result.view.navigation.current_annotations[0].name == default_annotation_name,
+            view.navigation.current_annotations[0].name == default_annotation_name,
             "cleared annotation display name should restore the default annotation name");
         Require(
-            result.view.filter.sources.size() == 1 &&
-                result.view.filter.sources[0].name == default_annotation_name,
+            view.filter.sources.size() == 1 &&
+                view.filter.sources[0].name == default_annotation_name,
             "selected sample filter source should restore the default annotation name");
-        sort_source = FindSortSource(result.view.sorting, annotation_source_id);
+        sort_source = FindSortSource(view.sorting, annotation_source_id);
         Require(sort_source != nullptr, "cleared annotation should remain the selected sort source");
         Require(
             sort_source->name == default_annotation_name,
             "selected sample sort source should restore the default annotation name");
 
         result = Submit(session, RenameAnnotationDisplayName(annotation_path, utf8_display_name));
+        view = session.View();
         Require(
-            result.view.navigation.current_annotations[0].name == utf8_display_name,
+            view.navigation.current_annotations[0].name == utf8_display_name,
             "annotation row should support UTF-8 display names after clearing the override");
         Require(
-            result.view.filter.sources.size() == 1 &&
-                result.view.filter.sources[0].name == utf8_display_name,
+            view.filter.sources.size() == 1 &&
+                view.filter.sources[0].name == utf8_display_name,
             "selected sample filter source should keep the UTF-8 annotation display name");
-        sort_source = FindSortSource(result.view.sorting, annotation_source_id);
+        sort_source = FindSortSource(view.sorting, annotation_source_id);
         Require(sort_source != nullptr, "UTF-8 renamed annotation should remain the selected sort source");
         Require(
             sort_source->name == utf8_display_name,
@@ -1174,19 +1182,19 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         3);
 
     (void)Submit(restored, OpenSourceCollection(source_path, 0));
-    const specforge::SourceCollectionSessionResult restored_result =
-        Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    (void)Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    const specforge::SourceCollectionSessionView restored_view = restored.View();
     Require(
-        restored_result.view.navigation.current_annotations[0].name == utf8_display_name,
+        restored_view.navigation.current_annotations[0].name == utf8_display_name,
         "restored workflow should keep the UTF-8 annotation display name");
     Require(
-        restored_result.view.filter.sources.size() == 1 &&
-            restored_result.view.filter.sources[0].name == utf8_display_name,
+        restored_view.filter.sources.size() == 1 &&
+            restored_view.filter.sources[0].name == utf8_display_name,
         "restored selected sample filter source should keep the UTF-8 annotation display name");
     Require(
         std::any_of(
-            restored_result.view.sorting.available_sources.begin(),
-            restored_result.view.sorting.available_sources.end(),
+            restored_view.sorting.available_sources.begin(),
+            restored_view.sorting.available_sources.end(),
             [&utf8_display_name](const auto& source) { return source.name == utf8_display_name; }),
         "restored available sample sort source should keep the UTF-8 annotation display name");
 }
@@ -1223,42 +1231,42 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
     Require(result.loaded, "plain integer annotation should load");
     Require(
-        !HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        !HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
         "plain integer annotation should not enter the visible sort list by default");
     Require(
-        HasAvailableSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        HasAvailableSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
         "plain integer annotation should be available to add as a sort source");
 
     result = Submit(session, AddReadOnlyAnnotation(label_result_path));
     Require(result.loaded, "metadata-backed label result annotation should load");
     Require(
-        !HasSortSource(result.view.sorting, AnnotationSourceId(label_result_path)),
+        !HasSortSource(session.View().sorting, AnnotationSourceId(label_result_path)),
         "label-result integer annotation should not enter the visible sort list");
     Require(
-        !HasAvailableSortSource(result.view.sorting, AnnotationSourceId(label_result_path)),
+        !HasAvailableSortSource(session.View().sorting, AnnotationSourceId(label_result_path)),
         "label-result integer annotation should not be available to add as a sort source");
 
     result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
-    Require(result.view.sorting.active, "plain annotation sort source should be selectable");
+    Require(session.View().sorting.active, "plain annotation sort source should be selectable");
     Require(
-        HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
         "activating plain annotation sorting should add it to the visible list");
     Require(
-        result.view.navigation.current_sequence_position &&
-            *result.view.navigation.current_sequence_position == 2,
+        session.View().navigation.current_sequence_position &&
+            *session.View().navigation.current_sequence_position == 2,
         "plain annotation sorting should use numeric values with source-order tie break");
 
     (void)Submit(session, CreateDefaultLabelingTask());
     result = Submit(session, SetActiveLabelingOutputPath(rank_path));
     Require(
-        !HasSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        !HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
         "annotation should stop being a sort source after it becomes the active local task output");
     Require(
-        !HasAvailableSortSource(result.view.sorting, AnnotationSourceId(rank_path)),
+        !HasAvailableSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
         "local task output annotation should not remain addable for sorting");
-    Require(!result.view.sorting.active, "invalidated annotation sorting should be cleared");
-    Require(!result.view.navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
-    Require(result.view.navigation.row_location_available, "cleared sorting should restore ordinary row location");
+    Require(!session.View().sorting.active, "invalidated annotation sorting should be cleared");
+    Require(!session.View().navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
+    Require(session.View().navigation.row_location_available, "cleared sorting should restore ordinary row location");
 }
 
 void TestSourceSessionRestoresAnnotationSortingState()
@@ -1295,10 +1303,10 @@ void TestSourceSessionRestoresAnnotationSortingState()
         specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
         Require(result.loaded, "plain integer annotation should load before selecting ordering");
         result = Submit(session, SetSampleSortSource(AnnotationSourceId(rank_path)));
-        Require(result.view.sorting.active, "annotation ordering should be active before saving");
+        Require(session.View().sorting.active, "annotation ordering should be active before saving");
         Require(
-            result.view.navigation.current_sequence_position &&
-                *result.view.navigation.current_sequence_position == 2,
+            session.View().navigation.current_sequence_position &&
+                *session.View().navigation.current_sequence_position == 2,
             "annotation ordering should put row 0 last before saving");
         Require(session.FlushStateCaches(), "session flush should save source and workflow state");
     }
@@ -1351,7 +1359,7 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
 
     const specforge::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "1", true));
-    const specforge::SourceCollectionNavigationView& navigation = result.view.navigation;
+    const specforge::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.filter_active, "zero-match condition should still activate navigation filtering");
     Require(navigation.sequence_active && navigation.sequence_empty, "zero-match condition should expose empty sequence");
     Require(navigation.sequence_count == 0, "empty sequence should expose zero sequence rows");
@@ -1361,12 +1369,12 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
     Require(navigation.current_sample_display_name.empty(), "empty sequence should not display the stale snapshot sample");
     Require(navigation.current_annotations.empty(), "empty sequence should not display stale current annotations");
     Require(
-        result.view.snapshot != nullptr,
+        session.View().snapshot != nullptr,
         "empty sequence should keep the source snapshot available to source-management views");
     Require(
-        result.view.current_sample_snapshot == nullptr,
+        session.View().current_sample_snapshot == nullptr,
         "empty sequence should suppress the stale snapshot for sample displays");
-    Require(!result.view.labeling.current_index, "labeling should not receive a fallback current row");
+    Require(!session.View().labeling.current_index, "labeling should not receive a fallback current row");
     Require(!result.action.snapshot_changed, "empty sequence should not load a fallback sample snapshot");
     Require(loaded_indices == std::vector<std::size_t>({0}), "empty sequence should not call LoadActiveSourceAt");
 }
@@ -1381,26 +1389,26 @@ void TestDeactivatingLabelingTaskKeepsAnnotationFilter()
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetFilterValueSelected(source_id, "1", true));
-    Require(result.view.navigation.filter_active, "annotation sample filter should affect navigation");
-    Require(result.view.navigation.filtered_sample_count == 1, "filter should include the one matching sample");
+    Require(session.View().navigation.filter_active, "annotation sample filter should affect navigation");
+    Require(session.View().navigation.filtered_sample_count == 1, "filter should include the one matching sample");
 
     (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "label should be accepted");
     result = Submit(session, AssignActiveLabelToCurrentSample(1));
-    Require(result.view.labeling.can_deactivate_task, "draft-only active task should be closable");
+    Require(session.View().labeling.can_deactivate_task, "draft-only active task should be closable");
 
     result = Submit(session, DeactivateActiveLabelingTask());
     Require(result.action.workflow_changed, "deactivating active task should report workflow change");
-    Require(!result.view.labeling.has_active_task, "deactivation should leave no active task");
-    Require(result.view.filter.sources.size() == 1, "deactivation should keep the annotation sample filter source");
-    Require(result.view.filter.sources[0].id == source_id, "deactivation should keep the annotation source id");
-    Require(result.view.navigation.filter_active, "deactivation should keep annotation navigation filtering active");
+    Require(!session.View().labeling.has_active_task, "deactivation should leave no active task");
+    Require(session.View().filter.sources.size() == 1, "deactivation should keep the annotation sample filter source");
+    Require(session.View().filter.sources[0].id == source_id, "deactivation should keep the annotation source id");
+    Require(session.View().navigation.filter_active, "deactivation should keep annotation navigation filtering active");
 
     result = Submit(session, CreateDefaultLabelingTask());
-    Require(result.view.labeling.has_active_task, "task record should remain available after deactivation");
-    Require(result.view.labeling.current_code == 1, "reactivated task should keep its label result");
+    Require(session.View().labeling.has_active_task, "task record should remain available after deactivation");
+    Require(session.View().labeling.current_code == 1, "reactivated task should keep its label result");
 }
 
 void TestCreateLabelingTaskUsesCustomName()
@@ -1412,9 +1420,9 @@ void TestCreateLabelingTaskUsesCustomName()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, CreateLabelingTask("  Quality review  "));
-    Require(result.view.labeling.has_active_task, "custom labeling task should become active");
-    Require(result.view.labeling.task_id == "quality-review", "custom task id should derive from the trimmed name");
-    Require(result.view.labeling.task_name == "Quality review", "custom task name should be trimmed and exposed");
+    Require(session.View().labeling.has_active_task, "custom labeling task should become active");
+    Require(session.View().labeling.task_id == "quality-review", "custom task id should derive from the trimmed name");
+    Require(session.View().labeling.task_name == "Quality review", "custom task name should be trimmed and exposed");
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
         "custom task should accept labels");
@@ -1422,9 +1430,9 @@ void TestCreateLabelingTaskUsesCustomName()
 
     (void)Submit(session, DeactivateActiveLabelingTask());
     result = Submit(session, CreateLabelingTask("Quality review"));
-    Require(result.view.labeling.has_active_task, "same custom task should reactivate");
-    Require(result.view.labeling.task_id == "quality-review", "reactivated custom task should keep the same task id");
-    Require(result.view.labeling.current_code == 3, "reactivated custom task should keep its draft values");
+    Require(session.View().labeling.has_active_task, "same custom task should reactivate");
+    Require(session.View().labeling.task_id == "quality-review", "reactivated custom task should keep the same task id");
+    Require(session.View().labeling.current_code == 3, "reactivated custom task should keep its draft values");
 }
 
 void TestRenameAndDeleteActiveLabelingTask()
@@ -1442,18 +1450,18 @@ void TestRenameAndDeleteActiveLabelingTask()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, RenameActiveLabelingTask(" Reviewed set "));
-    Require(result.view.labeling.has_active_task, "renamed task should remain active");
-    Require(result.view.labeling.task_id == "quality-review", "rename should keep the stable task id");
-    Require(result.view.labeling.task_name == "Reviewed set", "rename should trim and expose the new task name");
+    Require(session.View().labeling.has_active_task, "renamed task should remain active");
+    Require(session.View().labeling.task_id == "quality-review", "rename should keep the stable task id");
+    Require(session.View().labeling.task_name == "Reviewed set", "rename should trim and expose the new task name");
 
     result = Submit(session, DeleteActiveLabelingTask());
     Require(result.action.workflow_changed, "delete should report workflow change");
-    Require(!result.view.labeling.has_active_task, "delete should clear the active task");
+    Require(!session.View().labeling.has_active_task, "delete should clear the active task");
 
     result = Submit(session, CreateLabelingTask("Quality review"));
-    Require(result.view.labeling.has_active_task, "creating after delete should create a fresh task");
+    Require(session.View().labeling.has_active_task, "creating after delete should create a fresh task");
     Require(
-        result.view.labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
         "deleted draft values should not come back");
 }
 
@@ -1468,62 +1476,62 @@ void TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized()
     (void)Submit(session, CreateLabelingTask("Quality review"));
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
-    Require(result.view.navigation.current_annotations.size() == 1, "local task output should appear in annotations");
+    Require(session.View().navigation.current_annotations.size() == 1, "local task output should appear in annotations");
     Require(
-        result.view.navigation.current_annotations[0].name == "Quality review",
+        session.View().navigation.current_annotations[0].name == "Quality review",
         "local labeling annotation should default to the task name");
     Require(
-        result.view.filter.available_sources.size() == 1 &&
-            result.view.filter.available_sources[0].name == "Quality review",
+        session.View().filter.available_sources.size() == 1 &&
+            session.View().filter.available_sources[0].name == "Quality review",
         "local labeling filter source should default to the task name");
 
     result = Submit(session, RenameActiveLabelingTask("Reviewed set"));
-    Require(result.view.labeling.task_name == "Reviewed set", "task rename should update the active task");
+    Require(session.View().labeling.task_name == "Reviewed set", "task rename should update the active task");
     Require(
-        result.view.navigation.current_annotations[0].name == "Reviewed set",
+        session.View().navigation.current_annotations[0].name == "Reviewed set",
         "unmodified local labeling annotation display name should follow task rename");
     Require(
-        result.view.filter.available_sources[0].name == "Reviewed set",
+        session.View().filter.available_sources[0].name == "Reviewed set",
         "unmodified local labeling filter source should follow task rename");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
-    Require(result.view.labeling.task_name == "Reviewed set", "annotation rename should not rename the task");
+    Require(session.View().labeling.task_name == "Reviewed set", "annotation rename should not rename the task");
     Require(
-        result.view.navigation.current_annotations[0].name == "Hard cases",
+        session.View().navigation.current_annotations[0].name == "Hard cases",
         "annotation row should use the custom local-task display name");
     Require(
-        result.view.filter.available_sources[0].name == "Hard cases",
+        session.View().filter.available_sources[0].name == "Hard cases",
         "local labeling filter source should use the custom annotation display name");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
     Require(result.action.workflow_changed, "clearing local-task annotation display name should report workflow change");
-    Require(result.view.labeling.task_name == "Reviewed set", "clearing annotation display should not rename the task");
+    Require(session.View().labeling.task_name == "Reviewed set", "clearing annotation display should not rename the task");
     Require(
-        result.view.navigation.current_annotations[0].name == "Reviewed set",
+        session.View().navigation.current_annotations[0].name == "Reviewed set",
         "cleared local-task annotation display name should restore the task default");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
     Require(
-        result.view.navigation.current_annotations[0].name == "Hard cases",
+        session.View().navigation.current_annotations[0].name == "Hard cases",
         "local-task annotation should support customizing again after clearing");
 
     result = Submit(session, RenameActiveLabelingTask("Final task"));
-    Require(result.view.labeling.task_name == "Final task", "task should still be renameable after annotation customization");
+    Require(session.View().labeling.task_name == "Final task", "task should still be renameable after annotation customization");
     Require(
-        result.view.navigation.current_annotations[0].name == "Hard cases",
+        session.View().navigation.current_annotations[0].name == "Hard cases",
         "custom annotation display name should not be overwritten by later task rename");
     Require(
-        result.view.filter.available_sources[0].name == "Hard cases",
+        session.View().filter.available_sources[0].name == "Hard cases",
         "custom local labeling filter source name should not be overwritten by later task rename");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
     Require(
-        result.view.navigation.current_annotations[0].name == "Final task",
+        session.View().navigation.current_annotations[0].name == "Final task",
         "clearing annotation display should restore the default task name");
 
     result = Submit(session, RenameActiveLabelingTask("Synced task"));
     Require(
-        result.view.navigation.current_annotations[0].name == "Synced task",
+        session.View().navigation.current_annotations[0].name == "Synced task",
         "cleared annotation display override should follow task rename again");
 }
 
@@ -1547,36 +1555,36 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "external label result annotation should load");
-    Require(result.view.navigation.current_annotations.size() == 1, "loaded annotation should appear in navigation");
+    Require(session.View().navigation.current_annotations.size() == 1, "loaded annotation should appear in navigation");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "metadata-backed annotation should start as external");
     Require(
-        result.view.navigation.current_annotations[0].can_activate_labeling,
+        session.View().navigation.current_annotations[0].can_activate_labeling,
         "categorical annotation should be draggable into labeling");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
-    Require(result.view.labeling.has_active_task, "annotation activation should create an active task");
-    Require(result.view.labeling.task_name == "Quality review", "annotation metadata task name should be reused");
-    Require(result.view.labeling.current_code == 5, "labeling task should reuse annotation values");
-    Require(result.view.labeling.output_path && *result.view.labeling.output_path == annotation_path, "task should bind output path");
+    Require(session.View().labeling.has_active_task, "annotation activation should create an active task");
+    Require(session.View().labeling.task_name == "Quality review", "annotation metadata task name should be reused");
+    Require(session.View().labeling.current_code == 5, "labeling task should reuse annotation values");
+    Require(session.View().labeling.output_path && *session.View().labeling.output_path == annotation_path, "task should bind output path");
     Require(
-        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
         "metadata-backed annotation activation should be clean");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "activated annotation should be shown as a local labeling task");
 
     result = Submit(session, RemoveReadOnlyAnnotation(annotation_path));
     Require(!result.action.workflow_changed, "removing an annotation should not delete the local task");
-    Require(result.view.navigation.current_annotations.size() == 1, "local task should remain visible after annotation removal");
+    Require(session.View().navigation.current_annotations.size() == 1, "local task should remain visible after annotation removal");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "remaining row should come from the local task record");
-    Require(result.view.labeling.has_active_task, "removing an annotation should not remove the active local task");
+    Require(session.View().labeling.has_active_task, "removing an annotation should not remove the active local task");
 }
 
 void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
@@ -1600,23 +1608,23 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     specforge::SourceCollectionSessionResult result = Submit(session, CreateLabelingTask("Current task"));
-    Require(result.view.labeling.has_active_task, "current task should be active before activation attempt");
-    Require(result.view.labeling.task_id == "current-task", "test should start with the current task");
+    Require(session.View().labeling.has_active_task, "current task should be active before activation attempt");
+    Require(session.View().labeling.task_id == "current-task", "test should start with the current task");
     result = Submit(session, SetActiveLabelingOutputPath(blocked_output_path));
     Require(
-        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
         "current task should have a failed save guard");
 
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "external annotation should load before blocked activation");
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
-    Require(result.view.labeling.has_active_task, "blocked activation should keep the active task");
-    Require(result.view.labeling.task_id == "current-task", "annotation activation must not switch active tasks");
+    Require(session.View().labeling.has_active_task, "blocked activation should keep the active task");
+    Require(session.View().labeling.task_id == "current-task", "annotation activation must not switch active tasks");
     Require(
-        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
         "blocked activation should preserve the failed save state");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "blocked activation should leave the annotation external");
 }
@@ -1639,24 +1647,24 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "plain integer annotation should load");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "annotation without metadata should start as plain");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
-    Require(result.view.labeling.has_active_task, "plain annotation activation should create an active task");
-    Require(result.view.labeling.current_code == 7, "plain annotation values should become editable label values");
-    Require(result.view.labeling.label_set.labels.size() == 2, "plain annotation unique values should become labels");
-    Require(result.view.labeling.label_set.labels[0].code == 5, "plain annotation labels should include value 5");
-    Require(result.view.labeling.label_set.labels[1].code == 7, "plain annotation labels should include value 7");
+    Require(session.View().labeling.has_active_task, "plain annotation activation should create an active task");
+    Require(session.View().labeling.current_code == 7, "plain annotation values should become editable label values");
+    Require(session.View().labeling.label_set.labels.size() == 2, "plain annotation unique values should become labels");
+    Require(session.View().labeling.label_set.labels[0].code == 5, "plain annotation labels should include value 5");
+    Require(session.View().labeling.label_set.labels[1].code == 7, "plain annotation labels should include value 7");
     Require(
-        result.view.labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
         "plain annotation activation should write its new metadata sidecar");
     Require(
         std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
         "plain annotation activation should create metadata sidecar");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "plain annotation should become local after activation");
 }
@@ -1679,7 +1687,7 @@ void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
-    Require(result.view.labeling.has_active_task, "plain annotation should become a local task");
+    Require(session.View().labeling.has_active_task, "plain annotation should become a local task");
     Require(
         std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
         "test should start with a converted metadata sidecar");
@@ -1687,17 +1695,17 @@ void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
     std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(annotation_path));
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(
-        result.view.navigation.current_annotations.size() == 1,
+        session.View().navigation.current_annotations.size() == 1,
         "same loaded output path should render as one annotation row");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::LocalLabelingTask,
         "loaded output path owned by a local task should stay local when metadata is missing");
     Require(
-        result.view.navigation.current_annotations[0].metadata_missing,
+        session.View().navigation.current_annotations[0].metadata_missing,
         "missing local metadata sidecar should be surfaced in the annotation row");
     Require(
-        result.view.navigation.current_annotations[0].display_text == "7 (7)",
+        session.View().navigation.current_annotations[0].display_text == "7 (7)",
         "local task values should drive the row after missing metadata fallback");
 }
 
@@ -1751,18 +1759,18 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "metadata-backed annotation should load");
-    Require(result.view.labeling.has_active_task, "local cache fixture should restore the local task");
+    Require(session.View().labeling.has_active_task, "local cache fixture should restore the local task");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "same path and sample count should not make a local match without matching sidecar task id");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(
-        result.view.labeling.task_id == "local-task",
+        session.View().labeling.task_id == "local-task",
         "activation should not switch to a same-path task when the sidecar task id differs");
     Require(
-        result.view.navigation.current_annotations[0].relationship ==
+        session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "mismatched sidecar task id should keep the annotation external");
 }
@@ -1790,31 +1798,31 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
         "first source collection should accept a label definition");
     specforge::SourceCollectionSessionResult result =
         Submit(session, AssignActiveLabelToCurrentSample(1));
-    Require(result.view.labeling.current_code == 1, "first sample should be labeled before filtering");
+    Require(session.View().labeling.current_code == 1, "first sample should be labeled before filtering");
     const std::filesystem::path annotation_path =
         AddPlainIntegerFilterAnnotation(session, {1, 2, 2}, "_first_filter.npy");
     const std::string source_id = AnnotationSourceId(annotation_path);
     result = Submit(session, AddSampleFilterSource(source_id));
-    Require(result.view.filter.sources.size() == 1, "annotation sample filter should be explicitly selected");
+    Require(session.View().filter.sources.size() == 1, "annotation sample filter should be explicitly selected");
     result = Submit(
         session,
         SetFilterValueSelected(source_id, "1", true));
-    Require(result.view.navigation.filter_active, "annotation sample filter should affect sample navigation");
-    Require(result.view.navigation.filtered_sample_count == 1, "filter should include the one matching sample");
+    Require(session.View().navigation.filter_active, "annotation sample filter should affect sample navigation");
+    Require(session.View().navigation.filtered_sample_count == 1, "filter should include the one matching sample");
 
     result = Submit(session, OpenSourceCollection(second_source_path, 0));
     Require(result.action.workflow_changed, "opening another source collection should change the active workflow");
-    Require(!result.view.labeling.has_active_task, "second source collection should not inherit the first workflow");
-    Require(result.view.filter.sources.empty(), "source switch should clear selected filter sources");
-    Require(!result.view.navigation.filter_active, "source switch should clear navigation filtering");
+    Require(!session.View().labeling.has_active_task, "second source collection should not inherit the first workflow");
+    Require(session.View().filter.sources.empty(), "source switch should clear selected filter sources");
+    Require(!session.View().navigation.filter_active, "source switch should clear navigation filtering");
 
     result = Submit(session, SwitchSourceCollection(0));
     Require(result.action.workflow_changed, "switching back should reactivate the first workflow");
-    Require(result.view.labeling.has_active_task, "first source collection workflow should be restored");
-    Require(result.view.labeling.current_code == 1, "first source collection label result should be restored");
-    Require(result.view.filter.sources.empty(), "workflow restore should not restore old filter sources");
-    Require(result.view.filter.available_sources.size() == 1, "restored annotation should be available to add again");
-    Require(!result.view.navigation.filter_active, "workflow restore should leave sample filtering cleared");
+    Require(session.View().labeling.has_active_task, "first source collection workflow should be restored");
+    Require(session.View().labeling.current_code == 1, "first source collection label result should be restored");
+    Require(session.View().filter.sources.empty(), "workflow restore should not restore old filter sources");
+    Require(session.View().filter.available_sources.size() == 1, "restored annotation should be available to add again");
+    Require(!session.View().navigation.filter_active, "workflow restore should leave sample filtering cleared");
 }
 
 void TestNavigationViewSeparatesSampleNameFromDisplayName()
@@ -1825,14 +1833,14 @@ void TestNavigationViewSeparatesSampleNameFromDisplayName()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionNavigationView navigation = result.view.navigation;
+    specforge::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.current_sample_display_name == "sample-1", "view should expose the current display name");
     Require(navigation.current_sample_name.empty(), "unnamed samples should not expose a searchable sample name");
 
     result = Submit(
         session,
         SetSampleNameQuery(navigation.current_sample_display_name));
-    navigation = result.view.navigation;
+    navigation = session.View().navigation;
     Require(!navigation.exact_sample_name_match, "fallback display names should not be exact sample-name matches");
     Require(navigation.sample_name_matches.empty(), "fallback display names should not be sample-name search matches");
 }
@@ -1848,7 +1856,7 @@ void TestNavigationViewExposesSourceProvidedSampleName()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionNavigationView navigation = result.view.navigation;
+    specforge::SourceCollectionNavigationView navigation = session.View().navigation;
     Require(navigation.has_sample_names, "folder source should expose source-provided sample names");
     Require(navigation.current_sample_name == "alpha.csv", "view should expose the current source-provided sample name");
     Require(navigation.current_sample_display_name == "sample-1", "display text should remain separate from sample name");
@@ -1856,7 +1864,7 @@ void TestNavigationViewExposesSourceProvidedSampleName()
     result = Submit(
         session,
         SetSampleNameQuery(navigation.current_sample_name));
-    navigation = result.view.navigation;
+    navigation = session.View().navigation;
     Require(
         navigation.exact_sample_name_match && *navigation.exact_sample_name_match == 0,
         "source-provided sample names should remain searchable");
@@ -1876,9 +1884,9 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(first_source_path, 1));
-    Require(result.view.current_source_index && *result.view.current_source_index == 0, "first source should be active");
-    Require(result.view.snapshot->source.path == first_source_path, "first source snapshot should be visible");
-    Require(result.view.snapshot->collection.current_index == 1, "first source should open at requested row");
+    Require(session.View().current_source_index && *session.View().current_source_index == 0, "first source should be active");
+    Require(session.View().snapshot->source.path == first_source_path, "first source snapshot should be visible");
+    Require(session.View().snapshot->collection.current_index == 1, "first source should open at requested row");
     (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(
@@ -1889,8 +1897,8 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
         "first source should accept its own active label");
 
     result = Submit(session, OpenSourceCollection(second_source_path, 0));
-    Require(result.view.current_source_index && *result.view.current_source_index == 1, "second source should be active");
-    Require(result.view.snapshot->source.path == second_source_path, "second source snapshot should be visible");
+    Require(session.View().current_source_index && *session.View().current_source_index == 1, "second source should be active");
+    Require(session.View().snapshot->source.path == second_source_path, "second source snapshot should be visible");
     (void)Submit(session, CreateDefaultLabelingTask());
     Require(
         Submit(
@@ -1903,29 +1911,29 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
     result = Submit(session, SwitchSourceCollection(0));
     Require(result.action.snapshot_changed, "activating first source should swap to its cached snapshot");
     Require(
-        result.view.current_source_index && *result.view.current_source_index == 0,
+        session.View().current_source_index && *session.View().current_source_index == 0,
         "first source should be active again");
-    Require(result.view.snapshot->source.path == first_source_path, "reactivated snapshot should be the first source");
-    Require(result.view.snapshot->collection.current_index == 1, "reactivated first source should keep its cached row");
-    Require(result.view.labeling.has_active_task, "first source labeling task should be restored");
-    Require(result.view.labeling.label_set.labels.size() == 1, "first source should expose its own label set");
-    Require(result.view.labeling.label_set.labels[0].code == 10, "first source label set should not come from second source");
+    Require(session.View().snapshot->source.path == first_source_path, "reactivated snapshot should be the first source");
+    Require(session.View().snapshot->collection.current_index == 1, "reactivated first source should keep its cached row");
+    Require(session.View().labeling.has_active_task, "first source labeling task should be restored");
+    Require(session.View().labeling.label_set.labels.size() == 1, "first source should expose its own label set");
+    Require(session.View().labeling.label_set.labels[0].code == 10, "first source label set should not come from second source");
 
     const std::size_t loaded_count_before_remove = loaded_snapshots.size();
     result = Submit(session, RemoveSourceCollection(0));
     Require(result.action.snapshot_changed, "removing active first source should activate the next source snapshot");
     Require(result.action.workflow_changed, "removing active first source should resync the workflow");
     Require(result.action.navigation_inputs_changed, "removing active first source should refresh navigation inputs");
-    Require(result.view.sources.size() == 1, "removing first source should leave one source");
-    Require(result.view.sources[0].path == second_source_path, "remaining source should be the second source");
+    Require(session.View().sources.size() == 1, "removing first source should leave one source");
+    Require(session.View().sources[0].path == second_source_path, "remaining source should be the second source");
     Require(
-        result.view.current_source_index && *result.view.current_source_index == 0,
+        session.View().current_source_index && *session.View().current_source_index == 0,
         "second source should become index 0");
-    Require(result.view.snapshot->source.path == second_source_path, "second source snapshot should be visible after removal");
-    Require(result.view.snapshot->collection.current_index == 0, "second source cached row should be preserved");
-    Require(result.view.labeling.has_active_task, "second source labeling task should be restored after removal");
-    Require(result.view.labeling.label_set.labels.size() == 1, "second source should expose its own label set");
-    Require(result.view.labeling.label_set.labels[0].code == 20, "second source label set should survive first removal");
+    Require(session.View().snapshot->source.path == second_source_path, "second source snapshot should be visible after removal");
+    Require(session.View().snapshot->collection.current_index == 0, "second source cached row should be preserved");
+    Require(session.View().labeling.has_active_task, "second source labeling task should be restored after removal");
+    Require(session.View().labeling.label_set.labels.size() == 1, "second source should expose its own label set");
+    Require(session.View().labeling.label_set.labels[0].code == 20, "second source label set should survive first removal");
     Require(
         loaded_snapshots.size() == loaded_count_before_remove,
         "removing active source should activate the next cached source without reloading");
@@ -1962,11 +1970,9 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
         (void)Submit(session, OpenSourceCollection(second_source_path, 0));
         (void)Submit(session, AddReadOnlyAnnotation(second_annotation_path));
         (void)Submit(session, SwitchSourceCollection(0));
-        specforge::SourceCollectionSessionResult navigate_result =
-            Submit(session, MoveSampleNavigation(
-                                specforge::SampleNavigationRequest::Next()));
-        Require(navigate_result.view.snapshot->source.path == first_source_path, "first source should be active");
-        Require(navigate_result.view.snapshot->collection.current_index == 2, "first source should reach row 2");
+        (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+        Require(session.View().snapshot->source.path == first_source_path, "first source should be active");
+        Require(session.View().snapshot->collection.current_index == 2, "first source should reach row 2");
         Require(session.FlushStateCaches(), "session state caches should flush");
     }
 
@@ -2002,13 +2008,12 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
         !std::filesystem::exists(source_session_cache),
         "restore should not mark the source session cache dirty immediately");
 
-    const specforge::SourceCollectionSessionResult second_result =
-        Submit(restored, SwitchSourceCollection(1));
+    (void)Submit(restored, SwitchSourceCollection(1));
     Require(
-        second_result.view.navigation.current_annotations.size() == 1,
+        restored.View().navigation.current_annotations.size() == 1,
         "restored second source should restore its own annotations");
     Require(
-        second_result.view.navigation.current_annotations[0].path == second_annotation_path,
+        restored.View().navigation.current_annotations[0].path == second_annotation_path,
         "restored second source annotation path should come from source session state");
 }
 
@@ -2350,10 +2355,9 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
             },
             navigation_cache,
             labeling_cache);
-        const specforge::SourceCollectionSessionResult reload_result =
-            Submit(reloaded, OpenSourceCollection(source_path, 0));
+        (void)Submit(reloaded, OpenSourceCollection(source_path, 0));
         Require(
-            reload_result.view.labeling.has_active_task,
+            reloaded.View().labeling.has_active_task,
             "workflow flush should save labeling state even when source cache flush fails");
     }
 

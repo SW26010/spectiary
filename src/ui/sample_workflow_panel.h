@@ -24,6 +24,7 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
+        const SourceCollectionSessionViewReader& read_view,
         bool plot_shortcut_context_active,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
@@ -31,11 +32,13 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderFilters(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
+        const SourceCollectionSessionViewReader& read_view,
         bool* open);
 
     [[nodiscard]] SourceCollectionSessionAction RenderSorting(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
+        const SourceCollectionSessionViewReader& read_view,
         bool* open);
 
 private:

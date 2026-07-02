@@ -613,7 +613,7 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
-    return session_.View().snapshot;
+    return session_.CurrentSampleSnapshot();
 }
 
 void ShellUi::OpenSourceFromFilePicker()
@@ -823,6 +823,9 @@ void ShellUi::RenderFilesPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
+        },
         &panel_visibility_.files,
         []() {
             return ShowSourceFilePicker();
@@ -839,6 +842,9 @@ void ShellUi::RenderNavigationPanel()
         view,
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
+        },
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
         },
         &panel_visibility_.navigation));
 }
@@ -865,6 +871,9 @@ void ShellUi::RenderLabelingPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
+        },
         label_shortcut_context_active_,
         &panel_visibility_.labeling,
         []() {
@@ -880,6 +889,9 @@ void ShellUi::RenderFiltersPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
+        },
         &panel_visibility_.filters));
 }
 
@@ -890,6 +902,9 @@ void ShellUi::RenderSortingPanel()
         view,
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
+        },
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
         },
         &panel_visibility_.sorting));
 }

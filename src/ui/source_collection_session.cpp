@@ -586,7 +586,6 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         }
         break;
     }
-    result.view = View();
     return result;
 }
 

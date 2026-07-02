@@ -621,6 +621,7 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view,
     bool plot_shortcut_context_active,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
@@ -928,7 +929,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                 SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut})));
         MergeSourceCollectionSessionAction(action, result.action);
         if (result.changed) {
-            const SourceCollectionLabelingView& refreshed_view = result.view.labeling;
+            const SourceCollectionLabelingView refreshed_view = read_view().labeling;
             const SampleLabelSet& label_set =
                 refreshed_view.has_active_task ? refreshed_view.label_set : labeling_view.label_set;
             std::snprintf(
@@ -997,6 +998,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view,
     bool* open)
 {
     SourceCollectionSessionAction action;
@@ -1042,7 +1044,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
             SourceCollectionSessionResult result =
                 submit(ApplySampleFiltering(SampleFilteringIntent::AddSource(*source_to_add)));
             MergeSourceCollectionSessionAction(action, result.action);
-            filter_view = result.view.filter;
+            filter_view = read_view().filter;
             source_to_collapse = *source_to_add;
             ImGui::CloseCurrentPopup();
         }
@@ -1056,7 +1058,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
     if (ImGui::Button("Reset sample filters")) {
         SourceCollectionSessionResult result = submit(ApplySampleFiltering(SampleFilteringIntent::Clear()));
         MergeSourceCollectionSessionAction(action, result.action);
-        filter_view = result.view.filter;
+        filter_view = read_view().filter;
     }
 
     ImGui::Spacing();
@@ -1110,7 +1112,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
             SourceCollectionSessionResult result =
                 submit(ApplySampleFiltering(SampleFilteringIntent::RemoveSource(source_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
-            filter_view = result.view.filter;
+            filter_view = read_view().filter;
             removed_source = true;
         }
         if (tree_open && !removed_source) {
@@ -1166,6 +1168,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionViewReader& read_view,
     bool* open)
 {
     SourceCollectionSessionAction action;
@@ -1197,7 +1200,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
         SourceCollectionSessionResult result =
             submit(ApplySampleSorting(SampleSortingIntent::Clear()));
         MergeSourceCollectionSessionAction(action, result.action);
-        sorting_view = result.view.sorting;
+        sorting_view = read_view().sorting;
     }
 
     if (ImGui::BeginPopup(kAddSampleSortSourcePopup)) {
@@ -1223,7 +1226,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
             SourceCollectionSessionResult result =
                 submit(ApplySampleSorting(SampleSortingIntent::AddSource(*source_to_add)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -1250,27 +1253,27 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
                     : submit(ApplySampleSorting(SampleSortingIntent::SetSortDirection(
                           SampleNavigationSortDirection::Descending)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
         } else if (source_order_view.selected) {
             SourceCollectionSessionResult result = submit(ApplySampleSorting(
                 SampleSortingIntent::SetSortDirection(SampleNavigationSortDirection::Descending)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
             result = submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_order_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
         } else {
             SourceCollectionSessionResult result =
                 submit(ApplySampleSorting(SampleSortingIntent::Clear()));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
         }
     } else if (source_order_action.activate) {
         SourceCollectionSessionResult result = source_order_direction == SampleNavigationSortDirection::Descending
             ? submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_order_view.id)))
             : submit(ApplySampleSorting(SampleSortingIntent::Clear()));
         MergeSourceCollectionSessionAction(action, result.action);
-        sorting_view = result.view.sorting;
+        sorting_view = read_view().sorting;
     }
 
     bool has_sort_source = false;
@@ -1284,7 +1287,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
             SourceCollectionSessionResult result =
                 submit(ApplySampleSorting(SampleSortingIntent::RemoveSource(source_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
             stop_rendering_sources = true;
         } else if (row_action.toggle_direction) {
             const SampleNavigationSortDirection next_direction = source_view.selected
@@ -1295,12 +1298,12 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
                     ? SampleSortingIntent::SetSortDirection(next_direction)
                     : SampleSortingIntent::SetSortSource(source_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
         } else if (row_action.activate) {
             SourceCollectionSessionResult result =
                 submit(ApplySampleSorting(SampleSortingIntent::SetSortSource(source_view.id)));
             MergeSourceCollectionSessionAction(action, result.action);
-            sorting_view = result.view.sorting;
+            sorting_view = read_view().sorting;
         }
         if (stop_rendering_sources) {
             break;
@@ -1321,7 +1324,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
         SourceCollectionSessionResult result =
             submit(ApplySampleSorting(SampleSortingIntent::AddSource(*dropped_source)));
         MergeSourceCollectionSessionAction(action, result.action);
-        sorting_view = result.view.sorting;
+        sorting_view = read_view().sorting;
     }
 
     ImGui::End();
