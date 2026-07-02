@@ -19,18 +19,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kStateFormatKind = "specforge.sample_labeling_tasks.cache";
-constexpr int kStateSchemaVersion = 1;
-
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const auto utf8 = path.u8string();
-    return std::string(utf8.begin(), utf8.end());
-}
-
-std::filesystem::path Utf8ToPath(const std::string& value)
-{
-    return std::filesystem::path(std::u8string(value.begin(), value.end()));
-}
+constexpr int kStateSchemaVersion = 2;
 
 const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
 {
@@ -152,9 +141,10 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
             task.remembered_position = *remembered;
         }
     }
-    if (const std::optional<std::string> output_path = ReadStringMember(task_object, "output_path")) {
-        if (!output_path->empty()) {
-            task.output_path = Utf8ToPath(*output_path);
+    if (const JsonValue* output_path = ObjectMember(task_object, "output_path")) {
+        if (std::optional<std::filesystem::path> path = ReadPersistedPathReference(*output_path);
+            path && !path->empty()) {
+            task.output_path = std::move(*path);
         }
     }
     bool output_load_failed = false;
@@ -256,7 +246,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
 {
     SampleLabelingStateCacheLoadResult result;
     VersionedJsonCacheLoadResult cache =
-        LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample-labeling task record");
+        LoadVersionedJsonCacheFile(path, kStateFormatKind, {1, kStateSchemaVersion}, "sample-labeling task record");
     if (!cache.document) {
         result.warning = std::move(cache.warning);
         return result;
@@ -372,7 +362,11 @@ bool SaveSampleLabelingStateCache(
                     }
                     stream << ",\n";
                     stream << "          \"output_path\": ";
-                    WriteJsonString(stream, task.output_path ? PathToUtf8(*task.output_path) : std::string_view{});
+                    if (task.output_path) {
+                        WritePersistedPathReference(stream, *task.output_path);
+                    } else {
+                        stream << "null";
+                    }
                     stream << ",\n";
                     stream << "          \"labels\": [";
                     if (!task.label_set.labels.empty()) {

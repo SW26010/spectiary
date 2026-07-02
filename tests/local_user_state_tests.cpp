@@ -50,6 +50,12 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
     Require(stream.good(), "could not write text file");
 }
 
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
 {
     const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json");
@@ -133,6 +139,33 @@ void TestPortableDefaultStateWriteCreatesDataFile()
     Require(std::filesystem::exists(path), "portable default write should create the file under Data");
     Require(ReadTextFile(path) == "portable", "portable default write should persist content");
     std::filesystem::remove(path, cleanup_error);
+}
+
+void TestUserPathDisplayTextUsesPackageRelativePortablePath()
+{
+    if (specforge::BuildReleaseProfile() != specforge::ReleaseProfile::Portable) {
+        return;
+    }
+
+    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
+    const std::filesystem::path package_path =
+        runtime_paths.package_root / "package-relative-display-test" / "source.npy";
+    const std::string package_display = specforge::UserPathDisplayText(package_path);
+    Require(
+        package_display.find(PathToUtf8(runtime_paths.package_root)) == std::string::npos,
+        "package-contained user paths should display without the package root");
+    Require(
+        package_display.find("package-relative-display-test") != std::string::npos,
+        "package-contained user paths should display their package-relative directory");
+    Require(
+        package_display.find("source.npy") != std::string::npos,
+        "package-contained user paths should display their file name");
+
+    const std::filesystem::path external_path =
+        std::filesystem::temp_directory_path() / "specforge_external_display_test" / "source.npy";
+    Require(
+        specforge::UserPathDisplayText(external_path) == PathToUtf8(external_path),
+        "external user paths should keep their absolute display text");
 }
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()
@@ -367,6 +400,7 @@ int main()
     TestDefaultLocalUserStatePathUsesSpecForgeRoot();
     TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
     TestPortableDefaultStateWriteCreatesDataFile();
+    TestUserPathDisplayTextUsesPackageRelativePortablePath();
     TestAtomicWriteCreatesParentAndReplacesExistingFile();
     TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
     TestVersionedJsonCacheShellRoundTripsDocument();

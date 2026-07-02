@@ -1,3 +1,4 @@
+#include "app/runtime_paths.h"
 #include "domain/sample_filter.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
@@ -511,6 +512,65 @@ void TestExternalOutputIsResultSourceOfTruth()
     }
 }
 
+void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath()
+{
+    if (specforge::BuildReleaseProfile() != specforge::ReleaseProfile::Portable) {
+        return;
+    }
+
+    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
+    const std::filesystem::path package_test_root =
+        runtime_paths.package_root / "package-relative-labeling-cache-test";
+    const std::filesystem::path output_path = package_test_root / "outputs" / "labels.npy";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_package_relative_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove_all(package_test_root, cleanup_error);
+    std::filesystem::create_directories(output_path.parent_path());
+
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        "package-relative fixture should accept label");
+    Require(specforge::AssignSampleLabel(task, 1, 5).accepted, "package-relative fixture should accept label value");
+    specforge::SelectSampleLabelTaskOutputPath(task, output_path);
+    const specforge::SampleLabelTaskPersistResult persisted =
+        specforge::PersistSampleLabelingTaskResult(task);
+    Require(persisted.output_saved, persisted.message.empty() ? "package-relative output should save" : persisted.message);
+
+    specforge::SampleLabelingSourceState state;
+    state.sample_count = 3;
+    state.active_task_id = task.task_id;
+    state.tasks.push_back(task);
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace("source-identity", std::move(state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(cache_path, cache),
+        "package-relative labeling cache should save");
+
+    const std::string cache_text = ReadTextFile(cache_path);
+    Require(
+        cache_text.find("\"path_kind\": \"package_relative\"") != std::string::npos,
+        "package-contained output path should be written as a package-relative reference");
+    Require(
+        cache_text.find(PathToUtf8(runtime_paths.package_root)) == std::string::npos,
+        "package-relative output path should not store the package root");
+
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(loaded.warning.empty(), loaded.warning);
+    const auto source = loaded.cache.sources.find("source-identity");
+    Require(source != loaded.cache.sources.end(), "package-relative labeling source should restore");
+    Require(source->second.tasks.size() == 1, "package-relative labeling task should restore");
+    const specforge::SampleLabelingTask& restored_task = source->second.tasks.front();
+    Require(restored_task.output_path && *restored_task.output_path == output_path, "package-relative output should resolve under package root");
+    Require(restored_task.values.size() == 3 && restored_task.values[1] == 5, "package-relative output should load values from NPY");
+
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove_all(package_test_root, cleanup_error);
+}
+
 void TestMetadataOnlyChangesRewriteSidecarOnRetry()
 {
     const std::filesystem::path cache_path =
@@ -858,6 +918,7 @@ int main()
         TestSampleLabelingControllerAutosavesDraftRecord();
         TestTaskRecordFlushKeepsActiveTaskAddressStable();
         TestExternalOutputIsResultSourceOfTruth();
+        TestSampleLabelingStateCacheStoresPackageRelativeOutputPath();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();
         TestOutputPathConflictIsRejectedWithinSource();
         TestMissingExternalOutputRestoresFailedState();

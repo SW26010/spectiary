@@ -4,8 +4,11 @@
 #include "app/local_user_state_json.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <ostream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -14,7 +17,44 @@ namespace specforge {
 namespace {
 
 constexpr const char* kStateFormatKind = "specforge.sample_workflow_state.cache";
-constexpr int kStateSchemaVersion = 1;
+constexpr int kStateSchemaVersion = 2;
+constexpr std::string_view kAnnotationSourcePrefix = "annotation:";
+constexpr std::string_view kSourceKindAnnotationPath = "annotation_path";
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+std::filesystem::path PathFromUtf8(std::string_view value)
+{
+    std::u8string utf8;
+    utf8.reserve(value.size());
+    for (const char character : value) {
+        utf8.push_back(static_cast<char8_t>(static_cast<unsigned char>(character)));
+    }
+    return std::filesystem::path(utf8);
+}
+
+std::string AnnotationSourceIdFromPath(const std::filesystem::path& path)
+{
+    return path.empty() ? std::string{} : std::string{kAnnotationSourcePrefix} + PathToUtf8(path);
+}
+
+std::optional<std::filesystem::path> AnnotationPathFromSourceId(std::string_view source_id)
+{
+    if (source_id.size() <= kAnnotationSourcePrefix.size() ||
+        source_id.substr(0, kAnnotationSourcePrefix.size()) != kAnnotationSourcePrefix) {
+        return std::nullopt;
+    }
+
+    std::filesystem::path path = PathFromUtf8(source_id.substr(kAnnotationSourcePrefix.size()));
+    if (!path.is_absolute()) {
+        return std::nullopt;
+    }
+    return path;
+}
 
 const char* SortDirectionName(SampleNavigationSortDirection direction)
 {
@@ -70,7 +110,43 @@ bool HasState(const SampleWorkflowSourceState& state)
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
 
-void WriteStringArrayMember(
+void WritePersistedWorkflowSourceId(std::ostream& stream, std::string_view source_id)
+{
+    if (std::optional<std::filesystem::path> annotation_path = AnnotationPathFromSourceId(source_id)) {
+        stream << "{ \"source_kind\": ";
+        WriteJsonString(stream, kSourceKindAnnotationPath);
+        stream << ", \"path\": ";
+        WritePersistedPathReference(stream, *annotation_path);
+        stream << " }";
+        return;
+    }
+
+    WriteJsonString(stream, source_id);
+}
+
+std::optional<std::string> ReadPersistedWorkflowSourceId(const JsonValue& value)
+{
+    if (value.kind == JsonValue::Kind::String) {
+        return value.string_value.empty() ? std::nullopt : std::optional<std::string>{value.string_value};
+    }
+    if (value.kind != JsonValue::Kind::Object) {
+        return std::nullopt;
+    }
+
+    const std::optional<std::string> source_kind = ReadJsonStringMember(value, "source_kind");
+    const JsonValue* path = JsonObjectMember(value, "path");
+    if (!source_kind || *source_kind != kSourceKindAnnotationPath || path == nullptr) {
+        return std::nullopt;
+    }
+
+    std::optional<std::filesystem::path> annotation_path = ReadPersistedPathReference(*path);
+    if (!annotation_path || annotation_path->empty()) {
+        return std::nullopt;
+    }
+    return AnnotationSourceIdFromPath(*annotation_path);
+}
+
+void WriteSourceIdArrayMember(
     std::ostream& stream,
     const char* name,
     const std::vector<std::string>& values,
@@ -87,7 +163,7 @@ void WriteStringArrayMember(
         if (index > 0) {
             stream << ", ";
         }
-        WriteJsonString(stream, values[index]);
+        WritePersistedWorkflowSourceId(stream, values[index]);
     }
     stream << "]";
     wrote_member = true;
@@ -121,7 +197,7 @@ void WriteFilterConditions(
         }
         stream << "\n";
         stream << "        { \"source_id\": ";
-        WriteJsonString(stream, condition.source_id);
+        WritePersistedWorkflowSourceId(stream, condition.source_id);
         stream << ", \"allowed_values\": [";
         for (std::size_t value_index = 0; value_index < values.size(); ++value_index) {
             if (value_index > 0) {
@@ -148,7 +224,7 @@ void WriteSortState(std::ostream& stream, const SampleWorkflowSourceState& state
     WriteJsonString(stream, SortDirectionName(state.selected_sample_sort_direction));
     if (state.selected_sample_sort_source_id && !state.selected_sample_sort_source_id->empty()) {
         stream << ", \"source_id\": ";
-        WriteJsonString(stream, *state.selected_sample_sort_source_id);
+        WritePersistedWorkflowSourceId(stream, *state.selected_sample_sort_source_id);
     }
     stream << " }";
     wrote_member = true;
@@ -188,7 +264,7 @@ void WriteAnnotationDisplayNames(
         }
         stream << "\n";
         stream << "        { \"source_id\": ";
-        WriteJsonString(stream, display_name.source_id);
+        WritePersistedWorkflowSourceId(stream, display_name.source_id);
         stream << ", \"display_name\": ";
         WriteJsonString(stream, display_name.display_name);
         stream << " }";
@@ -209,7 +285,9 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source
         if (condition_object.kind != JsonValue::Kind::Object) {
             continue;
         }
-        std::optional<std::string> source_id = ReadJsonStringMember(condition_object, "source_id");
+        const JsonValue* source_id_value = JsonObjectMember(condition_object, "source_id");
+        std::optional<std::string> source_id =
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         if (!source_id || source_id->empty()) {
             continue;
         }
@@ -234,7 +312,7 @@ std::vector<SampleFilterCondition> ParseFilterConditions(const JsonValue& source
     return conditions;
 }
 
-std::vector<std::string> ParseStringArrayMember(const JsonValue& source_object, const char* name)
+std::vector<std::string> ParseSourceIdArrayMember(const JsonValue& source_object, const char* name)
 {
     std::vector<std::string> values;
     const JsonValue* array = JsonObjectMember(source_object, name);
@@ -242,8 +320,8 @@ std::vector<std::string> ParseStringArrayMember(const JsonValue& source_object, 
         return values;
     }
     for (const JsonValue& value : array->array) {
-        if (value.kind == JsonValue::Kind::String && !value.string_value.empty()) {
-            values.push_back(value.string_value);
+        if (std::optional<std::string> source_id = ReadPersistedWorkflowSourceId(value)) {
+            values.push_back(std::move(*source_id));
         }
     }
     return UniqueStrings(std::move(values));
@@ -262,7 +340,9 @@ std::vector<SampleAnnotationDisplayNameOverride> ParseAnnotationDisplayNames(con
         if (value.kind != JsonValue::Kind::Object) {
             continue;
         }
-        std::optional<std::string> source_id = ReadJsonStringMember(value, "source_id");
+        const JsonValue* source_id_value = JsonObjectMember(value, "source_id");
+        std::optional<std::string> source_id =
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         std::optional<std::string> display_name = ReadJsonStringMember(value, "display_name");
         if (!source_id || source_id->empty() || !display_name || display_name->empty() ||
             !seen.emplace(*source_id).second) {
@@ -280,7 +360,9 @@ void ParseSortState(const JsonValue& source_object, SampleWorkflowSourceState& s
     if (sorting == nullptr || sorting->kind != JsonValue::Kind::Object) {
         return;
     }
-    if (std::optional<std::string> source_id = ReadJsonStringMember(*sorting, "source_id");
+    const JsonValue* source_id_value = JsonObjectMember(*sorting, "source_id");
+    if (std::optional<std::string> source_id =
+            source_id_value == nullptr ? std::nullopt : ReadPersistedWorkflowSourceId(*source_id_value);
         source_id && !source_id->empty()) {
         state.selected_sample_sort_source_id = std::move(*source_id);
     }
@@ -300,7 +382,7 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
 {
     SampleWorkflowStateCache cache;
     VersionedJsonCacheLoadResult result =
-        LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample workflow state cache");
+        LoadVersionedJsonCacheFile(path, kStateFormatKind, {1, kStateSchemaVersion}, "sample workflow state cache");
     if (!result.document) {
         return cache;
     }
@@ -321,9 +403,9 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
         SampleWorkflowSourceState state;
         state.filter_conditions = ParseFilterConditions(source_object);
         state.selected_filter_source_ids =
-            ParseStringArrayMember(source_object, "selected_filter_source_ids");
+            ParseSourceIdArrayMember(source_object, "selected_filter_source_ids");
         state.selected_sample_sort_source_ids =
-            ParseStringArrayMember(source_object, "selected_sample_sort_source_ids");
+            ParseSourceIdArrayMember(source_object, "selected_sample_sort_source_ids");
         state.annotation_display_names = ParseAnnotationDisplayNames(source_object);
         ParseSortState(source_object, state);
         if (HasState(state)) {
@@ -369,12 +451,12 @@ bool SaveSampleWorkflowStateCache(
                 WriteJsonString(stream, identity);
                 bool wrote_member = true;
                 WriteFilterConditions(stream, state.filter_conditions, wrote_member);
-                WriteStringArrayMember(
+                WriteSourceIdArrayMember(
                     stream,
                     "selected_filter_source_ids",
                     state.selected_filter_source_ids,
                     wrote_member);
-                WriteStringArrayMember(
+                WriteSourceIdArrayMember(
                     stream,
                     "selected_sample_sort_source_ids",
                     state.selected_sample_sort_source_ids,

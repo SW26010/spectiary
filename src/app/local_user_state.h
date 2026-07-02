@@ -2,12 +2,19 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace specforge {
 
+struct JsonValue;
+
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
+[[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
+[[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value);
+void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path);
 
 class LocalUserStateSaveStatus {
 public:

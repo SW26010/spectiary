@@ -1,5 +1,6 @@
 #include "ui/source_collection_panel.h"
 
+#include "app/local_user_state.h"
 #include "ui/sample_name_autocomplete.h"
 
 #include <imgui.h>
@@ -55,7 +56,7 @@ std::string PathToUtf8(const std::filesystem::path& path)
 
 std::string NarrowPath(const std::filesystem::path& path)
 {
-    return PathToUtf8(path);
+    return UserPathDisplayText(path);
 }
 
 std::string TrimAscii(std::string_view value)

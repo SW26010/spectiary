@@ -1,5 +1,7 @@
 #include "ui/sample_workflow_panel.h"
 
+#include "app/local_user_state.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -435,7 +437,10 @@ SampleSortSourceRowAction RenderSampleSortSourceRow(
         action.activate = true;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", source_view.name.c_str());
+        const std::string tooltip = source_view.annotation_path.empty()
+            ? source_view.name
+            : UserPathDisplayText(source_view.annotation_path);
+        ImGui::SetTooltip("%s", tooltip.c_str());
     }
     const ImRect label_rect(label_min, ImVec2(label_min.x + label_width, label_min.y + frame_height));
     ImGui::RenderTextClipped(
@@ -870,7 +875,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             warning.data());
     }
     if (labeling_view.output_path) {
-        const std::string path = PathToUtf8(*labeling_view.output_path);
+        const std::string path = UserPathDisplayText(*labeling_view.output_path);
         ImGui::TextDisabled("%s", path.c_str());
     }
 
@@ -1025,7 +1030,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
                 source_to_add = source_view.id;
             }
             if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
-                const std::string path = PathToUtf8(source_view.annotation_path);
+                const std::string path = UserPathDisplayText(source_view.annotation_path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
             ImGui::PopID();
@@ -1087,6 +1092,10 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderFilters(
         const ImVec2 source_item_min = ImGui::GetItemRectMin();
         const ImVec2 source_item_max = ImGui::GetItemRectMax();
         const bool source_row_hovered = ImGui::IsItemHovered();
+        if (source_row_hovered && !source_view.annotation_path.empty()) {
+            const std::string path = UserPathDisplayText(source_view.annotation_path);
+            ImGui::SetTooltip("%s", path.c_str());
+        }
         bool removed_source = false;
         const float action_width = ImGui::GetFrameHeight();
         const ImRect remove_rect(
@@ -1202,7 +1211,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderSorting(
                 source_to_add = source_view.id;
             }
             if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {
-                const std::string path = PathToUtf8(source_view.annotation_path);
+                const std::string path = UserPathDisplayText(source_view.annotation_path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
             ImGui::PopID();
