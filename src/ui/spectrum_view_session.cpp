@@ -82,6 +82,13 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::SetPlotStyle(SpectrumPlot
     return command;
 }
 
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender()
+{
+    SpectrumViewSessionCommand command;
+    command.kind = SpectrumViewSessionCommandKind::SyncPlotLimitsOnNextRender;
+    return command;
+}
+
 void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
 {
     switch (command.kind) {
@@ -127,6 +134,11 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
     }
     case SpectrumViewSessionCommandKind::SetPlotStyle:
         plot_style_ = command.plot_style;
+        break;
+    case SpectrumViewSessionCommandKind::SyncPlotLimitsOnNextRender:
+        if (plot_state_.has_last_limits) {
+            plot_state_.sync_last_limits_next_frame = true;
+        }
         break;
     }
 }

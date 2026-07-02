@@ -583,11 +583,13 @@ void ShellUi::RefreshSystemColors()
 
 void ShellUi::EnterImmersivePlotMode()
 {
+    spectrum_view_session_.Submit(SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
     immersive_plot_mode_ = true;
 }
 
 void ShellUi::ExitImmersivePlotMode()
 {
+    spectrum_view_session_.Submit(SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
     immersive_plot_mode_ = false;
 }
 
@@ -750,7 +752,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
         SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()},
-        SpectrumPlotDisplayOptions{true});
+        SpectrumPlotDisplayOptions{true, true});
 
     ImGui::End();
 }

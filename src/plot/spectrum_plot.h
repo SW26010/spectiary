@@ -33,6 +33,7 @@ struct SpectrumPlotState {
     double last_x_max = 0.0;
     double last_y_min = 0.0;
     double last_y_max = 0.0;
+    bool sync_last_limits_next_frame = false;
 };
 
 struct SpectrumPlotProfileContext {
@@ -53,6 +54,7 @@ struct SpectrumPlotOverlays {
 
 struct SpectrumPlotDisplayOptions {
     bool edge_axis_overlay = false;
+    bool include_edge_pixels = false;
 };
 
 void RenderSpectrumPlot(

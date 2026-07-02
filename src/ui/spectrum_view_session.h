@@ -18,6 +18,7 @@ enum class SpectrumViewSessionCommandKind {
     SetGaussianSigma,
     SetMedianKernelSize,
     SetPlotStyle,
+    SyncPlotLimitsOnNextRender,
 };
 
 struct SpectrumViewSessionCommand {
@@ -31,6 +32,7 @@ struct SpectrumViewSessionCommand {
     [[nodiscard]] static SpectrumViewSessionCommand SetGaussianSigma(double sigma);
     [[nodiscard]] static SpectrumViewSessionCommand SetMedianKernelSize(int kernel_size);
     [[nodiscard]] static SpectrumViewSessionCommand SetPlotStyle(SpectrumPlotStyle style);
+    [[nodiscard]] static SpectrumViewSessionCommand SyncPlotLimitsOnNextRender();
 
 private:
     friend class SpectrumViewSession;

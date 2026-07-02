@@ -457,6 +457,13 @@ void StoreLastLimits(const ImPlotRect& limits, SpectrumPlotState& state)
     state.last_y_max = limits.Y.Max;
 }
 
+bool LastLimitsAreUsable(const SpectrumPlotState& state)
+{
+    return state.has_last_limits && std::isfinite(state.last_x_min) && std::isfinite(state.last_x_max) &&
+           std::isfinite(state.last_y_min) && std::isfinite(state.last_y_max) &&
+           state.last_x_min < state.last_x_max && state.last_y_min < state.last_y_max;
+}
+
 bool ContainsPoint(const ImVec2& min, const ImVec2& max, const ImVec2& point)
 {
     return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y;
@@ -526,6 +533,38 @@ bool ApplyEdgeAxisWheelZoom(
     return true;
 }
 
+ImVec2 PlotSizeForDisplay(const SpectrumPlotDisplayOptions& display, const ImVec2& available_size)
+{
+    if (!display.include_edge_pixels || available_size.x <= 0.0f || available_size.y <= 0.0f) {
+        return ImVec2(-1.0f, -1.0f);
+    }
+
+    // Dear ImGui's rectangle hit test includes Min but excludes Max. The immersive plot
+    // intentionally reaches the window edge, so give ImPlot one clipped pixel past the
+    // visible right/bottom edges and keep native hover, crosshair, mouse text, and pan.
+    return ImVec2(available_size.x + 1.0f, available_size.y + 1.0f);
+}
+
+bool ApplyStoredLimitsOnNextRender(SpectrumPlotState& state)
+{
+    if (!state.sync_last_limits_next_frame) {
+        return false;
+    }
+
+    state.sync_last_limits_next_frame = false;
+    if (!LastLimitsAreUsable(state)) {
+        return false;
+    }
+
+    ImPlot::SetNextAxesLimits(
+        state.last_x_min,
+        state.last_x_max,
+        state.last_y_min,
+        state.last_y_max,
+        ImPlotCond_Always);
+    return true;
+}
+
 }  // namespace
 
 void RenderSpectrumPlot(
@@ -546,11 +585,15 @@ void RenderSpectrumPlot(
         const Bounds bounds = ComputeBounds(*snapshot, state);
         ImPlot::SetNextAxesLimits(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max, ImPlotCond_Always);
         state.fit_next_frame = false;
+        state.sync_last_limits_next_frame = false;
+    } else {
+        ApplyStoredLimitsOnNextRender(state);
     }
 
     constexpr float kEdgeAxisBandPixels = 44.0f;
     const ImVec2 plot_widget_pos = ImGui::GetCursorScreenPos();
     const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
+    const ImVec2 plot_size = PlotSizeForDisplay(display, plot_widget_size);
     const bool edge_axis_wheel_zoomed =
         display.edge_axis_overlay && !fit_requested &&
         ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, kEdgeAxisBandPixels);
@@ -568,7 +611,7 @@ void RenderSpectrumPlot(
         plot_flags |= ImPlotFlags_NoInputs;
     }
 
-    if (ImPlot::BeginPlot("Spectrum##main_spectrum", ImVec2(-1.0f, -1.0f), plot_flags)) {
+    if (ImPlot::BeginPlot("Spectrum##main_spectrum", plot_size, plot_flags)) {
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
         ImPlot::SetupAxis(ImAxis_X1, x_label, axis_flags);
