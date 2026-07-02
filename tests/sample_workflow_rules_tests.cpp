@@ -2,6 +2,7 @@
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_sorting_sources.h"
+#include "ui/sample_workflow_source_policy.h"
 
 #include <filesystem>
 #include <optional>
@@ -271,6 +272,62 @@ void TestAnnotationSortingExclusions()
         "non-comparable float annotations should be excluded from view sources");
 }
 
+void TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting()
+{
+    const std::filesystem::path rank_path = TempPath("_policy_rank.npy");
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {"gamma", "alpha", "beta"};
+    manifest.annotations.push_back(MakeIntegerAnnotation("Rank", rank_path, {2, 1, 1}));
+    const std::string source_id = specforge::BuildAnnotationFilterSourceId(manifest.annotations[0]);
+
+    specforge::SampleWorkflowSourcePolicy policy;
+    const specforge::SampleWorkflowSourceContext context{
+        .collection = &manifest,
+        .labeling_tasks = nullptr,
+        .sample_count = 3};
+
+    specforge::SourceCollectionFilterView filter_view = policy.BuildFilterView(context);
+    Require(filter_view.sources.empty(), "policy should start with no selected sample filter sources");
+    Require(filter_view.available_sources.size() == 1, "policy should expose the annotation as addable filtering");
+    Require(filter_view.available_sources[0].name == "Rank", "policy should use the default annotation display name");
+
+    specforge::SourceCollectionSampleSortingView sorting_view = policy.BuildSortingView(context);
+    Require(
+        sorting_view.available_sources.size() == 1 && sorting_view.available_sources[0].name == "Rank",
+        "policy should expose the annotation as addable sorting");
+
+    Require(
+        policy.RenameAnnotationDisplayName(context, rank_path, "  Quality rank  "),
+        "policy should accept an annotation display-name override");
+    filter_view = policy.BuildFilterView(context);
+    Require(
+        filter_view.available_sources[0].name == "Quality rank",
+        "policy should apply display names to filter sources");
+    sorting_view = policy.BuildSortingView(context);
+    Require(
+        sorting_view.available_sources[0].name == "Quality rank",
+        "policy should apply display names to sorting sources");
+
+    Require(policy.AddFilterSource(context, source_id), "policy should explicitly select a sample filter source");
+    Require(
+        policy.SetFilterValueSelected(context, source_id, "1", true),
+        "policy should mutate selected sample filter values");
+    const specforge::SampleFilterEvaluation evaluation = policy.EvaluateFilters(context);
+    Require(evaluation.active, "selected values should activate sample filtering");
+    Require(evaluation.included_count == 2, "sample filtering should include matching annotation values");
+
+    Require(policy.SetSampleSortSource(context, source_id), "policy should select an annotation sort source");
+    policy.SetSampleSortDirection(specforge::SampleNavigationSortDirection::Descending);
+    specforge::SampleWorkflowSortChoiceResult sort_choice = policy.BuildSortChoice(context, true);
+    Require(sort_choice.choice.has_value(), "policy should build a navigation sort choice");
+    Require(
+        sort_choice.choice->direction == specforge::SampleNavigationSortDirection::Descending,
+        "policy should keep the selected source direction");
+    Require(
+        std::get<double>(sort_choice.choice->values[0]) == 2.0,
+        "policy sort choice should use annotation values");
+}
+
 }  // namespace
 
 int main()
@@ -282,5 +339,6 @@ int main()
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
     TestAnnotationSortingExclusions();
+    TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
     return 0;
 }

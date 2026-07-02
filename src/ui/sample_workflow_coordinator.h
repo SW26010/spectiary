@@ -1,10 +1,10 @@
 #pragma once
 
-#include "domain/sample_filter.h"
 #include "domain/spectrum_snapshot.h"
 #include "app/local_user_state.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/sample_workflow_source_policy.h"
 #include "ui/sample_workflow_state_cache_io.h"
 #include "ui/source_collection_session_types.h"
 
@@ -147,22 +147,8 @@ private:
     std::optional<std::size_t> ApplySampleSorting(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::size_t ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] std::optional<std::size_t> ActiveSampleIndex(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] SampleFilterEvaluation EvaluateSampleFilters(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] bool IsSelectedFilterSource(std::string_view source_id) const;
-    [[nodiscard]] bool IsSelectedSampleSortSource(std::string_view source_id) const;
-    [[nodiscard]] std::string AnnotationDisplayName(
-        const SampleAnnotationResult& annotation,
-        const SampleLabelingTask* local_task = nullptr) const;
-    [[nodiscard]] std::string LocalTaskAnnotationDisplayName(const SampleLabelingTask& task) const;
-    [[nodiscard]] SampleNavigationSortDirection SampleSortSourceDirection(std::string_view source_id) const;
-    void SetSampleSortSourceDirection(std::string_view source_id, SampleNavigationSortDirection direction);
-    [[nodiscard]] std::vector<SampleFilterSource> BuildSampleFilterSources() const;
-    [[nodiscard]] bool RemoveSelectedSampleSortSource(std::string_view source_id);
-    [[nodiscard]] const SourceCollectionFilterView& CachedSampleFilterView(std::size_t sample_count) const;
-    void InvalidateSampleFilterViewCache();
-    [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSampleSortingSourceViews(
-        std::size_t sample_count) const;
-    void InvalidateSampleSortingSourceCache();
+    [[nodiscard]] SampleWorkflowSourceContext SourcePolicyContext(
+        const SpectrumSnapshotHandle& snapshot) const;
     void EnsureWorkflowStateCacheLoaded();
     void RestoreActiveWorkflowState(std::string_view source_identity);
     void StoreActiveWorkflowState();
@@ -175,29 +161,14 @@ private:
 
     SampleNavigationController navigation_;
     SampleLabelingController labeling_;
-    SampleFilterController filters_;
+    SampleWorkflowSourcePolicy workflow_sources_;
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
-    std::vector<std::string> selected_filter_source_ids_;
-    std::vector<std::string> selected_sample_sort_source_ids_;
-    std::unordered_map<std::string, std::string> annotation_display_names_;
-    std::unordered_map<std::string, SampleNavigationSortDirection> sample_sort_source_directions_;
-    std::optional<std::string> selected_sample_sort_source_id_;
-    SampleNavigationSortDirection selected_sample_sort_direction_ =
-        SampleNavigationSortDirection::Ascending;
     std::filesystem::path workflow_state_cache_path_;
     SampleWorkflowStateCache workflow_state_cache_;
     LocalUserStateSaveScheduler workflow_state_save_scheduler_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
-    mutable bool sample_sorting_source_cache_valid_ = false;
-    mutable std::size_t sample_sorting_source_cache_sample_count_ = 0;
-    mutable const SourceCollectionManifest* sample_sorting_source_cache_context_ = nullptr;
-    mutable std::vector<SourceCollectionSampleSortSourceView> sample_sorting_source_cache_;
-    mutable bool sample_filter_view_cache_valid_ = false;
-    mutable std::size_t sample_filter_view_cache_sample_count_ = 0;
-    mutable const SourceCollectionManifest* sample_filter_view_cache_context_ = nullptr;
-    mutable SourceCollectionFilterView sample_filter_view_cache_;
 };
 
 }  // namespace specforge
