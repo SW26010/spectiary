@@ -23,8 +23,8 @@ struct Bounds {
     double y_max = 1.0;
 };
 
-struct ScopedEdgeAxisPlotStyle {
-    explicit ScopedEdgeAxisPlotStyle(bool enabled)
+struct ScopedTransparentPlotStyle {
+    explicit ScopedTransparentPlotStyle(bool enabled)
         : enabled_(enabled)
     {
         if (!enabled_) {
@@ -44,7 +44,7 @@ struct ScopedEdgeAxisPlotStyle {
         ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(0.0f, 0.0f));
     }
 
-    ~ScopedEdgeAxisPlotStyle()
+    ~ScopedTransparentPlotStyle()
     {
         if (!enabled_) {
             return;
@@ -54,8 +54,8 @@ struct ScopedEdgeAxisPlotStyle {
         ImPlot::PopStyleColor(7);
     }
 
-    ScopedEdgeAxisPlotStyle(const ScopedEdgeAxisPlotStyle&) = delete;
-    ScopedEdgeAxisPlotStyle& operator=(const ScopedEdgeAxisPlotStyle&) = delete;
+    ScopedTransparentPlotStyle(const ScopedTransparentPlotStyle&) = delete;
+    ScopedTransparentPlotStyle& operator=(const ScopedTransparentPlotStyle&) = delete;
 
 private:
     bool enabled_ = false;
@@ -343,17 +343,69 @@ double NiceTickStep(double range, int desired_count)
     return nice_fraction * magnitude;
 }
 
+int DecimalPlacesForStep(double step)
+{
+    const double abs_step = std::abs(step);
+    if (!std::isfinite(abs_step) || abs_step <= 0.0 || abs_step >= 1.0) {
+        return 0;
+    }
+
+    return std::clamp(static_cast<int>(std::ceil(-std::log10(abs_step))), 0, 8);
+}
+
+std::string TrimFixedDecimalZeros(std::string value)
+{
+    const std::size_t decimal = value.find('.');
+    if (decimal == std::string::npos) {
+        return value;
+    }
+
+    while (value.size() > decimal + 1 && value.back() == '0') {
+        value.pop_back();
+    }
+    if (!value.empty() && value.back() == '.') {
+        value.pop_back();
+    }
+    return value == "-0" ? "0" : value;
+}
+
 std::string FormatTickValue(double value, double step)
 {
+    if (!std::isfinite(value)) {
+        return {};
+    }
+
     if (std::abs(value) < std::abs(step) * 1.0e-6) {
         value = 0.0;
     }
 
     char buffer[64] = {};
-    const double abs_value = std::abs(value);
-    const char* format = (abs_value >= 10000.0 || (abs_value > 0.0 && abs_value < 0.01)) ? "%.3g" : "%.4g";
-    std::snprintf(buffer, sizeof(buffer), format, value);
-    return std::string(buffer);
+    std::snprintf(buffer, sizeof(buffer), "%.*f", DecimalPlacesForStep(step), value);
+    return TrimFixedDecimalZeros(std::string(buffer));
+}
+
+int FormatNativeCompactYTick(double value, char* buffer, int size, void*)
+{
+    if (buffer == nullptr || size <= 0) {
+        return 0;
+    }
+
+    if (!std::isfinite(value)) {
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    const double tenths = value * 10.0;
+    const double rounded_tenths = std::round(tenths);
+    if (std::abs(tenths - rounded_tenths) > 1.0e-6) {
+        return std::snprintf(buffer, static_cast<std::size_t>(size), "%4s", "");
+    }
+
+    double rounded_value = rounded_tenths / 10.0;
+    if (std::abs(rounded_value) < 0.05) {
+        rounded_value = 0.0;
+    }
+    return std::snprintf(buffer, static_cast<std::size_t>(size), "%4.1f", rounded_value);
 }
 
 float ClampTextStart(float desired, float minimum, float maximum)
@@ -364,7 +416,7 @@ float ClampTextStart(float desired, float minimum, float maximum)
     return std::clamp(desired, minimum, maximum);
 }
 
-void RenderEdgeAxisTicks()
+void RenderEdgeAxisOverlay()
 {
     const ImPlotRect limits = ImPlot::GetPlotLimits();
     const ImVec2 plot_pos = ImPlot::GetPlotPos();
@@ -539,10 +591,7 @@ ImVec2 PlotSizeForDisplay(const SpectrumPlotDisplayOptions& display, const ImVec
         return ImVec2(-1.0f, -1.0f);
     }
 
-    // Dear ImGui's rectangle hit test includes Min but excludes Max. The immersive plot
-    // intentionally reaches the window edge, so give ImPlot one clipped pixel past the
-    // visible right/bottom edges and keep native hover, crosshair, mouse text, and pan.
-    return ImVec2(available_size.x + 1.0f, available_size.y + 1.0f);
+    return available_size;
 }
 
 bool ApplyStoredLimitsOnNextRender(SpectrumPlotState& state)
@@ -598,14 +647,25 @@ void RenderSpectrumPlot(
         display.edge_axis_overlay && !fit_requested &&
         ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, kEdgeAxisBandPixels);
 
-    const ScopedEdgeAxisPlotStyle edge_axis_style(display.edge_axis_overlay);
+    const bool transparent_native_axes = display.native_transparent_axes && !display.edge_axis_overlay;
+    const ScopedTransparentPlotStyle transparent_plot_style(display.edge_axis_overlay || transparent_native_axes);
     ImPlotFlags plot_flags = ImPlotFlags_Crosshairs;
-    ImPlotAxisFlags axis_flags = ImPlotAxisFlags_None;
-    if (display.edge_axis_overlay) {
+    ImPlotAxisFlags x_axis_flags = ImPlotAxisFlags_None;
+    ImPlotAxisFlags y_axis_flags = ImPlotAxisFlags_None;
+    if (display.edge_axis_overlay || transparent_native_axes) {
         plot_flags |= ImPlotFlags_NoFrame | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend;
-        axis_flags |= ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
-                      ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoMenus |
-                      ImPlotAxisFlags_NoSideSwitch | ImPlotAxisFlags_NoHighlight;
+    }
+    if (transparent_native_axes) {
+        x_axis_flags |= ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                        ImPlotAxisFlags_NoMenus | ImPlotAxisFlags_NoSideSwitch |
+                        ImPlotAxisFlags_NoHighlight;
+        y_axis_flags |= x_axis_flags;
+    }
+    if (display.edge_axis_overlay) {
+        x_axis_flags |= ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoTickMarks |
+                        ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoMenus |
+                        ImPlotAxisFlags_NoSideSwitch | ImPlotAxisFlags_NoHighlight;
+        y_axis_flags |= x_axis_flags;
     }
     if (edge_axis_wheel_zoomed) {
         plot_flags |= ImPlotFlags_NoInputs;
@@ -614,8 +674,11 @@ void RenderSpectrumPlot(
     if (ImPlot::BeginPlot("Spectrum##main_spectrum", plot_size, plot_flags)) {
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
-        ImPlot::SetupAxis(ImAxis_X1, x_label, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, y_label, axis_flags);
+        ImPlot::SetupAxis(ImAxis_X1, x_label, x_axis_flags);
+        ImPlot::SetupAxis(ImAxis_Y1, y_label, y_axis_flags);
+        if (transparent_native_axes) {
+            ImPlot::SetupAxisFormat(ImAxis_Y1, FormatNativeCompactYTick);
+        }
 
         const SpectrumValueVector& x_values = snapshot->current_spectrum.x_values;
         const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
@@ -677,7 +740,7 @@ void RenderSpectrumPlot(
             RenderSpectralLineOverlays(overlays);
         }
         if (display.edge_axis_overlay) {
-            RenderEdgeAxisTicks();
+            RenderEdgeAxisOverlay();
         }
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();

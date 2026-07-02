@@ -55,6 +55,7 @@ struct SpectrumPlotOverlays {
 struct SpectrumPlotDisplayOptions {
     bool edge_axis_overlay = false;
     bool include_edge_pixels = false;
+    bool native_transparent_axes = false;
 };
 
 void RenderSpectrumPlot(

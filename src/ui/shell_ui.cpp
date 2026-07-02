@@ -31,6 +31,32 @@ constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 constexpr float kStatusBarSeparatorThickness = 1.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
+enum class ImmersivePlotAxisImplementation {
+    NativeImPlot,
+    CustomEdgeOverlay,
+};
+
+// Change this line to compare native ImPlot axes with the custom edge overlay.
+constexpr ImmersivePlotAxisImplementation kImmersivePlotAxisImplementation =
+    ImmersivePlotAxisImplementation::NativeImPlot;
+
+SpectrumPlotDisplayOptions MakeImmersivePlotDisplayOptions()
+{
+    SpectrumPlotDisplayOptions display_options;
+    display_options.include_edge_pixels = true;
+
+    switch (kImmersivePlotAxisImplementation) {
+    case ImmersivePlotAxisImplementation::NativeImPlot:
+        display_options.native_transparent_axes = true;
+        break;
+    case ImmersivePlotAxisImplementation::CustomEdgeOverlay:
+        display_options.edge_axis_overlay = true;
+        break;
+    }
+
+    return display_options;
+}
+
 class ScopedComInitialization {
 public:
     ScopedComInitialization()
@@ -752,7 +778,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
         SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()},
-        SpectrumPlotDisplayOptions{true, true});
+        MakeImmersivePlotDisplayOptions());
 
     ImGui::End();
 }
