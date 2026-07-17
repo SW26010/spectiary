@@ -644,6 +644,11 @@ bool ShellUi::immersive_plot_mode() const
     return immersive_plot_mode_;
 }
 
+bool ShellUi::latency_sensitive_plot_interaction_active() const
+{
+    return spectrum_view_session_.PlotPanActive();
+}
+
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
     (void)SubmitSessionCommand(

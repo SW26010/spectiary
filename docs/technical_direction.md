@@ -27,6 +27,7 @@
 - vcpkg 的 `imgui` port 提供 `docking-experimental`、`win32-binding` 和 `dx11-binding` features: <https://vcpkg.io/en/package/imgui.html>
 - ImPlot README 提醒高密度绘图需要关注 16-bit index 限制、renderer vtx offset 或 32-bit indices，并说明 ImPlot 适合实时交互绘图: <https://github.com/epezent/implot>
 - Windows Precision Touchpad 对未启用原生手势的桌面程序通常回退为 wheel 消息；主图的双指平移和捏合缩放使用 Windows Direct Manipulation，并只接管命中 plot 的 `PT_TOUCHPAD`: <https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal>、<https://learn.microsoft.com/en-us/windows/win32/directmanipulation/direct-manipulation-portal>
+- Windows 11 DRR 的高刷新交互使用官方 compositor clock API 请求 boost，并通过 compositor clock tick 驱动帧节奏；不能只请求 boost 后继续依赖被虚拟化的 DXGI vblank。DXGI 报告支持时，boosted flip-model swap chain 同时使用 capability-gated variable-refresh/tearing flags，普通帧仍保持同步提交: <https://learn.microsoft.com/en-us/windows/win32/directcomp/compositor-clock/compositor-clock>、<https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/variable-refresh-rate-displays>
 - CMake Presets 文档区分可提交的 `CMakePresets.json` 和本地的 `CMakeUserPresets.json`: <https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html>
 
 ## Docking 方向
@@ -80,6 +81,7 @@ JSONL profile 至少区分：
 - draw submission。
 - render pass duration。
 - present timing。
+- compositor clock 初始化、boost 请求/释放、可用性和 HRESULT。
 - spectrum switch。
 - overlay update。
 
@@ -89,6 +91,7 @@ JSONL profile 至少区分：
 - 130Hz 是当前真实数据 pan/drag 验收线。
 - 144Hz 是 stretch target。
 - 没有真实数据和新日志，不声明达标。
+- `compositor_clock.active=true` 只证明应用已成功请求并启动 clock pacing；是否实际升至 120Hz 仍以交互窗口内的 input/present interval 为准。
 - 触碰每帧 UI、plot、overlay、sample filtering、labeling 或 source/session view 构造的功能改动，必须用真实数据 profile 证明交互预算未退化；不能只用单元测试或 synthetic fixture 代替。
 
 ## 工程边界
@@ -96,6 +99,7 @@ JSONL profile 至少区分：
 建议后续代码结构：
 
 - `platform`: Win32 window、message loop、DPI、shutdown。
+- `platform/win32_compositor_clock`: Windows 11 API 动态发现、成对 boost 生命周期和 clock tick 唤醒；UI 主循环将普通输入无效化合并到下一次 tick，renderer 只负责 capability-gated DXGI present flags，不把 DRR API 细节扩散到 plot/UI。
 - `renderer`: D3D11 device、swap chain、render target、resize。
 - `ui`: ImGui context、style、dockspace、panel orchestration。
 - `plot`: ImPlot spectrum view 和 overlay rendering。

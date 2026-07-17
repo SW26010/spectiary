@@ -37,6 +37,10 @@ The product target is an elegant, responsive, dockable desktop spectrum viewer:
   public catalog
 - windowing: freely dockable ImGui panels using the docking branch
 - performance: measured on real data before making refresh-rate claims
+- refresh policy: event-driven at idle; on supported Windows 11 DRR systems,
+  main-plot mouse pan and Precision Touchpad manipulation request the compositor
+  high-refresh clock, pace rendering from its ticks, and return to the base rate
+  when interaction ends
 
 See [docs/product_requirements.md](docs/product_requirements.md),
 [docs/technical_direction.md](docs/technical_direction.md), and
@@ -47,6 +51,11 @@ See [docs/product_requirements.md](docs/product_requirements.md),
 The built application requires Windows 10 or Windows 11 at runtime. Its
 presentation path depends on `DXGI_SWAP_EFFECT_FLIP_DISCARD` and
 `IDXGISwapChain3`; older Windows versions are not supported.
+Windows 11 build 22000 or newer additionally enables compositor-clock DRR
+boosting. When DXGI reports variable-refresh presentation support, boosted
+frames use the standard tearing-capable flip-model path; ordinary and fallback
+frames retain the existing display-vsync path. Windows 10 and systems without
+the compositor-clock API safely keep the fallback behavior.
 
 Required tools:
 

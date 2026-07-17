@@ -30,6 +30,7 @@ namespace {
 
 constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
+constexpr UINT kCompositorClockTickMessage = WM_APP + 0x54U;
 constexpr float kDefaultWindowsDpi = 96.0f;
 constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -304,26 +305,38 @@ int SpecForgeApp::Run(
         }
 
         const bool window_renderable = !minimized_ && window_visible_;
-        if (window_renderable && render_wake_scheduler_.ShouldRender(now)) {
+        bool touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
+        UpdateCompositorClockBoost(window_renderable, touchpad_active);
+        const bool compositor_clock_paced = compositor_clock_.boost_active();
+        const bool render_permitted = !compositor_clock_paced || compositor_clock_tick_ready_;
+        if (window_renderable && render_wake_scheduler_.ShouldRender(now, render_permitted)) {
+            if (compositor_clock_paced) {
+                compositor_clock_tick_ready_ = false;
+            }
             render_wake_scheduler_.BeginFrame(now);
             RenderFrame();
             const ImGuiIO& io = ImGui::GetIO();
             const bool popup_open = ImGui::IsPopupOpen(
                 nullptr,
                 ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+            touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
+            UpdateCompositorClockBoost(window_renderable, touchpad_active);
             render_wake_scheduler_.EndFrame(
                 RenderWakeScheduler::Clock::now(),
                 {
-                    .touchpad_active = touchpad_gestures_.NeedsContinuousUpdates(),
+                    .touchpad_active = touchpad_active,
+                    .compositor_clock_paced = compositor_clock_.boost_active(),
                     .text_input_active = io.WantTextInput && io.ConfigInputTextCursorBlink,
                     .popup_open = popup_open,
                 });
         }
 
-        (void)WaitForWin32MessageOrDeadline(
-            render_wake_scheduler_.NextWakeDeadline(
-                window_renderable,
-                ui_.NextMaintenanceDeadline()));
+        const bool wait_render_permitted =
+            !compositor_clock_.boost_active() || compositor_clock_tick_ready_;
+        (void)WaitForWin32MessageOrDeadline(render_wake_scheduler_.NextWakeDeadline(
+            window_renderable,
+            ui_.NextMaintenanceDeadline(),
+            wait_render_permitted));
     }
 
     Shutdown();
@@ -391,6 +404,22 @@ void SpecForgeApp::Initialize(
     if (FAILED(renderer_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), renderer_result));
     }
+
+    const bool compositor_clock_available =
+        compositor_clock_.Initialize(window_.hwnd(), kCompositorClockTickMessage);
+    profile_.WriteEvent("compositor_clock", {
+                                                  ProfileSink::Field::String("action", "initialize"),
+                                                  ProfileSink::Field::Bool("available", compositor_clock_available),
+                                                  ProfileSink::Field::String(
+                                                      "result",
+                                                      HResultHex(compositor_clock_.last_boost_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "last_wait_result",
+                                                      std::to_string(compositor_clock_.last_wait_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "tick_count",
+                                                      std::to_string(compositor_clock_.tick_count())),
+                                              });
 
     InitializeUiBackends();
     if (!message_render_observer_.Start(&SpecForgeApp::InvalidateRenderFromWin32Message, this)) {
@@ -467,6 +496,26 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    if (compositor_clock_.boost_requested()) {
+        (void)compositor_clock_.SetBoostRequested(false);
+        profile_.WriteEvent("compositor_clock", {
+                                                  ProfileSink::Field::String("action", "shutdown_release"),
+                                                  ProfileSink::Field::Bool("requested", false),
+                                                  ProfileSink::Field::Bool(
+                                                      "active",
+                                                      compositor_clock_.boost_active()),
+                                                  ProfileSink::Field::String(
+                                                      "result",
+                                                      HResultHex(compositor_clock_.last_boost_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "last_wait_result",
+                                                      std::to_string(compositor_clock_.last_wait_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "tick_count",
+                                                      std::to_string(compositor_clock_.tick_count())),
+                                              });
+    }
+    compositor_clock_.Shutdown();
     message_render_observer_.Stop();
     touchpad_gestures_.ClearTarget();
 
@@ -525,6 +574,7 @@ void SpecForgeApp::RenderFrame()
 
         const ImGuiIO& io = ImGui::GetIO();
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            viewport_renderer_.SetCompositorClockPaced(compositor_clock_.boost_active());
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
             const D3D11RendererError viewport_error = viewport_renderer_.TakeLastError();
@@ -534,22 +584,60 @@ void SpecForgeApp::RenderFrame()
         }
     }
 
+    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
+                                                 ? D3D11PresentMode::CompositorClock
+                                                 : D3D11PresentMode::DisplayVSync;
     HRESULT present_result = S_OK;
     if (profile_.is_open()) {
         const auto present_start = std::chrono::steady_clock::now();
-        present_result = renderer_.Present();
+        present_result = renderer_.Present(present_mode);
         const auto present_elapsed = std::chrono::steady_clock::now() - present_start;
         profile_.WriteDuration(
             "present",
             frame_index_,
             std::chrono::duration<double, std::milli>(present_elapsed).count());
     } else {
-        present_result = renderer_.Present();
+        present_result = renderer_.Present(present_mode);
     }
 
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), present_result));
     }
+}
+
+void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
+{
+    const bool plot_interaction_active = ui_.latency_sensitive_plot_interaction_active();
+    const bool requested = window_renderable && (plot_interaction_active || touchpad_active);
+    if (requested == compositor_clock_.boost_requested()) {
+        return;
+    }
+
+    compositor_clock_tick_ready_ = false;
+    (void)compositor_clock_.SetBoostRequested(requested);
+    profile_.WriteEvent("compositor_clock", {
+                                                  ProfileSink::Field::String("action", "boost_request"),
+                                                  ProfileSink::Field::Bool("available", compositor_clock_.available()),
+                                                  ProfileSink::Field::Bool("requested", requested),
+                                                  ProfileSink::Field::Bool(
+                                                      "active",
+                                                      compositor_clock_.boost_active()),
+                                                  ProfileSink::Field::Bool(
+                                                      "plot_interaction_active",
+                                                      plot_interaction_active),
+                                                  ProfileSink::Field::Bool(
+                                                      "touchpad_active",
+                                                      touchpad_active),
+                                                  ProfileSink::Field::String(
+                                                      "result",
+                                                      HResultHex(compositor_clock_.last_boost_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "last_wait_result",
+                                                      std::to_string(compositor_clock_.last_wait_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "tick_count",
+                                                      std::to_string(compositor_clock_.tick_count())),
+                                              });
 }
 
 void SpecForgeApp::InvalidateRenderFromWin32Message(void* context) noexcept
@@ -885,7 +973,25 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                               DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709),
                                                   ProfileSink::Field::Number(
                                                       "swapchain_present_sync_interval",
-                                                      std::to_string(renderer_.present_sync_interval())),
+                                                      std::to_string(D3D11PresentSyncInterval(
+                                                          D3D11PresentMode::DisplayVSync))),
+                                                  ProfileSink::Field::Bool(
+                                                      "swapchain_tearing_supported",
+                                                      renderer_.tearing_supported()),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_compositor_clock_present_flags",
+                                                      std::to_string(D3D11PresentFlags(
+                                                          D3D11PresentMode::CompositorClock,
+                                                          renderer_.tearing_supported()))),
+                                                  ProfileSink::Field::Bool(
+                                                      "compositor_clock_available",
+                                                      compositor_clock_.available()),
+                                                  ProfileSink::Field::Bool(
+                                                      "compositor_clock_boost_requested",
+                                                      compositor_clock_.boost_requested()),
+                                                  ProfileSink::Field::Bool(
+                                                      "compositor_clock_boost_active",
+                                                      compositor_clock_.boost_active()),
                                                   ProfileSink::Field::Number(
                                                       "swapchain_desc_refresh_numerator",
                                                       std::to_string(
@@ -918,6 +1024,9 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                       "swapchain_swap_effect",
                                                       std::to_string(
                                                           swapchain_ok ? swap_chain_desc.SwapEffect : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_flags",
+                                                      std::to_string(swapchain_ok ? swap_chain_desc.Flags : 0)),
                                               });
 }
 
@@ -929,6 +1038,14 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
 
     if (profile_.is_open() && IsProfiledInputMessage(message)) {
         LogInputMessage(message, wparam, lparam);
+    }
+
+    if (message == kCompositorClockTickMessage) {
+        if (compositor_clock_.ConsumeTick()) {
+            compositor_clock_tick_ready_ = true;
+            render_wake_scheduler_.RequestFrame();
+        }
+        return 0;
     }
 
     if (message == WM_KEYDOWN && wparam == VK_F11 && IsInitialKeyDown(lparam)) {

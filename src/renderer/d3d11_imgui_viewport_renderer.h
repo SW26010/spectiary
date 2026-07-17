@@ -26,6 +26,7 @@ public:
 
     bool Initialize(IDXGIFactory2* factory, ID3D11Device* device, ID3D11DeviceContext* device_context);
     void Shutdown() noexcept;
+    void SetCompositorClockPaced(bool paced) noexcept { compositor_clock_paced_ = paced; }
 
     [[nodiscard]] D3D11RendererError TakeLastError() noexcept;
 
@@ -44,6 +45,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context_;
     D3D11RendererError last_error_;
+    bool compositor_clock_paced_ = false;
 };
 
 }  // namespace specforge

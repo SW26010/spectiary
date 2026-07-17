@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/render_wake_scheduler.h"
+#include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
 #include "platform/win32_touchpad_gesture_source.h"
@@ -51,6 +52,7 @@ private:
     void InitializeUiBackends();
     void Shutdown();
     void RenderFrame();
+    void UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active);
     static void InvalidateRenderFromWin32Message(void* context) noexcept;
     void RequestMessageRender() noexcept;
     void ApplyPendingResize();
@@ -71,6 +73,7 @@ private:
     D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;
     Win32TouchpadGestureSource touchpad_gestures_;
+    Win32CompositorClock compositor_clock_;
     Win32MessageRenderObserver message_render_observer_;
     RenderWakeScheduler render_wake_scheduler_;
     ShellUi ui_{&touchpad_gestures_};
@@ -80,6 +83,7 @@ private:
     bool running_ = true;
     bool minimized_ = false;
     bool window_visible_ = true;
+    bool compositor_clock_tick_ready_ = false;
     ImGuiStyle base_imgui_style_;
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;

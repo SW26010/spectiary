@@ -137,6 +137,18 @@ void TestResetSmoothingRestoresDefaults()
         "reset smoothing should restore gaussian sigma");
 }
 
+void TestPlotPanActivityIsExposedWithoutProjectingAFullView()
+{
+    specforge::SpectrumViewSession session;
+    Require(!session.PlotPanActive(), "plot pan should be inactive by default");
+
+    session.PlotStateForRender().pan_drag_active = true;
+    Require(session.PlotPanActive(), "render-owned pan state should drive latency-sensitive refresh policy");
+
+    session.Submit(specforge::SpectrumViewSessionCommand::ResetForSnapshotChange());
+    Require(!session.PlotPanActive(), "snapshot changes should clear stale pan activity");
+}
+
 }  // namespace
 
 int main()
@@ -145,5 +157,6 @@ int main()
     TestPlotLimitSyncUsesStoredLimitsForModeSwitch();
     TestSmoothingCommandsNormalizeAndClearCache();
     TestResetSmoothingRestoresDefaults();
+    TestPlotPanActivityIsExposedWithoutProjectingAFullView();
     return 0;
 }

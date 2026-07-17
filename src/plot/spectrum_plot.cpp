@@ -675,6 +675,15 @@ PlotTouchpadTarget MakeTouchpadTarget(
 
 }  // namespace
 
+bool IsPlotPanDragActive(
+    bool was_active,
+    bool plot_hovered,
+    bool left_button_down,
+    bool left_button_dragging) noexcept
+{
+    return left_button_down && (was_active || (plot_hovered && left_button_dragging));
+}
+
 void RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
@@ -685,6 +694,7 @@ void RenderSpectrumPlot(
     PlotTouchpadGestureSource* touchpad_gestures)
 {
     if (!CanPlotSnapshot(snapshot)) {
+        state.pan_drag_active = false;
         if (touchpad_gestures != nullptr) {
             touchpad_gestures->ClearTarget();
         }
@@ -839,6 +849,11 @@ void RenderSpectrumPlot(
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         StoreLastLimits(limits, state);
+        const bool hovered = ImPlot::IsPlotHovered();
+        const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
+        const bool pan_drag_active =
+            IsPlotPanDragActive(state.pan_drag_active, hovered, left_down, left_dragging);
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
             for (const PlotTouchpadGestureDelta& gesture : touchpad_batch.deltas) {
@@ -868,10 +883,6 @@ void RenderSpectrumPlot(
                                                               gesture.inertia),
                                                       });
             }
-            const bool hovered = ImPlot::IsPlotHovered();
-            const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-            const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
-            const bool pan_drag_active = left_down && (state.pan_drag_active || (hovered && left_dragging));
             const ImVec2 mouse = ImGui::GetMousePos();
             const ImPlotPoint plot_point = ImPlot::PixelsToPlot(mouse);
 
@@ -912,12 +923,15 @@ void RenderSpectrumPlot(
                                                               });
                 StoreProfiledLimits(limits, state);
             }
-            state.pan_drag_active = pan_drag_active;
         }
+        state.pan_drag_active = pan_drag_active;
 
         ImPlot::EndPlot();
-    } else if (touchpad_gestures != nullptr) {
-        touchpad_gestures->ClearTarget();
+    } else {
+        state.pan_drag_active = false;
+        if (touchpad_gestures != nullptr) {
+            touchpad_gestures->ClearTarget();
+        }
     }
 }
 

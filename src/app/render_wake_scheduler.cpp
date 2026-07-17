@@ -28,11 +28,12 @@ void RenderWakeScheduler::RequestFrame(std::optional<Duration> settings_save_del
     }
 }
 
-bool RenderWakeScheduler::ShouldRender(TimePoint now) const
+bool RenderWakeScheduler::ShouldRender(TimePoint now, bool render_permitted) const
 {
-    return render_requested_ ||
+    return render_permitted &&
+           (render_requested_ ||
            (next_frame_deadline_ && now >= *next_frame_deadline_) ||
-           (settings_save_deadline_ && now >= *settings_save_deadline_);
+           (settings_save_deadline_ && now >= *settings_save_deadline_));
 }
 
 void RenderWakeScheduler::BeginFrame(TimePoint now)
@@ -61,7 +62,7 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
     }
 
     std::optional<TimePoint> next_frame;
-    if (schedule_follow_up_) {
+    if (schedule_follow_up_ && !activity.compositor_clock_paced) {
         ConsiderEarlier(next_frame, now + kInteractiveFrameInterval);
     }
     schedule_follow_up_ = false;
@@ -72,29 +73,32 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
     }
     if (popup_animation_end_) {
         if (now < *popup_animation_end_) {
-            ConsiderEarlier(
-                next_frame,
-                std::min(now + kInteractiveFrameInterval, *popup_animation_end_));
+            if (!activity.compositor_clock_paced) {
+                ConsiderEarlier(
+                    next_frame,
+                    std::min(now + kInteractiveFrameInterval, *popup_animation_end_));
+            }
         } else {
             popup_animation_end_.reset();
         }
     }
 
-    if (activity.text_input_active) {
+    if (activity.text_input_active && !activity.compositor_clock_paced) {
         ConsiderEarlier(next_frame, now + kTextCursorFrameInterval);
     }
-    if (activity.touchpad_active) {
-        ConsiderEarlier(next_frame, now);
+    if (activity.touchpad_active && !activity.compositor_clock_paced) {
+        ConsiderEarlier(next_frame, now + kTouchpadFrameInterval);
     }
     next_frame_deadline_ = next_frame;
 }
 
 std::optional<RenderWakeScheduler::TimePoint> RenderWakeScheduler::NextWakeDeadline(
     bool window_renderable,
-    std::optional<TimePoint> maintenance_deadline) const
+    std::optional<TimePoint> maintenance_deadline,
+    bool render_permitted) const
 {
     std::optional<TimePoint> deadline = maintenance_deadline;
-    if (!window_renderable) {
+    if (!window_renderable || !render_permitted) {
         return deadline;
     }
 

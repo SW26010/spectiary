@@ -169,6 +169,11 @@ const SpectrumPlotStyle& SpectrumViewSession::PlotStyleForRender() const
     return plot_style_;
 }
 
+bool SpectrumViewSession::PlotPanActive() const
+{
+    return plot_state_.pan_drag_active;
+}
+
 void SpectrumViewSession::ResetForSnapshotChange()
 {
     const bool show_points = plot_state_.show_points;

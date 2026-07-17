@@ -1,5 +1,6 @@
 #include "renderer/d3d11_sdr_swap_chain.h"
 #include "renderer/d3d11_imgui_viewport_renderer.h"
+#include "renderer/d3d11_renderer.h"
 
 #include <imgui.h>
 
@@ -205,6 +206,11 @@ public:
         ImGui::GetPlatformIO().Renderer_SwapBuffers(&viewport_, nullptr);
     }
 
+    void SetCompositorClockPaced(bool paced)
+    {
+        renderer_.SetCompositorClockPaced(paced);
+    }
+
     void DestroyViewport()
     {
         ImGui::GetPlatformIO().Renderer_DestroyWindow(&viewport_);
@@ -222,6 +228,7 @@ private:
 void TestSdrSwapChainUsesModernSrgbPresentationContract()
 {
     const DXGI_SWAP_CHAIN_DESC1 desc = specforge::MakeSdrSwapChainDesc(1280, 720);
+    const DXGI_SWAP_CHAIN_DESC1 tearing_desc = specforge::MakeSdrSwapChainDesc(1280, 720, true);
 
     Require(desc.Width == 1280 && desc.Height == 720, "requested dimensions should be preserved");
     Require(desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM, "SDR presentation should use 8-bit RGBA UNORM");
@@ -233,8 +240,27 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
     Require(desc.AlphaMode == DXGI_ALPHA_MODE_IGNORE, "opaque Win32 windows should ignore swap-chain alpha");
     Require(desc.Flags == 0, "borderless fullscreen should not request a display mode switch");
     Require(
+        tearing_desc.Flags == DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
+        "a capable system should opt the flip-model chain into variable-refresh presentation");
+    Require(
         specforge::kSdrSwapChainColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
         "content color space should be explicitly tagged as sRGB/Rec.709 SDR");
+    Require(
+        specforge::D3D11PresentSyncInterval(specforge::D3D11PresentMode::DisplayVSync) == 1,
+        "normal event-driven presentation should remain display-vsync synchronized");
+    Require(
+        specforge::D3D11PresentSyncInterval(specforge::D3D11PresentMode::CompositorClock) == 0,
+        "compositor-clock-paced presentation should not wait again on virtualized DXGI vblank");
+    Require(
+        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::DisplayVSync, true) == 0,
+        "normal presentation should retain synchronized, tear-free semantics");
+    Require(
+        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, false) == 0,
+        "compositor-clock presentation should fall back cleanly without tearing support");
+    Require(
+        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, true) ==
+            DXGI_PRESENT_ALLOW_TEARING,
+        "boosted presentation should opt into variable-refresh delivery when supported");
 }
 
 void TestInvalidArgumentsPreserveDiagnosticStage()
@@ -256,6 +282,7 @@ void TestRealSwapChainInitializationColorSpaceAndResize()
     Require(SUCCEEDED(CreateTestDevice(device, context)), "the integration test should create a D3D11 device");
 
     ComPtr<IDXGIFactory2> factory = GetTestFactory(device.Get());
+    const bool tearing_supported = specforge::DxgiFactorySupportsTearing(factory.Get());
 
     specforge::D3D11SdrSwapChain swap_chain;
     Require(
@@ -276,6 +303,12 @@ void TestRealSwapChainInitializationColorSpaceAndResize()
 
     DXGI_SWAP_CHAIN_DESC resized_desc = {};
     Require(swap_chain.GetDesc(resized_desc), "the resized swap chain should expose its descriptor");
+    Require(
+        swap_chain.tearing_supported() == tearing_supported,
+        "the swap chain should retain the factory's tearing capability");
+    Require(
+        ((resized_desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0) == tearing_supported,
+        "resize should preserve the creation-time tearing flag");
     Require(
         resized_desc.BufferDesc.Width == 640 && resized_desc.BufferDesc.Height == 360,
         "resize should update the swap-chain dimensions");
@@ -306,6 +339,12 @@ void TestImGuiViewportSwapChainLifecycle()
 
     fixture.PresentViewport();
     Require(SUCCEEDED(fixture.TakeLastError().result), "detached viewport present should succeed");
+
+    fixture.SetCompositorClockPaced(true);
+    fixture.PresentViewport();
+    Require(
+        SUCCEEDED(fixture.TakeLastError().result),
+        "detached viewport compositor-clock present should use supported DXGI flags");
 
     fixture.DestroyViewport();
     Require(!fixture.has_viewport_swap_chain(), "redocking should destroy the viewport swap chain");

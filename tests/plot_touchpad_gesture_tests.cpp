@@ -1,4 +1,5 @@
 #include "plot/plot_touchpad_gesture.h"
+#include "plot/spectrum_plot.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -161,6 +162,22 @@ void TestOverflowingGestureIsTransactional()
     RequireNear(limits.y_max, 20.0, "rejected zoom should preserve y maximum");
 }
 
+void TestPlotPanActivityStartsOnPlotAndPersistsUntilRelease()
+{
+    Require(
+        !specforge::IsPlotPanDragActive(false, false, true, true),
+        "dragging outside the plot should not request latency-sensitive refresh");
+    Require(
+        specforge::IsPlotPanDragActive(false, true, true, true),
+        "a left drag over the plot should start latency-sensitive refresh");
+    Require(
+        specforge::IsPlotPanDragActive(true, false, true, false),
+        "an active plot drag should remain active after leaving the plot");
+    Require(
+        !specforge::IsPlotPanDragActive(true, true, false, false),
+        "button release should end latency-sensitive refresh");
+}
+
 }  // namespace
 
 int main()
@@ -172,5 +189,6 @@ int main()
     TestGestureBatchPreservesEventOrder();
     TestInvalidGestureIsIgnored();
     TestOverflowingGestureIsTransactional();
+    TestPlotPanActivityStartsOnPlotAndPersistsUntilRelease();
     return 0;
 }

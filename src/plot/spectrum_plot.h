@@ -59,6 +59,12 @@ struct SpectrumPlotDisplayOptions {
     bool native_transparent_axes = false;
 };
 
+[[nodiscard]] bool IsPlotPanDragActive(
+    bool was_active,
+    bool plot_hovered,
+    bool left_button_down,
+    bool left_button_dragging) noexcept;
+
 void RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,

@@ -97,9 +97,11 @@ void D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
     swap_chain_.Clear(device_context_.Get(), clear_color.data());
 }
 
-HRESULT D3D11Renderer::Present()
+HRESULT D3D11Renderer::Present(D3D11PresentMode mode)
 {
-    const HRESULT result = swap_chain_.Present(kPresentSyncInterval, 0);
+    const HRESULT result = swap_chain_.Present(
+        D3D11PresentSyncInterval(mode),
+        D3D11PresentFlags(mode, swap_chain_.tearing_supported()));
     if (FAILED(result)) {
         return RecordFailure(swap_chain_.last_error_operation(), result);
     }

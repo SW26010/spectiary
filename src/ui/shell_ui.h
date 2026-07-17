@@ -46,6 +46,7 @@ public:
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
     [[nodiscard]] bool immersive_plot_mode() const;
+    [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:

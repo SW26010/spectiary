@@ -62,6 +62,7 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     device_.Reset();
     factory_.Reset();
     last_error_ = {};
+    compositor_clock_paced_ = false;
 }
 
 D3D11RendererError D3D11ImGuiViewportRenderer::TakeLastError() noexcept
@@ -149,7 +150,10 @@ void D3D11ImGuiViewportRenderer::SwapViewportBuffers(ImGuiViewport* viewport, vo
     if (data == nullptr) {
         return;
     }
-    const HRESULT result = data->swap_chain.Present(0, 0);
+    const UINT flags = instance->compositor_clock_paced_ && data->swap_chain.tearing_supported()
+                           ? DXGI_PRESENT_ALLOW_TEARING
+                           : 0U;
+    const HRESULT result = data->swap_chain.Present(0, flags);
     instance->RecordFailure(result, data->swap_chain.last_error_operation());
 }
 

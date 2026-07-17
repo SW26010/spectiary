@@ -63,6 +63,7 @@ public:
     [[nodiscard]] int EffectiveMedianKernelSize(std::size_t point_count) const;
     [[nodiscard]] SpectrumPlotState& PlotStateForRender();
     [[nodiscard]] const SpectrumPlotStyle& PlotStyleForRender() const;
+    [[nodiscard]] bool PlotPanActive() const;
 
 private:
     void ResetForSnapshotChange();

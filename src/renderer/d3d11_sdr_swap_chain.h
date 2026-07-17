@@ -2,7 +2,7 @@
 
 #include <Windows.h>
 #include <d3d11.h>
-#include <dxgi1_4.h>
+#include <dxgi1_5.h>
 #include <wrl/client.h>
 
 #include <string_view>
@@ -13,7 +13,11 @@ inline constexpr DXGI_FORMAT kSdrSwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 inline constexpr DXGI_COLOR_SPACE_TYPE kSdrSwapChainColorSpace =
     DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
 
-[[nodiscard]] DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(UINT width = 0, UINT height = 0) noexcept;
+[[nodiscard]] DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(
+    UINT width = 0,
+    UINT height = 0,
+    bool allow_tearing = false) noexcept;
+[[nodiscard]] bool DxgiFactorySupportsTearing(IDXGIFactory2* factory) noexcept;
 
 class D3D11SdrSwapChain {
 public:
@@ -38,6 +42,7 @@ public:
 
     [[nodiscard]] bool GetDesc(DXGI_SWAP_CHAIN_DESC& desc) const noexcept;
     [[nodiscard]] bool GetConfiguredColorSpace(DXGI_COLOR_SPACE_TYPE& color_space) const noexcept;
+    [[nodiscard]] bool tearing_supported() const noexcept { return tearing_supported_; }
     [[nodiscard]] std::string_view last_error_operation() const noexcept { return last_error_operation_; }
 
 private:
@@ -49,6 +54,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> render_target_;
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_CUSTOM;
     bool color_space_set_ = false;
+    bool tearing_supported_ = false;
     std::string_view last_error_operation_;
 };
 

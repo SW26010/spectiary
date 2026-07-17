@@ -2,7 +2,7 @@
 
 namespace specforge {
 
-DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(UINT width, UINT height) noexcept
+DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(UINT width, UINT height, bool allow_tearing) noexcept
 {
     DXGI_SWAP_CHAIN_DESC1 desc = {};
     desc.Width = width;
@@ -16,8 +16,27 @@ DXGI_SWAP_CHAIN_DESC1 MakeSdrSwapChainDesc(UINT width, UINT height) noexcept
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-    desc.Flags = 0;
+    desc.Flags = allow_tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     return desc;
+}
+
+bool DxgiFactorySupportsTearing(IDXGIFactory2* factory) noexcept
+{
+    if (factory == nullptr) {
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory5> factory5;
+    if (FAILED(factory->QueryInterface(IID_PPV_ARGS(factory5.GetAddressOf())))) {
+        return false;
+    }
+
+    BOOL supported = FALSE;
+    return SUCCEEDED(factory5->CheckFeatureSupport(
+               DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+               &supported,
+               sizeof(supported))) &&
+           supported == TRUE;
 }
 
 D3D11SdrSwapChain::~D3D11SdrSwapChain()
@@ -39,7 +58,8 @@ HRESULT D3D11SdrSwapChain::Initialize(
     }
 
     Microsoft::WRL::ComPtr<IDXGISwapChain1> base_swap_chain;
-    const DXGI_SWAP_CHAIN_DESC1 desc = MakeSdrSwapChainDesc(width, height);
+    tearing_supported_ = DxgiFactorySupportsTearing(factory);
+    const DXGI_SWAP_CHAIN_DESC1 desc = MakeSdrSwapChainDesc(width, height, tearing_supported_);
     HRESULT result = factory->CreateSwapChainForHwnd(
         device,
         hwnd,
@@ -86,6 +106,7 @@ void D3D11SdrSwapChain::Shutdown() noexcept
     swap_chain_.Reset();
     color_space_ = DXGI_COLOR_SPACE_CUSTOM;
     color_space_set_ = false;
+    tearing_supported_ = false;
 }
 
 HRESULT D3D11SdrSwapChain::Resize(
@@ -101,7 +122,8 @@ HRESULT D3D11SdrSwapChain::Resize(
 
     device_context->OMSetRenderTargets(0, nullptr, nullptr);
     render_target_.Reset();
-    HRESULT result = swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+    const UINT flags = tearing_supported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0U;
+    HRESULT result = swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, flags);
     if (FAILED(result)) {
         return RecordFailure("IDXGISwapChain3::ResizeBuffers", result);
     }

@@ -52,6 +52,36 @@ void TestWindowInvalidationPersistsUntilRendered()
         "an externally requested frame should schedule one follow-up frame");
 }
 
+void TestClockPacingDefersInvalidationUntilPermitted()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    scheduler.RequestFrame();
+    const auto input_time = start + 1s;
+    Require(
+        !scheduler.ShouldRender(input_time, false),
+        "input invalidation should wait for compositor-clock permission");
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt, false),
+        "a deferred invalidation should not create a zero-time busy-loop deadline");
+
+    const auto maintenance = input_time + 5s;
+    Require(
+        scheduler.NextWakeDeadline(true, maintenance, false) == maintenance,
+        "clock pacing should preserve independent maintenance deadlines");
+    Require(
+        scheduler.ShouldRender(input_time, true),
+        "the pending invalidation should render as soon as a compositor tick permits it");
+
+    scheduler.BeginFrame(input_time);
+    scheduler.EndFrame(input_time, {.compositor_clock_paced = true});
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt),
+        "a compositor-paced frame should not schedule a competing timer frame");
+}
+
 void TestSettingsSaveWakeIsDebounced()
 {
     const Scheduler::TimePoint start{};
@@ -174,9 +204,27 @@ void TestTextInputAndTouchpadExposeTimeDrivenDemand()
 
     const auto text_frame =
         start + 1s + Scheduler::kInteractiveFrameInterval + Scheduler::kTextCursorFrameInterval;
+    scheduler.RequestFrame();
     scheduler.BeginFrame(text_frame);
-    scheduler.EndFrame(text_frame, {.touchpad_active = true});
-    Require(scheduler.ShouldRender(text_frame), "active touchpad manipulation should request continuous frames");
+    scheduler.EndFrame(
+        text_frame,
+        {
+            .touchpad_active = true,
+            .compositor_clock_paced = true,
+            .text_input_active = true,
+            .popup_open = true,
+        });
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt),
+        "clock-tick invalidation and UI animation should not create competing timer deadlines");
+
+    const auto fallback_frame = text_frame + 1s;
+    scheduler.RequestFrame();
+    scheduler.BeginFrame(fallback_frame);
+    scheduler.EndFrame(fallback_frame, {.touchpad_active = true});
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) == fallback_frame + Scheduler::kTouchpadFrameInterval,
+        "touchpad pacing should retain a bounded fallback deadline when compositor ticks are unavailable");
 }
 
 void TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance()
@@ -198,6 +246,7 @@ void TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance()
 int main()
 {
     TestWindowInvalidationPersistsUntilRendered();
+    TestClockPacingDefersInvalidationUntilPermitted();
     TestSettingsSaveWakeIsDebounced();
     TestSettingsSaveWakeStartsAfterTheDirtyFrame();
     TestPopupTransitionAnimatesForABoundedInterval();
