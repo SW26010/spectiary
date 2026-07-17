@@ -38,12 +38,13 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 2. 查看当前光谱，X 轴为 wavelength，Y 轴为 flux。
 3. 在主图中拖拽平移。
 4. 使用鼠标滚轮围绕光标缩放。
-5. 使用范围导航控制 wavelength window。
-6. 控制 flux window，支持手动固定和恢复自适应。
-7. 在矩阵数据中切换上一条和下一条光谱。
-8. 查看谱线、谱带和分组 overlay。
-9. 使用窗口预设。
-10. 输出 profile 日志，解释输入、状态更新、绘制和帧节奏。
+5. 使用 Windows Precision Touchpad 双指平移、捏合缩放；图内控制双轴，轴区域约束单轴。
+6. 使用范围导航控制 wavelength window。
+7. 控制 flux window，支持手动固定和恢复自适应。
+8. 在矩阵数据中切换上一条和下一条光谱。
+9. 查看谱线、谱带和分组 overlay。
+10. 使用窗口预设。
+11. 输出 profile 日志，解释输入、状态更新、绘制和帧节奏。
 
 ## 必须保留的需求
 
@@ -70,7 +71,8 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 - 交接稿中关于 Python 继续承担数据与业务状态的描述不能直接搬到本仓库。SpecForge 的目标栈是 native Windows C++，当前已通过 `SpectrumSnapshotHandle` 和 `.npy` loader 落地第一条输入合同；后续 Python、导出文件、IPC 或 native loader 只能作为 producer 侧实现选择，不能渗入 UI/plot 路径。
 - range slider 不要求照搬旧 UI。优先用 ImPlot 的轴限制、overview plot、drag rect、drag line、numeric inputs 或 lock toggles 组合出更适合 ImGui 的交互。
 - 谱线 overlay 不需要手写 canvas 系统。优先使用 ImPlot 的 line、annotation、shaded region 和 legend/selection 能力。
-- pan 和 wheel zoom 优先使用 ImPlot 的交互和 axis limits。只有证明确实不能满足光谱工作流时，才引入自定义 transform 层。
+- 鼠标 pan 和 wheel zoom 优先使用 ImPlot 原生交互；Precision Touchpad 使用 Windows Direct Manipulation 采集双指 pan/pinch，再统一映射到 ImPlot axis limits，不引入自定义 renderer。
+- 触屏输入暂缓，不属于当前 Precision Touchpad 验收范围。未来实现前先确定一指输入用于直接 pan，还是保留给点击选择/标注，再确定双指 pan/pinch 语义；实现应复用现有 plot axis-limit controller，但为 `PT_TOUCH` 增加独立的多接触点捕获与真实触屏验收。
 - Immersive mode 为了 edge-to-edge plot，允许仅在 immersive display option 下使用内绘轴 overlay 和 edge-band wheel zoom；普通 docked plot 仍走 ImPlot 原生交互。
 - default layout 可以用 ImGui dockspace 建立，布局持久化交给 ImGui ini。DockBuilder 若用于初始布局，必须被隔离为一次性初始化逻辑。
 

@@ -26,6 +26,7 @@
 - Dear ImGui example_win32_directx11 是实现 shell 时的主要代码参考: <https://github.com/ocornut/imgui/blob/master/examples/example_win32_directx11/main.cpp>
 - vcpkg 的 `imgui` port 提供 `docking-experimental`、`win32-binding` 和 `dx11-binding` features: <https://vcpkg.io/en/package/imgui.html>
 - ImPlot README 提醒高密度绘图需要关注 16-bit index 限制、renderer vtx offset 或 32-bit indices，并说明 ImPlot 适合实时交互绘图: <https://github.com/epezent/implot>
+- Windows Precision Touchpad 对未启用原生手势的桌面程序通常回退为 wheel 消息；主图的双指平移和捏合缩放使用 Windows Direct Manipulation，并只接管命中 plot 的 `PT_TOUCHPAD`: <https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal>、<https://learn.microsoft.com/en-us/windows/win32/directmanipulation/direct-manipulation-portal>
 - CMake Presets 文档区分可提交的 `CMakePresets.json` 和本地的 `CMakeUserPresets.json`: <https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html>
 
 ## Docking 方向
@@ -47,6 +48,8 @@ DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在�
 
 - main plot: `ImPlot::BeginPlot` 和 `ImPlot::PlotLine`。
 - pan/zoom: 使用 ImPlot axis interaction 和 axis limits。
+- touchpad: 平台层用 Direct Manipulation 产出平移/缩放增量，plot 层只负责统一的 axis-limit 变换；普通、沉浸和 detached viewport 共用这条路径，不复制模式专用控制器。
+- touchscreen（暂缓）: 当前 Win32 输入源只接管 `PT_TOUCHPAD`，不能把触屏兼容鼠标消息视为触屏支持。未来应将输入源泛化为共享的 Direct Manipulation gesture source，通过 `WM_POINTERDOWN` / `PT_TOUCH` 和逐接触点 `SetContact` 处理多指输入，同时复用现有命中区域、手势增量和 axis-limit controller；实现前必须先确定一指 pan 与点击选择/标注的优先级，并用真实触屏验证多指中心、capture、兼容鼠标去重和性能。参考 <https://learn.microsoft.com/en-us/windows/win32/api/directmanipulation/nf-directmanipulation-idirectmanipulationviewport-setcontact>。
 - wavelength range: 使用 overview mini plot 或 explicit axis range controls。
 - flux range: 默认 auto-fit，提供 lock 和 numeric min/max；必要时再加 overview 或 drag range。
 - spectral lines: 使用 vertical lines、annotations、shaded regions 和 legend/selection。
@@ -71,6 +74,7 @@ JSONL profile 至少区分：
 - runtime config。
 - pointer press/move/release。
 - wheel input。
+- touchpad gesture input（包含原生输入时间、pan/zoom 类型和 inertia 标记）。
 - range-control input。
 - view transform update。
 - draw submission。

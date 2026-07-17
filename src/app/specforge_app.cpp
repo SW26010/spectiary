@@ -444,6 +444,8 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    touchpad_gestures_.ClearTarget();
+
     if (imgui_initialized_) {
         profile_.WriteEvent("shutdown");
         ImGui_ImplDX11_Shutdown();

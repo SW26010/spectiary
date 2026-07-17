@@ -524,8 +524,8 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 
 }  // namespace
 
-ShellUi::ShellUi()
-    : session_(LoadSpectrumSnapshotFromPath)
+ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
+    : session_(LoadSpectrumSnapshotFromPath), touchpad_gestures_(touchpad_gestures)
 {
     panel_visibility_ = panel_visibility_state_.Load();
     RefreshSystemColors();
@@ -780,7 +780,8 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
             spectral_lines.visible_markers.data(),
             spectral_lines.visible_markers.size(),
             spectral_lines.marker_labels_visible},
-        MakeImmersivePlotDisplayOptions());
+        MakeImmersivePlotDisplayOptions(),
+        touchpad_gestures_);
 
     ImGui::End();
 }
@@ -1091,7 +1092,9 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         SpectrumPlotOverlays{
             spectral_lines.visible_markers.data(),
             spectral_lines.visible_markers.size(),
-            spectral_lines.marker_labels_visible});
+            spectral_lines.marker_labels_visible},
+        {},
+        touchpad_gestures_);
     ImGui::End();
 }
 

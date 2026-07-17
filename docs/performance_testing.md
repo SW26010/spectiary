@@ -22,6 +22,7 @@
 - `implot.pan_drag.state`: ImPlot 主图 pan-drag 开始和结束。
 - `implot.pan_drag.sample`: pan-drag 活跃期间每帧一次的 ImPlot plot 坐标和 axis limits。
 - `implot.axis_limits_changed`: ImPlot axis limits 变化，证明 view transform 已经更新。
+- `touchpad.gesture`: Precision Touchpad 原生手势增量，记录 `input_steady_ns`、`kind`、pan/zoom 数值和 inertia；事件自身的 `steady_ns` 是 plot 消费该增量的时间。
 - `present`: DX11 swap chain Present 完成时间，用于衡量可见帧节奏。
 - `display_environment`: 当前窗口所在 monitor、Windows display mode 频率、DWM timing、swapchain refresh desc 和 `Present` sync interval。
 
@@ -86,6 +87,8 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -SkipAnalyze
 ```
+
+触控板手势使用相同的真实数据启动和 JSONL 采集链路，但当前自动门禁仍只针对左键 pan。采集触控板时使用 `-SkipAnalyze`，在 plot 内连续双指平移或捏合 10–15 秒；检查 `touchpad.gesture`、随后发生的 `implot.axis_limits_changed` 和 `present`。不要把鼠标门禁脚本的 PASS 外推为触控板延迟结论。
 
 如果想采集并只看报告、不让性能 miss 让脚本失败：
 

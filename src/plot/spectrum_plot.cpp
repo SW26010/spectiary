@@ -594,24 +594,83 @@ ImVec2 PlotSizeForDisplay(const SpectrumPlotDisplayOptions& display, const ImVec
     return available_size;
 }
 
-bool ApplyStoredLimitsOnNextRender(SpectrumPlotState& state)
+std::uintptr_t CurrentNativeWindow()
 {
-    if (!state.sync_last_limits_next_frame) {
-        return false;
+    const ImGuiViewport* viewport = ImGui::GetWindowViewport();
+    if (viewport == nullptr) {
+        return 0;
     }
 
-    state.sync_last_limits_next_frame = false;
-    if (!LastLimitsAreUsable(state)) {
-        return false;
+    void* handle = viewport->PlatformHandleRaw;
+    if (handle == nullptr) {
+        handle = viewport->PlatformHandle;
     }
+    return reinterpret_cast<std::uintptr_t>(handle);
+}
 
+PlotViewLimits StoredViewLimits(const SpectrumPlotState& state)
+{
+    return {state.last_x_min, state.last_x_max, state.last_y_min, state.last_y_max};
+}
+
+void SetNextViewLimits(const PlotViewLimits& limits)
+{
     ImPlot::SetNextAxesLimits(
-        state.last_x_min,
-        state.last_x_max,
-        state.last_y_min,
-        state.last_y_max,
+        limits.x_min,
+        limits.x_max,
+        limits.y_min,
+        limits.y_max,
         ImPlotCond_Always);
-    return true;
+}
+
+PlotTouchpadTarget MakeTouchpadTarget(
+    std::uintptr_t native_window,
+    const ImVec2& widget_pos,
+    const ImVec2& widget_size,
+    bool edge_axis_overlay,
+    float edge_axis_band)
+{
+    const PlotPixelRect widget_rect{
+        widget_pos.x,
+        widget_pos.y,
+        widget_pos.x + widget_size.x,
+        widget_pos.y + widget_size.y};
+
+    PlotTouchpadTarget target;
+    target.native_window = native_window;
+    if (edge_axis_overlay) {
+        target.plot_rect = widget_rect;
+        target.x_axis_rect = {
+            widget_rect.left,
+            std::max(widget_rect.top, widget_rect.bottom - edge_axis_band),
+            widget_rect.right,
+            widget_rect.bottom};
+        target.y_axis_rect = {
+            widget_rect.left,
+            widget_rect.top,
+            std::min(widget_rect.right, widget_rect.left + edge_axis_band),
+            widget_rect.bottom};
+        return target;
+    }
+
+    const ImVec2 plot_pos = ImPlot::GetPlotPos();
+    const ImVec2 plot_size = ImPlot::GetPlotSize();
+    target.plot_rect = {
+        plot_pos.x,
+        plot_pos.y,
+        plot_pos.x + plot_size.x,
+        plot_pos.y + plot_size.y};
+    target.x_axis_rect = {
+        target.plot_rect.left,
+        target.plot_rect.bottom,
+        target.plot_rect.right,
+        widget_rect.bottom};
+    target.y_axis_rect = {
+        widget_rect.left,
+        target.plot_rect.top,
+        target.plot_rect.left,
+        target.plot_rect.bottom};
+    return target;
 }
 
 }  // namespace
@@ -622,21 +681,46 @@ void RenderSpectrumPlot(
     const SpectrumPlotProfileContext& profile,
     const SpectrumPlotStyle& style,
     const SpectrumPlotOverlays& overlays,
-    const SpectrumPlotDisplayOptions& display)
+    const SpectrumPlotDisplayOptions& display,
+    PlotTouchpadGestureSource* touchpad_gestures)
 {
     if (!CanPlotSnapshot(snapshot)) {
+        if (touchpad_gestures != nullptr) {
+            touchpad_gestures->ClearTarget();
+        }
         ImGui::TextDisabled("No plottable spectrum.");
         return;
     }
 
+    const std::uintptr_t native_window = CurrentNativeWindow();
+    PlotTouchpadGestureBatch touchpad_batch;
+    if (touchpad_gestures != nullptr && native_window != 0) {
+        touchpad_batch = touchpad_gestures->Poll(native_window);
+    }
+
     const bool fit_requested = state.fit_next_frame;
+    PlotViewLimits requested_limits;
+    bool has_requested_limits = false;
     if (state.fit_next_frame) {
         const Bounds bounds = ComputeBounds(*snapshot, state);
-        ImPlot::SetNextAxesLimits(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max, ImPlotCond_Always);
+        requested_limits = {bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max};
+        has_requested_limits = true;
         state.fit_next_frame = false;
         state.sync_last_limits_next_frame = false;
-    } else {
-        ApplyStoredLimitsOnNextRender(state);
+    } else if (state.sync_last_limits_next_frame) {
+        state.sync_last_limits_next_frame = false;
+        if (LastLimitsAreUsable(state)) {
+            requested_limits = StoredViewLimits(state);
+            has_requested_limits = true;
+        }
+    } else if (!touchpad_batch.deltas.empty() && LastLimitsAreUsable(state)) {
+        requested_limits = StoredViewLimits(state);
+        has_requested_limits = true;
+    }
+
+    if (has_requested_limits) {
+        (void)ApplyPlotTouchpadGestures(requested_limits, touchpad_batch);
+        SetNextViewLimits(requested_limits);
     }
 
     constexpr float kEdgeAxisBandPixels = 44.0f;
@@ -644,7 +728,8 @@ void RenderSpectrumPlot(
     const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
     const ImVec2 plot_size = PlotSizeForDisplay(display, plot_widget_size);
     const bool edge_axis_wheel_zoomed =
-        display.edge_axis_overlay && !fit_requested &&
+        display.edge_axis_overlay && !fit_requested && !touchpad_batch.active &&
+        touchpad_batch.deltas.empty() &&
         ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, kEdgeAxisBandPixels);
 
     const bool transparent_native_axes = display.native_transparent_axes && !display.edge_axis_overlay;
@@ -667,7 +752,7 @@ void RenderSpectrumPlot(
                         ImPlotAxisFlags_NoSideSwitch | ImPlotAxisFlags_NoHighlight;
         y_axis_flags |= x_axis_flags;
     }
-    if (edge_axis_wheel_zoomed) {
+    if (edge_axis_wheel_zoomed || touchpad_batch.active || !touchpad_batch.deltas.empty()) {
         plot_flags |= ImPlotFlags_NoInputs;
     }
 
@@ -743,10 +828,46 @@ void RenderSpectrumPlot(
             RenderEdgeAxisOverlay();
         }
 
+        if (touchpad_gestures != nullptr && native_window != 0) {
+            touchpad_gestures->SetTarget(MakeTouchpadTarget(
+                native_window,
+                plot_widget_pos,
+                plot_widget_size,
+                display.edge_axis_overlay,
+                kEdgeAxisBandPixels));
+        }
+
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         StoreLastLimits(limits, state);
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
+            for (const PlotTouchpadGestureDelta& gesture : touchpad_batch.deltas) {
+                sink->WriteEvent("touchpad.gesture", {
+                                                          ProfileSink::Field::Number(
+                                                              "frame",
+                                                              std::to_string(profile.frame_index)),
+                                                          ProfileSink::Field::String(
+                                                              "kind",
+                                                              gesture.kind == PlotTouchpadGestureKind::Pan
+                                                                  ? "pan"
+                                                                  : "zoom"),
+                                                          ProfileSink::Field::Number(
+                                                              "pan_x",
+                                                              std::to_string(gesture.pan_x)),
+                                                          ProfileSink::Field::Number(
+                                                              "pan_y",
+                                                              std::to_string(gesture.pan_y)),
+                                                          ProfileSink::Field::Number(
+                                                              "zoom_factor",
+                                                              std::to_string(gesture.zoom_factor)),
+                                                          ProfileSink::Field::Number(
+                                                              "input_steady_ns",
+                                                              std::to_string(gesture.input_steady_ns)),
+                                                          ProfileSink::Field::Bool(
+                                                              "inertia",
+                                                              gesture.inertia),
+                                                      });
+            }
             const bool hovered = ImPlot::IsPlotHovered();
             const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
             const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
@@ -795,6 +916,8 @@ void RenderSpectrumPlot(
         }
 
         ImPlot::EndPlot();
+    } else if (touchpad_gestures != nullptr) {
+        touchpad_gestures->ClearTarget();
     }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform/win32_window.h"
+#include "platform/win32_touchpad_gesture_source.h"
 #include "profile/profile_sink.h"
 #include "renderer/d3d11_renderer.h"
 #include "ui/shell_ui.h"
@@ -65,7 +66,8 @@ private:
     Win32Window window_;
     D3D11Renderer renderer_;
     ProfileSink profile_;
-    ShellUi ui_;
+    Win32TouchpadGestureSource touchpad_gestures_;
+    ShellUi ui_{&touchpad_gestures_};
 
     std::string imgui_ini_path_utf8_;
     bool imgui_initialized_ = false;

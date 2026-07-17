@@ -21,6 +21,7 @@
 namespace specforge {
 
 class ProfileSink;
+class PlotTouchpadGestureSource;
 
 struct ShellStatus {
     bool profile_open = false;
@@ -33,7 +34,7 @@ struct ShellStatus {
 
 class ShellUi {
 public:
-    ShellUi();
+    explicit ShellUi(PlotTouchpadGestureSource* touchpad_gestures = nullptr);
     ~ShellUi();
 
     void Render(const ShellStatus& status);
@@ -73,6 +74,7 @@ private:
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
+    PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;
     bool label_shortcut_context_active_ = false;

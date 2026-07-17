@@ -29,8 +29,9 @@ synthetic spectrum fixture, and optional JSONL profile output.
 The product target is an elegant, responsive, dockable desktop spectrum viewer:
 
 - primary view: wavelength on X, flux on Y
-- interaction: pan, cursor-centered wheel zoom, range navigation, spectrum
-  switching, and spectral-line overlays
+- interaction: mouse pan and cursor-centered wheel zoom, Precision Touchpad
+  two-finger pan and pinch zoom, range navigation, spectrum switching, and
+  spectral-line overlays
 - overlay data: public rest-frame vacuum Angstrom reference markers in tracked
   config; subtype presets, zoom windows, and private criteria stay out of the
   public catalog
@@ -130,6 +131,13 @@ A 3909-column `.npy` matrix uses the fixed loglam wavelength grid; other column
 counts fall back to pixel index and report that in snapshot diagnostics. Known
 auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`, and
 `*_known_mask.npy` are rejected instead of being plotted as spectra.
+
+On a Windows Precision Touchpad, move the pointer over the spectrum and use two
+fingers to pan or pinch to zoom. Starting over the plot body controls both axes;
+starting over an axis region constrains the gesture to that axis. The docked
+plot, immersive plot, and detached viewport share the same behavior. Devices
+without native Precision Touchpad input retain the existing mouse and wheel
+controls.
 
 ## Interaction Profiling
 

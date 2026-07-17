@@ -3,6 +3,7 @@
 #include "domain/spectrum_smoothing.h"
 #include "domain/spectrum_snapshot.h"
 #include "overlays/spectral_line_catalog.h"
+#include "plot/plot_touchpad_gesture.h"
 
 #include <imgui.h>
 
@@ -64,6 +65,7 @@ void RenderSpectrumPlot(
     const SpectrumPlotProfileContext& profile = {},
     const SpectrumPlotStyle& style = {},
     const SpectrumPlotOverlays& overlays = {},
-    const SpectrumPlotDisplayOptions& display = {});
+    const SpectrumPlotDisplayOptions& display = {},
+    PlotTouchpadGestureSource* touchpad_gestures = nullptr);
 
 }  // namespace specforge

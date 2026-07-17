@@ -140,6 +140,7 @@ specforge_configure_production_target(specforge_sessions)
 target_link_libraries(specforge_sessions PUBLIC specforge_core)
 
 add_library(specforge_desktop_ui STATIC
+    src/plot/plot_touchpad_gesture.cpp
     src/plot/spectrum_plot.cpp
     src/ui/sample_workflow_panel.cpp
     src/ui/shell_ui.cpp
@@ -159,6 +160,7 @@ target_link_libraries(specforge_desktop_ui
 add_executable(specforge_native WIN32
     src/app/specforge_app.cpp
     src/main.cpp
+    src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
     src/renderer/d3d11_renderer.cpp
     ${SPECFORGE_MANIFEST}
@@ -170,7 +172,10 @@ target_link_libraries(specforge_native PRIVATE
     d3d11
     dxgi
     dwmapi
+    comctl32
     imm32
+    ole32
+    uuid
 )
 
 set_target_properties(specforge_native PROPERTIES
@@ -241,6 +246,11 @@ specforge_add_test(
     specforge_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp
     specforge_core
+)
+specforge_add_test(
+    specforge_plot_touchpad_gesture_tests
+    tests/plot_touchpad_gesture_tests.cpp
+    specforge_desktop_ui
 )
 specforge_add_test(
     specforge_spectrum_view_session_tests
