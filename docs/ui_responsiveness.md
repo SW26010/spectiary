@@ -84,26 +84,50 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 判断：这个方案比单纯“少调用几次函数”更标准。业务规则仍然归 navigation/filter/sorting owner 管，UI 不偷读内部状态；性能约束通过 API 形状表达为 cheap snapshot accessor、cached sequence、cached filter/sort views 和不 materialize rows 的默认路径。它的取舍是 session view 不再携带完整 row 列表，测试需要改为验证 count/position/target 行为；这是合理取舍，因为完整列表属于 deep model/debug 数据，不该成为每帧 UI 合同。
 
+## 复盘：2026-07-17 catalog user state 投影退化
+
+范围：`fee63a6892cc64866ffc5eae0fa3ec18615b956a` 深化 spectral-line catalog user state Module 后，用户反馈 UI 性能明显退化；`b3be6d441c22d6092574e2fe2ca3f2ef1bfb1901` 修复。
+
+引入原因：
+
+- `fee63a6` 把 catalog user state 收敛为 intent/result/view Interface，并由 Module 统一验证 identity、不变量、dirty 状态和持久化；这个结构方向正确。
+- 但普通与沉浸式 plot 为了读取 marker label visibility，在每帧调用完整 `SpectralLinesPanelController::View()`；该 view 同时投影全部 grouping views、groups、marker references、grouping view search 和 panel 状态。
+- `View()` 还会对每个 user grouping view 重复调用 `EffectiveUserGroupingView()`。owned state 已经在 load 和 persistent intent 后规范化，这次 per-frame 修复既冗余，又让 plot `view_update` 成本随 grouping view set 增长。
+- 结果是只需要当前可见 spectral-line markers 和一个 label flag 的 overlay render path，承担了只属于 panel 展示的完整 catalog user state 投影。
+
+修复方式：
+
+- 增加窄 `SpectralLinesPanelController::PlotView()`，只返回当前 plot-visible spectral-line markers 和 marker label visibility；普通与沉浸式 plot 不再读取完整 `CatalogUserStateView`。
+- `View()` 直接投影 Module 持有的规范化 user grouping views，不在每帧 read path 重复执行 `EffectiveUserGroupingView()`。规范化继续由 constructor load 和每个 persistent intent 的统一完成路径负责。
+- controller Interface 测试覆盖 missing/unsupported snapshot、catalog marker 顺序、marker visibility、marker label visibility，以及既有的修改、选择恢复和持久化行为。
+- 使用 `carbon_net_increment_loglam_V0.31_X.npy` 的 3202 条 spectrum，在本机 Windows/DWM 约 120Hz 环境完成 16.17 秒真实 pan/drag：present interval p95 为 9.310ms、input-to-present p95 为 9.081ms、`view_update` p95 为 0.681ms。相对上一 commit 的 present interval p95 9.230ms，差异约 0.08ms，按本次“无明显相对退化”口径通过。
+
+判断：深化 catalog user state Module 本身没有错，问题是把 panel-facing full view 当成 plot overlay accessor。修复把性能特征写进 Interface 形状，在不绕过 Module、不复制 catalog marker 数据、不引入缓存失效协议的前提下恢复了 Locality。上述 10ms 是本次回归诊断门槛，不替代 `docs/performance_testing.md` 定义的 130Hz 项目验收标准；本次采集不能单独声明达到 130Hz acceptance。
+
 ## 设计规则
 
 1. Full view 不是 snapshot accessor。任何只需要当前光谱的 UI 必须使用 cheap snapshot API，不能调用 full session/workflow view。
 2. 每帧 view 只能是 presentation snapshot，不能隐式做 source scanning、filter evaluation、sorting value extraction 或 sequence materialization。
 3. Deep module 可以计算完整 domain result，但 UI-facing view 要按显示需求裁剪；完整 rows、masks、values 应留在 owner 或测试 seam。
-4. 业务 owner 负责缓存和失效。UI panel 不应该自己推断 filter/sequence/sorting，也不应该用拷贝出来的大列表判断权限。
-5. Source identity 和 workflow context 要分开。sample index 切换不等于 source identity 变化，也不应该触发 folder scan 或 filter/sort reapply。
-6. Filter/sorting/sequence 的默认 source-order 场景必须是 cheap path；只有 active filter/sort 或调试/test seam 需要 materialized ordered rows。
-7. Label write 只能做一次必要同步。写值、保存、filter update、auto-advance 要有清楚顺序，避免 command result 后再做全量 ensure。
-8. 新 panel 抽取或 session boundary refactor 必须检查每帧调用点。结构更干净不自动代表响应更快。
-9. 单元测试只能证明规则正确，不能证明交互预算。触碰热路径时必须补 profile 或至少解释为什么该改动不进入热路径。
-10. 长 build 不是合格反馈环。人工或 agent 验证 full CMake build 时必须带超时；性能问题优先建立可重复 profile 或 focused compile/test loop。
+4. Plot/overlay render path 只能读取其实际渲染所需的窄 view。Spectral-line overlay 使用 `PlotView()`；完整 `CatalogUserStateView` 只服务 panel 展示。
+5. Catalog user state 的不变量在 load 和 persistent intent 后规范化；per-frame `View()` 只投影 owned state，不负责重复修复或补全 grouping views。
+6. 业务 owner 负责缓存和失效。UI panel 不应该自己推断 filter/sequence/sorting，也不应该用拷贝出来的大列表判断权限。
+7. Source identity 和 workflow context 要分开。sample index 切换不等于 source identity 变化，也不应该触发 folder scan 或 filter/sort reapply。
+8. Filter/sorting/sequence 的默认 source-order 场景必须是 cheap path；只有 active filter/sort 或调试/test seam 需要 materialized ordered rows。
+9. Label write 只能做一次必要同步。写值、保存、filter update、auto-advance 要有清楚顺序，避免 command result 后再做全量 ensure。
+10. 新 panel 抽取或 session boundary refactor 必须检查每帧调用点。结构更干净不自动代表响应更快。
+11. 单元测试只能证明规则正确，不能证明交互预算。触碰热路径时必须补 profile 或至少解释为什么该改动不进入热路径。
+12. 长 build 不是合格反馈环。人工或 agent 验证 full CMake build 时必须带超时；性能问题优先建立可重复 profile 或 focused compile/test loop。
 
 ## 推荐实现形态
 
 优先采用：
 
 - `CurrentSampleSnapshot()` 这类 narrow read API。
+- `SpectralLinesPanelController::PlotView()` 这类只投影当前 render 所需状态的 narrow view。
 - frame-scoped view cache，command 后显式 dirty。
 - owner-owned cache，例如 navigation sequence cache、filter view cache、sorting view cache。
+- 在 load/mutation 路径规范化 owned state，让 read view 保持纯投影。
 - context fingerprint 驱动失效，而不是每次 sample index 变化都重算。
 - source-order implicit representation，避免 `[0..N)` 常规场景分配和复制。
 - session view 暴露 count、position、availability、current row 等 UI 需要字段，不暴露大列表作为常规合同。
@@ -113,6 +137,8 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 - 为了修卡顿绕过 domain owner，让 UI 直接读取 filter mask 或 labeling task 内部数组。
 - 为了方便测试把完整 sequence rows 放进每帧 view。
+- 为了读取一个 plot/overlay flag，在 render path 构造完整 panel-facing view。
+- 在 per-frame view builder 中重复修复 owner 已经保证的不变量。
 - 仅靠 memoizing `SessionView()` 掩盖内部仍然每帧重建 filter/sort/evaluation 的问题。
 - 未经 profile 就引入自定义 renderer、GPU path 或复杂 async pipeline。
 
@@ -123,6 +149,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 - `ShellUi::Render*`
 - `SourceCollectionSession::View()`
 - `SampleWorkflowCoordinator::*View()`
+- `SpectralLinesPanelController::View()` / `PlotView()`
 - sample navigation/filtering/sorting/labeling command path
 - source folder / collection identity / snapshot loading
 - plot render、overlay render、range controls
@@ -130,6 +157,8 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 检查项：
 
 - 主图 render path 是否仍只读取当前 snapshot 和 plot/overlay 所需轻量状态。
+- Spectral-line plot 是否只读取 `PlotView()`，没有为 overlay 构造完整 `CatalogUserStateView`。
+- Catalog user state 是否在 load/persistent intent 后规范化，而不是由 per-frame `View()` 重复修复。
 - 每帧是否会构造 full sequence、filter source、sorting source、included samples 或 source identity。
 - previous/next 和 label auto-advance 是否只加载目标 sample，不触发 source/workflow 全量重同步。
 - panel view 是否只包含显示需要的状态，没有复制 owner 内部大列表。
