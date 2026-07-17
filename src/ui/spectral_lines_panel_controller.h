@@ -168,6 +168,11 @@ struct CatalogUserStateView {
     std::vector<SpectralLineGroupingView> grouping_views;
 };
 
+struct SpectralLinePlotView {
+    std::vector<const SpectralLineMarker*> visible_markers;
+    bool marker_labels_visible = true;
+};
+
 class SpectralLinesPanelController {
 public:
     SpectralLinesPanelController();
@@ -182,7 +187,7 @@ public:
 
     [[nodiscard]] CatalogUserStateResult Submit(CatalogUserStateIntent intent);
     [[nodiscard]] CatalogUserStateView View() const;
-    [[nodiscard]] std::vector<const SpectralLineMarker*> VisibleMarkers(
+    [[nodiscard]] SpectralLinePlotView PlotView(
         const SpectrumSnapshotHandle& snapshot) const;
 
     void BeginFrame(std::uint64_t frame_index);

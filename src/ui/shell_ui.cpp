@@ -770,15 +770,16 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
-    const std::vector<const SpectralLineMarker*> spectral_lines =
-        spectral_lines_panel_.VisibleMarkers(snapshot);
-    const bool marker_labels_visible = spectral_lines_panel_.View().marker_labels_visible;
+    const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
     RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), marker_labels_visible},
+        SpectrumPlotOverlays{
+            spectral_lines.visible_markers.data(),
+            spectral_lines.visible_markers.size(),
+            spectral_lines.marker_labels_visible},
         MakeImmersivePlotDisplayOptions());
 
     ImGui::End();
@@ -1081,15 +1082,16 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
-    const std::vector<const SpectralLineMarker*> spectral_lines =
-        spectral_lines_panel_.VisibleMarkers(snapshot);
-    const bool marker_labels_visible = spectral_lines_panel_.View().marker_labels_visible;
+    const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
     RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), marker_labels_visible});
+        SpectrumPlotOverlays{
+            spectral_lines.visible_markers.data(),
+            spectral_lines.visible_markers.size(),
+            spectral_lines.marker_labels_visible});
     ImGui::End();
 }
 

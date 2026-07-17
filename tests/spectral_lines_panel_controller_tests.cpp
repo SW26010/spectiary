@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -41,6 +42,13 @@ specforge::SpectralLineCatalog GroupedCatalog()
     catalog.markers.push_back(Line("h_alpha", "H alpha", "Balmer", 6564.614));
     catalog.markers.push_back(Line("ca_ii_8500", "Ca II", "Ca II", 8500.360));
     return catalog;
+}
+
+specforge::SpectrumSnapshotHandle Snapshot(bool can_show_spectral_lines)
+{
+    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    snapshot->capabilities.can_show_spectral_lines = can_show_spectral_lines;
+    return snapshot;
 }
 
 std::filesystem::path TestCachePath(std::string_view test_name)
@@ -163,6 +171,53 @@ void TestForeignIdentitiesAreRejectedWithoutPersistence()
         Require(session.Flush(), "a clean session should flush successfully");
     }
     Require(!std::filesystem::exists(path), "rejected intents must not create a cache file");
+    RemoveTestCache(path);
+}
+
+void TestPlotViewProjectsOnlyPlotOverlayState()
+{
+    const std::filesystem::path path = TestCachePath("plot_view");
+    RemoveTestCache(path);
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+
+        const specforge::SpectralLinePlotView no_snapshot = session.PlotView(nullptr);
+        Require(no_snapshot.visible_markers.empty(), "a missing snapshot must not expose plot markers");
+        Require(no_snapshot.marker_labels_visible, "plot label visibility should be available without a snapshot");
+
+        const specforge::SpectralLinePlotView unsupported = session.PlotView(Snapshot(false));
+        Require(unsupported.visible_markers.empty(), "an unsupported snapshot must not expose plot markers");
+
+        specforge::SpectralLinePlotView plot_view = session.PlotView(Snapshot(true));
+        Require(plot_view.visible_markers.size() == 3, "a supported snapshot should expose visible catalog markers");
+        Require(
+            plot_view.visible_markers[0]->id == "h_beta" &&
+                plot_view.visible_markers[1]->id == "h_alpha" &&
+                plot_view.visible_markers[2]->id == "ca_ii_8500",
+            "plot markers should preserve catalog order");
+
+        RequireApplied(
+            session.Submit(specforge::CatalogUserStateIntent::SetMarkerLabelsVisible(false)),
+            "plot label visibility intent should be applied");
+        RequireApplied(
+            session.Submit(specforge::CatalogUserStateIntent::SetMarkerVisibility("h_alpha", false)),
+            "plot marker visibility intent should be applied");
+
+        plot_view = session.PlotView(Snapshot(true));
+        Require(!plot_view.marker_labels_visible, "plot view should reflect current marker label visibility");
+        Require(plot_view.visible_markers.size() == 2, "plot view should omit hidden markers");
+        Require(
+            std::none_of(
+                plot_view.visible_markers.begin(),
+                plot_view.visible_markers.end(),
+                [](const specforge::SpectralLineMarker* marker) {
+                    return marker != nullptr && marker->id == "h_alpha";
+                }),
+            "plot view should not expose a marker hidden through catalog user state");
+    }
     RemoveTestCache(path);
 }
 
@@ -334,6 +389,7 @@ void TestModificationSelectionAndPersistenceRoundTrip()
 int main()
 {
     TestForeignIdentitiesAreRejectedWithoutPersistence();
+    TestPlotViewProjectsOnlyPlotOverlayState();
     TestModificationSelectionAndPersistenceRoundTrip();
     return 0;
 }

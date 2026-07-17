@@ -418,8 +418,8 @@ void SpectralLinesGroupingViewUi::Render(
         ImGui::SameLine();
     }
 
-    const std::vector<const SpectralLineMarker*> visible_markers = panel.VisibleMarkers(snapshot);
-    const std::string marker_count = std::to_string(visible_markers.size()) + " plot-visible / " +
+    const SpectralLinePlotView plot_view = panel.PlotView(snapshot);
+    const std::string marker_count = std::to_string(plot_view.visible_markers.size()) + " plot-visible / " +
                                      std::to_string(catalog_marker_count) + " catalog markers";
     RenderDisabledText(marker_count);
 

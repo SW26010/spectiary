@@ -668,25 +668,26 @@ CatalogUserStateView SpectralLinesPanelController::View() const
         append_view(*catalog_grouping_view_, false);
     }
     for (const GroupingView& stored_view : user_state_.grouping_views) {
-        append_view(EffectiveUserGroupingView(stored_view, catalog_, catalog_identity_), true);
+        append_view(stored_view, true);
     }
     return result;
 }
 
-std::vector<const SpectralLineMarker*> SpectralLinesPanelController::VisibleMarkers(
+SpectralLinePlotView SpectralLinesPanelController::PlotView(
     const SpectrumSnapshotHandle& snapshot) const
 {
-    std::vector<const SpectralLineMarker*> markers;
+    SpectralLinePlotView result;
+    result.marker_labels_visible = marker_labels_visible_;
     if (!snapshot || !snapshot->capabilities.can_show_spectral_lines || catalog_.markers.empty()) {
-        return markers;
+        return result;
     }
-    markers.reserve(catalog_.markers.size());
+    result.visible_markers.reserve(catalog_.markers.size());
     for (const SpectralLineMarker& marker : catalog_.markers) {
         if (IsMarkerVisible(user_state_, marker.id)) {
-            markers.push_back(&marker);
+            result.visible_markers.push_back(&marker);
         }
     }
-    return markers;
+    return result;
 }
 
 void SpectralLinesPanelController::BeginFrame(std::uint64_t frame_index)
