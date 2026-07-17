@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/source_collection_session_types.h"
@@ -250,7 +251,8 @@ public:
     [[nodiscard]] SourceCollectionSessionView View() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
 
-    void MaybeSaveStateCaches(std::uint64_t frame_index);
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
 
 private:

@@ -3,6 +3,7 @@
 #include "domain/source_collection_manifest.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -14,8 +15,10 @@
 namespace specforge {
 namespace {
 
-constexpr std::uint64_t kStateSaveDebounceFrames = 30;
-constexpr std::uint64_t kStateSaveRetryFrames = 120;
+using namespace std::chrono_literals;
+
+constexpr auto kStateSaveDebounce = 500ms;
+constexpr auto kStateSaveRetry = 2s;
 
 bool HasPendingOutputSave(const SampleLabelingTask& task)
 {
@@ -74,7 +77,8 @@ SampleLabelingController::SampleLabelingController()
 
 SampleLabelingController::SampleLabelingController(std::filesystem::path state_cache_path)
     : state_cache_path_(std::move(state_cache_path)),
-      state_cache_save_scheduler_(kStateSaveDebounceFrames, kStateSaveRetryFrames)
+      state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
+      output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
 }
 
@@ -511,7 +515,7 @@ void SampleLabelingController::QueueStateSave()
 
 void SampleLabelingController::QueueOutputRetry()
 {
-    output_retry_pending_ = true;
+    output_retry_scheduler_.MarkDirty();
 }
 
 bool SampleLabelingController::TryRetryOutputSaves()
@@ -534,8 +538,6 @@ bool SampleLabelingController::TryRetryOutputSaves()
     }
 
     if (!attempted) {
-        output_retry_pending_ = false;
-        next_output_retry_frame_ = 0;
         return true;
     }
 
@@ -543,26 +545,17 @@ bool SampleLabelingController::TryRetryOutputSaves()
     return all_succeeded;
 }
 
-bool SampleLabelingController::MaybeRetryOutputSaves(std::uint64_t frame_index)
+bool SampleLabelingController::MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now)
 {
-    if (!output_retry_pending_) {
-        return false;
-    }
-    if (next_output_retry_frame_ == 0) {
-        next_output_retry_frame_ = frame_index + kStateSaveRetryFrames;
-        return false;
-    }
-    if (frame_index < next_output_retry_frame_) {
+    if (!output_retry_scheduler_.ShouldAttemptSave(now)) {
         return false;
     }
 
     const bool all_succeeded = TryRetryOutputSaves();
     if (all_succeeded) {
-        output_retry_pending_ = false;
-        next_output_retry_frame_ = 0;
+        output_retry_scheduler_.MarkSaveSucceeded();
     } else {
-        output_retry_pending_ = true;
-        next_output_retry_frame_ = frame_index + kStateSaveRetryFrames;
+        output_retry_scheduler_.MarkSaveFailed();
     }
     return true;
 }
@@ -606,23 +599,34 @@ bool SampleLabelingController::TrySaveStateCache()
     return saved;
 }
 
-void SampleLabelingController::MaybeSaveStateCache(std::uint64_t frame_index)
+void SampleLabelingController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    const bool output_retry_attempted = MaybeRetryOutputSaves(frame_index);
+    const bool output_retry_attempted = MaybeRetryOutputSaves(now);
     if (output_retry_attempted && state_cache_save_scheduler_.dirty()) {
         if (!TrySaveStateCache()) {
-            state_cache_save_scheduler_.MarkSaveFailed(frame_index);
+            state_cache_save_scheduler_.MarkSaveFailed();
         }
         return;
     }
 
-    if (!state_cache_save_scheduler_.ShouldAttemptSave(frame_index)) {
+    if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
         return;
     }
 
     if (!TrySaveStateCache()) {
-        state_cache_save_scheduler_.MarkSaveFailed(frame_index);
+        state_cache_save_scheduler_.MarkSaveFailed();
     }
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint> SampleLabelingController::NextMaintenanceDeadline() const
+{
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline =
+        state_cache_save_scheduler_.next_attempt_time();
+    const auto output_retry_deadline = output_retry_scheduler_.next_attempt_time();
+    if (output_retry_deadline && (!deadline || *output_retry_deadline < *deadline)) {
+        deadline = output_retry_deadline;
+    }
+    return deadline;
 }
 
 bool SampleLabelingController::FlushStateCache()

@@ -6,6 +6,7 @@
 #include "ui/sample_labeling_state_cache_io.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -26,6 +27,20 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+void RunMaintenanceUntilIdle(specforge::SampleLabelingController& controller)
+{
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        const auto deadline = controller.NextMaintenanceDeadline();
+        if (!deadline) {
+            return;
+        }
+        controller.RunMaintenance(*deadline);
+    }
+    Require(
+        !controller.NextMaintenanceDeadline(),
+        "sample-labeling maintenance should converge after successful persistence");
 }
 
 std::int32_t ReadLittleEndianI32(const std::array<unsigned char, 4>& bytes)
@@ -415,9 +430,11 @@ void TestSampleLabelingControllerAutosavesDraftRecord()
         Require(controller.PersistActiveTaskRecord(), "workflow setting should persist to local task record");
         Require(controller.AssignLabel(1, 5).accepted, "controller should label a sample");
         Require(controller.state_save_pending(), "sample label writes should queue a debounced local task save");
-        controller.MaybeSaveStateCache(10);
+        const auto deadline = controller.NextMaintenanceDeadline();
+        Require(deadline.has_value(), "queued sample-labeling save should expose its deadline");
+        controller.RunMaintenance(*deadline - std::chrono::milliseconds(1));
         Require(controller.state_save_pending(), "debounced local task save should not flush immediately");
-        controller.MaybeSaveStateCache(40);
+        controller.RunMaintenance(*deadline);
         Require(!controller.state_save_pending(), "debounced local task save should flush after the delay");
     }
 
@@ -604,8 +621,7 @@ void TestMetadataOnlyChangesRewriteSidecarOnRetry()
         "metadata-only edit should enter pending save state");
     Require(task->save_state.pending_count == 0, "metadata-only pending state should not invent pending samples");
 
-    controller.MaybeSaveStateCache(10);
-    controller.MaybeSaveStateCache(140);
+    RunMaintenanceUntilIdle(controller);
     task = controller.active_task();
     Require(task != nullptr && !task->metadata_save_pending, "metadata retry should clear metadata pending");
     Require(
@@ -830,8 +846,7 @@ void TestFailedExternalOutputRetriesAfterBackoff()
 
     std::filesystem::remove_all(output_path, cleanup_error);
     Require(!cleanup_error, "test should remove the directory blocking the retry");
-    controller.MaybeSaveStateCache(10);
-    controller.MaybeSaveStateCache(140);
+    RunMaintenanceUntilIdle(controller);
 
     task = controller.active_task();
     Require(task != nullptr, "task should remain active after retry");

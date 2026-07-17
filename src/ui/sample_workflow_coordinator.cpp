@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -16,8 +17,10 @@
 namespace specforge {
 namespace {
 
-constexpr std::uint64_t kWorkflowStateSaveDebounceFrames = 30;
-constexpr std::uint64_t kWorkflowStateSaveRetryFrames = 120;
+using namespace std::chrono_literals;
+
+constexpr auto kWorkflowStateSaveDebounce = 500ms;
+constexpr auto kWorkflowStateSaveRetry = 2s;
 
 std::string LowerAscii(std::string value)
 {
@@ -140,7 +143,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
 
 SampleWorkflowCoordinator::SampleWorkflowCoordinator()
     : workflow_state_cache_path_(DefaultSampleWorkflowStateCachePath()),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -149,7 +152,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path labeling_state_cache_path)
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(std::move(labeling_state_cache_path)),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -160,7 +163,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(std::move(labeling_state_cache_path)),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounceFrames, kWorkflowStateSaveRetryFrames)
+      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -907,17 +910,28 @@ std::optional<std::size_t> SampleWorkflowCoordinator::current_index() const
     return navigation_.current_index();
 }
 
-void SampleWorkflowCoordinator::MaybeSaveStateCaches(std::uint64_t frame_index)
+void SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    labeling_.MaybeSaveStateCache(frame_index);
-    if (!workflow_state_save_scheduler_.ShouldAttemptSave(frame_index)) {
+    labeling_.RunMaintenance(now);
+    if (!workflow_state_save_scheduler_.ShouldAttemptSave(now)) {
         return;
     }
     if (SaveWorkflowStateCache()) {
         workflow_state_save_scheduler_.MarkSaveSucceeded();
     } else {
-        workflow_state_save_scheduler_.MarkSaveFailed(frame_index);
+        workflow_state_save_scheduler_.MarkSaveFailed();
     }
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator::NextMaintenanceDeadline() const
+{
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline = labeling_.NextMaintenanceDeadline();
+    const std::optional<LocalUserStateSaveScheduler::TimePoint> workflow_deadline =
+        workflow_state_save_scheduler_.next_attempt_time();
+    if (workflow_deadline && (!deadline || *workflow_deadline < *deadline)) {
+        deadline = workflow_deadline;
+    }
+    return deadline;
 }
 
 bool SampleWorkflowCoordinator::FlushStateCaches()
@@ -1124,7 +1138,7 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
         workflow_state_save_scheduler_.MarkSaveSucceeded();
         return true;
     }
-    workflow_state_save_scheduler_.MarkSaveFailed(0);
+    workflow_state_save_scheduler_.MarkSaveFailed();
     return false;
 }
 

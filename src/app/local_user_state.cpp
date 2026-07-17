@@ -218,40 +218,36 @@ std::string_view LocalUserStateSaveStatus::message_view() const
 }
 
 LocalUserStateSaveScheduler::LocalUserStateSaveScheduler(
-    std::uint64_t debounce_frames,
-    std::uint64_t retry_frames)
-    : debounce_frames_(debounce_frames),
-      retry_frames_(retry_frames)
+    Duration debounce,
+    Duration retry)
+    : debounce_(debounce),
+      retry_(retry)
 {
 }
 
 void LocalUserStateSaveScheduler::MarkDirty()
 {
-    dirty_ = true;
+    MarkDirtyAt(Clock::now());
 }
 
-void LocalUserStateSaveScheduler::MarkDirty(std::uint64_t frame_index)
+void LocalUserStateSaveScheduler::MarkDirtyAt(TimePoint now)
 {
     dirty_ = true;
-    next_save_frame_ = std::max(next_save_frame_, frame_index + debounce_frames_);
+    const TimePoint debounce_deadline = now + debounce_;
+    if (!next_attempt_time_ || debounce_deadline > *next_attempt_time_) {
+        next_attempt_time_ = debounce_deadline;
+    }
 }
 
-bool LocalUserStateSaveScheduler::ShouldAttemptSave(std::uint64_t frame_index)
+bool LocalUserStateSaveScheduler::ShouldAttemptSave(TimePoint now) const
 {
-    if (!dirty_) {
-        return false;
-    }
-    if (next_save_frame_ == 0) {
-        next_save_frame_ = frame_index + debounce_frames_;
-        return false;
-    }
-    return frame_index >= next_save_frame_;
+    return dirty_ && next_attempt_time_ && now >= *next_attempt_time_;
 }
 
 void LocalUserStateSaveScheduler::MarkSaveSucceeded()
 {
     dirty_ = false;
-    next_save_frame_ = 0;
+    next_attempt_time_.reset();
 }
 
 void LocalUserStateSaveScheduler::MarkSaveSucceeded(LocalUserStateSaveStatus& status)
@@ -260,24 +256,41 @@ void LocalUserStateSaveScheduler::MarkSaveSucceeded(LocalUserStateSaveStatus& st
     status.Clear();
 }
 
-void LocalUserStateSaveScheduler::MarkSaveFailed(std::uint64_t frame_index)
+void LocalUserStateSaveScheduler::MarkSaveFailed()
+{
+    MarkSaveFailedAt(Clock::now());
+}
+
+void LocalUserStateSaveScheduler::MarkSaveFailedAt(TimePoint now)
 {
     dirty_ = true;
-    next_save_frame_ = frame_index + retry_frames_;
+    next_attempt_time_ = now + retry_;
 }
 
 void LocalUserStateSaveScheduler::MarkSaveFailed(
-    std::uint64_t frame_index,
     LocalUserStateSaveStatus& status,
     std::string message)
 {
-    MarkSaveFailed(frame_index);
+    MarkSaveFailedAt(Clock::now(), status, std::move(message));
+}
+
+void LocalUserStateSaveScheduler::MarkSaveFailedAt(
+    TimePoint now,
+    LocalUserStateSaveStatus& status,
+    std::string message)
+{
+    MarkSaveFailedAt(now);
     status.MarkFailed(std::move(message));
 }
 
 bool LocalUserStateSaveScheduler::dirty() const
 {
     return dirty_;
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint> LocalUserStateSaveScheduler::next_attempt_time() const
+{
+    return dirty_ ? next_attempt_time_ : std::nullopt;
 }
 
 }  // namespace specforge

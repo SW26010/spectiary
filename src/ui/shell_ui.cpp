@@ -551,12 +551,8 @@ void ShellUi::Render(const ShellStatus& status)
     session_view_cache_.reset();
     session_view_cache_dirty_ = false;
     label_shortcut_context_active_ = false;
-    spectral_lines_panel_.BeginFrame(status.frame_index);
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
-        panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
-        session_.MaybeSaveStateCaches(status.frame_index);
-        spectral_lines_panel_.MaybeSave(status.frame_index);
         session_view_cache_.reset();
         session_view_cache_dirty_ = false;
         return;
@@ -593,13 +589,30 @@ void ShellUi::Render(const ShellStatus& status)
     }
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
-        panel_visibility_,
-        status.frame_index);
-    panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
-    session_.MaybeSaveStateCaches(status.frame_index);
-    spectral_lines_panel_.MaybeSave(status.frame_index);
+        panel_visibility_);
     session_view_cache_.reset();
     session_view_cache_dirty_ = false;
+}
+
+void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+{
+    panel_visibility_state_.RunMaintenance(panel_visibility_, now);
+    session_.RunMaintenance(now);
+    spectral_lines_panel_.RunMaintenance(now);
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDeadline() const
+{
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline =
+        panel_visibility_state_.NextMaintenanceDeadline();
+    const auto consider = [&deadline](std::optional<LocalUserStateSaveScheduler::TimePoint> candidate) {
+        if (candidate && (!deadline || *candidate < *deadline)) {
+            deadline = candidate;
+        }
+    };
+    consider(session_.NextMaintenanceDeadline());
+    consider(spectral_lines_panel_.NextMaintenanceDeadline());
+    return deadline;
 }
 
 void ShellUi::RefreshSystemColors()

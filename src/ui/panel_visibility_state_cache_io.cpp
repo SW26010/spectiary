@@ -77,10 +77,10 @@ bool SavePanelVisibilityStateCache(
 
 PanelVisibilityStatePersistence::PanelVisibilityStatePersistence(
     std::filesystem::path cache_path,
-    std::uint64_t debounce_frames,
-    std::uint64_t retry_frames)
+    LocalUserStateSaveScheduler::Duration debounce,
+    LocalUserStateSaveScheduler::Duration retry)
     : cache_path_(std::move(cache_path)),
-      save_scheduler_(debounce_frames, retry_frames)
+      save_scheduler_(debounce, retry)
 {
 }
 
@@ -91,26 +91,31 @@ PanelVisibilityState PanelVisibilityStatePersistence::Load() const
 
 void PanelVisibilityStatePersistence::MarkDirtyIfChanged(
     const PanelVisibilityState& previous,
-    const PanelVisibilityState& current,
-    std::uint64_t frame_index)
+    const PanelVisibilityState& current)
 {
     if (!(current == previous)) {
-        save_scheduler_.MarkDirty(frame_index);
+        save_scheduler_.MarkDirty();
     }
 }
 
-void PanelVisibilityStatePersistence::MaybeSave(
+void PanelVisibilityStatePersistence::RunMaintenance(
     const PanelVisibilityState& state,
-    std::uint64_t frame_index)
+    LocalUserStateSaveScheduler::TimePoint now)
 {
-    if (!save_scheduler_.ShouldAttemptSave(frame_index)) {
+    if (!save_scheduler_.ShouldAttemptSave(now)) {
         return;
     }
     if (SavePanelVisibilityStateCache(cache_path_, state)) {
         save_scheduler_.MarkSaveSucceeded();
         return;
     }
-    save_scheduler_.MarkSaveFailed(frame_index);
+    save_scheduler_.MarkSaveFailed();
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint>
+PanelVisibilityStatePersistence::NextMaintenanceDeadline() const
+{
+    return save_scheduler_.next_attempt_time();
 }
 
 bool PanelVisibilityStatePersistence::Flush(const PanelVisibilityState& state)
@@ -122,7 +127,7 @@ bool PanelVisibilityStatePersistence::Flush(const PanelVisibilityState& state)
         save_scheduler_.MarkSaveSucceeded();
         return true;
     }
-    save_scheduler_.MarkSaveFailed(0);
+    save_scheduler_.MarkSaveFailed();
     return false;
 }
 

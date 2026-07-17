@@ -6,6 +6,7 @@
 #include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <system_error>
@@ -16,8 +17,10 @@
 namespace specforge {
 namespace {
 
-constexpr std::uint64_t kSourceSessionSaveDebounceFrames = 30;
-constexpr std::uint64_t kSourceSessionSaveRetryFrames = 120;
+using namespace std::chrono_literals;
+
+constexpr auto kSourceSessionSaveDebounce = 500ms;
+constexpr auto kSourceSessionSaveRetry = 2s;
 
 bool IsRestorableSourcePath(const std::filesystem::path& path)
 {
@@ -34,7 +37,7 @@ class SourceCollectionSessionStatePersistence {
 public:
     explicit SourceCollectionSessionStatePersistence(std::filesystem::path cache_path)
         : cache_path_(std::move(cache_path)),
-          save_scheduler_(kSourceSessionSaveDebounceFrames, kSourceSessionSaveRetryFrames)
+          save_scheduler_(kSourceSessionSaveDebounce, kSourceSessionSaveRetry)
     {
     }
 
@@ -63,19 +66,24 @@ public:
         }
     }
 
-    void MaybeSave(
-        std::uint64_t frame_index,
+    void RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now,
         const std::vector<SourceCollectionSavedSource>& sources,
         std::optional<std::size_t> active_source_index)
     {
-        if (!save_scheduler_.ShouldAttemptSave(frame_index)) {
+        if (!save_scheduler_.ShouldAttemptSave(now)) {
             return;
         }
         if (Save(sources, active_source_index)) {
             save_scheduler_.MarkSaveSucceeded();
         } else {
-            save_scheduler_.MarkSaveFailed(frame_index);
+            save_scheduler_.MarkSaveFailed();
         }
+    }
+
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const
+    {
+        return save_scheduler_.next_attempt_time();
     }
 
     [[nodiscard]] bool Flush(
@@ -89,7 +97,7 @@ public:
             save_scheduler_.MarkSaveSucceeded();
             return true;
         }
-        save_scheduler_.MarkSaveFailed(0);
+        save_scheduler_.MarkSaveFailed();
         return false;
     }
 
@@ -873,10 +881,22 @@ SourceCollectionSessionAction SourceCollectionSession::SetSampleSortDirection(
     return action;
 }
 
-void SourceCollectionSession::MaybeSaveStateCaches(std::uint64_t frame_index)
+void SourceCollectionSession::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    source_session_state_->MaybeSave(frame_index, SavedSourcesWithAnnotations(), roster_->current_source_index());
-    workflow_->MaybeSaveStateCaches(frame_index);
+    source_session_state_->RunMaintenance(now, SavedSourcesWithAnnotations(), roster_->current_source_index());
+    workflow_->RunMaintenance(now);
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint> SourceCollectionSession::NextMaintenanceDeadline() const
+{
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline =
+        source_session_state_->NextMaintenanceDeadline();
+    const std::optional<LocalUserStateSaveScheduler::TimePoint> workflow_deadline =
+        workflow_->NextMaintenanceDeadline();
+    if (workflow_deadline && (!deadline || *workflow_deadline < *deadline)) {
+        deadline = workflow_deadline;
+    }
+    return deadline;
 }
 
 bool SourceCollectionSession::FlushStateCaches()

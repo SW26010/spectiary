@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/render_wake_scheduler.h"
+#include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
 #include "platform/win32_touchpad_gesture_source.h"
 #include "profile/profile_sink.h"
@@ -49,7 +51,8 @@ private:
     void InitializeUiBackends();
     void Shutdown();
     void RenderFrame();
-    void WaitForRenderWake();
+    static void InvalidateRenderFromWin32Message(void* context) noexcept;
+    void RequestMessageRender() noexcept;
     void ApplyPendingResize();
     void ApplyUiScale(float dpi_scale);
     void ToggleFullscreen();
@@ -68,6 +71,8 @@ private:
     D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;
     Win32TouchpadGestureSource touchpad_gestures_;
+    Win32MessageRenderObserver message_render_observer_;
+    RenderWakeScheduler render_wake_scheduler_;
     ShellUi ui_{&touchpad_gestures_};
 
     std::string imgui_ini_path_utf8_;

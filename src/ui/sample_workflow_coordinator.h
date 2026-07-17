@@ -9,7 +9,6 @@
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -116,7 +115,8 @@ public:
     [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
 
-    void MaybeSaveStateCaches(std::uint64_t frame_index);
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
 
 private:

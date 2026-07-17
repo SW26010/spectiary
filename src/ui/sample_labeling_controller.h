@@ -4,7 +4,6 @@
 #include "ui/sample_labeling_state_cache_io.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -57,7 +56,8 @@ public:
     [[nodiscard]] bool PersistActiveTaskRecord();
     [[nodiscard]] bool MarkActiveOutputPersisted();
     [[nodiscard]] bool MarkActiveOutputSaveFailed(std::string message);
-    void MaybeSaveStateCache(std::uint64_t frame_index);
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
     [[nodiscard]] bool state_save_pending() const;
     [[nodiscard]] bool state_save_failed() const;
@@ -75,17 +75,16 @@ private:
     void QueueStateSave();
     void QueueOutputRetry();
     [[nodiscard]] bool TryRetryOutputSaves();
-    [[nodiscard]] bool MaybeRetryOutputSaves(std::uint64_t frame_index);
+    [[nodiscard]] bool MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] bool TrySaveStateCache();
 
     std::unordered_map<std::string, SourceState> sources_;
     std::filesystem::path state_cache_path_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
+    LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
     bool state_cache_loaded_ = false;
-    bool output_retry_pending_ = false;
-    std::uint64_t next_output_retry_frame_ = 0;
     std::string state_cache_load_warning_;
 };
 

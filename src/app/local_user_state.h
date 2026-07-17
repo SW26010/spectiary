@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstdint>
+#include <chrono>
 #include <filesystem>
 #include <iosfwd>
 #include <optional>
@@ -32,23 +32,30 @@ private:
 
 class LocalUserStateSaveScheduler {
 public:
+    using Clock = std::chrono::steady_clock;
+    using TimePoint = Clock::time_point;
+    using Duration = Clock::duration;
+
     LocalUserStateSaveScheduler() = default;
-    LocalUserStateSaveScheduler(std::uint64_t debounce_frames, std::uint64_t retry_frames);
+    LocalUserStateSaveScheduler(Duration debounce, Duration retry);
 
     void MarkDirty();
-    void MarkDirty(std::uint64_t frame_index);
-    [[nodiscard]] bool ShouldAttemptSave(std::uint64_t frame_index);
+    void MarkDirtyAt(TimePoint now);
+    [[nodiscard]] bool ShouldAttemptSave(TimePoint now) const;
     void MarkSaveSucceeded();
     void MarkSaveSucceeded(LocalUserStateSaveStatus& status);
-    void MarkSaveFailed(std::uint64_t frame_index);
-    void MarkSaveFailed(std::uint64_t frame_index, LocalUserStateSaveStatus& status, std::string message);
+    void MarkSaveFailed();
+    void MarkSaveFailedAt(TimePoint now);
+    void MarkSaveFailed(LocalUserStateSaveStatus& status, std::string message);
+    void MarkSaveFailedAt(TimePoint now, LocalUserStateSaveStatus& status, std::string message);
 
     [[nodiscard]] bool dirty() const;
+    [[nodiscard]] std::optional<TimePoint> next_attempt_time() const;
 
 private:
-    std::uint64_t debounce_frames_ = 0;
-    std::uint64_t retry_frames_ = 0;
-    std::uint64_t next_save_frame_ = 0;
+    Duration debounce_ = Duration::zero();
+    Duration retry_ = Duration::zero();
+    std::optional<TimePoint> next_attempt_time_;
     bool dirty_ = false;
 };
 

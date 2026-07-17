@@ -38,6 +38,8 @@ public:
     ~ShellUi();
 
     void Render(const ShellStatus& status);
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
     void RefreshSystemColors();
     void EnterImmersivePlotMode();

@@ -62,8 +62,20 @@ alpha blending 全部改为 linear-light pipeline 的情况下，把 render-targ
 并不能替代交换链色彩空间声明。HDR 或 Windows 自动色彩管理启用时，广色域映射由系统完成；Advanced Color 未启用时，
 应用仍遵循 Windows 传统 sRGB SDR 行为，不自行承担显示器 ICC 转换。
 
-Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。SpecForge 因此只在主窗口
-最小化或隐藏时停止渲染并等待窗口消息，不为失活窗口单独设置刷新率，也不尝试通过 Z-order 枚举恢复“完全遮挡”检测。
+Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。SpecForge 不通过 Z-order
+枚举恢复“完全遮挡”检测，而是让可见窗口在没有消息和维护任务时停止出帧，并用原生 Win32 message wait 保留最后一次
+presentation。鼠标、键盘、窗口和 ImGui viewport 消息各请求一帧；本地状态保存使用 `steady_clock` deadline 独立唤醒，
+不依赖刷新率推进。Direct Manipulation 使用 `MANUALUPDATE`，所以 Precision Touchpad 手势及 inertia active 期间继续逐帧
+轮询，结束后立即回到空闲等待。最小化或隐藏时仍执行到期维护，但不提交新的 render/present。
+
+`RenderWakeScheduler` 是唯一的 render/wake 策略边界：Win32 窗口处理器持久记录失效请求，不能用
+`PeekMessageW` 的返回值推断 UI 是否变化；调度器再取窗口失效、维护任务、触控板连续更新与 ImGui 时间行为的最早
+deadline。弹窗开合只在遮罩渐变的有界时间内逐帧更新，活动文本输入以低频 deadline 推进光标闪烁，消息交互后按
+`ImGuiIO::IniSavingRate` 从可能致脏的渲染帧完成时起安排一次保存唤醒。每次渲染后统一进入 Win32 wait；线程级消息
+observer 覆盖主窗口与 detached viewport，在 WndProc 派发时持久记录失效，即使 `PeekMessageW` 派发 sent/nonqueued
+消息后返回 `FALSE` 也不会丢帧。纯查询 `WM_NCHITTEST` 不产生渲染失效，避免静止 hover 与 presentation 形成反馈环。
+策略层不依赖 Win32、ImGui internal API 或刷新率，并由纯时间测试、真实 ImGui dirty timer 测试和 Win32 sent-message
+顺序测试覆盖。
 
 `D3D11SdrSwapChain::Resize` 必须显式从 D3D11 context 解绑 render target 后再释放 back buffer；调用方不应依赖先前
 成功 `Present` 的隐含解绑行为。

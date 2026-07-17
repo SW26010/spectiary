@@ -4,15 +4,19 @@
 #include "platform/atomic_file.h"
 #include "ui/panel_visibility_state_cache_io.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 namespace {
+
+using namespace std::chrono_literals;
 
 void Require(bool condition, std::string_view message)
 {
@@ -343,10 +347,12 @@ void TestSortedCacheKeysReturnsStableOrder()
 
 void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
 {
-    specforge::LocalUserStateSaveScheduler scheduler(30, 120);
+    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler(30ms, 120ms);
     specforge::LocalUserStateSaveStatus status;
 
-    scheduler.MarkDirty();
+    scheduler.MarkDirtyAt(start);
     status.MarkFailed("could not write state");
     Require(scheduler.dirty(), "failed status save should leave the scheduler dirty");
     Require(status.failed(), "failed status save should expose failure state");
@@ -357,41 +363,86 @@ void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
     Require(!status.failed(), "successful status save should clear failure state");
     Require(status.message().empty(), "successful status save should clear the error message");
 
-    scheduler.MarkSaveFailed(10, status, "retry later");
+    scheduler.MarkSaveFailedAt(start + 10ms, status, "retry later");
     Require(status.failed(), "retry failure should expose failure state");
-    Require(!scheduler.ShouldAttemptSave(129), "retry failure should respect retry backoff");
-    Require(scheduler.ShouldAttemptSave(130), "retry failure should flush after backoff");
+    Require(!scheduler.ShouldAttemptSave(start + 129ms), "retry failure should respect retry backoff");
+    Require(scheduler.ShouldAttemptSave(start + 130ms), "retry failure should flush after backoff");
 }
 
 void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
 {
-    specforge::LocalUserStateSaveScheduler scheduler(30, 120);
+    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler(30ms, 120ms);
     Require(!scheduler.dirty(), "new save scheduler should start clean");
+    Require(!scheduler.next_attempt_time(), "a clean scheduler should have no maintenance deadline");
 
-    scheduler.MarkDirty();
+    scheduler.MarkDirtyAt(start + 10ms);
     Require(scheduler.dirty(), "marking dirty should expose pending state");
-    Require(!scheduler.ShouldAttemptSave(10), "first save check should schedule the debounce");
-    Require(!scheduler.ShouldAttemptSave(39), "save scheduler should wait for debounce frames");
-    Require(scheduler.ShouldAttemptSave(40), "save scheduler should allow a save after debounce");
+    Require(
+        scheduler.next_attempt_time() == start + 40ms,
+        "marking dirty should publish the exact debounce deadline");
+    Require(!scheduler.ShouldAttemptSave(start + 39ms), "save scheduler should wait for the debounce");
+    Require(scheduler.ShouldAttemptSave(start + 40ms), "save scheduler should allow a save at the deadline");
 
-    scheduler.MarkSaveFailed(40);
+    scheduler.MarkSaveFailedAt(start + 40ms);
     Require(scheduler.dirty(), "failed save should keep pending state");
-    Require(!scheduler.ShouldAttemptSave(159), "failed save should wait for retry frames");
-    Require(scheduler.ShouldAttemptSave(160), "failed save should retry after backoff");
+    Require(
+        scheduler.next_attempt_time() == start + 160ms,
+        "failed save should replace the debounce with the retry deadline");
+    Require(!scheduler.ShouldAttemptSave(start + 159ms), "failed save should wait for retry backoff");
+    Require(scheduler.ShouldAttemptSave(start + 160ms), "failed save should retry at the deadline");
 
     scheduler.MarkSaveSucceeded();
     Require(!scheduler.dirty(), "successful save should clear pending state");
-    Require(!scheduler.ShouldAttemptSave(1000), "clean save scheduler should not attempt saves");
+    Require(!scheduler.next_attempt_time(), "successful save should clear the maintenance deadline");
+    Require(!scheduler.ShouldAttemptSave(start + 1s), "clean save scheduler should not attempt saves");
 }
 
-void TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown()
+void TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain()
 {
-    specforge::LocalUserStateSaveScheduler scheduler(30, 120);
-    scheduler.MarkDirty(5);
-    Require(!scheduler.ShouldAttemptSave(34), "known-frame dirty save should not flush before debounce");
-    scheduler.MarkDirty(20);
-    Require(!scheduler.ShouldAttemptSave(49), "new dirty frame should extend the debounce window");
-    Require(scheduler.ShouldAttemptSave(50), "extended debounce should flush at the latest dirty frame");
+    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler(30ms, 120ms);
+    scheduler.MarkDirtyAt(start + 5ms);
+    Require(!scheduler.ShouldAttemptSave(start + 34ms), "dirty state should not save before its debounce");
+    scheduler.MarkDirtyAt(start + 20ms);
+    Require(!scheduler.ShouldAttemptSave(start + 49ms), "new dirty state should extend the debounce");
+    Require(scheduler.ShouldAttemptSave(start + 50ms), "extended debounce should use the latest change time");
+}
+
+void TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff()
+{
+    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler(30ms, 120ms);
+
+    scheduler.MarkDirtyAt(start);
+    scheduler.MarkSaveFailedAt(start + 30ms);
+    scheduler.MarkDirtyAt(start + 40ms);
+
+    Require(
+        scheduler.next_attempt_time() == start + 150ms,
+        "new dirty state should not shorten an existing retry backoff");
+    Require(!scheduler.ShouldAttemptSave(start + 149ms), "retry backoff should remain in force");
+    Require(scheduler.ShouldAttemptSave(start + 150ms), "retry should remain due at its original deadline");
+}
+
+void TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported()
+{
+    using Scheduler = specforge::LocalUserStateSaveScheduler;
+    Scheduler scheduler(0ms, 50ms);
+    scheduler.MarkDirty();
+
+    std::this_thread::sleep_for(5ms);
+    const auto io_completed = Scheduler::Clock::now();
+    scheduler.MarkSaveFailed();
+
+    const auto retry_deadline = scheduler.next_attempt_time();
+    Require(retry_deadline.has_value(), "failed save should publish a retry deadline");
+    Require(
+        *retry_deadline >= io_completed + 50ms,
+        "retry backoff should start when the failed I/O reports completion");
 }
 
 void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
@@ -458,19 +509,44 @@ void TestPanelVisibilityPersistenceFlushesDirtyUiStateChange()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::PanelVisibilityStatePersistence persistence(path, 30, 120);
+    specforge::PanelVisibilityStatePersistence persistence(path, 30ms, 120ms);
     const specforge::PanelVisibilityState previous = persistence.Load();
     specforge::PanelVisibilityState current = previous;
     current.files = false;
     current.information = false;
 
-    persistence.MarkDirtyIfChanged(previous, current, 10);
+    persistence.MarkDirtyIfChanged(previous, current);
     Require(persistence.Flush(current), "dirty panel visibility should flush");
 
     const specforge::PanelVisibilityState restored = persistence.Load();
     Require(!restored.files, "flushed UI-hidden files panel should restore hidden");
     Require(restored.navigation, "unchanged navigation panel should restore visible");
     Require(!restored.information, "flushed UI-hidden information panel should restore hidden");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / "specforge_panel_visibility_deadline_tests";
+    const std::filesystem::path path = root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+
+    specforge::PanelVisibilityStatePersistence persistence(path, 30ms, 120ms);
+    const specforge::PanelVisibilityState previous = persistence.Load();
+    specforge::PanelVisibilityState current = previous;
+    current.smoothing = false;
+    persistence.MarkDirtyIfChanged(previous, current);
+
+    const auto deadline = persistence.NextMaintenanceDeadline();
+    Require(deadline.has_value(), "dirty panel visibility should expose a maintenance deadline");
+    persistence.RunMaintenance(current, *deadline - 1ms);
+    Require(!std::filesystem::exists(path), "panel visibility should not save before its deadline");
+    persistence.RunMaintenance(current, *deadline);
+    Require(std::filesystem::exists(path), "panel visibility should save exactly at its deadline");
+    Require(!persistence.NextMaintenanceDeadline(), "successful maintenance should clear the deadline");
+
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -490,9 +566,12 @@ int main()
     TestSortedCacheKeysReturnsStableOrder();
     TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
     TestLocalUserStateSaveSchedulerDebouncesAndRetries();
-    TestLocalUserStateSaveSchedulerExtendsDebounceWhenFrameIsKnown();
+    TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain();
+    TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
+    TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported();
     TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
     TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
     TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
+    TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
     return 0;
 }

@@ -17,6 +17,7 @@ public:
     [[nodiscard]] PlotTouchpadGestureBatch Poll(std::uintptr_t native_window) override;
     void SetTarget(const PlotTouchpadTarget& target) override;
     void ClearTarget() override;
+    [[nodiscard]] bool NeedsContinuousUpdates() const;
 
 private:
     struct Impl;

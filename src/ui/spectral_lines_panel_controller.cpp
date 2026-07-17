@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <unordered_set>
 #include <utility>
@@ -12,8 +13,10 @@
 namespace specforge {
 namespace {
 
-constexpr std::uint64_t kSaveDebounceFrames = 30;
-constexpr std::uint64_t kSaveRetryFrames = 600;
+using namespace std::chrono_literals;
+
+constexpr auto kSaveDebounce = 500ms;
+constexpr auto kSaveRetry = 10s;
 
 std::string TrimWhitespace(std::string_view value)
 {
@@ -303,7 +306,7 @@ SpectralLinesPanelController::SpectralLinesPanelController(
       catalog_identity_(std::move(catalog_identity)),
       catalog_grouping_view_(BuildCatalogGroupingView(catalog_, catalog_identity_)),
       user_state_cache_path_(std::move(user_state_cache_path)),
-      cache_save_scheduler_(kSaveDebounceFrames, kSaveRetryFrames)
+      cache_save_scheduler_(kSaveDebounce, kSaveRetry)
 {
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
     user_state_cache_ = std::move(load_result.cache);
@@ -690,17 +693,17 @@ SpectralLinePlotView SpectralLinesPanelController::PlotView(
     return result;
 }
 
-void SpectralLinesPanelController::BeginFrame(std::uint64_t frame_index)
+void SpectralLinesPanelController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    frame_index_ = frame_index;
-}
-
-void SpectralLinesPanelController::MaybeSave(std::uint64_t frame_index)
-{
-    frame_index_ = frame_index;
-    if (cache_save_scheduler_.ShouldAttemptSave(frame_index)) {
+    if (cache_save_scheduler_.ShouldAttemptSave(now)) {
         (void)Flush();
     }
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint>
+SpectralLinesPanelController::NextMaintenanceDeadline() const
+{
+    return cache_save_scheduler_.next_attempt_time();
 }
 
 bool SpectralLinesPanelController::Flush()
@@ -713,7 +716,6 @@ bool SpectralLinesPanelController::Flush()
     std::string error;
     if (!SaveCatalogUserStateCache(user_state_cache_path_, user_state_cache_, error)) {
         cache_save_scheduler_.MarkSaveFailed(
-            frame_index_,
             cache_save_status_,
             "Could not save spectral-line grouping cache: " + error);
         return false;
@@ -973,7 +975,7 @@ std::string SpectralLinesPanelController::NextUserGroupId()
 
 void SpectralLinesPanelController::MarkCacheDirty()
 {
-    cache_save_scheduler_.MarkDirty(frame_index_);
+    cache_save_scheduler_.MarkDirty();
 }
 
 void SpectralLinesPanelController::RequestGroupingViewSelection()

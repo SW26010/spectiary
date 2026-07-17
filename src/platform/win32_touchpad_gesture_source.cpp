@@ -411,6 +411,12 @@ struct Win32TouchpadGestureSource::Impl {
             return hwnd_;
         }
 
+        [[nodiscard]] bool NeedsContinuousUpdates() const
+        {
+            std::lock_guard lock(state_->mutex);
+            return state_->active;
+        }
+
         void SetTarget(const PlotTouchpadTarget& target)
         {
             RECT viewport_rect = {};
@@ -635,6 +641,11 @@ void Win32TouchpadGestureSource::ClearTarget()
     impl_->context.reset();
     impl_->failed_window = nullptr;
     impl_->retry_after = {};
+}
+
+bool Win32TouchpadGestureSource::NeedsContinuousUpdates() const
+{
+    return impl_->context != nullptr && impl_->context->NeedsContinuousUpdates();
 }
 
 }  // namespace specforge

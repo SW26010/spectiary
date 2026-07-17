@@ -190,8 +190,8 @@ public:
     [[nodiscard]] SpectralLinePlotView PlotView(
         const SpectrumSnapshotHandle& snapshot) const;
 
-    void BeginFrame(std::uint64_t frame_index);
-    void MaybeSave(std::uint64_t frame_index);
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool Flush();
 
 private:
@@ -227,7 +227,6 @@ private:
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;
-    std::uint64_t frame_index_ = 0;
     int next_view_index_ = 1;
     int next_group_index_ = 1;
 };

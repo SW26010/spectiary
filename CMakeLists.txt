@@ -94,6 +94,7 @@ endfunction()
 add_library(specforge_core STATIC
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
+    src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
     src/domain/fits_file_reader.cpp
     src/domain/fits_spectrum_loader.cpp
@@ -111,6 +112,8 @@ add_library(specforge_core STATIC
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp
+    src/platform/win32_message_render_observer.cpp
+    src/platform/win32_message_wait.cpp
     src/profile/profile_sink.cpp
 )
 specforge_configure_production_target(specforge_core)
@@ -223,6 +226,17 @@ specforge_add_test(
     specforge_local_user_state_tests
     tests/local_user_state_tests.cpp
     specforge_sessions
+)
+specforge_add_test(
+    specforge_render_wake_scheduler_tests
+    tests/render_wake_scheduler_tests.cpp
+    specforge_core
+)
+target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
+specforge_add_test(
+    specforge_win32_message_wait_tests
+    tests/win32_message_wait_tests.cpp
+    specforge_core
 )
 specforge_add_test(
     specforge_loader_tests

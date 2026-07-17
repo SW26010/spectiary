@@ -2,7 +2,7 @@
 
 #include "app/local_user_state.h"
 
-#include <cstdint>
+#include <chrono>
 #include <filesystem>
 #include <utility>
 
@@ -34,15 +34,17 @@ class PanelVisibilityStatePersistence {
 public:
     explicit PanelVisibilityStatePersistence(
         std::filesystem::path cache_path = DefaultPanelVisibilityStateCachePath(),
-        std::uint64_t debounce_frames = 30,
-        std::uint64_t retry_frames = 120);
+        LocalUserStateSaveScheduler::Duration debounce = std::chrono::milliseconds(500),
+        LocalUserStateSaveScheduler::Duration retry = std::chrono::seconds(2));
 
     [[nodiscard]] PanelVisibilityState Load() const;
     void MarkDirtyIfChanged(
         const PanelVisibilityState& previous,
-        const PanelVisibilityState& current,
-        std::uint64_t frame_index);
-    void MaybeSave(const PanelVisibilityState& state, std::uint64_t frame_index);
+        const PanelVisibilityState& current);
+    void RunMaintenance(
+        const PanelVisibilityState& state,
+        LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool Flush(const PanelVisibilityState& state);
 
 private:

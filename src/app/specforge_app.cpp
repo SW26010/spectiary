@@ -1,6 +1,7 @@
 #include "app/specforge_app.h"
 
 #include "app/runtime_paths.h"
+#include "platform/win32_message_wait.h"
 
 #include <dwmapi.h>
 #include <imgui.h>
@@ -283,6 +284,9 @@ int SpecForgeApp::Run(
                 running_ = false;
                 break;
             }
+            if (message.hwnd == nullptr) {
+                RequestMessageRender();
+            }
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -291,12 +295,35 @@ int SpecForgeApp::Run(
             break;
         }
 
-        if (minimized_ || !window_visible_) {
-            WaitForRenderWake();
-            continue;
+        auto now = RenderWakeScheduler::Clock::now();
+        const auto maintenance_deadline = ui_.NextMaintenanceDeadline();
+        if (maintenance_deadline && now >= *maintenance_deadline) {
+            ui_.RunMaintenance(now);
+            now = RenderWakeScheduler::Clock::now();
+            render_wake_scheduler_.RequestFrame();
         }
 
-        RenderFrame();
+        const bool window_renderable = !minimized_ && window_visible_;
+        if (window_renderable && render_wake_scheduler_.ShouldRender(now)) {
+            render_wake_scheduler_.BeginFrame(now);
+            RenderFrame();
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool popup_open = ImGui::IsPopupOpen(
+                nullptr,
+                ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+            render_wake_scheduler_.EndFrame(
+                RenderWakeScheduler::Clock::now(),
+                {
+                    .touchpad_active = touchpad_gestures_.NeedsContinuousUpdates(),
+                    .text_input_active = io.WantTextInput && io.ConfigInputTextCursorBlink,
+                    .popup_open = popup_open,
+                });
+        }
+
+        (void)WaitForWin32MessageOrDeadline(
+            render_wake_scheduler_.NextWakeDeadline(
+                window_renderable,
+                ui_.NextMaintenanceDeadline()));
     }
 
     Shutdown();
@@ -366,6 +393,9 @@ void SpecForgeApp::Initialize(
     }
 
     InitializeUiBackends();
+    if (!message_render_observer_.Start(&SpecForgeApp::InvalidateRenderFromWin32Message, this)) {
+        throw std::runtime_error("Failed to observe Win32 messages for render invalidation.");
+    }
     window_.Show(show_command);
     LogDisplayEnvironment("startup");
 }
@@ -437,6 +467,7 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    message_render_observer_.Stop();
     touchpad_gestures_.ClearTarget();
 
     if (imgui_initialized_) {
@@ -521,15 +552,22 @@ void SpecForgeApp::RenderFrame()
     }
 }
 
-void SpecForgeApp::WaitForRenderWake()
+void SpecForgeApp::InvalidateRenderFromWin32Message(void* context) noexcept
 {
-    if (!running_) {
-        return;
-    }
+    static_cast<SpecForgeApp*>(context)->RequestMessageRender();
+}
 
-    if (WaitMessage() == FALSE) {
-        throw std::runtime_error(HResultMessage("WaitMessage", HRESULT_FROM_WIN32(GetLastError())));
+void SpecForgeApp::RequestMessageRender() noexcept
+{
+    std::optional<RenderWakeScheduler::Duration> settings_save_delay;
+    if (imgui_initialized_ && ImGui::GetCurrentContext() != nullptr) {
+        const float saving_rate_seconds = ImGui::GetIO().IniSavingRate;
+        if (saving_rate_seconds > 0.0f) {
+            settings_save_delay = std::chrono::duration_cast<RenderWakeScheduler::Duration>(
+                std::chrono::duration<float>(saving_rate_seconds));
+        }
     }
+    render_wake_scheduler_.RequestFrame(settings_save_delay);
 }
 
 void SpecForgeApp::ApplyPendingResize()
@@ -885,6 +923,10 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 
 LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    if (Win32MessageCanInvalidateRender(message)) {
+        RequestMessageRender();
+    }
+
     if (profile_.is_open() && IsProfiledInputMessage(message)) {
         LogInputMessage(message, wparam, lparam);
     }
