@@ -10,7 +10,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -253,25 +252,6 @@ std::optional<UserGroupDragPayload> RenderUserGroupReorderTarget(
     return delivered;
 }
 
-std::string MarkerWavelengthText(const SpectralLineMarker& marker)
-{
-    std::array<char, 64> buffer = {};
-    if (marker.kind == SpectralLineMarkerKind::Line && marker.vacuum_angstrom) {
-        std::snprintf(buffer.data(), buffer.size(), "%.3f", *marker.vacuum_angstrom);
-        return buffer.data();
-    }
-    if (marker.kind == SpectralLineMarkerKind::Band && marker.start_vacuum_angstrom && marker.end_vacuum_angstrom) {
-        std::snprintf(
-            buffer.data(),
-            buffer.size(),
-            "%.3f-%.3f",
-            *marker.start_vacuum_angstrom,
-            *marker.end_vacuum_angstrom);
-        return buffer.data();
-    }
-    return {};
-}
-
 void RenderDisabledText(std::string_view text)
 {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -406,31 +386,30 @@ bool HiddenActionIconButton(
 void SpectralLinesGroupingViewUi::Render(
     SpectralLinesPanelController& panel,
     const SpectrumSnapshotHandle& snapshot,
-    const GroupingView& view,
-    GroupingView* editable_view)
+    const SpectralLineGroupingView& view,
+    std::size_t catalog_marker_count)
 {
-    const bool editable = editable_view != nullptr && !editable_view->read_only;
-    const SpectralLineCatalog& catalog = panel.catalog();
-    const CatalogIdentity& identity = panel.catalog_identity();
-    CatalogUserState& user_state = panel.user_state();
-    CatalogPanelState& panel_state = panel.panel_state();
-    const std::string search(panel.filter_buffer().data());
-    const bool search_active = !search.empty();
+    const bool editable = view.editable;
+    const bool search_active = view.search_active;
 
     if (editable) {
         if (ImGui::Button("+ Group")) {
-            panel.AddUserGroupToView(*editable_view);
+            (void)panel.Submit(CatalogUserStateIntent::AddUserGroup(view.id));
         }
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
                 if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
-                    if (drag->view_id == editable_view->id) {
+                    if (drag->view_id == view.id) {
                         const bool copy = ImGui::GetIO().KeyCtrl;
-                        panel.AddUserGroupWithMarkerReferenceToView(
-                            *editable_view,
-                            drag->marker_id,
-                            drag->source_group_id,
-                            copy);
+                        (void)panel.Submit(
+                            copy ? CatalogUserStateIntent::CopyMarkerReferenceToNewGroup(
+                                       view.id,
+                                       drag->marker_id,
+                                       drag->source_group_id)
+                                 : CatalogUserStateIntent::MoveMarkerReferenceToNewGroup(
+                                       view.id,
+                                       drag->marker_id,
+                                       drag->source_group_id));
                     }
                 }
             }
@@ -439,16 +418,15 @@ void SpectralLinesGroupingViewUi::Render(
         ImGui::SameLine();
     }
 
-    const std::vector<const SpectralLineMarker*> visible_markers = panel.FilteredMarkers(snapshot, false);
+    const std::vector<const SpectralLineMarker*> visible_markers = panel.VisibleMarkers(snapshot);
     const std::string marker_count = std::to_string(visible_markers.size()) + " plot-visible / " +
-                                     std::to_string(catalog.markers.size()) + " catalog markers";
+                                     std::to_string(catalog_marker_count) + " catalog markers";
     RenderDisabledText(marker_count);
 
-    const std::unordered_map<std::string, int> shared_counts = MarkerReferenceCounts(view, identity);
     const std::optional<UserGroupDragPayload> active_user_group_drag =
         editable ? CurrentUserGroupDragPayload() : std::nullopt;
     const bool group_reorder_drag_active =
-        editable && active_user_group_drag && active_user_group_drag->view_id == editable_view->id;
+        editable && active_user_group_drag && active_user_group_drag->view_id == view.id;
 
     if (view.groups.empty()) {
         ImGui::TextDisabled("No groups in this view.");
@@ -458,7 +436,7 @@ void SpectralLinesGroupingViewUi::Render(
     std::optional<UserGroupReorderGapResult> current_reorder_gap;
     std::optional<float> previous_group_midpoint_y;
     bool group_context_popup_open = false;
-    const auto render_reorder_gap = [&](const UserGroup& target_group) {
+    const auto render_reorder_gap = [&](const SpectralLineGroupView& target_group) {
         if (!group_reorder_drag_active) {
             current_reorder_gap = std::nullopt;
             return;
@@ -471,31 +449,25 @@ void SpectralLinesGroupingViewUi::Render(
     };
 
     for (std::size_t group_index = 0; group_index < view.groups.size(); ++group_index) {
-        const UserGroup& group = view.groups[group_index];
+        const SpectralLineGroupView& group = view.groups[group_index];
 
         render_reorder_gap(group);
 
-        std::vector<const MarkerReference*> matching_references;
-        matching_references.reserve(group.marker_references.size());
-        for (const MarkerReference& reference : group.marker_references) {
-            if (MarkerMatchesSearch(catalog, identity, reference, search)) {
-                matching_references.push_back(&reference);
-            }
-        }
-        const bool group_has_search_matches = !matching_references.empty();
-        const bool group_dimmed_by_search = search_active && !group_has_search_matches;
+        const bool group_has_search_matches = !group.marker_references.empty();
+        const bool group_dimmed_by_search = group.dimmed_by_search;
 
         ImGui::PushID(group.id.c_str());
         ImGui::AlignTextToFramePadding();
         bool next_group_visible = true;
         if (RenderGroupVisibilityControl(
-                VisibilityStateForGroup(user_state, group, catalog, identity, search_active),
+                group.visibility,
                 next_group_visible)) {
-            panel.SetGroupVisibility(group, next_group_visible, search_active);
+            (void)panel.Submit(
+                CatalogUserStateIntent::SetGroupMarkerVisibility(view.id, group.id, next_group_visible));
         }
 
         ImGui::SameLine();
-        const bool ordinary_group = !group.is_unassigned && group.id != UnassignedUserGroupId();
+        const bool ordinary_group = !group.is_unassigned;
         const bool group_context_active = group_context_view_id_ && group_context_group_id_ &&
                                           *group_context_view_id_ == view.id &&
                                           *group_context_group_id_ == group.id;
@@ -508,9 +480,7 @@ void SpectralLinesGroupingViewUi::Render(
         if (group_context_active) {
             group_flags |= ImGuiTreeNodeFlags_Selected;
         }
-        const std::string expansion_key = GroupExpansionKey(view.id, group.id);
-        const bool group_was_expanded = panel_state.expanded_group_ids.find(expansion_key) !=
-                                        panel_state.expanded_group_ids.end();
+        const bool group_was_expanded = group.expanded;
         if (group_reorder_drag_active) {
             ImGui::SetNextItemOpen(false, ImGuiCond_Always);
         } else if (search_active && group_has_search_matches) {
@@ -531,7 +501,7 @@ void SpectralLinesGroupingViewUi::Render(
             group_flags,
             "%s (%zu)",
             group.name.c_str(),
-            matching_references.size());
+            group.marker_references.size());
         const ImVec2 group_item_min = ImGui::GetItemRectMin();
         const ImVec2 group_item_max = ImGui::GetItemRectMax();
         const bool group_row_hovered = ImGui::IsItemHovered();
@@ -542,7 +512,7 @@ void SpectralLinesGroupingViewUi::Render(
             ImGui::PopStyleColor();
         }
         if (!group_reorder_drag_active && ImGui::IsItemToggledOpen()) {
-            panel.SetGroupExpanded(view.id, group.id, group_open);
+            (void)panel.Submit(CatalogUserStateIntent::SetGroupExpanded(view.id, group.id, group_open));
         }
         const bool group_contents_open = !group_reorder_drag_active && group_open;
         const float group_midpoint_y = (group_item_min.y + group_item_max.y) * 0.5f;
@@ -553,26 +523,27 @@ void SpectralLinesGroupingViewUi::Render(
                 ImVec2(current_reorder_gap->line.x_min, target_min_y),
                 ImVec2(current_reorder_gap->line.x_max, group_midpoint_y));
             if (std::optional<UserGroupDragPayload> drop = RenderUserGroupReorderTarget(
-                    editable_view->id,
+                    view.id,
                     target_rect,
                     current_reorder_gap->line,
                     ImGui::GetID("user_group_reorder_target"))) {
-                panel.ReorderUserGroupBeforeInView(*editable_view, drop->group_id, group.id);
+                (void)panel.Submit(
+                    CatalogUserStateIntent::ReorderUserGroupBefore(view.id, drop->group_id, group.id));
             }
         }
 
         bool group_deleted = false;
         if (editable && ordinary_group && !group_reorder_drag_active && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-            group_context_view_id_ = editable_view->id;
+            group_context_view_id_ = view.id;
             group_context_group_id_ = group.id;
         }
         if (editable && ordinary_group && !group_reorder_drag_active &&
             ImGui::BeginPopupContextItem("user_group_context")) {
             group_context_popup_open = true;
-            group_context_view_id_ = editable_view->id;
+            group_context_view_id_ = view.id;
             group_context_group_id_ = group.id;
             if (ImGui::Selectable("Rename")) {
-                renaming_group_view_id_ = editable_view->id;
+                renaming_group_view_id_ = view.id;
                 renaming_group_id_ = group.id;
                 std::snprintf(
                     renaming_group_name_.data(),
@@ -582,7 +553,7 @@ void SpectralLinesGroupingViewUi::Render(
                 renaming_group_popup_requested_ = true;
             }
             if (ImGui::Selectable("Delete")) {
-                group_deleted = panel.DeleteUserGroupFromView(*editable_view, group.id);
+                group_deleted = panel.Submit(CatalogUserStateIntent::DeleteUserGroup(view.id, group.id)).changed;
                 group_context_view_id_.reset();
                 group_context_group_id_.reset();
             }
@@ -597,7 +568,7 @@ void SpectralLinesGroupingViewUi::Render(
         }
 
         if (editable && ordinary_group && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-            const std::string drag_payload = EncodeUserGroupDragPayload(editable_view->id, group.id);
+            const std::string drag_payload = EncodeUserGroupDragPayload(view.id, group.id);
             ImGui::SetDragDropPayload(
                 kUserGroupDragPayload,
                 drag_payload.data(),
@@ -610,14 +581,19 @@ void SpectralLinesGroupingViewUi::Render(
         if (editable && ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kMarkerReferenceDragPayload)) {
                 if (std::optional<MarkerReferenceDragPayload> drag = DecodeMarkerReferenceDragPayload(*payload)) {
-                    if (drag->view_id == editable_view->id) {
+                    if (drag->view_id == view.id) {
                         const bool copy = ImGui::GetIO().KeyCtrl;
-                        panel.MoveOrCopyMarkerReferenceToGroup(
-                            *editable_view,
-                            drag->marker_id,
-                            drag->source_group_id,
-                            group.id,
-                            copy);
+                        (void)panel.Submit(
+                            copy ? CatalogUserStateIntent::CopyMarkerReference(
+                                       view.id,
+                                       drag->marker_id,
+                                       drag->source_group_id,
+                                       group.id)
+                                 : CatalogUserStateIntent::MoveMarkerReference(
+                                       view.id,
+                                       drag->marker_id,
+                                       drag->source_group_id,
+                                       group.id));
                     }
                 }
             }
@@ -636,7 +612,7 @@ void SpectralLinesGroupingViewUi::Render(
                 ActionIcon::Trash,
                 "Disband group",
                 group_row_hovered) &&
-                            panel.DeleteUserGroupFromView(*editable_view, group.id);
+                            panel.Submit(CatalogUserStateIntent::DeleteUserGroup(view.id, group.id)).changed;
             ImGui::SetCursorScreenPos(saved_cursor);
         }
         if (group_deleted) {
@@ -650,17 +626,12 @@ void SpectralLinesGroupingViewUi::Render(
         previous_group_midpoint_y = group_midpoint_y;
 
         if (group_contents_open) {
-            for (const MarkerReference* reference : matching_references) {
-                if (reference == nullptr) {
-                    continue;
-                }
+            for (const SpectralLineMarkerReferenceView& reference : group.marker_references) {
+                const bool resolved = reference.resolved;
+                const bool marker_visible = reference.visible;
+                const std::string& label = reference.label;
 
-                const SpectralLineMarker* marker = FindCatalogMarker(catalog, identity, *reference);
-                const bool resolved = marker != nullptr;
-                const bool marker_visible = resolved && IsMarkerVisible(user_state, reference->marker_id);
-                const std::string label = resolved ? marker->label : reference->marker_id;
-
-                ImGui::PushID(reference->marker_id.c_str());
+                ImGui::PushID(reference.marker_id.c_str());
 
                 ImGui::AlignTextToFramePadding();
                 const ImRect marker_hover_rect = CurrentFullWidthFrameRect();
@@ -670,7 +641,8 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::BeginDisabled();
                 }
                 if (ImGui::Checkbox("##marker_visibility", &checkbox_value) && resolved) {
-                    panel.SetMarkerEnabled(*marker, checkbox_value);
+                    (void)panel.Submit(
+                        CatalogUserStateIntent::SetMarkerVisibility(reference.marker_id, checkbox_value));
                 }
                 if (!resolved) {
                     ImGui::EndDisabled();
@@ -686,7 +658,7 @@ void SpectralLinesGroupingViewUi::Render(
                 if (editable && ordinary_group) {
                     marker_flags |= ImGuiTreeNodeFlags_AllowOverlap;
                 }
-                const std::string marker_suffix = resolved ? MarkerWavelengthText(*marker) : "unresolved";
+                const std::string& marker_suffix = reference.wavelength_text;
                 if (!resolved || !marker_visible) {
                     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 }
@@ -698,17 +670,17 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::PopStyleColor();
                 }
                 if (ImGui::IsItemHovered()) {
-                    if (resolved && !marker->notes.empty()) {
-                        ImGui::SetTooltip("%s\n%s", marker_suffix.c_str(), marker->notes.c_str());
+                    if (resolved && !reference.notes.empty()) {
+                        ImGui::SetTooltip("%s\n%s", marker_suffix.c_str(), reference.notes.c_str());
                     } else {
                         ImGui::SetTooltip("%s", marker_suffix.c_str());
                     }
                 }
                 if (editable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
+                    SubmitMarkerReferenceDragPayload(view.id, group.id, reference.marker_id, label);
                     ImGui::EndDragDropSource();
                 } else if (editable && BeginCtrlMarkerReferenceDragDropSource(ImRect(marker_item_min, marker_item_max))) {
-                    SubmitMarkerReferenceDragPayload(editable_view->id, group.id, reference->marker_id, label);
+                    SubmitMarkerReferenceDragPayload(view.id, group.id, reference.marker_id, label);
                     ImGui::EndDragDropSource();
                 }
                 if (editable && ImGui::BeginPopupContextItem("marker_context")) {
@@ -716,17 +688,18 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::Separator();
                     if (ImGui::BeginMenu("Copy to group")) {
                         bool has_target = false;
-                        for (const UserGroup& target_group : editable_view->groups) {
-                            if (target_group.id == group.id || target_group.is_unassigned ||
-                                target_group.id == UnassignedUserGroupId()) {
+                        for (const SpectralLineGroupView& target_group : view.groups) {
+                            if (target_group.id == group.id || target_group.is_unassigned) {
                                 continue;
                             }
                             has_target = true;
-                            if (ImGui::Selectable(target_group.name.c_str())) {
-                                panel.CopyMarkerReferenceToGroup(
-                                    *editable_view,
-                                    reference->marker_id,
-                                    target_group.id);
+                            const std::string target_label = target_group.name + "###" + target_group.id;
+                            if (ImGui::Selectable(target_label.c_str())) {
+                                (void)panel.Submit(CatalogUserStateIntent::CopyMarkerReference(
+                                    view.id,
+                                    reference.marker_id,
+                                    group.id,
+                                    target_group.id));
                             }
                         }
                         if (!has_target) {
@@ -737,7 +710,7 @@ void SpectralLinesGroupingViewUi::Render(
                     ImGui::EndPopup();
                 }
 
-                if (IsSharedMarkerReference(shared_counts, *reference)) {
+                if (reference.shared) {
                     ImGui::SameLine();
                     RenderSharedReferenceMarker();
                 }
@@ -755,10 +728,10 @@ void SpectralLinesGroupingViewUi::Render(
                         ActionIcon::Minus,
                         "Remove from this group",
                         marker_row_hovered) &&
-                                        panel.RemoveMarkerReferenceFromGroup(
-                                            *editable_view,
-                                            reference->marker_id,
-                                            group.id);
+                                        panel.Submit(CatalogUserStateIntent::RemoveMarkerReference(
+                                            view.id,
+                                            reference.marker_id,
+                                            group.id)).changed;
                     ImGui::SetCursorScreenPos(saved_cursor);
                 }
 
@@ -780,7 +753,6 @@ void SpectralLinesGroupingViewUi::Render(
 
 void SpectralLinesGroupingViewUi::RenderPendingPopups(SpectralLinesPanelController& panel)
 {
-    CatalogUserState& user_state = panel.user_state();
     if (renaming_group_popup_requested_) {
         ImGui::OpenPopup(kRenameUserGroupPopup);
         renaming_group_popup_requested_ = false;
@@ -796,14 +768,12 @@ void SpectralLinesGroupingViewUi::RenderPendingPopups(SpectralLinesPanelControll
             renaming_group_name_.size(),
             ImGuiInputTextFlags_EnterReturnsTrue);
         const bool valid_name = HasNonWhitespace(renaming_group_name_.data());
-        const auto finish_rename = [this, &panel, &user_state]() {
+        const auto finish_rename = [this, &panel]() {
             if (renaming_group_view_id_ && renaming_group_id_) {
-                for (GroupingView& view : user_state.grouping_views) {
-                    if (view.id == *renaming_group_view_id_) {
-                        panel.RenameUserGroupInView(view, *renaming_group_id_, renaming_group_name_.data());
-                        break;
-                    }
-                }
+                (void)panel.Submit(CatalogUserStateIntent::RenameUserGroup(
+                    *renaming_group_view_id_,
+                    *renaming_group_id_,
+                    renaming_group_name_.data()));
             }
             renaming_group_view_id_.reset();
             renaming_group_id_.reset();

@@ -4,6 +4,7 @@
 #include "ui/spectral_lines_panel_controller.h"
 
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <string>
 
@@ -14,8 +15,8 @@ public:
     void Render(
         SpectralLinesPanelController& panel,
         const SpectrumSnapshotHandle& snapshot,
-        const GroupingView& view,
-        GroupingView* editable_view);
+        const SpectralLineGroupingView& view,
+        std::size_t catalog_marker_count);
     void RenderPendingPopups(SpectralLinesPanelController& panel);
 
 private:

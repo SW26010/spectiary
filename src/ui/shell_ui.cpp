@@ -543,7 +543,7 @@ ShellUi::~ShellUi()
 {
     (void)panel_visibility_state_.Flush(panel_visibility_);
     (void)session_.FlushStateCaches();
-    spectral_lines_panel_.FlushCache();
+    (void)spectral_lines_panel_.Flush();
 }
 
 void ShellUi::Render(const ShellStatus& status)
@@ -551,12 +551,12 @@ void ShellUi::Render(const ShellStatus& status)
     session_view_cache_.reset();
     session_view_cache_dirty_ = false;
     label_shortcut_context_active_ = false;
-    spectral_lines_panel_.SetFrameIndex(status.frame_index);
+    spectral_lines_panel_.BeginFrame(status.frame_index);
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
         panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
         session_.MaybeSaveStateCaches(status.frame_index);
-        spectral_lines_panel_.MaybeSaveCache(status.frame_index);
+        spectral_lines_panel_.MaybeSave(status.frame_index);
         session_view_cache_.reset();
         session_view_cache_dirty_ = false;
         return;
@@ -597,7 +597,7 @@ void ShellUi::Render(const ShellStatus& status)
         status.frame_index);
     panel_visibility_state_.MaybeSave(panel_visibility_, status.frame_index);
     session_.MaybeSaveStateCaches(status.frame_index);
-    spectral_lines_panel_.MaybeSaveCache(status.frame_index);
+    spectral_lines_panel_.MaybeSave(status.frame_index);
     session_view_cache_.reset();
     session_view_cache_dirty_ = false;
 }
@@ -771,13 +771,14 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const std::vector<const SpectralLineMarker*> spectral_lines =
-        spectral_lines_panel_.FilteredMarkers(snapshot, false);
+        spectral_lines_panel_.VisibleMarkers(snapshot);
+    const bool marker_labels_visible = spectral_lines_panel_.View().marker_labels_visible;
     RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()},
+        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), marker_labels_visible},
         MakeImmersivePlotDisplayOptions());
 
     ImGui::End();
@@ -1081,13 +1082,14 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const std::vector<const SpectralLineMarker*> spectral_lines =
-        spectral_lines_panel_.FilteredMarkers(snapshot, false);
+        spectral_lines_panel_.VisibleMarkers(snapshot);
+    const bool marker_labels_visible = spectral_lines_panel_.View().marker_labels_visible;
     RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), spectral_lines_panel_.show_labels()});
+        SpectrumPlotOverlays{spectral_lines.data(), spectral_lines.size(), marker_labels_visible});
     ImGui::End();
 }
 

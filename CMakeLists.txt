@@ -72,133 +72,106 @@ function(specforge_use_runtime_paths target_name)
     endif()
 endfunction()
 
-add_executable(specforge_native WIN32
+function(specforge_enable_warnings target_name)
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE /EHsc /W4 /permissive-)
+    else()
+        target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+function(specforge_configure_production_target target_name)
+    target_include_directories(${target_name} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_definitions(${target_name} PRIVATE
+        NOMINMAX
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+    )
+    specforge_enable_warnings(${target_name})
+endfunction()
+
+add_library(specforge_core STATIC
     src/app/local_user_state.cpp
-    src/app/local_user_state.h
     src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
     src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/app/specforge_app.cpp
-    src/app/specforge_app.h
-    src/domain/sample_filter.cpp
-    src/domain/sample_filter.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/spectrum_fixture.cpp
-    src/domain/spectrum_fixture.h
     src/domain/fits_file_reader.cpp
-    src/domain/fits_file_reader.h
     src/domain/fits_spectrum_loader.cpp
-    src/domain/fits_spectrum_loader.h
+    src/domain/npy_array_io.cpp
     src/domain/sample_annotation_io.cpp
-    src/domain/sample_annotation_io.h
+    src/domain/sample_filter.cpp
+    src/domain/sample_labeling.cpp
     src/domain/source_collection_manifest.cpp
-    src/domain/source_collection_manifest.h
+    src/domain/spectrum_fixture.cpp
     src/domain/spectrum_format_adapters.cpp
-    src/domain/spectrum_format_adapters.h
     src/domain/spectrum_loader_support.cpp
-    src/domain/spectrum_loader_support.h
     src/domain/spectrum_loader.cpp
-    src/domain/spectrum_loader.h
-    src/domain/spectrum_snapshot.h
     src/domain/spectrum_smoothing.cpp
-    src/domain/spectrum_smoothing.h
-    src/main.cpp
     src/overlays/spectral_line_catalog.cpp
-    src/overlays/spectral_line_catalog.h
     src/overlays/spectral_line_user_state_cache_io.cpp
-    src/overlays/spectral_line_user_state_cache_io.h
     src/overlays/spectral_line_user_state.cpp
-    src/overlays/spectral_line_user_state.h
     src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/platform/win32_window.cpp
-    src/platform/win32_window.h
-    ${SPECFORGE_MANIFEST}
-    src/plot/spectrum_plot.cpp
-    src/plot/spectrum_plot.h
     src/profile/profile_sink.cpp
-    src/profile/profile_sink.h
-    src/renderer/d3d11_renderer.cpp
-    src/renderer/d3d11_renderer.h
-    src/ui/shell_ui.cpp
-    src/ui/shell_ui.h
+)
+specforge_configure_production_target(specforge_core)
+specforge_use_runtime_paths(specforge_core)
+specforge_use_embedded_resources(specforge_core)
+target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB)
+
+add_library(specforge_sessions STATIC
     src/ui/panel_visibility_state_cache_io.cpp
-    src/ui/panel_visibility_state_cache_io.h
-    src/ui/sample_name_autocomplete.cpp
-    src/ui/sample_name_autocomplete.h
     src/ui/sample_annotation_labeling_rules.cpp
-    src/ui/sample_annotation_labeling_rules.h
     src/ui/sample_labeling_controller.cpp
-    src/ui/sample_labeling_controller.h
     src/ui/sample_labeling_state_cache_io.cpp
-    src/ui/sample_labeling_state_cache_io.h
+    src/ui/sample_name_autocomplete.cpp
     src/ui/sample_navigation_controller.cpp
-    src/ui/sample_navigation_controller.h
     src/ui/sample_navigation_sequence.cpp
-    src/ui/sample_navigation_sequence.h
     src/ui/sample_navigation_state_cache_io.cpp
-    src/ui/sample_navigation_state_cache_io.h
     src/ui/sample_sorting_sources.cpp
-    src/ui/sample_sorting_sources.h
     src/ui/sample_workflow_coordinator.cpp
-    src/ui/sample_workflow_coordinator.h
     src/ui/sample_workflow_source_policy.cpp
-    src/ui/sample_workflow_source_policy.h
     src/ui/sample_workflow_state_cache_io.cpp
-    src/ui/sample_workflow_state_cache_io.h
-    src/ui/sample_workflow_panel.cpp
-    src/ui/sample_workflow_panel.h
-    src/ui/source_collection_panel.cpp
-    src/ui/source_collection_panel.h
     src/ui/source_collection_roster.cpp
-    src/ui/source_collection_roster.h
-    src/ui/source_collection_session.cpp
-    src/ui/source_collection_session.h
     src/ui/source_collection_session_state_cache_io.cpp
-    src/ui/source_collection_session_state_cache_io.h
-    src/ui/source_collection_session_types.h
-    src/ui/spectrum_view_session.cpp
-    src/ui/spectrum_view_session.h
-    src/ui/spectral_lines_grouping_view.cpp
-    src/ui/spectral_lines_grouping_view.h
-    src/ui/spectral_lines_panel.cpp
-    src/ui/spectral_lines_panel.h
+    src/ui/source_collection_session.cpp
     src/ui/spectral_lines_panel_controller.cpp
-    src/ui/spectral_lines_panel_controller.h
+)
+specforge_configure_production_target(specforge_sessions)
+target_link_libraries(specforge_sessions PUBLIC specforge_core)
+
+add_library(specforge_desktop_ui STATIC
+    src/plot/spectrum_plot.cpp
+    src/ui/sample_workflow_panel.cpp
+    src/ui/shell_ui.cpp
+    src/ui/source_collection_panel.cpp
+    src/ui/spectral_lines_grouping_view.cpp
+    src/ui/spectral_lines_panel.cpp
+    src/ui/spectrum_view_session.cpp
+)
+specforge_configure_production_target(specforge_desktop_ui)
+target_link_libraries(specforge_desktop_ui
+    PUBLIC
+        specforge_sessions
+        imgui::imgui
+        implot::implot
 )
 
-target_include_directories(specforge_native PRIVATE src)
-
-target_compile_definitions(specforge_native PRIVATE
-    NOMINMAX
-    UNICODE
-    _UNICODE
-    WIN32_LEAN_AND_MEAN
+add_executable(specforge_native WIN32
+    src/app/specforge_app.cpp
+    src/main.cpp
+    src/platform/win32_window.cpp
+    src/renderer/d3d11_renderer.cpp
+    ${SPECFORGE_MANIFEST}
 )
+specforge_configure_production_target(specforge_native)
 specforge_apply_release_profile(specforge_native)
-
 target_link_libraries(specforge_native PRIVATE
-    imgui::imgui
-    implot::implot
-    ZLIB::ZLIB
+    specforge_desktop_ui
     d3d11
     dxgi
     dwmapi
     imm32
-    ole32
-    shell32
 )
-specforge_use_embedded_resources(specforge_native)
-
-if(MSVC)
-    target_compile_options(specforge_native PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_native PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 
 set_target_properties(specforge_native PROPERTIES
     OUTPUT_NAME SpecForge
@@ -216,321 +189,73 @@ endif()
 
 enable_testing()
 
-add_executable(specforge_local_user_state_tests
+function(specforge_add_test target_name source_file production_target)
+    add_executable(${target_name} ${source_file})
+    target_link_libraries(${target_name} PRIVATE ${production_target})
+    specforge_enable_warnings(${target_name})
+    add_test(NAME ${target_name} COMMAND ${target_name})
+endfunction()
+
+specforge_add_test(
+    specforge_local_user_state_tests
     tests/local_user_state_tests.cpp
-    src/app/local_user_state.cpp
-    src/app/local_user_state.h
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/ui/panel_visibility_state_cache_io.cpp
-    src/ui/panel_visibility_state_cache_io.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_local_user_state_tests PRIVATE src)
-specforge_use_runtime_paths(specforge_local_user_state_tests)
-
-if(MSVC)
-    target_compile_options(specforge_local_user_state_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_local_user_state_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_local_user_state_tests COMMAND specforge_local_user_state_tests)
-
-add_executable(specforge_loader_tests
+specforge_add_test(
+    specforge_loader_tests
     tests/spectrum_loader_tests.cpp
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/fits_file_reader.cpp
-    src/domain/fits_file_reader.h
-    src/domain/fits_spectrum_loader.cpp
-    src/domain/fits_spectrum_loader.h
-    src/domain/sample_annotation_io.cpp
-    src/domain/sample_annotation_io.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/source_collection_manifest.cpp
-    src/domain/source_collection_manifest.h
-    src/domain/spectrum_format_adapters.cpp
-    src/domain/spectrum_format_adapters.h
-    src/domain/spectrum_loader_support.cpp
-    src/domain/spectrum_loader_support.h
-    src/domain/spectrum_loader.cpp
-    src/domain/spectrum_loader.h
-    src/domain/spectrum_snapshot.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
+    specforge_core
 )
-
-target_include_directories(specforge_loader_tests PRIVATE src)
 target_link_libraries(specforge_loader_tests PRIVATE ZLIB::ZLIB)
-
-if(MSVC)
-    target_compile_options(specforge_loader_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_loader_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_loader_tests COMMAND specforge_loader_tests)
-
-add_executable(specforge_sample_navigation_controller_tests
+specforge_add_test(
+    specforge_sample_navigation_controller_tests
     tests/sample_navigation_controller_tests.cpp
-    src/app/local_user_state.cpp
-    src/app/local_user_state.h
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/sample_annotation_io.cpp
-    src/domain/sample_annotation_io.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/source_collection_manifest.cpp
-    src/domain/source_collection_manifest.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/ui/sample_navigation_controller.cpp
-    src/ui/sample_navigation_controller.h
-    src/ui/sample_navigation_sequence.cpp
-    src/ui/sample_navigation_sequence.h
-    src/ui/sample_navigation_state_cache_io.cpp
-    src/ui/sample_navigation_state_cache_io.h
-    src/domain/spectrum_snapshot.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_sample_navigation_controller_tests PRIVATE src)
-specforge_use_runtime_paths(specforge_sample_navigation_controller_tests)
-
-if(MSVC)
-    target_compile_options(specforge_sample_navigation_controller_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_sample_navigation_controller_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_sample_navigation_controller_tests COMMAND specforge_sample_navigation_controller_tests)
-
-add_executable(specforge_sample_navigation_sequence_tests
+specforge_add_test(
+    specforge_sample_navigation_sequence_tests
     tests/sample_navigation_sequence_tests.cpp
-    src/ui/sample_navigation_sequence.cpp
-    src/ui/sample_navigation_sequence.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_sample_navigation_sequence_tests PRIVATE src)
-
-if(MSVC)
-    target_compile_options(specforge_sample_navigation_sequence_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_sample_navigation_sequence_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_sample_navigation_sequence_tests COMMAND specforge_sample_navigation_sequence_tests)
-
-add_executable(specforge_sample_workflow_rules_tests
+specforge_add_test(
+    specforge_sample_workflow_rules_tests
     tests/sample_workflow_rules_tests.cpp
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/sample_annotation_io.h
-    src/domain/sample_filter.cpp
-    src/domain/sample_filter.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/source_collection_manifest.h
-    src/domain/spectrum_snapshot.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/ui/sample_annotation_labeling_rules.cpp
-    src/ui/sample_annotation_labeling_rules.h
-    src/ui/sample_navigation_sequence.cpp
-    src/ui/sample_navigation_sequence.h
-    src/ui/sample_sorting_sources.cpp
-    src/ui/sample_sorting_sources.h
-    src/ui/sample_workflow_source_policy.cpp
-    src/ui/sample_workflow_source_policy.h
-    src/ui/source_collection_session_types.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_sample_workflow_rules_tests PRIVATE src)
-
-if(MSVC)
-    target_compile_options(specforge_sample_workflow_rules_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_sample_workflow_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_sample_workflow_rules_tests COMMAND specforge_sample_workflow_rules_tests)
-
-add_executable(specforge_sample_name_autocomplete_tests
+specforge_add_test(
+    specforge_sample_name_autocomplete_tests
     tests/sample_name_autocomplete_tests.cpp
-    src/ui/sample_name_autocomplete.cpp
-    src/ui/sample_name_autocomplete.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_sample_name_autocomplete_tests PRIVATE src)
-
-if(MSVC)
-    target_compile_options(specforge_sample_name_autocomplete_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_sample_name_autocomplete_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_sample_name_autocomplete_tests COMMAND specforge_sample_name_autocomplete_tests)
-
-add_executable(specforge_sample_labeling_filter_tests
+specforge_add_test(
+    specforge_sample_labeling_filter_tests
     tests/sample_labeling_filter_tests.cpp
-    src/app/local_user_state.cpp
-    src/app/local_user_state.h
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/sample_filter.cpp
-    src/domain/sample_filter.h
-    src/domain/sample_annotation_io.cpp
-    src/domain/sample_annotation_io.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/spectrum_snapshot.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/ui/sample_labeling_controller.cpp
-    src/ui/sample_labeling_controller.h
-    src/ui/sample_labeling_state_cache_io.cpp
-    src/ui/sample_labeling_state_cache_io.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_sample_labeling_filter_tests PRIVATE src)
-specforge_use_runtime_paths(specforge_sample_labeling_filter_tests)
-
-if(MSVC)
-    target_compile_options(specforge_sample_labeling_filter_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_sample_labeling_filter_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_sample_labeling_filter_tests COMMAND specforge_sample_labeling_filter_tests)
-
-add_executable(specforge_source_collection_session_tests
+specforge_add_test(
+    specforge_source_collection_session_tests
     tests/source_collection_session_tests.cpp
-    src/app/local_user_state.cpp
-    src/app/local_user_state.h
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/domain/npy_array_io.cpp
-    src/domain/npy_array_io.h
-    src/domain/sample_annotation_io.cpp
-    src/domain/sample_annotation_io.h
-    src/domain/source_collection_manifest.cpp
-    src/domain/source_collection_manifest.h
-    src/domain/sample_filter.cpp
-    src/domain/sample_filter.h
-    src/domain/sample_labeling.cpp
-    src/domain/sample_labeling.h
-    src/domain/spectrum_fixture.cpp
-    src/domain/spectrum_fixture.h
-    src/domain/spectrum_snapshot.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
-    src/ui/sample_annotation_labeling_rules.cpp
-    src/ui/sample_annotation_labeling_rules.h
-    src/ui/sample_labeling_controller.cpp
-    src/ui/sample_labeling_controller.h
-    src/ui/sample_labeling_state_cache_io.cpp
-    src/ui/sample_labeling_state_cache_io.h
-    src/ui/sample_navigation_controller.cpp
-    src/ui/sample_navigation_controller.h
-    src/ui/sample_navigation_sequence.cpp
-    src/ui/sample_navigation_sequence.h
-    src/ui/sample_navigation_state_cache_io.cpp
-    src/ui/sample_navigation_state_cache_io.h
-    src/ui/sample_sorting_sources.cpp
-    src/ui/sample_sorting_sources.h
-    src/ui/sample_workflow_coordinator.cpp
-    src/ui/sample_workflow_coordinator.h
-    src/ui/sample_workflow_source_policy.cpp
-    src/ui/sample_workflow_source_policy.h
-    src/ui/sample_workflow_state_cache_io.cpp
-    src/ui/sample_workflow_state_cache_io.h
-    src/ui/source_collection_roster.cpp
-    src/ui/source_collection_roster.h
-    src/ui/source_collection_session.cpp
-    src/ui/source_collection_session.h
-    src/ui/source_collection_session_state_cache_io.cpp
-    src/ui/source_collection_session_state_cache_io.h
-    src/ui/source_collection_session_types.h
+    specforge_sessions
 )
-
-target_include_directories(specforge_source_collection_session_tests PRIVATE src)
-specforge_use_runtime_paths(specforge_source_collection_session_tests)
-
-if(MSVC)
-    target_compile_options(specforge_source_collection_session_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_source_collection_session_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_source_collection_session_tests COMMAND specforge_source_collection_session_tests)
-
-add_executable(specforge_spectrum_smoothing_tests
+specforge_add_test(
+    specforge_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp
-    src/domain/spectrum_smoothing.cpp
-    src/domain/spectrum_smoothing.h
+    specforge_core
 )
-
-target_include_directories(specforge_spectrum_smoothing_tests PRIVATE src)
-
-if(MSVC)
-    target_compile_options(specforge_spectrum_smoothing_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_spectrum_smoothing_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_spectrum_smoothing_tests COMMAND specforge_spectrum_smoothing_tests)
-
-add_executable(specforge_spectrum_view_session_tests
+specforge_add_test(
+    specforge_spectrum_view_session_tests
     tests/spectrum_view_session_tests.cpp
-    src/domain/spectrum_smoothing.cpp
-    src/domain/spectrum_smoothing.h
-    src/ui/spectrum_view_session.cpp
-    src/ui/spectrum_view_session.h
+    specforge_desktop_ui
 )
-
-target_include_directories(specforge_spectrum_view_session_tests PRIVATE src)
-target_link_libraries(specforge_spectrum_view_session_tests PRIVATE imgui::imgui)
-
-if(MSVC)
-    target_compile_options(specforge_spectrum_view_session_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_spectrum_view_session_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_spectrum_view_session_tests COMMAND specforge_spectrum_view_session_tests)
-
-add_executable(specforge_spectral_line_catalog_tests
+specforge_add_test(
+    specforge_spectral_line_catalog_tests
     tests/spectral_line_catalog_tests.cpp
-    src/overlays/spectral_line_catalog.cpp
-    src/overlays/spectral_line_catalog.h
+    specforge_core
 )
-
-target_include_directories(specforge_spectral_line_catalog_tests PRIVATE src)
 target_compile_definitions(
     specforge_spectral_line_catalog_tests
     PRIVATE SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-specforge_use_embedded_resources(specforge_spectral_line_catalog_tests)
 
 if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
@@ -541,39 +266,13 @@ if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     )
 endif()
 
-if(MSVC)
-    target_compile_options(specforge_spectral_line_catalog_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_spectral_line_catalog_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_spectral_line_catalog_tests COMMAND specforge_spectral_line_catalog_tests)
-
-add_executable(specforge_spectral_line_user_state_tests
+specforge_add_test(
+    specforge_spectral_line_user_state_tests
     tests/spectral_line_user_state_tests.cpp
-    src/app/local_user_state.cpp
-    src/app/local_user_state.h
-    src/app/local_user_state_json.cpp
-    src/app/local_user_state_json.h
-    src/app/runtime_paths.cpp
-    src/app/runtime_paths.h
-    src/overlays/spectral_line_catalog.cpp
-    src/overlays/spectral_line_catalog.h
-    src/overlays/spectral_line_user_state_cache_io.cpp
-    src/overlays/spectral_line_user_state_cache_io.h
-    src/overlays/spectral_line_user_state.cpp
-    src/overlays/spectral_line_user_state.h
-    src/platform/atomic_file.cpp
-    src/platform/atomic_file.h
+    specforge_core
 )
-
-target_include_directories(specforge_spectral_line_user_state_tests PRIVATE src)
-specforge_use_runtime_paths(specforge_spectral_line_user_state_tests)
-
-if(MSVC)
-    target_compile_options(specforge_spectral_line_user_state_tests PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(specforge_spectral_line_user_state_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME specforge_spectral_line_user_state_tests COMMAND specforge_spectral_line_user_state_tests)
+specforge_add_test(
+    specforge_spectral_lines_panel_controller_tests
+    tests/spectral_lines_panel_controller_tests.cpp
+    specforge_sessions
+)
