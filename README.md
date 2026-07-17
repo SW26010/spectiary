@@ -44,6 +44,10 @@ See [docs/product_requirements.md](docs/product_requirements.md),
 
 ## Environment
 
+The built application requires Windows 10 or Windows 11 at runtime. Its
+presentation path depends on `DXGI_SWAP_EFFECT_FLIP_DISCARD` and
+`IDXGISwapChain3`; older Windows versions are not supported.
+
 Required tools:
 
 - Visual Studio 2022 Build Tools with the C++ desktop workload

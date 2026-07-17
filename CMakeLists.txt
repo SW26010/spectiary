@@ -157,20 +157,31 @@ target_link_libraries(specforge_desktop_ui
         implot::implot
 )
 
+add_library(specforge_renderer STATIC
+    src/renderer/d3d11_imgui_viewport_renderer.cpp
+    src/renderer/d3d11_renderer.cpp
+    src/renderer/d3d11_sdr_swap_chain.cpp
+)
+specforge_configure_production_target(specforge_renderer)
+target_link_libraries(specforge_renderer
+    PRIVATE
+        imgui::imgui
+        d3d11
+        dxgi
+)
+
 add_executable(specforge_native WIN32
     src/app/specforge_app.cpp
     src/main.cpp
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
-    src/renderer/d3d11_renderer.cpp
     ${SPECFORGE_MANIFEST}
 )
 specforge_configure_production_target(specforge_native)
 specforge_apply_release_profile(specforge_native)
 target_link_libraries(specforge_native PRIVATE
     specforge_desktop_ui
-    d3d11
-    dxgi
+    specforge_renderer
     dwmapi
     comctl32
     imm32
@@ -200,6 +211,13 @@ function(specforge_add_test target_name source_file production_target)
     specforge_enable_warnings(${target_name})
     add_test(NAME ${target_name} COMMAND ${target_name})
 endfunction()
+
+specforge_add_test(
+    specforge_sdr_swap_chain_tests
+    tests/d3d11_sdr_swap_chain_tests.cpp
+    specforge_renderer
+)
+target_link_libraries(specforge_sdr_swap_chain_tests PRIVATE imgui::imgui)
 
 specforge_add_test(
     specforge_local_user_state_tests

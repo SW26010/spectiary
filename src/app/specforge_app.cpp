@@ -31,13 +31,12 @@ constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
 constexpr float kDefaultWindowsDpi = 96.0f;
 constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
-constexpr DWORD kOcclusionFallbackPollMilliseconds = 250;
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
 constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
 constexpr const wchar_t* kPersonalizeRegistryKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 constexpr const wchar_t* kAppsUseLightThemeRegistryValue = L"AppsUseLightTheme";
 
-std::string HResultMessage(const char* action, HRESULT result)
+std::string HResultMessage(std::string_view action, HRESULT result)
 {
     std::ostringstream message;
     message << action << " failed with HRESULT 0x" << std::hex << static_cast<unsigned long>(result) << ".";
@@ -297,11 +296,6 @@ int SpecForgeApp::Run(
             continue;
         }
 
-        if (occluded_ && !TryResumeFromOcclusion()) {
-            WaitForRenderWake();
-            continue;
-        }
-
         RenderFrame();
     }
 
@@ -366,19 +360,10 @@ void SpecForgeApp::Initialize(
     }
     ApplyTitleBarTheme(window_.hwnd());
 
-    if (!renderer_.Initialize(window_.hwnd())) {
-        throw std::runtime_error("Failed to create the Direct3D 11 device and swap chain.");
+    const HRESULT renderer_result = renderer_.Initialize(window_.hwnd());
+    if (FAILED(renderer_result)) {
+        throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), renderer_result));
     }
-    const HRESULT occlusion_status_result = renderer_.occlusion_status_registration_result();
-    profile_.WriteEvent("dxgi_occlusion_status_event", {
-                                                        ProfileSink::Field::Bool(
-                                                            "available",
-                                                            renderer_.occlusion_event() != nullptr &&
-                                                                SUCCEEDED(occlusion_status_result)),
-                                                        ProfileSink::Field::String(
-                                                            "registration_result",
-                                                            HResultHex(occlusion_status_result)),
-                                                    });
 
     InitializeUiBackends();
     window_.Show(show_command);
@@ -439,6 +424,14 @@ void SpecForgeApp::InitializeUiBackends()
         throw std::runtime_error("Failed to initialize the Dear ImGui DirectX 11 backend.");
     }
 
+    if (!viewport_renderer_.Initialize(renderer_.factory(), renderer_.device(), renderer_.context())) {
+        ImGui_ImplDX11_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        throw std::runtime_error("Failed to initialize the Dear ImGui SDR viewport renderer.");
+    }
+
     imgui_initialized_ = true;
 }
 
@@ -449,6 +442,7 @@ void SpecForgeApp::Shutdown()
     if (imgui_initialized_) {
         profile_.WriteEvent("shutdown");
         ImGui_ImplDX11_Shutdown();
+        viewport_renderer_.Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImPlot::DestroyContext();
         ImGui::DestroyContext();
@@ -502,6 +496,10 @@ void SpecForgeApp::RenderFrame()
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
+            const D3D11RendererError viewport_error = viewport_renderer_.TakeLastError();
+            if (FAILED(viewport_error.result)) {
+                throw std::runtime_error(HResultMessage(viewport_error.operation, viewport_error.result));
+            }
         }
     }
 
@@ -518,33 +516,9 @@ void SpecForgeApp::RenderFrame()
         present_result = renderer_.Present();
     }
 
-    if (present_result == DXGI_STATUS_OCCLUDED) {
-        if (!occluded_) {
-            profile_.WriteEvent("render_idle", {ProfileSink::Field::String("reason", "dxgi_occluded")});
-        }
-        occluded_ = true;
-        return;
-    }
-
     if (FAILED(present_result)) {
-        throw std::runtime_error(HResultMessage("Present", present_result));
+        throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), present_result));
     }
-}
-
-bool SpecForgeApp::TryResumeFromOcclusion()
-{
-    const HRESULT present_test = renderer_.PresentTest();
-    if (present_test == DXGI_STATUS_OCCLUDED) {
-        return false;
-    }
-
-    if (FAILED(present_test)) {
-        throw std::runtime_error(HResultMessage("Present test", present_test));
-    }
-
-    occluded_ = false;
-    profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "dxgi_present_test")});
-    return true;
 }
 
 void SpecForgeApp::WaitForRenderWake()
@@ -553,23 +527,9 @@ void SpecForgeApp::WaitForRenderWake()
         return;
     }
 
-    if (occluded_) {
-        HANDLE occlusion_event = renderer_.occlusion_event();
-        if (occlusion_event != nullptr) {
-            const DWORD result = MsgWaitForMultipleObjects(1, &occlusion_event, FALSE, INFINITE, QS_ALLINPUT);
-            if (result != WAIT_FAILED) {
-                return;
-            }
-        }
-
-        const DWORD result =
-            MsgWaitForMultipleObjectsEx(0, nullptr, kOcclusionFallbackPollMilliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-        if (result != WAIT_FAILED) {
-            return;
-        }
+    if (WaitMessage() == FALSE) {
+        throw std::runtime_error(HResultMessage("WaitMessage", HRESULT_FROM_WIN32(GetLastError())));
     }
-
-    WaitMessage();
 }
 
 void SpecForgeApp::ApplyPendingResize()
@@ -585,8 +545,9 @@ void SpecForgeApp::ApplyPendingResize()
         return;
     }
 
-    if (!renderer_.Resize(resize.width, resize.height)) {
-        throw std::runtime_error("Failed to resize the Direct3D 11 render target.");
+    const HRESULT resize_result = renderer_.Resize(resize.width, resize.height);
+    if (FAILED(resize_result)) {
+        throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), resize_result));
     }
 
     profile_.WriteEvent("render_target_resize", {
@@ -765,6 +726,9 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 
     DXGI_SWAP_CHAIN_DESC swap_chain_desc = {};
     const bool swapchain_ok = renderer_.GetSwapChainDesc(swap_chain_desc);
+    DXGI_COLOR_SPACE_TYPE swap_chain_color_space = DXGI_COLOR_SPACE_CUSTOM;
+    const bool swapchain_color_space_configured =
+        renderer_.GetConfiguredSwapChainColorSpace(swap_chain_color_space);
     const double swapchain_desc_hz = swapchain_ok
                                          ? RatioHz(
                                                swap_chain_desc.BufferDesc.RefreshRate.Numerator,
@@ -867,6 +831,20 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                       "dwm_frames_missed",
                                                       std::to_string(dwm_ok ? dwm_timing.cFramesMissed : 0)),
                                                   ProfileSink::Field::Bool("swapchain_ok", swapchain_ok),
+                                                  ProfileSink::Field::Bool(
+                                                      "swapchain_color_space_configured",
+                                                      swapchain_color_space_configured),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_color_space",
+                                                      std::to_string(
+                                                          swapchain_color_space_configured
+                                                              ? swap_chain_color_space
+                                                              : 0)),
+                                                  ProfileSink::Field::Bool(
+                                                      "swapchain_srgb_sdr_explicit",
+                                                      swapchain_color_space_configured &&
+                                                          swap_chain_color_space ==
+                                                              DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709),
                                                   ProfileSink::Field::Number(
                                                       "swapchain_present_sync_interval",
                                                       std::to_string(renderer_.present_sync_interval())),
@@ -891,6 +869,10 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                   ProfileSink::Field::Number(
                                                       "swapchain_buffer_count",
                                                       std::to_string(swapchain_ok ? swap_chain_desc.BufferCount : 0)),
+                                                  ProfileSink::Field::Number(
+                                                      "swapchain_format",
+                                                      std::to_string(
+                                                          swapchain_ok ? swap_chain_desc.BufferDesc.Format : 0)),
                                                   ProfileSink::Field::Bool(
                                                       "swapchain_windowed",
                                                       swapchain_ok && swap_chain_desc.Windowed == TRUE),
@@ -939,7 +921,6 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
             profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "restored")});
         }
         minimized_ = false;
-        occluded_ = false;
 
         const UINT width = LOWORD(lparam);
         const UINT height = HIWORD(lparam);
@@ -962,7 +943,6 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
             if (!was_visible) {
                 profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "shown")});
             }
-            occluded_ = false;
         }
         return 0;
     case WM_SYSCOMMAND:

@@ -3,6 +3,7 @@
 #include "platform/win32_window.h"
 #include "platform/win32_touchpad_gesture_source.h"
 #include "profile/profile_sink.h"
+#include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "renderer/d3d11_renderer.h"
 #include "ui/shell_ui.h"
 
@@ -48,7 +49,6 @@ private:
     void InitializeUiBackends();
     void Shutdown();
     void RenderFrame();
-    bool TryResumeFromOcclusion();
     void WaitForRenderWake();
     void ApplyPendingResize();
     void ApplyUiScale(float dpi_scale);
@@ -65,6 +65,7 @@ private:
 
     Win32Window window_;
     D3D11Renderer renderer_;
+    D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;
     Win32TouchpadGestureSource touchpad_gestures_;
     ShellUi ui_{&touchpad_gestures_};
@@ -74,7 +75,6 @@ private:
     bool running_ = true;
     bool minimized_ = false;
     bool window_visible_ = true;
-    bool occluded_ = false;
     ImGuiStyle base_imgui_style_;
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;

@@ -44,7 +44,29 @@ $env:VCPKG_ROOT
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
-DirectX 11 来自 Windows SDK，`specforge_native` 显式链接 `d3d11`、`dxgi`、`dwmapi` 和 `imm32`。`zlib` 只用于受限 `.fits.gz` 单光谱读取路径。
+DirectX 11 来自 Windows SDK；`specforge_renderer` 封装 DX11/DXGI presentation，`specforge_native` 负责 Win32/DWM shell。
+`zlib` 只用于受限 `.fits.gz` 单光谱读取路径。
+
+## SDR 色彩与 presentation 契约
+
+SpecForge 的主窗口和 Dear ImGui detached viewport 统一输出 sRGB/Rec.709 SDR：交换链使用
+`DXGI_FORMAT_R8G8B8A8_UNORM`、双缓冲 `DXGI_SWAP_EFFECT_FLIP_DISCARD`，并通过
+`IDXGISwapChain3::SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)` 显式向 Windows 声明内容色彩空间。
+初始化和 resize 都必须验证该色彩空间可用于 present；不能静默退回未标记或旧式 blt-model 交换链。
+该 presentation 契约以 Windows 10 为最低运行环境，因为 `DXGI_SWAP_EFFECT_FLIP_DISCARD` 和
+`IDXGISwapChain3` 不支持更早的 Windows 版本。DXGI/D3D 初始化和 resize 失败必须保留具体操作名与
+`HRESULT`，避免把颜色空间、factory、swap chain 和 RTV 失败压成同一条通用错误。
+
+`UNORM` 是存储格式，`SetColorSpace1` 才是 compositor 看到的内容色彩空间声明。不要在没有把 ImGui style、纹理和
+alpha blending 全部改为 linear-light pipeline 的情况下，把 render-target view 直接改成 `_SRGB`；这会改变 GPU 写入编码，
+并不能替代交换链色彩空间声明。HDR 或 Windows 自动色彩管理启用时，广色域映射由系统完成；Advanced Color 未启用时，
+应用仍遵循 Windows 传统 sRGB SDR 行为，不自行承担显示器 ICC 转换。
+
+Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。SpecForge 因此只在主窗口
+最小化或隐藏时停止渲染并等待窗口消息，不为失活窗口单独设置刷新率，也不尝试通过 Z-order 枚举恢复“完全遮挡”检测。
+
+`D3D11SdrSwapChain::Resize` 必须显式从 D3D11 context 解绑 render target 后再释放 back buffer；调用方不应依赖先前
+成功 `Present` 的隐含解绑行为。
 
 ## UI 文本编码与字体
 
