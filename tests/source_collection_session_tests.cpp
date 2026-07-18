@@ -483,6 +483,24 @@ specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabe
         specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(std::move(label)));
 }
 
+specforge::SourceCollectionSessionIntent UpdateActiveLabel(
+    int original_code,
+    specforge::SampleLabelDefinition label,
+    bool allow_used_code_change)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::UpdateActiveLabel(
+            original_code,
+            std::move(label),
+            allow_used_code_change));
+}
+
+specforge::SourceCollectionSessionIntent RemoveActiveLabel(int code)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::RemoveActiveLabel(code));
+}
+
 specforge::SourceCollectionSessionIntent SetActiveLabelingAutoAdvance(bool enabled)
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
@@ -730,6 +748,191 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     Require(
         session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "local labeling filter should move to the first matching sample");
+}
+
+void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateLabelingTask("Quality review"));
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        "review label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        "keep label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(4));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+
+    const std::string source_id = "labeling:quality-review";
+    (void)Submit(session, AddSampleFilterSource(source_id));
+    (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
+    (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
+    Require(
+        session.View().navigation.current_index && *session.View().navigation.current_index == 0,
+        "test should start on the sample using the label to remove");
+    Require(
+        session.View().snapshot && session.View().snapshot->collection.current_index == 0,
+        "test snapshot should start on the sample using the label to remove");
+
+    const specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
+    Require(result.changed, "removing the label selected by a sample filter should change the task");
+    Require(
+        session.View().navigation.current_index && *session.View().navigation.current_index == 1,
+        "removing the label currently selected by sample filtering should reconcile navigation to the "
+        "remaining match");
+    Require(
+        session.View().snapshot && session.View().snapshot->collection.current_index == 1,
+        "removing the label currently selected by sample filtering should reload the spectrum snapshot");
+    Require(
+        session.View().current_sample_snapshot &&
+            session.View().current_sample_snapshot->collection.current_index == 1,
+        "the current sample snapshot should match reconciled navigation");
+    Require(result.action.snapshot_changed, "reloading the reconciled sample should report a snapshot change");
+}
+
+void TestRemovingLabelPrunesItsSampleFilterValue()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateLabelingTask("Quality review"));
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        "review label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        "keep label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(4));
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+
+    const std::string source_id = "labeling:quality-review";
+    (void)Submit(session, AddSampleFilterSource(source_id));
+    (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
+    (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
+
+    const specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(3));
+    Require(result.changed, "removing the selected label should change the task");
+    Require(session.View().filter.sources.size() == 1, "the labeling sample-filter source should stay selected");
+    const std::unordered_set<std::string> selected_keys =
+        session.View().filter.sources[0].selected_value_keys;
+    Require(
+        selected_keys.find("3") == selected_keys.end(),
+        "removing a label should remove its code from the active sample-filter condition");
+    Require(
+        selected_keys.find("4") != selected_keys.end(),
+        "removing a label should preserve other selected values in the same sample-filter condition");
+    Require(session.View().navigation.filter_active, "the remaining selected value should keep sample filtering active");
+    Require(session.View().navigation.sequence_count == 1, "the remaining selected label should keep one sample");
+}
+
+void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    (void)Submit(session, CreateLabelingTask("Quality review"));
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
+        "review label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "keep", 'k'})).changed,
+        "keep label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(4));
+    (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+
+    const std::string source_id = "labeling:quality-review";
+    (void)Submit(session, AddSampleFilterSource(source_id));
+    (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
+
+    specforge::SourceCollectionSessionResult result = Submit(
+        session,
+        UpdateActiveLabel(3, specforge::SampleLabelDefinition{7, "accepted", 'a'}, false));
+    Require(!result.changed, "changing a used label code should be rejected without confirmation");
+    Require(session.View().labeling.current_code == 3, "rejected recode should keep the current sample value");
+
+    result = Submit(
+        session,
+        UpdateActiveLabel(3, specforge::SampleLabelDefinition{7, "accepted", 'a'}, true));
+    Require(result.changed, "confirmed used label recode should flow through the session intent");
+    Require(session.View().labeling.current_code == 7, "confirmed recode should migrate the current sample value");
+    Require(
+        specforge::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr &&
+            specforge::FindSampleLabel(session.View().labeling.label_set, 7) != nullptr,
+        "confirmed recode should atomically replace the label definition");
+    Require(session.View().filter.sources.size() == 1, "confirmed recode should keep the sample filter source");
+    const std::unordered_set<std::string> selected_keys =
+        session.View().filter.sources[0].selected_value_keys;
+    Require(selected_keys.find("3") == selected_keys.end(), "sample filtering should drop the old label code");
+    Require(selected_keys.find("7") != selected_keys.end(), "sample filtering should follow the new label code");
+    Require(session.View().navigation.sequence_count == 1, "migrated sample filtering should keep one match");
+    Require(
+        session.View().navigation.current_index && *session.View().navigation.current_index == 0,
+        "migrated sample filtering should keep the same matching sample current");
+    Require(
+        session.View().snapshot && session.View().snapshot->collection.current_index == 0,
+        "migrated sample filtering should keep the spectrum snapshot aligned");
+
+    std::string load_error;
+    const std::optional<std::vector<int>> persisted =
+        specforge::LoadSampleLabelResultNpy(output_path, 3, &load_error);
+    Require(persisted.has_value(), load_error.empty() ? "recode output should load" : load_error);
+    Require(*persisted == std::vector<int>({7, 4, -1}), "confirmed recode should persist migrated values");
+}
+
+void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_incomplete_metadata.npy");
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(specforge::SampleLabelDefinition{5, "defined", 'd'});
+    SaveLabelResultFixture(
+        annotation_path,
+        "incomplete-metadata",
+        "Incomplete metadata",
+        {5, 9, -1},
+        label_set,
+        true);
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "fixture annotation should load");
+    (void)Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
+
+    const specforge::SourceCollectionLabelingView view = session.View().labeling;
+    Require(
+        specforge::FindSampleLabel(view.label_set, 9) == nullptr,
+        "fixture metadata should intentionally omit sample value code 9");
+    Require(view.label_usage_counts.at(9) == 1, "the labeling view should count undefined sample value code 9");
+
+    Require(
+        view.HasConflictingLabelCode(5, 9),
+        "a code present in sample values should conflict even when its metadata definition is missing");
+    Require(
+        !Submit(
+             session,
+             UpdateActiveLabel(5, specforge::SampleLabelDefinition{9, "collision", 'c'}, true))
+             .changed,
+        "the session should reject recoding a label to an undefined code already present in sample values");
 }
 
 void TestResumeLocateRespectsActiveFilterSequence()
@@ -1433,6 +1636,44 @@ void TestCreateLabelingTaskUsesCustomName()
     Require(session.View().labeling.has_active_task, "same custom task should reactivate");
     Require(session.View().labeling.task_id == "quality-review", "reactivated custom task should keep the same task id");
     Require(session.View().labeling.current_code == 3, "reactivated custom task should keep its draft values");
+}
+
+void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, CreateDefaultLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "used", 'u'})).changed,
+        "used label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{4, "unused", 'n'})).changed,
+        "unused label should be accepted");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(3));
+
+    const specforge::SourceCollectionLabelingView labeling = session.View().labeling;
+    Require(labeling.label_usage_counts.at(3) == 1, "view should expose the used label count");
+    Require(
+        labeling.label_usage_counts.find(4) == labeling.label_usage_counts.end(),
+        "view should omit zero-count labels from its usage map");
+
+    specforge::SourceCollectionSessionResult result = Submit(session, RemoveActiveLabel(4));
+    Require(result.changed, "unused label removal should flow through the session intent");
+    Require(
+        specforge::FindSampleLabel(session.View().labeling.label_set, 4) == nullptr,
+        "unused label should disappear from the view");
+
+    result = Submit(session, RemoveActiveLabel(3));
+    Require(result.changed, "used label removal should flow through the session intent");
+    Require(
+        specforge::FindSampleLabel(session.View().labeling.label_set, 3) == nullptr,
+        "used label definition should disappear from the view");
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "removing a used label should clear the current sample value");
+    Require(session.View().labeling.labeled_count == 0, "cleared values should update labeling progress");
 }
 
 void TestRenameAndDeleteActiveLabelingTask()
@@ -2379,6 +2620,10 @@ int main()
     TestAssigningLabelAutoAdvancesInsideSession();
     TestAnnotationFilterSelectionAppliesToNavigation();
     TestLocalLabelingAnnotationCanBeSampleFilterSource();
+    TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot();
+    TestRemovingLabelPrunesItsSampleFilterValue();
+    TestChangingUsedLabelCodeMigratesValuesAndSampleFilter();
+    TestLabelingViewCodeConflictIncludesUndefinedSampleValues();
     TestResumeLocateRespectsActiveFilterSequence();
     TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows();
     TestRememberedPositionResumableTracksActiveSequence();
@@ -2391,6 +2636,7 @@ int main()
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
     TestCreateLabelingTaskUsesCustomName();
+    TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel();
     TestRenameAndDeleteActiveLabelingTask();
     TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();

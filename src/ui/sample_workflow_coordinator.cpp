@@ -517,6 +517,71 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpsertActiveLabel(Sampl
     return action;
 }
 
+SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change,
+    bool* changed)
+{
+    SourceCollectionSessionAction action;
+    const int updated_code = label.code;
+    const SampleLabelingTask* active_task = labeling_.active_task();
+    const std::string sample_filter_source_id =
+        active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
+    const bool label_changed =
+        labeling_.UpdateActiveLabel(original_code, std::move(label), allow_used_code_change);
+    if (changed != nullptr) {
+        *changed = label_changed;
+    }
+    if (label_changed) {
+        if (!sample_filter_source_id.empty() &&
+            workflow_sources_.ReplaceSampleFilterValue(
+                sample_filter_source_id,
+                std::to_string(original_code),
+                std::to_string(updated_code))) {
+            MarkActiveWorkflowStateDirty();
+        }
+        if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
+            (void)labeling_.PersistActiveTask();
+        }
+        ApplyNavigationInputEffects(
+            action,
+            ReconcileNavigationInputs(
+                nullptr,
+                NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
+    }
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int code, bool* changed)
+{
+    SourceCollectionSessionAction action;
+    const SampleLabelingTask* active_task = labeling_.active_task();
+    const std::string sample_filter_source_id =
+        active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
+    const bool label_changed = labeling_.RemoveActiveLabel(code);
+    if (changed != nullptr) {
+        *changed = label_changed;
+    }
+    if (label_changed) {
+        if (!sample_filter_source_id.empty() &&
+            workflow_sources_.RemoveSampleFilterValue(
+                sample_filter_source_id,
+                std::to_string(code))) {
+            MarkActiveWorkflowStateDirty();
+        }
+        if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
+            (void)labeling_.PersistActiveTask();
+        }
+        ApplyNavigationInputEffects(
+            action,
+            ReconcileNavigationInputs(
+                nullptr,
+                NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
+    }
+    return action;
+}
+
 SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingAutoAdvance(bool enabled)
 {
     SourceCollectionSessionAction action;
@@ -859,7 +924,12 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
         view.task_id = task->task_id;
         view.task_name = task->task_name;
         view.label_set = task->label_set;
-        view.labeled_count = CountLabeledSamples(*task);
+        for (const int code : task->values) {
+            if (code != kUnlabeledSampleLabelCode) {
+                ++view.label_usage_counts[code];
+                ++view.labeled_count;
+            }
+        }
         view.sample_count = task->values.size();
         if (view.current_index && *view.current_index < task->values.size()) {
             view.current_code = task->values[*view.current_index];

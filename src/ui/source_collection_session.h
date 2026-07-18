@@ -52,6 +52,8 @@ enum class ActiveSampleWorkflowIntentKind {
     RenameActiveLabelingTask,
     DeleteActiveLabelingTask,
     UpsertActiveLabel,
+    UpdateActiveLabel,
+    RemoveActiveLabel,
     SetActiveLabelingAutoAdvance,
     SetActiveLabelingSkipLabeledOnAdvance,
     SetActiveLabelingOutputPath,
@@ -128,6 +130,11 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent RenameActiveLabelingTask(std::string task_name);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeleteActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] static ActiveSampleWorkflowIntent UpdateActiveLabel(
+        int original_code,
+        SampleLabelDefinition label,
+        bool allow_used_code_change = false);
+    [[nodiscard]] static ActiveSampleWorkflowIntent RemoveActiveLabel(int code);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingOutputPath(std::filesystem::path output_path);
@@ -147,6 +154,7 @@ private:
     SampleLabelDefinition label;
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;
+    bool allow_used_label_code_change = false;
 };
 
 struct SampleFilteringIntent {
@@ -287,6 +295,14 @@ private:
     [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,
+        bool* changed = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction UpdateActiveLabel(
+        int original_code,
+        SampleLabelDefinition label,
+        bool allow_used_code_change,
+        bool* changed = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction RemoveActiveLabel(
+        int code,
         bool* changed = nullptr);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);

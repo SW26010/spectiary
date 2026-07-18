@@ -45,6 +45,11 @@ public:
         bool metadata_clean);
     [[nodiscard]] bool ActivateTask(std::string_view task_id);
     [[nodiscard]] bool UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] bool UpdateActiveLabel(
+        int original_code,
+        SampleLabelDefinition label,
+        bool allow_used_code_change);
+    [[nodiscard]] bool RemoveActiveLabel(int code);
     [[nodiscard]] bool RenameActiveTask(std::string task_name);
     [[nodiscard]] bool SetActiveTaskOutputPath(std::filesystem::path output_path);
     [[nodiscard]] bool CanDeactivateActiveTask() const;

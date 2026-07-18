@@ -254,6 +254,109 @@ void TestSampleLabelTaskWritesStableCodes()
         "draft persistence should keep the internal-draft state");
 }
 
+void TestRemovingSampleLabelClearsAssignedValues()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{1, "used", 'u'}),
+        "used label should be accepted");
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{2, "unused", 'n'}),
+        "unused label should be accepted");
+    Require(specforge::AssignSampleLabel(task, 0, 1).accepted, "fixture should assign the used label");
+
+    Require(specforge::RemoveSampleLabel(task, 1), "a used label should be removable");
+    Require(specforge::FindSampleLabel(task.label_set, 1) == nullptr, "used label definition should be removed");
+    Require(
+        task.values[0] == specforge::kUnlabeledSampleLabelCode,
+        "samples using a removed label should become unlabeled");
+    Require(task.pending_sample_indices.contains(0), "cleared sample values should be pending persistence");
+
+    Require(specforge::RemoveSampleLabel(task, 2), "an unused label should be removable");
+    Require(specforge::FindSampleLabel(task.label_set, 2) == nullptr, "removed label should leave the label set");
+    Require(!specforge::RemoveSampleLabel(task, 2), "removing an unknown label should be a no-op");
+}
+
+void TestChangingUnusedSampleLabelCode()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{1, "review", 'r'}),
+        "fixture label should be accepted");
+
+    Require(
+        specforge::UpdateSampleLabel(
+            task,
+            1,
+            specforge::SampleLabelDefinition{7, "accepted", 'a'},
+            false),
+        "an unused label code should change without confirmation");
+    Require(specforge::FindSampleLabel(task.label_set, 1) == nullptr, "the old unused code should disappear");
+    const specforge::SampleLabelDefinition* updated = specforge::FindSampleLabel(task.label_set, 7);
+    Require(updated != nullptr, "the new unused code should be present");
+    Require(updated->name == "accepted" && updated->shortcut == 'a', "the label edit should be atomic");
+    Require(task.pending_sample_indices.empty(), "changing an unused code should not dirty sample values");
+}
+
+void TestChangingUsedSampleLabelCodeRequiresConfirmation()
+{
+    specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{1, "review", 'r'}),
+        "used fixture label should be accepted");
+    Require(
+        specforge::UpsertSampleLabel(task.label_set, specforge::SampleLabelDefinition{2, "other", 'o'}),
+        "occupied target fixture should be accepted");
+    Require(specforge::AssignSampleLabel(task, 0, 1).accepted, "first fixture sample should be labeled");
+    Require(specforge::AssignSampleLabel(task, 2, 1).accepted, "third fixture sample should be labeled");
+    specforge::MarkSampleLabelTaskPersisted(task, specforge::SampleLabelSaveStateKind::InternalDraftOnly);
+
+    Require(
+        !specforge::UpdateSampleLabel(
+            task,
+            1,
+            specforge::SampleLabelDefinition{7, "accepted", 'a'},
+            false),
+        "a used label code should require confirmation");
+    Require(specforge::FindSampleLabel(task.label_set, 1) != nullptr, "rejected recode should keep the old label");
+    Require(task.values == std::vector<int>({1, -1, 1}), "rejected recode should keep sample values");
+
+    Require(
+        specforge::UpdateSampleLabel(
+            task,
+            1,
+            specforge::SampleLabelDefinition{7, "accepted", 'a'},
+            true),
+        "confirmation should allow a used label code to change");
+    Require(specforge::FindSampleLabel(task.label_set, 1) == nullptr, "confirmed recode should remove the old code");
+    Require(specforge::FindSampleLabel(task.label_set, 7) != nullptr, "confirmed recode should add the new code");
+    Require(task.values == std::vector<int>({7, -1, 7}), "confirmed recode should migrate assigned values");
+    Require(
+        task.pending_sample_indices == std::unordered_set<std::size_t>({0, 2}),
+        "confirmed recode should dirty every migrated sample value");
+
+    Require(
+        !specforge::UpdateSampleLabel(
+            task,
+            7,
+            specforge::SampleLabelDefinition{2, "collision", 'c'},
+            true),
+        "confirmation should not overwrite another label code");
+
+    task.values[1] = 9;
+    Require(
+        !specforge::UpdateSampleLabel(
+            task,
+            7,
+            specforge::SampleLabelDefinition{9, "missing metadata collision", 'm'},
+            true),
+        "confirmation should not overwrite a code already present in sample values");
+    Require(
+        specforge::FindSampleLabel(task.label_set, 7) != nullptr &&
+            specforge::FindSampleLabel(task.label_set, 9) == nullptr,
+        "a sample-value collision should leave label definitions unchanged");
+}
+
 void TestSampleLabelResultWritesCompactNpy()
 {
     specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
@@ -925,6 +1028,9 @@ int main()
         TestSampleLabelingStateCacheReportsCorruptJson();
         TestSampleLabelingStateCacheReportsUnsupportedSchema();
         TestSampleLabelTaskWritesStableCodes();
+        TestRemovingSampleLabelClearsAssignedValues();
+        TestChangingUnusedSampleLabelCode();
+        TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
         TestSampleLabelResultWritesMetadataSidecar();
         TestSampleAnnotationUsesMatchingLabelMetadata();

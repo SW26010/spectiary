@@ -73,6 +73,14 @@ public:
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,
         bool* changed = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction UpdateActiveLabel(
+        int original_code,
+        SampleLabelDefinition label,
+        bool allow_used_code_change,
+        bool* changed = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction RemoveActiveLabel(
+        int code,
+        bool* changed = nullptr);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);

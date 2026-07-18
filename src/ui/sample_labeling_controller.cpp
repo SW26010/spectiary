@@ -285,6 +285,38 @@ bool SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
     return true;
 }
 
+bool SampleLabelingController::UpdateActiveLabel(
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change)
+{
+    SampleLabelingTask* task = active_task();
+    if (task == nullptr ||
+        !UpdateSampleLabel(*task, original_code, std::move(label), allow_used_code_change)) {
+        return false;
+    }
+    MarkSampleLabelTaskMetadataPending(*task);
+    if (ShouldRetryOutputSave(*task)) {
+        QueueOutputRetry();
+    }
+    QueueStateSave();
+    return true;
+}
+
+bool SampleLabelingController::RemoveActiveLabel(int code)
+{
+    SampleLabelingTask* task = active_task();
+    if (task == nullptr || !RemoveSampleLabel(*task, code)) {
+        return false;
+    }
+    MarkSampleLabelTaskMetadataPending(*task);
+    if (ShouldRetryOutputSave(*task)) {
+        QueueOutputRetry();
+    }
+    QueueStateSave();
+    return true;
+}
+
 bool SampleLabelingController::RenameActiveTask(std::string task_name)
 {
     SampleLabelingTask* task = active_task();

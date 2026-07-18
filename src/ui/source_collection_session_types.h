@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -86,6 +87,7 @@ struct SourceCollectionLabelingView {
     std::string task_id;
     std::string task_name;
     SampleLabelSet label_set;
+    std::unordered_map<int, std::size_t> label_usage_counts;
     std::size_t labeled_count = 0;
     std::size_t sample_count = 0;
     int current_code = kUnlabeledSampleLabelCode;
@@ -100,6 +102,16 @@ struct SourceCollectionLabelingView {
     bool state_save_failed = false;
     std::string state_save_error;
     std::string state_load_warning;
+
+    [[nodiscard]] bool HasConflictingLabelCode(int original_code, int requested_code) const
+    {
+        if (requested_code == original_code) {
+            return false;
+        }
+        const auto usage = label_usage_counts.find(requested_code);
+        return ContainsSampleLabelCode(label_set, requested_code) ||
+               (usage != label_usage_counts.end() && usage->second > 0);
+    }
 };
 
 struct SourceCollectionFilterSourceView {

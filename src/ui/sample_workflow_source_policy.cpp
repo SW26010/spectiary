@@ -412,6 +412,51 @@ bool SampleWorkflowSourcePolicy::SetFilterValueSelected(
     return true;
 }
 
+bool SampleWorkflowSourcePolicy::RemoveSampleFilterValue(
+    std::string_view source_id,
+    std::string_view value_key)
+{
+    const std::string source_id_string{source_id};
+    const SampleFilterCondition* condition = filters_.FindCondition(source_id_string);
+    if (condition == nullptr) {
+        return false;
+    }
+
+    std::unordered_set<std::string> allowed_value_keys = condition->allowed_value_keys;
+    if (allowed_value_keys.erase(std::string{value_key}) == 0) {
+        return false;
+    }
+
+    filters_.SetCondition(source_id_string, std::move(allowed_value_keys));
+    InvalidateFilterViewCache();
+    return true;
+}
+
+bool SampleWorkflowSourcePolicy::ReplaceSampleFilterValue(
+    std::string_view source_id,
+    std::string_view old_value_key,
+    std::string_view new_value_key)
+{
+    if (old_value_key == new_value_key) {
+        return false;
+    }
+
+    const std::string source_id_string{source_id};
+    const SampleFilterCondition* condition = filters_.FindCondition(source_id_string);
+    if (condition == nullptr) {
+        return false;
+    }
+
+    std::unordered_set<std::string> allowed_value_keys = condition->allowed_value_keys;
+    if (allowed_value_keys.erase(std::string{old_value_key}) == 0) {
+        return false;
+    }
+    allowed_value_keys.insert(std::string{new_value_key});
+    filters_.SetCondition(source_id_string, std::move(allowed_value_keys));
+    InvalidateFilterViewCache();
+    return true;
+}
+
 bool SampleWorkflowSourcePolicy::has_filter_conditions() const
 {
     return !filters_.conditions().empty();

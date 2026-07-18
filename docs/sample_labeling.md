@@ -115,6 +115,21 @@ names, or changing shortcuts must not change existing label code meanings.
 Changing a code that is already used by saved label values should require an
 explicit confirmation because it changes the interpretation of existing data.
 
+The labels panel should present one saved label per table row. Adding a label
+first saves a definition with suggested defaults and then enters a transient
+row-editing state. Leaving that editing state discards only the unsaved field
+changes; it must not remove the already-created label. The row acts as one edit
+focus scope, so clicking another row or control both cancels the current edit
+and activates the clicked target in the same interaction.
+
+Deleting a label that has assigned samples is destructive and must require
+explicit confirmation. Confirming changes every sample using that code to the
+unlabeled sentinel `-1`, removes the deleted code from any selected sample-filter
+values, and reconciles sample navigation. If the current sample leaves the
+active sample navigation sequence, the displayed spectrum snapshot must move to
+the reconciled current sample. The confirmation must describe these effects
+before the deletion is submitted.
+
 Each numeric label needs a stable numeric code, a display name, and an optional
 shortcut. Colors and other styling are optional later extensions. String and
 floating-point annotations may be displayed read-only, but they should not be
@@ -506,11 +521,13 @@ label is a skip; it advances the remembered labeling position but does not write
 the unlabeled sentinel.
 
 The active editable task should display all labels in its sample label set as
-buttons. Each button should show the label name and optional shortcut, and the
-button for the current sample's label value should be highlighted. A clear-label
-button should be available for writing the unlabeled value. When the current
-sample is unlabeled, the active task should display `Unlabeled`, no label button
-should be highlighted, and the clear-label button should be disabled.
+table rows. Each row should show the label name, numeric code, optional shortcut,
+and edit/delete actions. Clicking the non-action area of a row assigns that label
+to the current sample, and the row matching the current sample's label value
+should be highlighted. A clear-label button should be available for writing the
+unlabeled value. When the current sample is unlabeled, the active task should
+display `Unlabeled`, no label row should be highlighted, and the clear-label
+button should be disabled.
 
 Shortcut uniqueness is scoped to one sample labeling task. Different tasks may
 reuse the same shortcut because only one task is active at a time. Within the
@@ -525,7 +542,7 @@ The first implementation should only allow unmodified letter and digit keys for
 label shortcuts. Modifier combinations, navigation keys, whitespace keys, Enter,
 Delete, and similar UI operation keys are out of scope for label bindings.
 Shortcuts are optional for all labels and labeling actions. If a label or clear
-operation has no shortcut, it remains available through the UI button.
+operation has no shortcut, it remains available through its visible UI control.
 
 ## Persistence
 

@@ -59,6 +59,13 @@ public:
         std::string source_id,
         std::string value_key,
         bool selected);
+    [[nodiscard]] bool RemoveSampleFilterValue(
+        std::string_view source_id,
+        std::string_view value_key);
+    [[nodiscard]] bool ReplaceSampleFilterValue(
+        std::string_view source_id,
+        std::string_view old_value_key,
+        std::string_view new_value_key);
     [[nodiscard]] bool has_filter_conditions() const;
     [[nodiscard]] SampleFilterEvaluation EvaluateFilters(
         const SampleWorkflowSourceContext& context) const;

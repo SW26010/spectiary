@@ -98,6 +98,12 @@ struct SampleLabelTaskPersistResult {
 [[nodiscard]] const SampleLabelDefinition* FindSampleLabel(const SampleLabelSet& label_set, int code);
 [[nodiscard]] int NextAvailableSampleLabelCode(const SampleLabelSet& label_set);
 [[nodiscard]] bool UpsertSampleLabel(SampleLabelSet& label_set, SampleLabelDefinition label);
+[[nodiscard]] bool UpdateSampleLabel(
+    SampleLabelingTask& task,
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change);
+[[nodiscard]] bool RemoveSampleLabel(SampleLabelingTask& task, int code);
 [[nodiscard]] std::optional<int> SampleLabelCodeForShortcut(const SampleLabelSet& label_set, char shortcut);
 [[nodiscard]] std::string FormatSampleLabelValue(
     const SampleLabelSet& label_set,

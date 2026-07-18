@@ -315,6 +315,87 @@ bool UpsertSampleLabel(SampleLabelSet& label_set, SampleLabelDefinition label)
     return true;
 }
 
+bool UpdateSampleLabel(
+    SampleLabelingTask& task,
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change)
+{
+    const auto original = std::find_if(
+        task.label_set.labels.begin(),
+        task.label_set.labels.end(),
+        [original_code](const SampleLabelDefinition& candidate) {
+            return candidate.code == original_code;
+        });
+    if (original == task.label_set.labels.end()) {
+        return false;
+    }
+
+    const int updated_code = label.code;
+    const bool code_changed = updated_code != original_code;
+    if (code_changed) {
+        const bool target_code_has_label = ContainsSampleLabelCode(task.label_set, updated_code);
+        const bool target_code_has_values =
+            std::find(task.values.begin(), task.values.end(), updated_code) != task.values.end();
+        const bool original_code_has_values =
+            std::find(task.values.begin(), task.values.end(), original_code) != task.values.end();
+        if (updated_code == kUnlabeledSampleLabelCode || target_code_has_label || target_code_has_values ||
+            (original_code_has_values && !allow_used_code_change)) {
+            return false;
+        }
+    }
+
+    SampleLabelSet updated_label_set = task.label_set;
+    updated_label_set.labels.erase(
+        std::remove_if(
+            updated_label_set.labels.begin(),
+            updated_label_set.labels.end(),
+            [original_code](const SampleLabelDefinition& candidate) {
+                return candidate.code == original_code;
+            }),
+        updated_label_set.labels.end());
+    if (!UpsertSampleLabel(updated_label_set, std::move(label))) {
+        return false;
+    }
+    task.label_set = std::move(updated_label_set);
+
+    if (code_changed) {
+        for (std::size_t index = 0; index < task.values.size(); ++index) {
+            if (task.values[index] != original_code) {
+                continue;
+            }
+            task.values[index] = updated_code;
+            task.pending_sample_indices.insert(index);
+        }
+        RefreshPendingSaveState(task);
+    }
+    return true;
+}
+
+bool RemoveSampleLabel(SampleLabelingTask& task, int code)
+{
+    if (code == kUnlabeledSampleLabelCode) {
+        return false;
+    }
+
+    const auto match = std::find_if(task.label_set.labels.begin(), task.label_set.labels.end(), [code](const auto& label) {
+        return label.code == code;
+    });
+    if (match == task.label_set.labels.end()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < task.values.size(); ++index) {
+        if (task.values[index] == code) {
+            task.values[index] = kUnlabeledSampleLabelCode;
+            task.pending_sample_indices.insert(index);
+        }
+    }
+    task.label_set.labels.erase(match);
+    RefreshPendingSaveState(task);
+    return true;
+}
+
 std::optional<int> SampleLabelCodeForShortcut(const SampleLabelSet& label_set, char shortcut)
 {
     const char normalized = NormalizeSampleLabelShortcut(shortcut);

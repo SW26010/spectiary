@@ -245,6 +245,27 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::UpsertActiveLabel(SampleL
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::UpdateActiveLabel(
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::UpdateActiveLabel;
+    intent.label_code = original_code;
+    intent.label = std::move(label);
+    intent.allow_used_label_code_change = allow_used_code_change;
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::RemoveActiveLabel(int code)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::RemoveActiveLabel;
+    intent.label_code = code;
+    return intent;
+}
+
 ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(bool enabled)
 {
     ActiveSampleWorkflowIntent intent;
@@ -535,6 +556,16 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
             result.action = UpsertActiveLabel(std::move(intent.active_sample_workflow.label), &result.changed);
             break;
+        case ActiveSampleWorkflowIntentKind::UpdateActiveLabel:
+            result.action = UpdateActiveLabel(
+                intent.active_sample_workflow.label_code,
+                std::move(intent.active_sample_workflow.label),
+                intent.active_sample_workflow.allow_used_label_code_change,
+                &result.changed);
+            break;
+        case ActiveSampleWorkflowIntentKind::RemoveActiveLabel:
+            result.action = RemoveActiveLabel(intent.active_sample_workflow.label_code, &result.changed);
+            break;
         case ActiveSampleWorkflowIntentKind::SetActiveLabelingAutoAdvance:
             result.action = SetActiveLabelingAutoAdvance(intent.active_sample_workflow.enabled);
             break;
@@ -765,6 +796,32 @@ SourceCollectionSessionAction SourceCollectionSession::DeleteActiveLabelingTask(
 SourceCollectionSessionAction SourceCollectionSession::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
 {
     return workflow_->UpsertActiveLabel(std::move(label), changed);
+}
+
+SourceCollectionSessionAction SourceCollectionSession::UpdateActiveLabel(
+    int original_code,
+    SampleLabelDefinition label,
+    bool allow_used_code_change,
+    bool* changed)
+{
+    SourceCollectionSessionAction action = workflow_->UpdateActiveLabel(
+        original_code,
+        std::move(label),
+        allow_used_code_change,
+        changed);
+    if (action.navigation_inputs_changed) {
+        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    }
+    return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::RemoveActiveLabel(int code, bool* changed)
+{
+    SourceCollectionSessionAction action = workflow_->RemoveActiveLabel(code, changed);
+    if (action.navigation_inputs_changed) {
+        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    }
+    return action;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingAutoAdvance(bool enabled)

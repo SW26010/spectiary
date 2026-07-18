@@ -4,14 +4,16 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <cstdio>
-#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -31,9 +33,16 @@ constexpr const char* kAddSampleSortSourcePopup =
     "Add sample sort source###SpecForgeAddSampleSortSourcePopup";
 constexpr const char* kDeleteLabelingTaskPopup =
     "Delete labeling task?###SpecForgeDeleteLabelingTaskPopup";
+constexpr const char* kDeleteSampleLabelPopup = "Delete label?###SpecForgeDeleteSampleLabelPopup";
+constexpr const char* kChangeSampleLabelCodePopup =
+    "Change used label code?###SpecForgeChangeSampleLabelCodePopup";
 
 enum class ActionIcon {
     Minus,
+    Pencil,
+    Trash,
+    Check,
+    Close,
 };
 
 struct SampleSortSourceRowAction {
@@ -71,6 +80,23 @@ bool CanResumeRememberedRow(
         return false;
     }
     return labeling.remembered_position_resumable;
+}
+
+void DrawTableCellText(int column, std::string_view text)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImGui::TableSetColumnIndex(column);
+    const ImRect cell_rect = ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), column);
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const float text_y =
+        cell_rect.Min.y + std::max(0.0f, (cell_rect.GetHeight() - ImGui::GetTextLineHeight()) * 0.5f);
+    ImGui::PushClipRect(cell_rect.Min, cell_rect.Max, true);
+    draw_list->AddText(
+        ImVec2(cell_rect.Min.x + style.CellPadding.x, text_y),
+        ImGui::GetColorU32(ImGuiCol_Text),
+        text.data(),
+        text.data() + text.size());
+    ImGui::PopClipRect();
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -160,6 +186,97 @@ void CollapseSampleFilterSourceTree(std::string_view source_id)
     ImGui::PopID();
 }
 
+void DrawActionIcon(ImDrawList* draw_list, const ImRect& hit_rect, ActionIcon icon, ImU32 color)
+{
+    const float size = std::min(
+        ActionIconButtonWidth(),
+        std::max(1.0f, std::min(hit_rect.GetWidth(), hit_rect.GetHeight())));
+    const float left = hit_rect.Min.x + (hit_rect.GetWidth() - size) * 0.5f;
+    const float top = hit_rect.Min.y + (hit_rect.GetHeight() - size) * 0.5f;
+    const float right = left + size;
+    const float bottom = top + size;
+    const float stroke = 1.35f;
+
+    switch (icon) {
+    case ActionIcon::Minus:
+        draw_list->AddLine(
+            ImVec2(left + size * 0.18f, top + size * 0.5f),
+            ImVec2(right - size * 0.18f, top + size * 0.5f),
+            color,
+            stroke);
+        break;
+    case ActionIcon::Pencil: {
+        const ImVec2 tip(left + size * 0.16f, bottom - size * 0.16f);
+        const ImVec2 end(right - size * 0.14f, top + size * 0.14f);
+        draw_list->AddLine(tip, end, color, 2.2f);
+        draw_list->AddLine(
+            ImVec2(end.x - size * 0.10f, end.y - size * 0.04f),
+            ImVec2(end.x + size * 0.04f, end.y + size * 0.10f),
+            color,
+            stroke);
+        draw_list->AddTriangleFilled(
+            tip,
+            ImVec2(tip.x + size * 0.05f, tip.y - size * 0.15f),
+            ImVec2(tip.x + size * 0.15f, tip.y - size * 0.05f),
+            color);
+        break;
+    }
+    case ActionIcon::Trash:
+        draw_list->AddLine(
+            ImVec2(left + size * 0.38f, top + size * 0.25f),
+            ImVec2(left + size * 0.62f, top + size * 0.25f),
+            color,
+            stroke);
+        draw_list->AddLine(
+            ImVec2(left + size * 0.14f, top + size * 0.34f),
+            ImVec2(right - size * 0.14f, top + size * 0.34f),
+            color,
+            stroke);
+        draw_list->AddRect(
+            ImVec2(left + size * 0.19f, top + size * 0.43f),
+            ImVec2(right - size * 0.19f, top + size * 0.73f),
+            color,
+            2.0f,
+            0,
+            stroke);
+        draw_list->AddLine(
+            ImVec2(left + size * 0.43f, top + size * 0.49f),
+            ImVec2(left + size * 0.43f, top + size * 0.68f),
+            color,
+            1.0f);
+        draw_list->AddLine(
+            ImVec2(left + size * 0.57f, top + size * 0.49f),
+            ImVec2(left + size * 0.57f, top + size * 0.68f),
+            color,
+            1.0f);
+        break;
+    case ActionIcon::Check:
+        draw_list->AddLine(
+            ImVec2(left + size * 0.16f, top + size * 0.53f),
+            ImVec2(left + size * 0.40f, top + size * 0.76f),
+            color,
+            1.6f);
+        draw_list->AddLine(
+            ImVec2(left + size * 0.40f, top + size * 0.76f),
+            ImVec2(right - size * 0.12f, top + size * 0.20f),
+            color,
+            1.6f);
+        break;
+    case ActionIcon::Close:
+        draw_list->AddLine(
+            ImVec2(left + size * 0.20f, top + size * 0.20f),
+            ImVec2(right - size * 0.20f, bottom - size * 0.20f),
+            color,
+            1.5f);
+        draw_list->AddLine(
+            ImVec2(right - size * 0.20f, top + size * 0.20f),
+            ImVec2(left + size * 0.20f, bottom - size * 0.20f),
+            color,
+            1.5f);
+        break;
+    }
+}
+
 bool HiddenActionIconButton(
     const char* id,
     const ImRect& hit_rect,
@@ -167,7 +284,6 @@ bool HiddenActionIconButton(
     const char* tooltip,
     bool reveal_icon)
 {
-    const float width = std::max(1.0f, hit_rect.GetWidth());
     const ImGuiID item_id = ImGui::GetID(id);
     const bool item_visible = ImGui::ItemAdd(hit_rect, item_id, &hit_rect, ImGuiItemFlags_AllowOverlap);
     bool hovered = false;
@@ -182,17 +298,8 @@ bool HiddenActionIconButton(
 
     const bool draw_icon = item_visible && (reveal_icon || hovered || held);
     const ImU32 icon_color = ImGui::GetColorU32(ImGuiCol_Text);
-    const float icon_width = std::min(ActionIconButtonWidth(), width);
-    const float icon_left = hit_rect.Min.x + std::max(0.0f, (width - icon_width) * 0.5f);
-    const float stroke = 1.35f;
-
-    if (draw_icon && icon == ActionIcon::Minus) {
-        const float y = hit_rect.Min.y + hit_rect.GetHeight() * 0.5f;
-        draw_list->AddLine(
-            ImVec2(icon_left + icon_width * 0.18f, y),
-            ImVec2(icon_left + icon_width * 0.82f, y),
-            icon_color,
-            stroke);
+    if (draw_icon) {
+        DrawActionIcon(draw_list, hit_rect, icon, icon_color);
     }
 
     if (item_visible && hovered && tooltip != nullptr && tooltip[0] != '\0') {
@@ -222,17 +329,8 @@ bool ActionIconButton(
 
     const bool draw_icon = reveal_icon || hovered || held;
     const ImU32 icon_color = ImGui::GetColorU32(ImGuiCol_Text);
-    const float icon_width = std::min(ActionIconButtonWidth(), std::max(1.0f, hit_rect.GetWidth()));
-    const float icon_left = hit_rect.Min.x + std::max(0.0f, (hit_rect.GetWidth() - icon_width) * 0.5f);
-    const float stroke = 1.35f;
-
-    if (draw_icon && icon == ActionIcon::Minus) {
-        const float y = hit_rect.Min.y + hit_rect.GetHeight() * 0.5f;
-        draw_list->AddLine(
-            ImVec2(icon_left + icon_width * 0.18f, y),
-            ImVec2(icon_left + icon_width * 0.82f, y),
-            icon_color,
-            stroke);
+    if (draw_icon) {
+        DrawActionIcon(draw_list, hit_rect, icon, icon_color);
     }
 
     if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
@@ -482,36 +580,19 @@ std::string TrimAscii(std::string_view value)
     return std::string(first, last);
 }
 
-std::optional<int> ParseInt(std::string_view text)
+std::optional<int> ParseLabelCode(std::string_view value)
 {
-    const std::string trimmed = TrimAscii(text);
+    const std::string trimmed = TrimAscii(value);
     if (trimmed.empty()) {
         return std::nullopt;
     }
 
-    bool negative = false;
-    std::size_t offset = 0;
-    if (trimmed[0] == '-') {
-        negative = true;
-        offset = 1;
-    }
-    if (offset == trimmed.size()) {
+    int code = 0;
+    const auto [end, error] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), code);
+    if (error != std::errc{} || end != trimmed.data() + trimmed.size()) {
         return std::nullopt;
     }
-
-    int value = 0;
-    for (std::size_t index = offset; index < trimmed.size(); ++index) {
-        const char character = trimmed[index];
-        if (character < '0' || character > '9') {
-            return std::nullopt;
-        }
-        const int digit = character - '0';
-        if (value > (std::numeric_limits<int>::max() - digit) / 10) {
-            return std::nullopt;
-        }
-        value = value * 10 + digit;
-    }
-    return negative ? -value : value;
+    return code;
 }
 
 std::string_view SaveStateLabel(SampleLabelSaveStateKind kind)
@@ -571,20 +652,6 @@ bool IsLabelShortcutPressed(char shortcut, bool context_active)
     return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
 }
 
-std::string LabelButtonText(const SampleLabelDefinition& label)
-{
-    std::string text = label.name;
-    text += " (";
-    text += std::to_string(label.code);
-    text += ")";
-    if (label.shortcut != '\0') {
-        text += " [";
-        text.push_back(label.shortcut);
-        text += "]";
-    }
-    return text;
-}
-
 }  // namespace
 
 const char* SampleWorkflowPanelUi::LabelingWindowName()
@@ -608,10 +675,17 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     std::snprintf(new_task_name_buffer_.data(), new_task_name_buffer_.size(), "%s", "Manual labeling");
     active_task_name_buffer_.fill('\0');
     active_task_name_buffer_task_id_.clear();
-    std::fill(new_label_name_buffer_.begin(), new_label_name_buffer_.end(), '\0');
-    std::snprintf(new_label_name_buffer_.data(), new_label_name_buffer_.size(), "%s", "bad");
-    std::snprintf(new_label_code_buffer_.data(), new_label_code_buffer_.size(), "%d", 0);
-    new_label_shortcut_buffer_.fill('\0');
+    editing_label_code_.reset();
+    label_name_edit_buffer_.clear();
+    label_code_edit_buffer_.fill('\0');
+    label_shortcut_edit_buffer_.fill('\0');
+    label_name_focus_pending_ = false;
+    pending_label_code_change_original_code_.reset();
+    pending_label_code_change_ = {};
+    pending_label_code_change_usage_count_ = 0;
+    pending_delete_label_code_.reset();
+    pending_delete_label_name_.clear();
+    pending_delete_label_usage_count_ = 0;
     pending_annotation_activation_path_.clear();
     pending_annotation_activation_name_.clear();
     pending_delete_task_name_.clear();
@@ -621,7 +695,6 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
-    const SourceCollectionSessionViewReader& read_view,
     bool plot_shortcut_context_active,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
@@ -741,6 +814,11 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     if (active_task_name_buffer_task_id_ != labeling_view.task_id) {
         active_task_name_buffer_task_id_ = labeling_view.task_id;
         CopyToBuffer(active_task_name_buffer_, labeling_view.task_name);
+        editing_label_code_.reset();
+        label_name_focus_pending_ = false;
+        pending_delete_label_code_.reset();
+        pending_delete_label_name_.clear();
+        pending_delete_label_usage_count_ = 0;
     }
     ImGui::SetNextItemWidth(220.0f);
     ImGui::InputText("Task name##ActiveLabelingTaskName", active_task_name_buffer_.data(), active_task_name_buffer_.size());
@@ -914,34 +992,6 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         }
     }
 
-    ImGui::Separator();
-    ImGui::SetNextItemWidth(72.0f);
-    ImGui::InputText("Code", new_label_code_buffer_.data(), new_label_code_buffer_.size());
-    ImGui::SetNextItemWidth(160.0f);
-    ImGui::InputText("Name", new_label_name_buffer_.data(), new_label_name_buffer_.size());
-    ImGui::SetNextItemWidth(72.0f);
-    ImGui::InputText("Shortcut", new_label_shortcut_buffer_.data(), new_label_shortcut_buffer_.size());
-    const std::optional<int> new_code = ParseInt(new_label_code_buffer_.data());
-    if (ImGui::Button("Add label") && new_code) {
-        const char shortcut = new_label_shortcut_buffer_[0];
-        SourceCollectionSessionResult result = submit(ChangeActiveSampleWorkflow(
-            ActiveSampleWorkflowIntent::UpsertActiveLabel(
-                SampleLabelDefinition{*new_code, new_label_name_buffer_.data(), shortcut})));
-        MergeSourceCollectionSessionAction(action, result.action);
-        if (result.changed) {
-            const SourceCollectionLabelingView refreshed_view = read_view().labeling;
-            const SampleLabelSet& label_set =
-                refreshed_view.has_active_task ? refreshed_view.label_set : labeling_view.label_set;
-            std::snprintf(
-                new_label_code_buffer_.data(),
-                new_label_code_buffer_.size(),
-                "%d",
-                NextAvailableSampleLabelCode(label_set));
-            new_label_shortcut_buffer_.fill('\0');
-        }
-    }
-
-    ImGui::Separator();
     std::optional<int> label_code_to_assign;
     bool clear_label_requested = false;
     for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
@@ -951,18 +1001,339 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         }
     }
 
-    for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
-        const bool selected = current_code == label.code;
-        if (selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+    ImGui::Separator();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Labels");
+    ImGui::SameLine();
+    const bool add_label_requested = ImGui::SmallButton("+##AddSampleLabel");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Add label");
+    }
+    if (add_label_requested) {
+        const int code = NextAvailableSampleLabelCode(labeling_view.label_set);
+        const std::string name = "Label " + std::to_string(code);
+        SourceCollectionSessionResult result = submit(ChangeActiveSampleWorkflow(
+            ActiveSampleWorkflowIntent::UpsertActiveLabel(SampleLabelDefinition{code, name, '\0'})));
+        MergeSourceCollectionSessionAction(action, result.action);
+        if (result.changed) {
+            editing_label_code_ = code;
+            label_name_edit_buffer_ = name;
+            CopyToBuffer(label_code_edit_buffer_, std::to_string(code));
+            label_shortcut_edit_buffer_.fill('\0');
+            label_name_focus_pending_ = true;
         }
-        const std::string text = LabelButtonText(label);
-        if (ImGui::Button(text.c_str())) {
-            label_code_to_assign = label.code;
-            clear_label_requested = false;
+    }
+
+    std::optional<SampleLabelDefinition> label_to_update;
+    std::optional<int> label_to_update_original_code;
+    std::optional<int> label_code_to_remove;
+    bool open_change_label_code_popup = false;
+    bool open_delete_label_popup = false;
+    if (ImGui::BeginTable(
+            "sample_labels",
+            5,
+            ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoHostExtendX)) {
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthFixed, 52.0f);
+        ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthFixed, 68.0f);
+        ImGui::TableSetupColumn("##Edit", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+        ImGui::TableSetupColumn("##Delete", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+        ImGui::TableHeadersRow();
+
+        for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
+            const bool selected = current_code == label.code;
+            const bool editing = editing_label_code_ && *editing_label_code_ == label.code;
+            const auto usage = labeling_view.label_usage_counts.find(label.code);
+            const std::size_t usage_count =
+                usage == labeling_view.label_usage_counts.end() ? 0 : usage->second;
+
+            ImGui::PushID(label.code);
+            ImGui::TableNextRow(ImGuiTableRowFlags_None, ImGui::GetFrameHeight());
+            if (editing) {
+                ImGui::PushFocusScope(ImGui::GetID("label_edit_focus"));
+                bool submit_edit = false;
+                ImGui::TableSetColumnIndex(0);
+                ImGui::SetNextItemWidth(std::max(1.0f, ImGui::GetContentRegionAvail().x));
+                if (label_name_focus_pending_) {
+                    ImGui::SetKeyboardFocusHere();
+                    label_name_focus_pending_ = false;
+                }
+                submit_edit = ImGui::InputText(
+                    "##label_name",
+                    &label_name_edit_buffer_,
+                    ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(std::max(1.0f, ImGui::GetContentRegionAvail().x));
+                submit_edit = ImGui::InputText(
+                                  "##label_code",
+                                  label_code_edit_buffer_.data(),
+                                  label_code_edit_buffer_.size(),
+                                  ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_EnterReturnsTrue |
+                                      ImGuiInputTextFlags_AutoSelectAll) ||
+                              submit_edit;
+
+                ImGui::TableSetColumnIndex(2);
+                ImGui::SetNextItemWidth(std::max(1.0f, ImGui::GetContentRegionAvail().x));
+                submit_edit = ImGui::InputText(
+                                  "##label_shortcut",
+                                  label_shortcut_edit_buffer_.data(),
+                                  label_shortcut_edit_buffer_.size(),
+                                  ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_EnterReturnsTrue |
+                                      ImGuiInputTextFlags_AutoSelectAll) ||
+                              submit_edit;
+
+                const std::string requested_name = TrimAscii(label_name_edit_buffer_);
+                const char requested_shortcut = label_shortcut_edit_buffer_[0];
+                const bool valid_shortcut =
+                    requested_shortcut == '\0' || IsValidSampleLabelShortcut(requested_shortcut);
+                const std::optional<int> requested_code = ParseLabelCode(label_code_edit_buffer_.data());
+                const bool code_reserved = requested_code && *requested_code == kUnlabeledSampleLabelCode;
+                const bool code_conflicts =
+                    requested_code && labeling_view.HasConflictingLabelCode(label.code, *requested_code);
+                const bool valid_code = requested_code && !code_reserved && !code_conflicts;
+                const bool valid_edit = !requested_name.empty() && valid_shortcut && valid_code;
+                const char normalized_shortcut = NormalizeSampleLabelShortcut(requested_shortcut);
+                const auto shortcut_owner = std::find_if(
+                    labeling_view.label_set.labels.begin(),
+                    labeling_view.label_set.labels.end(),
+                    [label_code = label.code, normalized_shortcut](const SampleLabelDefinition& candidate) {
+                        return normalized_shortcut != '\0' && candidate.code != label_code &&
+                               candidate.shortcut == normalized_shortcut;
+                    });
+                if (!valid_edit) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::TableSetColumnIndex(3);
+                const ImRect save_cell =
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                const bool save_clicked = HiddenActionIconButton(
+                    "save_label",
+                    save_cell,
+                    ActionIcon::Check,
+                    nullptr,
+                    true);
+                const bool save_hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
+                if (save_clicked || (submit_edit && valid_edit)) {
+                    SampleLabelDefinition requested_label{*requested_code, requested_name, requested_shortcut};
+                    if (*requested_code != label.code && usage_count > 0) {
+                        pending_label_code_change_original_code_ = label.code;
+                        pending_label_code_change_ = std::move(requested_label);
+                        pending_label_code_change_usage_count_ = usage_count;
+                        open_change_label_code_popup = true;
+                    } else {
+                        label_to_update_original_code = label.code;
+                        label_to_update = std::move(requested_label);
+                    }
+                }
+                if (!valid_edit) {
+                    ImGui::EndDisabled();
+                    if (save_hovered) {
+                        if (requested_name.empty()) {
+                            ImGui::SetTooltip("Name is required");
+                        } else if (!requested_code) {
+                            ImGui::SetTooltip("Code must be an integer");
+                        } else if (code_reserved) {
+                            ImGui::SetTooltip("Code -1 is reserved for unlabeled samples");
+                        } else if (code_conflicts) {
+                            ImGui::SetTooltip(
+                                "Code %d is already used by a label or sample value",
+                                *requested_code);
+                        } else {
+                            ImGui::SetTooltip("Shortcut must be one letter or digit");
+                        }
+                    }
+                } else if (
+                    save_hovered && requested_code && *requested_code != label.code && usage_count > 0) {
+                    ImGui::SetTooltip(
+                        "Changing this code rewrites %llu assigned sample value(s)",
+                        static_cast<unsigned long long>(usage_count));
+                } else if (save_hovered && shortcut_owner != labeling_view.label_set.labels.end()) {
+                    ImGui::SetTooltip("Saving moves this shortcut from %s", shortcut_owner->name.c_str());
+                } else if (save_hovered) {
+                    ImGui::SetTooltip("Save label");
+                }
+                ImGui::TableSetColumnIndex(4);
+                const ImRect cancel_cell =
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                const auto cancel_label_edit = [&]() {
+                    editing_label_code_.reset();
+                    label_name_focus_pending_ = false;
+                };
+                if (HiddenActionIconButton(
+                        "cancel_label_edit",
+                        cancel_cell,
+                        ActionIcon::Close,
+                        "Cancel editing",
+                        true) ||
+                    (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+                        ImGui::IsKeyPressed(ImGuiKey_Escape))) {
+                    cancel_label_edit();
+                }
+
+                const ImRect editing_row_rect(
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), 0).Min,
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), 4).Max);
+                const bool mouse_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+                                           ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                                           ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+                if (mouse_clicked && !editing_row_rect.Contains(ImGui::GetMousePos())) {
+                    cancel_label_edit();
+                }
+                ImGui::PopFocusScope();
+            } else {
+                ImGui::TableSetColumnIndex(0);
+                const bool row_clicked = ImGui::Selectable(
+                    "##label_row",
+                    selected,
+                    ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+                    ImVec2(0.0f, ImGui::GetFrameHeight()));
+                const std::string code_text = std::to_string(label.code);
+                const std::string shortcut_text =
+                    label.shortcut == '\0' ? "None" : std::string(1, label.shortcut);
+                DrawTableCellText(0, label.name);
+                DrawTableCellText(1, code_text);
+                DrawTableCellText(2, shortcut_text);
+
+                ImGui::TableSetColumnIndex(3);
+                const ImRect edit_cell =
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                const bool edit_requested = HiddenActionIconButton(
+                    "edit_label",
+                    edit_cell,
+                    ActionIcon::Pencil,
+                    "Edit label",
+                    true);
+                if (edit_requested) {
+                    editing_label_code_ = label.code;
+                    label_name_edit_buffer_ = label.name;
+                    CopyToBuffer(label_code_edit_buffer_, std::to_string(label.code));
+                    label_shortcut_edit_buffer_.fill('\0');
+                    if (label.shortcut != '\0') {
+                        label_shortcut_edit_buffer_[0] = label.shortcut;
+                    }
+                    label_name_focus_pending_ = true;
+                }
+
+                const std::string delete_tooltip = usage_count == 0
+                    ? "Delete label"
+                    : "Delete label and clear " + std::to_string(usage_count) + " sample(s)";
+                ImGui::TableSetColumnIndex(4);
+                const ImRect delete_cell =
+                    ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
+                const bool delete_requested = HiddenActionIconButton(
+                    "delete_label",
+                    delete_cell,
+                    ActionIcon::Trash,
+                    delete_tooltip.c_str(),
+                    true);
+
+                if (row_clicked && !edit_requested && !delete_requested) {
+                    label_code_to_assign = label.code;
+                    clear_label_requested = false;
+                }
+                if (delete_requested) {
+                    if (usage_count == 0) {
+                        label_code_to_remove = label.code;
+                    } else {
+                        pending_delete_label_code_ = label.code;
+                        pending_delete_label_name_ = label.name;
+                        pending_delete_label_usage_count_ = usage_count;
+                        open_delete_label_popup = true;
+                    }
+                }
+            }
+            ImGui::PopID();
         }
-        if (selected) {
-            ImGui::PopStyleColor();
+        ImGui::EndTable();
+    }
+
+    if (open_change_label_code_popup) {
+        ImGui::OpenPopup(kChangeSampleLabelCodePopup);
+    }
+    if (ImGui::BeginPopupModal(kChangeSampleLabelCodePopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Label code %d is assigned to %llu sample(s).",
+            pending_label_code_change_original_code_.value_or(kUnlabeledSampleLabelCode),
+            static_cast<unsigned long long>(pending_label_code_change_usage_count_));
+        ImGui::TextWrapped(
+            "Changing it to %d will rewrite every assigned sample value.",
+            pending_label_code_change_.code);
+        if (ImGui::Button("Change code") && pending_label_code_change_original_code_) {
+            SourceCollectionSessionResult result = submit(ChangeActiveSampleWorkflow(
+                ActiveSampleWorkflowIntent::UpdateActiveLabel(
+                    *pending_label_code_change_original_code_,
+                    pending_label_code_change_,
+                    true)));
+            MergeSourceCollectionSessionAction(action, result.action);
+            if (result.changed) {
+                editing_label_code_.reset();
+                label_name_focus_pending_ = false;
+                pending_label_code_change_original_code_.reset();
+                pending_label_code_change_ = {};
+                pending_label_code_change_usage_count_ = 0;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            pending_label_code_change_original_code_.reset();
+            pending_label_code_change_ = {};
+            pending_label_code_change_usage_count_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (open_delete_label_popup) {
+        ImGui::OpenPopup(kDeleteSampleLabelPopup);
+    }
+    if (ImGui::BeginPopupModal(kDeleteSampleLabelPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Label \"%s\" is assigned to %llu sample(s).",
+            pending_delete_label_name_.c_str(),
+            static_cast<unsigned long long>(pending_delete_label_usage_count_));
+        ImGui::TextWrapped(
+            "Deleting it will change those values to Unlabeled (-1) and remove the label definition.");
+        ImGui::TextWrapped(
+            "Its selected sample-filter value will also be removed, which may move the current sample.");
+        if (ImGui::Button("Delete label") && pending_delete_label_code_) {
+            label_code_to_remove = pending_delete_label_code_;
+            pending_delete_label_code_.reset();
+            pending_delete_label_name_.clear();
+            pending_delete_label_usage_count_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            pending_delete_label_code_.reset();
+            pending_delete_label_name_.clear();
+            pending_delete_label_usage_count_ = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (label_to_update && label_to_update_original_code) {
+        SourceCollectionSessionResult result = submit(ChangeActiveSampleWorkflow(
+            ActiveSampleWorkflowIntent::UpdateActiveLabel(
+                *label_to_update_original_code,
+                std::move(*label_to_update),
+                false)));
+        MergeSourceCollectionSessionAction(action, result.action);
+        if (result.changed) {
+            editing_label_code_.reset();
+            label_name_focus_pending_ = false;
+        }
+    }
+    if (label_code_to_remove) {
+        SourceCollectionSessionResult result = submit(ChangeActiveSampleWorkflow(
+            ActiveSampleWorkflowIntent::RemoveActiveLabel(*label_code_to_remove)));
+        MergeSourceCollectionSessionAction(action, result.action);
+        if (result.changed && editing_label_code_ == label_code_to_remove) {
+            editing_label_code_.reset();
+            label_name_focus_pending_ = false;
         }
     }
 

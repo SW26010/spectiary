@@ -914,9 +914,6 @@ void ShellUi::RenderLabelingPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
-        [this]() -> const SourceCollectionSessionView& {
-            return SessionView();
-        },
         label_shortcut_context_active_,
         &panel_visibility_.labeling,
         []() {
