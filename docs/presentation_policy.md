@@ -386,6 +386,235 @@ Present flags、DRR boost 或自定义 duration。
   `package_root` 指向 `build/ninja-msvc-portable-debug`，记录 228 条输入、2641 次渲染与
   正常 `shutdown`。用户确认 panel 拖出、拖回、移动和调整大小均正常，故 queued-input
   修复的自动回归与正式构建人工验收均已闭环。
+- `logs/specforge-profile-20260718-103522.jsonl` 运行
+  `[DEBUG-drr-window-eligibility-v1]`，尝试把普通最大化、borderless 工作区和 borderless
+  整屏组成阶梯 A/B。普通最大化客户区为 `(0, 40) 2880×1760`，请求期间批准值始终为 0；
+  第一次切换后客户区变为 `(0, 0) 2880×1800`，159/167 个请求帧获批 `83333`；第二次切换
+  后 style 和几何均未再改变，79/87 个请求帧获批。原因是自动隐藏任务栏使系统报告的
+  `rcWork` 与 `rcMonitor` 同为 2880×1800，但普通最大化仍保留 40px 顶部非客户区；因此
+  第一次切换同时改变 style 和客户区覆盖，第二次切换没有单变量变化，尚不能区分二者谁是
+  批准条件。该轮 compositor tick 在各拖动段保持约 120Hz，但三种状态实际都只有约 20.1
+  FPS：`view_update` p50/p95 为 49.036/50.193ms，而 Present 调用 p50 约 0.04ms。用户观察
+  全程无撕裂且非常不流畅，与应用侧 UI 工作量瓶颈一致，不能据此否定 borderless 状态的
+  duration 批准。运行时起始 source 为空，随后发生 6.633s 的阻塞式载入且 plot 数据范围
+  不同于既有 V0.31 基准；下一轮必须显式传入同一 V0.31 source，并先保持客户区几何不变只
+  移除 window decoration，再单独扩展到整屏。
+- `logs/specforge-profile-20260718-104601.jsonl` 使用标准
+  `carbon_net_increment_loglam_V0.31_X.npy` 完成了
+  `[DEBUG-drr-window-eligibility-v2]` 单变量复验。普通最大化客户区为
+  `(0, 40) 2880×1760`；第一次组合键只移除 decoration，并把 borderless 窗口保持在完全相同的
+  客户区矩形，因此屏幕顶部留下 40px 黑条。该状态的两段 boost 分别持续 1.69s、8.49s，
+  共 643 个请求帧的 `ApprovedPresentDuration` 全部为 0，帧间隔 p50 仍约 16.6ms。第二次
+  组合键保持同一 borderless style，只把客户区扩展为 `(0, 0) 2880×1800`；三段 boost 共
+  678 个请求帧中 462 个获批 `83333`，三段首次获批延迟分别为 166.3ms、749.3ms、
+  2824.1ms。获批前帧间隔 p50 为 16.14–16.69ms，获批后降至 8.32–8.34ms；第三次恢复
+  普通最大化后批准值重新为 0。`view_update` 全程 p50/p95 仅 1.293/1.580ms，排除了 v1
+  的数据载入/UI 工作量混淆。由此确认：在本机 DRR 内屏上，移除 window decoration 本身
+  不足以使 custom duration 获批；客户区覆盖整个 monitor 才是本轮观察到的决定性条件。
+  用户全程未见撕裂，但主观只感到一般流畅且三种状态无明显差异；这与整屏阶段批准延迟大、
+  仅 68.1% 请求帧获批以及整份 49.006s 交互样本仍以约 60Hz 为主一致。该结果关闭普通窗口
+  custom-duration eligibility 假设，但批准延迟仍需作为 adapter acquisition 指标持续记录。
+- 标准 HWND swap chain 的普通窗口路径至此已完成候选 1–3 的证伪边界，因此开始按验证顺序
+  评估 Windows 11 composition-swapchain API。一次本机只读能力探针中，使用微软要求的
+  D3D11 device flags 后，`CreatePresentationFactory`、`CreatePresentationManager` 和
+  `SetPreferredPresentDuration(83333, 1000)` 均返回 `S_OK`，且
+  `IsPresentationSupported()` 与 `IsPresentationSupportedWithIndependentFlip()` 均为 true。
+  这只证明本机具备实现下一轮 A/B 的 API/驱动前提，不证明普通窗口已经达到 120Hz 或无撕裂；
+  必须继续以实际 presentation statistics、帧节奏和视觉门禁验证。
+- `logs/specforge-composition-probe-20260718-113505.jsonl` 是独立普通窗口
+  composition-swapchain v1 可见性实验。探针在 30.007s 内收到 3607 个 compositor tick、
+  提交 3603 帧，提交间隔 p50/p95 为 8.333/8.834ms，`Present()` 调用 p50/p95 为
+  0.235/0.480ms；3603 个 present 均得到 `PresentStatus_Queued` 和递增的 composition frame
+  ID，且没有 runtime failure。用户却没有看见预期的青色移动竖条，同时没有收到任何
+  `CompositionFrame` 或 `IndependentFlipFrame` statistics。因此这轮只证明 API 队列和
+  应用提交已达到约 120Hz，不能证明内容实际显示，更不能评价撕裂。下一版首先在 Present
+  前显式 flush D3D11 immediate context，并用纯色可见性哨兵区分“visual 未覆盖”与“buffer
+  内容未提交”；该探针第一条 initialize JSON 多写了一个右花括号，也需同时修正。
+- `logs/specforge-composition-probe-20260718-113928.jsonl` 运行
+  `[DEBUG-composition-present-v2-flush]`。探针显式 `Flush()` 后在 30 秒内提交 3601 帧，提交
+  间隔 p50/p95/p99 为 8.331/8.835/9.404ms，`Present()` 调用 p50/p95/p99 为
+  0.131/0.305/0.488ms；3601 个 present 均得到 `PresentStatus_Queued`，无 runtime failure。
+  窗口最大化客户区为 `1646 x 1006`（DPI 96），与 presentation buffer resize 后尺寸一致。
+  但用户看到的整个客户区仍为探针特意设置的白色 HWND 背景，没有看到前两秒全屏青色哨兵、
+  深色背景、移动青色条或黄色标记。因此显式提交 GPU 命令没有恢复可见性，且这批约 120Hz
+  statistics 仍不能解释为画面实际显示。下一轮只给 HWND 增加
+  `WS_EX_NOREDIRECTIONBITMAP`，验证传统窗口重定向表面是否阻挡本探针的 DirectComposition
+  visual；若白底仍在，再依次检查 DPI awareness 与 visual/surface 绑定，不同时改变这些变量。
+- `logs/specforge-composition-probe-20260718-114538.jsonl` 运行
+  `[DEBUG-composition-present-v3-no-redirection]`。加入 `WS_EX_NOREDIRECTIONBITMAP` 后，用户看到
+  整个客户区透明，仍没有青色哨兵、深色背景、移动青条或黄色标记。这说明该 flag 确实移除了
+  传统 HWND 重定向表面，但没有让 DirectComposition 内容出现，因而否定“白色重定向表面
+  单独遮挡 visual”的假设。探针仍收到 3601 个 compositor tick 并提交 3436 帧，提交间隔
+  p50/p95/p99 为 8.332/8.997/9.761ms，`Present()` p50/p95/p99 为
+  0.130/0.314/0.495ms；3431 个 present 为 queued、5 个 skipped，无 runtime failure。
+  下一轮保留该窗口样式，只把原先的 `SetBuffer -> render/Flush -> Present` 改为微软示例采用的
+  `render/Flush -> SetBuffer -> Present`，验证 presentation buffer 同步点是否在绑定时捕获。
+- `logs/specforge-composition-probe-20260718-115344.jsonl` 运行
+  `[DEBUG-composition-present-v4-render-before-bind]`。改为先 render/Flush、再 SetBuffer 后，用户
+  看到的客户区仍完全透明，未出现任何颜色哨兵；因此否定 presentation buffer 绑定时捕获了
+  绘制前同步状态这一假设。该轮收到 3606 个 compositor tick，提交 3601 帧且全部为 queued，
+  提交间隔 p50/p95/p99 为 8.329/8.795/9.370ms，`Present()` p50/p95/p99 为
+  0.141/0.364/0.475ms，无 runtime failure。下一轮在窗口显示、最大化 resize 完成后重新执行
+  `IDCompositionDevice::Commit()` 并等待 `WaitForCommitCompletion()`，验证 hidden-window 阶段
+  建立的 visual tree 是否未在可见 HWND 上生效；render、SetBuffer 和 Present 顺序保持不变。
+- `logs/specforge-composition-probe-20260718-120121.jsonl` 运行
+  `[DEBUG-composition-present-v5-recommit-after-show]`。窗口显示和最大化 resize 后的第二次
+  `Commit()` 与 `WaitForCommitCompletion()` 均返回 `S_OK`，但客户区仍完全透明，因此否定
+  “visual tree 只因在 hidden HWND 阶段提交而未生效”的假设。用户约 8.9s 后提前退出；期间
+  1063 帧全部 queued，提交间隔 p50/p95/p99 为 8.337/8.759/9.418ms，`Present()`
+  p50/p95/p99 为 0.127/0.341/0.497ms，无 runtime failure。下一轮在创建任何 HWND 前启用
+  Per-Monitor-V2 DPI awareness，并记录实际 awareness 与物理客户区几何；若仍透明，则用传统
+  DirectComposition surface 对照切分 HWND visual tree 与 composition-swapchain surface 路径。
+- `logs/specforge-composition-probe-20260718-121010.jsonl` 运行
+  `[DEBUG-composition-present-v6-pmv2-dpi]`。`SetProcessDpiAwarenessContext` 成功且实际线程
+  awareness 确认为 Per-Monitor-V2；窗口 DPI 从此前的 96 变为 168，最大化客户区也从虚拟
+  `1646 x 1006` 变为物理 `2880 x 1760`，证明该单变量确实生效。用户仍看到完全透明客户区，
+  因而否定 DPI 虚拟化或 presentation buffer 尺寸空间不一致是不可见根因。约 12.6s 内收到
+  1518 个 compositor tick、提交 1516 帧，其中 1514 queued、2 skipped；提交间隔
+  p50/p95/p99 为 8.326/8.894/9.376ms，无 runtime failure。下一轮让同一个 HWND target 和
+  root visual 临时改绑传统 DirectComposition 纯色 surface：若洋红色可见，则 visual tree
+  正常而 composition-swapchain surface 路径故障；若仍透明，则故障位于 HWND target/visual
+  tree 本身。该对照不用于评价刷新率或撕裂。
+- `logs/specforge-composition-probe-20260718-121505.jsonl` 运行
+  `[DEBUG-composition-present-v7-classic-dcomp-baseline]`。同一 HWND、composition target、root
+  visual 和 D3D11 device 改绑传统 DirectComposition surface 后，用户看到整个客户区为亮
+  洋红色。baseline surface 为 `2880 x 1760`、draw offset `(0, 0)`，Commit/Wait 均为 `S_OK`；
+  用户约 10.2s 后退出，后台 composition-swapchain 探针仍完成 1220 帧、1227 ticks 且无错误。
+  该差分确认 HWND、`CreateTargetForHwnd`、root visual、D3D11 绘制和 DirectComposition commit
+  链均正常，故障边界缩小到 composition-swapchain presentation surface 的内容/绑定状态。
+  下一轮恢复 presentation surface，显式设置与当前 buffer 一致的 source rect，并设置 content
+  tag 以取得 CompositionFrame statistics；tag 只增强观测，不改变画面语义。
+- `logs/specforge-composition-probe-20260718-121949.jsonl` 运行
+  `[DEBUG-composition-present-v8-explicit-source-rect]`，是 composition-swapchain 普通最大化窗口
+  的首次端到端成功。唯一影响可见性的变化是每次创建/resize buffer 时显式调用
+  `SetSourceRect(0, 0, width, height)`；content tag 只用于 statistics 关联。用户看到前两秒淡蓝色
+  哨兵和黄色中线，随后为深色背景、黄色中线与持续从左向右移动的青色柱，并确认无撕裂、流畅。
+  因此此前透明窗口的根因是 presentation surface 没有显式有效 source rect，不是 HWND
+  redirection、render/SetBuffer 顺序、hidden-window commit、DPI 虚拟化或 visual tree 绑定。
+  16.011s 内收到 1904 个 compositor tick、提交 1874 帧；提交间隔 p50/p95/p99 为
+  8.334/8.880/9.468ms，`Present()` p50/p95/p99 为 0.136/0.312/0.591ms。1874 个
+  PresentStatus 中 1872 queued、2 skipped；匹配 content tag 的显示统计包含 30 个
+  CompositionFrame 和 1842 个 IndependentFlipFrame，首次 independent flip 出现在启动后
+  359.1ms。全部 1842 个 independent-flip 样本的实际 duration 均为 `83333`（8.3333ms），
+  `displayed_time` 间隔 p50/p95/p99 为 8.331/8.332/8.333ms。由此证明本机普通最大化窗口可由
+  composition-swapchain API 在约 120Hz 下真实显示且无撕裂；这仍是独立探针证据，不代表
+  SpecForge 主渲染器已经采用该路径，也不代表未测试的显示器/系统环境已经兼容。
+- `logs/specforge-composition-probe-20260718-122559.jsonl` 运行
+  `[DEBUG-composition-present-v9-normal-window]`，只把 v8 的最大化窗口改为普通非最大化窗口。
+  客户区位于 `(276, 316)`、尺寸 `1576 x 936`，显著小于 2880×1800 内屏且未覆盖屏幕；用户
+  确认看到与 v8 相同的动画窗口，但未单独重述本轮撕裂与流畅度判断。12.890s 内收到 1533
+  个 compositor tick、提交 1504 帧，提交间隔 p50/p95/p99 为 8.329/8.856/9.342ms；1504
+  个 PresentStatus 全部 queued。匹配 content tag 的统计包含 35 个 CompositionFrame 和 1473
+  个 IndependentFlipFrame，后者 actual duration 全为 `83333`，`displayed_time` 间隔
+  p50/p95/p99 仍为 8.331/8.332/8.333ms。由此确认本机 composition-swapchain 的约 120Hz
+  真实显示不依赖最大化或近全屏覆盖，关闭“只是另一种全屏 eligibility 特例”的风险；下一轮
+  验证连续 live resize 时 buffer 注册/释放、source rect 更新、画面连续性和 tagged statistics。
+- `logs/specforge-composition-probe-20260718-123224.jsonl` 运行
+  `[DEBUG-composition-present-v10-live-resize]`。用户确认除调整窗口大小时卡顿外，画面、退出和
+  resize 后状态均正常。探针在 17.559s 的 live resize 区间处理 1373 次 resize、覆盖 1317
+  种客户区尺寸；每次 source rect 更新均为 `S_OK`，无 runtime failure。全程提交 3387 帧、
+  收到 3604 ticks；live-resize 帧间隔 p50/p95/p99/max 为 8.347/13.526/27.813/242.047ms，
+  1936 个 resize 区间 PresentStatus 中有 494 个 skipped。松开后画面恢复，但随后约 5s 内仍有
+  130/601 个 status skipped，说明显示模式/队列恢复不是瞬时完成。当前每条 `WM_SIZE` 都同步
+  释放并重新创建、注册三个 displayable buffer；日志尚未记录该操作耗时、buffer available
+  wait 或 Win32 size-move 精确边界，不能只凭源码把卡顿归因于分配。下一轮只加窄计时：buffer
+  reset/source-rect/allocation 总耗时、每帧 available-event wait，以及 `WM_ENTERSIZEMOVE`/
+  `WM_EXITSIZEMOVE` 标记；不改变 resize 策略。
+- `logs/specforge-composition-probe-20260718-123857.jsonl` 运行
+  `[DEBUG-composition-present-v11-resize-timing]`，用户观察与 v10 相同：live resize 时卡顿，但
+  窗口尺寸始终成功改变，画面和结束后状态正常。26.957s 内完成 2999 帧、3224 ticks 和 888
+  次 resize，无 runtime failure。每次同步重建三缓冲的 total p50/p95/p99/max 为
+  1.691/6.914/10.932/17.840ms，其中旧 buffer reset/release 占主要成本，p50/p95/p99/max 为
+  1.234/5.831/9.544/17.392ms；新 buffer allocation p50/p95/p99/max 为
+  0.424/1.305/2.275/9.349ms，source rect p95 仅 0.001ms。buffer available wait 通常很短，
+  p50/p95 为 0.002/0.003ms，但出现 249.8、136.4、116.6ms 尖峰；`Present()` p95 仅
+  0.170ms。全程 2999 个 status 中 2729 queued、270 skipped，并在 DWM composition 与
+  independent flip 间切换。由此确认卡顿来自临时探针在每条高频 `WM_SIZE` 上执行 atomic
+  三缓冲 release/reallocate/register，再叠加少量旧新 buffer 交接等待，不是 resize 正确性、
+  source rect 或 Present 调用失败。Microsoft 的
+  [composition-swapchain resize 示例](https://learn.microsoft.com/en-us/windows/win32/comp_swapchain/comp-swapchain-examples#example-15staggered-buffer-resize-operation-for-improved-performance)
+  同样指出 atomic resize 昂贵且可能产生 glitch，建议跨多个 present 逐个替换 buffer。当前将
+  live-resize 流畅度记为生产集成性能债务，不继续优化临时探针；正式 adapter 应 coalesce
+  `WM_SIZE` 或采用 staggered resize，并保留最终尺寸必达、旧 buffer 安全退休和统计可观测性。
+- `logs/specforge-composition-probe-20260718-125328.jsonl` 和
+  `logs/specforge-composition-probe-20260718-125923.jsonl` 运行
+  `[DEBUG-composition-present-v12-refresh-state]`，首次把 Windows 活动显示路径和实际 presentation
+  statistics 放在同一份证据中；第二次用于“动态 120Hz”复测。两次用户均确认普通非最大化窗口
+  流畅且无撕裂，实际 IndependentFlip 节奏也均约 120Hz。第一轮 16.068s 内提交 1879 帧，间隔
+  p50/p95/p99 为 8.332/8.876/9.411ms，1879 个 PresentStatus 全部 queued；1848 个匹配 tag 的
+  IndependentFlipFrame actual duration 全为 `83333`，`displayed_time` 间隔 p50/p95/p99 为
+  8.331/8.332/8.333ms。第二轮 14.453s 内提交 1641 帧，间隔 p50/p95/p99 为
+  8.330/8.855/9.679ms；1636 queued、5 skipped，1570 个 IndependentFlipFrame 的 actual duration
+  仍全为 `83333`，`displayed_time` p50/p95/p99 仍为 8.331/8.332/8.333ms。两轮探针却都误报
+  `DRR configured: no` 和虚拟/物理约 60Hz，因为 QueryDisplayConfig 只传入了
+  `QDC_VIRTUAL_MODE_AWARE`，漏掉 Windows 11 DRR 要求的 `QDC_VIRTUAL_REFRESH_RATE_AWARE`；因此
+  path flags `9` 和由此选择的 60Hz preferred duration 不能用于判定系统是固定 60Hz，也不能作为
+  正确的目标选择证据。有效结论仅是画面与 tagged display statistics 确认该 adapter 实际约 120Hz、
+  流畅且无撕裂；微软也明确说明 preferred duration 是提示，系统可采用该刷新率或其倍数：
+  [IPresentationManager::SetPreferredPresentDuration](https://learn.microsoft.com/en-us/windows/win32/api/presentation/nf-presentation-ipresentationmanager-setpreferredpresentduration)。
+  v13 只补充 virtual-refresh-rate-aware query flag，并把查询 flags 写入日志；呈现路径保持不变。
+- `logs/specforge-composition-probe-20260718-130535.jsonl` 运行
+  `[DEBUG-composition-present-v13-drr-query]`，用户确认动态 120Hz 下普通非最大化窗口流畅且无撕裂。
+  查询 flags 为 `82`（only-active + virtual-mode-aware + virtual-refresh-rate-aware），返回 path flags
+  `25`（active + virtual-mode support + DRR boost）；虚拟刷新率 60.0001Hz、物理刷新率 120.0002Hz，
+  而 DWM 桌面读数仍为 60.0154Hz。探针由物理路径计算 preferred duration `83333`、请求约
+  120.0005Hz，修复后环境分类与 Windows“动态 120Hz”设置完全一致，确认 v12 的误报只来自缺失
+  query flag。9.139s 内提交 1046 帧，间隔 p50/p95/p99 为 8.327/9.089/16.202ms；1027 queued、
+  19 skipped。976 个匹配 tag 的 IndependentFlipFrame actual duration 全为 `83333`，显示时间间隔
+  p50/p95/p99 为 8.331/8.332/8.333ms（另有 357 个 CompositionFrame）。因此 composition adapter
+  已在本机 DRR 自动模式同时通过环境识别、真实约 120Hz、流畅和无撕裂四项门禁；下一步用同一
+  v13 二进制测试固定 60Hz，再测试固定 120Hz。`logs/specforge-composition-probe-20260718-130926.jsonl`
+  是 DRR 自动模式的完整 30.368s 重复运行，而非固定 60Hz：path flags 仍为 `25`，虚拟/物理仍为
+  60.0001/120.0002Hz。用户再次确认流畅无撕裂；3541 帧的提交间隔 p50/p95/p99 为
+  8.333/8.774/9.307ms，3539 queued、2 skipped，3465 个 IndependentFlipFrame actual duration
+  全为 `83333`，显示间隔 p50/p95/p99 为 8.331/8.332/8.333ms。该重复结果提高了 DRR 基线可信度，
+  但不能代替固定 60Hz 对照；后者必须以控制台 `DRR configured: no` 为环境门禁。
+- `logs/specforge-composition-probe-20260718-131805.jsonl` 使用同一 v13 二进制完成固定 60Hz
+  对照。环境门禁正确：path flags `9`（无 DRR boost），虚拟/物理路径均为 60.0001Hz，DWM
+  60.0154Hz，preferred duration `166666`、请求约 60.0002Hz。用户主观评价“较流畅、无撕裂”。
+  21.918s 内提交 1275 帧，间隔 p50/p95/p99 为 16.678/17.670/18.312ms；1274 queued、1 skipped。
+  1236 个匹配 tag 的 IndependentFlipFrame actual duration 全为 `166666`，显示间隔 p50/p95/p99
+  为 16.662/16.663/16.664ms（另有 218 个 CompositionFrame）。这证实固定 60Hz 是实际显示约束，
+  composition adapter 不会暗中提升到 120Hz；该场景应记录为 `system_refresh_constraint`，不是 adapter
+  failure。策略仍是在系统当前允许的活动物理刷新率内选择最大无撕裂节奏，不应擅自修改用户的
+  全局显示设置。下一步用同一二进制验证固定 120Hz。
+- `logs/specforge-composition-probe-20260718-132244.jsonl` 使用同一 v13 二进制完成固定 120Hz
+  对照。环境门禁正确：path flags `9`（无 DRR boost），虚拟/物理路径均为 120.0002Hz，DWM
+  120.0322Hz，preferred duration `83333`、请求约 120.0005Hz。用户确认流畅无撕裂。11.564s
+  内提交 1334 帧，间隔 p50/p95/p99 为 8.333/8.919/9.788ms；1332 queued、2 skipped。
+  1300 个匹配 tag 的 IndependentFlipFrame actual duration 全为 `83333`，显示间隔 p50/p95/p99
+  为 8.331/8.332/8.333ms（另有 27 个 CompositionFrame）。至此 composition adapter 在本机
+  DRR 自动、固定 60Hz、固定 120Hz 三种静态状态均正确识别活动路径、跟随系统允许的最大物理
+  刷新率且无撕裂；下一项是运行中切换状态时重新感知并原地更新 preferred duration。
+- `logs/specforge-composition-probe-20260718-132921.jsonl` 运行
+  `[DEBUG-composition-present-v14-runtime-refresh-switch]`，从固定 120Hz 启动，运行中依次捕获
+  固定 120→DRR 120、DRR 120→固定 60、固定 60→DRR 120、DRR 120→固定 120 四次
+  `WM_DISPLAYCHANGE`；最后一次用户操作或系统应用过程表现为两个分立状态，说明实现必须容忍一次
+  设置流程产生多个通知和中间状态。每次通知后的立即查询与 500ms debounce 查询完全一致；四次
+  `SetPreferredPresentDuration` 更新均返回 `S_OK`，duration 依次为
+  `83333→83333→166666→83333→83333`，没有 stale duration 或 runtime failure。48.360s 内完成
+  4736 帧，4733 queued、3 skipped；匹配 tag 的统计包含 4687 个 IndependentFlipFrame 和 54 个
+  CompositionFrame。IndependentFlip actual duration 的连续序列为：`83333`×819、切换中
+  `166666`×1、`83333`×1473、`166666`×855、`83333`×1539，证明实际扫描在各稳定状态正确
+  跟随约 120/60/120Hz。用户全程未观察到撕裂、停顿、黑屏或动画中断。
+
+  客观统计仍捕获到显示模式切换 handoff：四个切换点前后各 1s 的最大提交间隔分别为
+  128.6/339.7/230.7/119.4ms，tagged `displayed_time` 最大间隙分别约为
+  233.3/598.1/481.3/158.3ms。这些间隙发生在新 preferred duration 更新之前，属于 Windows
+  显示模式重配置，而非 500ms debounce 或 manager update 阻塞；稳定后立即恢复正确节奏。正式
+  实现应把它记录为 `system_mode_switch_handoff`，保留原地、幂等、可重复的环境重选和 duration
+  更新；本机证据表明 immediate query 已足以读到正确状态，但 debounce 仍用于合并通知，不应
+  被当作切换无间隙的保证。
+- `logs/specforge-composition-probe-20260718-133558.jsonl` 运行
+  `[DEBUG-composition-present-v15-redirected-hwnd]`，只移除探针此前使用的
+  `WS_EX_NOREDIRECTIONBITMAP`，保留显式 source rect、composition surface、buffer、duration 和
+  present 路径不变。窗口扩展样式实际为 `256`（`WS_EX_WINDOWEDGE`），确认是普通 redirected
+  HWND；用户未发现画面缺失、撕裂或流畅度异常。固定 120Hz 下运行 20.187s、提交 2381 帧，
+  间隔 p50/p95/p99 为 8.328/8.989/9.696ms，2381 个 PresentStatus 全部 queued。2349 个匹配
+  tag 的 IndependentFlipFrame actual duration 全为 `83333`，显示间隔 p50/p95/p99 为
+  8.331/8.332/8.333ms（另有 36 个 CompositionFrame）。因此早期白屏是缺失 source rect 所致，
+  不是普通 HWND redirection 与 composition swapchain 不兼容；正式主窗口和 ImGui detached
+  viewport 无需修改扩展窗口样式即可集成 adapter。
 - 当前没有外接显示器、混合刷新率、多适配器或通用 VRR 显示器的实测证据。
 
 ## 实现候选的验证顺序
@@ -414,12 +643,12 @@ boost 释放和空闲恢复。失败的实验必须保留结论，但临时 debu
 
 | 场景 | 当前硬件可测 | 验收重点 | 状态 |
 |---|---:|---|---|
-| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | H1/H2 仅约 60Hz 无撕裂；H3 连续两次约 120Hz 无撕裂，p95 待收敛 |
+| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | H1/H2 仅约 60Hz 无撕裂；H3 连续两次约 120Hz 无撕裂；独立 composition-swapchain v13 正确识别 DRR 虚拟约 60/物理约 120Hz，真实显示约 120Hz、流畅无撕裂，尚未集成正式交互 |
 | 内屏 DRR 自动，触控板 pan/zoom | 是 | 原生输入延迟、惯性、无撕裂、释放 | pan/zoom 均确认获批后约 120Hz 且无撕裂；短手势重获批 p50 约 75–82ms；锚点几何待独立验收 |
-| 内屏固定 60 Hz | 是 | 无撕裂、不误报 DRR 失败 | `Present(1, 0)` 约 60Hz 且无撕裂；识别为系统模式约束，p95 待收敛 |
-| 内屏固定高刷（系统提供的档位） | 是 | 跟随活动刷新率、无撕裂 | 固定 120Hz：`Present(1, 0)` 约 120Hz 且无撕裂；p95 待收敛 |
-| 运行中切换自动/固定刷新率 | 是 | 策略重新感知、无 stale duration | 双向均已捕获 `WM_DISPLAYCHANGE`；自动→固定 120Hz 的同步 Present 正确跟随，固定 120Hz→自动的 custom duration 已确认 reset、重新请求和重新获批，无 stale duration；两向均无撕裂 |
-| 普通、沉浸、同屏 detached viewport | 是 | 所有 swap chain 行为一致 | 普通最大化的无撕裂路径约 60Hz；普通 UI 切为 borderless fullscreen 后 duration 获批、约 120Hz 且无撕裂；普通窗口和 detached viewport 的 tearing-at-target-rate 均已确认约 120Hz、流畅但可见撕裂；detached move/resize 的 queued-input 修复已通过自动测试 18/18 与正式构建人工复验；detached 无撕裂 adapter 与 per-viewport Present telemetry 仍未验证 |
+| 内屏固定 60 Hz | 是 | 无撕裂、不误报 DRR 失败 | `Present(1, 0)` 与 composition-swapchain v13 均真实约 60Hz、无撕裂；后者正确识别非 DRR 的虚拟/物理约 60Hz，主观较流畅，归类 `system_refresh_constraint` |
+| 内屏固定高刷（系统提供的档位） | 是 | 跟随活动刷新率、无撕裂 | 固定 120Hz：`Present(1, 0)` 与 composition-swapchain v13 均真实约 120Hz、流畅无撕裂；后者正确识别非 DRR 的虚拟/物理约 120Hz |
+| 运行中切换自动/固定刷新率 | 是 | 策略重新感知、无 stale duration | 既有 HWND 路径双向均捕获 `WM_DISPLAYCHANGE`；composition-swapchain v14 连续跨固定 120/DRR 120/固定 60/DRR 120/固定 120，四次 duration 更新均 `S_OK`、实际扫描正确跟随且主观无异常；客观记录 119–340ms 提交与 158–598ms 显示 handoff，归类 `system_mode_switch_handoff` |
+| 普通、沉浸、同屏 detached viewport | 是 | 所有 swap chain 行为一致 | 正式 HWND swap-chain 普通最大化的无撕裂路径约 60Hz；独立 composition-swapchain 已在最大化、普通非最大化和普通 redirected HWND 上真实显示约 120Hz、无撕裂且流畅，但尚未集成；普通 UI 切为 borderless fullscreen 后 duration 获批、约 120Hz 且无撕裂；普通窗口和 detached viewport 的 tearing-at-target-rate 均已确认约 120Hz、流畅但可见撕裂；detached move/resize 的 queued-input 修复已通过自动测试 18/18 与正式构建人工复验；detached 无撕裂 adapter 与 per-viewport Present telemetry 仍未验证 |
 | 外接固定 60/75 Hz | 否 | 同步跟随、正确记录约束 | 延后硬件验证 |
 | 外接固定 120/144/165 Hz | 否 | 最大活动刷新率、无撕裂 | 延后硬件验证 |
 | 内外屏不同刷新率并同时显示 | 否 | 慢屏不拖住快屏、各目标无撕裂 | 延后硬件验证 |
