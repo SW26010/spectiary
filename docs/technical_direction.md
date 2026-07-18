@@ -99,6 +99,9 @@ JSONL profile 至少区分：
 建议后续代码结构：
 
 - `platform`: Win32 window、message loop、DPI、shutdown。
+- `platform/win32_message_render_observer`: 主消息泵显式转交 queued message，thread-local
+  `WH_CALLWNDPROC` hook 补充非队列 sent message；两条路径复用同一 render-invalidation
+  谓词，避免 secondary viewport 输入漏唤醒，同时排除 `WM_NCHITTEST` 反馈循环。
 - `platform/win32_compositor_clock`: Windows 11 API 动态发现、成对 boost 生命周期和 clock tick 唤醒；UI 主循环将普通输入无效化合并到下一次 tick，renderer 只负责 capability-gated DXGI present flags，不把 DRR API 细节扩散到 plot/UI。
 - `renderer`: D3D11 device、swap chain、render target、resize。
 - `ui`: ImGui context、style、dockspace、panel orchestration。

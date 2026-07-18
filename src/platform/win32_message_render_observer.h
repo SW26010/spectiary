@@ -18,6 +18,7 @@ public:
     Win32MessageRenderObserver& operator=(const Win32MessageRenderObserver&) = delete;
 
     [[nodiscard]] bool Start(InvalidateCallback callback, void* context) noexcept;
+    void ObserveQueuedMessage(std::uint32_t message) noexcept;
     void Stop() noexcept;
 
 private:

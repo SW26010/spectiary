@@ -137,6 +137,72 @@ BOOL WaitAndDispatchSentMessage()
         PM_REMOVE);
 }
 
+void TestQueuedWindowMessageRequestsFrame()
+{
+    TestWindow window;
+    DrainQueuedMessages();
+
+    specforge::RenderWakeScheduler scheduler;
+    SettleScheduler(scheduler);
+    specforge::Win32MessageRenderObserver observer;
+    Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
+
+    Require(
+        PostMessageW(window.hwnd(), WM_MOUSEMOVE, 0, MAKELPARAM(8, 13)) != FALSE,
+        "secondary window mouse input should be queued");
+
+    MSG queued_message = {};
+    Require(
+        PeekMessageW(
+            &queued_message,
+            window.hwnd(),
+            WM_MOUSEMOVE,
+            WM_MOUSEMOVE,
+            PM_REMOVE) != FALSE,
+        "secondary window mouse input should be retrieved from the queue");
+    observer.ObserveQueuedMessage(queued_message.message);
+    TranslateMessage(&queued_message);
+    DispatchMessageW(&queued_message);
+
+    Require(
+        scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        "retrieving queued input for a secondary window should request a frame");
+
+    observer.Stop();
+}
+
+void TestQueuedHitTestDoesNotCreateRenderFeedback()
+{
+    TestWindow window;
+    DrainQueuedMessages();
+
+    specforge::RenderWakeScheduler scheduler;
+    SettleScheduler(scheduler);
+    specforge::Win32MessageRenderObserver observer;
+    Require(observer.Start(RequestFrame, &scheduler), "message observer should start");
+
+    Require(
+        PostMessageW(window.hwnd(), WM_NCHITTEST, 0, MAKELPARAM(8, 13)) != FALSE,
+        "hit-test message should be queued");
+
+    MSG queued_message = {};
+    Require(
+        PeekMessageW(
+            &queued_message,
+            window.hwnd(),
+            WM_NCHITTEST,
+            WM_NCHITTEST,
+            PM_REMOVE) != FALSE,
+        "hit-test message should be retrieved from the queue");
+    observer.ObserveQueuedMessage(queued_message.message);
+
+    Require(
+        !scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        "a queued hit-test message must not create render feedback");
+
+    observer.Stop();
+}
+
 void TestSentMessageWakeRemainsRenderableWhenPeekReturnsFalse()
 {
     TestWindow window;
@@ -191,6 +257,8 @@ void TestHitTestSentMessageDoesNotCreateRenderFeedback()
 
 int main()
 {
+    TestQueuedWindowMessageRequestsFrame();
+    TestQueuedHitTestDoesNotCreateRenderFeedback();
     TestSentMessageWakeRemainsRenderableWhenPeekReturnsFalse();
     TestHitTestSentMessageDoesNotCreateRenderFeedback();
     return 0;

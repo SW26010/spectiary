@@ -285,9 +285,7 @@ int SpecForgeApp::Run(
                 running_ = false;
                 break;
             }
-            if (message.hwnd == nullptr) {
-                RequestMessageRender();
-            }
+            message_render_observer_.ObserveQueuedMessage(message.message);
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }

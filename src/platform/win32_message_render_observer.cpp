@@ -67,6 +67,13 @@ bool Win32MessageRenderObserver::Start(InvalidateCallback callback, void* contex
     return false;
 }
 
+void Win32MessageRenderObserver::ObserveQueuedMessage(std::uint32_t message) noexcept
+{
+    if (impl_->callback != nullptr && Win32MessageCanInvalidateRender(message)) {
+        impl_->callback(impl_->context);
+    }
+}
+
 void Win32MessageRenderObserver::Stop() noexcept
 {
     if (impl_->hook != nullptr) {
