@@ -27,7 +27,7 @@
 - vcpkg 的 `imgui` port 提供 `docking-experimental`、`win32-binding` 和 `dx11-binding` features: <https://vcpkg.io/en/package/imgui.html>
 - ImPlot README 提醒高密度绘图需要关注 16-bit index 限制、renderer vtx offset 或 32-bit indices，并说明 ImPlot 适合实时交互绘图: <https://github.com/epezent/implot>
 - Windows Precision Touchpad 对未启用原生手势的桌面程序通常回退为 wheel 消息；主图的双指平移和捏合缩放使用 Windows Direct Manipulation，并只接管命中 plot 的 `PT_TOUCHPAD`: <https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal>、<https://learn.microsoft.com/en-us/windows/win32/directmanipulation/direct-manipulation-portal>
-- Windows 11 DRR 的高刷新交互使用官方 compositor clock API 请求 boost，并通过 compositor clock tick 驱动帧节奏；不能只请求 boost 后继续依赖被虚拟化的 DXGI vblank。DXGI 报告支持时，boosted flip-model swap chain 同时使用 capability-gated variable-refresh/tearing flags，普通帧仍保持同步提交: <https://learn.microsoft.com/en-us/windows/win32/directcomp/compositor-clock/compositor-clock>、<https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/variable-refresh-rate-displays>
+- Windows 11 DRR 的高刷新交互使用官方 compositor clock API 请求 boost，并通过 compositor clock tick 驱动帧节奏；最终 Present 策略必须遵循[显示呈现产品合同与验证矩阵](presentation_policy.md)：首选最高可用交互刷新率且无撕裂，发生冲突时先保持刷新率并允许可观测的 tearing，最后才降低刷新率。所有能力缺失、外部约束和降级都必须记录。不能只请求 boost 后继续依赖被虚拟化的 DXGI vblank，也不能仅凭全局 tearing capability 静默选择 `ALLOW_TEARING`: <https://learn.microsoft.com/en-us/windows/win32/directcomp/compositor-clock/compositor-clock>、<https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_6/nf-dxgi1_6-dxgidisablevblankvirtualization>
 - CMake Presets 文档区分可提交的 `CMakePresets.json` 和本地的 `CMakeUserPresets.json`: <https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html>
 
 ## Docking 方向

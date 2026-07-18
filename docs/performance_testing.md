@@ -22,7 +22,11 @@
 - `implot.pan_drag.state`: ImPlot 主图 pan-drag 开始和结束。
 - `implot.pan_drag.sample`: pan-drag 活跃期间每帧一次的 ImPlot plot 坐标和 axis limits。
 - `implot.axis_limits_changed`: ImPlot axis limits 变化，证明 view transform 已经更新。
-- `touchpad.gesture`: Precision Touchpad 原生手势增量，记录 `input_steady_ns`、`kind`、pan/zoom 数值和 inertia；事件自身的 `steady_ns` 是 plot 消费该增量的时间。
+- `touchpad.gesture`: Precision Touchpad 原生手势增量，记录 `input_steady_ns`、`kind`、
+  pan/zoom 数值和 inertia；事件自身的 `steady_ns` 是 plot 消费该增量的时间。
+  `input_steady_ns` 是 Direct Manipulation `OnContentUpdated` 产出有效 transform delta 的
+  时间，不是触控板硬件或原始 pointer packet 时间，因此可测应用消费延迟，但不能单独
+  证明设备到应用的完整输入延迟。
 - `present`: DX11 swap chain Present 调用完成时间；clock pacing 活跃时可作为提交帧节奏代理，
   但不是光子到达屏幕的直接测量。
 - `display_environment`: 当前窗口所在 monitor、Windows display mode 频率、DWM timing、swapchain refresh desc 和 `Present` sync interval。
@@ -123,6 +127,12 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specfo
 ```
 
 ## DRR boost 验证
+
+> 本节记录 commit `8282a95` 的已实现路径和历史 profile 结果，不代表最终产品呈现合同。
+> 该路径的 `ALLOW_TEARING` 已由真实 pan 的稳定水平断层证明存在可见撕裂，因此只能作为
+> “保持最高刷新率、允许撕裂”的第一层降级，不能作为首选状态。后续方案、降级顺序、
+> 可观测性字段和待补硬件矩阵以
+> [显示呈现产品合同与验证矩阵](presentation_policy.md)为准。
 
 Windows 11 DRR 模式下，主图左键 pan/drag 与命中主图的 Precision Touchpad manipulation
 会请求 compositor clock boost。交互期间由独立 compositor-clock waiter 把真实 clock tick
