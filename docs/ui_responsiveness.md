@@ -28,7 +28,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 - 重新扫描 source folder 或重建 source identity。
 - 每帧构造全量 sample sequence rows、filter sources、sorting values 或 evaluation mask。
 - 为了拿当前 snapshot 调用 full `SessionView()`。
-- 在一个 frame 内多次构造同一个 session view。
+- 在 session 状态未变化时重复构造同一个 session view，无论是否位于同一 frame。
 - 在 label write 后重复同步 navigation/source workflow。
 - 把只给面板展示的完整列表复制到 plot render path。
 
@@ -45,7 +45,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 修复方式：
 
-- 在 `ShellUi` 增加 frame-scoped `SessionView()` cache，同一帧多个 panel 共用一次 view，session command 后标脏。
+- 在 `ShellUi` 增加 `SessionView()` cache，同一帧多个 panel 共用一次 view，session command 后标脏；2026-07-18 起该 cache 在状态未变化时跨帧保留。
 - 把 filter panel view builder 和 domain filter evaluation builder 拆开；面板展示只构造 id、name、option summary，不重建每个 sample 的 evaluation 输入。
 - 用 profile 脚本和真实 `.npy` 数据重新验证主图 pan/drag，而不是只凭单元测试通过判断。
 - `docs/performance_testing.md` 在该修复中补充了 130Hz acceptance、144Hz stretch、真实数据基线和报告口径。
@@ -55,7 +55,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 后续硬化：
 
 - `SourceCollectionSessionResult` 只表达 command action、navigation result、changed/loaded/message，不携带 `SourceCollectionSessionView`，避免 command 提交默认构造 full session view。
-- panel 交互如果需要继续渲染刷新后的面板状态，必须通过显式 `SessionView()` reader 读取 frame-scoped view cache。
+- panel 交互如果需要继续渲染刷新后的面板状态，必须通过显式 `SessionView()` reader 读取 invalidation-driven view cache。
 - plot、smoothing、information、spectral lines 等 snapshot-only surface 继续使用 `CurrentSampleSnapshot()`，不通过 full session view 取当前 sample。
 
 ## 复盘：2026-06-29 sample navigation sequence 退化
@@ -104,6 +104,26 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 判断：深化 catalog user state Module 本身没有错，问题是把 panel-facing full view 当成 plot overlay accessor。修复把性能特征写进 Interface 形状，在不绕过 Module、不复制 catalog marker 数据、不引入缓存失效协议的前提下恢复了 Locality。上述 10ms 是本次回归诊断门槛，不替代 `docs/performance_testing.md` 定义的 130Hz 项目验收标准；本次采集不能单独声明达到 130Hz acceptance。
 
+## 复盘：2026-07-18 Portable Release 普通窗口退化
+
+现象：同一台内屏 DRR 120Hz 环境中，Portable Release 的普通窗口 pan 明显不流畅，沉浸模式正常。呈现诊断仍显示 composition backend、无降级、requested/actual 120Hz，因此不是 DRR 或合成时钟失效。
+
+引入原因：
+
+- `ShellUi::Render()` 在每个普通 frame 的开始和结束都主动丢弃 `session_view_cache_`；原有 cache 实际只有 frame-scoped 生命周期。
+- 普通模式的 Files 等 panel 会读取完整 `SourceCollectionSessionView`，沉浸模式只走窄 plot view，因此仅普通窗口命中该成本。
+- 在 11,550 条 folder collection 及已恢复的 navigation/labeling 状态下，完整 `SessionView()` 重建 p50/p95 为 22.736/26.994ms，并且每帧恰好重建一次。修复前 `view_update` p50/p95 为 26.967/31.258ms，present interval p50/p95 为 27.704/32.125ms。
+
+修复方式：
+
+- 状态未变化时跨帧保留 `session_view_cache_`；所有 Shell session command 继续显式标脏。
+- `RunMaintenance()` 后也标脏，因为维护可能改变 labeling save status 等 view 字段；下一次读取时按需重建。
+- 不绕过 `SourceCollectionSession`，不把 filter/sorting/labeling 内部状态泄漏给 UI，也不改变沉浸模式或 presentation contract。
+
+验证：同一份 11,550 条数据、同一份 Portable 本地状态和同一普通窗口 mouse-pan 流程中，1,464 个普通帧只有启动/维护边沿的 2 帧重建 view，其余 1,462 帧重建次数为 0。`view_update` p50/p95 降为 4.155/5.335ms，present interval p50/p95 降为 8.339/9.368ms；用户主观确认恢复流畅。严格 8.3333ms p95 gate 仍受 120Hz 帧节奏尾部影响，本次结论是消除普通窗口相对沉浸模式的 CPU 退化，不是宣称完整 120Hz gate 已通过。
+
+剩余边界：发生 session mutation 或维护后，完整 view 仍会一次性重建；若 future profile 显示 previous/next、labeling 或 filter/sort command 的单次延迟受此影响，应继续缩窄或 owner-cache 对应子 view，而不是恢复 per-frame 重建。当前没有不启动 ImGui/Win32 Shell 即可验证 Render 调用次数的自动化接缝，因此本回归以同数据 Release A/B profile 锁定；session command/view 的业务正确性仍由现有 focused tests 覆盖。
+
 ## 设计规则
 
 1. Full view 不是 snapshot accessor。任何只需要当前光谱的 UI 必须使用 cheap snapshot API，不能调用 full session/workflow view。
@@ -125,7 +145,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 - `CurrentSampleSnapshot()` 这类 narrow read API。
 - `SpectralLinesPanelController::PlotView()` 这类只投影当前 render 所需状态的 narrow view。
-- frame-scoped view cache，command 后显式 dirty。
+- invalidation-driven view cache；状态未变化时跨帧复用，command 和 maintenance 后显式 dirty。
 - owner-owned cache，例如 navigation sequence cache、filter view cache、sorting view cache。
 - 在 load/mutation 路径规范化 owned state，让 read view 保持纯投影。
 - context fingerprint 驱动失效，而不是每次 sample index 变化都重算。
@@ -139,7 +159,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 - 为了方便测试把完整 sequence rows 放进每帧 view。
 - 为了读取一个 plot/overlay flag，在 render path 构造完整 panel-facing view。
 - 在 per-frame view builder 中重复修复 owner 已经保证的不变量。
-- 仅靠 memoizing `SessionView()` 掩盖内部仍然每帧重建 filter/sort/evaluation 的问题。
+- 只延长 `SessionView()` cache 生命周期，却遗漏 command、maintenance 或其他 owner mutation 的失效边界。
 - 未经 profile 就引入自定义 renderer、GPU path 或复杂 async pipeline。
 
 ## 变更检查清单
@@ -162,6 +182,6 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 - 每帧是否会构造 full sequence、filter source、sorting source、included samples 或 source identity。
 - previous/next 和 label auto-advance 是否只加载目标 sample，不触发 source/workflow 全量重同步。
 - panel view 是否只包含显示需要的状态，没有复制 owner 内部大列表。
-- cache 失效条件是否覆盖 source、annotation、labeling、filter/sort choice 和 workflow context 变化。
+- cache 失效条件是否覆盖 source、annotation、labeling、filter/sort choice、workflow context 和 maintenance 可见状态变化。
 - 新增测试是否覆盖规则正确性；新增或更新 profile 是否覆盖交互预算。
 - 运行 build/test/profile 命令时是否设置了合理超时，避免诊断卡死。

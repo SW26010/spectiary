@@ -548,13 +548,9 @@ ShellUi::~ShellUi()
 
 void ShellUi::Render(const ShellStatus& status)
 {
-    session_view_cache_.reset();
-    session_view_cache_dirty_ = false;
     label_shortcut_context_active_ = false;
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
-        session_view_cache_.reset();
-        session_view_cache_dirty_ = false;
         return;
     }
     const PanelVisibilityState previous_panel_visibility = panel_visibility_;
@@ -590,14 +586,14 @@ void ShellUi::Render(const ShellStatus& status)
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
         panel_visibility_);
-    session_view_cache_.reset();
-    session_view_cache_dirty_ = false;
 }
 
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     panel_visibility_state_.RunMaintenance(panel_visibility_, now);
     session_.RunMaintenance(now);
+    // Maintenance can change save-status fields exposed by the derived session view.
+    session_view_cache_dirty_ = true;
     spectral_lines_panel_.RunMaintenance(now);
 }
 

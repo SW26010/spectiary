@@ -85,6 +85,7 @@ private:
     PanelVisibilityStatePersistence panel_visibility_state_;
     PanelVisibilityState panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
+    // SessionView() can derive state across every sample; retain it until a session mutation.
     std::optional<SourceCollectionSessionView> session_view_cache_;
     bool session_view_cache_dirty_ = false;
 };
