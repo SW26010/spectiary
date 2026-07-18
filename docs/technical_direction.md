@@ -101,8 +101,16 @@ JSONL profile 至少区分：
 - `platform`: Win32 window、message loop、DPI、shutdown。
 - `platform/win32_message_render_observer`: 主消息泵显式转交 queued message，thread-local
   `WH_CALLWNDPROC` hook 补充非队列 sent message；两条路径复用同一 render-invalidation
-  谓词，避免 secondary viewport 输入漏唤醒，同时排除 `WM_NCHITTEST` 反馈循环。
-- `platform/win32_compositor_clock`: Windows 11 API 动态发现、成对 boost 生命周期和 clock tick 唤醒；UI 主循环将普通输入无效化合并到下一次 tick，renderer 只负责 capability-gated DXGI present flags，不把 DRR API 细节扩散到 plot/UI。
+  谓词，避免 secondary viewport 输入漏唤醒，同时排除 `WM_NCHITTEST` 反馈循环。挂载
+  Direct Manipulation manual-update viewport 的 HWND 还会把实机确认的内部 queued
+  message `0x0096` 分类为 input pump 而非 render invalidation；standalone pump 按 compositor tick 限速，
+  plot `Poll()` 仍保留自身的 `Update()`，同一 tick 因而可能推进两次。真实手势增量再通过专用 wake
+  请求帧，wake 投递失败会释放 coalescing latch 以允许重试。不要把单次实测的一帧一个 gesture
+  提升为 `Update()` 调用次数不变量。
+- `platform/win32_compositor_clock`: Windows 11 API 动态发现、成对 boost 生命周期和 clock tick 唤醒；
+  UI 主循环将普通输入无效化合并到下一次 tick，renderer 只负责 capability-gated DXGI present flags，
+  不把 DRR API 细节扩散到 plot/UI。正常 tick 仅授权已有失效；waiter 异常退出的最后一个 tick
+  请求一次过渡帧，使 scheduler 切入有界 fallback cadence，并记录 wait result。
 - `renderer`: D3D11 device、swap chain、render target、resize。
 - `ui`: ImGui context、style、dockspace、panel orchestration。
 - `plot`: ImPlot spectrum view 和 overlay rendering。

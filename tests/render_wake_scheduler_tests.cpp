@@ -82,6 +82,39 @@ void TestClockPacingDefersInvalidationUntilPermitted()
         "a compositor-paced frame should not schedule a competing timer frame");
 }
 
+void TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    const auto failure_time = start + 1s;
+    const auto action = specforge::ClassifyCompositorClockTick(true, false);
+    Require(
+        action == specforge::CompositorClockTickAction::RequestFallbackFrame,
+        "a consumed tick from an inactive clock must select fallback transition work");
+    scheduler.RequestFrame();
+
+    Require(
+        scheduler.ShouldRender(failure_time),
+        "the final tick from a failed compositor waiter must request a transition frame");
+    scheduler.BeginFrame(failure_time);
+    scheduler.EndFrame(failure_time, {.touchpad_active = true});
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            failure_time + Scheduler::kTouchpadFrameInterval,
+        "the transition frame must establish bounded touchpad fallback pacing");
+
+    Require(
+        specforge::ClassifyCompositorClockTick(false, false) ==
+            specforge::CompositorClockTickAction::None,
+        "a stale tick message must not create a fallback transition frame");
+    Require(
+        specforge::ClassifyCompositorClockTick(true, true) ==
+            specforge::CompositorClockTickAction::GrantFramePermission,
+        "a normal active-clock tick must remain permission-only");
+}
+
 void TestSettingsSaveWakeIsDebounced()
 {
     const Scheduler::TimePoint start{};
@@ -202,28 +235,27 @@ void TestTextInputAndTouchpadExposeTimeDrivenDemand()
             start + 1s + Scheduler::kInteractiveFrameInterval + Scheduler::kTextCursorFrameInterval,
         "active text input should keep the cursor clock moving at a bounded cadence");
 
-    const auto text_frame =
-        start + 1s + Scheduler::kInteractiveFrameInterval + Scheduler::kTextCursorFrameInterval;
-    scheduler.RequestFrame();
-    scheduler.BeginFrame(text_frame);
-    scheduler.EndFrame(
-        text_frame,
-        {
-            .touchpad_active = true,
-            .compositor_clock_paced = true,
-            .text_input_active = true,
-            .popup_open = true,
-        });
+    Scheduler clock_paced_touchpad;
+    SettleInitialFrame(clock_paced_touchpad, start);
+    const auto touchpad_frame = start + 2s;
+    clock_paced_touchpad.RequestFrame();
+    clock_paced_touchpad.BeginFrame(touchpad_frame);
+    clock_paced_touchpad.EndFrame(
+        touchpad_frame,
+        {.touchpad_active = true, .compositor_clock_paced = true});
     Require(
-        !scheduler.NextWakeDeadline(true, std::nullopt),
-        "clock-tick invalidation and UI animation should not create competing timer deadlines");
+        !clock_paced_touchpad.NextWakeDeadline(true, std::nullopt),
+        "a clock-paced touchpad should pump input without forcing an unchanged render");
 
-    const auto fallback_frame = text_frame + 1s;
-    scheduler.RequestFrame();
-    scheduler.BeginFrame(fallback_frame);
-    scheduler.EndFrame(fallback_frame, {.touchpad_active = true});
+    Scheduler fallback_touchpad;
+    SettleInitialFrame(fallback_touchpad, start);
+    const auto fallback_frame = start + 3s;
+    fallback_touchpad.RequestFrame();
+    fallback_touchpad.BeginFrame(fallback_frame);
+    fallback_touchpad.EndFrame(fallback_frame, {.touchpad_active = true});
     Require(
-        scheduler.NextWakeDeadline(true, std::nullopt) == fallback_frame + Scheduler::kTouchpadFrameInterval,
+        fallback_touchpad.NextWakeDeadline(true, std::nullopt) ==
+            fallback_frame + Scheduler::kTouchpadFrameInterval,
         "touchpad pacing should retain a bounded fallback deadline when compositor ticks are unavailable");
 }
 
@@ -247,6 +279,7 @@ int main()
 {
     TestWindowInvalidationPersistsUntilRendered();
     TestClockPacingDefersInvalidationUntilPermitted();
+    TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence();
     TestSettingsSaveWakeIsDebounced();
     TestSettingsSaveWakeStartsAfterTheDirtyFrame();
     TestPopupTransitionAnimatesForABoundedInterval();

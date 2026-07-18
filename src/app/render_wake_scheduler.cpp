@@ -73,17 +73,15 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
     }
     if (popup_animation_end_) {
         if (now < *popup_animation_end_) {
-            if (!activity.compositor_clock_paced) {
-                ConsiderEarlier(
-                    next_frame,
-                    std::min(now + kInteractiveFrameInterval, *popup_animation_end_));
-            }
+            ConsiderEarlier(
+                next_frame,
+                std::min(now + kInteractiveFrameInterval, *popup_animation_end_));
         } else {
             popup_animation_end_.reset();
         }
     }
 
-    if (activity.text_input_active && !activity.compositor_clock_paced) {
+    if (activity.text_input_active) {
         ConsiderEarlier(next_frame, now + kTextCursorFrameInterval);
     }
     if (activity.touchpad_active && !activity.compositor_clock_paced) {

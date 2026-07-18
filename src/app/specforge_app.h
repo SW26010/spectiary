@@ -96,6 +96,8 @@ private:
     bool minimized_ = false;
     bool window_visible_ = true;
     bool compositor_clock_tick_ready_ = false;
+    bool touchpad_update_pending_ = false;
+    bool touchpad_update_tick_ready_ = false;
     ImGuiStyle base_imgui_style_;
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;

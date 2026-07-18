@@ -633,7 +633,47 @@ Present flags、DRR boost 或自定义 duration。
   `IsPlotPanDragActive` 按“从 drag 开始直到按钮释放”定义 latency-sensitive interaction，
   compositor tick 因而持续请求帧；不是 Composition 自激。该行为减少暂停后恢复移动时的升档风险，
   但不符合最严格的“无画面更新不提交空帧”解释，需在提交前明确选择是否把 tick permission 与
-  render invalidation 解耦。
+  render invalidation 解耦。后续实现将 compositor tick 降为 render permission，不再自行请求帧；
+  `logs/specforge-profile-20260718-143835.jsonl` 中静止段出现约 1.318s 的 Present 空洞，用户确认
+  鼠标按住静止时不再持续刷新，而继续移动仍正常。
+- Precision Touchpad 路径不能仅沿用 mouse drag 状态：`logs/specforge-profile-20260718-160236.jsonl`
+  的定向探针在 touchpad active 期间记录 2440 轮 invalidation，其中 1850 轮最后来源是同一主
+  HWND 上的 queued message `150`（`0x0096`），581 轮是专用 gesture wake `32851`
+  （`WM_APP+0x53`），跨线程 sent message 只有 1 轮。SDK 10.0.26100 没有公开 `0x0096`
+  常量；它由 Direct Manipulation manual-update context 的 subclass 消费。正式策略仍 dispatch
+  该消息，但只在相同 HWND 已挂载该 context 时把它分类为 `PumpUpdates`，不把它作为 render
+  invalidation；同号消息在其他 HWND 及所有普通 queued pointer input 维持原行为。
+- 两个失败实验保留为时序边界证据：把 `IDirectManipulationUpdateManager::Update()` 从 plot
+  `Poll()` 移到 compositor tick WndProc/独立主循环后，`152837` 和 `154533` 分别只有 54/44 个
+  zoom、没有 pan，用户确认画面不响应双指 pan；完全忽略 `0x0096` 后，`160826` 虽能在静止时
+  停帧，但同一次接触恢复移动不能可靠响应。最终实现保留原 `Poll()->Update()`，并把 `0x0096`
+  作为“只推进 input、不直接渲染”的 demand；一个消息批次只合并一次 demand，每个 compositor tick
+  最多执行一次 standalone pump。gesture wake 随后渲染时，`Poll()` 仍可在同一 tick 再调用一次
+  `Update()`；这不是调用次数不变量，下面的实机 A/B 证明不能安全地强制合并成一次。
+- `logs/specforge-profile-20260718-161436.jsonl` 暴露了未按 tick 限速的中间实现：4718 帧内记录
+  161046 个 gesture，其中 157343 个为 inertia，多个微小增量批量落到同一帧，用户观察到惯性
+  卡顿。最终 `162048` 将 1990 个 gesture 一一对应到 1990 个独立帧，该日志的 p95/max 每帧均为 1；
+  接触阶段 gesture interval p50/p95 为 8.33/9.44ms，惯性为 8.33/8.94ms。用户按“移动—不抬手
+  静止—恢复移动—松手惯性”复验，确认未发现异常；这闭环了静止零空提交、同接触恢复响应和
+  约 120Hz 惯性三项本机 DRR 验收。外接/混合刷新率与 clock 不可用 fallback 仍需后续硬件验证。
+- 自动回归另覆盖两个失效边沿：compositor waiter 异常退出后，最后一个 tick 在 inactive clock
+  状态下请求且只请求过渡帧，由 `EndFrame()` 建立 9ms 触控板 fallback deadline；正常 active tick
+  仍不主动 invalidation；该边沿写入 `waiter_failure_fallback` 及 wait result。专用 gesture wake 的
+  `PostMessageW` 若失败，会在持锁状态回滚
+  `wake_pending`，后续增量可重试，避免 coalescing 永久锁死。
+- 强制 single-update 的两轮失败实验否定了“让 pump 后的 `Poll()` 只 drain”方案。
+  `logs/specforge-profile-20260718-165754.jsonl` 的第一版 boolean gate 只有 734 个 gesture（其中 zoom 8）、
+  1075 次 Present 和 26 次 boost 切换；用户观察到 pinch 巨卡、停速后同接触恢复不响应。第二版在
+  新 tick 重置 gate，`171212` 的 zoom 恢复到 271，但总 gesture 仅 649、inertia 仅 16、boost 切换
+  增至 36 次，用户确认两个问题依旧。两次都没有 waiter failure、backend degradation 或单帧多 gesture；
+  唯一生效变量是跳过 `Poll()->Update()`。因此移除 gate，恢复经 `162048` 验证的 standalone pump 加
+  `Poll()->Update()` 路径；1990 gesture 对应 1990 frame 仅作为该次实测，不再写成结构性调用次数保证。
+- `logs/specforge-profile-20260718-172023.jsonl` 完成撤销 single-update gate 的恢复 A/B，用户按连续
+  pinch、静止不抬手、同接触继续移动及松手惯性复验，确认未发现异常。日志记录 1869 个 gesture：
+  1143 pan、726 zoom、247 inertia，分别落在 1869 个独立帧且无单帧堆积；input→gesture p50/p95
+  为 6.593/7.371ms，input→Present 为 8.183/9.319ms，惯性 interval 为 8.319/8.975ms。全程
+  boost 切换 12 次，无 waiter failure 或 presentation degradation。该结果恢复了 `162048` 的正常
+  交互形态，并确认 reviewer P2 应通过纠正文档保证范围解决，而不是强制 single-update。
 - 当前没有外接显示器、混合刷新率、多适配器或通用 VRR 显示器的实测证据。
 
 ## 已选实现与保留回退
@@ -666,8 +706,8 @@ IndependentFlip statistics 观测实际显示时长。
 
 | 场景 | 当前硬件可测 | 验收重点 | 状态 |
 |---|---:|---|---|
-| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | 生产 Composition 正确识别 DRR 虚拟约 60/物理约 120Hz；普通、沉浸及回 dock 后主 Plot 的有效交互 feedback 均为 83333 duration，视觉无撕裂且无功能异常；Present interval p50/p95 8.322/8.855ms，严格 p95 门禁仍 MISS；静止按住仍持续 120Hz 空提交，待策略确认 |
-| 内屏 DRR 自动，触控板 pan/zoom | 是 | 原生输入延迟、惯性、无撕裂、释放 | pan/zoom 均确认获批后约 120Hz 且无撕裂；短手势重获批 p50 约 75–82ms；锚点几何待独立验收 |
+| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | 生产 Composition 正确识别 DRR 虚拟约 60/物理约 120Hz；普通、沉浸及回 dock 后主 Plot 的有效交互 feedback 均为 83333 duration，视觉无撕裂且无功能异常；Present interval p50/p95 8.322/8.855ms，严格 p95 门禁仍 MISS；tick permission 与 invalidation 解耦后，静止按住不再空提交且恢复移动正常 |
+| 内屏 DRR 自动，触控板 pan/zoom | 是 | 原生输入延迟、惯性、无撕裂、释放 | pan/zoom 确认获批后约 120Hz 且无撕裂；attached HWND 的 Direct Manipulation standalone pump 按 compositor tick 合并，`Poll()` 保留自身 `Update()`。`165754`/`171212` 否定 single-update gate；恢复无 gate 后，`172023` 以 1869 gesture/1869 frame 复验连续 pinch、静止、同接触恢复及惯性均无异常，input→Present p50/p95 8.183/9.319ms；短手势重获批 p50 约 75–82ms；锚点几何待独立验收 |
 | 内屏固定 60 Hz | 是 | 无撕裂、不误报 DRR 失败 | `Present(1, 0)` 与 composition-swapchain v13 均真实约 60Hz、无撕裂；后者正确识别非 DRR 的虚拟/物理约 60Hz，主观较流畅，归类 `system_refresh_constraint` |
 | 内屏固定高刷（系统提供的档位） | 是 | 跟随活动刷新率、无撕裂 | 固定 120Hz：`Present(1, 0)` 与 composition-swapchain v13 均真实约 120Hz、流畅无撕裂；后者正确识别非 DRR 的虚拟/物理约 120Hz |
 | 运行中切换自动/固定刷新率 | 是 | 策略重新感知、无 stale duration | 既有 HWND 路径双向均捕获 `WM_DISPLAYCHANGE`；composition-swapchain v14 连续跨固定 120/DRR 120/固定 60/DRR 120/固定 120，四次 duration 更新均 `S_OK`、实际扫描正确跟随且主观无异常；客观记录 119–340ms 提交与 158–598ms 显示 handoff，归类 `system_mode_switch_handoff` |

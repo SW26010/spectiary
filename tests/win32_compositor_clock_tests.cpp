@@ -1,3 +1,4 @@
+#include "app/render_wake_scheduler.h"
 #include "platform/win32_compositor_clock.h"
 
 #include <Windows.h>
@@ -11,6 +12,7 @@
 namespace {
 
 using namespace std::chrono_literals;
+using Scheduler = specforge::RenderWakeScheduler;
 
 constexpr wchar_t kWindowClassName[] = L"SpecForgeCompositorClockTests";
 constexpr UINT kTickMessage = WM_APP + 0x71U;
@@ -25,6 +27,16 @@ void Require(bool condition, std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         std::exit(1);
     }
+}
+
+void SettleScheduler(Scheduler& scheduler, Scheduler::TimePoint start)
+{
+    scheduler.BeginFrame(start);
+    scheduler.EndFrame(start, {});
+    const auto follow_up = start + Scheduler::kInteractiveFrameInterval;
+    scheduler.BeginFrame(follow_up);
+    scheduler.EndFrame(follow_up, {});
+    Require(!scheduler.ShouldRender(follow_up), "render scheduler should be idle before clock failure");
 }
 
 HRESULT WINAPI FakeBoost(BOOL enable)
@@ -186,13 +198,33 @@ void TestUnexpectedWaitExitWakesUiForFallbackPacing()
     ResetFakeApi();
     TestWindow window;
     specforge::Win32CompositorClock clock({FakeBoost, FailingWait});
+    Scheduler scheduler;
+    const Scheduler::TimePoint start{};
+    SettleScheduler(scheduler, start);
 
     Require(clock.Initialize(window.hwnd(), kTickMessage), "failing wait API should initialize");
     Require(clock.SetBoostRequested(true), "boost should start before the wait failure is observed");
     Require(WaitForTick(window.hwnd()), "unexpected wait exit should wake the UI to select fallback pacing");
     Require(!clock.boost_active(), "failed waiter should stop compositor-clock presentation mode");
     Require(clock.last_wait_result() == WAIT_FAILED, "unexpected wait status should remain observable");
-    Require(clock.ConsumeTick(), "fallback wake should clear through the normal tick-message path");
+    const auto action = specforge::ClassifyCompositorClockTick(
+        clock.ConsumeTick(),
+        clock.boost_active());
+    Require(
+        action == specforge::CompositorClockTickAction::RequestFallbackFrame,
+        "the final tick should request the same fallback transition as the app message handler");
+    scheduler.RequestFrame();
+
+    const auto failure_time = start + 1s;
+    Require(
+        scheduler.ShouldRender(failure_time),
+        "waiter failure should wake one transition frame instead of freezing touchpad input");
+    scheduler.BeginFrame(failure_time);
+    scheduler.EndFrame(failure_time, {.touchpad_active = true});
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            failure_time + Scheduler::kTouchpadFrameInterval,
+        "the transition frame should establish bounded fallback touchpad pacing");
 
     (void)clock.SetBoostRequested(false);
     Require(g_disable_calls == 1, "wait failure should still release the matching boost request");

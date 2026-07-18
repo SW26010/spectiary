@@ -65,8 +65,15 @@ alpha blending 全部改为 linear-light pipeline 的情况下，把 render-targ
 Flip-model `Present` 不提供普通窗口被其他窗口完全覆盖的 `DXGI_STATUS_OCCLUDED` 状态。SpecForge 不通过 Z-order
 枚举恢复“完全遮挡”检测，而是让可见窗口在没有消息和维护任务时停止出帧，并用原生 Win32 message wait 保留最后一次
 presentation。鼠标、键盘、窗口和 ImGui viewport 消息各请求一帧；本地状态保存使用 `steady_clock` deadline 独立唤醒，
-不依赖刷新率推进。Direct Manipulation 使用 `MANUALUPDATE`，所以 Precision Touchpad 手势及 inertia active 期间继续逐帧
-轮询，结束后立即回到空闲等待。最小化或隐藏时仍执行到期维护，但不提交新的 render/present。
+不依赖刷新率推进。Direct Manipulation 使用 `MANUALUPDATE`：在 compositor-clock 路径中，内部 queued update message
+只把 input pump 标为 pending，每个 clock tick 最多执行一次 standalone pump；plot `Poll()` 仍保留自身的
+`Update()`，因此 gesture wake 在同一 tick 触发 render 时可能再推进一次。实机 A/B 证明强制 single-update 会造成
+pinch 卡顿及同接触恢复失败，所以这里不声明“每 tick 最多一次 `Update()`”不变量。只有生成真实
+pan/zoom/inertia 增量才请求
+render/present，因此接触未释放但静止时可等待，继续移动时又能恢复。clock pacing 不可用时仍保留有界的触控板
+fallback cadence；若 compositor waiter 异常退出，其最后一个 tick 只请求一次过渡帧，由该帧建立 fallback deadline，
+正常 active tick 仍然只是 render permission；异常边沿另记录 `waiter_failure_fallback` 与 wait result。
+最小化或隐藏时仍执行到期维护，但不提交新的 render/present。
 
 `RenderWakeScheduler` 是唯一的 render/wake 策略边界：Win32 窗口处理器持久记录失效请求，不能用
 `PeekMessageW` 的返回值推断 UI 是否变化；调度器再取窗口失效、维护任务、触控板连续更新与 ImGui 时间行为的最早
@@ -74,6 +81,9 @@ deadline。弹窗开合只在遮罩渐变的有界时间内逐帧更新，活动
 `ImGuiIO::IniSavingRate` 从可能致脏的渲染帧完成时起安排一次保存唤醒。每次渲染后统一进入 Win32 wait；线程级消息
 observer 覆盖主窗口与 detached viewport，在 WndProc 派发时持久记录失效，即使 `PeekMessageW` 派发 sent/nonqueued
 消息后返回 `FALSE` 也不会丢帧。纯查询 `WM_NCHITTEST` 不产生渲染失效，避免静止 hover 与 presentation 形成反馈环。
+Direct Manipulation 的未公开 `0x0096` 只在已挂载该 context 的同一 HWND 上分类为 `PumpUpdates`；消息本身仍正常
+dispatch，同号消息在其他窗口仍按普通 invalidation 处理。专用 gesture wake 使用 coalescing latch；`PostMessageW`
+失败会在 gesture-state lock 内释放 latch，使后续真实增量可以重试，不会永久失去渲染唤醒。
 策略层不依赖 Win32、ImGui internal API 或刷新率，并由纯时间测试、真实 ImGui dirty timer 测试和 Win32 sent-message
 顺序测试覆盖。
 

@@ -59,17 +59,19 @@ bool NearlyEqual(float left, float right)
 
 void PostWake(HWND hwnd, const std::shared_ptr<SharedGestureState>& state)
 {
-    bool should_post = false;
-    {
-        std::lock_guard lock(state->mutex);
-        if (!state->wake_pending) {
-            state->wake_pending = true;
-            should_post = true;
-        }
-    }
-    if (should_post) {
-        (void)PostMessageW(hwnd, kTouchpadGestureWakeMessage, 0, 0);
-    }
+    const auto post_message = [](std::uintptr_t native_window, std::uint32_t message) noexcept {
+        return PostMessageW(
+                   reinterpret_cast<HWND>(native_window),
+                   static_cast<UINT>(message),
+                   0,
+                   0) != FALSE;
+    };
+    std::lock_guard lock(state->mutex);
+    (void)TryPostWin32TouchpadWake(
+        reinterpret_cast<std::uintptr_t>(hwnd),
+        kTouchpadGestureWakeMessage,
+        state->wake_pending,
+        post_message);
 }
 
 class DirectManipulationEventHandler final
@@ -456,6 +458,11 @@ struct Win32TouchpadGestureSource::Impl {
             return batch;
         }
 
+        void PumpUpdates()
+        {
+            (void)update_manager_->Update(nullptr);
+        }
+
     private:
         explicit Context(HWND hwnd)
             : hwnd_(hwnd), state_(std::make_shared<SharedGestureState>())
@@ -641,6 +648,19 @@ void Win32TouchpadGestureSource::ClearTarget()
     impl_->context.reset();
     impl_->failed_window = nullptr;
     impl_->retry_after = {};
+}
+
+void Win32TouchpadGestureSource::PumpUpdates()
+{
+    if (impl_->context != nullptr) {
+        impl_->context->PumpUpdates();
+    }
+}
+
+bool Win32TouchpadGestureSource::OwnsWindow(std::uintptr_t native_window) const noexcept
+{
+    return impl_->context != nullptr &&
+           reinterpret_cast<std::uintptr_t>(impl_->context->hwnd()) == native_window;
 }
 
 bool Win32TouchpadGestureSource::NeedsContinuousUpdates() const

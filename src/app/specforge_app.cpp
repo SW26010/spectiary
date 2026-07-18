@@ -287,7 +287,18 @@ int SpecForgeApp::Run(
                 running_ = false;
                 break;
             }
-            message_render_observer_.ObserveQueuedMessage(message.message);
+            const bool direct_manipulation_attached = touchpad_gestures_.OwnsWindow(
+                reinterpret_cast<std::uintptr_t>(message.hwnd));
+            const Win32TouchpadQueuedMessageAction touchpad_message_action =
+                ClassifyWin32TouchpadQueuedMessage(
+                    message.message,
+                    direct_manipulation_attached);
+            if (touchpad_message_action ==
+                Win32TouchpadQueuedMessageAction::InvalidateRender) {
+                message_render_observer_.ObserveQueuedMessage(message.message);
+            } else {
+                touchpad_update_pending_ = true;
+            }
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -309,10 +320,14 @@ int SpecForgeApp::Run(
         UpdateCompositorClockBoost(window_renderable, touchpad_active);
         const bool compositor_clock_paced = compositor_clock_.boost_active();
         const bool render_permitted = !compositor_clock_paced || compositor_clock_tick_ready_;
-        if (window_renderable && render_wake_scheduler_.ShouldRender(now, render_permitted)) {
+        const bool should_render =
+            window_renderable && render_wake_scheduler_.ShouldRender(now, render_permitted);
+        if (should_render) {
             if (compositor_clock_paced) {
                 compositor_clock_tick_ready_ = false;
+                touchpad_update_tick_ready_ = false;
             }
+            touchpad_update_pending_ = false;
             render_wake_scheduler_.BeginFrame(now);
             RenderFrame();
             const ImGuiIO& io = ImGui::GetIO();
@@ -329,6 +344,14 @@ int SpecForgeApp::Run(
                     .text_input_active = io.WantTextInput && io.ConfigInputTextCursorBlink,
                     .popup_open = popup_open,
                 });
+        } else if (
+            window_renderable && compositor_clock_paced && touchpad_update_pending_ &&
+            touchpad_update_tick_ready_) {
+            touchpad_update_pending_ = false;
+            touchpad_update_tick_ready_ = false;
+            touchpad_gestures_.PumpUpdates();
+            touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
+            UpdateCompositorClockBoost(window_renderable, touchpad_active);
         }
 
         const bool wait_render_permitted =
@@ -422,7 +445,10 @@ void SpecForgeApp::Initialize(
                                               });
 
     InitializeUiBackends();
-    if (!message_render_observer_.Start(&SpecForgeApp::InvalidateRenderFromWin32Message, this)) {
+    if (!message_render_observer_.Start(
+            &SpecForgeApp::InvalidateRenderFromWin32Message,
+            this,
+            kCompositorClockTickMessage)) {
         throw std::runtime_error("Failed to observe Win32 messages for render invalidation.");
     }
     window_.Show(show_command);
@@ -626,6 +652,10 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
     }
 
     compositor_clock_tick_ready_ = false;
+    touchpad_update_tick_ready_ = false;
+    if (!requested) {
+        touchpad_update_pending_ = false;
+    }
     (void)compositor_clock_.SetBoostRequested(requested);
     profile_.WriteEvent("compositor_clock", {
                                                   ProfileSink::Field::String("action", "boost_request"),
@@ -1338,7 +1368,9 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 
 LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
-    if (Win32MessageCanInvalidateRender(message)) {
+    if (Win32MessageCanInvalidateRender(
+            message,
+            kCompositorClockTickMessage)) {
         RequestMessageRender();
     }
 
@@ -1347,9 +1379,29 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     }
 
     if (message == kCompositorClockTickMessage) {
-        if (compositor_clock_.ConsumeTick()) {
+        const CompositorClockTickAction action = ClassifyCompositorClockTick(
+            compositor_clock_.ConsumeTick(),
+            compositor_clock_.boost_active());
+        if (action == CompositorClockTickAction::GrantFramePermission) {
             compositor_clock_tick_ready_ = true;
+            touchpad_update_tick_ready_ = true;
+        } else if (action == CompositorClockTickAction::RequestFallbackFrame) {
+            compositor_clock_tick_ready_ = false;
+            touchpad_update_tick_ready_ = false;
             render_wake_scheduler_.RequestFrame();
+            profile_.WriteEvent("compositor_clock", {
+                                                          ProfileSink::Field::String(
+                                                              "action",
+                                                              "waiter_failure_fallback"),
+                                                          ProfileSink::Field::Bool(
+                                                              "requested",
+                                                              compositor_clock_.boost_requested()),
+                                                          ProfileSink::Field::Bool("active", false),
+                                                          ProfileSink::Field::Number(
+                                                              "last_wait_result",
+                                                              std::to_string(
+                                                                  compositor_clock_.last_wait_result())),
+                                                      });
         }
         return 0;
     }

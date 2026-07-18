@@ -12,6 +12,24 @@ struct RenderFrameActivity {
     bool popup_open = false;
 };
 
+enum class CompositorClockTickAction {
+    None,
+    GrantFramePermission,
+    RequestFallbackFrame,
+};
+
+[[nodiscard]] constexpr CompositorClockTickAction ClassifyCompositorClockTick(
+    bool tick_consumed,
+    bool compositor_clock_active) noexcept
+{
+    if (!tick_consumed) {
+        return CompositorClockTickAction::None;
+    }
+    return compositor_clock_active
+               ? CompositorClockTickAction::GrantFramePermission
+               : CompositorClockTickAction::RequestFallbackFrame;
+}
+
 class RenderWakeScheduler {
 public:
     using Clock = std::chrono::steady_clock;
