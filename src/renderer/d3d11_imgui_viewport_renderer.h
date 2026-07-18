@@ -1,10 +1,13 @@
 #pragma once
 
+#include "renderer/d3d11_window_presentation.h"
+
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
 #include <string_view>
+#include <vector>
 
 struct ImGuiViewport;
 struct ImVec2;
@@ -14,6 +17,17 @@ namespace specforge {
 struct D3D11RendererError {
     HRESULT result = S_OK;
     std::string_view operation;
+};
+
+struct D3D11ViewportPresentationUpdate {
+    unsigned int viewport_id = 0;
+    HWND hwnd = nullptr;
+    D3D11PresentationBackend backend = D3D11PresentationBackend::None;
+    D3D11PresentationDegradation degradation =
+        D3D11PresentationDegradation::None;
+    Win32DisplayRefreshState refresh_state;
+    D3D11PresentationTransition transition;
+    D3D11CompositionFeedback feedback;
 };
 
 class D3D11ImGuiViewportRenderer {
@@ -27,8 +41,11 @@ public:
     bool Initialize(IDXGIFactory2* factory, ID3D11Device* device, ID3D11DeviceContext* device_context);
     void Shutdown() noexcept;
     void SetCompositorClockPaced(bool paced) noexcept { compositor_clock_paced_ = paced; }
+    void RefreshPresentationTargets();
 
     [[nodiscard]] D3D11RendererError TakeLastError() noexcept;
+    [[nodiscard]] std::vector<D3D11ViewportPresentationUpdate>
+    TakePresentationUpdates() noexcept;
 
 private:
     static void CreateViewportWindow(ImGuiViewport* viewport);
@@ -38,6 +55,9 @@ private:
     static void SwapViewportBuffers(ImGuiViewport* viewport, void* render_argument);
 
     void RecordFailure(HRESULT result, std::string_view operation) noexcept;
+    void CollectPresentationUpdate(
+        const ImGuiViewport& viewport,
+        D3D11WindowPresentation& presentation);
 
     static D3D11ImGuiViewportRenderer* active_instance_;
 
@@ -45,6 +65,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context_;
     D3D11RendererError last_error_;
+    std::vector<D3D11ViewportPresentationUpdate> presentation_updates_;
     bool compositor_clock_paced_ = false;
 };
 

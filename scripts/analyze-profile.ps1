@@ -332,14 +332,44 @@ function Write-DisplayEnvironment {
     }
 
     Write-Host (
-        'Display environment: reason={0}, monitor={1}, Windows mode={2} Hz, {3}, Present sync={4}, swapchain desc={5} Hz' -f `
+        'Display environment: reason={0}, monitor={1}, Windows mode={2} Hz, {3}' -f `
             (Get-EventValue $event 'reason' '-'),
             (Get-EventValue $event 'monitor_device' '-'),
             (Format-Number (Get-EventValue $event 'display_mode_frequency_hz')),
-            $dwmText,
-            (Get-EventValue $event 'swapchain_present_sync_interval' '-'),
-            (Format-Number (Get-EventValue $event 'swapchain_desc_refresh_hz'))
+            $dwmText
     )
+
+    $backend = Get-EventValue $event 'presentation_backend' ''
+    if ($backend) {
+        $feedbackEvents = @($Events | Where-Object {
+                (Get-EventValue $_ 'event') -eq 'presentation_feedback' -and
+                (Get-EventValue $_ 'target') -eq 'main' -and
+                [double](Get-EventValue $_ 'last_actual_duration' 0) -gt 0
+            })
+        $actualText = '-'
+        if ($feedbackEvents.Count -gt 0) {
+            $actualDuration = [double](Get-EventValue $feedbackEvents[-1] 'last_actual_duration' 0)
+            $actualText = '{0} Hz' -f (Format-Number (10000000.0 / $actualDuration))
+        }
+        Write-Host (
+            'Presentation: backend={0}, degradation={1}, DRR={2}, virtual/physical/requested={3}/{4}/{5} Hz, actual={6}, system constraint={7}' -f `
+                $backend,
+                (Get-EventValue $event 'presentation_degradation' '-'),
+                (Get-EventValue $event 'display_config_drr_configured' '-'),
+                (Format-Number (Get-EventValue $event 'virtual_refresh_hz')),
+                (Format-Number (Get-EventValue $event 'physical_refresh_hz')),
+                (Format-Number (Get-EventValue $event 'presentation_requested_refresh_hz')),
+                $actualText,
+                (Get-EventValue $event 'system_refresh_constrained' '-')
+        )
+    }
+    else {
+        Write-Host (
+            'Presentation: legacy DXGI, Present sync={0}, swapchain desc={1} Hz' -f `
+                (Get-EventValue $event 'swapchain_present_sync_interval' '-'),
+                (Format-Number (Get-EventValue $event 'swapchain_desc_refresh_hz'))
+        )
+    }
 }
 
 function Read-ProfileEvents {

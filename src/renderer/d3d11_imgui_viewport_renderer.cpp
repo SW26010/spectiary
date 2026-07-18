@@ -1,7 +1,5 @@
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 
-#include "renderer/d3d11_sdr_swap_chain.h"
-
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 
@@ -11,7 +9,9 @@ namespace specforge {
 namespace {
 
 struct ViewportRendererData {
-    D3D11SdrSwapChain swap_chain;
+    D3D11WindowPresentation presentation;
+    HMONITOR monitor = nullptr;
+    bool frame_acquired = false;
 };
 
 [[nodiscard]] HWND ViewportWindowHandle(const ImGuiViewport& viewport) noexcept
@@ -42,6 +42,7 @@ bool D3D11ImGuiViewportRenderer::Initialize(
     device_ = device;
     device_context_ = device_context;
     last_error_ = {};
+    presentation_updates_.clear();
     active_instance_ = this;
 
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
@@ -62,12 +63,45 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     device_.Reset();
     factory_.Reset();
     last_error_ = {};
+    presentation_updates_.clear();
     compositor_clock_paced_ = false;
 }
 
 D3D11RendererError D3D11ImGuiViewportRenderer::TakeLastError() noexcept
 {
     return std::exchange(last_error_, D3D11RendererError{});
+}
+
+std::vector<D3D11ViewportPresentationUpdate>
+D3D11ImGuiViewportRenderer::TakePresentationUpdates() noexcept
+{
+    return std::exchange(
+        presentation_updates_,
+        std::vector<D3D11ViewportPresentationUpdate>{});
+}
+
+void D3D11ImGuiViewportRenderer::RefreshPresentationTargets()
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return;
+    }
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    for (int index = 0; index < platform_io.Viewports.Size; ++index) {
+        ImGuiViewport* viewport = platform_io.Viewports[index];
+        if (viewport == nullptr) {
+            continue;
+        }
+        auto* data = static_cast<ViewportRendererData*>(viewport->RendererUserData);
+        if (data == nullptr) {
+            continue;
+        }
+        const HRESULT result = data->presentation.RefreshTarget();
+        RecordFailure(result, data->presentation.last_error_operation());
+        if (SUCCEEDED(result)) {
+            data->monitor = data->presentation.refresh_state().monitor;
+        }
+        CollectPresentationUpdate(*viewport, data->presentation);
+    }
 }
 
 void D3D11ImGuiViewportRenderer::CreateViewportWindow(ImGuiViewport* viewport)
@@ -78,18 +112,22 @@ void D3D11ImGuiViewportRenderer::CreateViewportWindow(ImGuiViewport* viewport)
     }
 
     auto* data = new ViewportRendererData();
-    const HRESULT result = data->swap_chain.Initialize(
+    const HWND hwnd = ViewportWindowHandle(*viewport);
+    const HRESULT result = data->presentation.Initialize(
         instance->factory_.Get(),
         instance->device_.Get(),
-        ViewportWindowHandle(*viewport),
+        instance->device_context_.Get(),
+        hwnd,
         static_cast<UINT>(viewport->Size.x),
         static_cast<UINT>(viewport->Size.y));
     if (FAILED(result)) {
-        instance->RecordFailure(result, data->swap_chain.last_error_operation());
+        instance->RecordFailure(result, data->presentation.last_error_operation());
         delete data;
         return;
     }
+    data->monitor = data->presentation.refresh_state().monitor;
     viewport->RendererUserData = data;
+    instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 
 void D3D11ImGuiViewportRenderer::DestroyViewportWindow(ImGuiViewport* viewport)
@@ -113,12 +151,12 @@ void D3D11ImGuiViewportRenderer::SetViewportWindowSize(ImGuiViewport* viewport, 
         return;
     }
 
-    const HRESULT result = data->swap_chain.Resize(
-        instance->device_.Get(),
-        instance->device_context_.Get(),
+    const HRESULT result = data->presentation.Resize(
         static_cast<UINT>(size.x),
         static_cast<UINT>(size.y));
-    instance->RecordFailure(result, data->swap_chain.last_error_operation());
+    data->frame_acquired = false;
+    instance->RecordFailure(result, data->presentation.last_error_operation());
+    instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 
 void D3D11ImGuiViewportRenderer::RenderViewportWindow(ImGuiViewport* viewport, void*)
@@ -132,12 +170,40 @@ void D3D11ImGuiViewportRenderer::RenderViewportWindow(ImGuiViewport* viewport, v
         return;
     }
 
-    constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    data->swap_chain.Bind(instance->device_context_.Get());
-    if ((viewport->Flags & ImGuiViewportFlags_NoRendererClear) == 0) {
-        data->swap_chain.Clear(instance->device_context_.Get(), clear_color);
+    const HMONITOR current_monitor = MonitorFromWindow(
+        ViewportWindowHandle(*viewport),
+        MONITOR_DEFAULTTONEAREST);
+    if (current_monitor != nullptr && current_monitor != data->monitor) {
+        const HRESULT refresh_result = data->presentation.RefreshTarget();
+        instance->RecordFailure(
+            refresh_result,
+            data->presentation.last_error_operation());
+        if (SUCCEEDED(refresh_result)) {
+            data->monitor = current_monitor;
+        }
+        instance->CollectPresentationUpdate(*viewport, data->presentation);
     }
+
+    constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    const HRESULT begin_result = data->presentation.BeginFrame(
+        clear_color,
+        (viewport->Flags & ImGuiViewportFlags_NoRendererClear) == 0,
+        0);
+    if (begin_result == DXGI_ERROR_WAS_STILL_DRAWING) {
+        data->frame_acquired = false;
+        instance->CollectPresentationUpdate(*viewport, data->presentation);
+        return;
+    }
+    instance->RecordFailure(
+        begin_result,
+        data->presentation.last_error_operation());
+    if (FAILED(begin_result)) {
+        data->frame_acquired = false;
+        return;
+    }
+    data->frame_acquired = true;
     ImGui_ImplDX11_RenderDrawData(viewport->DrawData);
+    instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 
 void D3D11ImGuiViewportRenderer::SwapViewportBuffers(ImGuiViewport* viewport, void*)
@@ -150,11 +216,14 @@ void D3D11ImGuiViewportRenderer::SwapViewportBuffers(ImGuiViewport* viewport, vo
     if (data == nullptr) {
         return;
     }
-    const UINT flags = instance->compositor_clock_paced_ && data->swap_chain.tearing_supported()
-                           ? DXGI_PRESENT_ALLOW_TEARING
-                           : 0U;
-    const HRESULT result = data->swap_chain.Present(0, flags);
-    instance->RecordFailure(result, data->swap_chain.last_error_operation());
+    if (!data->frame_acquired) {
+        return;
+    }
+    data->frame_acquired = false;
+    const HRESULT result = data->presentation.Present(
+        instance->compositor_clock_paced_);
+    instance->RecordFailure(result, data->presentation.last_error_operation());
+    instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 
 void D3D11ImGuiViewportRenderer::RecordFailure(HRESULT result, std::string_view operation) noexcept
@@ -162,6 +231,26 @@ void D3D11ImGuiViewportRenderer::RecordFailure(HRESULT result, std::string_view 
     if (FAILED(result) && SUCCEEDED(last_error_.result)) {
         last_error_ = D3D11RendererError{result, operation.empty() ? "Dear ImGui viewport renderer" : operation};
     }
+}
+
+void D3D11ImGuiViewportRenderer::CollectPresentationUpdate(
+    const ImGuiViewport& viewport,
+    D3D11WindowPresentation& presentation)
+{
+    D3D11PresentationTransition transition = presentation.TakeTransition();
+    D3D11CompositionFeedback feedback = presentation.TakeCompositionFeedback();
+    if (transition.empty() && feedback.empty()) {
+        return;
+    }
+    presentation_updates_.push_back(D3D11ViewportPresentationUpdate{
+        .viewport_id = viewport.ID,
+        .hwnd = ViewportWindowHandle(viewport),
+        .backend = presentation.backend(),
+        .degradation = presentation.degradation(compositor_clock_paced_),
+        .refresh_state = presentation.refresh_state(),
+        .transition = transition,
+        .feedback = feedback,
+    });
 }
 
 }  // namespace specforge

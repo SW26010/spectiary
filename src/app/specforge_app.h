@@ -64,6 +64,18 @@ private:
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
     void LogDisplayEnvironment(std::string_view reason);
+    void LogPresentationUpdates();
+    void WritePresentationUpdate(
+        std::string_view target,
+        unsigned int viewport_id,
+        HWND hwnd,
+        D3D11PresentationBackend backend,
+        D3D11PresentationDegradation degradation,
+        const Win32DisplayRefreshState& refresh_state,
+        const D3D11PresentationTransition& transition,
+        const D3D11CompositionFeedback& feedback);
+    void SchedulePresentationTargetRefresh(HWND hwnd) noexcept;
+    void RefreshPresentationTargets(std::string_view reason);
 
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     void LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam);

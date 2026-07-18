@@ -1,6 +1,6 @@
 # 显示呈现产品合同与验证矩阵
 
-状态：产品要求已确认；最终 Windows 呈现实现仍在实验验证中。
+状态：产品要求已确认；Composition 主路径已接入生产 renderer，本机自动化与正式交互视觉验收通过；严格尾部延迟门禁及未具备硬件的场景仍未通过。
 
 本文定义 SpecForge 在不同显示器、刷新率和 Windows 自动刷新率设置下的产品行为。
 它区分产品不变量、实现候选和已经取得的证据；没有真实硬件证据的场景不得标记为通过。
@@ -615,40 +615,63 @@ Present flags、DRR boost 或自定义 duration。
   8.331/8.332/8.333ms（另有 36 个 CompositionFrame）。因此早期白屏是缺失 source rect 所致，
   不是普通 HWND redirection 与 composition swapchain 不兼容；正式主窗口和 ImGui detached
   viewport 无需修改扩展窗口样式即可集成 adapter。
+- `logs/specforge-profile-20260718-141859.jsonl` 是 Composition 正式接入生产 renderer 后的首次
+  主窗口、沉浸模式和 detached viewport 联合交互验收。环境门禁为 DRR 自动：virtual/physical
+  约 60/120Hz、请求约 120Hz，主窗口与 detached viewport 均选择 `composition`，没有 backend
+  fallback 或 degradation；全部 drag 窗口内 feedback 的最后实际 IndependentFlip duration 均为
+  `83333`，没有 `166666` 样本。用户确认三种 Plot 均未见撕裂或功能异常，detached 移动、调整
+  大小和拖回均成功；仅 live resize 仍有已知卡顿但没有 resize failure。37.272s 聚合拖动中，
+  pan sample interval p50/p95 为 8.326/8.735ms，Present interval 为 8.322/8.855ms，
+  input→Present p95 为 8.344ms；因此功能与视觉门禁通过，但严格 8.3333ms p95 总门禁仍为 FAIL。
+  全程 main feedback 聚合 10678 submissions、10569 IndependentFlip、32 skipped、0 buffer acquire
+  skip；detached 聚合 3731 submissions、3045 IndependentFlip、250 skipped、357 次非阻塞 buffer
+  acquire skip。后者证明慢/resize 中的 viewport 没有阻塞主窗口，但也量化了 atomic 三缓冲 resize
+  的现有流畅度债务。
+- 同一生产日志还确认“已开始 Plot drag 后按住左键但不移动”会继续空提交：最长 3181.96ms
+  静止段中没有 pointer move 或 axis change，但完成 380 次 Present（119.42Hz）；松开时
+  `plot_interaction_active` 变为 false 且 compositor boost 立即释放。根因是
+  `IsPlotPanDragActive` 按“从 drag 开始直到按钮释放”定义 latency-sensitive interaction，
+  compositor tick 因而持续请求帧；不是 Composition 自激。该行为减少暂停后恢复移动时的升档风险，
+  但不符合最严格的“无画面更新不提交空帧”解释，需在提交前明确选择是否把 tick permission 与
+  render invalidation 解耦。
 - 当前没有外接显示器、混合刷新率、多适配器或通用 VRR 显示器的实测证据。
 
-## 实现候选的验证顺序
+## 已选实现与保留回退
 
-以下是按复杂度排列的实验假设，不是已经选定的最终实现：
+生产 renderer 现在为每个 HWND 独立拥有 `D3D11WindowPresentation`：主窗口和 detached
+viewport 共享同一策略边界，UI/plot 不再组合具体 Present API。默认路径是标准 Windows
+Composition Swapchain：从窗口所在 active display path 的物理刷新率计算 preferred duration，
+使用显式 source rect、三张 displayable SDR/P709 buffer，并通过 tagged
+IndependentFlip statistics 观测实际显示时长。
 
-1. 在创建任何 swap chain 前禁用 DRR vblank virtualization，保留 compositor clock boost，
-   使用无撕裂同步 Present；验证本机 DRR 是否同时达到约 120 Hz 和无撕裂。
-2. 若同步 Present 仍受错误节奏约束，验证 compositor-clock paced `Present(0, 0)` 在 HWND
-   flip-model 路径上是否由 DWM 无撕裂合成并达到目标节奏。
-3. 仅在 `CheckPresentDurationSupport` 和系统批准都成功时，使用 custom present duration
-   adapter；duration 必须来自目标刷新率和支持查询，不得硬编码为 120 Hz。微软将
-   `IDXGISwapChainMedia` 定义为桌面媒体应用的无缝自定义刷新率接口，并明确限制为内置
-   面板；外接显示器会通过 `(0, 0)` support bounds 报告不支持。因此即使本机验证通过，
-   该 adapter 也只能覆盖相符的内屏能力，不能作为通用外屏路径。参考：
-   <https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_3/nn-dxgi1_3-idxgiswapchainmedia>。
-4. 若所有已验证的无撕裂高刷 adapter 都失败，选择能够维持最高刷新率的 tearing adapter，
-   并记录为 `tearing_at_target_rate`；只有该路径也不可用或不稳定时才降低刷新率。
-5. 只有标准 HWND swap chain 路径被证据证明无法满足多显示目标时，才评估更深的
-   DirectComposition 或 composition swapchain 方案。
+策略选择和生命周期如下：
 
-每一步只改变一个呈现变量，并同时记录视觉结果、交互窗口节奏、输入到画面代理延迟、
-boost 释放和空闲恢复。失败的实验必须保留结论，但临时 debug 代码应删除。
+1. 首选 Composition Swapchain；固定刷新率与 DRR 使用同一路径，不按内外屏写特例。
+2. 初始化、duration 更新、resize、buffer acquire 或 Present 的不可恢复错误均在该 HWND
+   上切到既有显式 SDR DXGI swap chain，并记录原 backend、失败操作和 HRESULT。
+3. DXGI 回退在 compositor-clock 交互节奏可用且系统支持 tearing 时使用
+   `Present(0, ALLOW_TEARING)`，记录 `tearing_at_target_rate`；否则使用同步 Present，记录
+   `reduced_rate_tear_free`。固定 60 Hz 等用户/系统模式限制单独记录为
+   `system_refresh_constraint`，不伪装成应用降级。
+4. `WM_DISPLAYCHANGE` 使用 500ms 合并更新，窗口退出 move/size 或 viewport 换屏也会重新查询
+   各自目标；不修改 Windows 全局显示模式。
+5. detached viewport 使用非阻塞 buffer acquire；缓冲暂不可写时只跳过该 viewport 当前帧并
+   累计 `buffer_acquire_skipped`，避免慢显示目标在 UI 线程上阻塞其他窗口。
+
+呈现状态只在策略转换时记录；实际 feedback 在首次 IndependentFlip、异常或每 120 次提交时
+聚合记录，避免逐帧日志。原有 custom-duration 和 vblank-virtualization 实验保留为历史证据，
+不再进入生产策略分支。
 
 ## 验证矩阵
 
 | 场景 | 当前硬件可测 | 验收重点 | 状态 |
 |---|---:|---|---|
-| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | H1/H2 仅约 60Hz 无撕裂；H3 连续两次约 120Hz 无撕裂；独立 composition-swapchain v13 正确识别 DRR 虚拟约 60/物理约 120Hz，真实显示约 120Hz、流畅无撕裂，尚未集成正式交互 |
+| 内屏 DRR 自动，鼠标 pan | 是 | boost 高档、最大节奏、无撕裂、释放 | 生产 Composition 正确识别 DRR 虚拟约 60/物理约 120Hz；普通、沉浸及回 dock 后主 Plot 的有效交互 feedback 均为 83333 duration，视觉无撕裂且无功能异常；Present interval p50/p95 8.322/8.855ms，严格 p95 门禁仍 MISS；静止按住仍持续 120Hz 空提交，待策略确认 |
 | 内屏 DRR 自动，触控板 pan/zoom | 是 | 原生输入延迟、惯性、无撕裂、释放 | pan/zoom 均确认获批后约 120Hz 且无撕裂；短手势重获批 p50 约 75–82ms；锚点几何待独立验收 |
 | 内屏固定 60 Hz | 是 | 无撕裂、不误报 DRR 失败 | `Present(1, 0)` 与 composition-swapchain v13 均真实约 60Hz、无撕裂；后者正确识别非 DRR 的虚拟/物理约 60Hz，主观较流畅，归类 `system_refresh_constraint` |
 | 内屏固定高刷（系统提供的档位） | 是 | 跟随活动刷新率、无撕裂 | 固定 120Hz：`Present(1, 0)` 与 composition-swapchain v13 均真实约 120Hz、流畅无撕裂；后者正确识别非 DRR 的虚拟/物理约 120Hz |
 | 运行中切换自动/固定刷新率 | 是 | 策略重新感知、无 stale duration | 既有 HWND 路径双向均捕获 `WM_DISPLAYCHANGE`；composition-swapchain v14 连续跨固定 120/DRR 120/固定 60/DRR 120/固定 120，四次 duration 更新均 `S_OK`、实际扫描正确跟随且主观无异常；客观记录 119–340ms 提交与 158–598ms 显示 handoff，归类 `system_mode_switch_handoff` |
-| 普通、沉浸、同屏 detached viewport | 是 | 所有 swap chain 行为一致 | 正式 HWND swap-chain 普通最大化的无撕裂路径约 60Hz；独立 composition-swapchain 已在最大化、普通非最大化和普通 redirected HWND 上真实显示约 120Hz、无撕裂且流畅，但尚未集成；普通 UI 切为 borderless fullscreen 后 duration 获批、约 120Hz 且无撕裂；普通窗口和 detached viewport 的 tearing-at-target-rate 均已确认约 120Hz、流畅但可见撕裂；detached move/resize 的 queued-input 修复已通过自动测试 18/18 与正式构建人工复验；detached 无撕裂 adapter 与 per-viewport Present telemetry 仍未验证 |
+| 普通、沉浸、同屏 detached viewport | 是 | 所有 swap chain 行为一致 | 自动测试 18/18；正式联合交互中主窗口与 detached 均使用 Composition，全部 drag feedback 为 83333 duration，视觉无撕裂，移动/resize/拖回成功；detached 记录 357 次非阻塞 buffer acquire skip 和 250 skipped status，live resize 仍卡顿但不失败，保留为 staggered resize 性能债务 |
 | 外接固定 60/75 Hz | 否 | 同步跟随、正确记录约束 | 延后硬件验证 |
 | 外接固定 120/144/165 Hz | 否 | 最大活动刷新率、无撕裂 | 延后硬件验证 |
 | 内外屏不同刷新率并同时显示 | 否 | 慢屏不拖住快屏、各目标无撕裂 | 延后硬件验证 |

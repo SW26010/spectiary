@@ -1,8 +1,12 @@
+#include "renderer/d3d11_composition_swap_chain.h"
 #include "renderer/d3d11_sdr_swap_chain.h"
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "renderer/d3d11_renderer.h"
+#include "renderer/d3d11_window_presentation.h"
+#include "renderer/win32_display_refresh.h"
 
 #include <imgui.h>
+#include <imgui_impl_dx11.h>
 
 #include <array>
 #include <stdexcept>
@@ -89,7 +93,7 @@ HRESULT CreateTestDevice(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContex
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
-        0,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
         feature_levels.data(),
         static_cast<UINT>(feature_levels.size()),
         D3D11_SDK_VERSION,
@@ -101,7 +105,7 @@ HRESULT CreateTestDevice(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContex
             nullptr,
             D3D_DRIVER_TYPE_WARP,
             nullptr,
-            0,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             feature_levels.data(),
             static_cast<UINT>(feature_levels.size()),
             D3D11_SDK_VERSION,
@@ -125,6 +129,15 @@ ComPtr<IDXGIFactory2> GetTestFactory(ID3D11Device* device)
     return factory;
 }
 
+bool PresentationApiSupported(ID3D11Device* device)
+{
+    ComPtr<IPresentationFactory> factory;
+    return SUCCEEDED(CreatePresentationFactory(
+               device,
+               IID_PPV_ARGS(factory.GetAddressOf()))) &&
+           factory->IsPresentationSupported();
+}
+
 struct ViewportCleanupObservation {
     bool viewport_destroyed = false;
     bool callbacks_cleared = false;
@@ -144,9 +157,14 @@ public:
     {
         IMGUI_CHECKVERSION();
         context_ = ImGui::CreateContext();
-        renderer_initialized_ = context_ != nullptr && renderer_.Initialize(factory, device, context);
+        backend_initialized_ = context_ != nullptr &&
+                               ImGui_ImplDX11_Init(device, context);
+        renderer_initialized_ = backend_initialized_ &&
+                                renderer_.Initialize(factory, device, context);
         viewport_.PlatformHandle = viewport_.PlatformHandleRaw = hwnd;
         viewport_.Size = ImVec2(320.0f, 240.0f);
+        draw_data_.DisplaySize = ImVec2(0.0f, 0.0f);
+        viewport_.DrawData = &draw_data_;
     }
 
     ~ImGuiViewportTestFixture()
@@ -176,6 +194,10 @@ public:
         if (cleanup_observation_ != nullptr) {
             cleanup_observation_->renderer_shutdown = true;
         }
+        if (backend_initialized_) {
+            ImGui_ImplDX11_Shutdown();
+            backend_initialized_ = false;
+        }
         ImGui::DestroyContext(context_);
         context_ = nullptr;
         ImGui::SetCurrentContext(previous_context_);
@@ -203,6 +225,7 @@ public:
 
     void PresentViewport()
     {
+        ImGui::GetPlatformIO().Renderer_RenderWindow(&viewport_, nullptr);
         ImGui::GetPlatformIO().Renderer_SwapBuffers(&viewport_, nullptr);
     }
 
@@ -221,7 +244,9 @@ private:
     ImGuiContext* context_ = nullptr;
     specforge::D3D11ImGuiViewportRenderer renderer_;
     ImGuiViewport viewport_;
+    ImDrawData draw_data_;
     ViewportCleanupObservation* cleanup_observation_ = nullptr;
+    bool backend_initialized_ = false;
     bool renderer_initialized_ = false;
 };
 
@@ -261,6 +286,107 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
         specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, true) ==
             DXGI_PRESENT_ALLOW_TEARING,
         "boosted presentation should opt into variable-refresh delivery when supported");
+}
+
+void TestDisplayRefreshDurationPolicy()
+{
+    Require(
+        specforge::PreferredPresentDuration(120, 1) == 83'333,
+        "120 Hz should request an 8.3333 ms presentation duration");
+    Require(
+        specforge::PreferredPresentDuration(60, 1) == 166'667,
+        "60 Hz should request a 16.6667 ms presentation duration");
+    Require(
+        specforge::PreferredPresentDuration(0, 1) == 0 &&
+            specforge::PreferredPresentDuration(120, 0) == 0,
+        "invalid refresh rationals should not create a duration request");
+    Require(
+        specforge::PreferredPresentTolerance(83'333) == 1'000,
+        "high refresh durations should retain a practical minimum tolerance");
+    Require(
+        specforge::PreferredPresentTolerance(166'667) == 1'667,
+        "longer durations should use the one-percent tolerance policy");
+}
+
+void TestWindowPresentationLifecycleAndDeterministicFallback()
+{
+    SwapChainTestWindow window;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    Require(
+        SUCCEEDED(CreateTestDevice(device, context)),
+        "the presentation adapter test should create a BGRA-capable D3D11 device");
+    ComPtr<IDXGIFactory2> factory = GetTestFactory(device.Get());
+
+    specforge::D3D11WindowPresentation presentation;
+    Require(
+        SUCCEEDED(presentation.Initialize(
+            factory.Get(),
+            device.Get(),
+            context.Get(),
+            window.hwnd(),
+            320,
+            240)),
+        "the per-window presentation adapter should initialize composition or its DXGI fallback");
+    Require(
+        presentation.backend() != specforge::D3D11PresentationBackend::None,
+        "successful initialization should select a concrete presentation backend");
+    if (PresentationApiSupported(device.Get())) {
+        Require(
+            presentation.backend() ==
+                specforge::D3D11PresentationBackend::Composition,
+            "a supported Presentation API device should select the composition backend");
+    }
+    const specforge::D3D11PresentationTransition initial_transition =
+        presentation.TakeTransition();
+    Require(
+        initial_transition.current_backend == presentation.backend(),
+        "initialization should expose the selected backend as a transition");
+
+    constexpr float clear_color[4] = {0.08f, 0.09f, 0.10f, 1.0f};
+    Require(
+        SUCCEEDED(presentation.BeginFrame(clear_color)),
+        "the selected backend should acquire and bind a render target");
+    Require(
+        SUCCEEDED(presentation.Present(false)),
+        "the selected backend should submit an ordinary tear-free frame");
+    Require(
+        SUCCEEDED(presentation.Resize(640, 360)),
+        "the selected backend should rebuild its buffers on resize");
+    Require(
+        SUCCEEDED(presentation.BeginFrame(clear_color)) &&
+            SUCCEEDED(presentation.Present(true)),
+        "the selected backend should present after resize under compositor pacing");
+    Require(
+        SUCCEEDED(presentation.RefreshTarget()),
+        "the selected backend should refresh its per-monitor duration policy");
+    presentation.Shutdown();
+
+    Require(
+        SUCCEEDED(presentation.Initialize(
+            factory.Get(),
+            device.Get(),
+            context.Get(),
+            window.hwnd(),
+            320,
+            240,
+            specforge::D3D11CompositionPolicy::Disabled)),
+        "the adapter should retain a deterministic DXGI fallback path");
+    Require(
+        presentation.backend() == specforge::D3D11PresentationBackend::Dxgi,
+        "disabling composition should select DXGI explicitly");
+    const specforge::D3D11PresentationTransition fallback_transition =
+        presentation.TakeTransition();
+    Require(
+        fallback_transition.current_backend ==
+                specforge::D3D11PresentationBackend::Dxgi &&
+            fallback_transition.operation ==
+                "composition disabled by presentation options",
+        "the deterministic fallback should remain observable");
+    Require(
+        SUCCEEDED(presentation.BeginFrame(clear_color)) &&
+            SUCCEEDED(presentation.Present(false)),
+        "the deterministic DXGI fallback should render and present");
 }
 
 void TestInvalidArgumentsPreserveDiagnosticStage()
@@ -390,8 +516,10 @@ void TestImGuiViewportFixtureCleansUpDuringExceptionUnwind()
 int main()
 {
     TestSdrSwapChainUsesModernSrgbPresentationContract();
+    TestDisplayRefreshDurationPolicy();
     TestInvalidArgumentsPreserveDiagnosticStage();
     TestRealSwapChainInitializationColorSpaceAndResize();
+    TestWindowPresentationLifecycleAndDeterministicFallback();
     TestImGuiViewportSwapChainLifecycle();
     TestImGuiViewportFixtureCleansUpDuringExceptionUnwind();
     return 0;

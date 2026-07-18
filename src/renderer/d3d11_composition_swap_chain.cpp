@@ -1,0 +1,511 @@
+#include "renderer/d3d11_composition_swap_chain.h"
+
+#include <atomic>
+#include <utility>
+
+namespace specforge {
+namespace {
+
+constexpr std::uint64_t kFeedbackReportIntervalFrames = 120;
+constexpr DXGI_COLOR_SPACE_TYPE kCompositionColorSpace =
+    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+std::atomic<UINT_PTR> g_next_content_tag{0x5350'0000U};
+
+}  // namespace
+
+bool D3D11CompositionFeedback::empty() const noexcept
+{
+    return present_submissions == 0 && status_queued == 0 &&
+           status_skipped == 0 && status_canceled == 0 &&
+           composition_frames == 0 && independent_flip_frames == 0 &&
+           buffer_acquire_skipped == 0 &&
+           SUCCEEDED(statistics_error);
+}
+
+void D3D11CompositionSwapChain::Buffer::Reset() noexcept
+{
+    if (available_event != nullptr) {
+        CloseHandle(std::exchange(available_event, nullptr));
+    }
+    presentation.Reset();
+    render_target.Reset();
+    texture.Reset();
+}
+
+D3D11CompositionSwapChain::~D3D11CompositionSwapChain()
+{
+    Shutdown();
+}
+
+HRESULT D3D11CompositionSwapChain::Initialize(
+    ID3D11Device* device,
+    HWND hwnd,
+    UINT width,
+    UINT height,
+    const Win32DisplayRefreshState& refresh_state)
+{
+    Shutdown();
+    last_error_operation_ = {};
+    if (device == nullptr || hwnd == nullptr || width == 0 || height == 0 ||
+        refresh_state.preferred_duration == 0 ||
+        refresh_state.preferred_tolerance == 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::Initialize arguments",
+            E_INVALIDARG);
+    }
+
+    HRESULT result = CreatePresentationFactory(
+        device,
+        IID_PPV_ARGS(factory_.GetAddressOf()));
+    if (FAILED(result)) {
+        return RecordFailure("CreatePresentationFactory", result);
+    }
+    if (!factory_->IsPresentationSupported()) {
+        Shutdown();
+        return RecordFailure(
+            "IPresentationFactory::IsPresentationSupported",
+            DXGI_ERROR_UNSUPPORTED);
+    }
+    independent_flip_supported_ =
+        factory_->IsPresentationSupportedWithIndependentFlip();
+
+    result = factory_->CreatePresentationManager(manager_.GetAddressOf());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("CreatePresentationManager", result);
+    }
+
+    result = UpdatePreferredDuration(refresh_state);
+    if (FAILED(result)) {
+        Shutdown();
+        return result;
+    }
+
+    present_status_statistics_result_ = manager_->EnablePresentStatisticsKind(
+        PresentStatisticsKind_PresentStatus,
+        true);
+    composition_statistics_result_ = manager_->EnablePresentStatisticsKind(
+        PresentStatisticsKind_CompositionFrame,
+        true);
+    independent_flip_statistics_result_ =
+        manager_->EnablePresentStatisticsKind(
+            PresentStatisticsKind_IndependentFlipFrame,
+            true);
+    statistics_event_result_ =
+        manager_->GetPresentStatisticsAvailableEvent(&statistics_event_);
+    if (FAILED(statistics_event_result_)) {
+        statistics_event_ = nullptr;
+    }
+
+    result = DCompositionCreateSurfaceHandle(
+        COMPOSITIONOBJECT_ALL_ACCESS,
+        nullptr,
+        &surface_handle_);
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("DCompositionCreateSurfaceHandle", result);
+    }
+    result = manager_->CreatePresentationSurface(
+        surface_handle_,
+        presentation_surface_.GetAddressOf());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("CreatePresentationSurface", result);
+    }
+
+    content_tag_ = g_next_content_tag.fetch_add(1, std::memory_order_relaxed);
+    presentation_surface_->SetTag(content_tag_);
+    result = presentation_surface_->SetAlphaMode(DXGI_ALPHA_MODE_IGNORE);
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IPresentationSurface::SetAlphaMode", result);
+    }
+    result = presentation_surface_->SetColorSpace(kCompositionColorSpace);
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IPresentationSurface::SetColorSpace", result);
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+    result = device->QueryInterface(IID_PPV_ARGS(dxgi_device.GetAddressOf()));
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("ID3D11Device::QueryInterface(IDXGIDevice)", result);
+    }
+    result = DCompositionCreateDevice(
+        dxgi_device.Get(),
+        IID_PPV_ARGS(composition_device_.GetAddressOf()));
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("DCompositionCreateDevice", result);
+    }
+    result = composition_device_->CreateTargetForHwnd(
+        hwnd,
+        TRUE,
+        composition_target_.GetAddressOf());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionDevice::CreateTargetForHwnd", result);
+    }
+    result = composition_device_->CreateVisual(
+        composition_visual_.GetAddressOf());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionDevice::CreateVisual", result);
+    }
+    result = composition_device_->CreateSurfaceFromHandle(
+        surface_handle_,
+        composition_content_.GetAddressOf());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionDevice::CreateSurfaceFromHandle", result);
+    }
+    result = composition_visual_->SetContent(composition_content_.Get());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionVisual::SetContent", result);
+    }
+    result = composition_target_->SetRoot(composition_visual_.Get());
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionTarget::SetRoot", result);
+    }
+    result = composition_device_->Commit();
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure("IDCompositionDevice::Commit", result);
+    }
+
+    result = CreateBuffers(device, width, height);
+    if (FAILED(result)) {
+        Shutdown();
+        return result;
+    }
+    feedback_ = {};
+    last_error_operation_ = {};
+    return S_OK;
+}
+
+void D3D11CompositionSwapChain::Shutdown() noexcept
+{
+    if (composition_target_ != nullptr) {
+        (void)composition_target_->SetRoot(nullptr);
+    }
+    if (composition_device_ != nullptr) {
+        (void)composition_device_->Commit();
+    }
+    ResetBuffers();
+    composition_content_.Reset();
+    composition_visual_.Reset();
+    composition_target_.Reset();
+    composition_device_.Reset();
+    presentation_surface_.Reset();
+    manager_.Reset();
+    factory_.Reset();
+    if (statistics_event_ != nullptr) {
+        CloseHandle(std::exchange(statistics_event_, nullptr));
+    }
+    if (surface_handle_ != nullptr) {
+        CloseHandle(std::exchange(surface_handle_, nullptr));
+    }
+    width_ = 0;
+    height_ = 0;
+    selected_buffer_ = -1;
+    preferred_duration_ = 0;
+    preferred_tolerance_ = 0;
+    content_tag_ = 0;
+    preferred_duration_result_ = E_FAIL;
+    present_status_statistics_result_ = E_FAIL;
+    composition_statistics_result_ = E_FAIL;
+    independent_flip_statistics_result_ = E_FAIL;
+    statistics_event_result_ = E_FAIL;
+    independent_flip_supported_ = false;
+    independent_flip_reported_ = false;
+    feedback_ = {};
+}
+
+HRESULT D3D11CompositionSwapChain::Resize(
+    ID3D11Device* device,
+    ID3D11DeviceContext* device_context,
+    UINT width,
+    UINT height)
+{
+    if (device == nullptr || device_context == nullptr || manager_ == nullptr ||
+        width == 0 || height == 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::Resize arguments",
+            E_INVALIDARG);
+    }
+    device_context->OMSetRenderTargets(0, nullptr, nullptr);
+    selected_buffer_ = -1;
+    const HRESULT result = CreateBuffers(device, width, height);
+    if (SUCCEEDED(result)) {
+        last_error_operation_ = {};
+    }
+    return result;
+}
+
+HRESULT D3D11CompositionSwapChain::UpdatePreferredDuration(
+    const Win32DisplayRefreshState& refresh_state) noexcept
+{
+    if (manager_ == nullptr || refresh_state.preferred_duration == 0 ||
+        refresh_state.preferred_tolerance == 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::UpdatePreferredDuration arguments",
+            E_INVALIDARG);
+    }
+    const SystemInterruptTime preferred_duration = {
+        refresh_state.preferred_duration,
+    };
+    const SystemInterruptTime tolerance = {
+        refresh_state.preferred_tolerance,
+    };
+    preferred_duration_result_ = manager_->SetPreferredPresentDuration(
+        preferred_duration,
+        tolerance);
+    if (FAILED(preferred_duration_result_)) {
+        return RecordFailure(
+            "IPresentationManager::SetPreferredPresentDuration",
+            preferred_duration_result_);
+    }
+    preferred_duration_ = refresh_state.preferred_duration;
+    preferred_tolerance_ = refresh_state.preferred_tolerance;
+    last_error_operation_ = {};
+    return S_OK;
+}
+
+HRESULT D3D11CompositionSwapChain::BeginFrame(
+    ID3D11DeviceContext* device_context,
+    const float clear_color[4],
+    bool clear,
+    DWORD availability_timeout_ms)
+{
+    if (device_context == nullptr || (clear && clear_color == nullptr) || manager_ == nullptr ||
+        selected_buffer_ >= 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::BeginFrame arguments",
+            E_INVALIDARG);
+    }
+
+    DrainStatistics();
+    std::array<HANDLE, 3> available_events = {};
+    for (std::size_t index = 0; index < buffers_.size(); ++index) {
+        available_events[index] = buffers_[index].available_event;
+    }
+    const DWORD wait_result = WaitForMultipleObjects(
+        static_cast<DWORD>(available_events.size()),
+        available_events.data(),
+        FALSE,
+        availability_timeout_ms);
+    if (wait_result == WAIT_TIMEOUT) {
+        ++feedback_.buffer_acquire_skipped;
+        last_error_operation_ = {};
+        return DXGI_ERROR_WAS_STILL_DRAWING;
+    }
+    if (wait_result >= WAIT_OBJECT_0 + available_events.size()) {
+        const DWORD error = wait_result == WAIT_FAILED
+                                      ? GetLastError()
+                                      : ERROR_GEN_FAILURE;
+        const HRESULT result = HRESULT_FROM_WIN32(
+            error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE);
+        return RecordFailure("IPresentationBuffer::GetAvailableEvent wait", result);
+    }
+
+    selected_buffer_ = static_cast<int>(wait_result - WAIT_OBJECT_0);
+    ID3D11RenderTargetView* render_target =
+        buffers_[static_cast<std::size_t>(selected_buffer_)].render_target.Get();
+    device_context->OMSetRenderTargets(1, &render_target, nullptr);
+    if (clear) {
+        device_context->ClearRenderTargetView(render_target, clear_color);
+    }
+    last_error_operation_ = {};
+    return S_OK;
+}
+
+HRESULT D3D11CompositionSwapChain::Present(
+    ID3D11DeviceContext* device_context)
+{
+    if (device_context == nullptr || manager_ == nullptr ||
+        presentation_surface_ == nullptr || selected_buffer_ < 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::Present arguments",
+            E_INVALIDARG);
+    }
+
+    device_context->Flush();
+    Buffer& buffer = buffers_[static_cast<std::size_t>(selected_buffer_)];
+    HRESULT result = presentation_surface_->SetBuffer(buffer.presentation.Get());
+    if (FAILED(result)) {
+        selected_buffer_ = -1;
+        return RecordFailure("IPresentationSurface::SetBuffer", result);
+    }
+    result = manager_->Present();
+    selected_buffer_ = -1;
+    if (FAILED(result)) {
+        return RecordFailure("IPresentationManager::Present", result);
+    }
+    ++feedback_.present_submissions;
+    last_error_operation_ = {};
+    return S_OK;
+}
+
+D3D11CompositionFeedback D3D11CompositionSwapChain::TakeFeedback() noexcept
+{
+    DrainStatistics();
+    const bool first_independent_flip =
+        !independent_flip_reported_ && feedback_.independent_flip_frames > 0;
+    const bool anomaly = feedback_.status_skipped > 0 ||
+                         feedback_.status_canceled > 0 ||
+                         FAILED(feedback_.statistics_error);
+    if (!first_independent_flip && !anomaly &&
+        feedback_.present_submissions < kFeedbackReportIntervalFrames &&
+        feedback_.buffer_acquire_skipped < kFeedbackReportIntervalFrames) {
+        return {};
+    }
+    independent_flip_reported_ =
+        independent_flip_reported_ || first_independent_flip;
+    return std::exchange(feedback_, D3D11CompositionFeedback{});
+}
+
+HRESULT D3D11CompositionSwapChain::RecordFailure(
+    std::string_view operation,
+    HRESULT result) noexcept
+{
+    last_error_operation_ = operation;
+    return result;
+}
+
+HRESULT D3D11CompositionSwapChain::CreateBuffers(
+    ID3D11Device* device,
+    UINT width,
+    UINT height)
+{
+    if (device == nullptr || manager_ == nullptr || presentation_surface_ == nullptr ||
+        width == 0 || height == 0) {
+        return RecordFailure(
+            "D3D11CompositionSwapChain::CreateBuffers arguments",
+            E_INVALIDARG);
+    }
+
+    ResetBuffers();
+    width_ = width;
+    height_ = height;
+    const RECT source_rect = {
+        0,
+        0,
+        static_cast<LONG>(width),
+        static_cast<LONG>(height),
+    };
+    HRESULT result = presentation_surface_->SetSourceRect(&source_rect);
+    if (FAILED(result)) {
+        return RecordFailure("IPresentationSurface::SetSourceRect", result);
+    }
+
+    for (Buffer& buffer : buffers_) {
+        D3D11_TEXTURE2D_DESC description = {};
+        description.Width = width;
+        description.Height = height;
+        description.MipLevels = 1;
+        description.ArraySize = 1;
+        description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        description.SampleDesc.Count = 1;
+        description.Usage = D3D11_USAGE_DEFAULT;
+        description.BindFlags =
+            D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        description.MiscFlags =
+            D3D11_RESOURCE_MISC_SHARED |
+            D3D11_RESOURCE_MISC_SHARED_NTHANDLE |
+            D3D11_RESOURCE_MISC_SHARED_DISPLAYABLE;
+        result = device->CreateTexture2D(
+            &description,
+            nullptr,
+            buffer.texture.GetAddressOf());
+        if (FAILED(result)) {
+            return RecordFailure("ID3D11Device::CreateTexture2D(displayable)", result);
+        }
+        result = device->CreateRenderTargetView(
+            buffer.texture.Get(),
+            nullptr,
+            buffer.render_target.GetAddressOf());
+        if (FAILED(result)) {
+            return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
+        }
+        result = manager_->AddBufferFromResource(
+            buffer.texture.Get(),
+            buffer.presentation.GetAddressOf());
+        if (FAILED(result)) {
+            return RecordFailure("IPresentationManager::AddBufferFromResource", result);
+        }
+        result = buffer.presentation->GetAvailableEvent(&buffer.available_event);
+        if (FAILED(result)) {
+            return RecordFailure("IPresentationBuffer::GetAvailableEvent", result);
+        }
+    }
+    return S_OK;
+}
+
+void D3D11CompositionSwapChain::ResetBuffers() noexcept
+{
+    selected_buffer_ = -1;
+    for (Buffer& buffer : buffers_) {
+        buffer.Reset();
+    }
+}
+
+void D3D11CompositionSwapChain::DrainStatistics() noexcept
+{
+    if (statistics_event_ == nullptr || manager_ == nullptr) {
+        return;
+    }
+    while (WaitForSingleObject(statistics_event_, 0) == WAIT_OBJECT_0) {
+        Microsoft::WRL::ComPtr<IPresentStatistics> statistics;
+        const HRESULT result = manager_->GetNextPresentStatistics(
+            statistics.GetAddressOf());
+        if (FAILED(result)) {
+            feedback_.statistics_error = result;
+            CloseHandle(std::exchange(statistics_event_, nullptr));
+            return;
+        }
+        switch (statistics->GetKind()) {
+        case PresentStatisticsKind_PresentStatus: {
+            Microsoft::WRL::ComPtr<IPresentStatusPresentStatistics> status;
+            if (SUCCEEDED(statistics.As(&status))) {
+                switch (status->GetPresentStatus()) {
+                case PresentStatus_Queued:
+                    ++feedback_.status_queued;
+                    break;
+                case PresentStatus_Skipped:
+                    ++feedback_.status_skipped;
+                    break;
+                case PresentStatus_Canceled:
+                    ++feedback_.status_canceled;
+                    break;
+                default:
+                    break;
+                }
+            }
+            break;
+        }
+        case PresentStatisticsKind_CompositionFrame:
+            ++feedback_.composition_frames;
+            break;
+        case PresentStatisticsKind_IndependentFlipFrame: {
+            Microsoft::WRL::ComPtr<IIndependentFlipFramePresentStatistics>
+                independent_flip;
+            if (SUCCEEDED(statistics.As(&independent_flip)) &&
+                independent_flip->GetContentTag() == content_tag_) {
+                ++feedback_.independent_flip_frames;
+                feedback_.last_actual_duration =
+                    independent_flip->GetPresentDuration().value;
+                feedback_.last_displayed_time =
+                    independent_flip->GetDisplayedTime().value;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
+}  // namespace specforge

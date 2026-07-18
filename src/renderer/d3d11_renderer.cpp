@@ -27,7 +27,7 @@ HRESULT D3D11Renderer::Initialize(HWND hwnd)
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
-        0,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
         feature_levels,
         static_cast<UINT>(std::size(feature_levels)),
         D3D11_SDK_VERSION,
@@ -59,9 +59,26 @@ HRESULT D3D11Renderer::Initialize(HWND hwnd)
         return RecordFailure("IDXGIAdapter::GetParent(IDXGIFactory2)", result);
     }
 
-    result = swap_chain_.Initialize(factory_.Get(), device_.Get(), hwnd);
+    RECT client_rect = {};
+    if (!GetClientRect(hwnd, &client_rect) || client_rect.right <= client_rect.left ||
+        client_rect.bottom <= client_rect.top) {
+        const DWORD error = GetLastError();
+        Shutdown();
+        return RecordFailure(
+            "GetClientRect",
+            HRESULT_FROM_WIN32(
+                error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE));
+    }
+
+    result = presentation_.Initialize(
+        factory_.Get(),
+        device_.Get(),
+        device_context_.Get(),
+        hwnd,
+        static_cast<UINT>(client_rect.right - client_rect.left),
+        static_cast<UINT>(client_rect.bottom - client_rect.top));
     if (FAILED(result)) {
-        const std::string_view operation = swap_chain_.last_error_operation();
+        const std::string_view operation = presentation_.last_error_operation();
         Shutdown();
         return RecordFailure(operation, result);
     }
@@ -72,7 +89,7 @@ HRESULT D3D11Renderer::Initialize(HWND hwnd)
 
 void D3D11Renderer::Shutdown()
 {
-    swap_chain_.Shutdown();
+    presentation_.Shutdown();
     factory_.Reset();
     device_context_.Reset();
     device_.Reset();
@@ -83,40 +100,64 @@ HRESULT D3D11Renderer::Resize(UINT width, UINT height)
     if (width == 0 || height == 0) {
         return RecordFailure("D3D11Renderer::Resize arguments", E_INVALIDARG);
     }
-    const HRESULT result = swap_chain_.Resize(device_.Get(), device_context_.Get(), width, height);
+    const HRESULT result = presentation_.Resize(width, height);
     if (FAILED(result)) {
-        return RecordFailure(swap_chain_.last_error_operation(), result);
+        return RecordFailure(presentation_.last_error_operation(), result);
     }
     last_error_operation_ = {};
     return S_OK;
 }
 
-void D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
+HRESULT D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
 {
-    swap_chain_.Bind(device_context_.Get());
-    swap_chain_.Clear(device_context_.Get(), clear_color.data());
-}
-
-HRESULT D3D11Renderer::Present(D3D11PresentMode mode)
-{
-    const HRESULT result = swap_chain_.Present(
-        D3D11PresentSyncInterval(mode),
-        D3D11PresentFlags(mode, swap_chain_.tearing_supported()));
+    const HRESULT result = presentation_.BeginFrame(clear_color.data());
     if (FAILED(result)) {
-        return RecordFailure(swap_chain_.last_error_operation(), result);
+        return RecordFailure(presentation_.last_error_operation(), result);
     }
     last_error_operation_ = {};
     return result;
 }
 
+HRESULT D3D11Renderer::Present(D3D11PresentMode mode)
+{
+    const HRESULT result = presentation_.Present(
+        mode == D3D11PresentMode::CompositorClock);
+    if (FAILED(result)) {
+        return RecordFailure(presentation_.last_error_operation(), result);
+    }
+    last_error_operation_ = {};
+    return result;
+}
+
+HRESULT D3D11Renderer::RefreshPresentationTarget()
+{
+    const HRESULT result = presentation_.RefreshTarget();
+    if (FAILED(result)) {
+        return RecordFailure(presentation_.last_error_operation(), result);
+    }
+    last_error_operation_ = {};
+    return result;
+}
+
+D3D11PresentationTransition
+D3D11Renderer::TakePresentationTransition() noexcept
+{
+    return presentation_.TakeTransition();
+}
+
+D3D11CompositionFeedback D3D11Renderer::TakeCompositionFeedback() noexcept
+{
+    return presentation_.TakeCompositionFeedback();
+}
+
 bool D3D11Renderer::GetSwapChainDesc(DXGI_SWAP_CHAIN_DESC& desc) const
 {
-    return swap_chain_.GetDesc(desc);
+    return presentation_.GetSwapChainDesc(desc);
 }
 
 bool D3D11Renderer::GetConfiguredSwapChainColorSpace(DXGI_COLOR_SPACE_TYPE& color_space) const
 {
-    return swap_chain_.GetConfiguredColorSpace(color_space);
+    return presentation_.GetConfiguredSwapChainColorSpace(color_space);
 }
 
 HRESULT D3D11Renderer::RecordFailure(std::string_view operation, HRESULT result) noexcept

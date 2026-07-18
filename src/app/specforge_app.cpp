@@ -31,6 +31,8 @@ namespace {
 constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
 constexpr UINT kCompositorClockTickMessage = WM_APP + 0x54U;
+constexpr UINT_PTR kPresentationRefreshTimer = 0x5350U;
+constexpr UINT kPresentationRefreshDelayMs = 500U;
 constexpr float kDefaultWindowsDpi = 96.0f;
 constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -425,6 +427,7 @@ void SpecForgeApp::Initialize(
     }
     window_.Show(show_command);
     LogDisplayEnvironment("startup");
+    LogPresentationUpdates();
 }
 
 void SpecForgeApp::InitializeUiBackends()
@@ -494,6 +497,9 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    if (window_.hwnd() != nullptr) {
+        KillTimer(window_.hwnd(), kPresentationRefreshTimer);
+    }
     if (compositor_clock_.boost_requested()) {
         (void)compositor_clock_.SetBoostRequested(false);
         profile_.WriteEvent("compositor_clock", {
@@ -567,7 +573,11 @@ void SpecForgeApp::RenderFrame()
 
     {
         ProfileTimer timer(profile_, "render_pass", frame_index_);
-        renderer_.BeginFrame(kClearColor);
+        const HRESULT begin_result = renderer_.BeginFrame(kClearColor);
+        if (FAILED(begin_result)) {
+            throw std::runtime_error(
+                HResultMessage(renderer_.last_error_operation(), begin_result));
+        }
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
         const ImGuiIO& io = ImGui::GetIO();
@@ -601,6 +611,10 @@ void SpecForgeApp::RenderFrame()
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), present_result));
     }
+    if (present_result == S_FALSE) {
+        render_wake_scheduler_.RequestFrame();
+    }
+    LogPresentationUpdates();
 }
 
 void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
@@ -626,6 +640,17 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
                                                   ProfileSink::Field::Bool(
                                                       "touchpad_active",
                                                       touchpad_active),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_backend",
+                                                      D3D11PresentationBackendName(
+                                                          renderer_.presentation_backend())),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_degradation",
+                                                      D3D11PresentationDegradationName(
+                                                          renderer_.presentation_degradation(
+                                                              compositor_clock_.boost_active()
+                                                                  ? D3D11PresentMode::CompositorClock
+                                                                  : D3D11PresentMode::DisplayVSync))),
                                                   ProfileSink::Field::String(
                                                       "result",
                                                       HResultHex(compositor_clock_.last_boost_result())),
@@ -810,6 +835,217 @@ void SpecForgeApp::ExitImmersivePlotMode()
     }
 }
 
+void SpecForgeApp::LogPresentationUpdates()
+{
+    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
+                                                  ? D3D11PresentMode::CompositorClock
+                                                  : D3D11PresentMode::DisplayVSync;
+    WritePresentationUpdate(
+        "main",
+        0,
+        window_.hwnd(),
+        renderer_.presentation_backend(),
+        renderer_.presentation_degradation(present_mode),
+        renderer_.display_refresh_state(),
+        renderer_.TakePresentationTransition(),
+        renderer_.TakeCompositionFeedback());
+
+    for (D3D11ViewportPresentationUpdate& update :
+         viewport_renderer_.TakePresentationUpdates()) {
+        WritePresentationUpdate(
+            "viewport",
+            update.viewport_id,
+            update.hwnd,
+            update.backend,
+            update.degradation,
+            update.refresh_state,
+            update.transition,
+            update.feedback);
+    }
+}
+
+void SpecForgeApp::WritePresentationUpdate(
+    std::string_view target,
+    unsigned int viewport_id,
+    HWND hwnd,
+    D3D11PresentationBackend backend,
+    D3D11PresentationDegradation degradation,
+    const Win32DisplayRefreshState& refresh_state,
+    const D3D11PresentationTransition& transition,
+    const D3D11CompositionFeedback& feedback)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+
+    if (!transition.empty()) {
+        profile_.WriteEvent("presentation_state", {
+                                                      ProfileSink::Field::String(
+                                                          "target",
+                                                          std::string(target)),
+                                                      ProfileSink::Field::Number(
+                                                          "viewport_id",
+                                                          std::to_string(viewport_id)),
+                                                      ProfileSink::Field::Number(
+                                                          "hwnd",
+                                                          std::to_string(
+                                                              reinterpret_cast<std::uintptr_t>(hwnd))),
+                                                      ProfileSink::Field::String(
+                                                          "previous_backend",
+                                                          D3D11PresentationBackendName(
+                                                              transition.previous_backend)),
+                                                      ProfileSink::Field::String(
+                                                          "backend",
+                                                          D3D11PresentationBackendName(backend)),
+                                                      ProfileSink::Field::String(
+                                                          "degradation",
+                                                          D3D11PresentationDegradationName(
+                                                              degradation)),
+                                                      ProfileSink::Field::String(
+                                                          "transition_operation",
+                                                          std::string(transition.operation)),
+                                                      ProfileSink::Field::String(
+                                                          "transition_result",
+                                                          HResultHex(transition.reason)),
+                                                      ProfileSink::Field::Bool(
+                                                          "drr_configured",
+                                                          refresh_state.drr_configured()),
+                                                      ProfileSink::Field::Bool(
+                                                          "system_refresh_constrained",
+                                                          refresh_state.system_refresh_constrained()),
+                                                      ProfileSink::Field::Number(
+                                                          "virtual_refresh_hz",
+                                                          std::to_string(
+                                                              refresh_state.virtual_refresh_hz())),
+                                                      ProfileSink::Field::Number(
+                                                          "physical_refresh_hz",
+                                                          std::to_string(
+                                                              refresh_state.physical_refresh_hz())),
+                                                      ProfileSink::Field::Number(
+                                                          "requested_refresh_hz",
+                                                          std::to_string(
+                                                              refresh_state.requested_refresh_hz())),
+                                                      ProfileSink::Field::Number(
+                                                          "preferred_duration",
+                                                          std::to_string(
+                                                              refresh_state.preferred_duration)),
+                                                      ProfileSink::Field::Number(
+                                                          "preferred_tolerance",
+                                                          std::to_string(
+                                                              refresh_state.preferred_tolerance)),
+                                                  });
+    }
+
+    if (!feedback.empty()) {
+        profile_.WriteEvent("presentation_feedback", {
+                                                         ProfileSink::Field::String(
+                                                             "target",
+                                                             std::string(target)),
+                                                         ProfileSink::Field::Number(
+                                                             "viewport_id",
+                                                             std::to_string(viewport_id)),
+                                                         ProfileSink::Field::Number(
+                                                             "hwnd",
+                                                             std::to_string(
+                                                                 reinterpret_cast<std::uintptr_t>(hwnd))),
+                                                         ProfileSink::Field::String(
+                                                             "backend",
+                                                             D3D11PresentationBackendName(backend)),
+                                                         ProfileSink::Field::Number(
+                                                             "present_submissions",
+                                                             std::to_string(
+                                                                 feedback.present_submissions)),
+                                                         ProfileSink::Field::Number(
+                                                             "status_queued",
+                                                             std::to_string(feedback.status_queued)),
+                                                         ProfileSink::Field::Number(
+                                                             "status_skipped",
+                                                             std::to_string(feedback.status_skipped)),
+                                                         ProfileSink::Field::Number(
+                                                             "status_canceled",
+                                                             std::to_string(feedback.status_canceled)),
+                                                         ProfileSink::Field::Number(
+                                                             "composition_frames",
+                                                             std::to_string(feedback.composition_frames)),
+                                                         ProfileSink::Field::Number(
+                                                             "independent_flip_frames",
+                                                             std::to_string(
+                                                                 feedback.independent_flip_frames)),
+                                                         ProfileSink::Field::Number(
+                                                             "buffer_acquire_skipped",
+                                                             std::to_string(
+                                                                 feedback.buffer_acquire_skipped)),
+                                                         ProfileSink::Field::Number(
+                                                             "last_actual_duration",
+                                                             std::to_string(
+                                                                 feedback.last_actual_duration)),
+                                                         ProfileSink::Field::Number(
+                                                             "last_displayed_time",
+                                                             std::to_string(
+                                                                 feedback.last_displayed_time)),
+                                                         ProfileSink::Field::String(
+                                                             "statistics_result",
+                                                             HResultHex(feedback.statistics_error)),
+                                                     });
+    }
+}
+
+void SpecForgeApp::SchedulePresentationTargetRefresh(HWND hwnd) noexcept
+{
+    if (hwnd != nullptr) {
+        SetTimer(
+            hwnd,
+            kPresentationRefreshTimer,
+            kPresentationRefreshDelayMs,
+            nullptr);
+    }
+}
+
+void SpecForgeApp::RefreshPresentationTargets(std::string_view reason)
+{
+    const HRESULT result = renderer_.RefreshPresentationTarget();
+    if (FAILED(result)) {
+        profile_.WriteEvent("presentation_refresh_failed", {
+                                                                 ProfileSink::Field::String(
+                                                                     "target",
+                                                                     "main"),
+                                                                 ProfileSink::Field::String(
+                                                                     "reason",
+                                                                     std::string(reason)),
+                                                                 ProfileSink::Field::String(
+                                                                     "operation",
+                                                                     std::string(
+                                                                         renderer_.last_error_operation())),
+                                                                 ProfileSink::Field::String(
+                                                                     "result",
+                                                                     HResultHex(result)),
+                                                             });
+    }
+    viewport_renderer_.RefreshPresentationTargets();
+    const D3D11RendererError viewport_error = viewport_renderer_.TakeLastError();
+    if (FAILED(viewport_error.result)) {
+        profile_.WriteEvent("presentation_refresh_failed", {
+                                                                 ProfileSink::Field::String(
+                                                                     "target",
+                                                                     "viewport"),
+                                                                 ProfileSink::Field::String(
+                                                                     "reason",
+                                                                     std::string(reason)),
+                                                                 ProfileSink::Field::String(
+                                                                     "operation",
+                                                                     std::string(
+                                                                         viewport_error.operation)),
+                                                                 ProfileSink::Field::String(
+                                                                     "result",
+                                                                     HResultHex(
+                                                                         viewport_error.result)),
+                                                             });
+    }
+    LogPresentationUpdates();
+    LogDisplayEnvironment(reason);
+    render_wake_scheduler_.RequestFrame();
+}
+
 void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 {
     if (!profile_.is_open()) {
@@ -858,6 +1094,11 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                swap_chain_desc.BufferDesc.RefreshRate.Numerator,
                                                swap_chain_desc.BufferDesc.RefreshRate.Denominator)
                                          : 0.0;
+    const Win32DisplayRefreshState& refresh_state =
+        renderer_.display_refresh_state();
+    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
+                                                  ? D3D11PresentMode::CompositorClock
+                                                  : D3D11PresentMode::DisplayVSync;
 
     profile_.WriteEvent("display_environment", {
                                                   ProfileSink::Field::String("reason", std::string(reason)),
@@ -955,6 +1196,73 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                       "dwm_frames_missed",
                                                       std::to_string(dwm_ok ? dwm_timing.cFramesMissed : 0)),
                                                   ProfileSink::Field::Bool("swapchain_ok", swapchain_ok),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_backend",
+                                                      D3D11PresentationBackendName(
+                                                          renderer_.presentation_backend())),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_degradation",
+                                                      D3D11PresentationDegradationName(
+                                                          renderer_.presentation_degradation(
+                                                              present_mode))),
+                                                  ProfileSink::Field::Bool(
+                                                      "composition_independent_flip_supported",
+                                                      renderer_
+                                                          .composition_independent_flip_supported()),
+                                                  ProfileSink::Field::Bool(
+                                                      "composition_statistics_available",
+                                                      renderer_.composition_statistics_available()),
+                                                  ProfileSink::Field::Bool(
+                                                      "display_config_path_found",
+                                                      refresh_state.path_found),
+                                                  ProfileSink::Field::Number(
+                                                      "display_config_result",
+                                                      std::to_string(
+                                                          refresh_state.display_config_result)),
+                                                  ProfileSink::Field::Number(
+                                                      "display_config_query_flags",
+                                                      std::to_string(
+                                                          refresh_state
+                                                              .display_config_query_flags)),
+                                                  ProfileSink::Field::Bool(
+                                                      "display_config_virtual_refresh_aware",
+                                                      refresh_state.virtual_refresh_rate_aware),
+                                                  ProfileSink::Field::Bool(
+                                                      "display_config_drr_configured",
+                                                      refresh_state.drr_configured()),
+                                                  ProfileSink::Field::Bool(
+                                                      "system_refresh_constrained",
+                                                      refresh_state
+                                                          .system_refresh_constrained()),
+                                                  ProfileSink::Field::Number(
+                                                      "max_available_refresh_hz",
+                                                      std::to_string(
+                                                          refresh_state
+                                                              .max_available_refresh_hz)),
+                                                  ProfileSink::Field::Number(
+                                                      "virtual_refresh_hz",
+                                                      std::to_string(
+                                                          refresh_state.virtual_refresh_hz())),
+                                                  ProfileSink::Field::Number(
+                                                      "physical_refresh_hz",
+                                                      std::to_string(
+                                                          refresh_state.physical_refresh_hz())),
+                                                  ProfileSink::Field::Number(
+                                                      "presentation_requested_refresh_hz",
+                                                      std::to_string(
+                                                          refresh_state.requested_refresh_hz())),
+                                                  ProfileSink::Field::Number(
+                                                      "presentation_preferred_duration",
+                                                      std::to_string(
+                                                          refresh_state.preferred_duration)),
+                                                  ProfileSink::Field::Number(
+                                                      "presentation_preferred_tolerance",
+                                                      std::to_string(
+                                                          refresh_state.preferred_tolerance)),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_duration_basis",
+                                                      DisplayRefreshDurationBasisName(
+                                                          refresh_state.duration_basis)),
                                                   ProfileSink::Field::Bool(
                                                       "swapchain_color_space_configured",
                                                       swapchain_color_space_configured),
@@ -1117,7 +1425,18 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         return 0;
     case WM_DISPLAYCHANGE:
         LogDisplayEnvironment("display_change");
+        SchedulePresentationTargetRefresh(hwnd);
         return 0;
+    case WM_EXITSIZEMOVE:
+        SchedulePresentationTargetRefresh(hwnd);
+        return 0;
+    case WM_TIMER:
+        if (wparam == kPresentationRefreshTimer) {
+            KillTimer(hwnd, kPresentationRefreshTimer);
+            RefreshPresentationTargets("display_refresh_settled");
+            return 0;
+        }
+        break;
     case WM_DPICHANGED:
         if (imgui_initialized_) {
             ApplyUiScale(DpiScaleFromWParam(wparam));
@@ -1136,8 +1455,9 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         profile_.WriteEvent("dpi_changed", {
                                                 ProfileSink::Field::Number("dpi", std::to_string(HIWORD(wparam))),
                                                 ProfileSink::Field::Number("dpi_scale", std::to_string(ui_dpi_scale_)),
-                                            });
+        });
         LogDisplayEnvironment("dpi_changed");
+        SchedulePresentationTargetRefresh(hwnd);
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);

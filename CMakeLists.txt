@@ -162,14 +162,18 @@ target_link_libraries(specforge_desktop_ui
 )
 
 add_library(specforge_renderer STATIC
+    src/renderer/d3d11_composition_swap_chain.cpp
     src/renderer/d3d11_imgui_viewport_renderer.cpp
     src/renderer/d3d11_renderer.cpp
     src/renderer/d3d11_sdr_swap_chain.cpp
+    src/renderer/d3d11_window_presentation.cpp
+    src/renderer/win32_display_refresh.cpp
 )
 specforge_configure_production_target(specforge_renderer)
 target_link_libraries(specforge_renderer
     PRIVATE
         imgui::imgui
+        dcomp
         d3d11
         dxgi
 )
