@@ -538,6 +538,15 @@ void TestFilterConstrainsSequentialNavigation()
     result = controller.Navigate(specforge::SampleNavigationRequest::LocateSampleName("beta"));
     Require(result.target_found && result.current_sample_in_filter, "sample-name locate should jump to an included match");
     Require(result.current_index == 1, "sample-name locate should return the filtered match");
+
+    result = controller.Navigate(specforge::SampleNavigationRequest::RestoreLabelUndoPosition(4));
+    Require(
+        result.target_found && result.moved,
+        "label undo should restore its source row outside the active sample navigation sequence");
+    Require(result.current_index == 4, "label undo should return to the affected source row");
+    Require(
+        !result.current_sample_in_filter,
+        "restored undo row may remain outside the active sample navigation sequence");
 }
 
 void TestEmptyFilterClearsCurrentSequenceRow()

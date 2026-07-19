@@ -76,7 +76,6 @@ public:
 
     [[nodiscard]] SampleLabelWriteResult AssignLabel(std::size_t sample_index, int code);
     [[nodiscard]] SampleLabelWriteResult ClearLabel(std::size_t sample_index);
-    [[nodiscard]] std::optional<int> LabelCodeForShortcut(char shortcut) const;
 
 private:
     [[nodiscard]] SourceState* ActiveSource();

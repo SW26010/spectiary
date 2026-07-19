@@ -399,10 +399,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const SourceCollectionSessionIntentSubmitter& submit,
     const SourceCollectionSessionViewReader& read_view,
     bool* open,
-    SampleNavigationShortcut& shortcut)
+    SampleWorkflowShortcut& shortcut)
 {
     SourceCollectionSessionAction action;
-    shortcut = SampleNavigationShortcut::None;
+    shortcut = {};
     if (!ImGui::Begin(kNavigationWindow, open)) {
         ImGui::End();
         return action;
@@ -413,9 +413,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         ImGui::TextDisabled("No active source");
         const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-        shortcut = RouteSampleNavigationShortcut(
-            shortcut_focused,
-            shortcut_hovered);
+        shortcut = RouteSampleWorkflowShortcut({
+            .focused = shortcut_focused,
+            .hovered = shortcut_hovered,
+            .navigation_enabled = true});
         ImGui::End();
         return action;
     }
@@ -516,9 +517,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
 
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    shortcut = RouteSampleNavigationShortcut(
-        shortcut_focused,
-        shortcut_hovered);
+    shortcut = RouteSampleWorkflowShortcut({
+        .focused = shortcut_focused,
+        .hovered = shortcut_hovered,
+        .navigation_enabled = true});
     ImGui::End();
     return action;
 }

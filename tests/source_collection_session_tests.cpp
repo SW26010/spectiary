@@ -509,6 +509,18 @@ specforge::SourceCollectionSessionIntent AssignActiveLabelToCurrentSample(int co
         specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(code));
 }
 
+specforge::SourceCollectionSessionIntent ClearActiveLabelForCurrentSample()
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample());
+}
+
+specforge::SourceCollectionSessionIntent UndoLastLabelWrite()
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::UndoLastLabelWrite());
+}
+
 specforge::SourceCollectionSessionIntent SetFilterValueSelected(
     std::string source_id,
     std::string value_key,
@@ -621,6 +633,224 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     Require(
         loaded_indices == std::vector<std::size_t>({0, 1, 0}),
         "session should load only the opened, auto-advanced, and verified sample snapshots");
+}
+
+void TestLabelUndoRestoresValueAndAutoAdvancePosition()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "first undo fixture label should be accepted");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        "second undo fixture label should be accepted");
+    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
+
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    Require(session.View().snapshot->collection.current_index == 1, "first label should auto-advance to row 1");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    Require(session.View().snapshot->collection.current_index == 2, "second label should auto-advance to row 2");
+
+    specforge::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
+    Require(undo_result.action.snapshot_changed, "undo should reload the sample affected by auto-advance");
+    Require(session.View().snapshot->collection.current_index == 1, "undo should return to the second labeled row");
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "undo should restore the second row's previous unlabeled value");
+
+    undo_result = Submit(session, UndoLastLabelWrite());
+    Require(undo_result.action.snapshot_changed, "repeated undo should reload the previous affected sample");
+    Require(session.View().snapshot->collection.current_index == 0, "repeated undo should return to the first row");
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "repeated undo should restore the first row's previous unlabeled value");
+    Require(
+        session.View().labeling.remembered_position && *session.View().labeling.remembered_position == 0,
+        "undo should restore the task's remembered labeling position");
+
+    undo_result = Submit(session, UndoLastLabelWrite());
+    Require(!undo_result.action.snapshot_changed, "undo with an empty history should do nothing");
+    Require(session.View().snapshot->collection.current_index == 0, "empty undo should keep the current sample");
+}
+
+void TestLabelUndoRestoresExistingValueAfterOverwriteAndClear()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "overwrite undo fixture should accept the first label");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        "overwrite undo fixture should accept the second label");
+
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    (void)Submit(session, AssignActiveLabelToCurrentSample(2));
+    Require(session.View().labeling.current_code == 2, "overwrite fixture should start with the new label");
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == 1,
+        "undo after overwrite should restore the previous existing label");
+
+    (void)Submit(session, ClearActiveLabelForCurrentSample());
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "clear fixture should remove the existing label");
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == 1,
+        "undo after clear should restore the previous existing label");
+}
+
+void TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "sample-navigation-sequence undo fixture should accept a sample label");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+
+    const std::filesystem::path annotation_path =
+        AddPlainIntegerFilterAnnotation(session, {1, 2, 2}, "_undo_sample_filter.npy");
+    const std::string source_id = AnnotationSourceId(annotation_path);
+    (void)Submit(session, AddSampleFilterSource(source_id));
+    (void)Submit(session, SetFilterValueSelected(source_id, "2", true));
+    Require(
+        session.View().snapshot->collection.current_index == 1,
+        "sample filtering should move away from the labeled row excluded by the active sample navigation sequence");
+
+    const specforge::SourceCollectionSessionResult undo_result = Submit(session, UndoLastLabelWrite());
+    Require(
+        undo_result.action.snapshot_changed,
+        "undo should reload its affected row outside the active sample navigation sequence");
+    Require(
+        session.View().snapshot->collection.current_index == 0,
+        "session undo should restore the affected row even when it is outside the active sample navigation sequence");
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "session undo outside the sample navigation sequence should restore the previous value");
+    Require(
+        session.View().navigation.filter_active && !session.View().navigation.current_sample_in_filter,
+        "undo should preserve active sample filtering while displaying the restored out-of-sequence row");
+}
+
+void TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "history invalidation fixture should accept the first label");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+
+    (void)Submit(session, DeactivateActiveLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == 1,
+        "reactivating a task should not resurrect undo history from before deactivation");
+
+    (void)Submit(session, ClearActiveLabelForCurrentSample());
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "good", 'g'})).changed,
+        "changing label definitions should succeed");
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == 1,
+        "changing label definitions should invalidate earlier label-write history");
+}
+
+void TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "one", 'o'})).changed,
+        "capacity fixture should accept label one");
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{2, "two", 't'})).changed,
+        "capacity fixture should accept label two");
+
+    for (int write_index = 0; write_index < 257; ++write_index) {
+        const int code = write_index % 2 == 0 ? 1 : 2;
+        (void)Submit(session, AssignActiveLabelToCurrentSample(code));
+    }
+    Require(session.View().labeling.current_code == 1, "257 alternating writes should end at label one");
+
+    for (int undo_index = 0; undo_index < 256; ++undo_index) {
+        (void)Submit(session, UndoLastLabelWrite());
+    }
+    Require(
+        session.View().labeling.current_code == 1,
+        "undoing the retained 256 entries should stop at the state after the discarded oldest write");
+    const specforge::SourceCollectionSessionResult exhausted = Submit(session, UndoLastLabelWrite());
+    Require(!exhausted.action.snapshot_changed, "a 257th undo should find no retained history entry");
+    Require(session.View().labeling.current_code == 1, "exhausted bounded history should preserve the current value");
+}
+
+void TestSavingToCompanionAnnotationKeepsLabelUndoHistory()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_samples.npy");
+    TouchFile(source_path);
+    const std::optional<std::filesystem::path> companion_path =
+        specforge::SourceCollectionCompanionAnnotationPath(source_path);
+    Require(companion_path.has_value(), "NPY source should provide a companion sample annotation path");
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
+        "companion-save undo fixture should accept its sample label");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+
+    const specforge::SourceCollectionSessionResult save_result =
+        Submit(session, SetActiveLabelingOutputPath(*companion_path));
+    Require(save_result.action.navigation_inputs_changed, "companion save should resync sample workflow inputs");
+    Require(std::filesystem::exists(*companion_path), "companion sample annotation should be written");
+
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "saving the active task to its companion sample annotation must preserve label undo history");
+}
+
+void TestNoOpLabelUpsertKeepsLabelUndoHistory()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const specforge::SampleLabelDefinition label{1, "bad", 'b'};
+    Require(Submit(session, UpsertActiveLabel(label)).changed, "no-op fixture should accept its initial sample label");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+
+    const specforge::SourceCollectionSessionResult no_op = Submit(session, UpsertActiveLabel(label));
+    Require(!no_op.changed, "saving an identical sample label definition should report no change");
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
+        "an identical sample label save must preserve label undo history");
 }
 
 void TestAnnotationFilterSelectionAppliesToNavigation()
@@ -2130,6 +2360,11 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
     Require(session.View().filter.sources.empty(), "workflow restore should not restore old filter sources");
     Require(session.View().filter.available_sources.size() == 1, "restored annotation should be available to add again");
     Require(!session.View().navigation.filter_active, "workflow restore should leave sample filtering cleared");
+
+    result = Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code == 1,
+        "switching source identity should discard the previous source's label undo history");
 }
 
 void TestNavigationViewSeparatesSampleNameFromDisplayName()
@@ -2684,6 +2919,13 @@ void RunAllTests()
 {
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
+    TestLabelUndoRestoresValueAndAutoAdvancePosition();
+    TestLabelUndoRestoresExistingValueAfterOverwriteAndClear();
+    TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence();
+    TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions();
+    TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites();
+    TestNoOpLabelUpsertKeepsLabelUndoHistory();
+    TestSavingToCompanionAnnotationKeepsLabelUndoHistory();
     TestAnnotationFilterSelectionAppliesToNavigation();
     TestLocalLabelingAnnotationCanBeSampleFilterSource();
     TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot();

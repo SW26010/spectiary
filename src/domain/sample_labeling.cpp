@@ -292,10 +292,12 @@ bool UpsertSampleLabel(SampleLabelSet& label_set, SampleLabelDefinition label)
         return false;
     }
 
+    bool changed = false;
     if (label.shortcut != '\0') {
         for (SampleLabelDefinition& existing : label_set.labels) {
             if (existing.code != label.code && existing.shortcut == label.shortcut) {
                 existing.shortcut = '\0';
+                changed = true;
             }
         }
     }
@@ -305,8 +307,14 @@ bool UpsertSampleLabel(SampleLabelSet& label_set, SampleLabelDefinition label)
     });
     if (match == label_set.labels.end()) {
         label_set.labels.push_back(std::move(label));
-    } else {
+        changed = true;
+    } else if (match->name != label.name || match->shortcut != label.shortcut) {
         *match = std::move(label);
+        changed = true;
+    }
+
+    if (!changed) {
+        return false;
     }
 
     std::stable_sort(label_set.labels.begin(), label_set.labels.end(), [](const auto& left, const auto& right) {

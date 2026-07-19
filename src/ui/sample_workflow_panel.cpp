@@ -635,26 +635,6 @@ bool AnnotationActivationNeedsConfirmation(SampleAnnotationWorkflowRelationship 
     return relationship != SampleAnnotationWorkflowRelationship::LocalLabelingTask;
 }
 
-bool IsLabelShortcutPressed(char shortcut, bool context_active)
-{
-    if (!context_active) {
-        return false;
-    }
-    const char normalized = NormalizeSampleLabelShortcut(shortcut);
-    const ImGuiIO& io = ImGui::GetIO();
-    if (normalized == '\0' || io.WantTextInput || io.KeyCtrl || io.KeyShift || io.KeyAlt || io.KeySuper) {
-        return false;
-    }
-
-    ImGuiKey key = ImGuiKey_None;
-    if (normalized >= 'a' && normalized <= 'z') {
-        key = static_cast<ImGuiKey>(static_cast<int>(ImGuiKey_A) + (normalized - 'a'));
-    } else if (normalized >= '0' && normalized <= '9') {
-        key = static_cast<ImGuiKey>(static_cast<int>(ImGuiKey_0) + (normalized - '0'));
-    }
-    return key != ImGuiKey_None && ImGui::IsKeyPressed(key, false);
-}
-
 }  // namespace
 
 const char* SampleWorkflowPanelUi::LabelingWindowName()
@@ -679,6 +659,7 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     label_name_edit_buffer_.clear();
     label_code_edit_buffer_.fill('\0');
     label_shortcut_edit_buffer_.fill('\0');
+    ResetLabelShortcutCapture();
     label_name_focus_pending_ = false;
     pending_label_code_change_original_code_.reset();
     pending_label_code_change_ = {};
@@ -692,26 +673,49 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     pending_annotation_activation_relationship_ = SampleAnnotationWorkflowRelationship::PlainAnnotation;
 }
 
+void SampleWorkflowPanelUi::ResetLabelShortcutCapture()
+{
+    label_shortcut_capture_active_ = false;
+    pending_conflicting_shortcut_ = '\0';
+    label_shortcut_notice_.clear();
+}
+
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
-    bool plot_shortcut_context_active,
+    const SourceCollectionSessionViewReader& read_view,
     bool* open,
-    const std::function<std::optional<std::filesystem::path>()>& choose_output_path)
+    const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    SampleWorkflowShortcut& shortcut)
 {
     SourceCollectionSessionAction action;
+    shortcut = {};
     if (!ImGui::Begin(kLabelingWindow, open)) {
+        ResetLabelShortcutCapture();
         ImGui::End();
         return action;
     }
-    const bool labeling_context_active =
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
-        ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    const bool labeling_context_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const bool labeling_context_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    const auto route_latest_labeling_shortcuts = [&](bool blocked) {
+        const SourceCollectionLabelingView& latest_labeling = read_view().labeling;
+        shortcut = RouteSampleWorkflowShortcut(
+            {
+                .focused = labeling_context_focused,
+                .hovered = labeling_context_hovered,
+                .labeling_enabled = latest_labeling.has_active_task,
+                .blocked = blocked,
+            },
+            latest_labeling.label_set);
+    };
 
     const SourceCollectionLabelingView labeling_view = session_view.labeling;
     const std::optional<std::size_t> current_index = labeling_view.current_index;
     if (!labeling_view.has_active_source || !current_index) {
+        editing_label_code_.reset();
+        ResetLabelShortcutCapture();
         ImGui::TextDisabled("No active source");
+        route_latest_labeling_shortcuts(false);
         ImGui::End();
         return action;
     }
@@ -816,6 +820,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                 action,
                 submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask()))
                     .action);
+            editing_label_code_.reset();
+            ResetLabelShortcutCapture();
+            route_latest_labeling_shortcuts(false);
             ImGui::End();
             return action;
         }
@@ -889,8 +896,11 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                 submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::DeleteActiveLabelingTask()))
                     .action);
             pending_delete_task_name_.clear();
+            editing_label_code_.reset();
+            ResetLabelShortcutCapture();
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+            route_latest_labeling_shortcuts(false);
             ImGui::End();
             return action;
         }
@@ -902,10 +912,16 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         ImGui::EndPopup();
     }
     if (action.workflow_changed) {
+        editing_label_code_.reset();
+        ResetLabelShortcutCapture();
+        route_latest_labeling_shortcuts(false);
         ImGui::End();
         return action;
     }
     if (!labeling_view.has_active_task) {
+        editing_label_code_.reset();
+        ResetLabelShortcutCapture();
+        route_latest_labeling_shortcuts(false);
         ImGui::End();
         return action;
     }
@@ -914,6 +930,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     if (active_task_id_ != labeling_view.task_id) {
         active_task_id_ = labeling_view.task_id;
         editing_label_code_.reset();
+        ResetLabelShortcutCapture();
         label_name_focus_pending_ = false;
         pending_delete_label_code_.reset();
         pending_delete_label_name_.clear();
@@ -1022,14 +1039,9 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         }
     }
 
+    bool block_shortcuts_this_frame = label_shortcut_capture_active_;
     std::optional<int> label_code_to_assign;
     bool clear_label_requested = false;
-    for (const SampleLabelDefinition& label : labeling_view.label_set.labels) {
-        if (IsLabelShortcutPressed(label.shortcut, labeling_context_active || plot_shortcut_context_active)) {
-            label_code_to_assign = label.code;
-            clear_label_requested = false;
-        }
-    }
 
     ImGui::Separator();
     ImGui::AlignTextToFramePadding();
@@ -1050,6 +1062,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             label_name_edit_buffer_ = name;
             CopyToBuffer(label_code_edit_buffer_, std::to_string(code));
             label_shortcut_edit_buffer_.fill('\0');
+            ResetLabelShortcutCapture();
             label_name_focus_pending_ = true;
         }
     }
@@ -1066,7 +1079,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoHostExtendX)) {
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 1.0f);
         ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthFixed, 52.0f);
-        ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthFixed, 68.0f);
+        ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthFixed, 132.0f);
         ImGui::TableSetupColumn("##Edit", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableSetupColumn("##Delete", ImGuiTableColumnFlags_WidthFixed, 32.0f);
         ImGui::TableHeadersRow();
@@ -1105,14 +1118,98 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                               submit_edit;
 
                 ImGui::TableSetColumnIndex(2);
-                ImGui::SetNextItemWidth(std::max(1.0f, ImGui::GetContentRegionAvail().x));
-                submit_edit = ImGui::InputText(
-                                  "##label_shortcut",
-                                  label_shortcut_edit_buffer_.data(),
-                                  label_shortcut_edit_buffer_.size(),
-                                  ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_EnterReturnsTrue |
-                                      ImGuiInputTextFlags_AutoSelectAll) ||
-                              submit_edit;
+                const bool has_shortcut = label_shortcut_edit_buffer_[0] != '\0';
+                const float clear_button_width = has_shortcut
+                    ? ImGui::CalcTextSize("Clear").x + ImGui::GetStyle().FramePadding.x * 2.0f
+                    : 0.0f;
+                const float shortcut_button_width = std::max(
+                    1.0f,
+                    ImGui::GetContentRegionAvail().x -
+                        (has_shortcut ? clear_button_width + ImGui::GetStyle().ItemSpacing.x : 0.0f));
+                const std::string shortcut_button_label =
+                    (label_shortcut_capture_active_
+                         ? std::string{"Press key..."}
+                         : FormatSampleLabelShortcut(label_shortcut_edit_buffer_[0])) +
+                    "###label_shortcut_capture";
+                if (ImGui::Button(shortcut_button_label.c_str(), ImVec2(shortcut_button_width, 0.0f))) {
+                    block_shortcuts_this_frame = true;
+                    if (label_shortcut_capture_active_) {
+                        ResetLabelShortcutCapture();
+                    } else {
+                        label_shortcut_capture_active_ = true;
+                        pending_conflicting_shortcut_ = '\0';
+                        label_shortcut_notice_ =
+                            "Press A-Z or 0-9. Backspace clears the binding; Escape cancels.";
+                    }
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        label_shortcut_capture_active_
+                            ? "Waiting for an unmodified letter or digit"
+                            : "Capture a label shortcut");
+                }
+                if (has_shortcut) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Clear##label_shortcut")) {
+                        block_shortcuts_this_frame = true;
+                        label_shortcut_edit_buffer_.fill('\0');
+                        ResetLabelShortcutCapture();
+                        label_shortcut_notice_ = "The shortcut will be unbound when this label is saved.";
+                    }
+                }
+
+                if (label_shortcut_capture_active_) {
+                    block_shortcuts_this_frame = true;
+                    const SampleLabelShortcutCapture capture = CaptureSampleLabelShortcut();
+                    switch (capture.kind) {
+                    case SampleLabelShortcutCaptureKind::None:
+                        break;
+                    case SampleLabelShortcutCaptureKind::Cancelled:
+                        ResetLabelShortcutCapture();
+                        break;
+                    case SampleLabelShortcutCaptureKind::Cleared:
+                        label_shortcut_edit_buffer_.fill('\0');
+                        ResetLabelShortcutCapture();
+                        label_shortcut_notice_ = "The shortcut will be unbound when this label is saved.";
+                        break;
+                    case SampleLabelShortcutCaptureKind::Unsupported:
+                        pending_conflicting_shortcut_ = '\0';
+                        label_shortcut_notice_ = "Only unmodified A-Z and 0-9 keys can be assigned.";
+                        break;
+                    case SampleLabelShortcutCaptureKind::Captured: {
+                        const char captured_shortcut = NormalizeSampleLabelShortcut(capture.shortcut);
+                        const SampleLabelShortcutSelection selection = ResolveSampleLabelShortcutSelection(
+                            captured_shortcut,
+                            label.code,
+                            pending_conflicting_shortcut_,
+                            labeling_view.label_set);
+                        const SampleLabelDefinition* captured_owner = selection.conflicting_label_code ==
+                                kUnlabeledSampleLabelCode
+                            ? nullptr
+                            : FindSampleLabel(labeling_view.label_set, selection.conflicting_label_code);
+                        const std::string display_shortcut = FormatSampleLabelShortcut(captured_shortcut);
+                        if (captured_owner == nullptr) {
+                            label_shortcut_edit_buffer_.fill('\0');
+                            label_shortcut_edit_buffer_[0] = captured_shortcut;
+                            ResetLabelShortcutCapture();
+                            label_shortcut_notice_ =
+                                "Shortcut " + display_shortcut + " selected. Save the label to apply it.";
+                        } else if (selection.kind == SampleLabelShortcutSelectionKind::Accepted) {
+                            const std::string previous_owner_name = captured_owner->name;
+                            label_shortcut_edit_buffer_.fill('\0');
+                            label_shortcut_edit_buffer_[0] = captured_shortcut;
+                            ResetLabelShortcutCapture();
+                            label_shortcut_notice_ = "Shortcut " + display_shortcut + " will move from " +
+                                                     previous_owner_name + " when this label is saved.";
+                        } else {
+                            pending_conflicting_shortcut_ = captured_shortcut;
+                            label_shortcut_notice_ = display_shortcut + " is assigned to " + captured_owner->name +
+                                                     ". Press " + display_shortcut + " again to move it.";
+                        }
+                        break;
+                    }
+                    }
+                }
 
                 const std::string requested_name = TrimAscii(label_name_edit_buffer_);
                 const char requested_shortcut = label_shortcut_edit_buffer_[0];
@@ -1189,6 +1286,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                     ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
                 const auto cancel_label_edit = [&]() {
                     editing_label_code_.reset();
+                    ResetLabelShortcutCapture();
                     label_name_focus_pending_ = false;
                 };
                 if (HiddenActionIconButton(
@@ -1197,7 +1295,8 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                         ActionIcon::Close,
                         "Cancel editing",
                         true) ||
-                    (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+                    (!block_shortcuts_this_frame &&
+                        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
                         ImGui::IsKeyPressed(ImGuiKey_Escape))) {
                     cancel_label_edit();
                 }
@@ -1220,8 +1319,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                     ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
                     ImVec2(0.0f, ImGui::GetFrameHeight()));
                 const std::string code_text = std::to_string(label.code);
-                const std::string shortcut_text =
-                    label.shortcut == '\0' ? "None" : std::string(1, label.shortcut);
+                const std::string shortcut_text = FormatSampleLabelShortcut(label.shortcut);
                 DrawTableCellText(0, label.name);
                 DrawTableCellText(1, code_text);
                 DrawTableCellText(2, shortcut_text);
@@ -1243,6 +1341,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
                     if (label.shortcut != '\0') {
                         label_shortcut_edit_buffer_[0] = label.shortcut;
                     }
+                    ResetLabelShortcutCapture();
                     label_name_focus_pending_ = true;
                 }
 
@@ -1279,6 +1378,19 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         ImGui::EndTable();
     }
 
+    if (editing_label_code_ && !label_shortcut_notice_.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+        if (ImGui::BeginChild(
+                "##label_shortcut_notice",
+                ImVec2(0.0f, 0.0f),
+                ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+            ImGui::TextWrapped("%s", label_shortcut_notice_.c_str());
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
+
     if (open_change_label_code_popup) {
         ImGui::OpenPopup(kChangeSampleLabelCodePopup);
     }
@@ -1299,6 +1411,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             MergeSourceCollectionSessionAction(action, result.action);
             if (result.changed) {
                 editing_label_code_.reset();
+                ResetLabelShortcutCapture();
                 label_name_focus_pending_ = false;
                 pending_label_code_change_original_code_.reset();
                 pending_label_code_change_ = {};
@@ -1353,6 +1466,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         MergeSourceCollectionSessionAction(action, result.action);
         if (result.changed) {
             editing_label_code_.reset();
+            ResetLabelShortcutCapture();
             label_name_focus_pending_ = false;
         }
     }
@@ -1362,6 +1476,7 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         MergeSourceCollectionSessionAction(action, result.action);
         if (result.changed && editing_label_code_ == label_code_to_remove) {
             editing_label_code_.reset();
+            ResetLabelShortcutCapture();
             label_name_focus_pending_ = false;
         }
     }
@@ -1390,6 +1505,8 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
             submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()))
                 .action);
     }
+
+    route_latest_labeling_shortcuts(block_shortcuts_this_frame);
 
     ImGui::End();
     return action;

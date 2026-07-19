@@ -23,6 +23,7 @@ enum class SampleNavigationRequestKind {
     LocateSourceRowInSequence,
     LocateSampleName,
     LocateSampleNameMatch,
+    RestoreLabelUndoPosition,
 };
 
 struct SampleNavigationRequest {
@@ -41,6 +42,7 @@ struct SampleNavigationRequest {
     [[nodiscard]] static SampleNavigationRequest LocateSampleNameMatch(
         std::size_t row_index,
         std::string sample_name);
+    [[nodiscard]] static SampleNavigationRequest RestoreLabelUndoPosition(std::size_t row_index);
 };
 
 struct SampleNavigationResult {

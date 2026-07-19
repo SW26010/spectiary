@@ -2,7 +2,7 @@
 
 #include "domain/spectrum_loader.h"
 #include "plot/spectrum_plot.h"
-#include "ui/sample_navigation_shortcut.h"
+#include "ui/sample_workflow_shortcut.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -549,11 +549,10 @@ ShellUi::~ShellUi()
 
 void ShellUi::Render(const ShellStatus& status)
 {
-    label_shortcut_context_active_ = false;
-    sample_navigation_shortcut_ = SampleNavigationShortcut::None;
+    sample_workflow_shortcut_ = {};
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
-        HandleSampleNavigationShortcut();
+        HandleSampleWorkflowShortcut();
         return;
     }
     const PanelVisibilityState previous_panel_visibility = panel_visibility_;
@@ -586,7 +585,7 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
-    HandleSampleNavigationShortcut();
+    HandleSampleWorkflowShortcut();
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
         panel_visibility_);
@@ -800,8 +799,16 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
 
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    label_shortcut_context_active_ = shortcut_focused || shortcut_hovered;
-    QueueSampleNavigationShortcut(RouteSampleNavigationShortcut(shortcut_focused, shortcut_hovered));
+    const SourceCollectionLabelingView& labeling = SessionView().labeling;
+    QueueSampleWorkflowShortcut(RouteSampleWorkflowShortcut(
+        {
+            .focused = shortcut_focused,
+            .hovered = shortcut_hovered,
+            .allow_hover_fallback = true,
+            .navigation_enabled = true,
+            .labeling_enabled = labeling.has_active_task,
+        },
+        labeling.label_set));
     ImGui::End();
 }
 
@@ -886,7 +893,7 @@ void ShellUi::RenderFilesPanel()
 void ShellUi::RenderNavigationPanel()
 {
     const SourceCollectionSessionView& view = SessionView();
-    SampleNavigationShortcut shortcut = SampleNavigationShortcut::None;
+    SampleWorkflowShortcut shortcut;
     HandleSessionAction(source_collection_panel_ui_.RenderNavigation(
         view,
         [this](SourceCollectionSessionIntent command) {
@@ -897,7 +904,7 @@ void ShellUi::RenderNavigationPanel()
         },
         &panel_visibility_.navigation,
         shortcut));
-    QueueSampleNavigationShortcut(shortcut);
+    QueueSampleWorkflowShortcut(shortcut);
 }
 
 void ShellUi::RenderAnnotationsPanel()
@@ -917,16 +924,21 @@ void ShellUi::RenderAnnotationsPanel()
 void ShellUi::RenderLabelingPanel()
 {
     const SourceCollectionSessionView& view = SessionView();
+    SampleWorkflowShortcut shortcut;
     HandleSessionAction(sample_workflow_panel_ui_.RenderLabeling(
         view,
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
-        label_shortcut_context_active_,
+        [this]() -> const SourceCollectionSessionView& {
+            return SessionView();
+        },
         &panel_visibility_.labeling,
         []() {
             return ShowLabelOutputFilePicker();
-        }));
+        },
+        shortcut));
+    QueueSampleWorkflowShortcut(shortcut);
 }
 
 void ShellUi::RenderFiltersPanel()
@@ -1113,34 +1125,49 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         touchpad_gestures_);
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-    label_shortcut_context_active_ = shortcut_focused || shortcut_hovered;
-    QueueSampleNavigationShortcut(RouteSampleNavigationShortcut(shortcut_focused, shortcut_hovered));
+    const SourceCollectionLabelingView& labeling = SessionView().labeling;
+    QueueSampleWorkflowShortcut(RouteSampleWorkflowShortcut(
+        {
+            .focused = shortcut_focused,
+            .hovered = shortcut_hovered,
+            .allow_hover_fallback = true,
+            .navigation_enabled = true,
+            .labeling_enabled = labeling.has_active_task,
+        },
+        labeling.label_set));
     ImGui::End();
 }
 
-void ShellUi::QueueSampleNavigationShortcut(SampleNavigationShortcut shortcut)
+void ShellUi::QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut)
 {
-    if (shortcut != SampleNavigationShortcut::None) {
-        sample_navigation_shortcut_ = shortcut;
+    if (shortcut.kind != SampleWorkflowShortcutKind::None) {
+        sample_workflow_shortcut_ = shortcut;
     }
 }
 
-void ShellUi::HandleSampleNavigationShortcut()
+void ShellUi::HandleSampleWorkflowShortcut()
 {
-    SampleNavigationRequest request;
-    switch (sample_navigation_shortcut_) {
-    case SampleNavigationShortcut::None:
+    switch (sample_workflow_shortcut_.kind) {
+    case SampleWorkflowShortcutKind::None:
         return;
-    case SampleNavigationShortcut::Previous:
-        request = SampleNavigationRequest::Previous();
-        break;
-    case SampleNavigationShortcut::Next:
-        request = SampleNavigationRequest::Next();
-        break;
+    case SampleWorkflowShortcutKind::PreviousSample:
+        (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
+            SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
+        return;
+    case SampleWorkflowShortcutKind::NextSample:
+        (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
+            SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
+        return;
+    case SampleWorkflowShortcutKind::UndoLabelWrite:
+        (void)SubmitSessionCommand(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            ActiveSampleWorkflowIntent::UndoLastLabelWrite()));
+        return;
+    case SampleWorkflowShortcutKind::AssignLabel:
+        (void)SubmitSessionCommand(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(
+                sample_workflow_shortcut_.label_code)));
+        return;
     }
-
-    (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
-        SampleNavigationIntent::Move(std::move(request))));
 }
 
 void ShellUi::RenderSpectralLinesPanel()

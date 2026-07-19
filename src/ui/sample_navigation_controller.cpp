@@ -105,6 +105,14 @@ SampleNavigationRequest SampleNavigationRequest::LocateSampleNameMatch(
     return request;
 }
 
+SampleNavigationRequest SampleNavigationRequest::RestoreLabelUndoPosition(std::size_t row_index)
+{
+    SampleNavigationRequest request;
+    request.kind = SampleNavigationRequestKind::RestoreLabelUndoPosition;
+    request.row_index = row_index;
+    return request;
+}
+
 SampleNavigationController::SampleNavigationController()
     : SampleNavigationController(DefaultSampleNavigationStateCachePath())
 {
@@ -331,6 +339,11 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
             session->manifest.sample_names,
             request.row_index,
             request.sample_name);
+        break;
+    case SampleNavigationRequestKind::RestoreLabelUndoPosition:
+        if (request.row_index < session->spectrum_count) {
+            target_index = request.row_index;
+        }
         break;
     default:
         break;

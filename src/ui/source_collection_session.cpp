@@ -297,6 +297,13 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ClearActiveLabelForCurren
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::UndoLastLabelWrite()
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::UndoLastLabelWrite;
+    return intent;
+}
+
 SampleFilteringIntent SampleFilteringIntent::Clear()
 {
     SampleFilteringIntent intent;
@@ -561,6 +568,9 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
             break;
         case ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample:
             result.action = ClearActiveLabelForCurrentSample();
+            break;
+        case ActiveSampleWorkflowIntentKind::UndoLastLabelWrite:
+            result.action = UndoLastLabelWrite();
             break;
         }
         break;
@@ -827,6 +837,13 @@ SourceCollectionSessionAction SourceCollectionSession::ClearActiveLabelForCurren
 {
     SourceCollectionSessionAction action;
     ApplyWorkflowCommandResult(action, workflow_->ClearActiveLabelForCurrentSample(roster_->snapshot()));
+    return action;
+}
+
+SourceCollectionSessionAction SourceCollectionSession::UndoLastLabelWrite()
+{
+    SourceCollectionSessionAction action;
+    ApplyWorkflowCommandResult(action, workflow_->UndoLastLabelWrite(roster_->snapshot()));
     return action;
 }
 

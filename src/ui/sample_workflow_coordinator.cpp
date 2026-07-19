@@ -21,6 +21,7 @@ using namespace std::chrono_literals;
 
 constexpr auto kWorkflowStateSaveDebounce = 500ms;
 constexpr auto kWorkflowStateSaveRetry = 2s;
+constexpr std::size_t kMaxLabelUndoEntries = 256;
 
 std::string LowerAscii(std::string value)
 {
@@ -42,7 +43,8 @@ bool PathExists(const std::filesystem::path& path)
 bool ShouldRememberLabelingPosition(SampleNavigationRequestKind kind)
 {
     return kind == SampleNavigationRequestKind::Previous || kind == SampleNavigationRequestKind::Next ||
-           kind == SampleNavigationRequestKind::LabelAdvance;
+           kind == SampleNavigationRequestKind::LabelAdvance ||
+           kind == SampleNavigationRequestKind::RestoreLabelUndoPosition;
 }
 
 SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
@@ -184,6 +186,10 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
     const bool workflow_context_changed =
         !active_sample_workflow_context_fingerprint_ ||
         *active_sample_workflow_context_fingerprint_ != identity.context_fingerprint;
+
+    if (workflow_identity_changed) {
+        ClearLabelUndoHistory();
+    }
 
     navigation_.ActivateSource(std::move(*source_key), snapshot);
     SyncSampleWorkflowSession(snapshot, action);
@@ -369,6 +375,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryL
             labeling_.CreateTask(task_id, std::string{kTemporarySampleLabelingTaskName}) != nullptr;
     }
     if (started_or_resumed) {
+        ClearLabelUndoHistory();
         workflow_sources_.InvalidateSortingSourceCache();
         ApplyNavigationInputEffects(
             action,
@@ -424,6 +431,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
 
     if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
         if (labeling_.ActivateTask(plan.task_id)) {
+            ClearLabelUndoHistory();
             workflow_sources_.InvalidateSortingSourceCache();
             ApplyNavigationInputEffects(
                 action,
@@ -447,6 +455,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
     if (task == nullptr) {
         return action;
     }
+    ClearLabelUndoHistory();
     if (!plan.metadata_clean && task->output_path) {
         const bool metadata_saved = labeling_.PersistActiveTask();
         if (!metadata_saved) {
@@ -475,6 +484,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTas
     if (!labeling_.DeleteActiveTask()) {
         return action;
     }
+    ClearLabelUndoHistory();
 
     if (!deleted_task_source_id.empty()) {
         (void)workflow_sources_.RemoveFilterSource(deleted_task_source_id);
@@ -501,6 +511,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpsertActiveLabel(Sampl
         *changed = label_changed;
     }
     if (label_changed) {
+        ClearLabelUndoHistory();
         if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
             (void)labeling_.PersistActiveTask();
         }
@@ -530,6 +541,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
         *changed = label_changed;
     }
     if (label_changed) {
+        ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&
             workflow_sources_.ReplaceSampleFilterValue(
                 sample_filter_source_id,
@@ -560,6 +572,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int c
         *changed = label_changed;
     }
     if (label_changed) {
+        ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&
             workflow_sources_.RemoveSampleFilterValue(
                 sample_filter_source_id,
@@ -637,6 +650,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelin
     if (!labeling_.DeactivateActiveTask()) {
         return action;
     }
+    ClearLabelUndoHistory();
 
     MarkActiveWorkflowStateDirty();
     workflow_sources_.InvalidateFilterViewCache();
@@ -671,6 +685,34 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ClearActiveLabelForCurren
         return {};
     }
     return ApplyLabelWriteResult(snapshot, labeling_.ClearLabel(*sample_index));
+}
+
+SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
+    const SpectrumSnapshotHandle& snapshot)
+{
+    if (!LabelUndoHistoryMatchesActiveTask() || label_undo_history_->entries.empty()) {
+        return {};
+    }
+
+    SampleLabelingTask* task = labeling_.active_task();
+    const LabelUndoEntry entry = label_undo_history_->entries.back();
+    if (task == nullptr || entry.sample_index >= task->values.size() ||
+        task->values[entry.sample_index] != entry.current_code) {
+        ClearLabelUndoHistory();
+        return {};
+    }
+
+    SampleLabelWriteResult write_result = entry.previous_code == kUnlabeledSampleLabelCode
+        ? labeling_.ClearLabel(entry.sample_index)
+        : labeling_.AssignLabel(entry.sample_index, entry.previous_code);
+    if (!write_result.changed) {
+        ClearLabelUndoHistory();
+        return {};
+    }
+
+    write_result.advance_requested = false;
+    label_undo_history_->entries.pop_back();
+    return ApplyLabelWriteResult(snapshot, write_result, false, entry.sample_index);
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::ClearFilters(const SpectrumSnapshotHandle& snapshot)
@@ -1043,6 +1085,7 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
 
 void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionAction& action)
 {
+    ClearLabelUndoHistory();
     labeling_.ClearActiveSource();
     workflow_sources_.Clear();
     active_sample_workflow_identity_.reset();
@@ -1213,11 +1256,17 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
     const SpectrumSnapshotHandle& snapshot,
-    const SampleLabelWriteResult& result)
+    const SampleLabelWriteResult& result,
+    bool record_undo,
+    std::optional<std::size_t> restore_sample_index)
 {
     SampleWorkflowCommandResult command_result;
     if (!result.changed) {
         return command_result;
+    }
+
+    if (record_undo) {
+        RecordLabelUndo(result);
     }
 
     SampleLabelingTask* task = labeling_.active_task();
@@ -1230,7 +1279,14 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
         NavigationInputReconcileRequest{.filters_changed = true});
     ApplyNavigationInputEffects(command_result, effects);
 
-    if (result.advance_requested && task != nullptr) {
+    if (restore_sample_index) {
+        const SampleWorkflowCommandResult navigation_result = RequestSampleNavigation(
+            SampleNavigationRequest::RestoreLabelUndoPosition(*restore_sample_index),
+            snapshot);
+        MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
+        command_result.navigation = navigation_result.navigation;
+        command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;
+    } else if (result.advance_requested && task != nullptr) {
         const SampleWorkflowCommandResult navigation_result =
             RequestSampleNavigation(BuildAutoAdvanceRequest(*task), snapshot);
         MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
@@ -1238,6 +1294,39 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
         command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;
     }
     return command_result;
+}
+
+void SampleWorkflowCoordinator::RecordLabelUndo(const SampleLabelWriteResult& result)
+{
+    const SampleLabelingTask* task = labeling_.active_task();
+    if (!active_sample_workflow_identity_ || task == nullptr) {
+        return;
+    }
+    if (!LabelUndoHistoryMatchesActiveTask()) {
+        label_undo_history_ = LabelUndoHistory{
+            .workflow_identity = *active_sample_workflow_identity_,
+            .task_id = task->task_id};
+    }
+    if (label_undo_history_->entries.size() == kMaxLabelUndoEntries) {
+        label_undo_history_->entries.erase(label_undo_history_->entries.begin());
+    }
+    label_undo_history_->entries.push_back(LabelUndoEntry{
+        .sample_index = result.sample_index,
+        .previous_code = result.previous_code,
+        .current_code = result.current_code});
+}
+
+void SampleWorkflowCoordinator::ClearLabelUndoHistory()
+{
+    label_undo_history_.reset();
+}
+
+bool SampleWorkflowCoordinator::LabelUndoHistoryMatchesActiveTask() const
+{
+    const SampleLabelingTask* task = labeling_.active_task();
+    return label_undo_history_ && active_sample_workflow_identity_ && task != nullptr &&
+           label_undo_history_->workflow_identity == *active_sample_workflow_identity_ &&
+           label_undo_history_->task_id == task->task_id;
 }
 
 }  // namespace specforge

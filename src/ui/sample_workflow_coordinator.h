@@ -88,6 +88,8 @@ public:
         int code);
     [[nodiscard]] SampleWorkflowCommandResult ClearActiveLabelForCurrentSample(
         const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowCommandResult UndoLastLabelWrite(
+        const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction ClearFilters(const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction AddFilterSource(
         const SpectrumSnapshotHandle& snapshot,
@@ -138,6 +140,18 @@ private:
         std::optional<std::size_t> snapshot_index_to_load;
     };
 
+    struct LabelUndoEntry {
+        std::size_t sample_index = 0;
+        int previous_code = kUnlabeledSampleLabelCode;
+        int current_code = kUnlabeledSampleLabelCode;
+    };
+
+    struct LabelUndoHistory {
+        std::string workflow_identity;
+        std::string task_id;
+        std::vector<LabelUndoEntry> entries;
+    };
+
     void SyncSampleWorkflowSession(const SpectrumSnapshotHandle& snapshot, SourceCollectionSessionAction& action);
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
     [[nodiscard]] NavigationInputReconcileEffects ReconcileNavigationInputs(
@@ -163,7 +177,12 @@ private:
     [[nodiscard]] bool FlushWorkflowStateCache();
     [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
-        const SampleLabelWriteResult& result);
+        const SampleLabelWriteResult& result,
+        bool record_undo = true,
+        std::optional<std::size_t> restore_sample_index = std::nullopt);
+    void RecordLabelUndo(const SampleLabelWriteResult& result);
+    void ClearLabelUndoHistory();
+    [[nodiscard]] bool LabelUndoHistoryMatchesActiveTask() const;
 
     SampleNavigationController navigation_;
     SampleLabelingController labeling_;
@@ -175,6 +194,7 @@ private:
     LocalUserStateSaveScheduler workflow_state_save_scheduler_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
+    std::optional<LabelUndoHistory> label_undo_history_;
 };
 
 }  // namespace specforge

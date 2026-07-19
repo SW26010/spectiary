@@ -565,8 +565,20 @@ button should be disabled.
 
 Shortcut uniqueness is scoped to one sample labeling task. Different tasks may
 reuse the same shortcut because only one task is active at a time. Within the
-active task, assigning a shortcut already used by another label should bind it to
-the newly edited label and leave the previous label unbound.
+active task, assigning a shortcut already used by another label requires the user
+to press the same key a second time in the shortcut capture control. The editor
+should show a small inline notice after the first press rather than opening a
+modal. Saving the edit then binds the shortcut to the newly edited label and
+leaves the previous label unbound.
+
+Shortcut editing is available only after the user explicitly enters a label
+row's edit mode. The normal label row remains a full-row assignment target and
+must not expose an independently clickable shortcut editor. In edit mode the
+shortcut control is a key capture control, not a text input. It displays letter
+bindings as uppercase keyboard legends, accepts the next unmodified letter or
+digit key, treats top-row and keypad digits as the same portable digit binding,
+uses Backspace or Delete to clear the pending binding, and uses Escape to cancel
+capture. The stored shortcut remains the canonical lowercase ASCII form.
 
 Labeling shortcuts should work when the Labeling window or plot context is
 active, but not while the user is editing text. A shortcut binding must not use
@@ -577,6 +589,31 @@ label shortcuts. Modifier combinations, navigation keys, whitespace keys, Enter,
 Delete, and similar UI operation keys are out of scope for label bindings.
 Shortcuts are optional for all labels and labeling actions. If a label or clear
 operation has no shortcut, it remains available through its visible UI control.
+
+`Ctrl+Z` undoes the most recent label assignment or clear operation for the
+active task. A label write and its automatic sample advance form one undoable
+workflow transaction: undo restores the previous label value and returns to the
+affected sample even when that row is outside the current sample navigation
+sequence under active sample filtering.
+Repeated `Ctrl+Z` operations walk a bounded in-memory history for the current
+source and task. That history is not persisted and is discarded when its source
+identity or active task changes, when the task is deleted or deactivated, or when
+label definitions change. Label-definition edits themselves are not undoable in
+the first implementation.
+
+Navigation, label assignment, and label undo should share one application-level
+sample-workflow shortcut router. Focused Labeling and plot contexts may route
+label assignment and undo; focused Navigation and plot contexts may route sample
+movement. A hover-only plot context may route commands only when no other ImGui
+window owns keyboard focus. Text editing, shortcut capture, open popups or modals,
+and other focused panels retain ownership and suppress these workflow commands.
+The router must still submit every applicable ImGui shortcut route on every
+frame, including frames where command execution is suppressed, because
+`ImGui::Shortcut()` also registers ownership for the next frame. It collects all
+matches before selecting one command in `undo -> navigation -> label` priority;
+top-row and keypad aliases are submitted separately rather than with
+short-circuit evaluation. Blocked frames may register routes but never execute
+workflow commands; active items and popups keep input ownership.
 
 ## Persistence
 

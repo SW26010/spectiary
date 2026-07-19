@@ -571,15 +571,6 @@ SampleLabelWriteResult SampleLabelingController::ClearLabel(std::size_t sample_i
     return result;
 }
 
-std::optional<int> SampleLabelingController::LabelCodeForShortcut(char shortcut) const
-{
-    const SampleLabelingTask* task = active_task();
-    if (task == nullptr) {
-        return std::nullopt;
-    }
-    return SampleLabelCodeForShortcut(task->label_set, shortcut);
-}
-
 SampleLabelingController::SourceState* SampleLabelingController::ActiveSource()
 {
     if (!active_source_identity_) {

@@ -58,6 +58,7 @@ enum class ActiveSampleWorkflowIntentKind {
     DeactivateActiveLabelingTask,
     AssignActiveLabelToCurrentSample,
     ClearActiveLabelForCurrentSample,
+    UndoLastLabelWrite,
 };
 
 enum class SampleFilteringIntentKind {
@@ -137,6 +138,7 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent DeactivateActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] static ActiveSampleWorkflowIntent ClearActiveLabelForCurrentSample();
+    [[nodiscard]] static ActiveSampleWorkflowIntent UndoLastLabelWrite();
 
 private:
     friend class SourceCollectionSession;
@@ -303,6 +305,7 @@ private:
     [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample();
+    [[nodiscard]] SourceCollectionSessionAction UndoLastLabelWrite();
     [[nodiscard]] SourceCollectionSessionAction ClearFilters();
     [[nodiscard]] SourceCollectionSessionAction AddFilterSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction RemoveFilterSource(std::string source_id);

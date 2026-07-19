@@ -3,7 +3,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/source_collection_panel.h"
 #include "ui/panel_visibility_state_cache_io.h"
-#include "ui/sample_navigation_shortcut.h"
+#include "ui/sample_workflow_shortcut.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
@@ -68,8 +68,8 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
-    void QueueSampleNavigationShortcut(SampleNavigationShortcut shortcut);
-    void HandleSampleNavigationShortcut();
+    void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
+    void HandleSampleWorkflowShortcut();
     [[nodiscard]] const SourceCollectionSessionView& SessionView();
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(SourceCollectionSessionIntent command);
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(SourceCollectionSessionIntent command);
@@ -83,8 +83,7 @@ private:
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;
-    bool label_shortcut_context_active_ = false;
-    SampleNavigationShortcut sample_navigation_shortcut_ = SampleNavigationShortcut::None;
+    SampleWorkflowShortcut sample_workflow_shortcut_;
     bool layout_seeded_ = false;
     PanelVisibilityStatePersistence panel_visibility_state_;
     PanelVisibilityState panel_visibility_;

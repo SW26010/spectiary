@@ -2,6 +2,7 @@
 
 #include "domain/sample_filter.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/sample_workflow_shortcut.h"
 #include "ui/source_collection_session.h"
 
 #include <array>
@@ -24,9 +25,10 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
-        bool plot_shortcut_context_active,
+        const SourceCollectionSessionViewReader& read_view,
         bool* open,
-        const std::function<std::optional<std::filesystem::path>()>& choose_output_path);
+        const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        SampleWorkflowShortcut& shortcut);
 
     [[nodiscard]] SourceCollectionSessionAction RenderFilters(
         const SourceCollectionSessionView& session_view,
@@ -41,11 +43,16 @@ public:
         bool* open);
 
 private:
+    void ResetLabelShortcutCapture();
+
     std::string active_task_id_;
     std::optional<int> editing_label_code_;
     std::string label_name_edit_buffer_;
     std::array<char, 16> label_code_edit_buffer_ = {};
     std::array<char, 2> label_shortcut_edit_buffer_ = {};
+    bool label_shortcut_capture_active_ = false;
+    char pending_conflicting_shortcut_ = '\0';
+    std::string label_shortcut_notice_;
     bool label_name_focus_pending_ = false;
     std::optional<int> pending_label_code_change_original_code_;
     SampleLabelDefinition pending_label_code_change_;
