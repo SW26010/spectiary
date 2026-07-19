@@ -251,6 +251,15 @@ surface that should expose previous/next sample movement and its shortcuts;
 Labeling should not duplicate separate previous/next controls. Navigation
 actions should still carry intent: direct location by row index or sample name is
 a direct locate action, while previous/next movement is a sequential move action.
+The default sequential movement shortcuts are unmodified Left Arrow for previous
+and unmodified Right Arrow for next. They are active only in the Navigation,
+ordinary plot, or immersive plot contexts. Text editing, modifier combinations,
+and open popups retain ownership of those keys and suppress sample movement.
+Keyboard focus takes precedence over pointer hover: a merely hovered Navigation
+or plot context must not claim the arrow keys while another panel owns keyboard
+focus.
+Within those contexts, Tab and Shift+Tab remain the standard way to move control
+focus; Left Arrow and Right Arrow are owned exclusively by sequential sample movement.
 
 The first read-only vertical slice should keep navigation in source order and
 support only previous/next movement, direct row-index jumps, and sample-name

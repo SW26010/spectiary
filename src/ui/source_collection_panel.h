@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/sample_navigation_shortcut.h"
 #include "ui/source_collection_session.h"
 
 #include <array>
@@ -34,7 +35,8 @@ public:
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
         const SourceCollectionSessionViewReader& read_view,
-        bool* open);
+        bool* open,
+        SampleNavigationShortcut& shortcut);
 
     [[nodiscard]] SourceCollectionSessionAction RenderAnnotations(
         const SourceCollectionSessionView& session_view,

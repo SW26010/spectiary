@@ -398,18 +398,24 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
     const SourceCollectionSessionViewReader& read_view,
-    bool* open)
+    bool* open,
+    SampleNavigationShortcut& shortcut)
 {
     SourceCollectionSessionAction action;
+    shortcut = SampleNavigationShortcut::None;
     if (!ImGui::Begin(kNavigationWindow, open)) {
         ImGui::End();
         return action;
     }
-
     SourceCollectionSessionView view = session_view;
     SourceCollectionNavigationView navigation = view.navigation;
     if (!navigation.has_active_source) {
         ImGui::TextDisabled("No active source");
+        const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+        shortcut = RouteSampleNavigationShortcut(
+            shortcut_focused,
+            shortcut_hovered);
         ImGui::End();
         return action;
     }
@@ -467,6 +473,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         view = read_view();
         navigation = view.navigation;
     }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Previous sample (Left Arrow)");
+    }
     if (!can_previous) {
         ImGui::EndDisabled();
     }
@@ -480,6 +489,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         MergeSourceCollectionSessionAction(action, result.action);
         view = read_view();
         navigation = view.navigation;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Next sample (Right Arrow)");
     }
     if (!can_next) {
         ImGui::EndDisabled();
@@ -502,6 +514,11 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     view.navigation = std::move(navigation);
     MergeSourceCollectionSessionAction(action, RenderSampleNameSearch(std::move(view), submit, read_view));
 
+    const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    shortcut = RouteSampleNavigationShortcut(
+        shortcut_focused,
+        shortcut_hovered);
     ImGui::End();
     return action;
 }

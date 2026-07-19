@@ -146,6 +146,7 @@ target_link_libraries(specforge_sessions PUBLIC specforge_core)
 add_library(specforge_desktop_ui STATIC
     src/plot/plot_touchpad_gesture.cpp
     src/plot/spectrum_plot.cpp
+    src/ui/sample_navigation_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
     src/ui/shell_ui.cpp
     src/ui/source_collection_panel.cpp
@@ -263,6 +264,11 @@ specforge_add_test(
     specforge_sample_navigation_sequence_tests
     tests/sample_navigation_sequence_tests.cpp
     specforge_sessions
+)
+specforge_add_test(
+    specforge_sample_navigation_shortcut_tests
+    tests/sample_navigation_shortcut_tests.cpp
+    specforge_desktop_ui
 )
 specforge_add_test(
     specforge_sample_workflow_rules_tests

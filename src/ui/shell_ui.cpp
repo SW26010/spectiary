@@ -2,6 +2,7 @@
 
 #include "domain/spectrum_loader.h"
 #include "plot/spectrum_plot.h"
+#include "ui/sample_navigation_shortcut.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -549,8 +550,10 @@ ShellUi::~ShellUi()
 void ShellUi::Render(const ShellStatus& status)
 {
     label_shortcut_context_active_ = false;
+    sample_navigation_shortcut_ = SampleNavigationShortcut::None;
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
+        HandleSampleNavigationShortcut();
         return;
     }
     const PanelVisibilityState previous_panel_visibility = panel_visibility_;
@@ -583,6 +586,7 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
+    HandleSampleNavigationShortcut();
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
         panel_visibility_);
@@ -780,9 +784,6 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     ImGui::Begin(kImmersivePlotWindow, nullptr, flags);
     ImGui::PopStyleVar(3);
 
-    label_shortcut_context_active_ =
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
-        ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
     RenderSpectrumPlot(
@@ -797,6 +798,10 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         MakeImmersivePlotDisplayOptions(),
         touchpad_gestures_);
 
+    const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    label_shortcut_context_active_ = shortcut_focused || shortcut_hovered;
+    QueueSampleNavigationShortcut(RouteSampleNavigationShortcut(shortcut_focused, shortcut_hovered));
     ImGui::End();
 }
 
@@ -881,6 +886,7 @@ void ShellUi::RenderFilesPanel()
 void ShellUi::RenderNavigationPanel()
 {
     const SourceCollectionSessionView& view = SessionView();
+    SampleNavigationShortcut shortcut = SampleNavigationShortcut::None;
     HandleSessionAction(source_collection_panel_ui_.RenderNavigation(
         view,
         [this](SourceCollectionSessionIntent command) {
@@ -889,7 +895,9 @@ void ShellUi::RenderNavigationPanel()
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
-        &panel_visibility_.navigation));
+        &panel_visibility_.navigation,
+        shortcut));
+    QueueSampleNavigationShortcut(shortcut);
 }
 
 void ShellUi::RenderAnnotationsPanel()
@@ -1090,9 +1098,6 @@ void ShellUi::RenderInfoTagsPanel()
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
     ImGui::Begin(kMainPlotWindow);
-    label_shortcut_context_active_ =
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
-        ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
     RenderSpectrumPlot(
@@ -1106,7 +1111,36 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
             spectral_lines.marker_labels_visible},
         {},
         touchpad_gestures_);
+    const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    label_shortcut_context_active_ = shortcut_focused || shortcut_hovered;
+    QueueSampleNavigationShortcut(RouteSampleNavigationShortcut(shortcut_focused, shortcut_hovered));
     ImGui::End();
+}
+
+void ShellUi::QueueSampleNavigationShortcut(SampleNavigationShortcut shortcut)
+{
+    if (shortcut != SampleNavigationShortcut::None) {
+        sample_navigation_shortcut_ = shortcut;
+    }
+}
+
+void ShellUi::HandleSampleNavigationShortcut()
+{
+    SampleNavigationRequest request;
+    switch (sample_navigation_shortcut_) {
+    case SampleNavigationShortcut::None:
+        return;
+    case SampleNavigationShortcut::Previous:
+        request = SampleNavigationRequest::Previous();
+        break;
+    case SampleNavigationShortcut::Next:
+        request = SampleNavigationRequest::Next();
+        break;
+    }
+
+    (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
+        SampleNavigationIntent::Move(std::move(request))));
 }
 
 void ShellUi::RenderSpectralLinesPanel()
