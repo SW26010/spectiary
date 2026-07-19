@@ -109,6 +109,13 @@ sample label result, or output target.
 _Avoid_: Labeling window visibility, implicit task deletion, sample annotation
 view
 
+**Temporary sample labeling task**:
+The single output-free sample labeling task retained for one source collection.
+It uses the default name `Temporary labeling task`, may be paused and resumed,
+and becomes a local labeling annotation only after the user selects an output
+location. A source collection may not own two temporary sample labeling tasks.
+_Avoid_: Unsaved copy of every formal task, unnamed annotation, global task
+
 **Sample navigation**:
 The user-facing control of the current spectrum sample within a source
 collection, including movement, ordering, and locating a sample.
@@ -181,8 +188,8 @@ state.
 _Avoid_: Sample labeling task record, sample labeling draft, label array payload
 
 **Sample labeling draft**:
-An in-progress sample label result saved for recovery before the user writes or
-exports the intended labeling output.
+The in-progress sample label result of a temporary sample labeling task, saved
+for recovery before the user selects the intended labeling output.
 _Avoid_: Final label output, label set, source data
 
 **Spectral-line marker**:

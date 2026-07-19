@@ -11,6 +11,8 @@
 
 namespace specforge {
 
+inline constexpr std::string_view kTemporarySampleLabelingTaskName = "Temporary labeling task";
+
 enum class SampleAnnotationLabelingActivationKind {
     None,
     ActivateExistingTask,
@@ -34,9 +36,10 @@ struct SampleAnnotationLabelingActivationPlan {
 };
 
 [[nodiscard]] std::string DefaultedSampleLabelingTaskName(std::string task_name);
-[[nodiscard]] std::string TaskIdForCreatedSampleLabelingTask(
+[[nodiscard]] std::string TaskIdForNewSampleLabelingTask(
     std::string_view task_name,
     const std::vector<SampleLabelingTask>* active_source_tasks);
+[[nodiscard]] std::string SampleLabelingTaskNameForOutputPath(const std::filesystem::path& output_path);
 [[nodiscard]] const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
     const std::vector<SampleLabelingTask>* active_source_tasks,
     const SampleAnnotationResult& annotation);

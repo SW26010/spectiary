@@ -30,6 +30,8 @@ public:
     [[nodiscard]] bool has_active_source() const;
     [[nodiscard]] SampleLabelingTask* active_task();
     [[nodiscard]] const SampleLabelingTask* active_task() const;
+    [[nodiscard]] SampleLabelingTask* temporary_task();
+    [[nodiscard]] const SampleLabelingTask* temporary_task() const;
     [[nodiscard]] const std::vector<SampleLabelingTask>* active_source_tasks() const;
     [[nodiscard]] const SampleLabelingTask* FindActiveSourceTaskByOutputPath(
         const std::filesystem::path& output_path,
@@ -52,6 +54,9 @@ public:
     [[nodiscard]] bool RemoveActiveLabel(int code);
     [[nodiscard]] bool RenameActiveTask(std::string task_name);
     [[nodiscard]] bool SetActiveTaskOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] bool SaveActiveTemporaryTaskToOutput(
+        std::filesystem::path output_path,
+        std::string task_name);
     [[nodiscard]] bool CanDeactivateActiveTask() const;
     [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] bool DeactivateActiveTask();

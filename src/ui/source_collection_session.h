@@ -46,10 +46,8 @@ enum class SampleNavigationIntentKind {
 };
 
 enum class ActiveSampleWorkflowIntentKind {
-    CreateDefaultLabelingTask,
-    CreateLabelingTask,
+    StartOrResumeTemporaryLabelingTask,
     ActivateLabelingTaskFromAnnotation,
-    RenameActiveLabelingTask,
     DeleteActiveLabelingTask,
     UpsertActiveLabel,
     UpdateActiveLabel,
@@ -123,11 +121,9 @@ private:
 };
 
 struct ActiveSampleWorkflowIntent {
-    [[nodiscard]] static ActiveSampleWorkflowIntent CreateDefaultLabelingTask();
-    [[nodiscard]] static ActiveSampleWorkflowIntent CreateLabelingTask(std::string task_name);
+    [[nodiscard]] static ActiveSampleWorkflowIntent StartOrResumeTemporaryLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
-    [[nodiscard]] static ActiveSampleWorkflowIntent RenameActiveLabelingTask(std::string task_name);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeleteActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent UpsertActiveLabel(SampleLabelDefinition label);
     [[nodiscard]] static ActiveSampleWorkflowIntent UpdateActiveLabel(
@@ -148,9 +144,8 @@ private:
 
     ActiveSampleWorkflowIntent() = default;
 
-    ActiveSampleWorkflowIntentKind kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
+    ActiveSampleWorkflowIntentKind kind = ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask;
     std::filesystem::path path;
-    std::string task_name;
     SampleLabelDefinition label;
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;
@@ -287,11 +282,9 @@ private:
         std::size_t target_row,
         std::string matched_name,
         SampleNavigationResult* navigation_result = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction CreateDefaultLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction CreateLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction StartOrResumeTemporaryLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
-    [[nodiscard]] SourceCollectionSessionAction RenameActiveLabelingTask(std::string task_name);
     [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,

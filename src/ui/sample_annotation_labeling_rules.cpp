@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -21,6 +22,12 @@ std::string TrimAscii(std::string value)
         return {};
     }
     return std::string(first, last);
+}
+
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const std::u8string value = path.u8string();
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
 }
 
 std::string TaskIdFromName(std::string_view task_name)
@@ -154,6 +161,23 @@ const SampleLabelingTask* FindTaskByMetadataOutput(
     return match == active_source_tasks->end() ? nullptr : &*match;
 }
 
+const SampleLabelingTask* FindTaskByAnnotationOutput(
+    const std::vector<SampleLabelingTask>* active_source_tasks,
+    const SampleAnnotationResult& annotation)
+{
+    if (active_source_tasks == nullptr || annotation.path.empty()) {
+        return nullptr;
+    }
+
+    const auto match = std::find_if(
+        active_source_tasks->begin(),
+        active_source_tasks->end(),
+        [&annotation](const SampleLabelingTask& task) {
+            return task.output_path && PathsReferToSameFile(*task.output_path, annotation.path);
+        });
+    return match == active_source_tasks->end() ? nullptr : &*match;
+}
+
 }  // namespace
 
 std::string DefaultedSampleLabelingTaskName(std::string task_name)
@@ -162,24 +186,21 @@ std::string DefaultedSampleLabelingTaskName(std::string task_name)
     return task_name.empty() ? "Manual labeling" : task_name;
 }
 
-std::string TaskIdForCreatedSampleLabelingTask(
+std::string TaskIdForNewSampleLabelingTask(
     std::string_view task_name,
     const std::vector<SampleLabelingTask>* active_source_tasks)
 {
-    const std::string base_task_id = TaskIdFromName(task_name);
-    if (active_source_tasks == nullptr) {
-        return base_task_id;
-    }
-    const auto base_match = std::find_if(
-        active_source_tasks->begin(),
-        active_source_tasks->end(),
-        [&base_task_id](const SampleLabelingTask& task) {
-            return task.task_id == base_task_id;
-        });
-    if (base_match == active_source_tasks->end() || base_match->task_name == task_name) {
-        return base_task_id;
-    }
     return UniqueTaskIdFromName(task_name, active_source_tasks);
+}
+
+std::string SampleLabelingTaskNameForOutputPath(const std::filesystem::path& output_path)
+{
+    const std::filesystem::path stem = output_path.stem();
+    if (!stem.empty()) {
+        return PathToUtf8(stem);
+    }
+    const std::filesystem::path filename = output_path.filename();
+    return filename.empty() ? std::string{kTemporarySampleLabelingTaskName} : PathToUtf8(filename);
 }
 
 const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
@@ -227,6 +248,14 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
             plan.task_id = existing_task->task_id;
             return plan;
         }
+    } else if (const SampleLabelingTask* existing_task =
+                   FindLocalTaskForLoadedAnnotation(request.active_source_tasks, annotation)) {
+        plan.kind = SampleAnnotationLabelingActivationKind::ActivateExistingTask;
+        plan.task_id = existing_task->task_id;
+        return plan;
+    }
+    if (FindTaskByAnnotationOutput(request.active_source_tasks, annotation) != nullptr) {
+        return plan;
     }
     if (request.active_task != nullptr) {
         return plan;

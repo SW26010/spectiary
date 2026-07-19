@@ -594,6 +594,43 @@ void TestTaskRecordFlushKeepsActiveTaskAddressStable()
     Require(after_flush == before_flush, "flushing local task record must not invalidate active task pointer");
 }
 
+void TestControllerKeepsOneTemporaryTaskPerSource()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_single_temporary_state.json";
+    const std::filesystem::path output_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_formalized_result.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(output_path), cleanup_error);
+
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("source-identity", 3);
+    specforge::SampleLabelingTask* first = controller.CreateTask("temporary", "Temporary labeling task");
+    Require(first != nullptr, "controller should create the first temporary task");
+    const std::string temporary_task_id = first->task_id;
+    Require(
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "review", 'r'}),
+        "temporary task should accept a label definition");
+    Require(controller.AssignLabel(1, 5).accepted, "temporary task should accept writes");
+    Require(controller.DeactivateActiveTask(), "temporary task should be pausable");
+
+    specforge::SampleLabelingTask* resumed = controller.CreateTask("another", "Another temporary task");
+    Require(resumed != nullptr && resumed->task_id == temporary_task_id, "create should resume the existing temporary task");
+    Require(resumed->values[1] == 5, "resumed temporary task should keep its draft values");
+    const std::vector<specforge::SampleLabelingTask>* tasks = controller.active_source_tasks();
+    Require(tasks != nullptr && tasks->size() == 1, "source should keep only one temporary task");
+
+    Require(controller.SetActiveTaskOutputPath(output_path), "temporary task should accept a formal output path");
+    Require(controller.PersistActiveTask(), "formalized task should persist before it is closed");
+    Require(controller.DeactivateActiveTask(), "formalized task should be closable");
+    specforge::SampleLabelingTask* fresh = controller.CreateTask("temporary-2", "Temporary labeling task");
+    Require(fresh != nullptr && !fresh->output_path, "formal save should allow a fresh temporary task");
+    tasks = controller.active_source_tasks();
+    Require(tasks != nullptr && tasks->size() == 2, "formal annotation and one temporary task should coexist");
+}
+
 void TestExternalOutputIsResultSourceOfTruth()
 {
     const std::filesystem::path cache_path =
@@ -793,7 +830,7 @@ void TestMissingExternalOutputRestoresFailedState()
     Require(!task->save_state.message.empty(), "missing external output should explain the failed restore");
 }
 
-void TestDraftOutputFailureKeepsDraftRecoveryValues()
+void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
 {
     const std::filesystem::path cache_path =
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_draft_output_failure_state.json";
@@ -811,24 +848,28 @@ void TestDraftOutputFailureKeepsDraftRecoveryValues()
         Require(controller.AssignLabel(1, 5).accepted, "controller should label draft value");
         Require(controller.PersistActiveTaskRecord(), "draft-only autosave should succeed before output selection");
 
-        Require(controller.SetActiveTaskOutputPath(output_path), "controller should accept selected output path");
-        Require(!controller.PersistActiveTask(), "saving to a directory path should fail as an output file");
+        Require(
+            !controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality"),
+            "saving to a directory path should fail as an output file");
+        const specforge::SampleLabelingTask* task = controller.active_task();
+        Require(task != nullptr && !task->output_path, "failed first save should keep an output-free draft");
+        Require(controller.temporary_task() != nullptr, "failed first save should keep the task resumable");
+        Require(controller.CanDeactivateActiveTask(), "failed first save should keep the draft pausable");
     }
 
     const std::string cache_text = ReadTextFile(cache_path);
-    Require(cache_text.find("\"output_path\"") != std::string::npos, "failed output task should keep output path");
-    Require(cache_text.find("\"values\"") == std::string::npos, "output-backed failed task should not store full values");
-    Require(cache_text.find("\"pending_values\"") != std::string::npos, "failed first output save should keep recovery overlay");
-    Require(cache_text.find("\"index\": 1") != std::string::npos, "recovery overlay should include the draft sample");
-    Require(cache_text.find("\"value\": 5") != std::string::npos, "recovery overlay should include the draft value");
+    Require(cache_text.find("\"output_path\": null") != std::string::npos, "failed first save should not bind output");
+    Require(cache_text.find("\"values\"") != std::string::npos, "failed first save should retain full draft values");
+    Require(cache_text.find("-1, 5, -1") != std::string::npos, "draft cache should retain the labeled sample");
 
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
         const specforge::SampleLabelingTask* task = restored.active_task();
-        Require(task != nullptr, "failed output task should restore");
-        Require(task->values.size() == 3 && task->values[1] == 5, "failed output restore should preserve draft label");
-        Require(task->pending_sample_indices.find(1) != task->pending_sample_indices.end(), "draft label should be pending output retry");
+        Require(task != nullptr && !task->output_path, "failed temporary draft should restore without an output");
+        Require(task->values.size() == 3 && task->values[1] == 5, "failed draft restore should preserve its label");
+        Require(restored.temporary_task() != nullptr, "restored failed draft should remain resumable");
+        Require(restored.CanDeactivateActiveTask(), "restored failed draft should remain pausable");
         Require(
             task->save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
             "failed first output save should restore failed state");
@@ -1038,12 +1079,13 @@ int main()
         TestFailedNpySaveDoesNotDamageExistingOutput();
         TestSampleLabelingControllerAutosavesDraftRecord();
         TestTaskRecordFlushKeepsActiveTaskAddressStable();
+        TestControllerKeepsOneTemporaryTaskPerSource();
         TestExternalOutputIsResultSourceOfTruth();
         TestSampleLabelingStateCacheStoresPackageRelativeOutputPath();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();
         TestOutputPathConflictIsRejectedWithinSource();
         TestMissingExternalOutputRestoresFailedState();
-        TestDraftOutputFailureKeepsDraftRecoveryValues();
+        TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues();
         TestCorruptLocalTaskRecordIsIgnored();
         TestFailedExternalOutputPersistsPendingOverlay();
         TestFailedExternalOutputRetriesAfterBackoff();

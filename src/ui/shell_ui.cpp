@@ -483,7 +483,7 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker()
         {L"NumPy label arrays", L"*.npy"},
         {L"All files", L"*.*"},
     };
-    dialog->SetTitle(L"Choose label output");
+    dialog->SetTitle(L"Save labeling annotation");
     dialog->SetFileTypes(
         static_cast<UINT>(sizeof(kLabelOutputFilters) / sizeof(kLabelOutputFilters[0])),
         kLabelOutputFilters);

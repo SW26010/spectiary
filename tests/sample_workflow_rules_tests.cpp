@@ -103,13 +103,11 @@ void TestTaskNamingRules()
         specforge::DefaultedSampleLabelingTaskName("   ") == "Manual labeling",
         "blank task names should use the default label");
     Require(
-        specforge::TaskIdForCreatedSampleLabelingTask("Quality review", &tasks) == "quality-review",
-        "same name should reuse the stable task id");
-
-    tasks[0].task_name = "Different name";
+        specforge::TaskIdForNewSampleLabelingTask("Quality review", &tasks) == "quality-review-2",
+        "new task ids should never reuse an existing task record");
     Require(
-        specforge::TaskIdForCreatedSampleLabelingTask("Quality review", &tasks) == "quality-review-2",
-        "same base id with a different name should allocate a suffix");
+        specforge::SampleLabelingTaskNameForOutputPath("saved-review.npy") == "saved-review",
+        "formal task names should derive from the selected output filename");
 }
 
 void TestPlainAnnotationActivationPlanCreatesEditableTask()
@@ -192,6 +190,40 @@ void TestMetadataCreatePlanAvoidsTaskIdCollision()
     Require(plan.task_id == "quality-2", "metadata task id collisions should be avoided");
     Require(plan.metadata_clean, "metadata-backed creation should start clean");
     Require(plan.label_set.labels.size() == 1 && plan.label_set.labels[0].name == "bad", "metadata labels should be reused");
+}
+
+void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
+{
+    const std::filesystem::path path = TempPath("_metadata_mismatch.npy");
+    std::vector<specforge::SampleLabelingTask> tasks;
+    tasks.push_back(MakeTask("local-task", "Local task", 3, path));
+    specforge::SampleAnnotationResult annotation = MakeIntegerAnnotation("External task", path, {5, -1, 9});
+    specforge::SampleLabelResultMetadata metadata;
+    metadata.task_id = "external-task";
+    metadata.task_name = "External task";
+
+    const specforge::SampleAnnotationLabelingActivationPlan plan =
+        specforge::PlanSampleAnnotationLabelingActivation(
+            specforge::SampleAnnotationLabelingActivationRequest{
+                .annotation = &annotation,
+                .active_source_tasks = &tasks,
+                .metadata = &metadata});
+
+    Require(
+        plan.kind == specforge::SampleAnnotationLabelingActivationKind::None,
+        "a same-path local task must not activate when sidecar task identity differs");
+
+    tasks[0].task_id = metadata.task_id;
+    tasks[0].values.resize(2);
+    const specforge::SampleAnnotationLabelingActivationPlan count_mismatch_plan =
+        specforge::PlanSampleAnnotationLabelingActivation(
+            specforge::SampleAnnotationLabelingActivationRequest{
+                .annotation = &annotation,
+                .active_source_tasks = &tasks,
+                .metadata = &metadata});
+    Require(
+        count_mismatch_plan.kind == specforge::SampleAnnotationLabelingActivationKind::None,
+        "a same-path local task must not activate when its sample count differs");
 }
 
 void TestSampleNameSortingSource()
@@ -336,6 +368,7 @@ int main()
     TestPlainAnnotationActivationPlanCreatesEditableTask();
     TestMetadataActivationPlanReusesExistingTask();
     TestMetadataCreatePlanAvoidsTaskIdCollision();
+    TestMetadataActivationPlanRejectsSamePathIdentityMismatch();
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
     TestAnnotationSortingExclusions();

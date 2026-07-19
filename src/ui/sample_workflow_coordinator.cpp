@@ -346,27 +346,29 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
         snapshot);
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::CreateDefaultLabelingTask()
+SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
 {
     SourceCollectionSessionAction action;
-    if (labeling_.CreateTask("manual-labeling", "Manual labeling") != nullptr) {
-        workflow_sources_.InvalidateSortingSourceCache();
-        ApplyNavigationInputEffects(
-            action,
-            ReconcileNavigationInputs(
-                nullptr,
-                NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
+    const SampleLabelingTask* active_task = labeling_.active_task();
+    const SampleLabelingTask* temporary_task = labeling_.temporary_task();
+    if (active_task != nullptr && temporary_task != nullptr && active_task->task_id == temporary_task->task_id) {
+        return action;
     }
-    return action;
-}
+    if (active_task != nullptr &&
+        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask())) {
+        return action;
+    }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::CreateLabelingTask(std::string task_name)
-{
-    SourceCollectionSessionAction action;
-    task_name = DefaultedSampleLabelingTaskName(std::move(task_name));
-    const std::string task_id =
-        TaskIdForCreatedSampleLabelingTask(task_name, labeling_.active_source_tasks());
-    if (labeling_.CreateTask(task_id, std::move(task_name)) != nullptr) {
+    bool started_or_resumed = false;
+    if (temporary_task != nullptr) {
+        started_or_resumed = labeling_.ActivateTask(temporary_task->task_id);
+    } else {
+        const std::vector<SampleLabelingTask>* tasks = labeling_.active_source_tasks();
+        const std::string task_id = TaskIdForNewSampleLabelingTask(kTemporarySampleLabelingTaskName, tasks);
+        started_or_resumed =
+            labeling_.CreateTask(task_id, std::string{kTemporarySampleLabelingTaskName}) != nullptr;
+    }
+    if (started_or_resumed) {
         workflow_sources_.InvalidateSortingSourceCache();
         ApplyNavigationInputEffects(
             action,
@@ -389,21 +391,34 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         return action;
     }
 
+    const std::vector<SampleLabelingTask>* active_source_tasks = labeling_.active_source_tasks();
     const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, annotation_path);
+    std::optional<SampleAnnotationResult> loaded_annotation;
     if (annotation == nullptr) {
-        return action;
+        const std::size_t sample_count = navigation_.spectrum_count().value_or(0);
+        std::string load_error;
+        loaded_annotation = LoadSampleAnnotationResultFromPath(annotation_path, sample_count, &load_error);
+        if (!loaded_annotation) {
+            return action;
+        }
+        annotation = &*loaded_annotation;
     }
 
-    const std::optional<SampleLabelResultMetadata> metadata =
-        LoadVerifiedLabelMetadataForAnnotation(*annotation);
     const SampleLabelingTask* active_task = labeling_.active_task();
+    const std::optional<SampleLabelResultMetadata> metadata = LoadVerifiedLabelMetadataForAnnotation(*annotation);
     SampleAnnotationLabelingActivationPlan plan = PlanSampleAnnotationLabelingActivation(
         SampleAnnotationLabelingActivationRequest{
             .annotation = annotation,
-            .active_task = active_task,
-            .active_source_tasks = labeling_.active_source_tasks(),
+            .active_source_tasks = active_source_tasks,
             .metadata = metadata ? &*metadata : nullptr});
     if (plan.kind == SampleAnnotationLabelingActivationKind::None) {
+        return action;
+    }
+    if (active_task != nullptr && active_task->task_id == plan.task_id) {
+        return action;
+    }
+    if (active_task != nullptr &&
+        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask())) {
         return action;
     }
 
@@ -449,25 +464,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
                 .workflow_changed = true,
                 .filters_changed = true,
                 .sorting_changed = true}));
-    return action;
-}
-
-SourceCollectionSessionAction SampleWorkflowCoordinator::RenameActiveLabelingTask(std::string task_name)
-{
-    SourceCollectionSessionAction action;
-    if (labeling_.RenameActiveTask(DefaultedSampleLabelingTaskName(std::move(task_name)))) {
-        (void)labeling_.PersistActiveTask();
-        workflow_sources_.InvalidateFilterViewCache();
-        workflow_sources_.InvalidateSortingSourceCache();
-        ApplyNavigationInputEffects(
-            action,
-            ReconcileNavigationInputs(
-                nullptr,
-                NavigationInputReconcileRequest{
-                    .workflow_changed = true,
-                    .filters_changed = true,
-                    .sorting_changed = true}));
-    }
     return action;
 }
 
@@ -612,8 +608,9 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
 {
     SourceCollectionSessionAction action;
     const std::filesystem::path selected_output_path = output_path;
-    if (labeling_.SetActiveTaskOutputPath(std::move(output_path))) {
-        (void)labeling_.PersistActiveTask();
+    if (labeling_.SaveActiveTemporaryTaskToOutput(
+            std::move(output_path),
+            SampleLabelingTaskNameForOutputPath(selected_output_path))) {
         if (const SourceCollectionManifest* context = navigation_.active_context()) {
             if (const SampleAnnotationResult* annotation =
                     FindSampleWorkflowAnnotationByPath(*context, selected_output_path)) {
@@ -919,8 +916,10 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
     SourceCollectionLabelingView view;
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     view.current_index = ActiveSampleIndex(snapshot);
+    view.has_temporary_task = labeling_.temporary_task() != nullptr;
     if (const SampleLabelingTask* task = labeling_.active_task()) {
         view.has_active_task = true;
+        view.active_task_is_temporary = !task->output_path;
         view.task_id = task->task_id;
         view.task_name = task->task_name;
         view.label_set = task->label_set;

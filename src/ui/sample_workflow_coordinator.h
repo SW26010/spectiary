@@ -64,11 +64,9 @@ public:
         std::size_t target_row,
         std::string matched_name,
         const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction CreateDefaultLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction CreateLabelingTask(std::string task_name);
+    [[nodiscard]] SourceCollectionSessionAction StartOrResumeTemporaryLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
-    [[nodiscard]] SourceCollectionSessionAction RenameActiveLabelingTask(std::string task_name);
     [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
     [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
         SampleLabelDefinition label,

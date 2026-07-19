@@ -3,6 +3,7 @@
 #include "domain/sample_labeling.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/sample_workflow_state_cache_io.h"
 #include "ui/source_collection_session.h"
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -441,28 +443,16 @@ specforge::SourceCollectionSessionIntent SetSampleNameQuery(std::string query)
         specforge::SampleNavigationIntent::SetSampleNameQuery(std::move(query)));
 }
 
-specforge::SourceCollectionSessionIntent CreateDefaultLabelingTask()
+specforge::SourceCollectionSessionIntent StartOrResumeTemporaryLabelingTask()
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::CreateDefaultLabelingTask());
-}
-
-specforge::SourceCollectionSessionIntent CreateLabelingTask(std::string task_name)
-{
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::CreateLabelingTask(std::move(task_name)));
+        specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask());
 }
 
 specforge::SourceCollectionSessionIntent ActivateLabelingTaskFromAnnotation(std::filesystem::path annotation_path)
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
         specforge::ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(std::move(annotation_path)));
-}
-
-specforge::SourceCollectionSessionIntent RenameActiveLabelingTask(std::string task_name)
-{
-    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-        specforge::ActiveSampleWorkflowIntent::RenameActiveLabelingTask(std::move(task_name)));
 }
 
 specforge::SourceCollectionSessionIntent DeleteActiveLabelingTask()
@@ -577,7 +567,7 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(session.View().sources.size() == 1, "opening a source should add one source entry");
     Require(session.View().snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
 
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "active source should accept a labeling task");
 
     const specforge::SourceCollectionSessionResult next_result =
@@ -606,7 +596,7 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(
             session,
@@ -709,7 +699,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "bad label should be accepted");
@@ -725,7 +715,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
-    const std::string source_id = "labeling:quality-review";
+    const std::string source_id = "labeling:temporary-labeling-task";
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
             session.View().navigation.current_annotations[0].relationship ==
@@ -758,7 +748,7 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
@@ -771,7 +761,7 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
     (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:quality-review";
+    const std::string source_id = "labeling:temporary-labeling-task";
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
     (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
@@ -806,7 +796,7 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
@@ -818,7 +808,7 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
     (void)Submit(session, AssignActiveLabelToCurrentSample(4));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:quality-review";
+    const std::string source_id = "labeling:temporary-labeling-task";
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
     (void)Submit(session, SetFilterValueSelected(source_id, "4", true));
@@ -846,7 +836,7 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
         "review label should be accepted");
@@ -859,7 +849,7 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
     (void)Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::LocateRow(0)));
     (void)Submit(session, SetActiveLabelingOutputPath(output_path));
 
-    const std::string source_id = "labeling:quality-review";
+    const std::string source_id = "labeling:temporary-labeling-task";
     (void)Submit(session, AddSampleFilterSource(source_id));
     (void)Submit(session, SetFilterValueSelected(source_id, "3", true));
 
@@ -997,7 +987,7 @@ void TestRememberedPositionResumableTracksActiveSequence()
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
 
     specforge::SourceCollectionSessionResult result =
@@ -1459,7 +1449,7 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
             *session.View().navigation.current_sequence_position == 2,
         "plain annotation sorting should use numeric values with source-order tie break");
 
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     result = Submit(session, SetActiveLabelingOutputPath(rank_path));
     Require(
         !HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
@@ -1595,7 +1585,7 @@ void TestDeactivatingLabelingTaskKeepsAnnotationFilter()
     Require(session.View().navigation.filter_active, "annotation sample filter should affect navigation");
     Require(session.View().navigation.filtered_sample_count == 1, "filter should include the one matching sample");
 
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "bad", 'b'})).changed,
         "label should be accepted");
@@ -1609,33 +1599,38 @@ void TestDeactivatingLabelingTaskKeepsAnnotationFilter()
     Require(session.View().filter.sources[0].id == source_id, "deactivation should keep the annotation source id");
     Require(session.View().navigation.filter_active, "deactivation should keep annotation navigation filtering active");
 
-    result = Submit(session, CreateDefaultLabelingTask());
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "task record should remain available after deactivation");
     Require(session.View().labeling.current_code == 1, "reactivated task should keep its label result");
 }
 
-void TestCreateLabelingTaskUsesCustomName()
+void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    specforge::SourceCollectionSessionResult result =
-        Submit(session, CreateLabelingTask("  Quality review  "));
-    Require(session.View().labeling.has_active_task, "custom labeling task should become active");
-    Require(session.View().labeling.task_id == "quality-review", "custom task id should derive from the trimmed name");
-    Require(session.View().labeling.task_name == "Quality review", "custom task name should be trimmed and exposed");
+    specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(session.View().labeling.has_active_task, "temporary labeling task should become active");
+    Require(session.View().labeling.has_temporary_task, "active draft should be exposed as the temporary task");
+    Require(session.View().labeling.active_task_is_temporary, "new labeling task should remain temporary");
+    Require(
+        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        "temporary task should use the fixed default name");
+    const std::string temporary_task_id = session.View().labeling.task_id;
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
-        "custom task should accept labels");
+        "temporary task should accept labels");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
 
     (void)Submit(session, DeactivateActiveLabelingTask());
-    result = Submit(session, CreateLabelingTask("Quality review"));
-    Require(session.View().labeling.has_active_task, "same custom task should reactivate");
-    Require(session.View().labeling.task_id == "quality-review", "reactivated custom task should keep the same task id");
-    Require(session.View().labeling.current_code == 3, "reactivated custom task should keep its draft values");
+    Require(!session.View().labeling.has_active_task, "paused temporary task should not remain active");
+    Require(session.View().labeling.has_temporary_task, "paused temporary task should remain resumable");
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(session.View().labeling.has_active_task, "temporary task should resume");
+    Require(session.View().labeling.task_id == temporary_task_id, "resumed task should keep its stable id");
+    Require(session.View().labeling.current_code == 3, "resumed task should keep its draft values");
 }
 
 void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
@@ -1644,7 +1639,7 @@ void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "used", 'u'})).changed,
         "used label should be accepted");
@@ -1676,67 +1671,60 @@ void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
     Require(session.View().labeling.labeled_count == 0, "cleared values should update labeling progress");
 }
 
-void TestRenameAndDeleteActiveLabelingTask()
+void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{3, "review", 'r'})).changed,
-        "task should accept a label before rename/delete");
+        "temporary task should accept a label before discard");
     (void)Submit(session, AssignActiveLabelToCurrentSample(3));
 
-    specforge::SourceCollectionSessionResult result =
-        Submit(session, RenameActiveLabelingTask(" Reviewed set "));
-    Require(session.View().labeling.has_active_task, "renamed task should remain active");
-    Require(session.View().labeling.task_id == "quality-review", "rename should keep the stable task id");
-    Require(session.View().labeling.task_name == "Reviewed set", "rename should trim and expose the new task name");
-
-    result = Submit(session, DeleteActiveLabelingTask());
+    const std::string discarded_task_id = session.View().labeling.task_id;
+    specforge::SourceCollectionSessionResult result = Submit(session, DeleteActiveLabelingTask());
     Require(result.action.workflow_changed, "delete should report workflow change");
     Require(!session.View().labeling.has_active_task, "delete should clear the active task");
+    Require(!session.View().labeling.has_temporary_task, "delete should discard the temporary task record");
 
-    result = Submit(session, CreateLabelingTask("Quality review"));
-    Require(session.View().labeling.has_active_task, "creating after delete should create a fresh task");
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(session.View().labeling.has_active_task, "starting after discard should create a fresh task");
+    Require(session.View().labeling.task_id == discarded_task_id, "fresh temporary task may reuse the available id");
     Require(
         session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
         "deleted draft values should not come back");
 }
 
-void TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized()
+void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::string saved_name = Utf8(output_path.stem().u8string());
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, CreateLabelingTask("Quality review"));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(session.View().labeling.active_task_is_temporary, "task should start as a local temporary draft");
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
+    Require(!session.View().labeling.has_temporary_task, "choosing output should formalize the temporary task");
+    Require(!session.View().labeling.active_task_is_temporary, "saved task should become a formal annotation");
+    Require(session.View().labeling.task_name == saved_name, "saved annotation name should derive from its filename");
     Require(session.View().navigation.current_annotations.size() == 1, "local task output should appear in annotations");
     Require(
-        session.View().navigation.current_annotations[0].name == "Quality review",
-        "local labeling annotation should default to the task name");
+        session.View().navigation.current_annotations[0].name == saved_name,
+        "local labeling annotation should default to the saved filename");
     Require(
         session.View().filter.available_sources.size() == 1 &&
-            session.View().filter.available_sources[0].name == "Quality review",
-        "local labeling filter source should default to the task name");
-
-    result = Submit(session, RenameActiveLabelingTask("Reviewed set"));
-    Require(session.View().labeling.task_name == "Reviewed set", "task rename should update the active task");
-    Require(
-        session.View().navigation.current_annotations[0].name == "Reviewed set",
-        "unmodified local labeling annotation display name should follow task rename");
-    Require(
-        session.View().filter.available_sources[0].name == "Reviewed set",
-        "unmodified local labeling filter source should follow task rename");
+            session.View().filter.available_sources[0].name == saved_name,
+        "local labeling filter source should default to the saved filename");
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
-    Require(session.View().labeling.task_name == "Reviewed set", "annotation rename should not rename the task");
+    Require(session.View().labeling.task_name == saved_name, "display-name customization should not rename metadata");
     Require(
         session.View().navigation.current_annotations[0].name == "Hard cases",
         "annotation row should use the custom local-task display name");
@@ -1746,34 +1734,109 @@ void TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized()
 
     result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
     Require(result.action.workflow_changed, "clearing local-task annotation display name should report workflow change");
-    Require(session.View().labeling.task_name == "Reviewed set", "clearing annotation display should not rename the task");
     Require(
-        session.View().navigation.current_annotations[0].name == "Reviewed set",
-        "cleared local-task annotation display name should restore the task default");
+        session.View().navigation.current_annotations[0].name == saved_name,
+        "cleared local-task annotation display name should restore the saved filename");
 
-    result = Submit(session, RenameAnnotationDisplayName(output_path, "Hard cases"));
+    result = Submit(session, DeactivateActiveLabelingTask());
+    Require(!session.View().labeling.has_temporary_task, "closing a formal annotation should not create a draft");
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(session.View().labeling.active_task_is_temporary, "a fresh temporary task should start after formal save");
     Require(
-        session.View().navigation.current_annotations[0].name == "Hard cases",
-        "local-task annotation should support customizing again after clearing");
+        session.View().navigation.current_annotations.size() == 1 &&
+            session.View().navigation.current_annotations[0].name == saved_name,
+        "starting a new temporary task should keep the formal annotation available");
 
-    result = Submit(session, RenameActiveLabelingTask("Final task"));
-    Require(session.View().labeling.task_name == "Final task", "task should still be renameable after annotation customization");
+    const std::string fresh_temporary_task_id = session.View().labeling.task_id;
+    result = Submit(session, ActivateLabelingTaskFromAnnotation(output_path));
     Require(
-        session.View().navigation.current_annotations[0].name == "Hard cases",
-        "custom annotation display name should not be overwritten by later task rename");
+        !session.View().labeling.active_task_is_temporary && session.View().labeling.output_path == output_path,
+        "selecting a labeling annotation should safely switch away from the active draft");
+    Require(session.View().labeling.has_temporary_task, "switching annotations should retain the paused draft");
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
-        session.View().filter.available_sources[0].name == "Hard cases",
-        "custom local labeling filter source name should not be overwritten by later task rename");
+        session.View().labeling.active_task_is_temporary &&
+            session.View().labeling.task_id == fresh_temporary_task_id,
+        "the persistent draft option should safely switch back from a formal annotation");
+}
 
-    result = Submit(session, RenameAnnotationDisplayName(output_path, "   "));
-    Require(
-        session.View().navigation.current_annotations[0].name == "Final task",
-        "clearing annotation display should restore the default task name");
+void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path blocked_output_path = UniqueTempPath("_blocked_output");
+    const std::filesystem::path replacement_output_path = UniqueTempPath("_replacement.npy");
+    std::filesystem::create_directories(blocked_output_path);
 
-    result = Submit(session, RenameActiveLabelingTask("Synced task"));
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const std::string temporary_task_id = session.View().labeling.task_id;
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, SetActiveLabelingOutputPath(blocked_output_path));
+    Require(session.View().labeling.has_active_task, "failed first save should keep the draft active");
+    Require(session.View().labeling.has_temporary_task, "failed first save should keep a resumable draft");
+    Require(session.View().labeling.active_task_is_temporary, "failed first save must not formalize the task");
+    Require(!session.View().labeling.output_path, "failed first save must not retain the rejected output target");
     Require(
-        session.View().navigation.current_annotations[0].name == "Synced task",
-        "cleared annotation display override should follow task rename again");
+        session.View().labeling.task_name == specforge::kTemporarySampleLabelingTaskName,
+        "failed first save should retain the temporary task name");
+    Require(
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        "failed first save should surface the write failure");
+    Require(session.View().labeling.can_deactivate_task, "failed first save should still allow pausing the draft");
+    Require(session.View().labeling.can_delete_task, "failed first save should still allow deleting the draft");
+
+    result = Submit(session, DeactivateActiveLabelingTask());
+    Require(!session.View().labeling.has_active_task, "failed first-save draft should be pausable");
+    Require(session.View().labeling.has_temporary_task, "paused failed draft should remain resumable");
+    result = Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        session.View().labeling.task_id == temporary_task_id,
+        "resuming after failed first save should preserve the draft identity");
+
+    result = Submit(session, SetActiveLabelingOutputPath(replacement_output_path));
+    Require(!session.View().labeling.active_task_is_temporary, "replacement output should formalize the draft");
+    Require(
+        session.View().labeling.output_path == replacement_output_path,
+        "replacement output should become the formal task target");
+    Require(
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "replacement output should save successfully");
+}
+
+void TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path output_path = UniqueTempPath("_metadata_blocked.npy");
+    const std::filesystem::path replacement_output_path = UniqueTempPath("_metadata_replacement.npy");
+    std::filesystem::create_directories(specforge::SampleLabelResultMetadataPathForResult(output_path));
+
+    std::vector<std::size_t> loaded_indices;
+    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+
+    specforge::SourceCollectionSessionResult result = Submit(session, SetActiveLabelingOutputPath(output_path));
+    Require(std::filesystem::exists(output_path), "metadata failure fixture should still write the label array");
+    Require(session.View().labeling.has_temporary_task, "failed first metadata save should retain the draft");
+    Require(
+        session.View().labeling.active_task_is_temporary,
+        "failed first metadata save must not formalize the task");
+    Require(!session.View().labeling.output_path, "failed first metadata save must not bind the partial output");
+    Require(
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        "failed first metadata save should surface the sidecar failure");
+    Require(
+        session.View().labeling.can_deactivate_task && session.View().labeling.can_delete_task,
+        "failed first metadata save should leave the draft recoverable");
+
+    result = Submit(session, SetActiveLabelingOutputPath(replacement_output_path));
+    Require(!session.View().labeling.active_task_is_temporary, "replacement target should formalize the draft");
+    Require(
+        session.View().labeling.output_path == replacement_output_path,
+        "replacement target should replace the rejected partial output");
 }
 
 void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
@@ -1832,8 +1895,7 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_blocked_activation.npy");
-    const std::filesystem::path blocked_output_path = UniqueTempPath("_blocked_output");
-    std::filesystem::create_directories(blocked_output_path);
+    const std::filesystem::path formal_output_path = UniqueTempPath("_formal_output.npy");
 
     specforge::SampleLabelSet label_set;
     label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
@@ -1848,19 +1910,25 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
-    specforge::SourceCollectionSessionResult result = Submit(session, CreateLabelingTask("Current task"));
+    specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "current task should be active before activation attempt");
-    Require(session.View().labeling.task_id == "current-task", "test should start with the current task");
-    result = Submit(session, SetActiveLabelingOutputPath(blocked_output_path));
+    result = Submit(session, SetActiveLabelingOutputPath(formal_output_path));
+    Require(
+        session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "current task should be formal before its later autosave failure");
+    const std::string current_task_id = session.View().labeling.task_id;
+    std::filesystem::remove(formal_output_path);
+    std::filesystem::create_directories(formal_output_path);
+    result = Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{7, "review", 'r'}));
     Require(
         session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
-        "current task should have a failed save guard");
+        "formal task should have a failed autosave guard");
 
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "external annotation should load before blocked activation");
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(session.View().labeling.has_active_task, "blocked activation should keep the active task");
-    Require(session.View().labeling.task_id == "current-task", "annotation activation must not switch active tasks");
+    Require(session.View().labeling.task_id == current_task_id, "annotation activation must not switch active tasks");
     Require(
         session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
         "blocked activation should preserve the failed save state");
@@ -1981,8 +2049,6 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     source_state.source_fingerprint = identity.source_fingerprint;
     source_state.context_fingerprint = identity.context_fingerprint;
     source_state.tasks.push_back(std::move(local_task));
-    source_state.active_task_id = "local-task";
-
     specforge::SampleLabelingStateCache cache;
     cache.sources.emplace(identity.id, std::move(source_state));
     Require(specforge::SaveSampleLabelingStateCache(labeling_cache, cache), "labeling cache fixture should save");
@@ -2000,7 +2066,7 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(result.loaded, "metadata-backed annotation should load");
-    Require(session.View().labeling.has_active_task, "local cache fixture should restore the local task");
+    Require(!session.View().labeling.has_active_task, "mismatch fixture should start without an active task");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
@@ -2008,8 +2074,8 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(
-        session.View().labeling.task_id == "local-task",
-        "activation should not switch to a same-path task when the sidecar task id differs");
+        !session.View().labeling.has_active_task,
+        "activation must not bind an inactive same-path task when the sidecar task id differs");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
@@ -2029,7 +2095,7 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
         2);
 
     (void)Submit(session, OpenSourceCollection(first_source_path, 0));
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(
             session,
@@ -2128,7 +2194,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
     Require(session.View().current_source_index && *session.View().current_source_index == 0, "first source should be active");
     Require(session.View().snapshot->source.path == first_source_path, "first source snapshot should be visible");
     Require(session.View().snapshot->collection.current_index == 1, "first source should open at requested row");
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(
             session,
@@ -2140,7 +2206,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
     result = Submit(session, OpenSourceCollection(second_source_path, 0));
     Require(session.View().current_source_index && *session.View().current_source_index == 1, "second source should be active");
     Require(session.View().snapshot->source.path == second_source_path, "second source snapshot should be visible");
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         Submit(
             session,
@@ -2583,7 +2649,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
         labeling_cache,
         {SourceFixture{source_path, 3}});
     (void)Submit(session, OpenSourceCollection(source_path, 0));
-    (void)Submit(session, CreateDefaultLabelingTask());
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
     Require(!session.FlushStateCaches(), "flush should fail when the source cache path is blocked by a file");
     {
@@ -2614,7 +2680,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
 
 }  // namespace
 
-int main()
+void RunAllTests()
 {
     TestNavigationReloadsSnapshotAndRemembersLabelingPosition();
     TestAssigningLabelAutoAdvancesInsideSession();
@@ -2635,10 +2701,12 @@ int main()
     TestSourceSessionRestoresAnnotationSortingState();
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
-    TestCreateLabelingTaskUsesCustomName();
+    TestTemporaryLabelingTaskUsesDefaultNameAndResumes();
     TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel();
-    TestRenameAndDeleteActiveLabelingTask();
-    TestLocalLabelingAnnotationDisplayNameFollowsTaskUntilCustomized();
+    TestDiscardingTemporaryLabelingTaskAllowsFreshStart();
+    TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask();
+    TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask();
+    TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
@@ -2658,5 +2726,15 @@ int main()
     TestSourceSessionSkipsMissingSourcePathsOnRestore();
     TestSourceSessionRestoresAtMostThirtyTwoSources();
     TestSourceSessionFlushFailureKeepsDirtyState();
+}
+
+int main()
+{
+    try {
+        RunAllTests();
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
     return 0;
 }

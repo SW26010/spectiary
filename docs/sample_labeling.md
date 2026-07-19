@@ -69,8 +69,9 @@ Floating-point dtypes are continuous annotations; they should display raw values
 and should not use sample label sets, mappings, classification shortcuts, or
 clear-label behavior.
 
-A source collection may have multiple sample labeling tasks and read-only
-annotation results. Existing annotation files or arrays should not be treated as
+A source collection may have multiple formal sample labeling tasks and read-only
+annotation results, but at most one output-free temporary sample labeling task.
+Existing annotation files or arrays should not be treated as
 globally tied to the currently selected sample label set; they may represent a
 different classification dimension or a non-classification value.
 
@@ -95,12 +96,13 @@ to that source collection.
 
 ## Manual Labeling
 
-Manual labeling uses a sample labeling task. The task has a stable task id, a
-user-facing task name, one sample label set, and workflow choices such as
-auto-advance behavior. The task name may change without changing the stable task
-id used for draft recovery and configuration references.
+Manual labeling starts with the source collection's single temporary sample
+labeling task. It has a stable task id, the fixed user-facing name `Temporary
+labeling task`, one sample label set, and workflow choices such as auto-advance
+behavior. Labeling does not ask for a task name when this draft is created or
+resumed.
 
-Creating a new editable sample labeling task should start with every sample
+Starting a new temporary sample labeling task should start with every sample
 unlabeled. The initial label result is therefore a one-dimensional array filled
 with `-1`. Copying or editing existing label files is handled by explicit user
 file choices rather than by separate first-run task modes.
@@ -176,19 +178,33 @@ The visible active manual labeling window should be named `Labeling`. In this
 document, `Sample labeling task` and `active manual labeling` remain the domain
 terms for the task and workflow behind that window.
 
-Closing a sample labeling task should deactivate the active sample labeling task
-rather than hide the `Labeling` window or delete the task record. Deactivation
-leaves the task record, label set, shortcuts, selected output path, remembered
+The first row of `Labeling` should use one compact task selector rather than
+separate task-name, create/resume, and annotation-drop rows. Its permanent first
+item is `New labeling task` when no temporary draft exists, `Resume labeling
+draft` when a draft is paused, and the selected temporary draft while that draft
+is active. Remaining items are the source collection's formal local labeling
+annotations. The selector itself remains the drag target for compatible rows
+from `Annotations`. Pause and delete controls belong immediately to the
+selector's right on the same row. Switching through the selector or drag target
+must honor the same pending/failed output-save guard as explicit close.
+
+Pausing or closing a sample labeling task should deactivate the active sample
+labeling task rather than hide the `Labeling` window or delete the task record.
+Deactivation leaves the task record, label set, shortcuts, selected output path, remembered
 position, and sample label result intact. After deactivation, `Labeling` has no
-active task and may accept a new task, including one converted from a categorical
-annotation in the `Annotations` window.
-In the first implementation, closing the active task should be disabled while
-the task has pending or failed output saves, including pending or failed metadata
-sidecar saves. The user must wait for autosave to complete or fix the output
-save problem before deactivating the task. Tasks in the internal-autosave-draft
-state may be closed because their current recovery state is owned by the local
-task record. A later implementation may allow non-blocking close with background
-retry and explicit pending-task surfacing.
+active task. If its temporary task still exists, the primary action is to resume
+that task rather than create another one. A formal categorical annotation may
+also be activated from the `Annotations` window.
+In the first implementation, closing a formal output-bound task should be
+disabled while it has pending or failed output saves, including pending or
+failed metadata sidecar saves. The user must wait for autosave to complete or
+fix the output save problem before deactivating that formal task. A temporary
+task whose first `Save to...` attempt fails remains output-free and recoverable:
+it keeps its temporary identity and error message and may be paused, deleted, or
+saved to the same or a different target. Tasks in the internal-autosave-draft
+state may also be closed because their current recovery state is owned by the
+local task record. A later implementation may allow non-blocking close with
+background retry and explicit pending-task surfacing.
 
 Deleting a sample labeling task is a separate explicit operation from closing
 or deactivating it. Delete removes the local task record and its internal draft.
@@ -362,21 +378,19 @@ stable source identity, or rewrite portable sample label result metadata. The
 default display name is the loaded result name: automatically loaded plain
 annotations default to the annotation file name, metadata-backed label results
 default to the metadata task name when available, and local sample labeling task
-rows default to the local task name. The user may edit the display name in place
-from the `Annotations` table. Clearing the edited display name removes the
-custom local override and restores the default display name. A custom display
+rows default to the output filename stem recorded as the formal task name. The
+user may edit the display name in place from the `Annotations` table. Clearing
+the edited display name removes the custom local override and restores the
+default display name. A custom display
 name affects the `Annotations` row, the drag preview text, and the corresponding
 entries shown in `Sample Filters` and `Sample Sorting`; hover text should still
 reveal the original annotation path or file name so the source remains
 inspectable.
 
-Local sample labeling task names and annotation display names are separate.
-When an annotation row represents a local sample labeling task and the user has
-not customized that row's annotation display name, renaming the task updates the
-annotation row's default display name. Once the user customizes the annotation
-display name, later task renames must not overwrite it. Editing the annotation
-display name must not rename the task. Editing the task name may only affect
-annotation display through this one-way default-name relationship.
+Formal sample labeling task names and annotation display names are separate. The
+formal task name is derived from the filename chosen through `Save to...` and is
+written to portable metadata. Editing the annotation display name must not
+rename the task, output file, or portable metadata.
 
 After editable sample labeling exists, categorical annotation rows should expose
 a small drag affordance so the user can drag that annotation to the Labeling
@@ -468,10 +482,21 @@ The converted task may expand its category set like any local task, but writing
 back to the original output target is limited by that file's writable format and
 integer dtype. If a new numeric code cannot be represented safely, SpecForge
 should require the user to choose a different output target before saving.
-When a task is created locally inside SpecForge, it does not need the in-place
-edit warning; it starts without an external output target, but the user may write
-by selecting an output location. Locally created tasks may define and expand
-their own category sets.
+Activating an annotation as an existing local task must use the same identity
+validation as annotation relationship display. A metadata-backed annotation
+must match the local task's output path, sidecar `task_id`, and sample count; a
+path-only match must not activate a local task or overwrite its output. If the
+same path is owned by a different local task, activation remains blocked and the
+annotation remains external.
+
+When a temporary task is started locally inside SpecForge, it does not need the
+in-place edit warning. It starts without an external output target and remains a
+local recovery draft until the user selects `Save to...`. Selecting the output
+location promotes it to a formal local labeling annotation only after both the
+label array and portable metadata sidecar are written successfully, derives its
+name from the chosen filename stem, and permits a fresh temporary task for the
+same source collection. A failed first write does not bind the path or rename
+the task. Locally created tasks may define and expand their own category sets.
 
 The first implementation should not allow two local sample labeling task records
 for the same source collection to point at the same output path. If the user
@@ -560,7 +585,8 @@ identity.
 Task records are scoped to a source collection. SpecForge may keep multiple
 source collections in its candidate/source list, but the activated source
 collection determines which task records and sample annotations are shown in the
-sample windows.
+sample windows. Each source collection may retain multiple output-backed task
+records but only one output-free temporary task record.
 
 Sample navigation state is separate local user state scoped to source collection
 identity. It persists the last shown sample index for the source collection
@@ -668,8 +694,8 @@ After an output location is selected, `autosaved to output` means the compact
 label result and its portable metadata have both been saved successfully. If the
 label result is saved but metadata save fails, the task remains pending or
 failed rather than claiming a complete output save.
-When a task has an output location, metadata-only changes such as task name,
-label code/name/shortcut changes, unlabeled sentinel changes, or source identity
+When a task has an output location, metadata-only changes such as label
+code/name/shortcut changes, unlabeled sentinel changes, or source identity
 summary changes should rewrite the adjacent sample label result metadata even
 when the label value array is unchanged. Such changes should enter the same
 pending or failed save-state path until the metadata sidecar is saved
@@ -700,9 +726,10 @@ read-only annotations. Manual classification output in the first editable
 implementation writes numeric label codes only. String task editing and
 compressed label result formats can be added later as explicit export options.
 
-Sample labeling drafts protect in-progress work before it has been written to
-the selected output location. They should be saved automatically as part of the
-local task record and kept separate from final sample label results.
+The single temporary sample labeling draft for a source collection protects
+in-progress work before it has been written to a selected output location. It
+should be saved automatically as part of the local task record and kept separate
+from formal sample label results.
 
 By default, manual labeling should autosave to the local draft. Once the user
 selects an explicit output location, label changes should autosave to that

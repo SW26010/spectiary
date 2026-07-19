@@ -158,6 +158,30 @@ const SampleLabelingTask* SampleLabelingController::active_task() const
     return match == state->tasks.end() ? nullptr : &*match;
 }
 
+SampleLabelingTask* SampleLabelingController::temporary_task()
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return nullptr;
+    }
+    const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [](const auto& task) {
+        return !task.output_path;
+    });
+    return match == state->tasks.end() ? nullptr : &*match;
+}
+
+const SampleLabelingTask* SampleLabelingController::temporary_task() const
+{
+    const SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return nullptr;
+    }
+    const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [](const auto& task) {
+        return !task.output_path;
+    });
+    return match == state->tasks.end() ? nullptr : &*match;
+}
+
 const std::vector<SampleLabelingTask>* SampleLabelingController::active_source_tasks() const
 {
     const SourceState* state = ActiveSource();
@@ -186,6 +210,12 @@ SampleLabelingTask* SampleLabelingController::CreateTask(std::string task_id, st
     SourceState* state = ActiveSource();
     if (state == nullptr || task_id.empty()) {
         return nullptr;
+    }
+
+    if (SampleLabelingTask* existing_temporary_task = temporary_task()) {
+        state->active_task_id = existing_temporary_task->task_id;
+        QueueStateSave();
+        return active_task();
     }
 
     auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
@@ -356,6 +386,46 @@ bool SampleLabelingController::SetActiveTaskOutputPath(std::filesystem::path out
         QueueOutputRetry();
     }
     QueueStateSave();
+    return true;
+}
+
+bool SampleLabelingController::SaveActiveTemporaryTaskToOutput(
+    std::filesystem::path output_path,
+    std::string task_name)
+{
+    SampleLabelingTask* task = active_task();
+    SourceState* state = ActiveSource();
+    if (task == nullptr || state == nullptr || task->output_path || output_path.empty() || task_name.empty()) {
+        return false;
+    }
+
+    const auto conflict = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& existing) {
+        return existing.task_id != task->task_id && existing.output_path &&
+               OutputPathMatches(*existing.output_path, output_path);
+    });
+    if (conflict != state->tasks.end()) {
+        task->save_state.message = "Output path is already used by another local labeling task.";
+        QueueStateSave();
+        return false;
+    }
+
+    SampleLabelingTask candidate = *task;
+    candidate.task_name = std::move(task_name);
+    SelectSampleLabelTaskOutputPath(candidate, std::move(output_path));
+    const SampleLabelResultMetadataSource source = SourceMetadataFromState(*state);
+    const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(candidate, &source);
+    if (!result.output_saved) {
+        task->save_state.kind = SampleLabelSaveStateKind::Failed;
+        task->save_state.pending_count = candidate.save_state.pending_count;
+        task->save_state.message = result.message.empty() ? "Could not save labeling output." : result.message;
+        QueueStateSave();
+        (void)FlushStateCache();
+        return false;
+    }
+
+    *task = std::move(candidate);
+    QueueStateSave();
+    (void)FlushStateCache();
     return true;
 }
 
@@ -600,7 +670,13 @@ bool SampleLabelingController::TrySaveStateCache()
             (void)identity;
             for (SampleLabelingTask& task : state.tasks) {
                 if (!task.output_path) {
-                    MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::InternalDraftOnly);
+                    task.pending_sample_indices.clear();
+                    task.metadata_save_pending = false;
+                    task.save_state.pending_count = 0;
+                    if (task.save_state.kind != SampleLabelSaveStateKind::Failed) {
+                        task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
+                        task.save_state.message.clear();
+                    }
                     continue;
                 }
                 task.save_state.pending_count = task.pending_sample_indices.size();

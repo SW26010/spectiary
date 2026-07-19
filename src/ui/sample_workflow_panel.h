@@ -41,9 +41,7 @@ public:
         bool* open);
 
 private:
-    std::array<char, 128> new_task_name_buffer_ = {};
-    std::array<char, 128> active_task_name_buffer_ = {};
-    std::string active_task_name_buffer_task_id_;
+    std::string active_task_id_;
     std::optional<int> editing_label_code_;
     std::string label_name_edit_buffer_;
     std::array<char, 16> label_code_edit_buffer_ = {};

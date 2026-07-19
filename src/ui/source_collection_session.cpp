@@ -198,18 +198,10 @@ SampleNavigationIntent SampleNavigationIntent::CommitSampleNameSelection(
     return intent;
 }
 
-ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::CreateDefaultLabelingTask()
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()
 {
     ActiveSampleWorkflowIntent intent;
-    intent.kind = ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask;
-    return intent;
-}
-
-ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::CreateLabelingTask(std::string task_name)
-{
-    ActiveSampleWorkflowIntent intent;
-    intent.kind = ActiveSampleWorkflowIntentKind::CreateLabelingTask;
-    intent.task_name = std::move(task_name);
+    intent.kind = ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask;
     return intent;
 }
 
@@ -219,14 +211,6 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ActivateLabelingTaskFromA
     ActiveSampleWorkflowIntent intent;
     intent.kind = ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation;
     intent.path = std::move(annotation_path);
-    return intent;
-}
-
-ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::RenameActiveLabelingTask(std::string task_name)
-{
-    ActiveSampleWorkflowIntent intent;
-    intent.kind = ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask;
-    intent.task_name = std::move(task_name);
     return intent;
 }
 
@@ -538,17 +522,11 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         break;
     case SourceCollectionSessionIntentKind::ActiveSampleWorkflow:
         switch (intent.active_sample_workflow.kind) {
-        case ActiveSampleWorkflowIntentKind::CreateDefaultLabelingTask:
-            result.action = CreateDefaultLabelingTask();
-            break;
-        case ActiveSampleWorkflowIntentKind::CreateLabelingTask:
-            result.action = CreateLabelingTask(std::move(intent.active_sample_workflow.task_name));
+        case ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask:
+            result.action = StartOrResumeTemporaryLabelingTask();
             break;
         case ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation:
             result.action = ActivateLabelingTaskFromAnnotation(std::move(intent.active_sample_workflow.path));
-            break;
-        case ActiveSampleWorkflowIntentKind::RenameActiveLabelingTask:
-            result.action = RenameActiveLabelingTask(std::move(intent.active_sample_workflow.task_name));
             break;
         case ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask:
             result.action = DeleteActiveLabelingTask();
@@ -761,16 +739,9 @@ SourceCollectionSessionAction SourceCollectionSession::CommitSampleNameSelection
     return action;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::CreateDefaultLabelingTask()
+SourceCollectionSessionAction SourceCollectionSession::StartOrResumeTemporaryLabelingTask()
 {
-    SourceCollectionSessionAction action = workflow_->CreateDefaultLabelingTask();
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::CreateLabelingTask(std::string task_name)
-{
-    SourceCollectionSessionAction action = workflow_->CreateLabelingTask(std::move(task_name));
+    SourceCollectionSessionAction action = workflow_->StartOrResumeTemporaryLabelingTask();
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
     return action;
 }
@@ -779,11 +750,6 @@ SourceCollectionSessionAction SourceCollectionSession::ActivateLabelingTaskFromA
     std::filesystem::path annotation_path)
 {
     return workflow_->ActivateLabelingTaskFromAnnotation(std::move(annotation_path));
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RenameActiveLabelingTask(std::string task_name)
-{
-    return workflow_->RenameActiveLabelingTask(std::move(task_name));
 }
 
 SourceCollectionSessionAction SourceCollectionSession::DeleteActiveLabelingTask()

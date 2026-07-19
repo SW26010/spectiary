@@ -84,6 +84,8 @@ struct SourceCollectionLabelingView {
     bool has_active_source = false;
     std::optional<std::size_t> current_index;
     bool has_active_task = false;
+    bool has_temporary_task = false;
+    bool active_task_is_temporary = false;
     std::string task_id;
     std::string task_name;
     SampleLabelSet label_set;
