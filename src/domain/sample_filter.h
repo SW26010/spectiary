@@ -4,6 +4,7 @@
 #include "domain/sample_labeling.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -48,6 +49,10 @@ public:
     [[nodiscard]] SampleFilterEvaluation Evaluate(
         const std::vector<SampleFilterSource>& sources,
         std::size_t sample_count) const;
+    [[nodiscard]] SampleFilterEvaluation Evaluate(
+        const std::vector<SampleFilterSource>& sources,
+        std::size_t sample_count,
+        const std::function<void()>& cancellation_checkpoint) const;
 
 private:
     std::vector<SampleFilterCondition> conditions_;
@@ -56,6 +61,12 @@ private:
 [[nodiscard]] std::string BuildAnnotationFilterSourceId(const SampleAnnotationResult& annotation);
 [[nodiscard]] std::string BuildLabelingFilterSourceId(const SampleLabelingTask& task);
 [[nodiscard]] SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& annotation);
+[[nodiscard]] SampleFilterSource BuildAnnotationFilterSource(
+    const SampleAnnotationResult& annotation,
+    const std::function<void()>& cancellation_checkpoint);
 [[nodiscard]] SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task);
+[[nodiscard]] SampleFilterSource BuildLabelingFilterSource(
+    const SampleLabelingTask& task,
+    const std::function<void()>& cancellation_checkpoint);
 
 }  // namespace specforge

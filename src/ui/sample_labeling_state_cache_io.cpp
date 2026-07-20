@@ -76,14 +76,21 @@ std::string_view SaveStateKindText(SampleLabelSaveStateKind kind)
     }
 }
 
-void ApplyPendingValues(SampleLabelingTask& task, const JsonValue& task_object)
+void ApplyPendingValues(
+    SampleLabelingTask& task,
+    const JsonValue& task_object,
+    const std::function<void()>& cancellation_checkpoint)
 {
     const JsonValue* pending_values = ObjectMember(task_object, "pending_values");
     if (pending_values == nullptr || pending_values->kind != JsonValue::Kind::Array) {
         return;
     }
 
-    for (const JsonValue& pending_object : pending_values->array) {
+    for (std::size_t index = 0; index < pending_values->array.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const JsonValue& pending_object = pending_values->array[index];
         if (pending_object.kind != JsonValue::Kind::Object) {
             continue;
         }
@@ -97,7 +104,9 @@ void ApplyPendingValues(SampleLabelingTask& task, const JsonValue& task_object)
     }
 }
 
-SampleLabelSet ParseLabelSet(const JsonValue& task_object)
+SampleLabelSet ParseLabelSet(
+    const JsonValue& task_object,
+    const std::function<void()>& cancellation_checkpoint)
 {
     SampleLabelSet label_set;
     const JsonValue* labels = ObjectMember(task_object, "labels");
@@ -105,7 +114,11 @@ SampleLabelSet ParseLabelSet(const JsonValue& task_object)
         return label_set;
     }
 
-    for (const JsonValue& label_object : labels->array) {
+    for (std::size_t index = 0; index < labels->array.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const JsonValue& label_object = labels->array[index];
         if (label_object.kind != JsonValue::Kind::Object) {
             continue;
         }
@@ -121,7 +134,10 @@ SampleLabelSet ParseLabelSet(const JsonValue& task_object)
     return label_set;
 }
 
-std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::size_t sample_count)
+std::optional<SampleLabelingTask> ParseTask(
+    const JsonValue& task_object,
+    std::size_t sample_count,
+    const std::function<void()>& cancellation_checkpoint)
 {
     if (task_object.kind != JsonValue::Kind::Object) {
         return std::nullopt;
@@ -133,8 +149,18 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
         return std::nullopt;
     }
 
-    SampleLabelingTask task = CreateSampleLabelingTask(*task_id, task_name.value_or(*task_id), sample_count);
-    task.label_set = ParseLabelSet(task_object);
+    SampleLabelingTask task = CreateSampleLabelingTask(*task_id, task_name.value_or(*task_id), 0);
+    task.values.reserve(sample_count);
+    constexpr std::size_t kInitializationChunk = 4096U;
+    while (task.values.size() < sample_count) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        task.values.resize(
+            std::min(sample_count, task.values.size() + kInitializationChunk),
+            kUnlabeledSampleLabelCode);
+    }
+    task.label_set = ParseLabelSet(task_object, cancellation_checkpoint);
     task.auto_advance = ReadBoolMember(task_object, "auto_advance", false);
     task.skip_labeled_on_advance = ReadBoolMember(task_object, "skip_labeled_on_advance", false);
     if (const std::optional<std::size_t> remembered = ReadSizeMember(task_object, "remembered_position")) {
@@ -155,7 +181,11 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
     std::string metadata_load_error;
     if (task.output_path) {
         if (std::optional<std::vector<int>> values =
-                LoadSampleLabelResultNpy(*task.output_path, sample_count, &output_load_error)) {
+                LoadSampleLabelResultNpyCancelable(
+                    *task.output_path,
+                    sample_count,
+                    cancellation_checkpoint,
+                    &output_load_error)) {
             task.values = std::move(*values);
         } else {
             output_load_failed = true;
@@ -166,7 +196,11 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
             const bool metadata_exists = std::filesystem::exists(metadata_path, metadata_exists_error) &&
                                          !metadata_exists_error;
             SampleLabelResultMetadataLoadResult metadata =
-                LoadSampleLabelResultMetadataForResult(*task.output_path, sample_count, "int32");
+                LoadSampleLabelResultMetadataForResultCancelable(
+                    *task.output_path,
+                    sample_count,
+                    "int32",
+                    cancellation_checkpoint);
             if (metadata.metadata) {
                 if (metadata.metadata->task_id != task.task_id) {
                     metadata_load_failed = true;
@@ -182,13 +216,17 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
                 metadata_load_error = "metadata sidecar is missing";
             }
         }
-        ApplyPendingValues(task, task_object);
+        ApplyPendingValues(task, task_object, cancellation_checkpoint);
     } else if (const JsonValue* values = ObjectMember(task_object, "values")) {
         if (values->kind == JsonValue::Kind::Array && values->array.size() == sample_count) {
             std::vector<int> parsed_values;
             parsed_values.reserve(values->array.size());
             bool all_ints = true;
-            for (const JsonValue& value : values->array) {
+            for (std::size_t index = 0; index < values->array.size(); ++index) {
+                if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
+                const JsonValue& value = values->array[index];
                 if (value.kind != JsonValue::Kind::Integer ||
                     value.integer_value < std::numeric_limits<int>::min() ||
                     value.integer_value > std::numeric_limits<int>::max()) {
@@ -233,6 +271,7 @@ std::optional<SampleLabelingTask> ParseTask(const JsonValue& task_object, std::s
     } else if (!task.output_path && task.save_state.kind == SampleLabelSaveStateKind::Pending) {
         task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
     }
+    RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
     return task;
 }
 
@@ -243,11 +282,18 @@ std::filesystem::path DefaultSampleLabelingStateCachePath()
     return DefaultLocalUserStatePath("sample-labeling-tasks.json");
 }
 
-SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::filesystem::path& path)
+SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
+    const std::filesystem::path& path,
+    const std::function<void()>& cancellation_checkpoint)
 {
     SampleLabelingStateCacheLoadResult result;
     VersionedJsonCacheLoadResult cache =
-        LoadVersionedJsonCacheFile(path, kStateFormatKind, {1, kStateSchemaVersion}, "sample-labeling task record");
+        LoadVersionedJsonCacheFile(
+            path,
+            kStateFormatKind,
+            {1, kStateSchemaVersion},
+            "sample-labeling task record",
+            cancellation_checkpoint);
     if (!cache.document) {
         result.warning = std::move(cache.warning);
         return result;
@@ -258,7 +304,11 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
         return result;
     }
 
-    for (const JsonValue& source_object : sources->array) {
+    for (std::size_t source_index = 0; source_index < sources->array.size(); ++source_index) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const JsonValue& source_object = sources->array[source_index];
         if (source_object.kind != JsonValue::Kind::Object) {
             continue;
         }
@@ -287,7 +337,11 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
                 continue;
             }
             for (const JsonValue& task_object : tasks->array) {
-                if (std::optional<SampleLabelingTask> task = ParseTask(task_object, state.sample_count)) {
+                if (cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
+                if (std::optional<SampleLabelingTask> task =
+                        ParseTask(task_object, state.sample_count, cancellation_checkpoint)) {
                     state.tasks.push_back(std::move(*task));
                 }
             }
@@ -298,8 +352,11 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
             state.active_task_id.reset();
         }
         result.cache.sources.emplace(
-            NormalizePersistedSourceCollectionIdentity(*identity),
+            NormalizePersistedSourceCollectionIdentity(std::move(*identity)),
             std::move(state));
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
     }
     return result;
 }

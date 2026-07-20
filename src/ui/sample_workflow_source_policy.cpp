@@ -181,7 +181,8 @@ bool IsSampleSortSourceAvailable(
 SampleFilterEvaluation EvaluateFilterSources(
     const SampleFilterController& filters,
     const std::vector<SampleFilterSource>& filter_sources,
-    std::size_t sample_count)
+    std::size_t sample_count,
+    const std::function<void()>& cancellation_checkpoint = {})
 {
     if (sample_count == 0) {
         return {};
@@ -191,7 +192,7 @@ SampleFilterEvaluation EvaluateFilterSources(
         evaluation.included_count = sample_count;
         return evaluation;
     }
-    return filters.Evaluate(filter_sources, sample_count);
+    return filters.Evaluate(filter_sources, sample_count, cancellation_checkpoint);
 }
 
 SourceCollectionFilterSourceView BuildFilterSourceView(
@@ -465,13 +466,31 @@ bool SampleWorkflowSourcePolicy::has_filter_conditions() const
 SampleFilterEvaluation SampleWorkflowSourcePolicy::EvaluateFilters(
     const SampleWorkflowSourceContext& context) const
 {
-    return EvaluateFilterSources(filters_, BuildSelectedFilterSources(context), context.sample_count);
+    return EvaluateFilters(context, {});
+}
+
+SampleFilterEvaluation SampleWorkflowSourcePolicy::EvaluateFilters(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
+    return EvaluateFilterSources(
+        filters_,
+        BuildSelectedFilterSources(context, cancellation_checkpoint),
+        context.sample_count,
+        cancellation_checkpoint);
 }
 
 SourceCollectionFilterView SampleWorkflowSourcePolicy::BuildFilterView(
     const SampleWorkflowSourceContext& context) const
 {
-    SourceCollectionFilterView view = CachedFilterView(context);
+    return BuildFilterView(context, {});
+}
+
+SourceCollectionFilterView SampleWorkflowSourcePolicy::BuildFilterView(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
+    SourceCollectionFilterView view = CachedFilterView(context, cancellation_checkpoint);
     view.sample_count = context.sample_count;
     return view;
 }
@@ -534,6 +553,14 @@ SampleWorkflowSortChoiceResult SampleWorkflowSourcePolicy::BuildSortChoice(
     const SampleWorkflowSourceContext& context,
     bool remove_unavailable_active_source)
 {
+    return BuildSortChoice(context, remove_unavailable_active_source, {});
+}
+
+SampleWorkflowSortChoiceResult SampleWorkflowSourcePolicy::BuildSortChoice(
+    const SampleWorkflowSourceContext& context,
+    bool remove_unavailable_active_source,
+    const std::function<void()>& cancellation_checkpoint)
+{
     SampleWorkflowSortChoiceResult result;
     if (context.sample_count == 0 || !selected_sample_sort_source_id_) {
         return result;
@@ -543,7 +570,8 @@ SampleWorkflowSortChoiceResult SampleWorkflowSourcePolicy::BuildSortChoice(
         context.collection,
         context.labeling_tasks,
         context.sample_count,
-        *selected_sample_sort_source_id_);
+        *selected_sample_sort_source_id_,
+        cancellation_checkpoint);
     if (!source) {
         if (remove_unavailable_active_source) {
             const std::string removed_source_id = *selected_sample_sort_source_id_;
@@ -563,11 +591,18 @@ SampleWorkflowSortChoiceResult SampleWorkflowSourcePolicy::BuildSortChoice(
 SourceCollectionSampleSortingView SampleWorkflowSourcePolicy::BuildSortingView(
     const SampleWorkflowSourceContext& context) const
 {
+    return BuildSortingView(context, {});
+}
+
+SourceCollectionSampleSortingView SampleWorkflowSourcePolicy::BuildSortingView(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
     SourceCollectionSampleSortingView view;
     view.direction = selected_sample_sort_direction_;
     view.source_order_direction = SampleSortSourceDirection("source-order");
     const std::vector<SourceCollectionSampleSortSourceView>& all_sources =
-        CachedSortingSourceViews(context);
+        CachedSortingSourceViews(context, cancellation_checkpoint);
     view.sources.reserve(selected_sample_sort_source_ids_.size() + 1);
     view.available_sources.reserve(all_sources.size());
 
@@ -730,6 +765,13 @@ bool SampleWorkflowSourcePolicy::RemoveSelectedSampleSortSource(std::string_view
 std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterSources(
     const SampleWorkflowSourceContext& context) const
 {
+    return BuildSelectedFilterSources(context, {});
+}
+
+std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterSources(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
     std::vector<SampleFilterSource> filter_sources;
     if (context.collection == nullptr || context.sample_count == 0) {
         return filter_sources;
@@ -737,44 +779,63 @@ std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterS
 
     filter_sources.reserve(selected_filter_source_ids_.size());
     std::unordered_set<std::string> emitted_labeling_source_ids;
-    for (const SampleAnnotationResult& annotation : context.collection->annotations) {
+    for (std::size_t annotation_index = 0;
+         annotation_index < context.collection->annotations.size();
+         ++annotation_index) {
+        if ((annotation_index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const SampleAnnotationResult& annotation = context.collection->annotations[annotation_index];
         if (const SampleLabelingTask* local_task =
                 FindLocalTaskForLoadedAnnotation(context.labeling_tasks, annotation)) {
             if (!IsLabelingSampleFilterCandidate(*local_task, context.sample_count)) {
                 continue;
             }
-            SampleFilterSource source = BuildLabelingFilterSource(*local_task);
-            source.name = AnnotationDisplayName(annotation, local_task);
-            emitted_labeling_source_ids.insert(source.id);
-            if (IsSelectedFilterSource(source.id)) {
-                filter_sources.push_back(std::move(source));
+            const std::string source_id = BuildLabelingFilterSourceId(*local_task);
+            emitted_labeling_source_ids.insert(source_id);
+            if (!IsSelectedFilterSource(source_id)) {
+                continue;
             }
+            SampleFilterSource source = BuildLabelingFilterSource(*local_task, cancellation_checkpoint);
+            source.name = AnnotationDisplayName(annotation, local_task);
+            filter_sources.push_back(std::move(source));
             continue;
         }
         if (!IsAnnotationSampleFilterCandidate(context.labeling_tasks, annotation, context.sample_count)) {
             continue;
         }
-        SampleFilterSource source = BuildAnnotationFilterSource(annotation);
-        source.name = AnnotationDisplayName(annotation);
-        if (IsSelectedFilterSource(source.id)) {
-            filter_sources.push_back(std::move(source));
+        const std::string source_id = BuildAnnotationFilterSourceId(annotation);
+        if (!IsSelectedFilterSource(source_id)) {
+            continue;
         }
+        SampleFilterSource source = BuildAnnotationFilterSource(annotation, cancellation_checkpoint);
+        source.name = AnnotationDisplayName(annotation);
+        filter_sources.push_back(std::move(source));
     }
     if (context.labeling_tasks != nullptr) {
-        for (const SampleLabelingTask& task : *context.labeling_tasks) {
+        for (std::size_t task_index = 0; task_index < context.labeling_tasks->size(); ++task_index) {
+            if ((task_index & 0xfffU) == 0U && cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
+            const SampleLabelingTask& task = (*context.labeling_tasks)[task_index];
             if (!task.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
                 continue;
             }
-            SampleFilterSource source = BuildLabelingFilterSource(task);
-            source.name = LocalTaskAnnotationDisplayName(task);
-            if (emitted_labeling_source_ids.find(source.id) != emitted_labeling_source_ids.end()) {
+            const std::string source_id = BuildLabelingFilterSourceId(task);
+            if (emitted_labeling_source_ids.find(source_id) != emitted_labeling_source_ids.end()) {
                 continue;
             }
-            emitted_labeling_source_ids.insert(source.id);
-            if (IsSelectedFilterSource(source.id)) {
-                filter_sources.push_back(std::move(source));
+            emitted_labeling_source_ids.insert(source_id);
+            if (!IsSelectedFilterSource(source_id)) {
+                continue;
             }
+            SampleFilterSource source = BuildLabelingFilterSource(task, cancellation_checkpoint);
+            source.name = LocalTaskAnnotationDisplayName(task);
+            filter_sources.push_back(std::move(source));
         }
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
     }
     return filter_sources;
 }
@@ -782,23 +843,39 @@ std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterS
 const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
     const SampleWorkflowSourceContext& context) const
 {
+    return CachedFilterView(context, {});
+}
+
+const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
     if (!filter_view_cache_valid_ ||
         filter_view_cache_context_ != context.collection ||
         filter_view_cache_sample_count_ != context.sample_count) {
         SourceCollectionFilterView view;
         view.sample_count = context.sample_count;
-        const std::vector<SampleFilterSource> filter_sources = BuildSelectedFilterSources(context);
-        view.evaluation = EvaluateFilterSources(filters_, filter_sources, context.sample_count);
+        const std::vector<SampleFilterSource> filter_sources =
+            BuildSelectedFilterSources(context, cancellation_checkpoint);
+        view.evaluation = EvaluateFilterSources(
+            filters_, filter_sources, context.sample_count, cancellation_checkpoint);
         view.evaluation.included_samples.clear();
         if (context.collection != nullptr && context.sample_count > 0) {
             std::unordered_set<std::string> emitted_labeling_source_ids;
-            for (const SampleAnnotationResult& annotation : context.collection->annotations) {
+            for (std::size_t annotation_index = 0;
+                 annotation_index < context.collection->annotations.size();
+                 ++annotation_index) {
+                if ((annotation_index & 0xfffU) == 0U && cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
+                const SampleAnnotationResult& annotation = context.collection->annotations[annotation_index];
                 if (const SampleLabelingTask* local_task =
                         FindLocalTaskForLoadedAnnotation(context.labeling_tasks, annotation)) {
                     if (!IsLabelingSampleFilterCandidate(*local_task, context.sample_count)) {
                         continue;
                     }
-                    SampleFilterSource source = BuildLabelingFilterSource(*local_task);
+                    SampleFilterSource source =
+                        BuildLabelingFilterSource(*local_task, cancellation_checkpoint);
                     source.name = AnnotationDisplayName(annotation, local_task);
                     emitted_labeling_source_ids.insert(source.id);
                     SourceCollectionFilterSourceView source_view =
@@ -816,7 +893,8 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
                         context.sample_count)) {
                     continue;
                 }
-                SampleFilterSource source = BuildAnnotationFilterSource(annotation);
+                SampleFilterSource source =
+                    BuildAnnotationFilterSource(annotation, cancellation_checkpoint);
                 source.name = AnnotationDisplayName(annotation);
                 SourceCollectionFilterSourceView source_view =
                     BuildFilterSourceView(source, filters_, annotation.path);
@@ -827,11 +905,15 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
                 }
             }
             if (context.labeling_tasks != nullptr) {
-                for (const SampleLabelingTask& task : *context.labeling_tasks) {
+                for (std::size_t task_index = 0; task_index < context.labeling_tasks->size(); ++task_index) {
+                    if ((task_index & 0xfffU) == 0U && cancellation_checkpoint) {
+                        cancellation_checkpoint();
+                    }
+                    const SampleLabelingTask& task = (*context.labeling_tasks)[task_index];
                     if (!task.output_path || !IsLabelingSampleFilterCandidate(task, context.sample_count)) {
                         continue;
                     }
-                    SampleFilterSource source = BuildLabelingFilterSource(task);
+                    SampleFilterSource source = BuildLabelingFilterSource(task, cancellation_checkpoint);
                     if (emitted_labeling_source_ids.find(source.id) != emitted_labeling_source_ids.end()) {
                         continue;
                     }
@@ -851,6 +933,9 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
         filter_view_cache_context_ = context.collection;
         filter_view_cache_sample_count_ = context.sample_count;
         filter_view_cache_valid_ = true;
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
     }
     return filter_view_cache_;
 }
@@ -859,13 +944,22 @@ const std::vector<SourceCollectionSampleSortSourceView>&
 SampleWorkflowSourcePolicy::CachedSortingSourceViews(
     const SampleWorkflowSourceContext& context) const
 {
+    return CachedSortingSourceViews(context, {});
+}
+
+const std::vector<SourceCollectionSampleSortSourceView>&
+SampleWorkflowSourcePolicy::CachedSortingSourceViews(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint) const
+{
     if (!sorting_source_cache_valid_ ||
         sorting_source_cache_context_ != context.collection ||
         sorting_source_cache_sample_count_ != context.sample_count) {
         sorting_source_cache_ = BuildSampleSortingSourceViews(
             context.collection,
             context.labeling_tasks,
-            context.sample_count);
+            context.sample_count,
+            cancellation_checkpoint);
         if (context.collection != nullptr) {
             for (SourceCollectionSampleSortSourceView& source_view : sorting_source_cache_) {
                 if (source_view.annotation_path.empty()) {

@@ -2,7 +2,9 @@
 
 #include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
+#include "domain/source_collection_manifest.h"
 #include "ui/sample_navigation_controller.h"
+#include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -21,6 +23,18 @@ class SampleWorkflowCoordinator;
 struct SampleWorkflowCommandResult;
 class SourceCollectionRoster;
 class SourceCollectionSessionStatePersistence;
+
+enum class SourceCollectionSessionRestoreMode {
+    Immediate,
+    Deferred,
+};
+
+struct SourceCollectionLoadHint {
+    SourceCollectionIdentity identity;
+    std::size_t spectrum_index = 0;
+    std::optional<SampleWorkflowSourceState> workflow_state;
+    std::optional<SampleLabelingSourceState> labeling_state;
+};
 
 enum class SourceCollectionSessionIntentKind {
     SourceCollection,
@@ -216,6 +230,8 @@ private:
 struct SourceCollectionSessionResult {
     SourceCollectionSessionAction action;
     SampleNavigationResult navigation;
+    std::optional<std::size_t> follow_up_spectrum_index;
+    std::vector<BackgroundRetirementHandle> background_retirement;
     bool changed = false;
     bool loaded = false;
     std::string message;
@@ -232,6 +248,9 @@ public:
     explicit SourceCollectionSession(SnapshotLoader snapshot_loader);
     SourceCollectionSession(
         SnapshotLoader snapshot_loader,
+        SourceCollectionSessionRestoreMode restore_mode);
+    SourceCollectionSession(
+        SnapshotLoader snapshot_loader,
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path);
     SourceCollectionSession(
@@ -245,6 +264,13 @@ public:
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
         std::filesystem::path workflow_state_cache_path);
+    SourceCollectionSession(
+        SnapshotLoader snapshot_loader,
+        std::filesystem::path source_session_state_cache_path,
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path,
+        SourceCollectionSessionRestoreMode restore_mode);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
@@ -255,10 +281,31 @@ public:
     [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionIntent intent);
     [[nodiscard]] SourceCollectionSessionView View() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
+    [[nodiscard]] SpectrumSnapshotHandle CurrentSourceSnapshot() const;
+    [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSource(
+        const std::filesystem::path& path) const;
+    [[nodiscard]] std::optional<SourceCollectionLoadHint> LoadHintForSource(
+        const std::filesystem::path& path);
+    [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
+        std::filesystem::path path,
+        std::size_t spectrum_index,
+        SpectrumSnapshotHandle snapshot,
+        PreparedSourceCollectionPayload payload);
+    [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
+        std::filesystem::path path,
+        std::size_t spectrum_index,
+        SpectrumSnapshotHandle snapshot,
+        SourceCollectionContext context,
+        PreparedSampleWorkflowState prepared_workflow);
+    [[nodiscard]] std::optional<SourceCollectionDeferredRestorePlan> TakeDeferredRestorePlan();
+    void FinishDeferredRestore();
+    [[nodiscard]] bool HasUnresolvedSourceIntent(const std::filesystem::path& path) const;
+    [[nodiscard]] bool ForgetUnresolvedSourceIntent(const std::filesystem::path& path);
 
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
 private:
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
@@ -319,10 +366,13 @@ private:
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);
 
-    [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation();
+    [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation(
+        bool refresh_source_context = false);
+    void PreserveRequiredBackgroundSnapshotLoad();
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
     void RestoreSourceSessionCache();
+    void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
     void ApplyWorkflowCommandResult(
         SourceCollectionSessionAction& action,
@@ -332,6 +382,11 @@ private:
     std::unique_ptr<SourceCollectionRoster> roster_;
     std::unique_ptr<SampleWorkflowCoordinator> workflow_;
     std::unique_ptr<SourceCollectionSessionStatePersistence> source_session_state_;
+    std::optional<SourceCollectionDeferredRestorePlan> deferred_restore_plan_;
+    std::vector<SourceCollectionSavedSource> unresolved_deferred_restore_sources_;
+    bool deferred_restore_active_ = false;
+    bool background_loads_required_ = false;
+    std::optional<std::size_t> pending_background_spectrum_index_;
 };
 
 }  // namespace specforge

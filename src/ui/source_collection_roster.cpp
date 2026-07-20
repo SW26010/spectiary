@@ -1,10 +1,9 @@
 #include "ui/source_collection_roster.h"
 
+#include "domain/source_path_identity.h"
 #include "domain/spectrum_fixture.h"
 
 #include <algorithm>
-#include <cctype>
-#include <system_error>
 #include <utility>
 
 namespace specforge {
@@ -20,21 +19,6 @@ std::string FileNameToUtf8(const std::filesystem::path& path)
 {
     const std::filesystem::path filename = path.filename();
     return filename.empty() ? PathToUtf8(path) : PathToUtf8(filename);
-}
-
-std::string LowerAscii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
-
-std::string SourceKey(const std::filesystem::path& path)
-{
-    std::error_code error;
-    const std::filesystem::path absolute_path = std::filesystem::absolute(path, error);
-    return LowerAscii(PathToUtf8(error ? path : absolute_path));
 }
 
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
@@ -192,10 +176,23 @@ SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
 {
     SourceCollectionSessionAction action;
     SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
-    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = source_index;
+    AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
+    current_source_index_ = update.source_index;
     SetSnapshot(std::move(loaded_snapshot), action);
     return action;
+}
+
+SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSource(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    SpectrumSnapshotHandle snapshot)
+{
+    SourceCollectionRosterPreparedOpenResult result;
+    AddOrUpdateSourceResult update = AddOrUpdateSource(path, snapshot, spectrum_index);
+    current_source_index_ = update.source_index;
+    result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
+    SetSnapshot(std::move(snapshot), result.action);
+    return result;
 }
 
 SourceCollectionSessionAction SourceCollectionRoster::ActivateSource(std::size_t source_index)
@@ -255,10 +252,18 @@ SourceCollectionSessionAction SourceCollectionRoster::LoadActiveSourceAt(std::si
 
     const std::filesystem::path path = source->path;
     SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
-    const std::size_t source_index = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = source_index;
+    AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
+    current_source_index_ = update.source_index;
     SetSnapshot(std::move(loaded_snapshot), action);
     return action;
+}
+
+void SourceCollectionRoster::RememberActiveSourceIndex(std::size_t spectrum_index)
+{
+    if (!current_source_index_ || *current_source_index_ >= sources_.size()) {
+        return;
+    }
+    sources_[*current_source_index_].last_spectrum_index = spectrum_index;
 }
 
 const SourceCollectionRoster::SourceListEntry* SourceCollectionRoster::current_source() const
@@ -269,12 +274,13 @@ const SourceCollectionRoster::SourceListEntry* SourceCollectionRoster::current_s
     return &sources_[*current_source_index_];
 }
 
-std::size_t SourceCollectionRoster::AddOrUpdateSource(
+SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpdateSource(
     const std::filesystem::path& path,
     SpectrumSnapshotHandle snapshot,
     std::size_t spectrum_index)
 {
-    const std::string key = SourceKey(path);
+    AddOrUpdateSourceResult result;
+    const std::string key = SourcePathIdentityKey(path);
     const auto match = std::find_if(sources_.begin(), sources_.end(), [&key](const SourceListEntry& entry) {
         return entry.key == key;
     });
@@ -283,9 +289,11 @@ std::size_t SourceCollectionRoster::AddOrUpdateSource(
         match->display_name = SnapshotDisplayNameText(snapshot, path);
         match->type_label = SnapshotTypeLabelText(snapshot);
         match->state_label = SnapshotStateLabelText(snapshot);
+        result.replaced_cached_snapshot = std::move(match->cached_snapshot);
         match->cached_snapshot = std::move(snapshot);
         match->last_spectrum_index = spectrum_index;
-        return static_cast<std::size_t>(std::distance(sources_.begin(), match));
+        result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));
+        return result;
     }
 
     SourceListEntry entry;
@@ -297,7 +305,8 @@ std::size_t SourceCollectionRoster::AddOrUpdateSource(
     entry.cached_snapshot = std::move(snapshot);
     entry.last_spectrum_index = spectrum_index;
     sources_.push_back(std::move(entry));
-    return sources_.size() - 1;
+    result.source_index = sources_.size() - 1;
+    return result;
 }
 
 void SourceCollectionRoster::SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action)

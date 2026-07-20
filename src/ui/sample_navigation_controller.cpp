@@ -1,13 +1,14 @@
 #include "ui/sample_navigation_controller.h"
 
-#include "domain/sample_annotation_io.h"
+#include "domain/source_path_identity.h"
+#include "ui/sample_workflow_preparation.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -20,23 +21,31 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
-bool PathExists(const std::filesystem::path& path)
-{
-    std::error_code error;
-    return std::filesystem::exists(path, error) && !error;
-}
-
 bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesystem::path& right)
 {
     if (left.empty() || right.empty()) {
         return false;
     }
-    std::error_code equivalent_error;
-    if (PathExists(left) && PathExists(right) &&
-        std::filesystem::equivalent(left, right, equivalent_error) && !equivalent_error) {
-        return true;
+    return SourcePathIdentityKey(left) == SourcePathIdentityKey(right);
+}
+
+std::vector<std::filesystem::path> AnnotationPaths(const SourceCollectionManifest& manifest)
+{
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(manifest.annotations.size());
+    std::unordered_set<std::string> path_keys;
+    path_keys.reserve(manifest.annotations.size());
+    for (const SampleAnnotationResult& annotation : manifest.annotations) {
+        if (annotation.path.empty()) {
+            continue;
+        }
+        std::string path_key = SourcePathIdentityKey(annotation.path);
+        if (path_key.empty() || !path_keys.insert(std::move(path_key)).second) {
+            continue;
+        }
+        paths.push_back(annotation.path);
     }
-    return left.lexically_normal() == right.lexically_normal();
+    return paths;
 }
 
 }  // namespace
@@ -130,8 +139,27 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
         return;
     }
 
+    SourceCollectionContext context = LoadSourceCollectionContext(*snapshot);
+    ActivateSource(
+        std::move(source_key),
+        snapshot,
+        context.identity,
+        std::move(context.manifest));
+}
+
+void SampleNavigationController::ActivateSource(
+    std::string source_key,
+    const SpectrumSnapshotHandle& snapshot,
+    const SourceCollectionIdentity& identity,
+    SourceCollectionManifest manifest,
+    std::optional<std::size_t> prepared_index)
+{
+    if (source_key.empty() || !snapshot) {
+        ClearActiveSource();
+        return;
+    }
+
     EnsureStateCacheLoaded();
-    const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
     SourceSession& session = sessions_[identity.id];
     const bool new_session = session.source_collection_identity.empty();
     const bool context_changed = session.context_fingerprint != identity.context_fingerprint;
@@ -157,7 +185,7 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
             }
             retained_annotation_paths.push_back(annotation.path);
         }
-        session.manifest = LoadSourceCollectionManifest(*snapshot);
+        session.manifest = std::move(manifest);
         for (const std::filesystem::path& annotation_path : retained_annotation_paths) {
             if (std::any_of(
                     session.manifest.annotations.begin(),
@@ -173,7 +201,9 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     session.sample_name_query = previous_query;
     if (session.spectrum_count > 0) {
         const auto persisted = state_cache_.last_indices_by_source_identity.find(identity.id);
-        if (new_session && persisted != state_cache_.last_indices_by_source_identity.end() &&
+        if (prepared_index && *prepared_index < session.spectrum_count) {
+            session.current_index = *prepared_index;
+        } else if (new_session && persisted != state_cache_.last_indices_by_source_identity.end() &&
             persisted->second < session.spectrum_count) {
             session.current_index = persisted->second;
         } else if (new_session) {
@@ -198,6 +228,116 @@ void SampleNavigationController::ActivateSource(std::string source_key, const Sp
     source_key_to_session_key_[source_key] = identity.id;
     active_source_key_ = identity.id;
     PersistActiveIndex();
+}
+
+BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
+    std::string source_key,
+    const SpectrumSnapshotHandle& snapshot,
+    const SourceCollectionIdentity& identity,
+    SourceCollectionManifest manifest,
+    PreparedSampleWorkflowState prepared)
+{
+    if (source_key.empty() || !snapshot) {
+        ClearActiveSource();
+        return {};
+    }
+
+    auto [session_entry, inserted] = sessions_.try_emplace(identity.id);
+    BackgroundRetirementHandle retired_session;
+    if (!inserted) {
+        auto retired = std::make_shared<SourceSession>();
+        *retired = std::move(session_entry->second);
+        retired_session = std::move(retired);
+        session_entry->second = SourceSession{};
+    }
+    SourceSession& session = session_entry->second;
+    session.source_collection_identity = identity.id;
+    session.source_name = identity.source_name;
+    session.source_fingerprint = identity.source_fingerprint;
+    session.context_fingerprint = identity.context_fingerprint;
+    session.spectrum_count = identity.spectrum_count;
+    session.current_index = prepared.current_index;
+    session.manifest = std::move(manifest);
+    // Sample-name search is transient UI state. A prepared load never performs
+    // an implicit collection scan to preserve an old query.
+    session.sample_name_query.clear();
+    session.sample_name_matches = prepared.navigation_sequence.sample_name_matches;
+    session.filter_active = prepared.filter_evaluation.active;
+    session.filter_included_samples = std::move(prepared.filter_evaluation.included_samples);
+    session.filtered_sample_count = prepared.filter_evaluation.active
+        ? prepared.filter_evaluation.included_count
+        : identity.spectrum_count;
+    session.index_before_active_filter = prepared.index_before_active_filter;
+    session.sort_choice = prepared.sort_choice ? std::move(*prepared.sort_choice) : SampleNavigationSortChoice{};
+    session.sequence_cache = std::move(prepared.navigation_sequence);
+    session.sequence_cache_valid = true;
+
+    source_key_to_session_key_[source_key] = identity.id;
+    active_source_key_ = identity.id;
+    return retired_session;
+}
+
+std::optional<SourceCollectionIdentity> SampleNavigationController::ActivateKnownSource(
+    std::string_view source_key)
+{
+    const std::optional<SourceCollectionIdentity> identity = KnownSourceIdentity(source_key);
+    if (!identity) {
+        return std::nullopt;
+    }
+    const auto mapped = source_key_to_session_key_.find(std::string(source_key));
+    active_source_key_ = mapped->second;
+    PersistActiveIndex();
+    return identity;
+}
+
+std::optional<SourceCollectionIdentity> SampleNavigationController::KnownSourceIdentity(
+    std::string_view source_key) const
+{
+    const auto mapped = source_key_to_session_key_.find(std::string(source_key));
+    if (mapped == source_key_to_session_key_.end()) {
+        return std::nullopt;
+    }
+    const auto session = sessions_.find(mapped->second);
+    if (session == sessions_.end()) {
+        return std::nullopt;
+    }
+
+    return SourceCollectionIdentity{
+        .id = session->second.source_collection_identity,
+        .source_name = session->second.source_name,
+        .source_fingerprint = session->second.source_fingerprint,
+        .context_fingerprint = session->second.context_fingerprint,
+        .spectrum_count = session->second.spectrum_count,
+    };
+}
+
+std::optional<std::size_t> SampleNavigationController::KnownSourceCurrentIndex(
+    std::string_view source_key) const
+{
+    const auto mapped = source_key_to_session_key_.find(std::string(source_key));
+    if (mapped == source_key_to_session_key_.end()) {
+        return std::nullopt;
+    }
+    const auto session = sessions_.find(mapped->second);
+    return session == sessions_.end() ? std::nullopt : session->second.current_index;
+}
+
+std::optional<SourceCollectionIdentity> SampleNavigationController::active_source_identity() const
+{
+    if (!active_source_key_) {
+        return std::nullopt;
+    }
+    const auto session = sessions_.find(*active_source_key_);
+    if (session == sessions_.end()) {
+        return std::nullopt;
+    }
+    return SourceCollectionIdentity{
+        .id = session->second.source_collection_identity,
+        .source_name = session->second.source_name,
+        .source_fingerprint = session->second.source_fingerprint,
+        .context_fingerprint = session->second.context_fingerprint,
+        .spectrum_count = session->second.spectrum_count,
+    };
 }
 
 void SampleNavigationController::RemoveSource(std::string_view source_key)
@@ -575,21 +715,24 @@ SampleNavigationController::AnnotationPathsBySourceKey() const
             continue;
         }
 
-        std::vector<std::filesystem::path> paths;
-        for (const SampleAnnotationResult& annotation : session->second.manifest.annotations) {
-            if (annotation.path.empty() ||
-                std::any_of(paths.begin(), paths.end(), [&annotation](const std::filesystem::path& existing) {
-                    return PathsReferToSameFile(existing, annotation.path);
-                })) {
-                continue;
-            }
-            paths.push_back(annotation.path);
-        }
+        std::vector<std::filesystem::path> paths = AnnotationPaths(session->second.manifest);
         if (!paths.empty()) {
             paths_by_source_key.emplace(source_key, std::move(paths));
         }
     }
     return paths_by_source_key;
+}
+
+std::vector<std::filesystem::path> SampleNavigationController::AnnotationPathsForSourceKey(
+    std::string_view source_key) const
+{
+    const auto session_key = source_key_to_session_key_.find(std::string(source_key));
+    if (session_key == source_key_to_session_key_.end()) {
+        return {};
+    }
+    const auto session = sessions_.find(session_key->second);
+    return session == sessions_.end() ? std::vector<std::filesystem::path>{}
+                                      : AnnotationPaths(session->second.manifest);
 }
 
 SampleNavigationController::SourceSession* SampleNavigationController::ActiveSession()
@@ -695,35 +838,7 @@ bool SampleNavigationController::LoadReadOnlyAnnotationIntoSession(
     const std::filesystem::path& path,
     std::string* message)
 {
-    std::string load_error;
-    std::optional<SampleAnnotationResult> annotation =
-        LoadSampleAnnotationResultFromPath(path, session.spectrum_count, &load_error);
-    if (!annotation) {
-        std::string ignored_message = "Ignored " + PathToUtf8(path.filename()) + ": " + load_error + ".";
-        session.manifest.messages.push_back(ignored_message);
-        if (message != nullptr) {
-            *message = std::move(ignored_message);
-        }
-        return false;
-    }
-
-    const std::string metadata_warning = annotation->metadata_warning;
-    const auto same_path = [&path](const SampleAnnotationResult& existing) {
-        return PathsReferToSameFile(existing.path, path);
-    };
-    auto existing = std::find_if(session.manifest.annotations.begin(), session.manifest.annotations.end(), same_path);
-    if (existing != session.manifest.annotations.end()) {
-        *existing = std::move(*annotation);
-    } else {
-        session.manifest.annotations.push_back(std::move(*annotation));
-    }
-    if (!metadata_warning.empty()) {
-        session.manifest.messages.push_back(metadata_warning);
-    }
-    if (message != nullptr) {
-        *message = {};
-    }
-    return true;
+    return IngestReadOnlySampleAnnotation(session.manifest, path, session.spectrum_count, message);
 }
 
 void SampleNavigationController::EnsureStateCacheLoaded()

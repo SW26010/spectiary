@@ -2,6 +2,7 @@
 
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/background_retirement.h"
 #include "ui/sample_navigation_sequence.h"
 #include "ui/sample_navigation_state_cache_io.h"
 
@@ -14,6 +15,8 @@
 #include <vector>
 
 namespace specforge {
+
+struct PreparedSampleWorkflowState;
 
 enum class SampleNavigationRequestKind {
     Previous,
@@ -69,6 +72,25 @@ public:
     explicit SampleNavigationController(std::filesystem::path state_cache_path);
 
     void ActivateSource(std::string source_key, const SpectrumSnapshotHandle& snapshot);
+    void ActivateSource(
+        std::string source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        const SourceCollectionIdentity& identity,
+        SourceCollectionManifest manifest,
+        std::optional<std::size_t> prepared_index = std::nullopt);
+    [[nodiscard]] BackgroundRetirementHandle ActivatePreparedSource(
+        std::string source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        const SourceCollectionIdentity& identity,
+        SourceCollectionManifest manifest,
+        PreparedSampleWorkflowState prepared);
+    [[nodiscard]] std::optional<SourceCollectionIdentity> ActivateKnownSource(
+        std::string_view source_key);
+    [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
+        std::string_view source_key) const;
+    [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
+        std::string_view source_key) const;
+    [[nodiscard]] std::optional<SourceCollectionIdentity> active_source_identity() const;
     void RemoveSource(std::string_view source_key);
     void ClearActiveSource();
     [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
@@ -77,6 +99,8 @@ public:
     [[nodiscard]] bool RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
+    [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSourceKey(
+        std::string_view source_key) const;
     [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
         AnnotationPathsBySourceKey() const;
 

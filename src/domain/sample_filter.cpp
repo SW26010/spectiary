@@ -102,6 +102,17 @@ SampleFilterEvaluation SampleFilterController::Evaluate(
     const std::vector<SampleFilterSource>& sources,
     std::size_t sample_count) const
 {
+    return Evaluate(sources, sample_count, {});
+}
+
+SampleFilterEvaluation SampleFilterController::Evaluate(
+    const std::vector<SampleFilterSource>& sources,
+    std::size_t sample_count,
+    const std::function<void()>& cancellation_checkpoint) const
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     SampleFilterEvaluation evaluation;
     evaluation.included_samples.assign(sample_count, true);
     evaluation.included_count = sample_count;
@@ -124,6 +135,9 @@ SampleFilterEvaluation SampleFilterController::Evaluate(
         evaluation.active = true;
         evaluation.included_count = 0;
         for (std::size_t index = 0; index < sample_count; ++index) {
+            if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
             evaluation.included_samples[index] =
                 evaluation.included_samples[index] &&
                 condition.allowed_value_keys.find(source->value_keys_by_sample[index]) !=
@@ -137,6 +151,9 @@ SampleFilterEvaluation SampleFilterController::Evaluate(
     if (!evaluation.active) {
         evaluation.included_count = sample_count;
         std::fill(evaluation.included_samples.begin(), evaluation.included_samples.end(), true);
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
     }
     return evaluation;
 }
@@ -153,6 +170,13 @@ std::string BuildLabelingFilterSourceId(const SampleLabelingTask& task)
 
 SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& annotation)
 {
+    return BuildAnnotationFilterSource(annotation, {});
+}
+
+SampleFilterSource BuildAnnotationFilterSource(
+    const SampleAnnotationResult& annotation,
+    const std::function<void()>& cancellation_checkpoint)
+{
     SampleFilterSource source;
     source.id = BuildAnnotationFilterSourceId(annotation);
     source.name = annotation.name;
@@ -161,16 +185,30 @@ SampleFilterSource BuildAnnotationFilterSource(const SampleAnnotationResult& ann
     source.value_keys_by_sample.reserve(annotation.values.size());
 
     std::unordered_map<std::string, std::size_t> option_indices;
-    for (const SampleAnnotationValue& value : annotation.values) {
+    for (std::size_t index = 0; index < annotation.values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const SampleAnnotationValue& value = annotation.values[index];
         source.value_keys_by_sample.push_back(value.display_text);
         if (source.filterable) {
             AddOption(source.options, option_indices, value.display_text, value.display_text);
         }
     }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     return source;
 }
 
 SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task)
+{
+    return BuildLabelingFilterSource(task, {});
+}
+
+SampleFilterSource BuildLabelingFilterSource(
+    const SampleLabelingTask& task,
+    const std::function<void()>& cancellation_checkpoint)
 {
     SampleFilterSource source;
     source.id = BuildLabelingFilterSourceId(task);
@@ -180,7 +218,11 @@ SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task)
     source.value_keys_by_sample.reserve(task.values.size());
 
     std::unordered_map<std::string, std::size_t> option_indices;
-    for (const int value : task.values) {
+    for (std::size_t index = 0; index < task.values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const int value = task.values[index];
         const std::string key = std::to_string(value);
         source.value_keys_by_sample.push_back(key);
         AddOption(source.options, option_indices, key, FormatSampleLabelValue(task.label_set, value));
@@ -205,6 +247,10 @@ SampleFilterSource BuildLabelingFilterSource(const SampleLabelingTask& task)
         option.display_text = FormatSampleLabelValue(task.label_set, kUnlabeledSampleLabelCode);
         option.sample_count = 0;
         source.options.push_back(std::move(option));
+    }
+
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
     }
 
     return source;

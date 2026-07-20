@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -32,7 +33,8 @@ struct SampleLabelingStateCacheLoadResult {
 [[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath();
 
 [[nodiscard]] SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
-    const std::filesystem::path& path);
+    const std::filesystem::path& path,
+    const std::function<void()>& cancellation_checkpoint = {});
 
 [[nodiscard]] bool SaveSampleLabelingStateCache(
     const std::filesystem::path& path,

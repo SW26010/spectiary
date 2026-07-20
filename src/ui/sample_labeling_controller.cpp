@@ -76,7 +76,17 @@ SampleLabelingController::SampleLabelingController()
 }
 
 SampleLabelingController::SampleLabelingController(std::filesystem::path state_cache_path)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          [](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(path); })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader)
     : state_cache_path_(std::move(state_cache_path)),
+      state_cache_loader_(std::move(state_cache_loader)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -90,7 +100,8 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
         return;
     }
 
-    SourceState& state = sources_[source_identity];
+    SourceState* materialized = MaterializeSource(source_identity);
+    SourceState& state = materialized == nullptr ? sources_[source_identity] : *materialized;
     if (state.sample_count != 0 && state.sample_count != sample_count) {
         state.tasks.clear();
         state.active_task_id.reset();
@@ -113,6 +124,76 @@ void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& id
     state->source_fingerprint = identity.source_fingerprint;
     state->context_fingerprint = identity.context_fingerprint;
     QueueStateSave();
+}
+
+BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
+    const SourceCollectionIdentity& identity,
+    std::optional<SourceState> prepared_state,
+    std::string state_load_warning)
+{
+    if (identity.id.empty() || identity.spectrum_count == 0) {
+        BackgroundRetirementHandle retired;
+        if (prepared_state) {
+            retired = MakeBackgroundRetirementHandle(std::move(*prepared_state));
+        }
+        ClearActiveSource();
+        return retired;
+    }
+    auto existing = sources_.find(identity.id);
+    BackgroundRetirementHandle retired;
+    if (existing == sources_.end()) {
+        SourceState state = prepared_state ? std::move(*prepared_state) : SourceState{};
+        existing = sources_.emplace(identity.id, std::move(state)).first;
+    } else if (existing->second.sample_count != 0 &&
+               existing->second.sample_count != identity.spectrum_count) {
+        auto retired_state = std::make_shared<SourceState>();
+        *retired_state = std::move(existing->second);
+        retired = std::move(retired_state);
+        existing->second = prepared_state ? std::move(*prepared_state) : SourceState{};
+    } else if (prepared_state) {
+        retired = MakeBackgroundRetirementHandle(std::move(*prepared_state));
+    }
+    SourceState& state = existing->second;
+    state.sample_count = identity.spectrum_count;
+    state.source_name = identity.source_name;
+    state.source_fingerprint = identity.source_fingerprint;
+    state.context_fingerprint = identity.context_fingerprint;
+    active_source_identity_ = identity.id;
+    if (state_cache_load_warning_.empty() && !state_load_warning.empty()) {
+        state_cache_load_warning_ = std::move(state_load_warning);
+    }
+    if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
+        QueueOutputRetry();
+    }
+    return retired;
+}
+
+BackgroundRetirementHandle SampleLabelingController::AdoptPreparedStateCache(
+    std::shared_ptr<const SampleLabelingStateCacheLoadResult> cache_snapshot)
+{
+    if (!cache_snapshot || cache_snapshot == state_cache_snapshot_) {
+        return {};
+    }
+    std::shared_ptr<const SampleLabelingStateCacheLoadResult> retired =
+        std::exchange(state_cache_snapshot_, std::move(cache_snapshot));
+    state_cache_loaded_ = true;
+    if (state_cache_load_warning_.empty()) {
+        state_cache_load_warning_ = state_cache_snapshot_->warning;
+    }
+    return retired;
+}
+
+std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgroundResourcesForShutdown()
+{
+    std::vector<BackgroundRetirementHandle> resources;
+    if (state_cache_snapshot_) {
+        resources.push_back(std::move(state_cache_snapshot_));
+    }
+    if (!sources_.empty()) {
+        resources.push_back(MakeBackgroundRetirementHandle(std::exchange(sources_, {})));
+    }
+    active_source_identity_.reset();
+    return resources;
 }
 
 void SampleLabelingController::ClearActiveSource()
@@ -186,6 +267,14 @@ const std::vector<SampleLabelingTask>* SampleLabelingController::active_source_t
 {
     const SourceState* state = ActiveSource();
     return state == nullptr ? nullptr : &state->tasks;
+}
+
+std::optional<SampleLabelingController::SourceState> SampleLabelingController::SourceStateForIdentity(
+    std::string_view source_identity)
+{
+    EnsureStateCacheLoaded();
+    const SourceState* state = MaterializeSource(source_identity);
+    return state == nullptr ? std::nullopt : std::optional<SourceState>{*state};
 }
 
 const SampleLabelingTask* SampleLabelingController::FindActiveSourceTaskByOutputPath(
@@ -266,6 +355,7 @@ SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
     SampleLabelingTask task = CreateSampleLabelingTask(std::move(task_id), std::move(task_name), state->sample_count);
     task.label_set = std::move(label_set);
     task.values = std::move(values);
+    RebuildSampleLabelingTaskStatistics(task);
     task.output_path = std::move(output_path);
     if (metadata_clean) {
         MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
@@ -589,14 +679,33 @@ const SampleLabelingController::SourceState* SampleLabelingController::ActiveSou
     return match == sources_.end() ? nullptr : &match->second;
 }
 
+SampleLabelingController::SourceState* SampleLabelingController::MaterializeSource(
+    std::string_view source_identity)
+{
+    const std::string identity{source_identity};
+    if (const auto state = sources_.find(identity); state != sources_.end()) {
+        return &state->second;
+    }
+    if (!state_cache_snapshot_) {
+        return nullptr;
+    }
+    const auto cached = state_cache_snapshot_->cache.sources.find(identity);
+    if (cached == state_cache_snapshot_->cache.sources.end()) {
+        return nullptr;
+    }
+    return &sources_.emplace(identity, cached->second).first->second;
+}
+
 void SampleLabelingController::EnsureStateCacheLoaded()
 {
     if (state_cache_loaded_) {
         return;
     }
     state_cache_loaded_ = true;
-    SampleLabelingStateCacheLoadResult result = LoadSampleLabelingStateCache(state_cache_path_);
-    sources_ = std::move(result.cache.sources);
+    SampleLabelingStateCacheLoadResult result = state_cache_loader_(state_cache_path_);
+    for (auto& [identity, state] : result.cache.sources) {
+        sources_.try_emplace(std::move(identity), std::move(state));
+    }
     state_cache_load_warning_ = std::move(result.warning);
 }
 
@@ -683,7 +792,12 @@ bool SampleLabelingController::TrySaveStateCache()
         }
     };
 
-    std::unordered_map<std::string, SourceState> sources_to_write = sources_;
+    std::unordered_map<std::string, SourceState> sources_to_write =
+        state_cache_snapshot_ ? state_cache_snapshot_->cache.sources
+                              : std::unordered_map<std::string, SourceState>{};
+    for (const auto& [identity, state] : sources_) {
+        sources_to_write[identity] = state;
+    }
     normalize_saved_states(sources_to_write);
     SampleLabelingStateCache cache;
     cache.sources = std::move(sources_to_write);

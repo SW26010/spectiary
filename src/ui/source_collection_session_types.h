@@ -3,6 +3,7 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_labeling.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/background_retirement.h"
 #include "ui/sample_navigation_sequence.h"
 
 #include <cstddef>
@@ -165,6 +166,11 @@ struct SourceCollectionSavedSource {
     std::filesystem::path path;
     std::size_t last_spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
+};
+
+struct SourceCollectionDeferredRestorePlan {
+    std::vector<SourceCollectionSavedSource> sources;
+    std::optional<std::size_t> active_source_index;
 };
 
 struct SourceCollectionSessionView {

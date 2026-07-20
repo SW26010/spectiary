@@ -136,6 +136,7 @@ add_library(specforge_sessions STATIC
     src/ui/sample_navigation_state_cache_io.cpp
     src/ui/sample_sorting_sources.cpp
     src/ui/sample_workflow_coordinator.cpp
+    src/ui/sample_workflow_preparation.cpp
     src/ui/sample_workflow_source_policy.cpp
     src/ui/sample_workflow_state_cache_io.cpp
     src/ui/source_collection_roster.cpp

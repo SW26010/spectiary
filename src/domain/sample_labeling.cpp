@@ -188,8 +188,12 @@ bool WriteInt32Npy(const std::filesystem::path& path, const std::vector<int>& va
 std::optional<std::vector<int>> ReadInt32Npy(
     const std::filesystem::path& path,
     std::size_t expected_count,
+    const std::function<void()>& cancellation_checkpoint,
     std::string* error_message)
 {
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     std::ifstream stream(path, std::ios::binary);
     if (!stream.good()) {
         if (error_message != nullptr) {
@@ -217,12 +221,32 @@ std::optional<std::vector<int>> ReadInt32Npy(
         ValidateNpyPayloadSize(path, header, expected_count, scalar_type->item_size);
         SeekNpyData(stream, header);
 
-        const std::vector<std::int32_t> typed_values =
-            ReadNpyTypedValues<std::int32_t>(stream, expected_count, "label output data is truncated");
+        std::vector<std::int32_t> typed_values(expected_count);
+        constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
+        constexpr std::size_t kReadChunkValues = kReadChunkBytes / sizeof(std::int32_t);
+        for (std::size_t offset = 0; offset < expected_count;) {
+            if (cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
+            const std::size_t count = std::min(kReadChunkValues, expected_count - offset);
+            stream.read(
+                reinterpret_cast<char*>(typed_values.data() + offset),
+                static_cast<std::streamsize>(count * sizeof(std::int32_t)));
+            if (!stream) {
+                throw NpyArrayError(NpyArrayErrorKind::InvalidShape, "label output data is truncated");
+            }
+            offset += count;
+        }
         std::vector<int> values;
         values.reserve(typed_values.size());
-        for (const std::int32_t value : typed_values) {
-            values.push_back(static_cast<int>(value));
+        for (std::size_t index = 0; index < typed_values.size(); ++index) {
+            if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
+            values.push_back(static_cast<int>(typed_values[index]));
+        }
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
         }
         return values;
     } catch (const NpyArrayError& error) {
@@ -244,6 +268,8 @@ SampleLabelingTask CreateSampleLabelingTask(
     task.task_id = std::move(task_id);
     task.task_name = std::move(task_name);
     task.values.assign(sample_count, kUnlabeledSampleLabelCode);
+    task.label_usage_counts.clear();
+    task.labeled_count = 0;
     task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
     return task;
 }
@@ -376,6 +402,7 @@ bool UpdateSampleLabel(
             task.pending_sample_indices.insert(index);
         }
         RefreshPendingSaveState(task);
+        RebuildSampleLabelingTaskStatistics(task);
     }
     return true;
 }
@@ -401,6 +428,7 @@ bool RemoveSampleLabel(SampleLabelingTask& task, int code)
     }
     task.label_set.labels.erase(match);
     RefreshPendingSaveState(task);
+    RebuildSampleLabelingTaskStatistics(task);
     return true;
 }
 
@@ -443,6 +471,27 @@ std::size_t CountUnlabeledSamples(const SampleLabelingTask& task)
     return task.values.size() - CountLabeledSamples(task);
 }
 
+void RebuildSampleLabelingTaskStatistics(
+    SampleLabelingTask& task,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    task.label_usage_counts.clear();
+    task.labeled_count = 0;
+    for (std::size_t index = 0; index < task.values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const int code = task.values[index];
+        if (code != kUnlabeledSampleLabelCode) {
+            ++task.label_usage_counts[code];
+            ++task.labeled_count;
+        }
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+}
+
 SampleLabelWriteResult AssignSampleLabel(SampleLabelingTask& task, std::size_t sample_index, int code)
 {
     SampleLabelWriteResult result;
@@ -459,6 +508,22 @@ SampleLabelWriteResult AssignSampleLabel(SampleLabelingTask& task, std::size_t s
     result.current_code = code;
     result.changed = result.previous_code != result.current_code;
     if (result.changed) {
+        const auto previous = task.label_usage_counts.find(result.previous_code);
+        const bool statistics_consistent = result.previous_code == kUnlabeledSampleLabelCode ||
+                                           (previous != task.label_usage_counts.end() &&
+                                            previous->second > 0 && task.labeled_count > 0);
+        if (!statistics_consistent) {
+            RebuildSampleLabelingTaskStatistics(task);
+        } else {
+            if (result.previous_code != kUnlabeledSampleLabelCode) {
+                if (--previous->second == 0) {
+                    task.label_usage_counts.erase(previous);
+                }
+                --task.labeled_count;
+            }
+            ++task.label_usage_counts[result.current_code];
+            ++task.labeled_count;
+        }
         result.advance_requested = task.auto_advance;
         task.remembered_position = sample_index;
         task.pending_sample_indices.insert(sample_index);
@@ -483,6 +548,15 @@ SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sa
     result.current_code = kUnlabeledSampleLabelCode;
     result.changed = result.previous_code != result.current_code;
     if (result.changed) {
+        auto previous = task.label_usage_counts.find(result.previous_code);
+        if (previous == task.label_usage_counts.end() || previous->second == 0 || task.labeled_count == 0) {
+            RebuildSampleLabelingTaskStatistics(task);
+        } else {
+            if (--previous->second == 0) {
+                task.label_usage_counts.erase(previous);
+            }
+            --task.labeled_count;
+        }
         result.advance_requested = task.auto_advance;
         task.remembered_position = sample_index;
         task.pending_sample_indices.insert(sample_index);
@@ -583,7 +657,16 @@ std::optional<std::vector<int>> LoadSampleLabelResultNpy(
     std::size_t expected_count,
     std::string* error_message)
 {
-    return ReadInt32Npy(path, expected_count, error_message);
+    return ReadInt32Npy(path, expected_count, {}, error_message);
+}
+
+std::optional<std::vector<int>> LoadSampleLabelResultNpyCancelable(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const std::function<void()>& cancellation_checkpoint,
+    std::string* error_message)
+{
+    return ReadInt32Npy(path, expected_count, cancellation_checkpoint, error_message);
 }
 
 std::filesystem::path SampleLabelResultMetadataPathForResult(const std::filesystem::path& result_path)
@@ -673,7 +756,23 @@ SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResult(
     std::size_t expected_count,
     std::string_view expected_dtype)
 {
+    return LoadSampleLabelResultMetadataForResultCancelable(
+        result_path,
+        expected_count,
+        expected_dtype,
+        {});
+}
+
+SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResultCancelable(
+    const std::filesystem::path& result_path,
+    std::size_t expected_count,
+    std::string_view expected_dtype,
+    const std::function<void()>& cancellation_checkpoint)
+{
     SampleLabelResultMetadataLoadResult result;
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     const std::filesystem::path metadata_path = SampleLabelResultMetadataPathForResult(result_path);
     std::error_code exists_error;
     if (!std::filesystem::exists(metadata_path, exists_error) || exists_error) {
@@ -685,11 +784,17 @@ SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResult(
         result.warning = "could not read sample label result metadata";
         return result;
     }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
+    std::string contents;
+    if (!ReadTextStreamCancelable(stream, contents, cancellation_checkpoint)) {
+        result.warning = "could not read sample label result metadata";
+        return result;
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
 
     std::string parse_error;
-    std::optional<JsonValue> root = ParseJson(buffer.str(), parse_error);
+    std::optional<JsonValue> root = ParseJson(contents, parse_error, cancellation_checkpoint);
     if (!root || root->kind != JsonValue::Kind::Object) {
         result.warning = parse_error.empty() ? "invalid sample label result metadata" : parse_error;
         return result;

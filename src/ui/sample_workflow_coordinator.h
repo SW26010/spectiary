@@ -10,13 +10,19 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace specforge {
+
+struct PreparedSampleWorkflowState;
+struct SampleWorkflowPreparationCacheBundle;
 
 struct SampleWorkflowCommandResult {
     SourceCollectionSessionAction action;
@@ -24,8 +30,15 @@ struct SampleWorkflowCommandResult {
     std::optional<std::size_t> snapshot_index_to_load;
 };
 
+struct PreparedSampleWorkflowActivationResult {
+    SourceCollectionSessionAction action;
+    std::vector<BackgroundRetirementHandle> background_retirement;
+};
+
 class SampleWorkflowCoordinator {
 public:
+    using WorkflowStateCacheLoader =
+        std::function<SampleWorkflowStateCache(const std::filesystem::path&)>;
     SampleWorkflowCoordinator();
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
@@ -34,14 +47,46 @@ public:
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
         std::filesystem::path workflow_state_cache_path);
+    SampleWorkflowCoordinator(
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path,
+        SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
+        WorkflowStateCacheLoader workflow_state_cache_loader);
 
     [[nodiscard]] SourceCollectionSessionAction SyncActiveSource(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        SourceCollectionContext context,
+        PreparedSampleWorkflowState prepared_workflow);
+    [[nodiscard]] bool CanReusePreparedKnownSource(
+        std::optional<std::string> source_key,
+        const SourceCollectionIdentity& identity) const;
+    [[nodiscard]] SourceCollectionSessionAction SyncReusedPreparedKnownSource(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        const SourceCollectionIdentity& identity);
+    [[nodiscard]] std::optional<SourceCollectionIdentity> ActiveSourceIdentity() const;
+    [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
+        std::string_view source_key) const;
+    [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
+        std::string_view source_key) const;
+    [[nodiscard]] std::optional<SampleWorkflowSourceState> WorkflowStateForSourceIdentity(
+        std::string_view source_identity);
+    [[nodiscard]] std::optional<SampleLabelingSourceState> LabelingStateForSourceIdentity(
+        std::string_view source_identity);
+    [[nodiscard]] SourceCollectionSessionAction SyncKnownActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction ClearActiveWorkflow();
     void BeginRestoringSourceSession();
     void EndRestoringSourceSession();
     void RemoveSource(std::string_view source_key);
+    void DiscardPreparedViewCaches();
+    [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
     [[nodiscard]] SampleWorkflowCommandResult RequestSampleNavigation(
         const SampleNavigationRequest& request,
@@ -57,6 +102,8 @@ public:
         std::string display_name);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
+    [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSourceKey(
+        std::string_view source_key) const;
     [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
         AnnotationPathsBySourceKey() const;
     [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
@@ -128,6 +175,12 @@ public:
     [[nodiscard]] bool FlushStateCaches();
 
 private:
+    [[nodiscard]] SourceCollectionSessionAction SyncActiveSourceWithContext(
+        std::optional<std::string> source_key,
+        const SpectrumSnapshotHandle& snapshot,
+        SourceCollectionContext context,
+        std::optional<std::size_t> prepared_index);
+
     struct NavigationInputReconcileRequest {
         bool workflow_changed = false;
         bool filters_changed = false;
@@ -152,7 +205,9 @@ private:
         std::vector<LabelUndoEntry> entries;
     };
 
-    void SyncSampleWorkflowSession(const SpectrumSnapshotHandle& snapshot, SourceCollectionSessionAction& action);
+    void SyncSampleWorkflowSession(
+        const SourceCollectionIdentity& identity,
+        SourceCollectionSessionAction& action);
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
     [[nodiscard]] NavigationInputReconcileEffects ReconcileNavigationInputs(
         const SpectrumSnapshotHandle& snapshot,
@@ -170,6 +225,11 @@ private:
     [[nodiscard]] SampleWorkflowSourceContext SourcePolicyContext(
         const SpectrumSnapshotHandle& snapshot) const;
     void EnsureWorkflowStateCacheLoaded();
+    void AdoptPreparedCache(
+        const std::shared_ptr<const SampleWorkflowPreparationCacheBundle>& cache,
+        std::vector<BackgroundRetirementHandle>& background_retirement);
+    [[nodiscard]] const SampleWorkflowSourceState* CachedWorkflowState(
+        std::string_view source_identity) const;
     void RestoreActiveWorkflowState(std::string_view source_identity);
     void StoreActiveWorkflowState();
     void MarkActiveWorkflowStateDirty();
@@ -190,11 +250,16 @@ private:
     std::optional<std::string> active_sample_workflow_identity_;
     std::optional<std::string> active_sample_workflow_context_fingerprint_;
     std::filesystem::path workflow_state_cache_path_;
+    std::shared_ptr<const SampleWorkflowStateCache> workflow_state_cache_snapshot_;
     SampleWorkflowStateCache workflow_state_cache_;
+    std::unordered_set<std::string> workflow_state_tombstones_;
+    WorkflowStateCacheLoader workflow_state_cache_loader_;
     LocalUserStateSaveScheduler workflow_state_save_scheduler_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
     std::optional<LabelUndoHistory> label_undo_history_;
+    std::optional<SourceCollectionFilterView> prepared_filter_view_;
+    std::optional<SourceCollectionSampleSortingView> prepared_sorting_view_;
 };
 
 }  // namespace specforge

@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -69,8 +70,14 @@ public:
     [[nodiscard]] bool has_filter_conditions() const;
     [[nodiscard]] SampleFilterEvaluation EvaluateFilters(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] SampleFilterEvaluation EvaluateFilters(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
     [[nodiscard]] SourceCollectionFilterView BuildFilterView(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] SourceCollectionFilterView BuildFilterView(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
 
     void ClearSampleSorting();
     [[nodiscard]] bool AddSampleSortSource(
@@ -84,8 +91,15 @@ public:
     [[nodiscard]] SampleWorkflowSortChoiceResult BuildSortChoice(
         const SampleWorkflowSourceContext& context,
         bool remove_unavailable_active_source);
+    [[nodiscard]] SampleWorkflowSortChoiceResult BuildSortChoice(
+        const SampleWorkflowSourceContext& context,
+        bool remove_unavailable_active_source,
+        const std::function<void()>& cancellation_checkpoint);
     [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
 
     void RestoreState(const SampleWorkflowSourceState& state);
     [[nodiscard]] SampleWorkflowSourceState StoreState() const;
@@ -102,10 +116,19 @@ private:
     [[nodiscard]] bool RemoveSelectedSampleSortSource(std::string_view source_id);
     [[nodiscard]] std::vector<SampleFilterSource> BuildSelectedFilterSources(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] std::vector<SampleFilterSource> BuildSelectedFilterSources(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
     [[nodiscard]] const SourceCollectionFilterView& CachedFilterView(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] const SourceCollectionFilterView& CachedFilterView(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
     [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSortingSourceViews(
         const SampleWorkflowSourceContext& context) const;
+    [[nodiscard]] const std::vector<SourceCollectionSampleSortSourceView>& CachedSortingSourceViews(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint) const;
 
     SampleFilterController filters_;
     std::vector<std::string> selected_filter_source_ids_;

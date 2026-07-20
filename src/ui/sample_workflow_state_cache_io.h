@@ -4,6 +4,7 @@
 #include "ui/sample_navigation_sequence.h"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -32,7 +33,9 @@ struct SampleWorkflowStateCache {
 
 [[nodiscard]] std::filesystem::path DefaultSampleWorkflowStateCachePath();
 
-[[nodiscard]] SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::path& path);
+[[nodiscard]] SampleWorkflowStateCache LoadSampleWorkflowStateCache(
+    const std::filesystem::path& path,
+    const std::function<void()>& cancellation_checkpoint = {});
 
 [[nodiscard]] bool SaveSampleWorkflowStateCache(
     const std::filesystem::path& path,

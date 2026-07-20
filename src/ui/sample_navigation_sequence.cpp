@@ -198,6 +198,16 @@ std::optional<std::size_t> SampleNavigationSequence::LabelAdvanceTarget(
 
 SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSequenceInput& input)
 {
+    return BuildSampleNavigationSequence(input, {});
+}
+
+SampleNavigationSequence BuildSampleNavigationSequence(
+    const SampleNavigationSequenceInput& input,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     SampleNavigationSequence sequence;
     sequence.source_row_count = input.source_row_count;
     const bool sort_applies = SortApplies(input);
@@ -207,23 +217,34 @@ SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSeq
     if (materialize_order) {
         sequence.ordered_rows.reserve(input.source_row_count);
         for (std::size_t row = 0; row < input.source_row_count; ++row) {
+            if ((row & 0xfffU) == 0U && cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
             if (IncludeRow(input, row)) {
                 sequence.ordered_rows.push_back(row);
             }
         }
         if (sequence.active) {
             sequence.included_rows.assign(input.source_row_count, false);
-            for (const std::size_t row : sequence.ordered_rows) {
+            for (std::size_t index = 0; index < sequence.ordered_rows.size(); ++index) {
+                if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
+                const std::size_t row = sequence.ordered_rows[index];
                 sequence.included_rows[row] = true;
             }
         }
 
         if (sort_applies) {
             const SampleNavigationSortChoice& sort_choice = *input.sort_choice;
+            std::size_t comparison_count = 0;
             std::stable_sort(
                 sequence.ordered_rows.begin(),
                 sequence.ordered_rows.end(),
-                [&sort_choice](std::size_t left, std::size_t right) {
+                [&sort_choice, &cancellation_checkpoint, &comparison_count](std::size_t left, std::size_t right) {
+                    if (((++comparison_count) & 0xfffU) == 0U && cancellation_checkpoint) {
+                        cancellation_checkpoint();
+                    }
                     const int comparison = CompareSortValues(sort_choice.values[left], sort_choice.values[right]);
                     if (comparison == 0) {
                         return left < right;
@@ -233,6 +254,9 @@ SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSeq
                     }
                     return comparison > 0;
                 });
+            if (cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
         }
     }
 
@@ -273,7 +297,11 @@ SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSeq
     if (!input.sample_name_query.empty() && !input.sample_names.empty()) {
         const std::string query = LowerAscii(std::string(input.sample_name_query));
         if (materialize_order) {
-            for (const std::size_t row : sequence.ordered_rows) {
+            for (std::size_t position = 0; position < sequence.ordered_rows.size(); ++position) {
+                if ((position & 0xfffU) == 0U && cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
+                const std::size_t row = sequence.ordered_rows[position];
                 if (row < input.sample_names.size() &&
                     LowerAscii(input.sample_names[row]).find(query) != std::string::npos) {
                     sequence.sample_name_matches.push_back(row);
@@ -282,11 +310,18 @@ SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSeq
         } else {
             const std::size_t count = std::min(input.source_row_count, input.sample_names.size());
             for (std::size_t row = 0; row < count; ++row) {
+                if ((row & 0xfffU) == 0U && cancellation_checkpoint) {
+                    cancellation_checkpoint();
+                }
                 if (LowerAscii(input.sample_names[row]).find(query) != std::string::npos) {
                     sequence.sample_name_matches.push_back(row);
                 }
             }
         }
+    }
+
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
     }
 
     return sequence;

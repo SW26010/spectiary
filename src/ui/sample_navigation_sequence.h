@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -65,5 +66,8 @@ struct SampleNavigationSequence {
 [[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(std::string value);
 [[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(
     const SampleNavigationSequenceInput& input);
+[[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(
+    const SampleNavigationSequenceInput& input,
+    const std::function<void()>& cancellation_checkpoint);
 
 }  // namespace specforge

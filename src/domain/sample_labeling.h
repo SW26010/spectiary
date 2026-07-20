@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -70,6 +72,10 @@ struct SampleLabelingTask {
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;
+    // Derived, non-persisted presentation statistics. Mutations maintain these
+    // incrementally; cache ingestion rebuilds them off the UI thread.
+    std::unordered_map<int, std::size_t> label_usage_counts;
+    std::size_t labeled_count = 0;
 };
 
 struct SampleLabelWriteResult {
@@ -111,6 +117,9 @@ struct SampleLabelTaskPersistResult {
     int unlabeled_sentinel = kUnlabeledSampleLabelCode);
 [[nodiscard]] std::size_t CountLabeledSamples(const SampleLabelingTask& task);
 [[nodiscard]] std::size_t CountUnlabeledSamples(const SampleLabelingTask& task);
+void RebuildSampleLabelingTaskStatistics(
+    SampleLabelingTask& task,
+    const std::function<void()>& cancellation_checkpoint = {});
 
 [[nodiscard]] SampleLabelWriteResult AssignSampleLabel(
     SampleLabelingTask& task,
@@ -132,6 +141,11 @@ void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message
     const std::filesystem::path& path,
     std::size_t expected_count,
     std::string* error_message = nullptr);
+[[nodiscard]] std::optional<std::vector<int>> LoadSampleLabelResultNpyCancelable(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const std::function<void()>& cancellation_checkpoint,
+    std::string* error_message = nullptr);
 [[nodiscard]] std::filesystem::path SampleLabelResultMetadataPathForResult(
     const std::filesystem::path& result_path);
 [[nodiscard]] bool SaveSampleLabelResultMetadataSidecar(
@@ -143,5 +157,10 @@ void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message
     const std::filesystem::path& result_path,
     std::size_t expected_count,
     std::string_view expected_dtype);
+[[nodiscard]] SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResultCancelable(
+    const std::filesystem::path& result_path,
+    std::size_t expected_count,
+    std::string_view expected_dtype,
+    const std::function<void()>& cancellation_checkpoint);
 
 }  // namespace specforge

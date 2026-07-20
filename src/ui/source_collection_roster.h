@@ -19,6 +19,11 @@ struct SourceCollectionRosterRemoveResult {
     std::string removed_source_key;
 };
 
+struct SourceCollectionRosterPreparedOpenResult {
+    SourceCollectionSessionAction action;
+    SpectrumSnapshotHandle replaced_cached_snapshot;
+};
+
 class SourceCollectionRoster {
 public:
     using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
@@ -37,11 +42,21 @@ public:
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index);
+    [[nodiscard]] SourceCollectionRosterPreparedOpenResult OpenPreparedSource(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        SpectrumSnapshotHandle snapshot);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
+    void RememberActiveSourceIndex(std::size_t spectrum_index);
 
 private:
+    struct AddOrUpdateSourceResult {
+        std::size_t source_index = 0;
+        SpectrumSnapshotHandle replaced_cached_snapshot;
+    };
+
     struct SourceListEntry {
         std::filesystem::path path;
         std::string key;
@@ -57,7 +72,7 @@ private:
     };
 
     [[nodiscard]] const SourceListEntry* current_source() const;
-    [[nodiscard]] std::size_t AddOrUpdateSource(
+    [[nodiscard]] AddOrUpdateSourceResult AddOrUpdateSource(
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,
         std::size_t spectrum_index);

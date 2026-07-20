@@ -1,5 +1,4 @@
 #include "domain/spectrum_snapshot.h"
-#include "domain/source_collection_identity_digest.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
 
@@ -14,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -378,6 +378,70 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
     Require(context != nullptr && context->annotations.empty(), "removed annotation should leave active context");
 }
 
+void TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_annotation_path_lookup_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleNavigationController controller(cache_path);
+    const specforge::SpectrumSnapshotHandle first_snapshot =
+        MakeSnapshot("C:/synthetic/first-source.npy", "first-source", 1, 0);
+    specforge::SourceCollectionManifest first_manifest;
+    first_manifest.annotations.push_back(specforge::SampleAnnotationResult{
+        .path = "C:/unavailable/../annotations/result.npy",
+    });
+    first_manifest.annotations.push_back(specforge::SampleAnnotationResult{
+        .path = "c:/annotations/RESULT.npy",
+    });
+    controller.ActivateSource(
+        "first-key",
+        first_snapshot,
+        specforge::SourceCollectionIdentity{
+            .id = "first-identity",
+            .source_name = "first",
+            .source_fingerprint = "first-source-fingerprint",
+            .context_fingerprint = "first-context-fingerprint",
+            .spectrum_count = 1,
+        },
+        std::move(first_manifest));
+
+    const specforge::SpectrumSnapshotHandle second_snapshot =
+        MakeSnapshot("C:/synthetic/second-source.npy", "second-source", 1, 0);
+    specforge::SourceCollectionManifest second_manifest;
+    second_manifest.annotations.push_back(specforge::SampleAnnotationResult{
+        .path = "//offline-server/share/second-result.npy",
+    });
+    controller.ActivateSource(
+        "second-key",
+        second_snapshot,
+        specforge::SourceCollectionIdentity{
+            .id = "second-identity",
+            .source_name = "second",
+            .source_fingerprint = "second-source-fingerprint",
+            .context_fingerprint = "second-context-fingerprint",
+            .spectrum_count = 1,
+        },
+        std::move(second_manifest));
+
+    const std::vector<std::filesystem::path> first_paths =
+        controller.AnnotationPathsForSourceKey("first-key");
+    Require(first_paths.size() == 1, "lexically equivalent annotation paths should deduplicate in memory");
+    Require(
+        first_paths.front() == std::filesystem::path("C:/unavailable/../annotations/result.npy"),
+        "annotation lookup should preserve the first stored spelling");
+    Require(
+        controller.AnnotationPathsForSourceKey("missing-key").empty(),
+        "unknown source lookup should not fall back to scanning every source");
+
+    const std::vector<std::filesystem::path> second_paths =
+        controller.AnnotationPathsForSourceKey("second-key");
+    Require(
+        second_paths.size() == 1 && second_paths.front() == std::filesystem::path("//offline-server/share/second-result.npy"),
+        "source-local lookup should return only the requested source annotations");
+}
+
 void TestControllerPersistsLastIndexBySourceIdentity()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_nav_persist.npy";
@@ -404,7 +468,7 @@ void TestControllerPersistsLastIndexBySourceIdentity()
     Require(cache_text.find(PathToUtf8(path.parent_path())) == std::string::npos, "cache should not key state by absolute directory path");
 }
 
-void TestControllerMigratesLongFolderIdentityState()
+void TestControllerLoadsLongFolderIdentityState()
 {
     const std::filesystem::path folder_path =
         std::filesystem::temp_directory_path() / "specforge_nav_long_folder_identity";
@@ -425,8 +489,8 @@ void TestControllerMigratesLongFolderIdentityState()
     }
 
     specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(folder_path, "folder:long-identity", kSampleCount, 0);
-    const specforge::SourceCollectionFolderListing listing =
-        specforge::ScanSourceCollectionFolder(folder_path);
+    specforge::SourceCollectionContext context = specforge::LoadSourceCollectionContext(*snapshot);
+    const specforge::SourceCollectionFolderListing listing = specforge::ScanSourceCollectionFolder(folder_path);
     std::string legacy_fingerprint = "folder";
     for (const specforge::SourceCollectionFolderSpectrumFile& sample : listing.spectra) {
         legacy_fingerprint += ";" + PathToUtf8(sample.path.filename()) + ":" + sample.stat_fingerprint;
@@ -434,12 +498,8 @@ void TestControllerMigratesLongFolderIdentityState()
     const std::string legacy_identity =
         "name=" + PathToUtf8(folder_path.filename()) + "|fingerprint=" + legacy_fingerprint +
         "|count=" + std::to_string(kSampleCount);
-    const std::string identity = specforge::BuildSourceCollectionIdentity(*snapshot).id;
-    Require(legacy_identity.size() > 1000, "legacy fixture should cover long cache identities");
-    Require(identity.size() == 74, "current identity should use a fixed-size versioned SHA-256 digest");
-    Require(
-        identity == specforge::NormalizePersistedSourceCollectionIdentity(legacy_identity),
-        "long legacy identity should normalize to the current source identity");
+    Require(legacy_identity.size() > 1000, "legacy fixture should cover long cache migration");
+    Require(context.identity.id.size() == 74, "current folder identity should remain fixed-size");
 
     {
         std::ofstream stream(cache_path);
@@ -455,8 +515,14 @@ void TestControllerMigratesLongFolderIdentityState()
     }
 
     specforge::SampleNavigationController controller(cache_path);
-    controller.ActivateSource("folder-source", snapshot);
-    Require(controller.current_index() && *controller.current_index() == 7, "long cached identity should restore index");
+    controller.ActivateSource(
+        "folder-source",
+        snapshot,
+        context.identity,
+        std::move(context.manifest));
+    Require(
+        controller.current_index() && *controller.current_index() == 7,
+        "legacy long cached identity should migrate and restore its index");
 }
 
 void TestRemoveSourceUsesExternalSourceKey()
@@ -604,8 +670,9 @@ int main()
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerAddsManualAnnotationToActiveContext();
     TestControllerRestoresAndRemovesProvidedAnnotations();
+    TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity();
     TestControllerPersistsLastIndexBySourceIdentity();
-    TestControllerMigratesLongFolderIdentityState();
+    TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
     TestEmptyFilterClearsCurrentSequenceRow();

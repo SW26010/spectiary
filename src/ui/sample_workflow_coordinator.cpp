@@ -3,6 +3,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
+#include "ui/sample_workflow_preparation.h"
 
 #include <algorithm>
 #include <cctype>
@@ -145,6 +146,9 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
 
 SampleWorkflowCoordinator::SampleWorkflowCoordinator()
     : workflow_state_cache_path_(DefaultSampleWorkflowStateCachePath()),
+      workflow_state_cache_loader_([](const std::filesystem::path& path) {
+          return LoadSampleWorkflowStateCache(path);
+      }),
       workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
@@ -154,6 +158,9 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path labeling_state_cache_path)
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(std::move(labeling_state_cache_path)),
+      workflow_state_cache_loader_([](const std::filesystem::path& path) {
+          return LoadSampleWorkflowStateCache(path);
+      }),
       workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
@@ -162,9 +169,25 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path,
     std::filesystem::path workflow_state_cache_path)
+    : SampleWorkflowCoordinator(
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path),
+          std::move(workflow_state_cache_path),
+          [](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(path); },
+          [](const std::filesystem::path& path) { return LoadSampleWorkflowStateCache(path); })
+{
+}
+
+SampleWorkflowCoordinator::SampleWorkflowCoordinator(
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path,
+    SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
+    WorkflowStateCacheLoader workflow_state_cache_loader)
     : navigation_(std::move(navigation_state_cache_path)),
-      labeling_(std::move(labeling_state_cache_path)),
+      labeling_(std::move(labeling_state_cache_path), std::move(labeling_state_cache_loader)),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
+      workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
       workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
@@ -173,6 +196,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot)
 {
+    DiscardPreparedViewCaches();
     SourceCollectionSessionAction action;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
         navigation_.ClearActiveSource();
@@ -180,7 +204,183 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
         return action;
     }
 
-    const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
+    return SyncActiveSourceWithContext(
+        std::move(source_key),
+        snapshot,
+        LoadSourceCollectionContext(*snapshot),
+        std::nullopt);
+}
+
+PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedActiveSource(
+    std::optional<std::string> source_key,
+    const SpectrumSnapshotHandle& snapshot,
+    SourceCollectionContext context,
+    PreparedSampleWorkflowState prepared_workflow)
+{
+    PreparedSampleWorkflowActivationResult result;
+    SourceCollectionSessionAction& action = result.action;
+    if (!source_key || !snapshot || snapshot->source.path.empty()) {
+        navigation_.ClearActiveSource();
+        ClearSampleWorkflow(action);
+        return result;
+    }
+
+    const SourceCollectionIdentity identity = context.identity;
+    AdoptPreparedCache(prepared_workflow.preparation_cache, result.background_retirement);
+    if (active_sample_workflow_identity_ && *active_sample_workflow_identity_ != identity.id) {
+        StoreActiveWorkflowState();
+    }
+    if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
+        ClearLabelUndoHistory();
+    }
+    if (BackgroundRetirementHandle retired_labeling = labeling_.ActivatePreparedSource(
+            identity,
+            std::move(prepared_workflow.labeling_source_state),
+            std::move(prepared_workflow.labeling_state_warning))) {
+        result.background_retirement.push_back(std::move(retired_labeling));
+    }
+    result.background_retirement.push_back(
+        MakeBackgroundRetirementHandle(std::move(workflow_sources_)));
+    workflow_sources_ = SampleWorkflowSourcePolicy{};
+    workflow_sources_.RestoreState(prepared_workflow.workflow_source_state);
+    active_sample_workflow_identity_ = identity.id;
+    active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
+    if (prepared_filter_view_) {
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(*prepared_filter_view_)));
+    }
+    if (prepared_sorting_view_) {
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(*prepared_sorting_view_)));
+    }
+    prepared_filter_view_.emplace(std::move(prepared_workflow.filter_view));
+    prepared_sorting_view_.emplace(std::move(prepared_workflow.sorting_view));
+    if (BackgroundRetirementHandle retired_navigation = navigation_.ActivatePreparedSource(
+            std::move(*source_key),
+            snapshot,
+            identity,
+            std::move(context.manifest),
+            std::move(prepared_workflow))) {
+        result.background_retirement.push_back(std::move(retired_navigation));
+    }
+    action.workflow_changed = true;
+    action.navigation_inputs_changed = true;
+    return result;
+}
+
+bool SampleWorkflowCoordinator::CanReusePreparedKnownSource(
+    std::optional<std::string> source_key,
+    const SourceCollectionIdentity& identity) const
+{
+    if (!source_key) {
+        return false;
+    }
+    const std::optional<SourceCollectionIdentity> known =
+        navigation_.KnownSourceIdentity(*source_key);
+    return known && known->id == identity.id &&
+           known->context_fingerprint == identity.context_fingerprint &&
+           known->spectrum_count == identity.spectrum_count;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::SyncReusedPreparedKnownSource(
+    std::optional<std::string> source_key,
+    const SpectrumSnapshotHandle& snapshot,
+    const SourceCollectionIdentity& identity)
+{
+    if (!snapshot || !CanReusePreparedKnownSource(source_key, identity)) {
+        return {};
+    }
+    return SyncKnownActiveSource(std::move(source_key), snapshot);
+}
+
+std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::ActiveSourceIdentity() const
+{
+    return navigation_.active_source_identity();
+}
+
+std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::KnownSourceIdentity(
+    std::string_view source_key) const
+{
+    return navigation_.KnownSourceIdentity(source_key);
+}
+
+std::optional<std::size_t> SampleWorkflowCoordinator::KnownSourceCurrentIndex(
+    std::string_view source_key) const
+{
+    return navigation_.KnownSourceCurrentIndex(source_key);
+}
+
+std::optional<SampleWorkflowSourceState> SampleWorkflowCoordinator::WorkflowStateForSourceIdentity(
+    std::string_view source_identity)
+{
+    if (active_sample_workflow_identity_ && *active_sample_workflow_identity_ == source_identity) {
+        return workflow_sources_.StoreState();
+    }
+    EnsureWorkflowStateCacheLoaded();
+    const SampleWorkflowSourceState* state = CachedWorkflowState(source_identity);
+    return state == nullptr ? std::nullopt : std::optional<SampleWorkflowSourceState>{*state};
+}
+
+std::optional<SampleLabelingSourceState> SampleWorkflowCoordinator::LabelingStateForSourceIdentity(
+    std::string_view source_identity)
+{
+    return labeling_.SourceStateForIdentity(source_identity);
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::SyncKnownActiveSource(
+    std::optional<std::string> source_key,
+    const SpectrumSnapshotHandle& snapshot)
+{
+    DiscardPreparedViewCaches();
+    SourceCollectionSessionAction action;
+    if (!source_key || !snapshot || snapshot->source.path.empty()) {
+        navigation_.ClearActiveSource();
+        ClearSampleWorkflow(action);
+        return action;
+    }
+
+    const std::optional<SourceCollectionIdentity> identity =
+        navigation_.ActivateKnownSource(*source_key);
+    if (!identity) {
+        // A source first opened through the synchronous compatibility path has
+        // no prepared context yet. Build it once, then reuse it thereafter.
+        return SyncActiveSource(std::move(source_key), snapshot);
+    }
+
+    const bool workflow_identity_changed =
+        !active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity->id;
+    const bool workflow_context_changed =
+        !active_sample_workflow_context_fingerprint_ ||
+        *active_sample_workflow_context_fingerprint_ != identity->context_fingerprint;
+    if (workflow_identity_changed) {
+        ClearLabelUndoHistory();
+    }
+
+    SyncSampleWorkflowSession(*identity, action);
+    if (workflow_identity_changed || workflow_context_changed) {
+        ApplyNavigationInputEffects(
+            action,
+            ReconcileNavigationInputs(
+                snapshot,
+                NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
+    }
+    return action;
+}
+
+SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSourceWithContext(
+    std::optional<std::string> source_key,
+    const SpectrumSnapshotHandle& snapshot,
+    SourceCollectionContext context,
+    std::optional<std::size_t> prepared_index)
+{
+    SourceCollectionSessionAction action;
+    if (!source_key || !snapshot || snapshot->source.path.empty()) {
+        navigation_.ClearActiveSource();
+        ClearSampleWorkflow(action);
+        return action;
+    }
+
+    const SourceCollectionIdentity& identity = context.identity;
     const bool workflow_identity_changed =
         !active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id;
     const bool workflow_context_changed =
@@ -191,8 +391,13 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
         ClearLabelUndoHistory();
     }
 
-    navigation_.ActivateSource(std::move(*source_key), snapshot);
-    SyncSampleWorkflowSession(snapshot, action);
+    navigation_.ActivateSource(
+        std::move(*source_key),
+        snapshot,
+        identity,
+        std::move(context.manifest),
+        prepared_index);
+    SyncSampleWorkflowSession(identity, action);
     if (workflow_identity_changed || workflow_context_changed) {
         ApplyNavigationInputEffects(
             action,
@@ -225,6 +430,36 @@ void SampleWorkflowCoordinator::RemoveSource(std::string_view source_key)
     navigation_.RemoveSource(source_key);
     workflow_sources_.InvalidateFilterViewCache();
     workflow_sources_.InvalidateSortingSourceCache();
+}
+
+void SampleWorkflowCoordinator::DiscardPreparedViewCaches()
+{
+    prepared_filter_view_.reset();
+    prepared_sorting_view_.reset();
+}
+
+std::vector<BackgroundRetirementHandle> SampleWorkflowCoordinator::ReleaseBackgroundResourcesForShutdown()
+{
+    std::vector<BackgroundRetirementHandle> resources =
+        labeling_.ReleaseBackgroundResourcesForShutdown();
+    if (workflow_state_cache_snapshot_) {
+        resources.push_back(std::move(workflow_state_cache_snapshot_));
+    }
+    if (!workflow_state_cache_.sources_by_identity.empty()) {
+        resources.push_back(
+            MakeBackgroundRetirementHandle(std::exchange(workflow_state_cache_, {})));
+    }
+    resources.push_back(MakeBackgroundRetirementHandle(std::move(workflow_sources_)));
+    workflow_sources_ = SampleWorkflowSourcePolicy{};
+    if (prepared_filter_view_) {
+        resources.push_back(MakeBackgroundRetirementHandle(std::move(*prepared_filter_view_)));
+        prepared_filter_view_.reset();
+    }
+    if (prepared_sorting_view_) {
+        resources.push_back(MakeBackgroundRetirementHandle(std::move(*prepared_sorting_view_)));
+        prepared_sorting_view_.reset();
+    }
+    return resources;
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
@@ -332,6 +567,12 @@ std::unordered_map<std::string, std::vector<std::filesystem::path>>
 SampleWorkflowCoordinator::AnnotationPathsBySourceKey() const
 {
     return navigation_.AnnotationPathsBySourceKey();
+}
+
+std::vector<std::filesystem::path> SampleWorkflowCoordinator::AnnotationPathsForSourceKey(
+    std::string_view source_key) const
+{
+    return navigation_.AnnotationPathsForSourceKey(source_key);
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleNameQuery(std::string query)
@@ -965,12 +1206,8 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
         view.task_id = task->task_id;
         view.task_name = task->task_name;
         view.label_set = task->label_set;
-        for (const int code : task->values) {
-            if (code != kUnlabeledSampleLabelCode) {
-                ++view.label_usage_counts[code];
-                ++view.labeled_count;
-            }
-        }
+        view.label_usage_counts = task->label_usage_counts;
+        view.labeled_count = task->labeled_count;
         view.sample_count = task->values.size();
         if (view.current_index && *view.current_index < task->values.size()) {
             view.current_code = task->values[*view.current_index];
@@ -996,7 +1233,9 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
 
 SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumSnapshotHandle& snapshot) const
 {
-    SourceCollectionFilterView view = workflow_sources_.BuildFilterView(SourcePolicyContext(snapshot));
+    SourceCollectionFilterView view = prepared_filter_view_
+        ? *prepared_filter_view_
+        : workflow_sources_.BuildFilterView(SourcePolicyContext(snapshot));
     view.has_active_source = snapshot && !snapshot->source.path.empty() && view.sample_count > 0;
     view.navigation_filter_active = navigation_.filter_active();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
@@ -1006,7 +1245,9 @@ SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumS
 SourceCollectionSampleSortingView SampleWorkflowCoordinator::SortingView(
     const SpectrumSnapshotHandle& snapshot) const
 {
-    SourceCollectionSampleSortingView view = workflow_sources_.BuildSortingView(SourcePolicyContext(snapshot));
+    SourceCollectionSampleSortingView view = prepared_sorting_view_
+        ? *prepared_sorting_view_
+        : workflow_sources_.BuildSortingView(SourcePolicyContext(snapshot));
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     return view;
 }
@@ -1053,16 +1294,15 @@ bool SampleWorkflowCoordinator::FlushStateCaches()
 }
 
 void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
-    const SpectrumSnapshotHandle& snapshot,
+    const SourceCollectionIdentity& identity,
     SourceCollectionSessionAction& action)
 {
-    if (!snapshot || snapshot->source.path.empty() || snapshot->collection.spectrum_count == 0) {
+    if (identity.id.empty() || identity.spectrum_count == 0) {
         ClearSampleWorkflow(action);
         return;
     }
-
-    const SourceCollectionIdentity identity = BuildSourceCollectionIdentity(*snapshot);
     if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
+        StoreActiveWorkflowState();
         active_sample_workflow_identity_ = identity.id;
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
         labeling_.ActivateSource(identity);
@@ -1085,6 +1325,7 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
 
 void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionAction& action)
 {
+    DiscardPreparedViewCaches();
     ClearLabelUndoHistory();
     labeling_.ClearActiveSource();
     workflow_sources_.Clear();
@@ -1197,7 +1438,48 @@ void SampleWorkflowCoordinator::EnsureWorkflowStateCacheLoaded()
         return;
     }
     workflow_state_cache_loaded_ = true;
-    workflow_state_cache_ = LoadSampleWorkflowStateCache(workflow_state_cache_path_);
+    workflow_state_cache_ = workflow_state_cache_loader_(workflow_state_cache_path_);
+}
+
+void SampleWorkflowCoordinator::AdoptPreparedCache(
+    const std::shared_ptr<const SampleWorkflowPreparationCacheBundle>& cache,
+    std::vector<BackgroundRetirementHandle>& background_retirement)
+{
+    if (!cache) {
+        return;
+    }
+    std::shared_ptr<const SampleWorkflowStateCache> workflow_cache(cache, &cache->workflow);
+    if (workflow_cache != workflow_state_cache_snapshot_) {
+        if (workflow_state_cache_snapshot_) {
+            background_retirement.push_back(workflow_state_cache_snapshot_);
+        }
+        workflow_state_cache_snapshot_ = std::move(workflow_cache);
+    }
+    workflow_state_cache_loaded_ = true;
+
+    std::shared_ptr<const SampleLabelingStateCacheLoadResult> labeling_cache(cache, &cache->labeling);
+    if (BackgroundRetirementHandle retired =
+            labeling_.AdoptPreparedStateCache(std::move(labeling_cache))) {
+        background_retirement.push_back(std::move(retired));
+    }
+}
+
+const SampleWorkflowSourceState* SampleWorkflowCoordinator::CachedWorkflowState(
+    std::string_view source_identity) const
+{
+    const std::string identity{source_identity};
+    if (workflow_state_tombstones_.contains(identity)) {
+        return nullptr;
+    }
+    if (const auto state = workflow_state_cache_.sources_by_identity.find(identity);
+        state != workflow_state_cache_.sources_by_identity.end()) {
+        return &state->second;
+    }
+    if (!workflow_state_cache_snapshot_) {
+        return nullptr;
+    }
+    const auto state = workflow_state_cache_snapshot_->sources_by_identity.find(identity);
+    return state == workflow_state_cache_snapshot_->sources_by_identity.end() ? nullptr : &state->second;
 }
 
 void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view source_identity)
@@ -1205,11 +1487,11 @@ void SampleWorkflowCoordinator::RestoreActiveWorkflowState(std::string_view sour
     EnsureWorkflowStateCacheLoaded();
 
     workflow_sources_.Clear();
-    const auto match = workflow_state_cache_.sources_by_identity.find(std::string(source_identity));
-    if (match == workflow_state_cache_.sources_by_identity.end()) {
+    const SampleWorkflowSourceState* state = CachedWorkflowState(source_identity);
+    if (state == nullptr) {
         return;
     }
-    workflow_sources_.RestoreState(match->second);
+    workflow_sources_.RestoreState(*state);
 }
 
 void SampleWorkflowCoordinator::StoreActiveWorkflowState()
@@ -1222,23 +1504,33 @@ void SampleWorkflowCoordinator::StoreActiveWorkflowState()
     SampleWorkflowSourceState state = workflow_sources_.StoreState();
     if (workflow_sources_.HasState()) {
         workflow_state_cache_.sources_by_identity[*active_sample_workflow_identity_] = std::move(state);
+        workflow_state_tombstones_.erase(*active_sample_workflow_identity_);
     } else {
         workflow_state_cache_.sources_by_identity.erase(*active_sample_workflow_identity_);
+        workflow_state_tombstones_.insert(*active_sample_workflow_identity_);
     }
 }
 
 void SampleWorkflowCoordinator::MarkActiveWorkflowStateDirty()
 {
-    if (workflow_state_cache_path_.empty()) {
-        return;
-    }
     StoreActiveWorkflowState();
-    workflow_state_save_scheduler_.MarkDirty();
+    if (!workflow_state_cache_path_.empty()) {
+        workflow_state_save_scheduler_.MarkDirty();
+    }
 }
 
 bool SampleWorkflowCoordinator::SaveWorkflowStateCache()
 {
-    return SaveSampleWorkflowStateCache(workflow_state_cache_path_, workflow_state_cache_);
+    SampleWorkflowStateCache merged = workflow_state_cache_snapshot_
+        ? *workflow_state_cache_snapshot_
+        : SampleWorkflowStateCache{};
+    for (const auto& [identity, state] : workflow_state_cache_.sources_by_identity) {
+        merged.sources_by_identity[identity] = state;
+    }
+    for (const std::string& identity : workflow_state_tombstones_) {
+        merged.sources_by_identity.erase(identity);
+    }
+    return SaveSampleWorkflowStateCache(workflow_state_cache_path_, merged);
 }
 
 bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
@@ -1260,6 +1552,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
     bool record_undo,
     std::optional<std::size_t> restore_sample_index)
 {
+    DiscardPreparedViewCaches();
     SampleWorkflowCommandResult command_result;
     if (!result.changed) {
         return command_result;
