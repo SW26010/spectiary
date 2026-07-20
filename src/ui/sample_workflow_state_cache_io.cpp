@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -409,7 +410,9 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(const std::filesystem::pat
         state.annotation_display_names = ParseAnnotationDisplayNames(source_object);
         ParseSortState(source_object, state);
         if (HasState(state)) {
-            cache.sources_by_identity.emplace(std::move(*identity), std::move(state));
+            cache.sources_by_identity.emplace(
+                NormalizePersistedSourceCollectionIdentity(std::move(*identity)),
+                std::move(state));
         }
     }
     return cache;

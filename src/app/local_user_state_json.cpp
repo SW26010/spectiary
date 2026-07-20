@@ -19,8 +19,9 @@ namespace {
 
 class JsonParser {
 public:
-    explicit JsonParser(std::string_view text)
-        : text_(text)
+    JsonParser(std::string_view text, JsonCancellationCheckpoint cancellation_checkpoint)
+        : text_(text),
+          cancellation_checkpoint_(std::move(cancellation_checkpoint))
     {
     }
 
@@ -39,6 +40,15 @@ public:
     }
 
 private:
+    void Checkpoint()
+    {
+        if (!cancellation_checkpoint_ || position_ - last_checkpoint_position_ < 4096U) {
+            return;
+        }
+        last_checkpoint_position_ = position_;
+        cancellation_checkpoint_();
+    }
+
     void SkipWhitespace()
     {
         while (position_ < text_.size()) {
@@ -47,6 +57,7 @@ private:
                 break;
             }
             ++position_;
+            Checkpoint();
         }
     }
 
@@ -104,6 +115,7 @@ private:
         }
 
         for (;;) {
+            Checkpoint();
             std::string key;
             if (!ParseString(key, error)) {
                 return false;
@@ -142,6 +154,7 @@ private:
         }
 
         for (;;) {
+            Checkpoint();
             JsonValue item;
             if (!ParseValue(item, error)) {
                 return false;
@@ -225,6 +238,7 @@ private:
 
         value.clear();
         while (position_ < text_.size()) {
+            Checkpoint();
             const char character = text_[position_++];
             if (character == '"') {
                 return true;
@@ -321,6 +335,7 @@ private:
             : static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
         std::uint64_t magnitude = 0;
         while (position_ < text_.size() && text_[position_] >= '0' && text_[position_] <= '9') {
+            Checkpoint();
             const auto digit = static_cast<std::uint64_t>(text_[position_] - '0');
             if (magnitude > (limit - digit) / 10U) {
                 error = "JSON integer is out of range";
@@ -358,6 +373,8 @@ private:
 
     std::string_view text_;
     std::size_t position_ = 0;
+    std::size_t last_checkpoint_position_ = 0;
+    JsonCancellationCheckpoint cancellation_checkpoint_;
 };
 
 bool SupportsSchema(int schema_version, std::initializer_list<int> supported_schema_versions)
@@ -373,9 +390,36 @@ char JsonHexNibble(unsigned char value)
 
 }  // namespace
 
-std::optional<JsonValue> ParseJson(std::string_view text, std::string& error)
+bool ReadTextStreamCancelable(
+    std::istream& stream,
+    std::string& contents,
+    const JsonCancellationCheckpoint& cancellation_checkpoint)
 {
-    JsonParser parser(text);
+    contents.clear();
+    constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
+    std::vector<char> read_buffer(kReadChunkBytes);
+    while (stream.good()) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        stream.read(read_buffer.data(), static_cast<std::streamsize>(read_buffer.size()));
+        const std::streamsize read_count = stream.gcount();
+        if (read_count > 0) {
+            contents.append(read_buffer.data(), static_cast<std::size_t>(read_count));
+        }
+    }
+    return stream.eof();
+}
+
+std::optional<JsonValue> ParseJson(
+    std::string_view text,
+    std::string& error,
+    const JsonCancellationCheckpoint& cancellation_checkpoint)
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+    JsonParser parser(text, cancellation_checkpoint);
     return parser.Parse(error);
 }
 
@@ -481,9 +525,13 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     const std::filesystem::path& path,
     std::string_view format_kind,
     std::initializer_list<int> supported_schema_versions,
-    std::string_view description)
+    std::string_view description,
+    const JsonCancellationCheckpoint& cancellation_checkpoint)
 {
     VersionedJsonCacheLoadResult result;
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     if (path.empty()) {
         return result;
     }
@@ -498,12 +546,14 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
         result.warning = "Could not read " + std::string(description) + ".";
         return result;
     }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    const std::string contents = buffer.str();
+    std::string contents;
+    if (!ReadTextStreamCancelable(stream, contents, cancellation_checkpoint)) {
+        result.warning = "Could not read " + std::string(description) + ".";
+        return result;
+    }
 
     std::string parse_error;
-    std::optional<JsonValue> root = ParseJson(contents, parse_error);
+    std::optional<JsonValue> root = ParseJson(contents, parse_error, cancellation_checkpoint);
     if (!root || root->kind != JsonValue::Kind::Object) {
         result.warning = "Ignored " + std::string(description) + ": " + parse_error;
         return result;

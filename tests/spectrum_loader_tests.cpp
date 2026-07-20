@@ -1,10 +1,14 @@
 #include "domain/spectrum_loader.h"
+#include "domain/fits_file_reader.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
+#include "domain/source_collection_identity_digest.h"
+#include "domain/stable_sha256.h"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -861,6 +865,443 @@ void TestLoadsGzippedFitsSpectrum()
     Require(MetadataValue(snapshot, "format") == "fits.gz", "gzipped FITS format should come from domain");
 }
 
+void WriteFitsScalarTableWithTrailingEmptyHdus(
+    const std::filesystem::path& path,
+    std::size_t trailing_hdu_count)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open multi-HDU FITS fixture");
+    WriteFitsPrimary(stream);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", "                   8"),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'FLUX'"),
+                                FitsCard("TFORM1", "'E'"),
+                                FitsCard("TTYPE2", "'LOGLAM'"),
+                                FitsCard("TFORM2", "'E'"),
+                            });
+    std::vector<unsigned char> data;
+    AppendBigEndianFloat(data, 1.0F);
+    AppendBigEndianFloat(data, 3.0F);
+    stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    for (std::size_t index = 0; index < trailing_hdu_count; ++index) {
+        WriteFitsPrimary(stream);
+    }
+    Require(stream.good(), "could not write multi-HDU FITS fixture");
+}
+
+void WriteLargeFitsLoglamVectorTable(const std::filesystem::path& path, std::size_t value_count)
+{
+    std::ofstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open large vector FITS fixture");
+    WriteFitsPrimary(stream);
+    const std::size_t row_width = value_count * 2U * sizeof(float);
+    WriteFitsHeader(stream, {
+                                FitsCard("XTENSION", "'BINTABLE'"),
+                                FitsCard("BITPIX", "                   8"),
+                                FitsCard("NAXIS", "                   2"),
+                                FitsCard("NAXIS1", std::to_string(row_width)),
+                                FitsCard("NAXIS2", "                   1"),
+                                FitsCard("PCOUNT", "                   0"),
+                                FitsCard("GCOUNT", "                   1"),
+                                FitsCard("TFIELDS", "                   2"),
+                                FitsCard("TTYPE1", "'LOGLAM'"),
+                                FitsCard("TFORM1", "'" + std::to_string(value_count) + "E'"),
+                                FitsCard("TTYPE2", "'FLUX'"),
+                                FitsCard("TFORM2", "'" + std::to_string(value_count) + "E'"),
+                            });
+    std::vector<unsigned char> data;
+    data.reserve(row_width);
+    for (std::size_t index = 0; index < value_count; ++index) {
+        AppendBigEndianFloat(data, 3.0F + static_cast<float>(index) * 0.000001F);
+    }
+    for (std::size_t index = 0; index < value_count; ++index) {
+        AppendBigEndianFloat(data, static_cast<float>(index));
+    }
+    stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    PadFitsData(stream, data.size());
+    Require(stream.good(), "could not write large vector FITS fixture");
+}
+
+void TestCancelableCsvLoadStopsInsideParsingAndSorting()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancelable.csv";
+    {
+        std::ofstream stream(path);
+        Require(stream.good(), "could not create cancelable CSV fixture");
+        stream << "wavelength,flux\n";
+        for (std::size_t index = 0; index < 20'000; ++index) {
+            stream << (5000 + index) << ',' << index << '\n';
+        }
+    }
+
+    std::size_t cancellation_checks = 0;
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+        path,
+        0,
+        [&cancellation_checks]() { return ++cancellation_checks >= 8; });
+    Require(snapshot == nullptr, "cancelable CSV loading should stop without publishing a snapshot");
+    Require(cancellation_checks >= 8, "CSV loading should poll cancellation throughout parsing");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
+void TestNpyTypedValueConversionPollsCancellation()
+{
+    constexpr std::size_t kColumnCount = 262'144;
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancel_npy_conversion.npy";
+    WriteNpy(path, "<f4", {1, kColumnCount}, BytesFor(std::vector<float>(kColumnCount, 1.0F)));
+
+    std::size_t cancellation_checks = 0;
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+        path,
+        0,
+        [&cancellation_checks]() {
+            ++cancellation_checks;
+            return false;
+        });
+    Require(snapshot && snapshot->capabilities.can_plot_current_spectrum, "wide NPY fixture should load");
+
+    constexpr std::size_t kCheckpointStride = 4096;
+    const std::size_t linear_work_blocks = (kColumnCount + kCheckpointStride - 1) / kCheckpointStride;
+    Require(
+        cancellation_checks >= linear_work_blocks * 3,
+        "NPY read, typed conversion, and plot-vector transforms should each poll cancellation");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
+void TestFolderSortingPollsCancellation()
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("specforge_loader_cancel_folder_sort_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::error_code error;
+    Require(std::filesystem::create_directory(path), "could not create folder sort fixture");
+    constexpr std::size_t kFileCount = 64;
+    for (std::size_t index = 0; index < kFileCount; ++index) {
+        std::ofstream stream(path / ("sample-" + std::to_string(kFileCount - index) + ".csv"));
+        stream << "fixture";
+    }
+
+    class FolderSortCancellationMarker final : public std::runtime_error {
+    public:
+        FolderSortCancellationMarker()
+            : std::runtime_error("folder sort cancellation marker")
+        {
+        }
+    };
+
+    std::size_t processed_entries = 0;
+    bool canceled_in_sort = false;
+    try {
+        (void)specforge::ScanSourceCollectionFolder(
+            path,
+            [&processed_entries](std::size_t processed) {
+                processed_entries = processed;
+            },
+            [&processed_entries]() {
+                if (processed_entries == kFileCount) {
+                    throw FolderSortCancellationMarker();
+                }
+            });
+    } catch (const FolderSortCancellationMarker&) {
+        canceled_in_sort = true;
+    }
+    std::filesystem::remove_all(path, error);
+    Require(processed_entries == kFileCount, "folder cancellation should arm only after enumeration");
+    Require(canceled_in_sort, "folder filename sorting should poll cooperative cancellation");
+}
+
+void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancelable_annotation.npy";
+    constexpr std::size_t kValueCount = 600'000;
+    WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
+
+    class CancellationMarker final : public std::runtime_error {
+    public:
+        CancellationMarker()
+            : std::runtime_error("annotation cancellation marker")
+        {
+        }
+    };
+
+    std::size_t cancellation_checks = 0;
+    bool canceled = false;
+    try {
+        (void)specforge::LoadSampleAnnotationResultFromPathCancelable(
+            path,
+            kValueCount,
+            [&cancellation_checks]() {
+                if (++cancellation_checks >= 4) {
+                    throw CancellationMarker();
+                }
+            });
+    } catch (const CancellationMarker&) {
+        canceled = true;
+    }
+    Require(canceled, "annotation cancellation should propagate to the queue boundary");
+    Require(cancellation_checks >= 4, "annotation loading should poll beyond initial dispatch");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
+void TestCancelableAnnotationLoadStopsInsideMetadataFormatting()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancelable_annotation_metadata.npy";
+    constexpr std::size_t kValueCount = 600'000;
+    WriteNpy(path, "<i4", {kValueCount}, BytesFor(std::vector<std::int32_t>(kValueCount, 7)));
+
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask("metadata-cancel", "Metadata cancel", kValueCount);
+    Require(
+        specforge::UpsertSampleLabel(
+            task.label_set,
+            specforge::SampleLabelDefinition{7, "accepted", 'a'}),
+        "metadata cancellation fixture label should be valid");
+    std::string metadata_error;
+    Require(
+        specforge::SaveSampleLabelResultMetadataSidecar(path, task, nullptr, &metadata_error),
+        metadata_error.empty() ? "metadata cancellation fixture should save" : metadata_error);
+
+    class CancellationMarker final : public std::runtime_error {
+    public:
+        CancellationMarker()
+            : std::runtime_error("annotation metadata cancellation marker")
+        {
+        }
+    };
+
+    constexpr std::size_t kReadChunkValues = (1024U * 1024U) / sizeof(std::int32_t);
+    constexpr std::size_t kCheckpointStride = 4096;
+    constexpr std::size_t kReadChunks = (kValueCount + kReadChunkValues - 1) / kReadChunkValues;
+    constexpr std::size_t kPayloadConversionChecks =
+        (kValueCount + kCheckpointStride - 1) / kCheckpointStride;
+    constexpr std::size_t kFirstMetadataFormattingCheck =
+        1 + kReadChunks + kPayloadConversionChecks + 2 + 1;
+    std::size_t cancellation_checks = 0;
+    bool canceled = false;
+    try {
+        (void)specforge::LoadSampleAnnotationResultFromPathCancelable(
+            path,
+            kValueCount,
+            [&cancellation_checks]() {
+                if (++cancellation_checks >= kFirstMetadataFormattingCheck) {
+                    throw CancellationMarker();
+                }
+            });
+    } catch (const CancellationMarker&) {
+        canceled = true;
+    }
+    Require(canceled, "annotation label metadata formatting should honor cooperative cancellation");
+    Require(
+        cancellation_checks >= kFirstMetadataFormattingCheck,
+        "metadata cancellation should occur after payload conversion has completed");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(path), error);
+}
+
+void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
+{
+    const std::filesystem::path annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_ingestion_warning.npy";
+    WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
+    {
+        std::ofstream metadata(specforge::SampleLabelResultMetadataPathForResult(annotation_path), std::ios::trunc);
+        metadata << "{invalid-json";
+    }
+
+    specforge::SourceCollectionManifest manifest;
+    Require(
+        specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
+        "shared annotation ingestion should retain the usable value array");
+    Require(manifest.annotations.size() == 1, "shared ingestion should append one annotation");
+    Require(!manifest.messages.empty(), "shared ingestion should preserve the metadata warning");
+    Require(
+        specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
+        "re-ingesting the same annotation should update it");
+    Require(manifest.annotations.size() == 1, "shared ingestion should not duplicate an existing annotation path");
+}
+
+void TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline()
+{
+    const std::filesystem::path fits_path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancel_source.fits";
+    const std::filesystem::path gzip_path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancel_source.fits.gz";
+    WriteFitsScalarTable(fits_path);
+    WriteBytes(gzip_path, GzipBytes(ReadBytes(fits_path)));
+
+    std::size_t cancellation_checks = 0;
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+        gzip_path,
+        0,
+        [&cancellation_checks]() {
+            ++cancellation_checks;
+            return cancellation_checks >= 4;
+        });
+    Require(snapshot == nullptr, "cancelable FITS.GZ loading should stop without publishing an error snapshot");
+    Require(cancellation_checks >= 4, "FITS.GZ loading should poll cancellation beyond initial dispatch");
+}
+
+void TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancel_numeric_decode.fits";
+    WriteLargeFitsLoglamVectorTable(path, 50'000);
+
+    std::size_t cancellation_checks = 0;
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+        path,
+        0,
+        [&cancellation_checks]() {
+            ++cancellation_checks;
+            return cancellation_checks >= 36;
+        });
+    Require(snapshot == nullptr, "FITS cancellation during numeric work must not publish a snapshot");
+    Require(
+        cancellation_checks >= 36,
+        "FITS cancellation should remain wired beyond file read and HDU parsing");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
+void TestFitsColumnAndImageReadersPollDuringValueConversion()
+{
+    constexpr std::size_t kValueCount = 20'000;
+    std::vector<unsigned char> bytes;
+    bytes.reserve(kValueCount * sizeof(float));
+    for (std::size_t index = 0; index < kValueCount; ++index) {
+        AppendBigEndianFloat(bytes, static_cast<float>(index));
+    }
+
+    specforge::detail::FitsHdu table_hdu;
+    table_hdu.header.values["NAXIS1"] = std::to_string(bytes.size());
+    table_hdu.header.values["NAXIS2"] = "1";
+    table_hdu.data_size = bytes.size();
+    specforge::detail::FitsColumn column;
+    column.repeat = kValueCount;
+    column.code = 'E';
+    column.element_size = sizeof(float);
+    column.byte_width = bytes.size();
+
+    std::size_t column_checks = 0;
+    bool column_canceled = false;
+    try {
+        (void)specforge::detail::ReadFitsColumnVector(
+            bytes,
+            table_hdu,
+            column,
+            0,
+            false,
+            [&column_checks]() { return ++column_checks >= 3; });
+    } catch (const specforge::detail::FitsFileError& error) {
+        column_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
+    }
+    Require(column_canceled, "FITS table value conversion should honor cooperative cancellation");
+
+    specforge::detail::FitsHdu image_hdu;
+    image_hdu.header.values["BITPIX"] = "-32";
+    image_hdu.data_size = bytes.size();
+    std::size_t image_checks = 0;
+    bool image_canceled = false;
+    try {
+        (void)specforge::detail::ReadFitsImageRow(
+            bytes,
+            image_hdu,
+            0,
+            kValueCount,
+            [&image_checks]() { return ++image_checks >= 3; });
+    } catch (const specforge::detail::FitsFileError& error) {
+        image_canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
+    }
+    Require(image_canceled, "FITS image value conversion should honor cooperative cancellation");
+}
+
+void TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop()
+{
+    constexpr std::size_t kFieldCount = 999;
+    std::vector<std::string> cards = {
+        FitsCard("XTENSION", "'BINTABLE'"),
+        FitsCard("BITPIX", "                   8"),
+        FitsCard("NAXIS", "                   2"),
+        FitsCard("NAXIS1", "                3996"),
+        FitsCard("NAXIS2", "                   1"),
+        FitsCard("PCOUNT", "                   0"),
+        FitsCard("GCOUNT", "                   1"),
+        FitsCard("TFIELDS", "                 999"),
+    };
+    cards.reserve(cards.size() + kFieldCount * 2);
+    for (std::size_t index = 1; index <= kFieldCount; ++index) {
+        cards.push_back(FitsCard("TTYPE" + std::to_string(index), "'VALUE'"));
+        cards.push_back(FitsCard("TFORM" + std::to_string(index), "'E'"));
+    }
+    std::string header;
+    for (const std::string& card : cards) {
+        header += card;
+    }
+    header += FitsCard("END");
+    header.append((2880 - (header.size() % 2880)) % 2880, ' ');
+    std::vector<unsigned char> bytes(header.begin(), header.end());
+    bytes.resize(bytes.size() + 3996, 0);
+    bytes.resize(bytes.size() + ((2880 - (3996 % 2880)) % 2880), 0);
+
+    const std::size_t header_block_count = header.size() / 2880;
+    const std::size_t cancel_at = 1 + header_block_count + 2;
+    std::size_t cancellation_checks = 0;
+    bool canceled = false;
+    try {
+        (void)specforge::detail::ParseFitsHdus(
+            bytes,
+            [&cancellation_checks, cancel_at]() { return ++cancellation_checks >= cancel_at; });
+    } catch (const specforge::detail::FitsFileError& error) {
+        canceled = error.code() == specforge::detail::FitsFileErrorCode::Canceled;
+    }
+    Require(canceled, "FITS TFIELDS column discovery should honor cancellation inside its column loop");
+}
+
+void TestFitsHeaderMetadataScanPollsAcrossManyHdus()
+{
+    constexpr std::size_t kTrailingHduCount = 3'000;
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_loader_cancel_many_hdu_metadata.fits";
+    WriteFitsScalarTableWithTrailingEmptyHdus(path, kTrailingHduCount);
+
+    // File read and ParseFitsHdus account for just over two checks per HDU.
+    // Arming beyond that boundary targets the repeated header-metadata scans.
+    const std::size_t cancel_at = 2 * (kTrailingHduCount + 2) + 100;
+    std::size_t cancellation_checks = 0;
+    const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPathCancelable(
+        path,
+        0,
+        [&cancellation_checks, cancel_at]() { return ++cancellation_checks >= cancel_at; });
+    Require(snapshot == nullptr, "FITS metadata scan should stop without publishing a snapshot");
+    Require(
+        cancellation_checks >= cancel_at,
+        "FITS header metadata lookup should keep polling after HDU parsing finishes");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
+}
+
 void TestRejectsCorruptGzippedFits()
 {
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_loader_corrupt.fits.gz";
@@ -934,6 +1375,54 @@ void TestLoadsFolderCollectionWithWarnings()
     Require(MetadataValue(first, "source_type") == "folder_collection", "folder collection source type should come from domain");
     Require(MetadataValue(first, "format") == "folder", "folder collection format should come from domain");
     Require(HasDiagnosticCode(first, SpectrumDiagnosticCode::UnsupportedFormat), "folder warnings should be reported");
+
+    const specforge::SourceCollectionFolderListing listing = specforge::ScanSourceCollectionFolder(path);
+    Require(
+        std::all_of(listing.spectra.begin(), listing.spectra.end(), [](const auto& sample) {
+            return !sample.stat_fingerprint.empty();
+        }),
+        "folder scan should retain each spectrum file stat fingerprint");
+    const specforge::SourceCollectionContext context = specforge::LoadSourceCollectionContext(*first);
+    Require(
+        specforge::IsVersionedSha256Digest(context.identity.source_fingerprint),
+        "folder source fingerprints should have a fixed-size versioned digest");
+    std::vector<std::filesystem::path> legacy_fingerprint_paths;
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(path)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        const std::string extension = LowerAscii(PathToUtf8(entry.path().extension()));
+        if (extension == ".csv" || IsFitsSample(entry.path())) {
+            legacy_fingerprint_paths.push_back(entry.path());
+        }
+    }
+    std::stable_sort(
+        legacy_fingerprint_paths.begin(),
+        legacy_fingerprint_paths.end(),
+        [](const std::filesystem::path& left, const std::filesystem::path& right) {
+            return LowerAscii(PathToUtf8(left.filename())) < LowerAscii(PathToUtf8(right.filename()));
+        });
+    std::string legacy_fingerprint = "folder";
+    for (const std::filesystem::path& sample_path : legacy_fingerprint_paths) {
+        legacy_fingerprint += ";" + PathToUtf8(sample_path.filename()) + ":size=" +
+                              std::to_string(std::filesystem::file_size(sample_path)) + ";mtime=" +
+                              std::to_string(std::filesystem::last_write_time(sample_path).time_since_epoch().count());
+    }
+    Require(
+        context.identity.source_fingerprint == specforge::VersionedSha256Digest(legacy_fingerprint),
+        "streamed folder fingerprints must preserve the exact legacy identity semantics");
+    const std::string legacy_identity =
+        "name=" + PathToUtf8(path.filename()) + "|fingerprint=" + legacy_fingerprint + "|count=2";
+    Require(
+        context.identity.id == specforge::NormalizePersistedSourceCollectionIdentity(legacy_identity),
+        "legacy folder cache identities should migrate to the same fixed-size key");
+    Require(context.identity.id.size() == 74, "versioned SHA-256 identities should remain fixed-size");
+    Require(context.manifest.sample_names.size() == 2, "source context should build folder sample names in the same pass");
+    Require(context.manifest.sample_names[0] == "a.csv", "folder source context should preserve stable filename order");
+    Require(context.manifest.sample_names[1] == "b.fits", "folder source context should include FITS sample names");
+    Require(
+        specforge::BuildSourceCollectionIdentity(*first).id == context.identity.id,
+        "combined source context must preserve the existing folder identity format");
 
     const SpectrumSnapshotHandle second = specforge::LoadSpectrumSnapshotFromPath(path, 1);
     Require(second->capabilities.can_plot_current_spectrum, "folder second file should be plottable");
@@ -1023,14 +1512,20 @@ void TestOptionalSampleDirectory()
 
 int main()
 {
+    TestNpyTypedValueConversionPollsCancellation();
+    TestFolderSortingPollsCancellation();
     TestLoadsSelectedNpyRow();
     TestLoadsNpySampleAnnotationContext();
     TestLoadsReadOnlyAnnotationDtypes();
+    TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates();
     TestRejectsMismatchedSampleAnnotationLength();
     TestRejectsAuxiliaryNpyArrays();
     TestClassifiesUnsupportedDtype();
     TestClassifiesEmptyShape();
     TestLoadsCsvSpectrum();
+    TestCancelableCsvLoadStopsInsideParsingAndSorting();
+    TestCancelableAnnotationLoadStopsInsidePayloadConversion();
+    TestCancelableAnnotationLoadStopsInsideMetadataFormatting();
     TestLoadsFitsScalarTableSpectrum();
     TestLoadsFitsVectorTableSpectrum();
     TestBlocksInvalidFitsRedshiftForRestFrameInput();
@@ -1038,6 +1533,11 @@ int main()
     TestRejectsFitsImageWcsFallback();
     TestRejectsMalformedFitsTableWidth();
     TestLoadsGzippedFitsSpectrum();
+    TestCancelableGzippedFitsLoadStopsInsideTheDecoderPipeline();
+    TestCancelableFitsLoadStopsInsideNumericDecodeAndTransforms();
+    TestFitsColumnAndImageReadersPollDuringValueConversion();
+    TestFitsColumnDiscoveryPollsDuringLargeTfieldsLoop();
+    TestFitsHeaderMetadataScanPollsAcrossManyHdus();
     TestRejectsCorruptGzippedFits();
     TestRejectsOversizedInflatedGzippedFits();
     TestRejectsOversizedFitsBeforeRead();

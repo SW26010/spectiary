@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
 #include <optional>
@@ -42,7 +43,7 @@ SampleNavigationStateCache LoadSampleNavigationStateCache(const std::filesystem:
         const std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");
         const std::optional<std::size_t> index = ReadJsonSizeMember(source_object, "last_index");
         if (identity && !identity->empty() && index) {
-            cache.last_indices_by_source_identity[*identity] = *index;
+            cache.last_indices_by_source_identity[NormalizePersistedSourceCollectionIdentity(*identity)] = *index;
         }
     }
     return cache;

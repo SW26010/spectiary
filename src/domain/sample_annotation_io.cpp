@@ -75,11 +75,48 @@ std::string DtypeName(const NpyScalarType& scalar_type)
 }
 
 template <typename T>
-void AssignIntegralValues(SampleAnnotationResult& result, std::ifstream& stream, std::size_t value_count)
+std::vector<T> ReadNpyTypedValuesCancelable(
+    std::ifstream& stream,
+    std::size_t value_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
 {
-    const std::vector<T> typed_values = ReadNpyTypedValues<T>(stream, value_count);
+    if (value_count > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max()) / sizeof(T)) {
+        throw NpyAnnotationError("NPY array is too large to read");
+    }
+    std::vector<T> values(value_count);
+    constexpr std::size_t kChunkBytes = 1024U * 1024U;
+    constexpr std::size_t kChunkValues = std::max<std::size_t>(1, kChunkBytes / sizeof(T));
+    for (std::size_t offset = 0; offset < value_count;) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const std::size_t count = std::min(kChunkValues, value_count - offset);
+        stream.read(
+            reinterpret_cast<char*>(values.data() + offset),
+            static_cast<std::streamsize>(count * sizeof(T)));
+        if (!stream) {
+            throw NpyAnnotationError("NPY array data is truncated");
+        }
+        offset += count;
+    }
+    return values;
+}
+
+template <typename T>
+void AssignIntegralValues(
+    SampleAnnotationResult& result,
+    std::ifstream& stream,
+    std::size_t value_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
+{
+    const std::vector<T> typed_values =
+        ReadNpyTypedValuesCancelable<T>(stream, value_count, cancellation_checkpoint);
     result.values.reserve(value_count);
-    for (const T value : typed_values) {
+    for (std::size_t index = 0; index < typed_values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const T value = typed_values[index];
         SampleAnnotationValue annotation_value;
         if constexpr (std::is_signed_v<T>) {
             const auto widened = static_cast<long long>(value);
@@ -99,20 +136,36 @@ void AssignIntegralValues(SampleAnnotationResult& result, std::ifstream& stream,
 }
 
 template <typename T>
-void AssignFloatingValues(SampleAnnotationResult& result, std::ifstream& stream, std::size_t value_count)
+void AssignFloatingValues(
+    SampleAnnotationResult& result,
+    std::ifstream& stream,
+    std::size_t value_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
 {
-    const std::vector<T> typed_values = ReadNpyTypedValues<T>(stream, value_count);
+    const std::vector<T> typed_values =
+        ReadNpyTypedValuesCancelable<T>(stream, value_count, cancellation_checkpoint);
     result.values.reserve(value_count);
-    for (const T value : typed_values) {
-        result.values.push_back({FormatFloatingValue(static_cast<double>(value))});
+    for (std::size_t index = 0; index < typed_values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        result.values.push_back({FormatFloatingValue(static_cast<double>(typed_values[index]))});
     }
 }
 
-void AssignStringValues(SampleAnnotationResult& result, std::ifstream& stream, const NpyScalarType& scalar_type, std::size_t value_count)
+void AssignStringValues(
+    SampleAnnotationResult& result,
+    std::ifstream& stream,
+    const NpyScalarType& scalar_type,
+    std::size_t value_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
 {
     result.values.reserve(value_count);
     std::string bytes(scalar_type.item_size, '\0');
     for (std::size_t index = 0; index < value_count; ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         if (!stream) {
             throw NpyAnnotationError("NPY string data is truncated");
@@ -121,14 +174,24 @@ void AssignStringValues(SampleAnnotationResult& result, std::ifstream& stream, c
     }
 }
 
-void ApplyLabelResultMetadata(SampleAnnotationResult& result, const std::filesystem::path& path, std::size_t expected_count)
+void ApplyLabelResultMetadata(
+    SampleAnnotationResult& result,
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
 {
     if (result.kind != SampleAnnotationKind::CategoricalInteger) {
         return;
     }
 
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     SampleLabelResultMetadataLoadResult metadata_result =
         LoadSampleLabelResultMetadataForResult(path, expected_count, result.dtype_name);
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     if (!metadata_result.warning.empty()) {
         result.metadata_warning =
             "Ignored " + FileNameToUtf8(SampleLabelResultMetadataPathForResult(path).filename()) +
@@ -144,7 +207,11 @@ void ApplyLabelResultMetadata(SampleAnnotationResult& result, const std::filesys
     if (!result.label_metadata->task_name.empty()) {
         result.name = result.label_metadata->task_name;
     }
-    for (SampleAnnotationValue& value : result.values) {
+    for (std::size_t index = 0; index < result.values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        SampleAnnotationValue& value = result.values[index];
         if (value.integer_value) {
             value.display_text = FormatSampleLabelValue(
                 result.label_metadata->label_set,
@@ -152,10 +219,19 @@ void ApplyLabelResultMetadata(SampleAnnotationResult& result, const std::filesys
                 result.label_metadata->unlabeled_sentinel);
         }
     }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
 }
 
-SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path, std::size_t expected_count)
+SampleAnnotationResult ReadAnnotationNpyValues(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
 {
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
         throw NpyAnnotationError("could not open the NPY file");
@@ -190,16 +266,16 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
         result.kind = SampleAnnotationKind::CategoricalInteger;
         switch (scalar_type->item_size) {
         case 1:
-            AssignIntegralValues<std::int8_t>(result, stream, expected_count);
+            AssignIntegralValues<std::int8_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 2:
-            AssignIntegralValues<std::int16_t>(result, stream, expected_count);
+            AssignIntegralValues<std::int16_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 4:
-            AssignIntegralValues<std::int32_t>(result, stream, expected_count);
+            AssignIntegralValues<std::int32_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 8:
-            AssignIntegralValues<std::int64_t>(result, stream, expected_count);
+            AssignIntegralValues<std::int64_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         default:
             throw NpyAnnotationError("signed integer NPY dtype is not supported");
@@ -209,16 +285,16 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
         result.kind = SampleAnnotationKind::CategoricalInteger;
         switch (scalar_type->item_size) {
         case 1:
-            AssignIntegralValues<std::uint8_t>(result, stream, expected_count);
+            AssignIntegralValues<std::uint8_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 2:
-            AssignIntegralValues<std::uint16_t>(result, stream, expected_count);
+            AssignIntegralValues<std::uint16_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 4:
-            AssignIntegralValues<std::uint32_t>(result, stream, expected_count);
+            AssignIntegralValues<std::uint32_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         case 8:
-            AssignIntegralValues<std::uint64_t>(result, stream, expected_count);
+            AssignIntegralValues<std::uint64_t>(result, stream, expected_count, cancellation_checkpoint);
             break;
         default:
             throw NpyAnnotationError("unsigned integer NPY dtype is not supported");
@@ -227,9 +303,9 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
     case NpyScalarKind::Float:
         result.kind = SampleAnnotationKind::ContinuousFloat;
         if (scalar_type->item_size == 4) {
-            AssignFloatingValues<float>(result, stream, expected_count);
+            AssignFloatingValues<float>(result, stream, expected_count, cancellation_checkpoint);
         } else if (scalar_type->item_size == 8) {
-            AssignFloatingValues<double>(result, stream, expected_count);
+            AssignFloatingValues<double>(result, stream, expected_count, cancellation_checkpoint);
         } else {
             throw NpyAnnotationError("floating-point NPY dtype is not supported");
         }
@@ -237,13 +313,13 @@ SampleAnnotationResult ReadAnnotationNpyValues(const std::filesystem::path& path
     case NpyScalarKind::Bytes:
     case NpyScalarKind::Unicode:
         result.kind = SampleAnnotationKind::Text;
-        AssignStringValues(result, stream, *scalar_type, expected_count);
+        AssignStringValues(result, stream, *scalar_type, expected_count, cancellation_checkpoint);
         break;
     default:
         throw NpyAnnotationError("NPY dtype is not supported for read-only sample annotations");
     }
 
-    ApplyLabelResultMetadata(result, path, expected_count);
+    ApplyLabelResultMetadata(result, path, expected_count, cancellation_checkpoint);
     return result;
 }
 
@@ -254,9 +330,21 @@ std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPath(
     std::size_t expected_count,
     std::string* error_message)
 {
+    return LoadSampleAnnotationResultFromPathCancelable(path, expected_count, {}, error_message);
+}
+
+std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPathCancelable(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint,
+    std::string* error_message)
+{
     try {
-        return ReadAnnotationNpyValues(path, expected_count);
+        return ReadAnnotationNpyValues(path, expected_count, cancellation_checkpoint);
     } catch (const std::exception& error) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         if (error_message != nullptr) {
             *error_message = error.what();
         }

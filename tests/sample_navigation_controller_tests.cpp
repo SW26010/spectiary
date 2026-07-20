@@ -1,4 +1,5 @@
 #include "domain/spectrum_snapshot.h"
+#include "domain/source_collection_identity_digest.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
 
@@ -403,7 +404,7 @@ void TestControllerPersistsLastIndexBySourceIdentity()
     Require(cache_text.find(PathToUtf8(path.parent_path())) == std::string::npos, "cache should not key state by absolute directory path");
 }
 
-void TestControllerLoadsLongFolderIdentityState()
+void TestControllerMigratesLongFolderIdentityState()
 {
     const std::filesystem::path folder_path =
         std::filesystem::temp_directory_path() / "specforge_nav_long_folder_identity";
@@ -424,8 +425,21 @@ void TestControllerLoadsLongFolderIdentityState()
     }
 
     specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(folder_path, "folder:long-identity", kSampleCount, 0);
+    const specforge::SourceCollectionFolderListing listing =
+        specforge::ScanSourceCollectionFolder(folder_path);
+    std::string legacy_fingerprint = "folder";
+    for (const specforge::SourceCollectionFolderSpectrumFile& sample : listing.spectra) {
+        legacy_fingerprint += ";" + PathToUtf8(sample.path.filename()) + ":" + sample.stat_fingerprint;
+    }
+    const std::string legacy_identity =
+        "name=" + PathToUtf8(folder_path.filename()) + "|fingerprint=" + legacy_fingerprint +
+        "|count=" + std::to_string(kSampleCount);
     const std::string identity = specforge::BuildSourceCollectionIdentity(*snapshot).id;
-    Require(identity.size() > 1000, "test identity should be long enough to cover regex stack risk");
+    Require(legacy_identity.size() > 1000, "legacy fixture should cover long cache identities");
+    Require(identity.size() == 74, "current identity should use a fixed-size versioned SHA-256 digest");
+    Require(
+        identity == specforge::NormalizePersistedSourceCollectionIdentity(legacy_identity),
+        "long legacy identity should normalize to the current source identity");
 
     {
         std::ofstream stream(cache_path);
@@ -435,7 +449,7 @@ void TestControllerLoadsLongFolderIdentityState()
         stream << "  \"schema_version\": 1,\n";
         stream << "  \"sources\": [\n";
         stream << "    { \"identity\": \"short-source\", \"last_index\": 0 },\n";
-        stream << "    { \"identity\": \"" << identity << "\", \"last_index\": 7 }\n";
+        stream << "    { \"identity\": \"" << legacy_identity << "\", \"last_index\": 7 }\n";
         stream << "  ]\n";
         stream << "}\n";
     }
@@ -591,7 +605,7 @@ int main()
     TestControllerAddsManualAnnotationToActiveContext();
     TestControllerRestoresAndRemovesProvidedAnnotations();
     TestControllerPersistsLastIndexBySourceIdentity();
-    TestControllerLoadsLongFolderIdentityState();
+    TestControllerMigratesLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
     TestEmptyFilterClearsCurrentSequenceRow();

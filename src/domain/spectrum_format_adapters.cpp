@@ -44,6 +44,16 @@ private:
     SpectrumDiagnosticCode code_;
 };
 
+class SpectrumLoadCanceled final : public std::exception {
+};
+
+void ThrowIfCanceled(const SpectrumLoadCancellationCheck& cancellation_requested)
+{
+    if (cancellation_requested && cancellation_requested()) {
+        throw SpectrumLoadCanceled();
+    }
+}
+
 SpectrumDiagnosticCode DiagnosticCodeForNpyArrayError(NpyArrayErrorKind kind)
 {
     switch (kind) {
@@ -106,25 +116,45 @@ void ValidateFileSize(
 }
 
 template <typename T>
-std::vector<double> ReadTypedRow(std::ifstream& stream, std::size_t column_count)
+std::vector<double> ReadTypedRow(
+    std::ifstream& stream,
+    std::size_t column_count,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
-    std::vector<T> typed_values;
-    try {
-        typed_values = ReadNpyTypedValues<T>(stream, column_count, "Selected NPY row is truncated.");
-    } catch (const NpyArrayError& error) {
-        throw NpyLoadError(DiagnosticCodeForNpyArrayError(error.kind()), error.what());
+    ThrowIfCanceled(cancellation_requested);
+    std::vector<T> typed_values(column_count);
+    constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
+    const std::size_t chunk_value_count = std::max<std::size_t>(1, kReadChunkBytes / sizeof(T));
+    for (std::size_t offset = 0; offset < column_count;) {
+        ThrowIfCanceled(cancellation_requested);
+        const std::size_t value_count = std::min(chunk_value_count, column_count - offset);
+        stream.read(
+            reinterpret_cast<char*>(typed_values.data() + offset),
+            static_cast<std::streamsize>(value_count * sizeof(T)));
+        if (!stream) {
+            throw NpyLoadError(SpectrumDiagnosticCode::InvalidShape, "Selected NPY row is truncated.");
+        }
+        offset += value_count;
     }
+    ThrowIfCanceled(cancellation_requested);
 
-    std::vector<double> values;
-    values.reserve(column_count);
-    for (T value : typed_values) {
-        values.push_back(static_cast<double>(value));
+    std::vector<double> values(column_count);
+    for (std::size_t index = 0; index < column_count; ++index) {
+        if ((index & 0xfffU) == 0U) {
+            ThrowIfCanceled(cancellation_requested);
+        }
+        values[index] = static_cast<double>(typed_values[index]);
     }
+    ThrowIfCanceled(cancellation_requested);
     return values;
 }
 
-NpyRow ReadNpyRow(const std::filesystem::path& path, std::size_t requested_index)
+NpyRow ReadNpyRow(
+    const std::filesystem::path& path,
+    std::size_t requested_index,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
+    ThrowIfCanceled(cancellation_requested);
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
         throw NpyLoadError(SpectrumDiagnosticCode::OpenFailed, "Could not open the NPY file.");
@@ -165,10 +195,10 @@ NpyRow ReadNpyRow(const std::filesystem::path& path, std::size_t requested_index
     std::vector<double> values;
     switch (scalar_type->item_size) {
     case sizeof(float):
-        values = ReadTypedRow<float>(stream, column_count);
+        values = ReadTypedRow<float>(stream, column_count, cancellation_requested);
         break;
     case sizeof(double):
-        values = ReadTypedRow<double>(stream, column_count);
+        values = ReadTypedRow<double>(stream, column_count, cancellation_requested);
         break;
     default:
         throw NpyLoadError(SpectrumDiagnosticCode::UnsupportedFormat, "Unsupported NPY element type.");
@@ -203,21 +233,32 @@ bool IsAuxiliaryNpyArrayName(const std::filesystem::path& path)
     return IsSourceCollectionAuxiliaryNpyArrayName(path);
 }
 
-std::vector<double> MakeXValues(std::size_t column_count, bool has_loglam_grid)
+std::vector<double> MakeXValues(
+    std::size_t column_count,
+    bool has_loglam_grid,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
     std::vector<double> x_values;
     x_values.reserve(column_count);
     for (std::size_t index = 0; index < column_count; ++index) {
+        if ((index & 0xfffU) == 0U) {
+            ThrowIfCanceled(cancellation_requested);
+        }
         if (has_loglam_grid) {
             x_values.push_back(std::pow(10.0, kLogLamStart + static_cast<double>(index) * kLogLamStep));
         } else {
             x_values.push_back(static_cast<double>(index));
         }
     }
+    ThrowIfCanceled(cancellation_requested);
     return x_values;
 }
 
-void FilterFiniteValues(std::vector<double>& x_values, std::vector<double>& y_values, std::size_t& filtered_count)
+void FilterFiniteValues(
+    std::vector<double>& x_values,
+    std::vector<double>& y_values,
+    std::size_t& filtered_count,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
     std::vector<double> filtered_x;
     std::vector<double> filtered_y;
@@ -225,6 +266,9 @@ void FilterFiniteValues(std::vector<double>& x_values, std::vector<double>& y_va
     filtered_y.reserve(y_values.size());
 
     for (std::size_t index = 0; index < x_values.size(); ++index) {
+        if ((index & 0xfffU) == 0U) {
+            ThrowIfCanceled(cancellation_requested);
+        }
         const double x_value = x_values[index];
         const double y_value = y_values[index];
         if (std::isfinite(x_value) && std::isfinite(y_value) && x_value >= 0.0) {
@@ -236,13 +280,19 @@ void FilterFiniteValues(std::vector<double>& x_values, std::vector<double>& y_va
     filtered_count = x_values.size() - filtered_x.size();
     x_values = std::move(filtered_x);
     y_values = std::move(filtered_y);
+    ThrowIfCanceled(cancellation_requested);
 }
 
-SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::size_t spectrum_index)
+SpectrumSnapshotHandle LoadNpySnapshot(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
     NpyRow row;
     try {
-        row = ReadNpyRow(path, spectrum_index);
+        row = ReadNpyRow(path, spectrum_index, cancellation_requested);
+    } catch (const SpectrumLoadCanceled&) {
+        return nullptr;
     } catch (const NpyLoadError& error) {
         return MakeNpyErrorSnapshot(path, error.code(), error.what());
     } catch (const std::exception& error) {
@@ -250,11 +300,15 @@ SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::s
     }
 
     const bool has_loglam_grid = row.column_count == kLogLamGridColumns;
-    std::vector<double> x_values = MakeXValues(row.column_count, has_loglam_grid);
+    std::vector<double> x_values;
     std::vector<double> y_values = std::move(row.values);
-
     std::size_t filtered_count = 0;
-    FilterFiniteValues(x_values, y_values, filtered_count);
+    try {
+        x_values = MakeXValues(row.column_count, has_loglam_grid, cancellation_requested);
+        FilterFiniteValues(x_values, y_values, filtered_count, cancellation_requested);
+    } catch (const SpectrumLoadCanceled&) {
+        return nullptr;
+    }
     if (x_values.empty()) {
         return MakeNpyErrorSnapshot(
             path,
@@ -337,13 +391,18 @@ SpectrumSnapshotHandle LoadNpySnapshot(const std::filesystem::path& path, std::s
     return snapshot;
 }
 
-std::vector<std::string> SplitCsvLine(std::string_view line)
+std::vector<std::string> SplitCsvLine(
+    std::string_view line,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
     std::vector<std::string> fields;
     std::string field;
     bool in_quotes = false;
 
     for (std::size_t index = 0; index < line.size(); ++index) {
+        if ((index & 0xfffU) == 0U) {
+            ThrowIfCanceled(cancellation_requested);
+        }
         const char character = line[index];
         if (character == '"') {
             if (in_quotes && index + 1 < line.size() && line[index + 1] == '"') {
@@ -376,8 +435,11 @@ std::optional<std::size_t> FindCsvColumn(const std::vector<std::string>& header,
     return std::nullopt;
 }
 
-SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
+SpectrumSnapshotHandle LoadCsvSnapshot(
+    const std::filesystem::path& path,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
+    ThrowIfCanceled(cancellation_requested);
     std::ifstream stream(path);
     if (!stream) {
         return MakeErrorSnapshot(
@@ -399,8 +461,9 @@ SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
             "file",
             {{"format", "csv", "domain"}});
     }
+    ThrowIfCanceled(cancellation_requested);
 
-    const std::vector<std::string> first_fields = SplitCsvLine(first_line);
+    const std::vector<std::string> first_fields = SplitCsvLine(first_line, cancellation_requested);
     std::vector<std::string> header = first_fields;
     bool first_line_is_data = false;
     if (first_fields.size() >= 2 && ParseDouble(first_fields[0]) && ParseDouble(first_fields[1])) {
@@ -432,6 +495,7 @@ SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
 
     FilterStats stats;
     const auto read_fields = [&](const std::vector<std::string>& fields) {
+        ThrowIfCanceled(cancellation_requested);
         const std::size_t x_column = wavelength_column ? *wavelength_column : *loglam_column;
         if (x_column >= fields.size() || *flux_column >= fields.size()) {
             ++stats.non_finite_or_non_positive_count;
@@ -443,7 +507,12 @@ SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
             ++stats.non_finite_or_non_positive_count;
             return;
         }
-        loaded.x_values.push_back(uses_loglam ? std::pow(10.0, *parsed_x) : *parsed_x);
+        const double x_value = uses_loglam ? std::pow(10.0, *parsed_x) : *parsed_x;
+        if (!std::isfinite(x_value) || x_value <= 0.0 || !std::isfinite(*parsed_y)) {
+            ++stats.non_finite_or_non_positive_count;
+            return;
+        }
+        loaded.x_values.push_back(x_value);
         loaded.y_values.push_back(*parsed_y);
     };
 
@@ -452,20 +521,27 @@ SpectrumSnapshotHandle LoadCsvSnapshot(const std::filesystem::path& path)
     }
 
     std::string line;
+    std::size_t line_count = 0;
     while (std::getline(stream, line)) {
+        if ((line_count++ & 0xffU) == 0U) {
+            ThrowIfCanceled(cancellation_requested);
+        }
         if (TrimAscii(line).empty()) {
             continue;
         }
-        read_fields(SplitCsvLine(line));
+        read_fields(SplitCsvLine(line, cancellation_requested));
     }
 
-    FilterSpectrumPixels(loaded.x_values, loaded.y_values, nullptr, nullptr, true, stats);
+    ThrowIfCanceled(cancellation_requested);
     AddFilterDiagnostics(loaded.diagnostics, stats);
     loaded.diagnostics.push_back(MakeDiagnostic(
         SpectrumDiagnosticSeverity::Warning,
         SpectrumDiagnosticCode::AxisFrameUnknown,
         "CSV wavelength values are plotted as provided; no rest-frame correction status is available."));
-    return MakeLoadedSpectrumSnapshot(path, std::move(loaded));
+    return MakeLoadedSpectrumSnapshot(
+        path,
+        std::move(loaded),
+        [&cancellation_requested]() { ThrowIfCanceled(cancellation_requested); });
 }
 
 std::string JoinExamples(const std::vector<std::string>& examples)
@@ -530,9 +606,15 @@ std::vector<SpectrumMetadataEntry> FolderSourceMetadata(
     return metadata;
 }
 
-SpectrumSnapshotHandle LoadFolderSnapshot(const std::filesystem::path& path, std::size_t spectrum_index)
+SpectrumSnapshotHandle LoadFolderSnapshot(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SourceCollectionFolderListing& scan,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
 {
-    const SourceCollectionFolderListing scan = ScanSourceCollectionFolder(path);
+    if (cancellation_requested && cancellation_requested()) {
+        return nullptr;
+    }
     if (!scan.readable) {
         return MakeErrorSnapshot(
             path,
@@ -571,8 +653,17 @@ SpectrumSnapshotHandle LoadFolderSnapshot(const std::filesystem::path& path, std
     }
 
     const SourceCollectionFolderSpectrumFile& selected = scan.spectra[spectrum_index];
-    SpectrumSnapshotHandle selected_snapshot =
-        selected.format == "csv" ? LoadCsvSnapshot(selected.path) : LoadFitsSnapshot(selected.path, 0);
+    SpectrumSnapshotHandle selected_snapshot;
+    try {
+        selected_snapshot = selected.format == "csv"
+            ? LoadCsvSnapshot(selected.path, cancellation_requested)
+            : LoadFitsSnapshotCancelable(selected.path, 0, cancellation_requested);
+    } catch (const SpectrumLoadCanceled&) {
+        return nullptr;
+    }
+    if (!selected_snapshot || (cancellation_requested && cancellation_requested())) {
+        return nullptr;
+    }
 
     auto snapshot = std::make_shared<SpectrumSnapshot>(*selected_snapshot);
     AddSourceBasics(*snapshot, path, "folder");
@@ -612,6 +703,17 @@ SpectrumSnapshotHandle LoadFolderSnapshot(const std::filesystem::path& path, std
 
 SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathImpl(const std::filesystem::path& path, std::size_t spectrum_index)
 {
+    return LoadSpectrumSnapshotFromPathImplCancelable(path, spectrum_index, {});
+}
+
+SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathImplCancelable(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
+{
+    if (cancellation_requested && cancellation_requested()) {
+        return nullptr;
+    }
     if (path.empty()) {
         return MakeErrorSnapshot(path, SpectrumDiagnosticCode::OpenFailed, "No input path was provided.");
     }
@@ -633,16 +735,21 @@ SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathImpl(const std::filesystem::p
             "Could not inspect whether the input path is a file or directory.");
     }
     if (is_directory) {
-        return LoadFolderSnapshot(path, spectrum_index);
+        return LoadFolderSnapshot(path, spectrum_index, ScanSourceCollectionFolder(path), cancellation_requested);
     }
 
     const std::string extension = ExtensionLower(path);
     const std::string format = SourceFormatLabel(path);
     if (extension == ".csv") {
-        return LoadCsvSnapshot(path);
+        try {
+            SpectrumSnapshotHandle snapshot = LoadCsvSnapshot(path, cancellation_requested);
+            return cancellation_requested && cancellation_requested() ? nullptr : snapshot;
+        } catch (const SpectrumLoadCanceled&) {
+            return nullptr;
+        }
     }
     if (IsFitsSourcePath(path)) {
-        return LoadFitsSnapshot(path, spectrum_index);
+        return LoadFitsSnapshotCancelable(path, spectrum_index, cancellation_requested);
     }
     if (extension != ".npy") {
         return MakeErrorSnapshot(
@@ -662,7 +769,24 @@ SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathImpl(const std::filesystem::p
             {{"file_role", "auxiliary_npy", "domain"}});
     }
 
-    return LoadNpySnapshot(path, spectrum_index);
+    return LoadNpySnapshot(path, spectrum_index, cancellation_requested);
+}
+
+SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListing(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SourceCollectionFolderListing& listing)
+{
+    return LoadFolderSnapshot(path, spectrum_index, listing, {});
+}
+
+SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SourceCollectionFolderListing& listing,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
+{
+    return LoadFolderSnapshot(path, spectrum_index, listing, cancellation_requested);
 }
 
 }  // namespace specforge::detail

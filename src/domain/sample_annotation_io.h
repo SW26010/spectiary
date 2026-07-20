@@ -4,12 +4,15 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace specforge {
+
+using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
 enum class SampleAnnotationKind {
     CategoricalInteger,
@@ -43,6 +46,11 @@ struct SampleAnnotationResult {
 [[nodiscard]] std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPath(
     const std::filesystem::path& path,
     std::size_t expected_count,
+    std::string* error_message = nullptr);
+[[nodiscard]] std::optional<SampleAnnotationResult> LoadSampleAnnotationResultFromPathCancelable(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint,
     std::string* error_message = nullptr);
 [[nodiscard]] std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind);
 [[nodiscard]] std::string_view SampleAnnotationWorkflowRelationshipLabel(

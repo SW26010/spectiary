@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <initializer_list>
+#include <istream>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -33,7 +34,16 @@ struct JsonValue {
     std::int64_t integer_value = 0;
 };
 
-[[nodiscard]] std::optional<JsonValue> ParseJson(std::string_view text, std::string& error);
+using JsonCancellationCheckpoint = std::function<void()>;
+
+[[nodiscard]] bool ReadTextStreamCancelable(
+    std::istream& stream,
+    std::string& contents,
+    const JsonCancellationCheckpoint& cancellation_checkpoint = {});
+[[nodiscard]] std::optional<JsonValue> ParseJson(
+    std::string_view text,
+    std::string& error,
+    const JsonCancellationCheckpoint& cancellation_checkpoint = {});
 [[nodiscard]] const JsonValue* JsonObjectMember(const JsonValue& value, std::string_view key);
 [[nodiscard]] std::optional<std::string> ReadJsonStringMember(const JsonValue& value, std::string_view key);
 [[nodiscard]] std::optional<std::size_t> ReadJsonSizeMember(const JsonValue& value, std::string_view key);
@@ -72,7 +82,8 @@ using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string
     const std::filesystem::path& path,
     std::string_view format_kind,
     std::initializer_list<int> supported_schema_versions,
-    std::string_view description);
+    std::string_view description,
+    const JsonCancellationCheckpoint& cancellation_checkpoint = {});
 
 [[nodiscard]] bool WriteVersionedJsonCacheFile(
     const std::filesystem::path& path,

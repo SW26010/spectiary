@@ -17,18 +17,33 @@ bool IsFitsExtension(std::string_view extension)
     return extension == ".fits" || extension == ".fit" || extension == ".fts";
 }
 
-void SortByX(std::vector<double>& x_values, std::vector<double>& y_values)
+void SortByX(
+    std::vector<double>& x_values,
+    std::vector<double>& y_values,
+    const SpectrumLoadCheckpoint& cancellation_checkpoint)
 {
     std::vector<std::pair<double, double>> pairs;
     pairs.reserve(x_values.size());
     for (std::size_t index = 0; index < x_values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         pairs.emplace_back(x_values[index], y_values[index]);
     }
-    std::stable_sort(pairs.begin(), pairs.end(), [](const auto& left, const auto& right) {
+    std::size_t comparison_count = 0;
+    std::stable_sort(pairs.begin(), pairs.end(), [&cancellation_checkpoint, &comparison_count](
+                                                     const auto& left,
+                                                     const auto& right) {
+        if ((comparison_count++ & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         return left.first < right.first;
     });
 
     for (std::size_t index = 0; index < pairs.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         x_values[index] = pairs[index].first;
         y_values[index] = pairs[index].second;
     }
@@ -261,7 +276,8 @@ void FilterSpectrumPixels(
     const std::vector<double>* mask_values,
     const std::vector<double>* ivar_values,
     bool require_positive_x,
-    FilterStats& stats)
+    FilterStats& stats,
+    const SpectrumLoadCheckpoint& cancellation_checkpoint)
 {
     if (x_values.size() != y_values.size()) {
         throw SpectrumFileLoadError(
@@ -281,6 +297,9 @@ void FilterSpectrumPixels(
     filtered_y.reserve(y_values.size());
 
     for (std::size_t index = 0; index < x_values.size(); ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
         const double x_value = x_values[index];
         const double y_value = y_values[index];
         if (!std::isfinite(x_value) || !std::isfinite(y_value) || (require_positive_x && x_value <= 0.0)) {
@@ -337,7 +356,10 @@ void AddFilterDiagnostics(std::vector<SpectrumDiagnostic>& diagnostics, const Fi
     }
 }
 
-SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(const std::filesystem::path& path, LoadedSpectrum loaded)
+SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(
+    const std::filesystem::path& path,
+    LoadedSpectrum loaded,
+    const SpectrumLoadCheckpoint& cancellation_checkpoint)
 {
     if (loaded.x_values.empty() || loaded.y_values.empty()) {
         return MakeErrorSnapshot(
@@ -349,7 +371,7 @@ SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(const std::filesystem::path& p
             {{"format", loaded.format, "domain"}});
     }
 
-    SortByX(loaded.x_values, loaded.y_values);
+    SortByX(loaded.x_values, loaded.y_values, cancellation_checkpoint);
 
     auto snapshot = std::make_shared<SpectrumSnapshot>();
     AddSourceBasics(*snapshot, path);

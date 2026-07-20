@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -267,11 +268,16 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
             continue;
         }
 
+        const bool legacy_identity = IsLegacySourceCollectionIdentity(*identity);
         SampleLabelingSourceState state;
         state.sample_count = *sample_count;
         state.source_name = ReadStringMember(source_object, "source_name").value_or("");
-        state.source_fingerprint = ReadStringMember(source_object, "source_fingerprint").value_or("");
-        state.context_fingerprint = ReadStringMember(source_object, "context_fingerprint").value_or("");
+        state.source_fingerprint = NormalizeLegacySourceCollectionFingerprint(
+            ReadStringMember(source_object, "source_fingerprint").value_or(""),
+            legacy_identity);
+        state.context_fingerprint = NormalizeLegacySourceCollectionFingerprint(
+            ReadStringMember(source_object, "context_fingerprint").value_or(""),
+            legacy_identity);
         if (std::optional<std::string> active_task_id = ReadStringMember(source_object, "active_task_id");
             active_task_id && !active_task_id->empty()) {
             state.active_task_id = std::move(*active_task_id);
@@ -291,7 +297,9 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(const std::files
             })) {
             state.active_task_id.reset();
         }
-        result.cache.sources.emplace(*identity, std::move(state));
+        result.cache.sources.emplace(
+            NormalizePersistedSourceCollectionIdentity(*identity),
+            std::move(state));
     }
     return result;
 }

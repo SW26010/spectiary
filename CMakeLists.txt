@@ -102,7 +102,10 @@ add_library(specforge_core STATIC
     src/domain/sample_annotation_io.cpp
     src/domain/sample_filter.cpp
     src/domain/sample_labeling.cpp
+    src/domain/source_collection_identity_digest.cpp
     src/domain/source_collection_manifest.cpp
+    src/domain/source_path_identity.cpp
+    src/domain/stable_sha256.cpp
     src/domain/spectrum_fixture.cpp
     src/domain/spectrum_format_adapters.cpp
     src/domain/spectrum_loader_support.cpp
@@ -120,7 +123,7 @@ add_library(specforge_core STATIC
 specforge_configure_production_target(specforge_core)
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
-target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB)
+target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB bcrypt)
 
 add_library(specforge_sessions STATIC
     src/ui/panel_visibility_state_cache_io.cpp

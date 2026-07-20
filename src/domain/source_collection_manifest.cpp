@@ -1,6 +1,8 @@
 #include "domain/source_collection_manifest.h"
 
 #include "domain/npy_array_io.h"
+#include "domain/source_path_identity.h"
+#include "domain/stable_sha256.h"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +21,13 @@
 
 namespace specforge {
 namespace {
+
+void Checkpoint(const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+}
 
 class SourceCollectionManifestError : public std::runtime_error {
 public:
@@ -153,6 +162,30 @@ std::string FileStatFingerprint(const std::filesystem::path& path)
     return "size=" + std::to_string(safe_size) + ";mtime=" + (error ? std::string{"unknown"} : FileTimeFingerprint(time));
 }
 
+bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesystem::path& right)
+{
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    std::error_code equivalent_error;
+    if (PathExists(left) && PathExists(right) &&
+        std::filesystem::equivalent(left, right, equivalent_error) && !equivalent_error) {
+        return true;
+    }
+    return left.lexically_normal() == right.lexically_normal();
+}
+
+std::string DirectoryEntryStatFingerprint(const std::filesystem::directory_entry& entry)
+{
+    std::error_code size_error;
+    const std::uintmax_t size = entry.file_size(size_error);
+    const std::uintmax_t safe_size = size_error ? 0 : size;
+    std::error_code time_error;
+    const std::filesystem::file_time_type time = entry.last_write_time(time_error);
+    return "size=" + std::to_string(safe_size) +
+           ";mtime=" + (time_error ? std::string{"unknown"} : FileTimeFingerprint(time));
+}
+
 std::string OptionalFileFingerprint(const std::optional<std::filesystem::path>& path)
 {
     if (!path) {
@@ -183,21 +216,103 @@ std::string NpySourceFingerprint(const SpectrumSnapshot& snapshot)
     return fingerprint;
 }
 
-std::string FolderSourceFingerprint(const std::filesystem::path& path)
+struct FolderIdentityDigests {
+    std::string source_fingerprint;
+    std::string identity;
+};
+
+FolderIdentityDigests BuildFolderIdentityDigests(
+    std::string_view source_name,
+    std::size_t spectrum_count,
+    const SourceCollectionFolderListing& listing,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
 {
-    const SourceCollectionFolderListing listing = ScanSourceCollectionFolder(path);
-    if (!listing.readable) {
-        return "folder_unreadable";
+    const std::string_view initial_fingerprint = listing.readable ? std::string_view{"folder"}
+                                                                  : std::string_view{"folder_unreadable"};
+    StableSha256 source_digest;
+    StableSha256 identity_digest;
+    source_digest.Append(initial_fingerprint);
+    identity_digest.Append("name=");
+    identity_digest.Append(source_name);
+    identity_digest.Append("|fingerprint=");
+    identity_digest.Append(initial_fingerprint);
+
+    if (listing.readable) {
+        for (std::size_t index = 0; index < listing.spectra.size(); ++index) {
+            if ((index & 0xfffU) == 0U) {
+                Checkpoint(cancellation_checkpoint);
+            }
+            const SourceCollectionFolderSpectrumFile& sample = listing.spectra[index];
+            const std::string filename = FileNameToUtf8(sample.path.filename());
+            for (StableSha256* digest : {&source_digest, &identity_digest}) {
+                digest->Append(";");
+                digest->Append(filename);
+                digest->Append(":");
+                digest->Append(sample.stat_fingerprint);
+            }
+        }
     }
 
-    std::string fingerprint = "folder";
-    for (const SourceCollectionFolderSpectrumFile& sample : listing.spectra) {
-        fingerprint += ";";
-        fingerprint += FileNameToUtf8(sample.path.filename());
-        fingerprint += ":";
-        fingerprint += FileStatFingerprint(sample.path);
+    identity_digest.Append("|count=");
+    identity_digest.Append(std::to_string(spectrum_count));
+    return FolderIdentityDigests{
+        FinishVersionedSha256Digest(source_digest),
+        FinishVersionedSha256Digest(identity_digest),
+    };
+}
+
+std::string ObservedFileFingerprint(const std::filesystem::path& path)
+{
+    std::error_code exists_error;
+    const bool exists = std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        return "unavailable";
     }
-    return fingerprint;
+    if (!exists) {
+        return "missing";
+    }
+    return FileStatFingerprint(path);
+}
+
+std::vector<SourceCollectionFileDependencyState> CaptureAnnotationDependencies(
+    std::vector<std::filesystem::path> paths,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    std::vector<std::filesystem::path> expanded;
+    expanded.reserve(paths.size() * 2U);
+    for (const std::filesystem::path& path : paths) {
+        Checkpoint(cancellation_checkpoint);
+        if (path.empty()) {
+            continue;
+        }
+        expanded.push_back(path);
+        expanded.push_back(SampleLabelResultMetadataPathForResult(path));
+    }
+
+    std::vector<SourceCollectionFileDependencyState> dependencies;
+    dependencies.reserve(expanded.size());
+    for (const std::filesystem::path& path : expanded) {
+        Checkpoint(cancellation_checkpoint);
+        dependencies.push_back({SourcePathIdentityKey(path), ObservedFileFingerprint(path)});
+    }
+    std::sort(
+        dependencies.begin(),
+        dependencies.end(),
+        [](const SourceCollectionFileDependencyState& left,
+           const SourceCollectionFileDependencyState& right) {
+            return left.path_key < right.path_key;
+        });
+    dependencies.erase(
+        std::unique(
+            dependencies.begin(),
+            dependencies.end(),
+            [](const SourceCollectionFileDependencyState& left,
+               const SourceCollectionFileDependencyState& right) {
+                return left.path_key == right.path_key;
+            }),
+        dependencies.end());
+    Checkpoint(cancellation_checkpoint);
+    return dependencies;
 }
 
 NpyStringData ReadStringNpyData(
@@ -221,7 +336,10 @@ NpyStringData ReadStringNpyData(
     return NpyStringData{*scalar_type, header.data_offset};
 }
 
-std::vector<std::string> ReadStringNpyValues(const std::filesystem::path& path, std::size_t expected_count)
+std::vector<std::string> ReadStringNpyValues(
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
 {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
@@ -238,6 +356,9 @@ std::vector<std::string> ReadStringNpyValues(const std::filesystem::path& path, 
     values.reserve(expected_count);
     std::string bytes(data.scalar_type.item_size, '\0');
     for (std::size_t index = 0; index < expected_count; ++index) {
+        if ((index & 0xfffU) == 0U) {
+            Checkpoint(cancellation_checkpoint);
+        }
         stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         if (!stream) {
             throw SourceCollectionManifestError("NPY string data is truncated");
@@ -247,16 +368,22 @@ std::vector<std::string> ReadStringNpyValues(const std::filesystem::path& path, 
     return values;
 }
 
-void LoadNpySampleNames(SourceCollectionManifest& manifest, const std::filesystem::path& source_path, std::size_t spectrum_count)
+void LoadNpySampleNames(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& source_path,
+    std::size_t spectrum_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
 {
+    Checkpoint(cancellation_checkpoint);
     const std::optional<std::filesystem::path> name_path = SourceCollectionCompanionNamePath(source_path);
     if (!name_path || !PathExists(*name_path)) {
         return;
     }
 
     try {
-        manifest.sample_names = ReadStringNpyValues(*name_path, spectrum_count);
+        manifest.sample_names = ReadStringNpyValues(*name_path, spectrum_count, cancellation_checkpoint);
     } catch (const std::exception& error) {
+        Checkpoint(cancellation_checkpoint);
         manifest.messages.push_back("Ignored " + FileNameToUtf8(name_path->filename()) + ": " + error.what() + ".");
     }
 }
@@ -264,8 +391,10 @@ void LoadNpySampleNames(SourceCollectionManifest& manifest, const std::filesyste
 void LoadNpyAutoAnnotations(
     SourceCollectionManifest& manifest,
     const std::filesystem::path& source_path,
-    std::size_t spectrum_count)
+    std::size_t spectrum_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
 {
+    Checkpoint(cancellation_checkpoint);
     const std::optional<std::filesystem::path> annotation_path = SourceCollectionCompanionAnnotationPath(source_path);
     if (!annotation_path || !PathExists(*annotation_path)) {
         return;
@@ -273,7 +402,11 @@ void LoadNpyAutoAnnotations(
 
     std::string error_message;
     std::optional<SampleAnnotationResult> annotation =
-        LoadSampleAnnotationResultFromPath(*annotation_path, spectrum_count, &error_message);
+        LoadSampleAnnotationResultFromPathCancelable(
+            *annotation_path,
+            spectrum_count,
+            cancellation_checkpoint,
+            &error_message);
     if (annotation) {
         if (!annotation->metadata_warning.empty()) {
             manifest.messages.push_back(annotation->metadata_warning);
@@ -284,19 +417,55 @@ void LoadNpyAutoAnnotations(
     }
 }
 
-std::vector<std::string> LoadFolderSampleNames(const std::filesystem::path& path, std::size_t expected_count)
+std::vector<std::string> LoadFolderSampleNames(
+    const SourceCollectionFolderListing& listing,
+    std::size_t expected_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
 {
-    const SourceCollectionFolderListing listing = ScanSourceCollectionFolder(path);
     if (!listing.readable || listing.spectra.size() != expected_count) {
         return {};
     }
 
     std::vector<std::string> names;
     names.reserve(listing.spectra.size());
-    for (const SourceCollectionFolderSpectrumFile& sample : listing.spectra) {
-        names.push_back(FileNameToUtf8(sample.path.filename()));
+    for (std::size_t index = 0; index < listing.spectra.size(); ++index) {
+        if ((index & 0xfffU) == 0U) {
+            Checkpoint(cancellation_checkpoint);
+        }
+        names.push_back(FileNameToUtf8(listing.spectra[index].path.filename()));
     }
     return names;
+}
+
+SourceCollectionIdentity BuildFolderSourceCollectionIdentity(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionFolderListing& listing,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
+{
+    SourceCollectionIdentity identity;
+    identity.source_name = FileNameToUtf8(snapshot.source.path.filename());
+    identity.spectrum_count = snapshot.collection.spectrum_count;
+    FolderIdentityDigests digests =
+        BuildFolderIdentityDigests(
+            identity.source_name,
+            identity.spectrum_count,
+            listing,
+            cancellation_checkpoint);
+    identity.source_fingerprint = std::move(digests.source_fingerprint);
+    identity.context_fingerprint = identity.source_fingerprint;
+    identity.id = std::move(digests.identity);
+    return identity;
+}
+
+SourceCollectionManifest BuildFolderSourceCollectionManifest(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionFolderListing& listing,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {})
+{
+    SourceCollectionManifest manifest;
+    manifest.sample_names =
+        LoadFolderSampleNames(listing, snapshot.collection.spectrum_count, cancellation_checkpoint);
+    return manifest;
 }
 
 void PushExample(std::vector<std::string>& examples, const std::filesystem::path& path)
@@ -318,26 +487,79 @@ SourceCollectionIdentity BuildSourceCollectionIdentity(const SpectrumSnapshot& s
     std::error_code directory_error;
     const bool is_directory = std::filesystem::is_directory(snapshot.source.path, directory_error);
     if (!directory_error && is_directory) {
-        identity.source_fingerprint = FolderSourceFingerprint(snapshot.source.path);
-        identity.context_fingerprint = identity.source_fingerprint;
+        return BuildFolderSourceCollectionIdentity(snapshot, ScanSourceCollectionFolder(snapshot.source.path));
     } else if (ExtensionLower(snapshot.source.path) == ".npy") {
-        identity.source_fingerprint = NpySourceFingerprint(snapshot);
-        identity.context_fingerprint = identity.source_fingerprint +
-                                       "|name=" + OptionalFileFingerprint(SourceCollectionCompanionNamePath(snapshot.source.path)) +
-                                       "|annotation=" +
-                                           OptionalFileFingerprint(SourceCollectionCompanionAnnotationPath(snapshot.source.path));
+        const std::string legacy_source_fingerprint = NpySourceFingerprint(snapshot);
+        const std::string legacy_context_fingerprint =
+            legacy_source_fingerprint +
+            "|name=" + OptionalFileFingerprint(SourceCollectionCompanionNamePath(snapshot.source.path)) +
+            "|annotation=" + OptionalFileFingerprint(SourceCollectionCompanionAnnotationPath(snapshot.source.path));
+        identity.source_fingerprint = VersionedSha256Digest(legacy_source_fingerprint);
+        identity.context_fingerprint = VersionedSha256Digest(legacy_context_fingerprint);
+        identity.id = VersionedSha256Digest(
+            "name=" + identity.source_name + "|fingerprint=" + legacy_source_fingerprint +
+            "|count=" + std::to_string(identity.spectrum_count));
     } else {
-        identity.source_fingerprint = FileStatFingerprint(snapshot.source.path);
+        const std::string legacy_source_fingerprint = FileStatFingerprint(snapshot.source.path);
+        identity.source_fingerprint = VersionedSha256Digest(legacy_source_fingerprint);
         identity.context_fingerprint = identity.source_fingerprint;
+        identity.id = VersionedSha256Digest(
+            "name=" + identity.source_name + "|fingerprint=" + legacy_source_fingerprint +
+            "|count=" + std::to_string(identity.spectrum_count));
     }
+    return identity;
+}
 
-    identity.id = "name=" + identity.source_name + "|fingerprint=" + identity.source_fingerprint +
-                  "|count=" + std::to_string(identity.spectrum_count);
+SourceCollectionIdentity BuildSourceCollectionIdentity(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionSingleFileState& file_state)
+{
+    SourceCollectionIdentity identity;
+    identity.source_name = FileNameToUtf8(snapshot.source.path.filename());
+    identity.spectrum_count = snapshot.collection.spectrum_count;
+    if (ExtensionLower(snapshot.source.path) == ".npy") {
+        std::string legacy_source_fingerprint = file_state.source_stat_fingerprint;
+        const std::string_view dtype = MetadataValue(snapshot.source.metadata, "dtype");
+        const std::string_view rows = MetadataValue(snapshot.source.metadata, "shape_rows");
+        const std::string_view columns = MetadataValue(snapshot.source.metadata, "shape_columns");
+        if (!dtype.empty()) {
+            legacy_source_fingerprint += ";dtype=";
+            legacy_source_fingerprint += dtype;
+        }
+        if (!rows.empty() || !columns.empty()) {
+            legacy_source_fingerprint += ";shape=";
+            legacy_source_fingerprint += rows;
+            legacy_source_fingerprint += "x";
+            legacy_source_fingerprint += columns;
+        }
+        const std::string legacy_context_fingerprint =
+            legacy_source_fingerprint + "|name=" + file_state.companion_name_fingerprint +
+            "|annotation=" + file_state.companion_annotation_fingerprint;
+        identity.source_fingerprint = VersionedSha256Digest(legacy_source_fingerprint);
+        identity.context_fingerprint = VersionedSha256Digest(legacy_context_fingerprint);
+        identity.id = VersionedSha256Digest(
+            "name=" + identity.source_name + "|fingerprint=" + legacy_source_fingerprint +
+            "|count=" + std::to_string(identity.spectrum_count));
+    } else {
+        identity.source_fingerprint = VersionedSha256Digest(file_state.source_stat_fingerprint);
+        identity.context_fingerprint = identity.source_fingerprint;
+        identity.id = VersionedSha256Digest(
+            "name=" + identity.source_name + "|fingerprint=" + file_state.source_stat_fingerprint +
+            "|count=" + std::to_string(identity.spectrum_count));
+    }
     return identity;
 }
 
 SourceCollectionManifest LoadSourceCollectionManifest(const SpectrumSnapshot& snapshot)
 {
+    return LoadSourceCollectionManifestCancelable(snapshot, {});
+}
+
+SourceCollectionManifest LoadSourceCollectionManifestCancelable(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    Checkpoint(cancellation_checkpoint);
     SourceCollectionManifest manifest;
     if (snapshot.source.path.empty() || snapshot.collection.spectrum_count == 0) {
         return manifest;
@@ -346,18 +568,219 @@ SourceCollectionManifest LoadSourceCollectionManifest(const SpectrumSnapshot& sn
     std::error_code directory_error;
     const bool is_directory = std::filesystem::is_directory(snapshot.source.path, directory_error);
     if (!directory_error && is_directory) {
-        manifest.sample_names = LoadFolderSampleNames(snapshot.source.path, snapshot.collection.spectrum_count);
-        return manifest;
+        const SourceCollectionFolderListing listing = ScanSourceCollectionFolder(
+            snapshot.source.path,
+            [&cancellation_checkpoint](std::size_t) { Checkpoint(cancellation_checkpoint); });
+        return BuildFolderSourceCollectionManifest(snapshot, listing, cancellation_checkpoint);
     }
 
     if (ExtensionLower(snapshot.source.path) == ".npy") {
-        LoadNpySampleNames(manifest, snapshot.source.path, snapshot.collection.spectrum_count);
-        LoadNpyAutoAnnotations(manifest, snapshot.source.path, snapshot.collection.spectrum_count);
+        LoadNpySampleNames(
+            manifest,
+            snapshot.source.path,
+            snapshot.collection.spectrum_count,
+            cancellation_checkpoint);
+        LoadNpyAutoAnnotations(
+            manifest,
+            snapshot.source.path,
+            snapshot.collection.spectrum_count,
+            cancellation_checkpoint);
     }
+    Checkpoint(cancellation_checkpoint);
     return manifest;
 }
 
+bool IngestReadOnlySampleAnnotation(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    std::string* message)
+{
+    return IngestReadOnlySampleAnnotationCancelable(manifest, path, expected_count, {}, message);
+}
+
+bool IngestReadOnlySampleAnnotationCancelable(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    std::string* message)
+{
+    Checkpoint(cancellation_checkpoint);
+    std::string load_error;
+    std::optional<SampleAnnotationResult> annotation =
+        LoadSampleAnnotationResultFromPathCancelable(
+            path,
+            expected_count,
+            cancellation_checkpoint,
+            &load_error);
+    if (!annotation) {
+        std::string ignored_message = "Ignored " + FileNameToUtf8(path.filename()) + ": " + load_error + ".";
+        manifest.messages.push_back(ignored_message);
+        if (message != nullptr) {
+            *message = std::move(ignored_message);
+        }
+        return false;
+    }
+
+    const std::string metadata_warning = annotation->metadata_warning;
+    const auto existing = std::find_if(
+        manifest.annotations.begin(),
+        manifest.annotations.end(),
+        [&path](const SampleAnnotationResult& candidate) {
+            return PathsReferToSameFile(candidate.path, path);
+        });
+    if (existing != manifest.annotations.end()) {
+        *existing = std::move(*annotation);
+    } else {
+        manifest.annotations.push_back(std::move(*annotation));
+    }
+    if (!metadata_warning.empty()) {
+        manifest.messages.push_back(metadata_warning);
+    }
+    if (message != nullptr) {
+        message->clear();
+    }
+    Checkpoint(cancellation_checkpoint);
+    return true;
+}
+
+bool SourceCollectionManifestContainsAnnotation(
+    const SourceCollectionManifest& manifest,
+    const std::filesystem::path& path)
+{
+    return std::any_of(
+        manifest.annotations.begin(),
+        manifest.annotations.end(),
+        [&path](const SampleAnnotationResult& annotation) {
+            return PathsReferToSameFile(annotation.path, path);
+        });
+}
+
+SourceCollectionContext LoadSourceCollectionContext(const SpectrumSnapshot& snapshot)
+{
+    return LoadSourceCollectionContextCancelable(snapshot, {});
+}
+
+SourceCollectionContext LoadSourceCollectionContextCancelable(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    Checkpoint(cancellation_checkpoint);
+    if (snapshot.source.path.empty() || snapshot.collection.spectrum_count == 0) {
+        return {};
+    }
+
+    std::error_code directory_error;
+    const bool is_directory = std::filesystem::is_directory(snapshot.source.path, directory_error);
+    if (!directory_error && is_directory) {
+        const SourceCollectionFolderListing listing = ScanSourceCollectionFolder(
+            snapshot.source.path,
+            [&cancellation_checkpoint](std::size_t) { Checkpoint(cancellation_checkpoint); });
+        return BuildFolderSourceCollectionContextCancelable(snapshot, listing, cancellation_checkpoint);
+    }
+
+    SourceCollectionIdentity identity = BuildSourceCollectionIdentity(snapshot);
+    Checkpoint(cancellation_checkpoint);
+    SourceCollectionManifest manifest =
+        LoadSourceCollectionManifestCancelable(snapshot, cancellation_checkpoint);
+    return SourceCollectionContext{std::move(identity), std::move(manifest)};
+}
+
+SourceCollectionContext LoadSourceCollectionContextCancelable(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionSingleFileState& file_state,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    Checkpoint(cancellation_checkpoint);
+    if (snapshot.source.path.empty() || snapshot.collection.spectrum_count == 0) {
+        return {};
+    }
+    SourceCollectionIdentity identity = BuildSourceCollectionIdentity(snapshot, file_state);
+    Checkpoint(cancellation_checkpoint);
+    SourceCollectionManifest manifest =
+        LoadSourceCollectionManifestCancelable(snapshot, cancellation_checkpoint);
+    return SourceCollectionContext{std::move(identity), std::move(manifest)};
+}
+
+SourceCollectionSingleFileState CaptureSourceCollectionSingleFileState(
+    const std::filesystem::path& source_path,
+    const std::vector<std::filesystem::path>& annotation_paths,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    Checkpoint(cancellation_checkpoint);
+    SourceCollectionSingleFileState state;
+    state.source_stat_fingerprint = ObservedFileFingerprint(source_path);
+    const std::optional<std::filesystem::path> name_path = SourceCollectionCompanionNamePath(source_path);
+    const std::optional<std::filesystem::path> annotation_path =
+        SourceCollectionCompanionAnnotationPath(source_path);
+    state.companion_name_fingerprint = OptionalFileFingerprint(name_path);
+    state.companion_annotation_fingerprint = OptionalFileFingerprint(annotation_path);
+    std::vector<std::filesystem::path> all_annotation_paths = annotation_paths;
+    if (annotation_path) {
+        all_annotation_paths.push_back(*annotation_path);
+    }
+    state.annotation_dependencies =
+        CaptureAnnotationDependencies(std::move(all_annotation_paths), cancellation_checkpoint);
+    return state;
+}
+
+bool SourceCollectionSingleFileStatesMatch(
+    const SourceCollectionSingleFileState& left,
+    const SourceCollectionSingleFileState& right)
+{
+    return left == right;
+}
+
+void FinalizeSourceCollectionAnnotationContextFingerprint(
+    SourceCollectionContext& context,
+    const std::vector<std::filesystem::path>& requested_annotation_paths,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    std::vector<std::filesystem::path> paths = requested_annotation_paths;
+    paths.reserve(paths.size() + context.manifest.annotations.size());
+    for (const SampleAnnotationResult& annotation : context.manifest.annotations) {
+        Checkpoint(cancellation_checkpoint);
+        if (!annotation.path.empty()) {
+            paths.push_back(annotation.path);
+        }
+    }
+    const std::vector<SourceCollectionFileDependencyState> dependencies =
+        CaptureAnnotationDependencies(std::move(paths), cancellation_checkpoint);
+    if (dependencies.empty()) {
+        return;
+    }
+
+    StableSha256 digest;
+    digest.Append("base=");
+    digest.Append(context.identity.context_fingerprint);
+    for (const SourceCollectionFileDependencyState& dependency : dependencies) {
+        Checkpoint(cancellation_checkpoint);
+        digest.Append("|path=");
+        digest.Append(dependency.path_key);
+        digest.Append("|stat=");
+        digest.Append(dependency.stat_fingerprint);
+    }
+    context.identity.context_fingerprint = FinishVersionedSha256Digest(digest);
+    Checkpoint(cancellation_checkpoint);
+}
+
 SourceCollectionFolderListing ScanSourceCollectionFolder(const std::filesystem::path& path)
+{
+    return ScanSourceCollectionFolder(path, {}, {});
+}
+
+SourceCollectionFolderListing ScanSourceCollectionFolder(
+    const std::filesystem::path& path,
+    const SourceCollectionFolderScanProgress& progress)
+{
+    return ScanSourceCollectionFolder(path, progress, {});
+}
+
+SourceCollectionFolderListing ScanSourceCollectionFolder(
+    const std::filesystem::path& path,
+    const SourceCollectionFolderScanProgress& progress,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
 {
     SourceCollectionFolderListing listing;
     std::error_code iterator_error;
@@ -371,7 +794,13 @@ SourceCollectionFolderListing ScanSourceCollectionFolder(const std::filesystem::
         return listing;
     }
 
+    std::size_t processed_entry_count = 0;
     for (const std::filesystem::directory_entry& entry : iterator) {
+        Checkpoint(cancellation_checkpoint);
+        ++processed_entry_count;
+        if (progress) {
+            progress(processed_entry_count);
+        }
         std::error_code type_error;
         if (entry.is_directory(type_error)) {
             ++listing.ignored_directory_count;
@@ -392,23 +821,76 @@ SourceCollectionFolderListing ScanSourceCollectionFolder(const std::filesystem::
 
         if (ExtensionLower(entry.path()) == ".csv") {
             ++listing.csv_count;
-            listing.spectra.push_back(SourceCollectionFolderSpectrumFile{entry.path(), "csv"});
+            listing.spectra.push_back(
+                SourceCollectionFolderSpectrumFile{entry.path(), "csv", DirectoryEntryStatFingerprint(entry)});
         } else if (IsFitsSourceFile(entry.path())) {
             ++listing.fits_count;
-            listing.spectra.push_back(SourceCollectionFolderSpectrumFile{entry.path(), SourceCollectionFileFormat(entry.path())});
+            listing.spectra.push_back(SourceCollectionFolderSpectrumFile{
+                entry.path(),
+                SourceCollectionFileFormat(entry.path()),
+                DirectoryEntryStatFingerprint(entry),
+            });
         } else {
             ++listing.ignored_file_count;
             PushExample(listing.ignored_file_examples, entry.path());
         }
     }
 
+    std::size_t comparison_count = 0;
     std::stable_sort(
         listing.spectra.begin(),
         listing.spectra.end(),
-        [](const SourceCollectionFolderSpectrumFile& left, const SourceCollectionFolderSpectrumFile& right) {
+        [&comparison_count, &cancellation_checkpoint](
+            const SourceCollectionFolderSpectrumFile& left,
+            const SourceCollectionFolderSpectrumFile& right) {
+            if ((comparison_count++ & 0x3ffU) == 0U) {
+                Checkpoint(cancellation_checkpoint);
+            }
             return LowerAscii(FileNameToUtf8(left.path)) < LowerAscii(FileNameToUtf8(right.path));
         });
+    Checkpoint(cancellation_checkpoint);
     return listing;
+}
+
+bool SourceCollectionFolderListingsMatch(
+    const SourceCollectionFolderListing& left,
+    const SourceCollectionFolderListing& right,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    if (left.readable != right.readable || left.spectra.size() != right.spectra.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.spectra.size(); ++index) {
+        if ((index & 0xfffU) == 0U) {
+            Checkpoint(cancellation_checkpoint);
+        }
+        const SourceCollectionFolderSpectrumFile& left_file = left.spectra[index];
+        const SourceCollectionFolderSpectrumFile& right_file = right.spectra[index];
+        if (left_file.path != right_file.path || left_file.format != right_file.format ||
+            left_file.stat_fingerprint != right_file.stat_fingerprint) {
+            return false;
+        }
+    }
+    Checkpoint(cancellation_checkpoint);
+    return true;
+}
+
+SourceCollectionContext BuildFolderSourceCollectionContext(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionFolderListing& listing)
+{
+    return BuildFolderSourceCollectionContextCancelable(snapshot, listing, {});
+}
+
+SourceCollectionContext BuildFolderSourceCollectionContextCancelable(
+    const SpectrumSnapshot& snapshot,
+    const SourceCollectionFolderListing& listing,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint)
+{
+    return SourceCollectionContext{
+        BuildFolderSourceCollectionIdentity(snapshot, listing, cancellation_checkpoint),
+        BuildFolderSourceCollectionManifest(snapshot, listing, cancellation_checkpoint),
+    };
 }
 
 bool IsSourceCollectionAuxiliaryNpyArrayName(const std::filesystem::path& source_path)

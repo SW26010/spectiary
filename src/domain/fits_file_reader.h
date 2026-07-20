@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,7 @@ enum class FitsFileErrorCode {
     OpenFailed,
     UnsupportedFormat,
     InvalidShape,
+    Canceled,
 };
 
 class FitsFileError : public std::runtime_error {
@@ -55,13 +57,17 @@ struct FitsHdu {
 
 std::vector<unsigned char> ReadFitsFileBytes(
     const std::filesystem::path& path,
-    std::uintmax_t max_bytes = kMaxSynchronousFitsFileBytes);
+    std::uintmax_t max_bytes = kMaxSynchronousFitsFileBytes,
+    const std::function<bool()>& cancellation_requested = {});
 
 std::vector<unsigned char> DecompressGzipFitsBytes(
     const std::vector<unsigned char>& compressed,
-    std::size_t max_inflated_bytes = kMaxSynchronousInflatedFitsBytes);
+    std::size_t max_inflated_bytes = kMaxSynchronousInflatedFitsBytes,
+    const std::function<bool()>& cancellation_requested = {});
 
-std::vector<FitsHdu> ParseFitsHdus(const std::vector<unsigned char>& bytes);
+std::vector<FitsHdu> ParseFitsHdus(
+    const std::vector<unsigned char>& bytes,
+    const std::function<bool()>& cancellation_requested = {});
 
 std::optional<std::string> FitsValue(const FitsHeader& header, std::string_view key);
 std::int64_t FitsInteger(const FitsHeader& header, std::string_view key, std::int64_t default_value = 0);
@@ -72,12 +78,14 @@ std::vector<double> ReadFitsColumnVector(
     const FitsHdu& hdu,
     const FitsColumn& column,
     std::size_t row_index,
-    bool scalar_rows);
+    bool scalar_rows,
+    const std::function<bool()>& cancellation_requested = {});
 
 std::vector<double> ReadFitsImageRow(
     const std::vector<unsigned char>& bytes,
     const FitsHdu& hdu,
     std::size_t row_index,
-    std::size_t column_count);
+    std::size_t column_count,
+    const std::function<bool()>& cancellation_requested = {});
 
 }  // namespace specforge::detail

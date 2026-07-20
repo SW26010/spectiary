@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sstream>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -550,6 +551,41 @@ void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
+void TestCancelableTextStreamReadStopsBetweenChunks()
+{
+    constexpr std::size_t kReadChunkBytes = 1024U * 1024U;
+    std::istringstream stream(std::string(3U * kReadChunkBytes, 'x'));
+    std::string contents;
+    std::size_t cancellation_checks = 0;
+    class CancellationMarker final : public std::runtime_error {
+    public:
+        CancellationMarker()
+            : std::runtime_error("text stream cancellation marker")
+        {
+        }
+    };
+
+    bool canceled = false;
+    try {
+        (void)specforge::ReadTextStreamCancelable(
+            stream,
+            contents,
+            [&cancellation_checks]() {
+                if (++cancellation_checks == 2) {
+                    throw CancellationMarker();
+                }
+            });
+    } catch (const CancellationMarker&) {
+        canceled = true;
+    }
+
+    Require(canceled, "text stream read should propagate cooperative cancellation");
+    Require(cancellation_checks == 2, "text stream read should check cancellation before every chunk");
+    Require(
+        contents.size() == kReadChunkBytes,
+        "text stream cancellation should stop before consuming the second chunk");
+}
+
 }  // namespace
 
 int main()
@@ -573,5 +609,6 @@ int main()
     TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
     TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
     TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
+    TestCancelableTextStreamReadStopsBetweenChunks();
     return 0;
 }

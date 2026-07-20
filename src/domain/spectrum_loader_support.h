@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -12,6 +13,8 @@
 #include <vector>
 
 namespace specforge::detail {
+
+using SpectrumLoadCheckpoint = std::function<void()>;
 
 class SpectrumFileLoadError : public std::runtime_error {
 public:
@@ -67,7 +70,8 @@ void FilterSpectrumPixels(
     const std::vector<double>* mask_values,
     const std::vector<double>* ivar_values,
     bool require_positive_x,
-    FilterStats& stats);
+    FilterStats& stats,
+    const SpectrumLoadCheckpoint& cancellation_checkpoint = {});
 
 void AddFilterDiagnostics(std::vector<SpectrumDiagnostic>& diagnostics, const FilterStats& stats);
 
@@ -86,6 +90,9 @@ struct LoadedSpectrum {
     std::vector<SpectrumDiagnostic> diagnostics;
 };
 
-SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(const std::filesystem::path& path, LoadedSpectrum loaded);
+SpectrumSnapshotHandle MakeLoadedSpectrumSnapshot(
+    const std::filesystem::path& path,
+    LoadedSpectrum loaded,
+    const SpectrumLoadCheckpoint& cancellation_checkpoint = {});
 
 }  // namespace specforge::detail
