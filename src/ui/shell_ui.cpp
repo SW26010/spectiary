@@ -710,19 +710,13 @@ std::uint64_t ShellUi::QueueSourceLoad(
 
     const std::uint64_t generation = ++source_load_generations_[path_key];
     const std::optional<SourceCollectionLoadHint> hint = session_.LoadHintForSource(path);
-    const SourceCollectionLoadPriority priority = purpose == PendingSourceLoadPurpose::DeferredRestore
-        ? SourceCollectionLoadPriority::Restore
-        : (purpose == PendingSourceLoadPurpose::SessionFollowUp
-                ? SourceCollectionLoadPriority::Continuation
-                : SourceCollectionLoadPriority::Interactive);
     const std::uint64_t task_id = source_load_queue_.Enqueue(
         {
             .path = path,
             .spectrum_index = spectrum_index,
             .annotation_paths = std::move(annotation_paths),
             .reuse_identity = hint ? std::optional<SourceCollectionIdentity>{hint->identity} : std::nullopt,
-        },
-        priority);
+        });
     pending_source_loads_.emplace(
         task_id,
         PendingSourceLoad{
@@ -743,8 +737,21 @@ std::uint64_t ShellUi::QueueSourceLoad(
 
 void ShellUi::BeginSourceActivationIntent(bool preserve_pending_explicit_opens)
 {
-    ++source_activation_epoch_;
-    for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
+    AdvanceSourceActivationIntent(
+        source_activation_epoch_,
+        pending_source_loads_,
+        preserve_pending_explicit_opens,
+        [this](std::uint64_t task_id) { source_load_queue_.Cancel(task_id); });
+}
+
+void ShellUi::AdvanceSourceActivationIntent(
+    std::uint64_t& activation_epoch,
+    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+    bool preserve_pending_explicit_opens,
+    const std::function<void(std::uint64_t)>& cancel)
+{
+    ++activation_epoch;
+    for (auto pending = pending_loads.begin(); pending != pending_loads.end();) {
         PendingSourceLoad& ticket = pending->second;
         if (ticket.purpose == PendingSourceLoadPurpose::DeferredRestore) {
             ++pending;
@@ -752,13 +759,20 @@ void ShellUi::BeginSourceActivationIntent(bool preserve_pending_explicit_opens)
         }
         if (preserve_pending_explicit_opens &&
             ticket.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
-            ticket.activation_epoch = source_activation_epoch_;
+            ticket.activation_epoch = activation_epoch;
             ++pending;
             continue;
         }
-        source_load_queue_.Cancel(pending->first);
-        pending = pending_source_loads_.erase(pending);
+        cancel(pending->first);
+        pending = pending_loads.erase(pending);
     }
+}
+
+bool ShellUi::CompletionStartsSourceActivationIntent(
+    PendingSourceLoadPurpose purpose,
+    bool loaded)
+{
+    return loaded && purpose == PendingSourceLoadPurpose::ExplicitOpen;
 }
 
 void ShellUi::QueueSessionFollowUp(
@@ -837,12 +851,20 @@ void ShellUi::DrainSourceLoads()
         for (SpectrumValueVector& resource : plot_resources) {
             source_load_queue_.RetireResource(std::move(resource));
         }
+        const bool starts_activation_intent =
+            CompletionStartsSourceActivationIntent(ticket.purpose, result.loaded);
         if (!result.loaded) {
             source_load_error_ = result.message.empty()
                 ? "The prepared source result was no longer applicable."
                 : std::move(result.message);
         } else {
             source_load_error_.clear();
+            if (starts_activation_intent) {
+                // A newer successful explicit open owns the final activation.
+                // Preserve later explicit opens, but cancel follow-ups queued by
+                // earlier explicit results processed in this drain.
+                BeginSourceActivationIntent(true);
+            }
         }
         if (result.follow_up_spectrum_index) {
             (void)QueueSourceLoad(

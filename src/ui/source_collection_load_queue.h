@@ -39,12 +39,6 @@ struct SourceCollectionLoadCompletion {
     std::string error_message;
 };
 
-enum class SourceCollectionLoadPriority {
-    Continuation,
-    Interactive,
-    Restore,
-};
-
 struct SourceCollectionLoadDependencies {
     using CancellationCheck = std::function<bool()>;
     using SnapshotLoader = std::function<SpectrumSnapshotHandle(
@@ -77,9 +71,9 @@ public:
     SourceCollectionLoadQueue(const SourceCollectionLoadQueue&) = delete;
     SourceCollectionLoadQueue& operator=(const SourceCollectionLoadQueue&) = delete;
 
-    [[nodiscard]] std::uint64_t Enqueue(
-        SourceCollectionLoadRequest request,
-        SourceCollectionLoadPriority priority = SourceCollectionLoadPriority::Interactive);
+    // Every request runs on its own jthread. Injected dependencies therefore
+    // need to support concurrent calls from independent source loads.
+    [[nodiscard]] std::uint64_t Enqueue(SourceCollectionLoadRequest request);
     [[nodiscard]] std::vector<std::uint64_t> EnqueueBatch(
         std::vector<SourceCollectionLoadRequest> requests);
     void Cancel(std::uint64_t task_id);
@@ -87,7 +81,7 @@ public:
     [[nodiscard]] bool NeedsService() const;
 
     // Large immutable graphs replaced or rejected by the UI are released by
-    // the same background worker between load tasks.
+    // a dedicated background reclaimer, never by the UI caller.
     void RetirePrepared(PreparedSourceCollection prepared);
     void RetireResource(BackgroundRetirementHandle resource);
 

@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -107,6 +108,17 @@ private:
         std::uint64_t activation_epoch = 0;
         PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
     };
+
+    static void AdvanceSourceActivationIntent(
+        std::uint64_t& activation_epoch,
+        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+        bool preserve_pending_explicit_opens,
+        const std::function<void(std::uint64_t)>& cancel);
+    [[nodiscard]] static bool CompletionStartsSourceActivationIntent(
+        PendingSourceLoadPurpose purpose,
+        bool loaded);
+
+    friend struct ShellUiTestAccess;
 
     SourceCollectionSession session_;
     SourceCollectionLoadQueue source_load_queue_;

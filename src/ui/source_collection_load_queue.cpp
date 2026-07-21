@@ -12,6 +12,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <stop_token>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -112,57 +113,114 @@ class SourceCollectionLoadQueue::Impl {
 public:
     explicit Impl(SourceCollectionLoadDependencies dependencies)
         : dependencies_(std::move(dependencies)),
-          worker_([this](std::stop_token stop_token) { WorkerLoop(stop_token); })
+          retirement_worker_([this](std::stop_token stop_token) {
+              RetirementLoop(stop_token);
+          })
     {
     }
 
     ~Impl()
     {
-        worker_.request_stop();
-        condition_.notify_all();
-        if (worker_.joinable()) {
-            worker_.join();
+        StopLoadWorkers();
+        retirement_worker_.request_stop();
+        retirement_condition_.notify_all();
+        if (retirement_worker_.joinable()) {
+            retirement_worker_.join();
         }
     }
 
-    struct BatchCache {
+    struct BatchCompletionSlot {
+        std::uint64_t task_id = 0;
+        std::shared_ptr<std::atomic_bool> canceled;
+        bool terminal = false;
+        std::optional<SourceCollectionLoadCompletion> completion;
+    };
+
+    struct BatchState {
+        std::once_flag load_once;
         std::shared_ptr<const SampleWorkflowPreparationCacheBundle> value;
+        std::vector<BatchCompletionSlot> completions;
+        std::size_t next_completion = 0;
+        bool admitted = false;
+        bool abandoned = false;
     };
 
     struct Task {
         std::uint64_t id = 0;
         SourceCollectionLoadRequest request;
         std::shared_ptr<std::atomic_bool> canceled;
-        std::shared_ptr<BatchCache> batch_cache;
-        SourceCollectionLoadPriority priority = SourceCollectionLoadPriority::Interactive;
+        std::shared_ptr<std::atomic_bool> finished;
+        std::shared_ptr<BatchState> batch;
+        std::size_t batch_index = 0;
+        std::shared_ptr<BatchCompletionSlot> ordered_completion;
     };
 
-    std::uint64_t Enqueue(
-        SourceCollectionLoadRequest request,
-        SourceCollectionLoadPriority priority)
+    struct Worker {
+        Worker(
+            std::shared_ptr<std::atomic_bool> finished_flag,
+            Impl* owner,
+            Task task)
+            : finished(std::move(finished_flag)),
+              thread([owner,
+                      task = std::move(task),
+                      finished_flag = finished](std::stop_token stop_token) mutable {
+                  owner->RunTask(task, stop_token);
+                  finished_flag->store(true, std::memory_order_release);
+              })
+        {
+        }
+
+        Worker(Worker&&) noexcept = default;
+        Worker& operator=(Worker&&) noexcept = default;
+        Worker(const Worker&) = delete;
+        Worker& operator=(const Worker&) = delete;
+
+        std::shared_ptr<std::atomic_bool> finished;
+        std::jthread thread;
+    };
+
+    std::uint64_t Enqueue(SourceCollectionLoadRequest request)
     {
+        ReapFinishedWorkers();
         std::lock_guard lock(mutex_);
-        const std::uint64_t id = EnqueueLocked(std::move(request), nullptr, priority);
-        condition_.notify_one();
-        return id;
+        auto completion = std::make_shared<BatchCompletionSlot>();
+        ordered_completions_.push_back(completion);
+        try {
+            return StartTaskLocked(std::move(request), nullptr, 0, std::move(completion));
+        } catch (...) {
+            ordered_completions_.pop_back();
+            throw;
+        }
     }
 
     std::vector<std::uint64_t> EnqueueBatch(std::vector<SourceCollectionLoadRequest> requests)
     {
+        ReapFinishedWorkers();
         std::lock_guard lock(mutex_);
         std::vector<std::uint64_t> ids;
         ids.reserve(requests.size());
         if (requests.empty()) {
             return ids;
         }
-        auto batch_cache = std::make_shared<BatchCache>();
-        for (SourceCollectionLoadRequest& request : requests) {
-            ids.push_back(EnqueueLocked(
-                std::move(request),
-                batch_cache,
-                SourceCollectionLoadPriority::Restore));
+        auto batch = std::make_shared<BatchState>();
+        batch->completions.resize(requests.size());
+        try {
+            for (std::size_t index = 0; index < requests.size(); ++index) {
+                ids.push_back(StartTaskLocked(std::move(requests[index]), batch, index));
+            }
+            batch->admitted = true;
+            PublishReadyBatchCompletions(*batch);
+        } catch (...) {
+            batch->abandoned = true;
+            for (const std::uint64_t id : ids) {
+                const auto match = cancellation_.find(id);
+                if (match != cancellation_.end()) {
+                    match->second->store(true, std::memory_order_relaxed);
+                    cancellation_.erase(match);
+                }
+            }
+            throw;
         }
-        condition_.notify_one();
         return ids;
     }
 
@@ -173,17 +231,20 @@ public:
         if (match != cancellation_.end()) {
             match->second->store(true, std::memory_order_relaxed);
         }
-        condition_.notify_one();
     }
 
     std::vector<SourceCollectionLoadCompletion> TakeCompleted()
     {
-        std::lock_guard lock(mutex_);
         std::vector<SourceCollectionLoadCompletion> result;
-        result.reserve(completed_.size());
-        while (!completed_.empty()) {
-            result.push_back(std::move(completed_.front()));
-            completed_.pop_front();
+        std::vector<std::jthread> finished_workers;
+        {
+            std::lock_guard lock(mutex_);
+            result.reserve(completed_.size());
+            while (!completed_.empty()) {
+                result.push_back(std::move(completed_.front()));
+                completed_.pop_front();
+            }
+            CollectFinishedWorkersLocked(finished_workers);
         }
         return result;
     }
@@ -200,7 +261,7 @@ public:
             std::lock_guard lock(mutex_);
             retired_prepared_.push_back(std::move(prepared));
         }
-        condition_.notify_one();
+        retirement_condition_.notify_one();
     }
 
     void RetireResource(BackgroundRetirementHandle resource)
@@ -212,34 +273,105 @@ public:
             std::lock_guard lock(mutex_);
             retired_resources_.push_back(std::move(resource));
         }
-        condition_.notify_one();
+        retirement_condition_.notify_one();
     }
 
 private:
-    std::uint64_t EnqueueLocked(
+    std::uint64_t StartTaskLocked(
         SourceCollectionLoadRequest request,
-        std::shared_ptr<BatchCache> batch_cache,
-        SourceCollectionLoadPriority priority)
+        std::shared_ptr<BatchState> batch,
+        std::size_t batch_index = 0,
+        std::shared_ptr<BatchCompletionSlot> ordered_completion = nullptr)
     {
         const std::uint64_t id = next_task_id_++;
         auto canceled = std::make_shared<std::atomic_bool>(false);
-        Task task{id, std::move(request), canceled, std::move(batch_cache), priority};
-        if (priority == SourceCollectionLoadPriority::Continuation) {
-            pending_.push_front(std::move(task));
-        } else if (priority == SourceCollectionLoadPriority::Interactive) {
-            const auto first_restore = std::find_if(
-                pending_.begin(),
-                pending_.end(),
-                [](const Task& queued) {
-                    return queued.priority == SourceCollectionLoadPriority::Restore;
-                });
-            pending_.insert(first_restore, std::move(task));
-        } else {
-            pending_.push_back(std::move(task));
-        }
-        cancellation_.emplace(id, std::move(canceled));
+        auto finished = std::make_shared<std::atomic_bool>(false);
+        const std::filesystem::path failure_path = request.path;
+        const std::size_t failure_spectrum_index = request.spectrum_index;
+        std::shared_ptr<BatchState> failure_batch = batch;
+        std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
+        Task task{
+            id,
+            std::move(request),
+            canceled,
+            finished,
+            std::move(batch),
+            batch_index,
+            std::move(ordered_completion),
+        };
+        cancellation_.emplace(id, canceled);
         ++active_task_count_;
+        try {
+            workers_.emplace_back(std::move(finished), this, std::move(task));
+        } catch (const std::system_error& error) {
+            --active_task_count_;
+            SourceCollectionLoadCompletion completion{
+                id,
+                failure_path,
+                failure_spectrum_index,
+                std::nullopt,
+                std::string("Could not start the source loading thread: ") + error.what(),
+            };
+            if (failure_batch) {
+                FinishBatchTask(
+                    *failure_batch,
+                    batch_index,
+                    id,
+                    canceled,
+                    std::move(completion));
+            } else {
+                FinishOrderedTask(
+                    *failure_ordered_completion,
+                    id,
+                    canceled,
+                    std::move(completion));
+            }
+            return id;
+        } catch (...) {
+            cancellation_.erase(id);
+            --active_task_count_;
+            throw;
+        }
         return id;
+    }
+
+    void CollectFinishedWorkersLocked(std::vector<std::jthread>& finished_workers)
+    {
+        for (auto worker = workers_.begin(); worker != workers_.end();) {
+            if (!worker->finished->load(std::memory_order_acquire)) {
+                ++worker;
+                continue;
+            }
+            finished_workers.push_back(std::move(worker->thread));
+            worker = workers_.erase(worker);
+        }
+    }
+
+    void ReapFinishedWorkers()
+    {
+        std::vector<std::jthread> finished_workers;
+        {
+            std::lock_guard lock(mutex_);
+            CollectFinishedWorkersLocked(finished_workers);
+        }
+    }
+
+    void StopLoadWorkers()
+    {
+        std::vector<std::jthread> workers;
+        {
+            std::lock_guard lock(mutex_);
+            workers.reserve(workers_.size());
+            for (const auto& [id, canceled] : cancellation_) {
+                (void)id;
+                canceled->store(true, std::memory_order_relaxed);
+            }
+            for (Worker& worker : workers_) {
+                worker.thread.request_stop();
+                workers.push_back(std::move(worker.thread));
+            }
+            workers_.clear();
+        }
     }
 
     SourceCollectionCancellationCheckpoint CheckpointFor(
@@ -257,17 +389,20 @@ private:
         const Task& task,
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
-        if (task.batch_cache && task.batch_cache->value) {
-            return task.batch_cache->value;
+        if (!task.batch) {
+            return std::make_shared<SampleWorkflowPreparationCacheBundle>(
+                dependencies_.workflow_cache_loader(
+                    dependencies_.workflow_cache_paths,
+                    checkpoint));
         }
-        auto cache = std::make_shared<SampleWorkflowPreparationCacheBundle>(
-            dependencies_.workflow_cache_loader(
-                dependencies_.workflow_cache_paths,
-                checkpoint));
-        if (task.batch_cache) {
-            task.batch_cache->value = cache;
-        }
-        return cache;
+        std::call_once(task.batch->load_once, [this, &task, &checkpoint]() {
+            task.batch->value = std::make_shared<SampleWorkflowPreparationCacheBundle>(
+                dependencies_.workflow_cache_loader(
+                    dependencies_.workflow_cache_paths,
+                    checkpoint));
+        });
+        checkpoint();
+        return task.batch->value;
     }
 
     PreparedSampleWorkflowState PrepareWorkflow(
@@ -436,28 +571,129 @@ private:
         return PrepareFile(task, checkpoint);
     }
 
+    void PublishCompletion(BatchCompletionSlot& slot)
+    {
+        const bool canceled =
+            slot.canceled && slot.canceled->load(std::memory_order_relaxed);
+        if (slot.completion) {
+            if (!canceled) {
+                completed_.push_back(std::move(*slot.completion));
+            } else if (slot.completion->prepared) {
+                retired_prepared_.push_back(std::move(*slot.completion->prepared));
+                retirement_condition_.notify_one();
+            }
+            slot.completion.reset();
+        }
+        cancellation_.erase(slot.task_id);
+    }
+
+    void PublishReadyBatchCompletions(BatchState& batch)
+    {
+        if (!batch.admitted || batch.abandoned) {
+            return;
+        }
+        while (batch.next_completion < batch.completions.size()) {
+            BatchCompletionSlot& slot = batch.completions[batch.next_completion];
+            if (!slot.terminal) {
+                return;
+            }
+            PublishCompletion(slot);
+            ++batch.next_completion;
+        }
+    }
+
+    void FinishBatchTask(
+        BatchState& batch,
+        std::size_t batch_index,
+        std::uint64_t task_id,
+        std::shared_ptr<std::atomic_bool> canceled,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        BatchCompletionSlot& slot = batch.completions[batch_index];
+        slot.task_id = task_id;
+        slot.canceled = std::move(canceled);
+        slot.terminal = true;
+        slot.completion = std::move(completion);
+        PublishReadyBatchCompletions(batch);
+    }
+
+    void FinishBatchTask(
+        const Task& task,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        FinishBatchTask(
+            *task.batch,
+            task.batch_index,
+            task.id,
+            task.canceled,
+            std::move(completion));
+    }
+
+    void PublishReadyOrderedCompletions()
+    {
+        while (!ordered_completions_.empty() && ordered_completions_.front()->terminal) {
+            PublishCompletion(*ordered_completions_.front());
+            ordered_completions_.pop_front();
+        }
+    }
+
+    void FinishOrderedTask(
+        BatchCompletionSlot& slot,
+        std::uint64_t task_id,
+        std::shared_ptr<std::atomic_bool> canceled,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        slot.task_id = task_id;
+        slot.canceled = std::move(canceled);
+        slot.terminal = true;
+        slot.completion = std::move(completion);
+        PublishReadyOrderedCompletions();
+    }
+
+    void FinishOrderedTask(
+        const Task& task,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        FinishOrderedTask(
+            *task.ordered_completion,
+            task.id,
+            task.canceled,
+            std::move(completion));
+    }
+
     void FinishTask(const Task& task, SourceCollectionLoadCompletion completion)
     {
         std::lock_guard lock(mutex_);
-        cancellation_.erase(task.id);
         if (active_task_count_ > 0) {
             --active_task_count_;
         }
-        if (!task.canceled->load(std::memory_order_relaxed)) {
-            completed_.push_back(std::move(completion));
+        if (task.batch) {
+            FinishBatchTask(
+                task,
+                task.canceled->load(std::memory_order_relaxed)
+                    ? std::nullopt
+                    : std::optional<SourceCollectionLoadCompletion>{std::move(completion)});
+        } else {
+            FinishOrderedTask(task, std::move(completion));
         }
+        task.finished->store(true, std::memory_order_release);
     }
 
     void FinishCanceledTask(const Task& task)
     {
         std::lock_guard lock(mutex_);
-        cancellation_.erase(task.id);
         if (active_task_count_ > 0) {
             --active_task_count_;
         }
+        if (task.batch) {
+            FinishBatchTask(task, std::nullopt);
+        } else {
+            FinishOrderedTask(task, std::nullopt);
+        }
+        task.finished->store(true, std::memory_order_release);
     }
 
-    void DrainForShutdown(
+    void DrainRetirementForShutdown(
         std::deque<PreparedSourceCollection>& prepared,
         std::deque<BackgroundRetirementHandle>& resources)
     {
@@ -473,76 +709,73 @@ private:
             std::make_move_iterator(retired_prepared_.end()));
         retired_prepared_.clear();
         resources.swap(retired_resources_);
-        pending_.clear();
         cancellation_.clear();
         active_task_count_ = 0;
     }
 
-    void WorkerLoop(std::stop_token stop_token)
+    void RunTask(const Task& task, std::stop_token stop_token)
+    {
+        if (task.canceled->load(std::memory_order_relaxed)) {
+            FinishCanceledTask(task);
+            return;
+        }
+
+        SourceCollectionLoadCompletion completion;
+        completion.task_id = task.id;
+        completion.path = task.request.path;
+        completion.spectrum_index = task.request.spectrum_index;
+        try {
+            completion.prepared = Prepare(task, stop_token);
+        } catch (const SourceLoadCanceled&) {
+            FinishCanceledTask(task);
+            return;
+        } catch (const std::exception& error) {
+            completion.error_message = error.what();
+        } catch (...) {
+            completion.error_message = "Unknown source loading failure.";
+        }
+        FinishTask(task, std::move(completion));
+    }
+
+    void RetirementLoop(std::stop_token stop_token)
     {
         for (;;) {
-            std::optional<Task> task;
             std::deque<PreparedSourceCollection> retired_prepared;
             std::deque<BackgroundRetirementHandle> retired_resources;
             {
                 std::unique_lock lock(mutex_);
-                condition_.wait(lock, stop_token, [this]() {
-                    return !pending_.empty() || !retired_prepared_.empty() ||
-                           !retired_resources_.empty();
+                retirement_condition_.wait(lock, stop_token, [this]() {
+                    return !retired_prepared_.empty() || !retired_resources_.empty();
                 });
                 if (stop_token.stop_requested()) {
-                    DrainForShutdown(retired_prepared, retired_resources);
+                    DrainRetirementForShutdown(retired_prepared, retired_resources);
                 } else {
                     retired_prepared.swap(retired_prepared_);
                     retired_resources.swap(retired_resources_);
-                    if (!pending_.empty()) {
-                        task = std::move(pending_.front());
-                        pending_.pop_front();
-                    }
                 }
             }
 
-            // Destruction happens here, outside the mutex and on the worker.
+            // Destruction happens here, outside the mutex and off the UI thread.
             retired_prepared.clear();
             retired_resources.clear();
             if (stop_token.stop_requested()) {
                 return;
             }
-            if (!task) {
-                continue;
-            }
-            if (task->canceled->load(std::memory_order_relaxed)) {
-                FinishCanceledTask(*task);
-                continue;
-            }
-
-            SourceCollectionLoadCompletion completion;
-            completion.task_id = task->id;
-            completion.path = task->request.path;
-            completion.spectrum_index = task->request.spectrum_index;
-            try {
-                completion.prepared = Prepare(*task, stop_token);
-            } catch (const SourceLoadCanceled&) {
-                FinishCanceledTask(*task);
-                continue;
-            } catch (const std::exception& error) {
-                completion.error_message = error.what();
-            }
-            FinishTask(*task, std::move(completion));
         }
     }
 
     SourceCollectionLoadDependencies dependencies_;
     mutable std::mutex mutex_;
-    std::condition_variable_any condition_;
-    std::deque<Task> pending_;
+    std::condition_variable_any retirement_condition_;
     std::deque<SourceCollectionLoadCompletion> completed_;
+    std::deque<std::shared_ptr<BatchCompletionSlot>> ordered_completions_;
     std::deque<PreparedSourceCollection> retired_prepared_;
     std::deque<BackgroundRetirementHandle> retired_resources_;
     std::unordered_map<std::uint64_t, std::shared_ptr<std::atomic_bool>> cancellation_;
     std::uint64_t next_task_id_ = 1;
     std::size_t active_task_count_ = 0;
-    std::jthread worker_;
+    std::vector<Worker> workers_;
+    std::jthread retirement_worker_;
 };
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue()
@@ -562,11 +795,9 @@ SourceCollectionLoadQueue::SourceCollectionLoadQueue(SourceCollectionLoadQueue&&
 SourceCollectionLoadQueue& SourceCollectionLoadQueue::operator=(
     SourceCollectionLoadQueue&&) noexcept = default;
 
-std::uint64_t SourceCollectionLoadQueue::Enqueue(
-    SourceCollectionLoadRequest request,
-    SourceCollectionLoadPriority priority)
+std::uint64_t SourceCollectionLoadQueue::Enqueue(SourceCollectionLoadRequest request)
 {
-    return impl_->Enqueue(std::move(request), priority);
+    return impl_->Enqueue(std::move(request));
 }
 
 std::vector<std::uint64_t> SourceCollectionLoadQueue::EnqueueBatch(

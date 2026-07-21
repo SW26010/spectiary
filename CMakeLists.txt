@@ -301,6 +301,12 @@ specforge_add_test(
     specforge_sessions
 )
 specforge_add_test(
+    specforge_shell_source_load_activation_tests
+    tests/shell_source_load_activation_tests.cpp
+    specforge_desktop_ui
+)
+target_link_libraries(specforge_shell_source_load_activation_tests PRIVATE dwmapi)
+specforge_add_test(
     specforge_spectrum_smoothing_tests
     tests/spectrum_smoothing_tests.cpp
     specforge_core

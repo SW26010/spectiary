@@ -175,8 +175,18 @@ void TestBatchLoadsWorkflowCachesOnce()
     WriteFixture(first);
     WriteFixture(second);
     std::atomic_int cache_loads = 0;
+    std::atomic_int decoder_entries = 0;
+    std::promise<void> both_decoders_entered_promise;
+    std::shared_future<void> both_decoders_entered =
+        both_decoders_entered_promise.get_future().share();
+    std::promise<void> release_decoders_promise;
+    std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto&) {
+            if (decoder_entries.fetch_add(1) + 1 == 2) {
+                both_decoders_entered_promise.set_value();
+            }
+            release_decoders.wait();
             return MakeSnapshot(path, index);
         },
         &cache_loads));
@@ -186,7 +196,11 @@ void TestBatchLoadsWorkflowCachesOnce()
         {.path = second},
     });
     Require(ids.size() == 2, "batch enqueue should return every task id");
+    const bool both_started =
+        both_decoders_entered.wait_for(2s) == std::future_status::ready;
+    release_decoders_promise.set_value();
     auto completions = WaitForCompletions(queue, 2);
+    Require(both_started, "batch sources should decode concurrently");
     Require(
         completions[0].prepared && completions[1].prepared,
         "every batch source should produce a prepared result");
@@ -195,60 +209,219 @@ void TestBatchLoadsWorkflowCachesOnce()
     std::filesystem::remove(second);
 }
 
-void TestInteractiveLoadRunsBeforeRemainingRestoreBatch()
+void TestSourcesUseIndependentThreads()
 {
-    const std::filesystem::path active = UniqueTempPath("_priority_active.csv");
-    const std::filesystem::path restore_a = UniqueTempPath("_priority_restore_a.csv");
-    const std::filesystem::path restore_b = UniqueTempPath("_priority_restore_b.csv");
-    const std::filesystem::path interactive = UniqueTempPath("_priority_interactive.csv");
-    for (const auto& path : {active, restore_a, restore_b, interactive}) {
+    const std::filesystem::path first = UniqueTempPath("_parallel_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_parallel_b.csv");
+    for (const auto& path : {first, second}) {
         WriteFixture(path);
     }
 
-    std::promise<void> active_entered_promise;
-    std::shared_future<void> active_entered = active_entered_promise.get_future().share();
-    std::promise<void> release_active_promise;
-    std::shared_future<void> release_active = release_active_promise.get_future().share();
-    std::atomic_bool active_entered_once = false;
-    std::mutex order_mutex;
-    std::vector<std::filesystem::path> order;
+    std::atomic_int decoder_entries = 0;
+    std::promise<void> both_decoders_entered_promise;
+    std::shared_future<void> both_decoders_entered =
+        both_decoders_entered_promise.get_future().share();
+    std::promise<void> release_decoders_promise;
+    std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
+    std::mutex thread_ids_mutex;
+    std::vector<std::thread::id> thread_ids;
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
         [&](const auto& path, std::size_t index, const auto&) {
-            if (path == active && !active_entered_once.exchange(true)) {
-                active_entered_promise.set_value();
-                release_active.wait();
-            }
             {
-                std::lock_guard lock(order_mutex);
-                order.push_back(path);
+                std::lock_guard lock(thread_ids_mutex);
+                thread_ids.push_back(std::this_thread::get_id());
             }
+            if (decoder_entries.fetch_add(1) + 1 == 2) {
+                both_decoders_entered_promise.set_value();
+            }
+            release_decoders.wait();
             return MakeSnapshot(path, index);
         }));
 
-    (void)queue.Enqueue({.path = active});
-    Require(
-        active_entered.wait_for(2s) == std::future_status::ready,
-        "priority test should start its active task");
-    (void)queue.EnqueueBatch({
-        {.path = restore_a},
-        {.path = restore_b},
-    });
-    (void)queue.Enqueue({.path = interactive});
-    release_active_promise.set_value();
+    (void)queue.Enqueue({.path = first});
+    (void)queue.Enqueue({.path = second});
+    const bool both_started =
+        both_decoders_entered.wait_for(2s) == std::future_status::ready;
+    release_decoders_promise.set_value();
 
-    (void)WaitForCompletions(queue, 4);
+    (void)WaitForCompletions(queue, 2);
+    Require(both_started, "a source load must not wait for another source to finish");
     {
-        std::lock_guard lock(order_mutex);
-        Require(order.size() == 4, "priority test should decode every task");
-        Require(order[0] == active, "the already-running task should finish first");
-        Require(order[1] == interactive, "interactive work should precede queued restore work");
-        Require(order[2] == restore_a && order[3] == restore_b, "restore order should remain stable");
+        std::lock_guard lock(thread_ids_mutex);
+        Require(thread_ids.size() == 2, "parallel test should decode both sources");
+        Require(thread_ids[0] != thread_ids[1], "each source should have an independent thread");
     }
 
-    for (const auto& path : {active, restore_a, restore_b, interactive}) {
+    for (const auto& path : {first, second}) {
         std::filesystem::remove(path);
     }
+}
+
+void TestIndividualLoadsPublishInRequestOrder()
+{
+    const std::filesystem::path first = UniqueTempPath("_individual_order_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_individual_order_b.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    std::promise<void> second_decoder_entered_promise;
+    std::shared_future<void> second_decoder_entered =
+        second_decoder_entered_promise.get_future().share();
+    std::promise<void> release_first_promise;
+    std::shared_future<void> release_first = release_first_promise.get_future().share();
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& path, std::size_t index, const auto&) {
+            if (path == first) {
+                release_first.wait();
+                return MakeSnapshot(path, index);
+            }
+            second_decoder_entered_promise.set_value();
+            throw std::runtime_error("second individual source finished first");
+        }));
+    const std::uint64_t first_id = queue.Enqueue({.path = first});
+    const std::uint64_t second_id = queue.Enqueue({.path = second});
+    const bool second_started =
+        second_decoder_entered.wait_for(2s) == std::future_status::ready;
+    bool published_early = false;
+    std::vector<specforge::SourceCollectionLoadCompletion> completions;
+    if (second_started) {
+        published_early = WaitUntil(
+            [&]() {
+                std::vector<specforge::SourceCollectionLoadCompletion> ready =
+                    queue.TakeCompleted();
+                completions.insert(
+                    completions.end(),
+                    std::make_move_iterator(ready.begin()),
+                    std::make_move_iterator(ready.end()));
+                return !completions.empty();
+            },
+            100ms);
+    }
+    release_first_promise.set_value();
+    if (completions.size() < 2) {
+        std::vector<specforge::SourceCollectionLoadCompletion> remaining =
+            WaitForCompletions(queue, 2 - completions.size());
+        completions.insert(
+            completions.end(),
+            std::make_move_iterator(remaining.begin()),
+            std::make_move_iterator(remaining.end()));
+    }
+
+    Require(second_started, "a later individual source should load before the first finishes");
+    Require(!published_early, "individual source results should retain request order");
+    Require(
+        completions.size() == 2 && completions[0].task_id == first_id &&
+            completions[1].task_id == second_id,
+        "individual completion order should remain stable");
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+}
+
+void TestBatchPublishesInRequestOrder()
+{
+    const std::filesystem::path first = UniqueTempPath("_ordered_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_ordered_b.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    std::promise<void> second_decoder_entered_promise;
+    std::shared_future<void> second_decoder_entered =
+        second_decoder_entered_promise.get_future().share();
+    std::promise<void> release_first_promise;
+    std::shared_future<void> release_first = release_first_promise.get_future().share();
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& path, std::size_t index, const auto&) {
+            if (path == first) {
+                release_first.wait();
+                return MakeSnapshot(path, index);
+            }
+            second_decoder_entered_promise.set_value();
+            throw std::runtime_error("second source finished first");
+        }));
+    const std::vector<std::uint64_t> ids = queue.EnqueueBatch({
+        {.path = first},
+        {.path = second},
+    });
+    const bool second_started =
+        second_decoder_entered.wait_for(2s) == std::future_status::ready;
+    bool published_early = false;
+    std::vector<specforge::SourceCollectionLoadCompletion> completions;
+    if (second_started) {
+        published_early = WaitUntil(
+            [&]() {
+                std::vector<specforge::SourceCollectionLoadCompletion> ready =
+                    queue.TakeCompleted();
+                completions.insert(
+                    completions.end(),
+                    std::make_move_iterator(ready.begin()),
+                    std::make_move_iterator(ready.end()));
+                return !completions.empty();
+            },
+            100ms);
+    }
+    release_first_promise.set_value();
+    if (completions.size() < 2) {
+        std::vector<specforge::SourceCollectionLoadCompletion> remaining =
+            WaitForCompletions(queue, 2 - completions.size());
+        completions.insert(
+            completions.end(),
+            std::make_move_iterator(remaining.begin()),
+            std::make_move_iterator(remaining.end()));
+    }
+
+    Require(second_started, "later batch sources should start before the first source finishes");
+    Require(!published_early, "a batch should not publish later sources out of request order");
+    Require(
+        completions.size() == 2 && completions[0].task_id == ids[0] &&
+            completions[1].task_id == ids[1],
+        "batch completion order should remain stable");
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+}
+
+void TestBufferedBatchCompletionCanBeCanceled()
+{
+    const std::filesystem::path first = UniqueTempPath("_buffered_cancel_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_buffered_cancel_b.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    std::promise<void> second_decoder_entered_promise;
+    std::shared_future<void> second_decoder_entered =
+        second_decoder_entered_promise.get_future().share();
+    std::promise<void> release_first_promise;
+    std::shared_future<void> release_first = release_first_promise.get_future().share();
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& path, std::size_t index, const auto&) {
+            if (path == first) {
+                release_first.wait();
+                return MakeSnapshot(path, index);
+            }
+            second_decoder_entered_promise.set_value();
+            throw std::runtime_error("buffered completion should be canceled");
+        }));
+    const std::vector<std::uint64_t> ids = queue.EnqueueBatch({
+        {.path = first},
+        {.path = second},
+    });
+    const bool second_started =
+        second_decoder_entered.wait_for(2s) == std::future_status::ready;
+    if (second_started) {
+        std::this_thread::sleep_for(100ms);
+        queue.Cancel(ids[1]);
+    }
+    release_first_promise.set_value();
+
+    std::vector<specforge::SourceCollectionLoadCompletion> completions =
+        WaitForCompletions(queue, 1);
+    Require(second_started, "buffered cancel test should run the later source concurrently");
+    Require(
+        completions.size() == 1 && completions.front().task_id == ids[0],
+        "cancel should suppress a completion buffered behind an earlier batch source");
+    Require(!queue.NeedsService(), "a canceled buffered completion should leave no queued result");
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
 }
 
 void TestFolderUsesOnePreparedListing()
@@ -323,6 +496,58 @@ void TestCancelSuppressesCompletion()
     std::filesystem::remove(path);
 }
 
+void TestCancelStopsOnlyItsSourceThread()
+{
+    const std::filesystem::path canceled_path = UniqueTempPath("_cancel_one.csv");
+    const std::filesystem::path surviving_path = UniqueTempPath("_cancel_survivor.csv");
+    WriteFixture(canceled_path);
+    WriteFixture(surviving_path);
+    std::atomic_int decoder_entries = 0;
+    std::atomic_bool canceled_decoder_stopped = false;
+    std::promise<void> both_decoders_entered_promise;
+    std::shared_future<void> both_decoders_entered =
+        both_decoders_entered_promise.get_future().share();
+    std::promise<void> release_survivor_promise;
+    std::shared_future<void> release_survivor = release_survivor_promise.get_future().share();
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& path, std::size_t index, const auto& canceled) {
+            if (decoder_entries.fetch_add(1) + 1 == 2) {
+                both_decoders_entered_promise.set_value();
+            }
+            if (path == canceled_path) {
+                while (!canceled()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                canceled_decoder_stopped.store(true);
+            } else {
+                while (release_survivor.wait_for(1ms) != std::future_status::ready &&
+                       !canceled()) {
+                }
+            }
+            return MakeSnapshot(path, index);
+        }));
+    const std::uint64_t canceled_id = queue.Enqueue({.path = canceled_path});
+    const std::uint64_t surviving_id = queue.Enqueue({.path = surviving_path});
+    Require(
+        both_decoders_entered.wait_for(2s) == std::future_status::ready,
+        "independent cancel test should start both source threads");
+    queue.Cancel(canceled_id);
+    Require(
+        WaitUntil([&]() { return canceled_decoder_stopped.load(); }),
+        "cancel should stop its selected source thread");
+    Require(queue.NeedsService(), "canceling one source must not stop another active source");
+    release_survivor_promise.set_value();
+
+    std::vector<specforge::SourceCollectionLoadCompletion> completions =
+        WaitForCompletions(queue, 1);
+    Require(
+        completions.size() == 1 && completions.front().task_id == surviving_id,
+        "only the uncanceled source should publish a completion");
+    std::filesystem::remove(canceled_path);
+    std::filesystem::remove(surviving_path);
+}
+
 void TestFailureIsReported()
 {
     const std::filesystem::path path = UniqueTempPath("_failure.csv");
@@ -338,6 +563,42 @@ void TestFailureIsReported()
         completions.front().error_message == "decoder failure",
         "failed decoder should preserve its diagnostic");
     std::filesystem::remove(path);
+}
+
+void TestDestructionStopsEverySourceThread()
+{
+    const std::filesystem::path first = UniqueTempPath("_shutdown_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_shutdown_b.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    std::atomic_int decoder_entries = 0;
+    std::atomic_int canceled_decoders = 0;
+    std::promise<void> both_decoders_entered_promise;
+    std::shared_future<void> both_decoders_entered =
+        both_decoders_entered_promise.get_future().share();
+
+    {
+        specforge::SourceCollectionLoadQueue queue(Dependencies(
+            [&](const auto& path, std::size_t index, const auto& canceled) {
+                if (decoder_entries.fetch_add(1) + 1 == 2) {
+                    both_decoders_entered_promise.set_value();
+                }
+                while (!canceled()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                ++canceled_decoders;
+                return MakeSnapshot(path, index);
+            }));
+        (void)queue.Enqueue({.path = first});
+        (void)queue.Enqueue({.path = second});
+        Require(
+            both_decoders_entered.wait_for(2s) == std::future_status::ready,
+            "shutdown test should start every source thread");
+    }
+
+    Require(canceled_decoders.load() == 2, "queue destruction should stop and join every source thread");
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
 }
 
 struct DestructionProbe {
@@ -369,11 +630,16 @@ int main()
     TestEnqueueReturnsBeforeLoaderCompletes();
     TestMatchingIdentitySkipsWorkflowCacheLoad();
     TestBatchLoadsWorkflowCachesOnce();
-    TestInteractiveLoadRunsBeforeRemainingRestoreBatch();
+    TestSourcesUseIndependentThreads();
+    TestIndividualLoadsPublishInRequestOrder();
+    TestBatchPublishesInRequestOrder();
+    TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
     TestChangedFileRetriesOneStableGeneration();
     TestCancelSuppressesCompletion();
+    TestCancelStopsOnlyItsSourceThread();
     TestFailureIsReported();
+    TestDestructionStopsEverySourceThread();
     TestRetirementRunsOnWorker();
     return 0;
 }
