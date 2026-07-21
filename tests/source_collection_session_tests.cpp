@@ -364,7 +364,7 @@ specforge::SourceCollectionSessionIntent OpenSourceCollection(
     std::size_t spectrum_index = 0)
 {
     return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::Open(std::move(path), spectrum_index));
+        specforge::SourceCollectionIntent::OpenSynchronously(std::move(path), spectrum_index));
 }
 
 specforge::SourceCollectionSessionIntent SwitchSourceCollection(std::size_t source_index)
@@ -3260,13 +3260,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     const std::optional<specforge::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint && hint->spectrum_index == 1, "non-active source reload should capture its live row");
-    Require(
-        hint->workflow_state && !hint->workflow_state->filter_conditions.empty(),
-        "non-active source reload should seed preparation from live, not-yet-flushed workflow intent");
-    Require(
-        hint->labeling_state && !hint->labeling_state->tasks.empty() &&
-            hint->labeling_state->tasks.front().values[1] == 7,
-        "non-active source reload should capture its live, not-yet-flushed labeling generation");
+    Require(hint->identity.id == identity.id, "non-active source reload should expose its stable generation");
 
     const specforge::SpectrumSnapshotHandle reloaded_snapshot = MakeSnapshot(source_path, 3, 1);
     const specforge::SourceCollectionSessionResult reload_result = session.OpenPreparedSource(
@@ -3350,6 +3344,58 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
         "prepared commits and non-active state hints must not reopen either cache on the UI thread");
 }
 
+void TestPreparedProjectionsMoveIntoTheSessionView()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_prepared_projection.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("prepared projection test must not load synchronously");
+        },
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {"prepared-projection", "projection", "source", "context", 3};
+    context.manifest.sample_names = {"a", "b", "c"};
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(snapshot, context, 0, {}, {});
+    prepared.filter_view.sources.push_back(
+        specforge::SourceCollectionFilterSourceView{.id = "filter-source", .name = "Filter source"});
+    prepared.sorting_view.sources.push_back(
+        specforge::SourceCollectionSampleSortSourceView{.id = "sort-source", .name = "Sort source"});
+    const auto* prepared_filter_storage = prepared.filter_view.sources.data();
+    const auto* prepared_sorting_storage = prepared.sorting_view.sources.data();
+
+    const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
+        source_path,
+        0,
+        snapshot,
+        std::move(context),
+        std::move(prepared));
+    Require(result.loaded, "prepared projection fixture should load");
+    const specforge::SourceCollectionSessionView view = session.View();
+    Require(
+        view.filter.sources.data() == prepared_filter_storage,
+        "prepared filter projection should move into the UI session view");
+    Require(
+        view.sorting.sources.data() == prepared_sorting_storage,
+        "prepared sorting projection should move into the UI session view");
+}
+
+void TestSourceSelectionIntentsSupersedePendingActivation()
+{
+    Require(
+        SwitchSourceCollection(0).SupersedesPendingSourceActivation(),
+        "switching source should invalidate work prepared for the previous selection");
+    Require(
+        RemoveSourceCollection(0).SupersedesPendingSourceActivation(),
+        "removing source should invalidate pending source activation");
+    Require(
+        !specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+             specforge::SampleNavigationIntent::Move(specforge::SampleNavigationRequest::Next()))
+             .SupersedesPendingSourceActivation(),
+        "navigation should retain its own replacement follow-up");
+}
+
 void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
 {
     const std::filesystem::path source_a = UniqueTempPath("_rejected_reuse_a.npy");
@@ -3386,7 +3432,10 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         std::move(context_b),
         std::move(workflow_b));
 
-    (void)Submit(session, RemoveSourceCollection(0));
+    const specforge::SourceCollectionSessionResult removed = Submit(session, RemoveSourceCollection(0));
+    Require(
+        removed.background_retirement.size() >= 2,
+        "removing a prepared source should hand its snapshot and workflow context to the reclaimer");
 
     const specforge::SpectrumSnapshotHandle stale_snapshot = MakeSnapshot(source_a, 3, 1);
     const specforge::SourceCollectionSessionResult rejected = session.OpenPreparedSource(
@@ -3673,6 +3722,8 @@ void RunAllTests()
     TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow();
     TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow();
     TestPreparedCacheSnapshotPreventsUiCacheReload();
+    TestPreparedProjectionsMoveIntoTheSessionView();
+    TestSourceSelectionIntentsSupersedePendingActivation();
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestInterruptedPreparedFollowUpRemainsBackgroundOnlyOnReactivation();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();

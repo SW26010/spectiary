@@ -4,6 +4,7 @@
 #include "plot/spectrum_plot.h"
 
 #include <cstddef>
+#include <vector>
 
 namespace specforge {
 
@@ -64,6 +65,7 @@ public:
     [[nodiscard]] SpectrumPlotState& PlotStateForRender();
     [[nodiscard]] const SpectrumPlotStyle& PlotStyleForRender() const;
     [[nodiscard]] bool PlotPanActive() const;
+    [[nodiscard]] std::vector<SpectrumValueVector> RetainHeavySnapshotResources() const;
 
 private:
     void ResetForSnapshotChange();

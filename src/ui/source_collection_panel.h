@@ -12,6 +12,7 @@
 namespace specforge {
 
 using SourceCollectionPathPicker = std::function<std::optional<std::filesystem::path>()>;
+using SourceCollectionPathOpener = std::function<void(const std::filesystem::path&)>;
 
 class SourceCollectionPanelUi {
 public:
@@ -26,10 +27,10 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderFiles(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionSessionViewReader& read_view,
         bool* open,
         const SourceCollectionPathPicker& choose_source_file,
-        const SourceCollectionPathPicker& choose_source_folder);
+        const SourceCollectionPathPicker& choose_source_folder,
+        const SourceCollectionPathOpener& open_source);
 
     [[nodiscard]] SourceCollectionSessionAction RenderNavigation(
         const SourceCollectionSessionView& session_view,

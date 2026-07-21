@@ -143,12 +143,12 @@ private:
     bool dirty_after_restore_ = false;
 };
 
-SourceCollectionIntent SourceCollectionIntent::Open(
+SourceCollectionIntent SourceCollectionIntent::OpenSynchronously(
     std::filesystem::path path,
     std::size_t spectrum_index)
 {
     SourceCollectionIntent intent;
-    intent.kind = SourceCollectionIntentKind::Open;
+    intent.kind = SourceCollectionIntentKind::OpenSynchronously;
     intent.path = std::move(path);
     intent.spectrum_index = spectrum_index;
     return intent;
@@ -446,6 +446,15 @@ SourceCollectionSessionIntent SourceCollectionSessionIntent::ApplySampleSorting(
     return session_intent;
 }
 
+bool SourceCollectionSessionIntent::SupersedesPendingSourceActivation() const
+{
+    if (kind != SourceCollectionSessionIntentKind::SourceCollection) {
+        return false;
+    }
+    return source_collection.kind == SourceCollectionIntentKind::SwitchActive ||
+           source_collection.kind == SourceCollectionIntentKind::Remove;
+}
+
 SourceCollectionSession::SourceCollectionSession(SnapshotLoader snapshot_loader)
     : SourceCollectionSession(
           std::move(snapshot_loader),
@@ -551,7 +560,7 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
     switch (intent.kind) {
     case SourceCollectionSessionIntentKind::SourceCollection:
         switch (intent.source_collection.kind) {
-        case SourceCollectionIntentKind::Open:
+        case SourceCollectionIntentKind::OpenSynchronously:
             result.action =
                 OpenSource(intent.source_collection.path, intent.source_collection.spectrum_index);
             break;
@@ -559,7 +568,9 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
             result.action = ActivateSource(intent.source_collection.source_index);
             break;
         case SourceCollectionIntentKind::Remove:
-            result.action = RemoveSource(intent.source_collection.source_index);
+            result.action = RemoveSource(
+                intent.source_collection.source_index,
+                result.background_retirement);
             break;
         case SourceCollectionIntentKind::AddReadOnlyAnnotationResult:
             result.action = AddReadOnlyAnnotationToActiveSource(
@@ -726,7 +737,7 @@ std::vector<std::filesystem::path> SourceCollectionSession::AnnotationPathsForSo
 }
 
 std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSource(
-    const std::filesystem::path& path)
+    const std::filesystem::path& path) const
 {
     const std::string source_key = SourcePathIdentityKey(path);
     const std::optional<SourceCollectionIdentity> identity = workflow_->KnownSourceIdentity(source_key);
@@ -734,11 +745,7 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
     if (!identity || !current_index) {
         return std::nullopt;
     }
-    return SourceCollectionLoadHint{
-        *identity,
-        *current_index,
-        workflow_->WorkflowStateForSourceIdentity(identity->id),
-        workflow_->LabelingStateForSourceIdentity(identity->id)};
+    return SourceCollectionLoadHint{*identity, *current_index};
 }
 
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
@@ -763,17 +770,26 @@ SourceCollectionSessionAction SourceCollectionSession::ActivateSource(std::size_
     return action;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::RemoveSource(std::size_t source_index)
+SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
+    std::size_t source_index,
+    std::vector<BackgroundRetirementHandle>& background_retirement)
 {
     SourceCollectionSessionAction action;
-    const SourceCollectionRosterRemoveResult remove_result = roster_->RemoveSource(source_index);
+    SourceCollectionRosterRemoveResult remove_result = roster_->RemoveSource(source_index);
     MergeSourceCollectionSessionAction(action, remove_result.action);
     if (!remove_result.removed) {
         return action;
     }
 
     MarkSourceSessionCacheDirty();
-    workflow_->RemoveSource(remove_result.removed_source_key);
+    if (!remove_result.retired_snapshots.empty()) {
+        background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(remove_result.retired_snapshots)));
+    }
+    if (BackgroundRetirementHandle retired_workflow =
+            workflow_->RemoveSource(remove_result.removed_source_key)) {
+        background_retirement.push_back(std::move(retired_workflow));
+    }
     if (remove_result.removed_current) {
         MergeSourceCollectionSessionAction(action, workflow_->ClearActiveWorkflow());
         MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());

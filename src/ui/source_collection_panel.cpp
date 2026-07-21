@@ -279,10 +279,10 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
-    const SourceCollectionSessionViewReader& read_view,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
-    const SourceCollectionPathPicker& choose_source_folder)
+    const SourceCollectionPathPicker& choose_source_folder,
+    const SourceCollectionPathOpener& open_source)
 {
     SourceCollectionSessionAction action;
     if (!ImGui::Begin(kFilesWindow, open)) {
@@ -296,19 +296,13 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 
     if (ImGui::Button("Add file...")) {
         if (std::optional<std::filesystem::path> path = choose_source_file()) {
-            SourceCollectionSessionResult result =
-                submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
-            MergeSourceCollectionSessionAction(action, result.action);
-            view = read_view();
+            open_source(*path);
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("Add folder...")) {
         if (std::optional<std::filesystem::path> path = choose_source_folder()) {
-            SourceCollectionSessionResult result =
-                submit(EditSourceCollection(SourceCollectionIntent::Open(*path)));
-            MergeSourceCollectionSessionAction(action, result.action);
-            view = read_view();
+            open_source(*path);
         }
     }
     ImGui::SameLine();

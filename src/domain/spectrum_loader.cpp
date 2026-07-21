@@ -19,4 +19,17 @@ SpectrumSnapshotHandle LoadSpectrumSnapshotFromPathCancelable(
     return detail::LoadSpectrumSnapshotFromPathImplCancelable(path, spectrum_index, cancellation_requested);
 }
 
+SpectrumSnapshotHandle LoadFolderSpectrumSnapshotFromListingCancelable(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SourceCollectionFolderListing& listing,
+    const SpectrumLoadCancellationCheck& cancellation_requested)
+{
+    return detail::LoadFolderSpectrumSnapshotFromListingCancelable(
+        path,
+        spectrum_index,
+        listing,
+        cancellation_requested);
+}
+
 }  // namespace specforge

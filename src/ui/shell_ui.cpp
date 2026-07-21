@@ -1,6 +1,7 @@
 #include "ui/shell_ui.h"
 
 #include "domain/spectrum_loader.h"
+#include "domain/source_path_identity.h"
 #include "plot/spectrum_plot.h"
 #include "ui/sample_workflow_shortcut.h"
 
@@ -12,6 +13,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -99,7 +101,11 @@ float StatusBarHeight()
     return kStatusBarSeparatorThickness + ImGui::GetFrameHeight();
 }
 
-void RenderStatusBar(const ShellStatus& status, const ImVec2& size)
+void RenderStatusBar(
+    const ShellStatus& status,
+    const ImVec2& size,
+    bool source_load_active,
+    std::string_view source_load_error)
 {
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 min = ImGui::GetCursorScreenPos();
@@ -116,7 +122,15 @@ void RenderStatusBar(const ShellStatus& status, const ImVec2& size)
                              0.0f,
                              (size.y - kStatusBarSeparatorThickness - ImGui::GetTextLineHeight()) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(min.x + style.FramePadding.x, text_y));
-    ImGui::TextUnformatted("Ready");
+    if (!source_load_error.empty()) {
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+            "Load failed: %.*s",
+            static_cast<int>(source_load_error.size()),
+            source_load_error.data());
+    } else {
+        ImGui::TextUnformatted(source_load_active ? "Loading source..." : "Ready");
+    }
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -526,18 +540,12 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 }  // namespace
 
 ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
-    : session_(LoadSpectrumSnapshotFromPath), touchpad_gestures_(touchpad_gestures)
+    : session_(LoadSpectrumSnapshotFromPath, SourceCollectionSessionRestoreMode::Deferred),
+      touchpad_gestures_(touchpad_gestures)
 {
     panel_visibility_ = panel_visibility_state_.Load();
     RefreshSystemColors();
-    const SourceCollectionSessionView& restored_view = SessionView();
-    if (restored_view.navigation.has_active_source) {
-        source_collection_panel_ui_.SyncNavigationInputs(
-            restored_view,
-            [this](SourceCollectionSessionIntent intent) {
-                return SubmitSessionCommandForPanel(std::move(intent));
-            });
-    }
+    BeginDeferredSourceRestore();
 }
 
 ShellUi::~ShellUi()
@@ -545,10 +553,19 @@ ShellUi::~ShellUi()
     (void)panel_visibility_state_.Flush(panel_visibility_);
     (void)session_.FlushStateCaches();
     (void)spectral_lines_panel_.Flush();
+    if (session_view_cache_) {
+        source_load_queue_.RetireResource(
+            std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
+        session_view_cache_.reset();
+    }
+    for (BackgroundRetirementHandle& resource : session_.ReleaseBackgroundResourcesForShutdown()) {
+        source_load_queue_.RetireResource(std::move(resource));
+    }
 }
 
 void ShellUi::Render(const ShellStatus& status)
 {
+    DrainSourceLoads();
     sample_workflow_shortcut_ = {};
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
@@ -593,6 +610,10 @@ void ShellUi::Render(const ShellStatus& status)
 
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
+    DrainSourceLoads();
+    source_load_service_deadline_ = source_load_queue_.NeedsService()
+        ? std::optional<LocalUserStateSaveScheduler::TimePoint>{now + std::chrono::milliseconds(16)}
+        : std::nullopt;
     panel_visibility_state_.RunMaintenance(panel_visibility_, now);
     session_.RunMaintenance(now);
     // Maintenance can change save-status fields exposed by the derived session view.
@@ -611,6 +632,15 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
     };
     consider(session_.NextMaintenanceDeadline());
     consider(spectral_lines_panel_.NextMaintenanceDeadline());
+    if (source_load_queue_.NeedsService()) {
+        if (!source_load_service_deadline_) {
+            source_load_service_deadline_ =
+                LocalUserStateSaveScheduler::Clock::now() + std::chrono::milliseconds(16);
+        }
+        consider(source_load_service_deadline_);
+    } else {
+        source_load_service_deadline_.reset();
+    }
     return deadline;
 }
 
@@ -650,8 +680,262 @@ bool ShellUi::latency_sensitive_plot_interaction_active() const
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    (void)SubmitSessionCommand(
-        SourceCollectionSessionIntent::EditSourceCollection(SourceCollectionIntent::Open(path, spectrum_index)));
+    BeginSourceActivationIntent(true);
+    if (deferred_restore_active_) {
+        deferred_restore_active_path_ = path;
+    }
+    (void)QueueSourceLoad(
+        path,
+        spectrum_index,
+        session_.AnnotationPathsForSource(path),
+        PendingSourceLoadPurpose::ExplicitOpen);
+}
+
+std::uint64_t ShellUi::QueueSourceLoad(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    std::vector<std::filesystem::path> annotation_paths,
+    PendingSourceLoadPurpose purpose)
+{
+    const std::string path_key = SourcePathIdentityKey(path);
+    for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
+        if (pending->second.path_key != path_key) {
+            ++pending;
+            continue;
+        }
+        source_load_queue_.Cancel(pending->first);
+        deferred_restore_task_ids_.erase(pending->first);
+        pending = pending_source_loads_.erase(pending);
+    }
+
+    const std::uint64_t generation = ++source_load_generations_[path_key];
+    const std::optional<SourceCollectionLoadHint> hint = session_.LoadHintForSource(path);
+    const SourceCollectionLoadPriority priority = purpose == PendingSourceLoadPurpose::DeferredRestore
+        ? SourceCollectionLoadPriority::Restore
+        : (purpose == PendingSourceLoadPurpose::SessionFollowUp
+                ? SourceCollectionLoadPriority::Continuation
+                : SourceCollectionLoadPriority::Interactive);
+    const std::uint64_t task_id = source_load_queue_.Enqueue(
+        {
+            .path = path,
+            .spectrum_index = spectrum_index,
+            .annotation_paths = std::move(annotation_paths),
+            .reuse_identity = hint ? std::optional<SourceCollectionIdentity>{hint->identity} : std::nullopt,
+        },
+        priority);
+    pending_source_loads_.emplace(
+        task_id,
+        PendingSourceLoad{
+            .path = path,
+            .path_key = path_key,
+            .spectrum_index = spectrum_index,
+            .generation = generation,
+            .activation_epoch = source_activation_epoch_,
+            .purpose = purpose,
+        });
+    if (purpose == PendingSourceLoadPurpose::DeferredRestore) {
+        deferred_restore_task_ids_.insert(task_id);
+    }
+    source_load_error_.clear();
+    source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
+    return task_id;
+}
+
+void ShellUi::BeginSourceActivationIntent(bool preserve_pending_explicit_opens)
+{
+    ++source_activation_epoch_;
+    for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
+        PendingSourceLoad& ticket = pending->second;
+        if (ticket.purpose == PendingSourceLoadPurpose::DeferredRestore) {
+            ++pending;
+            continue;
+        }
+        if (preserve_pending_explicit_opens &&
+            ticket.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
+            ticket.activation_epoch = source_activation_epoch_;
+            ++pending;
+            continue;
+        }
+        source_load_queue_.Cancel(pending->first);
+        pending = pending_source_loads_.erase(pending);
+    }
+}
+
+void ShellUi::QueueSessionFollowUp(
+    const SourceCollectionSessionResult& result,
+    bool deferred_restore)
+{
+    if (!result.follow_up_spectrum_index) {
+        return;
+    }
+    const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
+    if (!snapshot || snapshot->source.path.empty()) {
+        return;
+    }
+    (void)QueueSourceLoad(
+        snapshot->source.path,
+        *result.follow_up_spectrum_index,
+        session_.AnnotationPathsForSource(snapshot->source.path),
+        deferred_restore ? PendingSourceLoadPurpose::DeferredRestore
+                         : PendingSourceLoadPurpose::SessionFollowUp);
+}
+
+void ShellUi::DrainSourceLoads()
+{
+    for (SourceCollectionLoadCompletion& completion : source_load_queue_.TakeCompleted()) {
+        const auto pending = pending_source_loads_.find(completion.task_id);
+        if (pending == pending_source_loads_.end()) {
+            if (completion.prepared) {
+                source_load_queue_.RetirePrepared(std::move(*completion.prepared));
+            }
+            continue;
+        }
+
+        PendingSourceLoad ticket = std::move(pending->second);
+        pending_source_loads_.erase(pending);
+        deferred_restore_task_ids_.erase(completion.task_id);
+        const auto current_generation = source_load_generations_.find(ticket.path_key);
+        const bool activation_current =
+            ticket.purpose == PendingSourceLoadPurpose::DeferredRestore ||
+            ticket.activation_epoch == source_activation_epoch_;
+        const bool current = activation_current &&
+                             current_generation != source_load_generations_.end() &&
+                             current_generation->second == ticket.generation &&
+                             SourcePathIdentityKey(completion.path) == ticket.path_key &&
+                             completion.spectrum_index == ticket.spectrum_index;
+        if (!current) {
+            if (completion.prepared) {
+                source_load_queue_.RetirePrepared(std::move(*completion.prepared));
+            }
+            continue;
+        }
+        if (!completion.prepared) {
+            source_load_error_ = completion.error_message.empty()
+                ? "Background source loading failed."
+                : std::move(completion.error_message);
+            continue;
+        }
+
+        PreparedSourceCollection prepared = std::move(*completion.prepared);
+        if (session_view_cache_) {
+            source_load_queue_.RetireResource(
+                std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
+            session_view_cache_.reset();
+        }
+        std::vector<SpectrumValueVector> plot_resources =
+            spectrum_view_session_.RetainHeavySnapshotResources();
+        SourceCollectionSessionResult result = session_.OpenPreparedSource(
+            prepared.path,
+            prepared.spectrum_index,
+            std::move(prepared.snapshot),
+            std::move(prepared.payload));
+        session_view_cache_dirty_ = true;
+        HandleSessionAction(result.action);
+        for (BackgroundRetirementHandle& resource : result.background_retirement) {
+            source_load_queue_.RetireResource(std::move(resource));
+        }
+        for (SpectrumValueVector& resource : plot_resources) {
+            source_load_queue_.RetireResource(std::move(resource));
+        }
+        if (!result.loaded) {
+            source_load_error_ = result.message.empty()
+                ? "The prepared source result was no longer applicable."
+                : std::move(result.message);
+        } else {
+            source_load_error_.clear();
+        }
+        if (result.follow_up_spectrum_index) {
+            (void)QueueSourceLoad(
+                ticket.path,
+                *result.follow_up_spectrum_index,
+                session_.AnnotationPathsForSource(ticket.path),
+                ticket.purpose == PendingSourceLoadPurpose::DeferredRestore
+                    ? PendingSourceLoadPurpose::DeferredRestore
+                    : PendingSourceLoadPurpose::SessionFollowUp);
+        }
+        RestoreDeferredActiveSourceIfAvailable();
+    }
+    FinishDeferredSourceRestoreIfReady();
+}
+
+void ShellUi::BeginDeferredSourceRestore()
+{
+    std::optional<SourceCollectionDeferredRestorePlan> plan =
+        session_.TakeDeferredRestorePlan();
+    if (!plan || plan->sources.empty()) {
+        return;
+    }
+
+    deferred_restore_active_ = true;
+    if (plan->active_source_index && *plan->active_source_index < plan->sources.size()) {
+        deferred_restore_active_path_ = plan->sources[*plan->active_source_index].path;
+    }
+
+    std::vector<SourceCollectionLoadRequest> requests;
+    std::vector<PendingSourceLoad> tickets;
+    requests.reserve(plan->sources.size());
+    tickets.reserve(plan->sources.size());
+    for (SourceCollectionSavedSource& source : plan->sources) {
+        const std::string path_key = SourcePathIdentityKey(source.path);
+        const std::uint64_t generation = ++source_load_generations_[path_key];
+        tickets.push_back(PendingSourceLoad{
+            .path = source.path,
+            .path_key = path_key,
+            .spectrum_index = source.last_spectrum_index,
+            .generation = generation,
+            .activation_epoch = source_activation_epoch_,
+            .purpose = PendingSourceLoadPurpose::DeferredRestore,
+        });
+        requests.push_back(SourceCollectionLoadRequest{
+            .path = std::move(source.path),
+            .spectrum_index = source.last_spectrum_index,
+            .annotation_paths = std::move(source.annotation_paths),
+        });
+    }
+    const std::vector<std::uint64_t> task_ids =
+        source_load_queue_.EnqueueBatch(std::move(requests));
+    for (std::size_t index = 0; index < task_ids.size(); ++index) {
+        pending_source_loads_.emplace(task_ids[index], std::move(tickets[index]));
+        deferred_restore_task_ids_.insert(task_ids[index]);
+    }
+    source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
+}
+
+void ShellUi::FinishDeferredSourceRestoreIfReady()
+{
+    if (!deferred_restore_active_ || !deferred_restore_task_ids_.empty()) {
+        return;
+    }
+    RestoreDeferredActiveSourceIfAvailable();
+    session_.FinishDeferredRestore();
+    deferred_restore_active_ = false;
+    deferred_restore_active_path_.reset();
+}
+
+void ShellUi::RestoreDeferredActiveSourceIfAvailable()
+{
+    if (!deferred_restore_active_ || !deferred_restore_active_path_) {
+        return;
+    }
+    const std::string active_path_key =
+        SourcePathIdentityKey(*deferred_restore_active_path_);
+    const SourceCollectionSessionView& view = SessionView();
+    for (std::size_t index = 0; index < view.sources.size(); ++index) {
+        if (SourcePathIdentityKey(view.sources[index].path) != active_path_key) {
+            continue;
+        }
+        if (view.current_source_index && *view.current_source_index == index) {
+            return;
+        }
+        SourceCollectionSessionResult result = session_.Submit(
+            SourceCollectionSessionIntent::EditSourceCollection(
+                SourceCollectionIntent::SwitchActive(index)));
+        RetireSessionResources(result);
+        session_view_cache_dirty_ = true;
+        HandleSessionAction(result.action);
+        QueueSessionFollowUp(result, true);
+        return;
+    }
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
@@ -688,6 +972,11 @@ void ShellUi::OpenAnnotationFromFilePicker()
 const SourceCollectionSessionView& ShellUi::SessionView()
 {
     if (!session_view_cache_ || session_view_cache_dirty_) {
+        if (session_view_cache_) {
+            source_load_queue_.RetireResource(
+                std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
+            session_view_cache_.reset();
+        }
         session_view_cache_ = session_.View();
         session_view_cache_dirty_ = false;
     }
@@ -696,7 +985,18 @@ const SourceCollectionSessionView& ShellUi::SessionView()
 
 SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionIntent command)
 {
+    if (command.SupersedesPendingSourceActivation()) {
+        BeginSourceActivationIntent(false);
+    }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    if (deferred_restore_active_) {
+        const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
+        if (snapshot && !snapshot->source.path.empty()) {
+            deferred_restore_active_path_ = snapshot->source.path;
+        }
+    }
+    QueueSessionFollowUp(result);
+    RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     HandleSessionAction(result.action);
     return result;
@@ -704,9 +1004,28 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSess
 
 SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(SourceCollectionSessionIntent command)
 {
+    if (command.SupersedesPendingSourceActivation()) {
+        BeginSourceActivationIntent(false);
+    }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    if (deferred_restore_active_) {
+        const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
+        if (snapshot && !snapshot->source.path.empty()) {
+            deferred_restore_active_path_ = snapshot->source.path;
+        }
+    }
+    QueueSessionFollowUp(result);
+    RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     return result;
+}
+
+void ShellUi::RetireSessionResources(SourceCollectionSessionResult& result)
+{
+    for (BackgroundRetirementHandle& resource : result.background_retirement) {
+        source_load_queue_.RetireResource(std::move(resource));
+    }
+    result.background_retirement.clear();
 }
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
@@ -759,7 +1078,11 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
 
     ImGui::DockSpace(dockspace_id, dockspace_size, ImGuiDockNodeFlags_None);
     ImGui::SetCursorScreenPos(ImVec2(content_origin.x, content_origin.y + dockspace_size.y));
-    RenderStatusBar(status, ImVec2(content_size.x, status_bar_height));
+    RenderStatusBar(
+        status,
+        ImVec2(content_size.x, status_bar_height),
+        source_load_queue_.NeedsService(),
+        source_load_error_);
 
     ImGui::End();
 }
@@ -878,15 +1201,15 @@ void ShellUi::RenderFilesPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
-        [this]() -> const SourceCollectionSessionView& {
-            return SessionView();
-        },
         &panel_visibility_.files,
         []() {
             return ShowSourceFilePicker();
         },
         []() {
             return ShowSourceFolderPicker();
+        },
+        [this](const std::filesystem::path& path) {
+            OpenSource(path);
         }));
 }
 

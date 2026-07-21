@@ -17,6 +17,7 @@ struct SourceCollectionRosterRemoveResult {
     bool removed = false;
     bool removed_current = false;
     std::string removed_source_key;
+    std::vector<SpectrumSnapshotHandle> retired_snapshots;
 };
 
 struct SourceCollectionRosterPreparedOpenResult {

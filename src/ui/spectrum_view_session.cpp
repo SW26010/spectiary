@@ -174,6 +174,19 @@ bool SpectrumViewSession::PlotPanActive() const
     return plot_state_.pan_drag_active;
 }
 
+std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResources() const
+{
+    std::vector<SpectrumValueVector> resources;
+    resources.reserve(2);
+    if (plot_state_.smoothing_cache_source) {
+        resources.push_back(plot_state_.smoothing_cache_source);
+    }
+    if (plot_state_.smoothed_y_values) {
+        resources.push_back(plot_state_.smoothed_y_values);
+    }
+    return resources;
+}
+
 void SpectrumViewSession::ResetForSnapshotChange()
 {
     const bool show_points = plot_state_.show_points;

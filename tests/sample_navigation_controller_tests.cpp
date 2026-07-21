@@ -537,7 +537,7 @@ void TestRemoveSourceUsesExternalSourceKey()
     controller.ActivateSource("source-list-key", MakeSnapshot(path, "file:any-path", 2, 1));
     Require(controller.current_index() && *controller.current_index() == 1, "test source should activate");
 
-    controller.RemoveSource("source-list-key");
+    (void)controller.RemoveSource("source-list-key");
     Require(!controller.current_index(), "removed source should clear the active session");
     const specforge::SampleNavigationResult result =
         controller.Navigate(specforge::SampleNavigationRequest::Previous());

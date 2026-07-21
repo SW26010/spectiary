@@ -218,6 +218,12 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
     result.removed = true;
     result.removed_current = current_source_index_ && *current_source_index_ == source_index;
     result.removed_source_key = sources_[source_index].key;
+    if (sources_[source_index].cached_snapshot) {
+        result.retired_snapshots.push_back(std::move(sources_[source_index].cached_snapshot));
+    }
+    if (result.removed_current && snapshot_) {
+        result.retired_snapshots.push_back(std::move(snapshot_));
+    }
     std::optional<std::size_t> next_current_index;
     if (result.removed_current && sources_.size() > 1) {
         next_current_index = source_index + 1 < sources_.size() ? source_index : source_index - 1;

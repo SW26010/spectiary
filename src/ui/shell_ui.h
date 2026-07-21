@@ -8,6 +8,7 @@
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_session.h"
+#include "ui/source_collection_load_queue.h"
 #include "ui/spectrum_view_session.h"
 
 #include <imgui.h>
@@ -17,6 +18,8 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -75,7 +78,38 @@ private:
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(SourceCollectionSessionIntent command);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
 
+    enum class PendingSourceLoadPurpose {
+        ExplicitOpen,
+        SessionFollowUp,
+        DeferredRestore,
+    };
+
+    [[nodiscard]] std::uint64_t QueueSourceLoad(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        std::vector<std::filesystem::path> annotation_paths,
+        PendingSourceLoadPurpose purpose);
+    void BeginSourceActivationIntent(bool preserve_pending_explicit_opens);
+    void QueueSessionFollowUp(
+        const SourceCollectionSessionResult& result,
+        bool deferred_restore = false);
+    void RetireSessionResources(SourceCollectionSessionResult& result);
+    void DrainSourceLoads();
+    void BeginDeferredSourceRestore();
+    void RestoreDeferredActiveSourceIfAvailable();
+    void FinishDeferredSourceRestoreIfReady();
+
+    struct PendingSourceLoad {
+        std::filesystem::path path;
+        std::string path_key;
+        std::size_t spectrum_index = 0;
+        std::uint64_t generation = 0;
+        std::uint64_t activation_epoch = 0;
+        PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
+    };
+
     SourceCollectionSession session_;
+    SourceCollectionLoadQueue source_load_queue_;
     SpectrumViewSession spectrum_view_session_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
@@ -91,6 +125,14 @@ private:
     // SessionView() can derive state across every sample; retain it until a session mutation.
     std::optional<SourceCollectionSessionView> session_view_cache_;
     bool session_view_cache_dirty_ = false;
+    std::unordered_map<std::uint64_t, PendingSourceLoad> pending_source_loads_;
+    std::unordered_map<std::string, std::uint64_t> source_load_generations_;
+    std::unordered_set<std::uint64_t> deferred_restore_task_ids_;
+    std::optional<std::filesystem::path> deferred_restore_active_path_;
+    mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
+    std::string source_load_error_;
+    std::uint64_t source_activation_epoch_ = 0;
+    bool deferred_restore_active_ = false;
 };
 
 }  // namespace specforge

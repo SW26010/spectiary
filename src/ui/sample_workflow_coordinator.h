@@ -84,7 +84,7 @@ public:
     [[nodiscard]] SourceCollectionSessionAction ClearActiveWorkflow();
     void BeginRestoringSourceSession();
     void EndRestoringSourceSession();
-    void RemoveSource(std::string_view source_key);
+    [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
     void DiscardPreparedViewCaches();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
@@ -258,8 +258,10 @@ private:
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
     std::optional<LabelUndoHistory> label_undo_history_;
-    std::optional<SourceCollectionFilterView> prepared_filter_view_;
-    std::optional<SourceCollectionSampleSortingView> prepared_sorting_view_;
+    // One-shot prepared projections are moved into the Shell session-view
+    // cache on first presentation, avoiding an O(N) UI-thread copy.
+    mutable std::optional<SourceCollectionFilterView> prepared_filter_view_;
+    mutable std::optional<SourceCollectionSampleSortingView> prepared_sorting_view_;
 };
 
 }  // namespace specforge

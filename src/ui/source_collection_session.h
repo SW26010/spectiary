@@ -32,8 +32,6 @@ enum class SourceCollectionSessionRestoreMode {
 struct SourceCollectionLoadHint {
     SourceCollectionIdentity identity;
     std::size_t spectrum_index = 0;
-    std::optional<SampleWorkflowSourceState> workflow_state;
-    std::optional<SampleLabelingSourceState> labeling_state;
 };
 
 enum class SourceCollectionSessionIntentKind {
@@ -45,7 +43,7 @@ enum class SourceCollectionSessionIntentKind {
 };
 
 enum class SourceCollectionIntentKind {
-    Open,
+    OpenSynchronously,
     SwitchActive,
     Remove,
     AddReadOnlyAnnotationResult,
@@ -91,7 +89,9 @@ enum class SampleSortingIntentKind {
 };
 
 struct SourceCollectionIntent {
-    [[nodiscard]] static SourceCollectionIntent Open(
+    // Compatibility path for headless/session callers. Interactive UI code
+    // must enqueue a PreparedSourceCollection instead.
+    [[nodiscard]] static SourceCollectionIntent OpenSynchronously(
         std::filesystem::path path,
         std::size_t spectrum_index = 0);
     [[nodiscard]] static SourceCollectionIntent SwitchActive(std::size_t source_index);
@@ -108,7 +108,7 @@ private:
 
     SourceCollectionIntent() = default;
 
-    SourceCollectionIntentKind kind = SourceCollectionIntentKind::Open;
+    SourceCollectionIntentKind kind = SourceCollectionIntentKind::OpenSynchronously;
     std::filesystem::path path;
     std::string display_name;
     std::size_t spectrum_index = 0;
@@ -214,6 +214,10 @@ struct SourceCollectionSessionIntent {
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent);
 
+    // A newer explicit source selection supersedes background work that was
+    // prepared for the previously active source.
+    [[nodiscard]] bool SupersedesPendingSourceActivation() const;
+
 private:
     friend class SourceCollectionSession;
 
@@ -285,7 +289,7 @@ public:
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSource(
         const std::filesystem::path& path) const;
     [[nodiscard]] std::optional<SourceCollectionLoadHint> LoadHintForSource(
-        const std::filesystem::path& path);
+        const std::filesystem::path& path) const;
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,
@@ -312,7 +316,9 @@ private:
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
-    [[nodiscard]] SourceCollectionSessionAction RemoveSource(std::size_t source_index);
+    [[nodiscard]] SourceCollectionSessionAction RemoveSource(
+        std::size_t source_index,
+        std::vector<BackgroundRetirementHandle>& background_retirement);
     [[nodiscard]] SourceCollectionSessionAction RequestSampleNavigation(
         const SampleNavigationRequest& request,
         SampleNavigationResult* navigation_result = nullptr);

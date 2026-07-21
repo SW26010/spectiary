@@ -340,7 +340,7 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::active_sourc
     };
 }
 
-void SampleNavigationController::RemoveSource(std::string_view source_key)
+BackgroundRetirementHandle SampleNavigationController::RemoveSource(std::string_view source_key)
 {
     const std::string external_key(source_key);
     std::string session_key = external_key;
@@ -350,10 +350,15 @@ void SampleNavigationController::RemoveSource(std::string_view source_key)
         source_key_to_session_key_.erase(mapped);
     }
 
-    sessions_.erase(session_key);
+    BackgroundRetirementHandle retired;
+    auto removed = sessions_.extract(session_key);
+    if (!removed.empty()) {
+        retired = MakeBackgroundRetirementHandle(std::move(removed.mapped()));
+    }
     if (active_source_key_ && *active_source_key_ == session_key) {
         active_source_key_.reset();
     }
+    return retired;
 }
 
 void SampleNavigationController::ClearActiveSource()

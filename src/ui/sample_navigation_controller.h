@@ -91,7 +91,7 @@ public:
     [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
         std::string_view source_key) const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> active_source_identity() const;
-    void RemoveSource(std::string_view source_key);
+    [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
     void ClearActiveSource();
     [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,

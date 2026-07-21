@@ -425,11 +425,12 @@ void SampleWorkflowCoordinator::EndRestoringSourceSession()
     restoring_source_session_ = false;
 }
 
-void SampleWorkflowCoordinator::RemoveSource(std::string_view source_key)
+BackgroundRetirementHandle SampleWorkflowCoordinator::RemoveSource(std::string_view source_key)
 {
-    navigation_.RemoveSource(source_key);
+    BackgroundRetirementHandle retired = navigation_.RemoveSource(source_key);
     workflow_sources_.InvalidateFilterViewCache();
     workflow_sources_.InvalidateSortingSourceCache();
+    return retired;
 }
 
 void SampleWorkflowCoordinator::DiscardPreparedViewCaches()
@@ -1233,9 +1234,13 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
 
 SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumSnapshotHandle& snapshot) const
 {
-    SourceCollectionFilterView view = prepared_filter_view_
-        ? *prepared_filter_view_
-        : workflow_sources_.BuildFilterView(SourcePolicyContext(snapshot));
+    SourceCollectionFilterView view;
+    if (prepared_filter_view_) {
+        view = std::move(*prepared_filter_view_);
+        prepared_filter_view_.reset();
+    } else {
+        view = workflow_sources_.BuildFilterView(SourcePolicyContext(snapshot));
+    }
     view.has_active_source = snapshot && !snapshot->source.path.empty() && view.sample_count > 0;
     view.navigation_filter_active = navigation_.filter_active();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
@@ -1245,9 +1250,13 @@ SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumS
 SourceCollectionSampleSortingView SampleWorkflowCoordinator::SortingView(
     const SpectrumSnapshotHandle& snapshot) const
 {
-    SourceCollectionSampleSortingView view = prepared_sorting_view_
-        ? *prepared_sorting_view_
-        : workflow_sources_.BuildSortingView(SourcePolicyContext(snapshot));
+    SourceCollectionSampleSortingView view;
+    if (prepared_sorting_view_) {
+        view = std::move(*prepared_sorting_view_);
+        prepared_sorting_view_.reset();
+    } else {
+        view = workflow_sources_.BuildSortingView(SourcePolicyContext(snapshot));
+    }
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     return view;
 }
