@@ -463,22 +463,105 @@ std::vector<BackgroundRetirementHandle> SampleWorkflowCoordinator::ReleaseBackgr
     return resources;
 }
 
+void SampleWorkflowCoordinator::SetDeferredSampleNavigation(bool enabled)
+{
+    deferred_sample_navigation_ = enabled;
+    if (!enabled) {
+        CancelDeferredSampleNavigation();
+    }
+}
+
+bool SampleWorkflowCoordinator::CommitDeferredSampleNavigation(std::size_t spectrum_index)
+{
+    const bool remember_labeling_position =
+        navigation_.pending_navigation_remembers_labeling_position();
+    if (!navigation_.CommitDeferredNavigation(spectrum_index)) {
+        return false;
+    }
+    if (remember_labeling_position) {
+        (void)labeling_.RememberActivePosition(spectrum_index);
+    }
+    return true;
+}
+
+bool SampleWorkflowCoordinator::RetargetDeferredSampleNavigation(std::size_t spectrum_index)
+{
+    return navigation_.RetargetDeferredNavigation(spectrum_index);
+}
+
+void SampleWorkflowCoordinator::CompletePreparedDeferredSampleNavigation(
+    const PendingSampleNavigation& pending)
+{
+    const std::optional<SourceCollectionIdentity> active_identity =
+        navigation_.active_source_identity();
+    if (active_identity && active_identity->id == pending.source_identity.id &&
+        navigation_.current_index() == pending.spectrum_index &&
+        pending.remember_labeling_position) {
+        (void)labeling_.RememberActivePosition(pending.spectrum_index);
+    }
+}
+
+void SampleWorkflowCoordinator::CancelDeferredSampleNavigation()
+{
+    navigation_.CancelDeferredNavigation();
+}
+
+std::optional<std::size_t> SampleWorkflowCoordinator::pending_sample_index() const
+{
+    return navigation_.pending_index();
+}
+
+std::optional<PendingSampleNavigation> SampleWorkflowCoordinator::pending_sample_navigation() const
+{
+    const std::optional<SourceCollectionIdentity> identity = navigation_.active_source_identity();
+    const std::optional<std::size_t> index = navigation_.pending_index();
+    if (!identity || !index) {
+        return std::nullopt;
+    }
+    return PendingSampleNavigation{
+        *identity,
+        *index,
+        navigation_.pending_navigation_remembers_labeling_position(),
+    };
+}
+
 SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
     const SampleNavigationRequest& request,
-    const SpectrumSnapshotHandle& snapshot)
+    const SpectrumSnapshotHandle& snapshot,
+    std::optional<std::size_t> deferred_base_index)
 {
     SampleWorkflowCommandResult result;
-    result.navigation = navigation_.Navigate(request);
-    if (result.navigation.has_active_source && result.navigation.target_found &&
-        ShouldRememberLabelingPosition(request.kind)) {
-        (void)labeling_.RememberActivePosition(result.navigation.current_index);
-    }
+    const std::optional<std::size_t> pending_index_before = navigation_.pending_index();
+    result.navigation = deferred_sample_navigation_
+        ? navigation_.NavigateDeferred(
+              request,
+              ShouldRememberLabelingPosition(request.kind),
+              deferred_base_index)
+        : navigation_.Navigate(request);
     if (result.navigation.has_active_source && result.navigation.target_found) {
-        if (!snapshot || snapshot->collection.current_index != result.navigation.current_index) {
-            result.snapshot_index_to_load = result.navigation.current_index;
+        if (!deferred_sample_navigation_ && ShouldRememberLabelingPosition(request.kind)) {
+            (void)labeling_.RememberActivePosition(result.navigation.current_index);
+        }
+    }
+    if (!result.navigation.has_active_source || !result.navigation.target_found) {
+        return result;
+    }
+
+    if (deferred_sample_navigation_) {
+        const std::optional<std::size_t> pending_index_after = navigation_.pending_index();
+        if (pending_index_after == pending_index_before) {
+            return result;
+        }
+        if (pending_index_after &&
+            (!snapshot || snapshot->collection.current_index != *pending_index_after)) {
+            result.snapshot_index_to_load = pending_index_after;
         } else {
             result.action.navigation_inputs_changed = true;
         }
+    } else if (!snapshot || snapshot->collection.current_index != result.navigation.current_index) {
+        result.snapshot_index_to_load = result.navigation.current_index;
+    } else {
+        result.action.navigation_inputs_changed = true;
     }
     return result;
 }
@@ -1117,10 +1200,8 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     view.current_sequence_position = sequence.current_sequence_position;
     view.sample_count = navigation_.spectrum_count().value_or(snapshot ? snapshot->collection.spectrum_count : 0);
     view.has_active_source = snapshot && !snapshot->source.path.empty() && view.sample_count > 0;
-    view.can_move_previous = sequence.previous_target && sequence.current_source_row &&
-                             *sequence.previous_target != *sequence.current_source_row;
-    view.can_move_next = sequence.next_target && sequence.current_source_row &&
-                         *sequence.next_target != *sequence.current_source_row;
+    view.can_move_previous = navigation_.can_move_previous();
+    view.can_move_next = navigation_.can_move_next();
     view.filter_active = navigation_.filter_active();
     view.current_sample_in_filter = navigation_.current_sample_in_filter();
     view.sequence_active = sequence.active;
@@ -1388,17 +1469,17 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleFilters(const S
     workflow_sources_.InvalidateFilterViewCache();
     const std::size_t sample_count = ActiveSampleCount(snapshot);
     if (sample_count == 0) {
-        return navigation_.ClearSampleFilter();
+        return navigation_.ClearSampleFilter(deferred_sample_navigation_);
     }
     if (!workflow_sources_.has_filter_conditions()) {
-        return navigation_.ClearSampleFilter();
+        return navigation_.ClearSampleFilter(deferred_sample_navigation_);
     }
 
     const SampleFilterEvaluation evaluation = workflow_sources_.EvaluateFilters(SourcePolicyContext(snapshot));
     if (evaluation.active) {
-        return navigation_.SetSampleFilter(evaluation.included_samples);
+        return navigation_.SetSampleFilter(evaluation.included_samples, deferred_sample_navigation_);
     }
-    return navigation_.ClearSampleFilter();
+    return navigation_.ClearSampleFilter(deferred_sample_navigation_);
 }
 
 std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleSorting(
@@ -1410,10 +1491,12 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleSorting(
         MarkActiveWorkflowStateDirty();
     }
     if (!sort_choice.choice) {
-        return navigation_.ClearSampleSorting();
+        return navigation_.ClearSampleSorting(deferred_sample_navigation_);
     }
 
-    return navigation_.SetSampleSorting(std::move(*sort_choice.choice));
+    return navigation_.SetSampleSorting(
+        std::move(*sort_choice.choice),
+        deferred_sample_navigation_);
 }
 
 std::size_t SampleWorkflowCoordinator::ActiveSampleCount(const SpectrumSnapshotHandle& snapshot) const
@@ -1589,8 +1672,10 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
         command_result.navigation = navigation_result.navigation;
         command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;
     } else if (result.advance_requested && task != nullptr) {
-        const SampleWorkflowCommandResult navigation_result =
-            RequestSampleNavigation(BuildAutoAdvanceRequest(*task), snapshot);
+        const SampleWorkflowCommandResult navigation_result = RequestSampleNavigation(
+            BuildAutoAdvanceRequest(*task),
+            snapshot,
+            result.sample_index);
         MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
         command_result.navigation = navigation_result.navigation;
         command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;

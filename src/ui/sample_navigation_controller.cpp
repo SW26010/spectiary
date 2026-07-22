@@ -48,6 +48,50 @@ std::vector<std::filesystem::path> AnnotationPaths(const SourceCollectionManifes
     return paths;
 }
 
+std::optional<std::size_t> ResolveNavigationTarget(
+    const SampleNavigationRequest& request,
+    const SampleNavigationSequence& sequence,
+    const SourceCollectionManifest& manifest,
+    std::size_t spectrum_count,
+    bool filter_active,
+    bool& blocked_by_filter)
+{
+    switch (request.kind) {
+    case SampleNavigationRequestKind::Previous:
+        return sequence.previous_target;
+    case SampleNavigationRequestKind::Next:
+        return sequence.next_target;
+    case SampleNavigationRequestKind::LabelAdvance:
+        return sequence.LabelAdvanceTarget(request.eligible_samples);
+    case SampleNavigationRequestKind::LocateRow: {
+        const std::optional<std::size_t> target = sequence.LocateSourceRow(request.row_index);
+        if (!target && request.row_index < spectrum_count && !sequence.row_location_available) {
+            blocked_by_filter = filter_active;
+        }
+        return target;
+    }
+    case SampleNavigationRequestKind::LocateSourceRowInSequence: {
+        const std::optional<std::size_t> target = sequence.LocateSourceRowInSequence(request.row_index);
+        if (!target && request.row_index < spectrum_count && sequence.active) {
+            blocked_by_filter = filter_active;
+        }
+        return target;
+    }
+    case SampleNavigationRequestKind::LocateSampleName:
+        return sequence.LocateSampleName(manifest.sample_names, request.sample_name);
+    case SampleNavigationRequestKind::LocateSampleNameMatch:
+        return sequence.LocateSampleNameMatch(
+            manifest.sample_names,
+            request.row_index,
+            request.sample_name);
+    case SampleNavigationRequestKind::RestoreLabelUndoPosition:
+        return request.row_index < spectrum_count
+            ? std::optional<std::size_t>{request.row_index}
+            : std::nullopt;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 SampleNavigationRequest SampleNavigationRequest::Previous()
@@ -453,46 +497,13 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
         return result;
     }
 
-    std::optional<std::size_t> target_index;
-    switch (request.kind) {
-    case SampleNavigationRequestKind::Previous:
-        target_index = sequence.previous_target;
-        break;
-    case SampleNavigationRequestKind::Next:
-        target_index = sequence.next_target;
-        break;
-    case SampleNavigationRequestKind::LabelAdvance:
-        target_index = sequence.LabelAdvanceTarget(request.eligible_samples);
-        break;
-    case SampleNavigationRequestKind::LocateRow:
-        target_index = sequence.LocateSourceRow(request.row_index);
-        if (!target_index && request.row_index < session->spectrum_count && !sequence.row_location_available) {
-            result.blocked_by_filter = session->filter_active;
-        }
-        break;
-    case SampleNavigationRequestKind::LocateSourceRowInSequence:
-        target_index = sequence.LocateSourceRowInSequence(request.row_index);
-        if (!target_index && request.row_index < session->spectrum_count && sequence.active) {
-            result.blocked_by_filter = session->filter_active;
-        }
-        break;
-    case SampleNavigationRequestKind::LocateSampleName:
-        target_index = sequence.LocateSampleName(session->manifest.sample_names, request.sample_name);
-        break;
-    case SampleNavigationRequestKind::LocateSampleNameMatch:
-        target_index = sequence.LocateSampleNameMatch(
-            session->manifest.sample_names,
-            request.row_index,
-            request.sample_name);
-        break;
-    case SampleNavigationRequestKind::RestoreLabelUndoPosition:
-        if (request.row_index < session->spectrum_count) {
-            target_index = request.row_index;
-        }
-        break;
-    default:
-        break;
-    }
+    const std::optional<std::size_t> target_index = ResolveNavigationTarget(
+        request,
+        sequence,
+        session->manifest,
+        session->spectrum_count,
+        session->filter_active,
+        result.blocked_by_filter);
 
     if (!target_index) {
         return result;
@@ -500,12 +511,107 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 
     result.target_found = true;
     session->current_index = *target_index;
+    session->pending_index.reset();
+    session->pending_navigation_remembers_labeling_position = false;
     InvalidateSequence(*session);
     result.current_index = *session->current_index;
     result.moved = result.current_index != result.previous_index;
     PopulateResultFromSequence(result, *session, CachedSequence(*session));
     PersistActiveIndex();
     return result;
+}
+
+SampleNavigationResult SampleNavigationController::NavigateDeferred(
+    const SampleNavigationRequest& request,
+    bool remember_labeling_position,
+    std::optional<std::size_t> base_index)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr) {
+        return {};
+    }
+
+    if (!base_index) {
+        base_index = session->pending_index ? session->pending_index : session->current_index;
+    }
+    SampleNavigationResult result;
+    result.has_active_source = true;
+    result.previous_index = base_index.value_or(0);
+    result.current_index = base_index.value_or(0);
+    const SampleNavigationSequence sequence = BuildSequence(*session, base_index);
+    PopulateResultFromSequence(result, *session, sequence);
+    if (session->spectrum_count == 0) {
+        return result;
+    }
+
+    std::optional<std::size_t> target_index = ResolveNavigationTarget(
+        request,
+        sequence,
+        session->manifest,
+        session->spectrum_count,
+        session->filter_active,
+        result.blocked_by_filter);
+    if (!target_index && request.kind == SampleNavigationRequestKind::LabelAdvance &&
+        session->pending_index && session->pending_index != base_index &&
+        sequence.ContainsSourceRow(*session->pending_index) &&
+        (request.eligible_samples.empty() ||
+         (*session->pending_index < request.eligible_samples.size() &&
+          request.eligible_samples[*session->pending_index]))) {
+        target_index = session->pending_index;
+    }
+    if (!target_index) {
+        return result;
+    }
+
+    result.target_found = true;
+    result.moved = *target_index != result.previous_index;
+    if (session->current_index && *target_index == *session->current_index) {
+        session->pending_index.reset();
+        session->pending_navigation_remembers_labeling_position = false;
+    } else if (session->pending_index != target_index) {
+        session->pending_index = *target_index;
+        session->pending_navigation_remembers_labeling_position = remember_labeling_position;
+    } else {
+        session->pending_navigation_remembers_labeling_position =
+            session->pending_navigation_remembers_labeling_position || remember_labeling_position;
+    }
+    const SampleNavigationSequence target_sequence = BuildSequence(*session, *target_index);
+    PopulateResultFromSequence(result, *session, target_sequence);
+    result.current_index = *target_index;
+    return result;
+}
+
+bool SampleNavigationController::RetargetDeferredNavigation(std::size_t spectrum_index)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || !session->pending_index) {
+        return false;
+    }
+    session->pending_index = spectrum_index;
+    return true;
+}
+
+bool SampleNavigationController::CommitDeferredNavigation(std::size_t spectrum_index)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr || session->pending_index != spectrum_index) {
+        return false;
+    }
+
+    session->current_index = spectrum_index;
+    session->pending_index.reset();
+    session->pending_navigation_remembers_labeling_position = false;
+    InvalidateSequence(*session);
+    PersistActiveIndex();
+    return true;
+}
+
+void SampleNavigationController::CancelDeferredNavigation()
+{
+    if (SourceSession* session = ActiveSession()) {
+        session->pending_index.reset();
+        session->pending_navigation_remembers_labeling_position = false;
+    }
 }
 
 std::optional<std::size_t> SampleNavigationController::current_index() const
@@ -515,6 +621,19 @@ std::optional<std::size_t> SampleNavigationController::current_index() const
         return std::nullopt;
     }
     return session->current_index;
+}
+
+std::optional<std::size_t> SampleNavigationController::pending_index() const
+{
+    const SourceSession* session = ActiveSession();
+    return session == nullptr ? std::nullopt : session->pending_index;
+}
+
+bool SampleNavigationController::pending_navigation_remembers_labeling_position() const
+{
+    const SourceSession* session = ActiveSession();
+    return session != nullptr && session->pending_index &&
+           session->pending_navigation_remembers_labeling_position;
 }
 
 std::optional<std::size_t> SampleNavigationController::spectrum_count() const
@@ -532,8 +651,9 @@ bool SampleNavigationController::can_move_previous() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    const SampleNavigationSequence& sequence = CachedSequence(*session);
-    return sequence.previous_target && session->current_index && *sequence.previous_target != *session->current_index;
+    const SampleNavigationSequence& sequence = InteractionSequence(*session);
+    return sequence.previous_target && sequence.current_source_row &&
+           *sequence.previous_target != *sequence.current_source_row;
 }
 
 bool SampleNavigationController::can_move_next() const
@@ -542,18 +662,21 @@ bool SampleNavigationController::can_move_next() const
     if (session == nullptr || session->spectrum_count == 0) {
         return false;
     }
-    const SampleNavigationSequence& sequence = CachedSequence(*session);
-    return sequence.next_target && session->current_index && *sequence.next_target != *session->current_index;
+    const SampleNavigationSequence& sequence = InteractionSequence(*session);
+    return sequence.next_target && sequence.current_source_row &&
+           *sequence.next_target != *sequence.current_source_row;
 }
 
-std::optional<std::size_t> SampleNavigationController::SetSampleFilter(std::vector<bool> included_samples)
+std::optional<std::size_t> SampleNavigationController::SetSampleFilter(
+    std::vector<bool> included_samples,
+    bool defer_navigation)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
         return std::nullopt;
     }
     if (included_samples.size() != session->spectrum_count) {
-        return ClearSampleFilter();
+        return ClearSampleFilter(defer_navigation);
     }
 
     const std::optional<std::size_t> previous_index = session->current_index;
@@ -566,8 +689,13 @@ std::optional<std::size_t> SampleNavigationController::SetSampleFilter(std::vect
         session->filter_included_samples.begin(),
         session->filter_included_samples.end(),
         true));
-    (void)ReconcileCurrentWithSequence(*session);
+    const std::optional<std::size_t> deferred_target = defer_navigation
+        ? ReconcileDeferredWithSequence(*session)
+        : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (defer_navigation) {
+        return deferred_target;
+    }
     if (session->current_index != previous_index) {
         PersistActiveIndex();
         return session->current_index;
@@ -575,24 +703,34 @@ std::optional<std::size_t> SampleNavigationController::SetSampleFilter(std::vect
     return std::nullopt;
 }
 
-std::optional<std::size_t> SampleNavigationController::ClearSampleFilter()
+std::optional<std::size_t> SampleNavigationController::ClearSampleFilter(bool defer_navigation)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
         return std::nullopt;
     }
     const std::optional<std::size_t> previous_index = session->current_index;
+    const std::optional<std::size_t> restored_index =
+        session->index_before_active_filter &&
+            *session->index_before_active_filter < session->spectrum_count
+        ? session->index_before_active_filter
+        : std::nullopt;
     session->filter_active = false;
     session->filter_included_samples.clear();
     session->filtered_sample_count = 0;
-    if (session->index_before_active_filter && *session->index_before_active_filter < session->spectrum_count) {
-        session->current_index = *session->index_before_active_filter;
-    } else if (!session->current_index && session->spectrum_count > 0) {
+    if (!defer_navigation && restored_index) {
+        session->current_index = *restored_index;
+    } else if (!defer_navigation && !session->current_index && session->spectrum_count > 0) {
         session->current_index = 0;
     }
     session->index_before_active_filter.reset();
-    (void)ReconcileCurrentWithSequence(*session);
+    const std::optional<std::size_t> deferred_target = defer_navigation
+        ? ReconcileDeferredWithSequence(*session, restored_index)
+        : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (defer_navigation) {
+        return deferred_target;
+    }
     if (session->current_index != previous_index) {
         PersistActiveIndex();
         return session->current_index;
@@ -626,18 +764,24 @@ bool SampleNavigationController::current_sample_in_filter() const
 }
 
 std::optional<std::size_t> SampleNavigationController::SetSampleSorting(
-    SampleNavigationSortChoice sort_choice)
+    SampleNavigationSortChoice sort_choice,
+    bool defer_navigation)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr || sort_choice.values.size() != session->spectrum_count) {
-        return ClearSampleSorting();
+        return ClearSampleSorting(defer_navigation);
     }
 
     const std::optional<std::size_t> previous_index = session->current_index;
     session->sort_choice = std::move(sort_choice);
     session->sort_choice.active = true;
-    (void)ReconcileCurrentWithSequence(*session);
+    const std::optional<std::size_t> deferred_target = defer_navigation
+        ? ReconcileDeferredWithSequence(*session)
+        : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (defer_navigation) {
+        return deferred_target;
+    }
     if (session->current_index != previous_index) {
         PersistActiveIndex();
         return session->current_index;
@@ -645,7 +789,7 @@ std::optional<std::size_t> SampleNavigationController::SetSampleSorting(
     return std::nullopt;
 }
 
-std::optional<std::size_t> SampleNavigationController::ClearSampleSorting()
+std::optional<std::size_t> SampleNavigationController::ClearSampleSorting(bool defer_navigation)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
@@ -654,8 +798,13 @@ std::optional<std::size_t> SampleNavigationController::ClearSampleSorting()
 
     const std::optional<std::size_t> previous_index = session->current_index;
     session->sort_choice = {};
-    (void)ReconcileCurrentWithSequence(*session);
+    const std::optional<std::size_t> deferred_target = defer_navigation
+        ? ReconcileDeferredWithSequence(*session)
+        : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    if (defer_navigation) {
+        return deferred_target;
+    }
     if (session->current_index != previous_index) {
         PersistActiveIndex();
         return session->current_index;
@@ -760,6 +909,13 @@ const SampleNavigationController::SourceSession* SampleNavigationController::Act
 
 SampleNavigationSequence SampleNavigationController::BuildSequence(const SourceSession& session)
 {
+    return BuildSequence(session, session.current_index);
+}
+
+SampleNavigationSequence SampleNavigationController::BuildSequence(
+    const SourceSession& session,
+    std::optional<std::size_t> current_index)
+{
     SampleNavigationSequenceInput input;
     input.source_row_count = session.spectrum_count;
     input.sample_names = session.manifest.sample_names;
@@ -767,7 +923,7 @@ SampleNavigationSequence SampleNavigationController::BuildSequence(const SourceS
     input.materialize_source_order = false;
     input.included_samples = &session.filter_included_samples;
     input.sort_choice = &session.sort_choice;
-    input.current_source_row = session.current_index;
+    input.current_source_row = current_index;
     input.sample_name_query = session.sample_name_query;
     return BuildSampleNavigationSequence(input);
 }
@@ -781,9 +937,23 @@ const SampleNavigationSequence& SampleNavigationController::CachedSequence(const
     return session.sequence_cache;
 }
 
+const SampleNavigationSequence& SampleNavigationController::InteractionSequence(
+    const SourceSession& session)
+{
+    if (!session.pending_index) {
+        return CachedSequence(session);
+    }
+    if (session.interaction_sequence_index != session.pending_index) {
+        session.interaction_sequence_cache = BuildSequence(session, session.pending_index);
+        session.interaction_sequence_index = session.pending_index;
+    }
+    return session.interaction_sequence_cache;
+}
+
 void SampleNavigationController::InvalidateSequence(SourceSession& session)
 {
     session.sequence_cache_valid = false;
+    session.interaction_sequence_index.reset();
 }
 
 std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSequence(SourceSession& session)
@@ -806,6 +976,52 @@ std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSeque
     }
     InvalidateSequence(session);
     return session.current_index;
+}
+
+std::optional<std::size_t> SampleNavigationController::ReconcileDeferredWithSequence(
+    SourceSession& session,
+    std::optional<std::size_t> preferred_index)
+{
+    const std::optional<std::size_t> previous_pending_index = session.pending_index;
+    if (!preferred_index) {
+        preferred_index = session.pending_index ? session.pending_index : session.current_index;
+    }
+
+    InvalidateSequence(session);
+    const SampleNavigationSequence sequence = BuildSequence(session, preferred_index);
+    std::optional<std::size_t> target_index;
+    if (sequence.current_source_row) {
+        target_index = sequence.current_source_row;
+    } else if (!sequence.active && session.spectrum_count > 0) {
+        target_index = 0;
+    } else if (!sequence.ordered_rows.empty()) {
+        target_index = sequence.ordered_rows.front();
+    }
+
+    if (!target_index) {
+        session.current_index.reset();
+        session.pending_index.reset();
+        session.pending_navigation_remembers_labeling_position = false;
+        InvalidateSequence(session);
+        return std::nullopt;
+    }
+    if (session.current_index == target_index) {
+        session.pending_index.reset();
+        session.pending_navigation_remembers_labeling_position = false;
+        InvalidateSequence(session);
+        return std::nullopt;
+    }
+    if (previous_pending_index == target_index) {
+        InvalidateSequence(session);
+        return std::nullopt;
+    }
+
+    session.pending_index = target_index;
+    if (!previous_pending_index) {
+        session.pending_navigation_remembers_labeling_position = false;
+    }
+    InvalidateSequence(session);
+    return target_index;
 }
 
 bool SampleNavigationController::IsSampleInFilter(const SourceSession& session, std::size_t sample_index)

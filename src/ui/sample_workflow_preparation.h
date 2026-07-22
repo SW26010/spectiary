@@ -9,6 +9,7 @@
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -51,6 +52,7 @@ struct PreparedSampleWorkflowState {
 struct PreparedSourceCollectionPlan {
     SourceCollectionContext context;
     PreparedSampleWorkflowState workflow;
+    std::optional<std::uint64_t> base_live_workflow_revision;
 };
 
 struct PreparedSourceCollectionReuse {

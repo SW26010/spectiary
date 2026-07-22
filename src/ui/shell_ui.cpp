@@ -586,11 +586,22 @@ ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
     BeginDeferredSourceRestore();
 }
 
+ShellUi::ShellUi(
+    SourceCollectionSession session,
+    SourceCollectionLoadQueue source_load_queue)
+    : session_(std::move(session)),
+      source_load_queue_(std::move(source_load_queue)),
+      persist_local_state_(false)
+{
+}
+
 ShellUi::~ShellUi()
 {
-    (void)panel_visibility_state_.Flush(panel_visibility_);
-    (void)session_.FlushStateCaches();
-    (void)spectral_lines_panel_.Flush();
+    if (persist_local_state_) {
+        (void)panel_visibility_state_.Flush(panel_visibility_);
+        (void)session_.FlushStateCaches();
+        (void)spectral_lines_panel_.Flush();
+    }
     if (session_view_cache_) {
         source_load_queue_.RetireResource(
             std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
@@ -726,6 +737,9 @@ bool ShellUi::latency_sensitive_plot_interaction_active() const
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
     BeginSourceActivationIntent(true);
+    if (session_.CancelActivePendingSampleNavigation()) {
+        session_view_cache_dirty_ = true;
+    }
     if (deferred_restore_active_) {
         deferred_restore_active_path_ = path;
     }
@@ -761,6 +775,9 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .spectrum_index = spectrum_index,
             .annotation_paths = std::move(annotation_paths),
             .reuse_identity = hint ? std::optional<SourceCollectionIdentity>{hint->identity} : std::nullopt,
+            .base_live_workflow_revision =
+                hint ? std::optional<std::uint64_t>{hint->live_workflow_revision}
+                     : std::nullopt,
         });
     pending_source_loads_.emplace(
         task_id,
@@ -820,15 +837,47 @@ bool ShellUi::CompletionStartsSourceActivationIntent(
     return loaded && purpose == PendingSourceLoadPurpose::ExplicitOpen;
 }
 
+std::optional<ShellUi::PendingSourceLoad> ShellUi::TakeCurrentPendingSourceLoad(
+    const SourceCollectionLoadCompletion& completion,
+    std::uint64_t activation_epoch,
+    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+    const std::unordered_map<std::string, std::uint64_t>& source_load_generations)
+{
+    const auto pending = pending_loads.find(completion.task_id);
+    if (pending == pending_loads.end()) {
+        return std::nullopt;
+    }
+
+    PendingSourceLoad ticket = std::move(pending->second);
+    pending_loads.erase(pending);
+    const auto current_generation = source_load_generations.find(ticket.path_key);
+    const bool activation_current =
+        ticket.purpose == PendingSourceLoadPurpose::DeferredRestore ||
+        ticket.activation_epoch == activation_epoch;
+    const bool current = activation_current &&
+                         current_generation != source_load_generations.end() &&
+                         current_generation->second == ticket.generation &&
+                         SourcePathIdentityKey(completion.path) == ticket.path_key &&
+                         completion.spectrum_index == ticket.spectrum_index;
+    return current ? std::optional<PendingSourceLoad>{std::move(ticket)} : std::nullopt;
+}
+
 void ShellUi::QueueSessionFollowUp(
     const SourceCollectionSessionResult& result,
     bool deferred_restore)
 {
+    CancelSourceFollowUps(result);
     if (!result.follow_up_spectrum_index) {
         return;
     }
     const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
     if (!snapshot || snapshot->source.path.empty()) {
+        return;
+    }
+    if (HasMatchingSourceFollowUp(
+            snapshot->source.path,
+            *result.follow_up_spectrum_index,
+            pending_source_loads_)) {
         return;
     }
     (void)QueueSourceLoad(
@@ -839,39 +888,107 @@ void ShellUi::QueueSessionFollowUp(
                          : PendingSourceLoadPurpose::SessionFollowUp);
 }
 
+void ShellUi::CancelSourceFollowUps(const SourceCollectionSessionResult& result)
+{
+    CancelSourceFollowUpsForResultInState(
+        result,
+        pending_source_loads_,
+        deferred_restore_task_ids_,
+        [this](std::uint64_t task_id) { source_load_queue_.Cancel(task_id); });
+}
+
+void ShellUi::CancelSourceFollowUpsForResultInState(
+    const SourceCollectionSessionResult& result,
+    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+    std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
+    const std::function<void(std::uint64_t)>& cancel)
+{
+    if (!result.canceled_source_follow_up_path) {
+        return;
+    }
+    CancelSourceFollowUpsForPathInState(
+        *result.canceled_source_follow_up_path,
+        pending_loads,
+        deferred_restore_task_ids,
+        cancel);
+}
+
+void ShellUi::CancelSourceFollowUpsForPathInState(
+    const std::filesystem::path& path,
+    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+    std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
+    const std::function<void(std::uint64_t)>& cancel)
+{
+    const std::string path_key = SourcePathIdentityKey(path);
+    for (auto pending = pending_loads.begin(); pending != pending_loads.end();) {
+        if (pending->second.path_key != path_key ||
+            pending->second.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
+            ++pending;
+            continue;
+        }
+        cancel(pending->first);
+        deferred_restore_task_ids.erase(pending->first);
+        pending = pending_loads.erase(pending);
+    }
+}
+
+bool ShellUi::HasMatchingSourceFollowUp(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads)
+{
+    const std::string path_key = SourcePathIdentityKey(path);
+    return std::any_of(
+        pending_loads.begin(),
+        pending_loads.end(),
+        [&path_key, spectrum_index](const auto& entry) {
+            const PendingSourceLoad& pending = entry.second;
+            return pending.path_key == path_key &&
+                   pending.spectrum_index == spectrum_index &&
+                   pending.purpose != PendingSourceLoadPurpose::ExplicitOpen;
+        });
+}
+
+bool ShellUi::CancelFailedPendingSampleNavigation(
+    SourceCollectionSession& session,
+    const PendingSourceLoad& ticket)
+{
+    if (ticket.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
+        return false;
+    }
+    return session.CancelPendingSampleNavigation(ticket.path, ticket.spectrum_index);
+}
+
 void ShellUi::DrainSourceLoads()
 {
-    for (SourceCollectionLoadCompletion& completion : source_load_queue_.TakeCompleted()) {
-        const auto pending = pending_source_loads_.find(completion.task_id);
-        if (pending == pending_source_loads_.end()) {
+    DrainSourceLoadCompletions(source_load_queue_.TakeCompleted());
+}
+
+void ShellUi::DrainSourceLoadCompletions(
+    std::vector<SourceCollectionLoadCompletion> completions)
+{
+    for (SourceCollectionLoadCompletion& completion : completions) {
+        deferred_restore_task_ids_.erase(completion.task_id);
+        std::optional<PendingSourceLoad> current_ticket = TakeCurrentPendingSourceLoad(
+            completion,
+            source_activation_epoch_,
+            pending_source_loads_,
+            source_load_generations_);
+        if (!current_ticket) {
             if (completion.prepared) {
                 source_load_queue_.RetirePrepared(std::move(*completion.prepared));
             }
             continue;
         }
 
-        PendingSourceLoad ticket = std::move(pending->second);
-        pending_source_loads_.erase(pending);
-        deferred_restore_task_ids_.erase(completion.task_id);
-        const auto current_generation = source_load_generations_.find(ticket.path_key);
-        const bool activation_current =
-            ticket.purpose == PendingSourceLoadPurpose::DeferredRestore ||
-            ticket.activation_epoch == source_activation_epoch_;
-        const bool current = activation_current &&
-                             current_generation != source_load_generations_.end() &&
-                             current_generation->second == ticket.generation &&
-                             SourcePathIdentityKey(completion.path) == ticket.path_key &&
-                             completion.spectrum_index == ticket.spectrum_index;
-        if (!current) {
-            if (completion.prepared) {
-                source_load_queue_.RetirePrepared(std::move(*completion.prepared));
-            }
-            continue;
-        }
+        PendingSourceLoad ticket = std::move(*current_ticket);
         if (!completion.prepared) {
             source_load_error_ = completion.error_message.empty()
                 ? "Background source loading failed."
                 : std::move(completion.error_message);
+            if (CancelFailedPendingSampleNavigation(session_, ticket)) {
+                session_view_cache_dirty_ = true;
+            }
             continue;
         }
 
@@ -888,6 +1005,7 @@ void ShellUi::DrainSourceLoads()
             prepared.spectrum_index,
             std::move(prepared.snapshot),
             std::move(prepared.payload));
+        CancelSourceFollowUps(result);
         session_view_cache_dirty_ = true;
         HandleSessionAction(result.action);
         for (BackgroundRetirementHandle& resource : result.background_retirement) {
@@ -902,6 +1020,7 @@ void ShellUi::DrainSourceLoads()
             source_load_error_ = result.message.empty()
                 ? "The prepared source result was no longer applicable."
                 : std::move(result.message);
+            (void)CancelFailedPendingSampleNavigation(session_, ticket);
         } else {
             source_load_error_.clear();
             if (starts_activation_intent) {
@@ -1052,7 +1171,7 @@ const SourceCollectionSessionView& ShellUi::SessionView()
 
 SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionIntent command)
 {
-    if (command.SupersedesPendingSourceActivation()) {
+    if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
@@ -1071,7 +1190,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSess
 
 SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(SourceCollectionSessionIntent command)
 {
-    if (command.SupersedesPendingSourceActivation()) {
+    if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));

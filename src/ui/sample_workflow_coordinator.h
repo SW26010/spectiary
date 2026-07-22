@@ -35,6 +35,12 @@ struct PreparedSampleWorkflowActivationResult {
     std::vector<BackgroundRetirementHandle> background_retirement;
 };
 
+struct PendingSampleNavigation {
+    SourceCollectionIdentity source_identity;
+    std::size_t spectrum_index = 0;
+    bool remember_labeling_position = false;
+};
+
 class SampleWorkflowCoordinator {
 public:
     using WorkflowStateCacheLoader =
@@ -87,10 +93,18 @@ public:
     [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
     void DiscardPreparedViewCaches();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
+    void SetDeferredSampleNavigation(bool enabled);
+    [[nodiscard]] bool RetargetDeferredSampleNavigation(std::size_t spectrum_index);
+    [[nodiscard]] bool CommitDeferredSampleNavigation(std::size_t spectrum_index);
+    void CompletePreparedDeferredSampleNavigation(const PendingSampleNavigation& pending);
+    void CancelDeferredSampleNavigation();
+    [[nodiscard]] std::optional<std::size_t> pending_sample_index() const;
+    [[nodiscard]] std::optional<PendingSampleNavigation> pending_sample_navigation() const;
 
     [[nodiscard]] SampleWorkflowCommandResult RequestSampleNavigation(
         const SampleNavigationRequest& request,
-        const SpectrumSnapshotHandle& snapshot);
+        const SpectrumSnapshotHandle& snapshot,
+        std::optional<std::size_t> deferred_base_index = std::nullopt);
     [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
         bool* loaded = nullptr,
@@ -257,6 +271,7 @@ private:
     LocalUserStateSaveScheduler workflow_state_save_scheduler_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
+    bool deferred_sample_navigation_ = false;
     std::optional<LabelUndoHistory> label_undo_history_;
     // One-shot prepared projections are moved into the Shell session-view
     // cache on first presentation, avoiding an O(N) UI-thread copy.

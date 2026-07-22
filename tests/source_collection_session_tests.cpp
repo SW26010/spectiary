@@ -3175,6 +3175,850 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         "plot and labeling should converge on the reconciled row 0 snapshot");
 }
 
+void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_deferred_navigation.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred navigation must not invoke the synchronous loader");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {"deferred-navigation", "source", "source-fingerprint", "context-fingerprint", 3};
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+            source_path,
+            0,
+            initial_snapshot,
+            std::move(context),
+            std::move(prepared)).loaded,
+        "initial prepared source should commit");
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const specforge::SourceCollectionLabelingView initial_labeling = session.View().labeling;
+
+    const specforge::SourceCollectionSessionResult pending =
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()));
+    const specforge::SourceCollectionSessionView pending_view = session.View();
+    Require(pending.follow_up_spectrum_index == 1, "next should request row 1 in the background");
+    Require(
+        pending_view.navigation.current_index == 0,
+        "navigation should keep presenting row 0 while row 1 is pending");
+    Require(
+        pending_view.current_sample_snapshot == initial_snapshot &&
+            pending_view.current_sample_snapshot->collection.current_index == 0,
+        "sample panels should keep presenting the complete row 0 snapshot while row 1 is pending");
+    Require(
+        pending_view.labeling.current_index == 0,
+        "labeling should remain bound to the presented row while navigation is pending");
+    Require(
+        pending_view.labeling.remembered_position == initial_labeling.remembered_position,
+        "labeling controls should not expose the pending row before its snapshot commits");
+
+    const specforge::SourceCollectionSessionResult reversed =
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Previous()));
+    Require(
+        reversed.canceled_source_follow_up_path == source_path &&
+            !reversed.follow_up_spectrum_index,
+        "returning to the presented row should cancel the obsolete background follow-up");
+    Require(
+        session.View().navigation.current_index == 0 &&
+            session.CurrentSampleSnapshot() == initial_snapshot,
+        "canceling pending navigation should leave the committed presentation unchanged");
+
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "navigation should be able to request row 1 again after cancellation");
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 2,
+        "a repeated next should advance from the pending target instead of the presented row");
+    const specforge::SourceCollectionSessionView row_two_pending_view = session.View();
+    Require(
+        row_two_pending_view.navigation.can_move_previous &&
+            !row_two_pending_view.navigation.can_move_next,
+        "navigation buttons should use pending row 2 while the visible presentation remains on row 0");
+    Require(
+        !Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+             .follow_up_spectrum_index,
+        "repeating next at the pending sequence boundary should retain the existing row 2 ticket");
+    Require(
+        session.View().navigation.current_index == 0 &&
+            session.CurrentSampleSnapshot() == initial_snapshot,
+        "coalescing navigation should continue presenting the last complete sample");
+    Require(
+        session.CancelPendingSampleNavigation(source_path, 2),
+        "a failed latest background load should cancel its matching pending navigation");
+    Require(
+        session.View().navigation.current_index == 0 &&
+            session.CurrentSampleSnapshot() == initial_snapshot,
+        "a failed background load should retain the last complete presentation");
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "navigation after a failed load should resume from the presented row");
+
+    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+        source_path,
+        1,
+        next_snapshot,
+        specforge::PreparedSourceCollectionReuse{identity});
+    const specforge::SourceCollectionSessionView committed_view = session.View();
+    Require(committed.loaded, "prepared row 1 should commit");
+    Require(!committed.follow_up_spectrum_index, "the committed row should need no corrective follow-up");
+    Require(
+        committed_view.navigation.current_index == 1,
+        "navigation should switch to row 1 when its snapshot commits");
+    Require(
+        committed_view.current_sample_snapshot == next_snapshot &&
+            committed_view.current_sample_snapshot->collection.current_index == 1,
+        "sample panels should switch to the complete row 1 snapshot on commit");
+    Require(
+        committed_view.labeling.current_index == 1,
+        "labeling should switch to row 1 in the same committed presentation");
+}
+
+void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresentation()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_deferred_filter_retarget.npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_deferred_filter_values.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "deferred-filter-values",
+        "Deferred filter values",
+        {0, 0, 1},
+        specforge::SampleLabelSet{},
+        false);
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred filtering must not invoke the synchronous loader");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {"deferred-filter-retarget", "source", "source-fingerprint", "context", 3};
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred filter fixture should load");
+    Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
+    const std::string filter_source_id = AnnotationSourceId(annotation_path);
+    (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "manual next should initially queue row 1");
+
+    const specforge::SourceCollectionSessionResult filtered =
+        Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
+    const specforge::SourceCollectionSessionView pending_view = session.View();
+    Require(filtered.follow_up_spectrum_index == 2, "filter reconciliation should replace row 1 with row 2");
+    Require(
+        pending_view.navigation.current_index == 0 &&
+            pending_view.current_sample_snapshot == initial_snapshot &&
+            pending_view.labeling.current_index == 0,
+        "filter reconciliation should retain the complete committed row 0 presentation");
+
+    const specforge::SpectrumSnapshotHandle filtered_snapshot = MakeSnapshot(source_path, 3, 2);
+    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+        source_path,
+        2,
+        filtered_snapshot,
+        specforge::PreparedSourceCollectionReuse{identity});
+    const specforge::SourceCollectionSessionView committed_view = session.View();
+    Require(committed.loaded && !committed.follow_up_spectrum_index, "filtered row 2 should commit once");
+    Require(
+        committed_view.navigation.current_index == 2 &&
+            committed_view.current_sample_snapshot == filtered_snapshot,
+        "filter target and snapshot should become visible together");
+}
+
+void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_deferred_label_advance.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred label advance must not invoke the synchronous loader");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {"deferred-label-advance", "source", "source-fingerprint", "context", 3};
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred label fixture should load");
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "accepted", 'a'})).changed,
+        "deferred label fixture should add its label");
+    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "manual next should queue row 1 before labeling row 0");
+
+    const specforge::SourceCollectionSessionResult labeled =
+        Submit(session, AssignActiveLabelToCurrentSample(1));
+    const specforge::SourceCollectionSessionView pending_view = session.View();
+    Require(
+        !labeled.follow_up_spectrum_index,
+        "auto-advance from visible row 0 should retain the existing row 1 ticket instead of jumping to row 2");
+    Require(
+        pending_view.current_sample_snapshot == initial_snapshot &&
+            pending_view.labeling.current_index == 0 &&
+            pending_view.labeling.current_code == 1,
+        "the label write should remain visibly attached to committed row 0 while row 1 loads");
+
+    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   next_snapshot,
+                   specforge::PreparedSourceCollectionReuse{identity})
+            .loaded,
+        "the retained row 1 ticket should still commit");
+    Require(
+        session.View().navigation.current_index == 1 &&
+            session.View().current_sample_snapshot == next_snapshot,
+        "auto-advance should land on row 1 after its complete snapshot arrives");
+}
+
+void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_deferred_label_merge.npy");
+    const std::filesystem::path annotation_path = UniqueTempPath("_deferred_label_merge_filter.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "deferred-label-merge-filter",
+        "Deferred label merge filter",
+        {0, 1, 0},
+        specforge::SampleLabelSet{},
+        false);
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred label merge must not invoke the synchronous loader");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {"deferred-label-merge", "source", "source-fingerprint", "context", 3};
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred label merge fixture should load");
+    Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "filter annotation should load");
+    const std::string filter_source_id = AnnotationSourceId(annotation_path);
+    (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    Require(
+        Submit(session, SetFilterValueSelected(filter_source_id, "1", true))
+                .follow_up_spectrum_index == 1,
+        "filter reconciliation should queue row 1 without labeling-position semantics");
+
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(session, UpsertActiveLabel(specforge::SampleLabelDefinition{1, "accepted", 'a'})).changed,
+        "deferred label merge fixture should add its label");
+    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
+    const specforge::SourceCollectionSessionResult labeled =
+        Submit(session, AssignActiveLabelToCurrentSample(1));
+    Require(
+        !labeled.follow_up_spectrum_index,
+        "auto-advance to the same pending row should retain the filter's existing worker ticket");
+
+    const specforge::SpectrumSnapshotHandle next_snapshot = MakeSnapshot(source_path, 3, 1);
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   next_snapshot,
+                   specforge::PreparedSourceCollectionReuse{identity})
+            .loaded,
+        "the merged row 1 request should commit through the retained ticket");
+    Require(
+        session.View().labeling.remembered_position == 1,
+        "label auto-advance should upgrade the matching filter pending request to remember row 1");
+}
+
+void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_deferred_plan_reconcile.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred plan reconciliation must remain on the background path");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext initial_context;
+    initial_context.identity = {
+        "deferred-plan-reconcile",
+        "source",
+        "source-fingerprint",
+        "initial-context",
+        3,
+    };
+    initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState initial_workflow =
+        PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(initial_context),
+                   std::move(initial_workflow))
+            .loaded,
+        "initial prepared source should commit");
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const std::optional<std::size_t> initial_remembered_position =
+        session.View().labeling.remembered_position;
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "next should initially request row 1");
+
+    const specforge::SpectrumSnapshotHandle intermediate_snapshot = MakeSnapshot(source_path, 3, 1);
+    specforge::SourceCollectionContext changed_context;
+    changed_context.identity = {
+        "deferred-plan-reconcile",
+        "source",
+        "source-fingerprint",
+        "changed-context",
+        3,
+    };
+    changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState reconciled_workflow =
+        PrepareWorkflow(intermediate_snapshot, changed_context, 1, {}, {});
+    reconciled_workflow.current_index = 2;
+    reconciled_workflow.navigation_sequence.current_source_row = 2;
+
+    const specforge::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
+        source_path,
+        1,
+        intermediate_snapshot,
+        std::move(changed_context),
+        std::move(reconciled_workflow));
+    const specforge::SourceCollectionSessionView pending_view = session.View();
+    Require(reconciled.loaded, "the intermediate prepared plan should be accepted");
+    Require(
+        reconciled.follow_up_spectrum_index == 2,
+        "the reconciled plan should request only its final row");
+    Require(
+        session.CurrentSourceSnapshot() == initial_snapshot &&
+            session.CurrentSampleSnapshot() == initial_snapshot,
+        "plan reconciliation must retain the previous complete snapshot until the final row arrives");
+    Require(
+        pending_view.navigation.current_index == 0 &&
+            pending_view.labeling.current_index == 0,
+        "plan reconciliation must retain the previous complete navigation and labeling presentation");
+    Require(
+        pending_view.labeling.remembered_position == initial_remembered_position,
+        "an intermediate plan must not commit the pending labeling position");
+
+    Require(
+        session.CancelPendingSampleNavigation(source_path, 2),
+        "failure of the reconciled final row should cancel the retargeted navigation");
+    Require(
+        session.CurrentSourceSnapshot() == initial_snapshot &&
+            session.CurrentSampleSnapshot() == initial_snapshot &&
+            session.View().navigation.current_index == 0,
+        "failure of the reconciled final row must leave the old complete presentation recoverable");
+    Require(
+        session.View().labeling.remembered_position == initial_remembered_position,
+        "failed plan reconciliation must not leak a labeling-position commit");
+
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "navigation should remain usable after the reconciled final row fails");
+    const specforge::SpectrumSnapshotHandle second_intermediate_snapshot =
+        MakeSnapshot(source_path, 3, 1);
+    specforge::SourceCollectionContext second_changed_context;
+    second_changed_context.identity = {
+        "deferred-plan-reconcile",
+        "source",
+        "source-fingerprint",
+        "changed-context",
+        3,
+    };
+    second_changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState second_reconciled_workflow =
+        PrepareWorkflow(second_intermediate_snapshot, second_changed_context, 1, {}, {});
+    second_reconciled_workflow.current_index = 2;
+    second_reconciled_workflow.navigation_sequence.current_source_row = 2;
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   second_intermediate_snapshot,
+                   std::move(second_changed_context),
+                   std::move(second_reconciled_workflow))
+                .follow_up_spectrum_index == 2,
+        "a retried intermediate plan should again request its reconciled final row");
+
+    const specforge::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
+    specforge::SourceCollectionContext final_context;
+    final_context.identity = {
+        "deferred-plan-reconcile",
+        "source",
+        "source-fingerprint",
+        "changed-context",
+        3,
+    };
+    final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState final_workflow =
+        PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
+    const specforge::SourceCollectionSessionResult final_result = session.OpenPreparedSource(
+        source_path,
+        2,
+        final_snapshot,
+        std::move(final_context),
+        std::move(final_workflow));
+    const specforge::SourceCollectionSessionView final_view = session.View();
+    Require(final_result.loaded && !final_result.follow_up_spectrum_index, "the final row should commit once");
+    Require(
+        final_view.snapshot == final_snapshot &&
+            final_view.current_sample_snapshot == final_snapshot &&
+            final_view.navigation.current_index == 2 &&
+            final_view.labeling.current_index == 2,
+        "the final snapshot, navigation, and labeling panels should publish together");
+    Require(
+        final_view.labeling.remembered_position == 2,
+        "the source-bound pending navigation should remember labeling position only at final commit");
+}
+
+void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_stale_prepared_plan.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("stale prepared plan test must remain on the background path");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext initial_context;
+    initial_context.identity = {
+        "stale-prepared-plan",
+        "source",
+        "stable-source-fingerprint",
+        "context-v1",
+        3,
+    };
+    initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState initial_workflow =
+        PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(initial_context),
+                   std::move(initial_workflow))
+            .loaded,
+        "stale prepared plan fixture should commit its initial source");
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "stale prepared plan fixture should queue row 1");
+    const std::optional<specforge::SourceCollectionLoadHint> load_hint =
+        session.LoadHintForSource(source_path);
+    Require(load_hint.has_value(), "known source navigation should expose its workflow revision");
+
+    const specforge::SpectrumSnapshotHandle prepared_snapshot = MakeSnapshot(source_path, 3, 1);
+    specforge::SourceCollectionContext changed_context;
+    changed_context.identity = {
+        "stale-prepared-plan",
+        "source",
+        "stable-source-fingerprint",
+        "context-v2",
+        3,
+    };
+    changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState stale_workflow =
+        PrepareWorkflow(prepared_snapshot, changed_context, 1, {}, {});
+
+    (void)Submit(session, AddSampleSortSource("sample-name"));
+    const specforge::SourceCollectionSessionResult sorted =
+        Submit(session, SetSampleSortSource("sample-name"));
+    Require(
+        !sorted.follow_up_spectrum_index && session.View().sorting.active,
+        "new live sorting should retain the existing row 1 worker");
+
+    const specforge::SourceCollectionSessionResult committed = session.OpenPreparedSource(
+        source_path,
+        1,
+        prepared_snapshot,
+        specforge::PreparedSourceCollectionPlan{
+            std::move(changed_context),
+            std::move(stale_workflow),
+            load_hint->live_workflow_revision});
+    const specforge::SourceCollectionSessionView view = session.View();
+    Require(committed.loaded && !committed.follow_up_spectrum_index, "row 1 should commit once");
+    Require(
+        view.current_sample_snapshot == prepared_snapshot &&
+            view.navigation.current_index == 1,
+        "the prepared snapshot and pending row should commit atomically");
+    Require(
+        view.sorting.active && view.sorting.active_source_id == "sample-name",
+        "an older full plan must not overwrite newer live sorting while its worker waits");
+}
+
+void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_live_context_reconcile.npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_live_context_reconcile_filter.npy");
+    SaveLabelResultFixture(
+        annotation_path,
+        "live-context-values",
+        "Live context values",
+        {1, 1, 0},
+        specforge::SampleLabelSet{},
+        false);
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("live context reconciliation must remain in the background");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext initial_context;
+    initial_context.identity = {
+        "live-context-reconcile",
+        "source",
+        "stable-source-fingerprint",
+        "context-v1",
+        3,
+    };
+    initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    std::string annotation_error;
+    std::optional<specforge::SampleAnnotationResult> initial_annotation =
+        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+    Require(initial_annotation.has_value(), "initial context annotation should load");
+    initial_context.manifest.annotations.push_back(std::move(*initial_annotation));
+    specforge::PreparedSampleWorkflowState initial_workflow =
+        PrepareWorkflow(initial_snapshot, initial_context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(initial_context),
+                   std::move(initial_workflow))
+            .loaded,
+        "live context fixture should commit its initial source");
+    const std::string filter_source_id = AnnotationSourceId(annotation_path);
+    (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    (void)Submit(session, SetFilterValueSelected(filter_source_id, "1", true));
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "the original context should queue row 1");
+    const specforge::SourceCollectionSessionView presentation_before_context_change =
+        session.View();
+    Require(
+        presentation_before_context_change.filter.evaluation.included_count == 2 &&
+            presentation_before_context_change.navigation.sequence_count == 2 &&
+            presentation_before_context_change.navigation.current_sample_in_filter,
+        "the committed presentation should still expose the original context projections");
+    const std::optional<specforge::SourceCollectionLoadHint> load_hint =
+        session.LoadHintForSource(source_path);
+    Require(load_hint.has_value(), "context reconciliation should capture a live revision");
+
+    SaveLabelResultFixture(
+        annotation_path,
+        "live-context-values",
+        "Live context values",
+        {0, 0, 1},
+        specforge::SampleLabelSet{},
+        false);
+    const specforge::SpectrumSnapshotHandle intermediate_snapshot =
+        MakeSnapshot(source_path, 3, 1);
+    specforge::SourceCollectionContext changed_context;
+    changed_context.identity = {
+        "live-context-reconcile",
+        "source",
+        "stable-source-fingerprint",
+        "context-v2",
+        3,
+    };
+    const specforge::SourceCollectionIdentity changed_identity = changed_context.identity;
+    changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    std::optional<specforge::SampleAnnotationResult> changed_annotation =
+        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+    Require(changed_annotation.has_value(), "changed context annotation should load");
+    changed_context.manifest.annotations.push_back(std::move(*changed_annotation));
+    specforge::PreparedSampleWorkflowState stale_workflow =
+        PrepareWorkflow(intermediate_snapshot, changed_context, 1, {}, {});
+
+    const specforge::SourceCollectionSessionResult reconciled = session.OpenPreparedSource(
+        source_path,
+        1,
+        intermediate_snapshot,
+        specforge::PreparedSourceCollectionPlan{
+            std::move(changed_context),
+            std::move(stale_workflow),
+            load_hint->live_workflow_revision});
+    Require(
+        reconciled.loaded && reconciled.follow_up_spectrum_index == 2,
+        "the live filter should retarget the changed context to row 2");
+    const specforge::SourceCollectionSessionView presentation_while_waiting = session.View();
+    Require(
+        session.CurrentSourceSnapshot() == initial_snapshot &&
+            session.CurrentSampleSnapshot() == initial_snapshot &&
+            presentation_while_waiting.navigation.current_index == 0,
+        "context reconciliation must keep the old complete row until final row 2 is prepared");
+    Require(
+        presentation_while_waiting.filter.evaluation.included_count == 2 &&
+            presentation_while_waiting.navigation.sequence_count == 2 &&
+            presentation_while_waiting.navigation.current_sample_in_filter,
+        "the old manifest, filter, and navigation projections must remain committed while final row 2 loads");
+
+    const specforge::SpectrumSnapshotHandle final_snapshot = MakeSnapshot(source_path, 3, 2);
+    specforge::SourceCollectionContext final_context;
+    final_context.identity = changed_identity;
+    final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    std::optional<specforge::SampleAnnotationResult> final_annotation =
+        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+    Require(final_annotation.has_value(), "final context annotation should load");
+    final_context.manifest.annotations.push_back(std::move(*final_annotation));
+    specforge::PreparedSampleWorkflowState final_workflow =
+        PrepareWorkflow(final_snapshot, final_context, 2, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   2,
+                   final_snapshot,
+                   specforge::PreparedSourceCollectionPlan{
+                       std::move(final_context),
+                       std::move(final_workflow),
+                       load_hint->live_workflow_revision})
+            .loaded,
+        "the reconciled final row should atomically commit its full context plan");
+    Require(
+        session.CurrentSampleSnapshot() == final_snapshot &&
+            session.View().navigation.current_index == 2,
+        "the changed context should publish only with its final complete row");
+    std::filesystem::remove(annotation_path);
+}
+
+void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
+{
+    const std::filesystem::path source_a = UniqueTempPath("_deferred_switch_a.npy");
+    const std::filesystem::path source_b = UniqueTempPath("_deferred_switch_b.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("deferred source switching must not invoke the synchronous loader");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    auto open_prepared = [&session](
+                             const std::filesystem::path& path,
+                             std::string identity,
+                             const specforge::SpectrumSnapshotHandle& snapshot) {
+        specforge::SourceCollectionContext context;
+        context.identity = {
+            std::move(identity),
+            "source",
+            path.string(),
+            path.string() + "-context",
+            3,
+        };
+        context.manifest.sample_names = {"alpha", "beta", "gamma"};
+        specforge::PreparedSampleWorkflowState workflow =
+            PrepareWorkflow(snapshot, context, 0, {}, {});
+        return session.OpenPreparedSource(
+            path,
+            0,
+            snapshot,
+            std::move(context),
+            std::move(workflow));
+    };
+
+    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    Require(open_prepared(source_a, "deferred-switch-a", snapshot_a).loaded, "source A should load");
+    Require(open_prepared(source_b, "deferred-switch-b", snapshot_b).loaded, "source B should load");
+    (void)Submit(session, SwitchSourceCollection(0));
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const std::optional<std::size_t> remembered_a = session.View().labeling.remembered_position;
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "source A should queue row 1");
+
+    const specforge::SourceCollectionSessionResult switched_to_b =
+        Submit(session, SwitchSourceCollection(1));
+    Require(
+        switched_to_b.canceled_source_follow_up_path == source_a,
+        "switching to B should cancel A's pending source-follow-up ticket");
+    const specforge::SourceCollectionSessionResult switched_back_to_a =
+        Submit(session, SwitchSourceCollection(0));
+    const specforge::SourceCollectionSessionView restored_a = session.View();
+    Require(
+        !switched_back_to_a.follow_up_spectrum_index,
+        "switching back to A must not resurrect its canceled row 1 navigation");
+    Require(
+        restored_a.snapshot == snapshot_a &&
+            restored_a.current_sample_snapshot == snapshot_a &&
+            restored_a.navigation.current_index == 0,
+        "switching back to A should restore its last committed row 0 presentation");
+    Require(
+        restored_a.labeling.remembered_position == remembered_a,
+        "canceled navigation metadata must not leak across source switches");
+}
+
+void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
+{
+    const std::filesystem::path source_a = UniqueTempPath("_preserve_pending_a.npy");
+    const std::filesystem::path source_b = UniqueTempPath("_preserve_pending_b.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("preserved deferred navigation must not load synchronously");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
+    specforge::SourceCollectionContext context_a;
+    context_a.identity = {"preserve-pending-a", "a", "a-source", "a-context", 3};
+    context_a.manifest.sample_names = {"a0", "a1", "a2"};
+    const specforge::SourceCollectionIdentity identity_a = context_a.identity;
+    specforge::PreparedSampleWorkflowState workflow_a =
+        PrepareWorkflow(snapshot_a, context_a, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_a,
+                   0,
+                   snapshot_a,
+                   std::move(context_a),
+                   std::move(workflow_a))
+            .loaded,
+        "source A should load");
+
+    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
+    specforge::SourceCollectionContext context_b;
+    context_b.identity = {"preserve-pending-b", "b", "b-source", "b-context", 3};
+    context_b.manifest.sample_names = {"b0", "b1", "b2"};
+    specforge::PreparedSampleWorkflowState workflow_b =
+        PrepareWorkflow(snapshot_b, context_b, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_b,
+                   0,
+                   snapshot_b,
+                   std::move(context_b),
+                   std::move(workflow_b))
+            .loaded,
+        "source B should load");
+    (void)Submit(session, SwitchSourceCollection(0));
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "source A should queue row 1");
+
+    const specforge::SourceCollectionSessionResult removed_b =
+        Submit(session, RemoveSourceCollection(1));
+    Require(
+        removed_b.canceled_source_follow_up_path == source_b &&
+            !removed_b.follow_up_spectrum_index,
+        "removing inactive source B should cancel only B's tickets and retain source A's pending ticket");
+    const specforge::SourceCollectionSessionResult reselected_a =
+        Submit(session, SwitchSourceCollection(0));
+    Require(
+        !reselected_a.canceled_source_follow_up_path && !reselected_a.follow_up_spectrum_index,
+        "reselecting active source A should retain its pending ticket");
+
+    const specforge::SpectrumSnapshotHandle row_one_snapshot = MakeSnapshot(source_a, 3, 1);
+    Require(
+        session.OpenPreparedSource(
+                   source_a,
+                   1,
+                   row_one_snapshot,
+                   specforge::PreparedSourceCollectionReuse{identity_a})
+            .loaded,
+        "the retained source A ticket should still commit row 1");
+    Require(
+        session.CurrentSampleSnapshot() == row_one_snapshot &&
+            session.View().navigation.current_index == 1,
+        "non-active removal and current reselection must preserve source A navigation");
+}
+
 void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
 {
     const std::filesystem::path source_path = UniqueTempPath("_same_identity_reload.npy");
@@ -3233,6 +4077,14 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     const specforge::SourceCollectionSessionResult filter_result =
         Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
     Require(filter_result.follow_up_spectrum_index == 1, "live filter should move navigation to row 1");
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   MakeSnapshot(source_path, 3, 1),
+                   specforge::PreparedSourceCollectionReuse{identity})
+            .loaded,
+        "the filtered row should commit only after its complete snapshot is prepared");
     (void)Submit(session, AddSampleSortSource(annotation_source_id));
     (void)Submit(session, SetSampleSortSource(annotation_source_id));
     (void)Submit(
@@ -3381,18 +4233,27 @@ void TestPreparedProjectionsMoveIntoTheSessionView()
         "prepared sorting projection should move into the UI session view");
 }
 
-void TestSourceSelectionIntentsSupersedePendingActivation()
+void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
 {
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path& path, std::size_t index) {
+            return MakeSnapshot(path, 3, index);
+        },
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
     Require(
-        SwitchSourceCollection(0).SupersedesPendingSourceActivation(),
-        "switching source should invalidate work prepared for the previous selection");
+        session.SupersedesPendingSourceActivation(OpenSourceCollection("replacement.npy")),
+        "opening another source should invalidate work prepared for the previous selection");
     Require(
-        RemoveSourceCollection(0).SupersedesPendingSourceActivation(),
-        "removing source should invalidate pending source activation");
+        !session.SupersedesPendingSourceActivation(SwitchSourceCollection(0)),
+        "an unavailable source selection cannot supersede the active source");
     Require(
-        !specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
-             specforge::SampleNavigationIntent::Move(specforge::SampleNavigationRequest::Next()))
-             .SupersedesPendingSourceActivation(),
+        !session.SupersedesPendingSourceActivation(RemoveSourceCollection(0)),
+        "an unavailable source removal cannot supersede the active source");
+    Require(
+        !session.SupersedesPendingSourceActivation(
+            specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::Move(
+                    specforge::SampleNavigationRequest::Next()))),
         "navigation should retain its own replacement follow-up");
 }
 
@@ -3432,10 +4293,17 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         std::move(context_b),
         std::move(workflow_b));
 
+    const std::optional<specforge::SourceCollectionLoadHint> stale_plan_hint =
+        session.LoadHintForSource(source_a);
+    Require(stale_plan_hint.has_value(), "known inactive source should expose its plan revision");
+
     const specforge::SourceCollectionSessionResult removed = Submit(session, RemoveSourceCollection(0));
     Require(
         removed.background_retirement.size() >= 2,
         "removing a prepared source should hand its snapshot and workflow context to the reclaimer");
+    Require(
+        removed.canceled_source_follow_up_path == source_a,
+        "removing an inactive source should cancel that source's non-explicit Shell tickets");
 
     const specforge::SpectrumSnapshotHandle stale_snapshot = MakeSnapshot(source_a, 3, 1);
     const specforge::SourceCollectionSessionResult rejected = session.OpenPreparedSource(
@@ -3450,9 +4318,31 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     Require(
         session.CurrentSourceSnapshot() == snapshot_b,
         "rejecting reuse for a removed source must leave the newer active source untouched");
+
+    const specforge::SpectrumSnapshotHandle stale_plan_snapshot = MakeSnapshot(source_a, 3, 1);
+    specforge::SourceCollectionContext stale_context;
+    stale_context.identity = {"reuse-a", "a", "a-source", "a-context-new", 3};
+    stale_context.manifest.sample_names = {"a", "b", "c"};
+    specforge::PreparedSampleWorkflowState stale_workflow =
+        PrepareWorkflow(stale_plan_snapshot, stale_context, 1, {}, {});
+    const specforge::SourceCollectionSessionResult rejected_plan = session.OpenPreparedSource(
+        source_a,
+        1,
+        stale_plan_snapshot,
+        specforge::PreparedSourceCollectionPlan{
+            std::move(stale_context),
+            std::move(stale_workflow),
+            stale_plan_hint->live_workflow_revision});
+    Require(!rejected_plan.loaded, "a late full plan for a removed source must be rejected");
+    Require(
+        rejected_plan.background_retirement.size() >= 2,
+        "a rejected full plan should retire its decoded snapshot and prepared payload");
+    Require(
+        session.CurrentSourceSnapshot() == snapshot_b && session.View().sources.size() == 1,
+        "a late full plan must not reinsert or activate the removed source");
 }
 
-void TestInterruptedPreparedFollowUpRemainsBackgroundOnlyOnReactivation()
+void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot()
 {
     const std::filesystem::path source_a = UniqueTempPath("_interrupted_follow_up_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_interrupted_follow_up_b.npy");
@@ -3502,11 +4392,11 @@ void TestInterruptedPreparedFollowUpRemainsBackgroundOnlyOnReactivation()
         Submit(session, SetFilterValueSelected(annotation_source_id, "2", true)).follow_up_spectrum_index == 1,
         "filter should request the unresolved row 1 follow-up");
     Require(
-        Submit(session, SetSampleNameQuery("b")).follow_up_spectrum_index == 1,
-        "a query that supersedes the queued row load must immediately request the still-missing row again");
+        !Submit(session, SetSampleNameQuery("b")).follow_up_spectrum_index,
+        "a query that retains the pending target should keep the existing row 1 ticket");
     Require(
-        session.CurrentSampleSnapshot() == nullptr,
-        "a query must not make the stale row 0 snapshot visible while row 1 is still pending");
+        session.CurrentSampleSnapshot() == snapshot_a,
+        "the complete committed row 0 snapshot should remain visible while row 1 is pending");
 
     const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
     specforge::SourceCollectionContext context_b;
@@ -3526,8 +4416,10 @@ void TestInterruptedPreparedFollowUpRemainsBackgroundOnlyOnReactivation()
     Require(synchronous_loader_calls == 0, "reactivating an interrupted source must not load synchronously");
     Require(
         reactivated.follow_up_spectrum_index == 1,
-        "reactivating an interrupted source should request its missing row as background work");
-    Require(session.CurrentSampleSnapshot() == nullptr, "the stale row 0 snapshot must remain hidden");
+        "reactivating source A should create fresh row 1 work because its active filter excludes row 0");
+    Require(
+        session.CurrentSampleSnapshot() == snapshot_a,
+        "reactivating source A should restore its last complete committed row 0 snapshot");
 }
 
 void TestSwitchingPreparedSourceReusesItsInMemoryContext()
@@ -3720,12 +4612,21 @@ void RunAllTests()
     TestSupersededDeferredRestorePreservesPersistedSourceIntents();
     TestForgettingUnavailableDeferredSourcePersistsDuringRestore();
     TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow();
+    TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase();
+    TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics();
+    TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresentation();
+    TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation();
+    TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits();
+    TestSwitchingAwayCancelsSourceBoundDeferredNavigation();
+    TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow();
+    TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged();
+    TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges();
     TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow();
     TestPreparedCacheSnapshotPreventsUiCacheReload();
     TestPreparedProjectionsMoveIntoTheSessionView();
-    TestSourceSelectionIntentsSupersedePendingActivation();
+    TestSourceSelectionSupersessionRequiresAnActualActivationChange();
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
-    TestInterruptedPreparedFollowUpRemainsBackgroundOnlyOnReactivation();
+    TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();
     TestSourceSessionFlushFailureKeepsDirtyState();
 }

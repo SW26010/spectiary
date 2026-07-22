@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -32,6 +33,7 @@ enum class SourceCollectionSessionRestoreMode {
 struct SourceCollectionLoadHint {
     SourceCollectionIdentity identity;
     std::size_t spectrum_index = 0;
+    std::uint64_t live_workflow_revision = 0;
 };
 
 enum class SourceCollectionSessionIntentKind {
@@ -214,10 +216,6 @@ struct SourceCollectionSessionIntent {
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent);
 
-    // A newer explicit source selection supersedes background work that was
-    // prepared for the previously active source.
-    [[nodiscard]] bool SupersedesPendingSourceActivation() const;
-
 private:
     friend class SourceCollectionSession;
 
@@ -235,6 +233,7 @@ struct SourceCollectionSessionResult {
     SourceCollectionSessionAction action;
     SampleNavigationResult navigation;
     std::optional<std::size_t> follow_up_spectrum_index;
+    std::optional<std::filesystem::path> canceled_source_follow_up_path;
     std::vector<BackgroundRetirementHandle> background_retirement;
     bool changed = false;
     bool loaded = false;
@@ -283,6 +282,8 @@ public:
     SourceCollectionSession& operator=(const SourceCollectionSession&) = delete;
 
     [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionIntent intent);
+    [[nodiscard]] bool SupersedesPendingSourceActivation(
+        const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] SourceCollectionSessionView View() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSourceSnapshot() const;
@@ -305,6 +306,10 @@ public:
     void FinishDeferredRestore();
     [[nodiscard]] bool HasUnresolvedSourceIntent(const std::filesystem::path& path) const;
     [[nodiscard]] bool ForgetUnresolvedSourceIntent(const std::filesystem::path& path);
+    [[nodiscard]] bool CancelPendingSampleNavigation(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index);
+    [[nodiscard]] bool CancelActivePendingSampleNavigation();
 
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
@@ -318,7 +323,8 @@ private:
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction RemoveSource(
         std::size_t source_index,
-        std::vector<BackgroundRetirementHandle>& background_retirement);
+        std::vector<BackgroundRetirementHandle>& background_retirement,
+        std::optional<std::filesystem::path>* canceled_source_follow_up_path);
     [[nodiscard]] SourceCollectionSessionAction RequestSampleNavigation(
         const SampleNavigationRequest& request,
         SampleNavigationResult* navigation_result = nullptr);
@@ -393,6 +399,7 @@ private:
     bool deferred_restore_active_ = false;
     bool background_loads_required_ = false;
     std::optional<std::size_t> pending_background_spectrum_index_;
+    std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;
 };
 
 }  // namespace specforge

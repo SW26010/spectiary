@@ -105,17 +105,30 @@ public:
         AnnotationPathsBySourceKey() const;
 
     [[nodiscard]] SampleNavigationResult Navigate(const SampleNavigationRequest& request);
+    [[nodiscard]] SampleNavigationResult NavigateDeferred(
+        const SampleNavigationRequest& request,
+        bool remember_labeling_position,
+        std::optional<std::size_t> base_index = std::nullopt);
+    [[nodiscard]] bool RetargetDeferredNavigation(std::size_t spectrum_index);
+    [[nodiscard]] bool CommitDeferredNavigation(std::size_t spectrum_index);
+    void CancelDeferredNavigation();
     [[nodiscard]] std::optional<std::size_t> current_index() const;
+    [[nodiscard]] std::optional<std::size_t> pending_index() const;
+    [[nodiscard]] bool pending_navigation_remembers_labeling_position() const;
     [[nodiscard]] std::optional<std::size_t> spectrum_count() const;
     [[nodiscard]] bool can_move_previous() const;
     [[nodiscard]] bool can_move_next() const;
-    std::optional<std::size_t> SetSampleFilter(std::vector<bool> included_samples);
-    std::optional<std::size_t> ClearSampleFilter();
+    std::optional<std::size_t> SetSampleFilter(
+        std::vector<bool> included_samples,
+        bool defer_navigation = false);
+    std::optional<std::size_t> ClearSampleFilter(bool defer_navigation = false);
     [[nodiscard]] bool filter_active() const;
     [[nodiscard]] std::size_t filtered_sample_count() const;
     [[nodiscard]] bool current_sample_in_filter() const;
-    std::optional<std::size_t> SetSampleSorting(SampleNavigationSortChoice sort_choice);
-    std::optional<std::size_t> ClearSampleSorting();
+    std::optional<std::size_t> SetSampleSorting(
+        SampleNavigationSortChoice sort_choice,
+        bool defer_navigation = false);
+    std::optional<std::size_t> ClearSampleSorting(bool defer_navigation = false);
     [[nodiscard]] bool sorting_active() const;
     [[nodiscard]] const SampleNavigationSequence& current_sequence() const;
     void SetSampleNameQuery(std::string query);
@@ -130,7 +143,11 @@ private:
         std::string source_fingerprint;
         std::string context_fingerprint;
         std::size_t spectrum_count = 0;
+        // current_index owns the committed UI presentation. pending_index is
+        // only a navigation intent until its prepared snapshot arrives.
         std::optional<std::size_t> current_index;
+        std::optional<std::size_t> pending_index;
+        bool pending_navigation_remembers_labeling_position = false;
         SourceCollectionManifest manifest;
         std::string sample_name_query;
         std::vector<std::size_t> sample_name_matches;
@@ -141,14 +158,24 @@ private:
         SampleNavigationSortChoice sort_choice;
         mutable bool sequence_cache_valid = false;
         mutable SampleNavigationSequence sequence_cache;
+        mutable std::optional<std::size_t> interaction_sequence_index;
+        mutable SampleNavigationSequence interaction_sequence_cache;
     };
 
     [[nodiscard]] SourceSession* ActiveSession();
     [[nodiscard]] const SourceSession* ActiveSession() const;
     [[nodiscard]] static SampleNavigationSequence BuildSequence(const SourceSession& session);
+    [[nodiscard]] static SampleNavigationSequence BuildSequence(
+        const SourceSession& session,
+        std::optional<std::size_t> current_index);
     [[nodiscard]] static const SampleNavigationSequence& CachedSequence(const SourceSession& session);
+    [[nodiscard]] static const SampleNavigationSequence& InteractionSequence(
+        const SourceSession& session);
     static void InvalidateSequence(SourceSession& session);
     static std::optional<std::size_t> ReconcileCurrentWithSequence(SourceSession& session);
+    static std::optional<std::size_t> ReconcileDeferredWithSequence(
+        SourceSession& session,
+        std::optional<std::size_t> preferred_index = std::nullopt);
     [[nodiscard]] static bool IsSampleInFilter(const SourceSession& session, std::size_t sample_index);
     static void PopulateResultFromSequence(
         SampleNavigationResult& result,

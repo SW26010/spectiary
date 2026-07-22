@@ -168,6 +168,37 @@ void TestMatchingIdentitySkipsWorkflowCacheLoad()
     std::filesystem::remove(path);
 }
 
+void TestChangedContextFullPlanCarriesLiveWorkflowRevision()
+{
+    const std::filesystem::path path = UniqueTempPath("_revision.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path, 1);
+    const specforge::SourceCollectionSingleFileState state =
+        specforge::CaptureSourceCollectionSingleFileState(path);
+    specforge::SourceCollectionIdentity previous_identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot, state);
+    previous_identity.context_fingerprint = "previous-context";
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [snapshot](const auto&, std::size_t, const auto&) { return snapshot; }));
+    (void)queue.Enqueue({
+        .path = path,
+        .spectrum_index = 1,
+        .reuse_identity = previous_identity,
+        .base_live_workflow_revision = 42,
+    });
+    std::vector<specforge::SourceCollectionLoadCompletion> completions =
+        WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed context load should succeed");
+    const auto* plan = std::get_if<specforge::PreparedSourceCollectionPlan>(
+        &completions.front().prepared->payload);
+    Require(plan != nullptr, "changed context should produce a full prepared plan");
+    Require(
+        plan->base_live_workflow_revision == 42,
+        "the full plan must retain the live workflow revision captured at enqueue time");
+    std::filesystem::remove(path);
+}
+
 void TestBatchLoadsWorkflowCachesOnce()
 {
     const std::filesystem::path first = UniqueTempPath("_batch_a.csv");
@@ -629,6 +660,7 @@ int main()
 {
     TestEnqueueReturnsBeforeLoaderCompletes();
     TestMatchingIdentitySkipsWorkflowCacheLoad();
+    TestChangedContextFullPlanCarriesLiveWorkflowRevision();
     TestBatchLoadsWorkflowCachesOnce();
     TestSourcesUseIndependentThreads();
     TestIndividualLoadsPublishInRequestOrder();

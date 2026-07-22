@@ -59,6 +59,9 @@ public:
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
 
 private:
+    ShellUi(
+        SourceCollectionSession session,
+        SourceCollectionLoadQueue source_load_queue);
     void OpenSourceFromFilePicker();
     void OpenSourceFromFolderPicker();
     void OpenAnnotationFromFilePicker();
@@ -98,8 +101,11 @@ private:
     void QueueSessionFollowUp(
         const SourceCollectionSessionResult& result,
         bool deferred_restore = false);
+    void CancelSourceFollowUps(const SourceCollectionSessionResult& result);
     void RetireSessionResources(SourceCollectionSessionResult& result);
     void DrainSourceLoads();
+    void DrainSourceLoadCompletions(
+        std::vector<SourceCollectionLoadCompletion> completions);
     void BeginDeferredSourceRestore();
     void RestoreDeferredActiveSourceIfAvailable();
     void FinishDeferredSourceRestoreIfReady();
@@ -113,11 +119,33 @@ private:
         PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
     };
 
+    [[nodiscard]] static std::optional<PendingSourceLoad> TakeCurrentPendingSourceLoad(
+        const SourceCollectionLoadCompletion& completion,
+        std::uint64_t activation_epoch,
+        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+        const std::unordered_map<std::string, std::uint64_t>& source_load_generations);
     static void AdvanceSourceActivationIntent(
         std::uint64_t& activation_epoch,
         std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
         bool preserve_pending_explicit_opens,
         const std::function<void(std::uint64_t)>& cancel);
+    static void CancelSourceFollowUpsForPathInState(
+        const std::filesystem::path& path,
+        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+        std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
+        const std::function<void(std::uint64_t)>& cancel);
+    static void CancelSourceFollowUpsForResultInState(
+        const SourceCollectionSessionResult& result,
+        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
+        std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
+        const std::function<void(std::uint64_t)>& cancel);
+    [[nodiscard]] static bool HasMatchingSourceFollowUp(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        const std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads);
+    [[nodiscard]] static bool CancelFailedPendingSampleNavigation(
+        SourceCollectionSession& session,
+        const PendingSourceLoad& ticket);
     [[nodiscard]] static bool CompletionStartsSourceActivationIntent(
         PendingSourceLoadPurpose purpose,
         bool loaded);
@@ -135,6 +163,7 @@ private:
     bool immersive_plot_toggle_requested_ = false;
     bool profile_recording_toggle_requested_ = false;
     SampleWorkflowShortcut sample_workflow_shortcut_;
+    bool persist_local_state_ = true;
     bool layout_seeded_ = false;
     PanelVisibilityStatePersistence panel_visibility_state_;
     PanelVisibilityState panel_visibility_;

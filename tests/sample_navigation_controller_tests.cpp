@@ -659,6 +659,36 @@ void TestEmptyFilterClearsCurrentSequenceRow()
     Require(controller.current_index() && *controller.current_index() == 1, "clearing filter should restore the pre-filter row");
 }
 
+void TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "specforge_nav_sort_only.npy";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_sort_only_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(path, "<f8", {3, 2}, BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource("source", MakeSnapshot(path, "file:source", 3, 0));
+    specforge::SampleNavigationSortChoice sort;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(3.0),
+        specforge::MakeSampleNavigationSortValue(2.0),
+        specforge::MakeSampleNavigationSortValue(1.0),
+    };
+    (void)controller.SetSampleSorting(std::move(sort));
+    Require(controller.sorting_active(), "sort-only fixture should activate sorting");
+    Require(!controller.filter_active(), "sort-only fixture must not activate filtering");
+
+    const specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::LocateRow(2));
+    Require(!result.target_found, "ordinary row locate should be unavailable in sorted order");
+    Require(
+        !result.blocked_by_filter,
+        "sort-only row location must not claim that an inactive filter blocked the target");
+}
+
 }  // namespace
 
 int main()
@@ -676,5 +706,6 @@ int main()
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
     TestEmptyFilterClearsCurrentSequenceRow();
+    TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
     return 0;
 }

@@ -16,6 +16,7 @@ struct SourceCollectionRosterRemoveResult {
     SourceCollectionSessionAction action;
     bool removed = false;
     bool removed_current = false;
+    std::filesystem::path removed_path;
     std::string removed_source_key;
     std::vector<SpectrumSnapshotHandle> retired_snapshots;
 };

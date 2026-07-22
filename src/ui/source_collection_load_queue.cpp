@@ -460,7 +460,10 @@ private:
             task.request.path,
             task.request.spectrum_index,
             std::move(snapshot),
-            PreparedSourceCollectionPlan{std::move(context), std::move(workflow)},
+            PreparedSourceCollectionPlan{
+                std::move(context),
+                std::move(workflow),
+                task.request.base_live_workflow_revision},
         };
     }
 

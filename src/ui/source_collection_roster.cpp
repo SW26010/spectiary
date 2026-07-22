@@ -217,6 +217,7 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
 
     result.removed = true;
     result.removed_current = current_source_index_ && *current_source_index_ == source_index;
+    result.removed_path = sources_[source_index].path;
     result.removed_source_key = sources_[source_index].key;
     if (sources_[source_index].cached_snapshot) {
         result.retired_snapshots.push_back(std::move(sources_[source_index].cached_snapshot));

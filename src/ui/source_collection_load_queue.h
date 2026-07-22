@@ -21,6 +21,7 @@ struct SourceCollectionLoadRequest {
     std::size_t spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
     std::optional<SourceCollectionIdentity> reuse_identity;
+    std::optional<std::uint64_t> base_live_workflow_revision;
 };
 
 struct PreparedSourceCollection {
