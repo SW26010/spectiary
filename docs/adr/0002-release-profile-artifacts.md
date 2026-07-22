@@ -69,6 +69,16 @@ Portable profile logs are also SpecForge-owned default writes, so the Portable
 default profile directory is `Data/logs`. An explicit diagnostic override such
 as `SPECFORGE_PROFILE_DIR` may still redirect profile output because that is a
 developer-selected path, not the artifact's default storage location.
+Release artifacts expose the same profiler through a runtime `Performance` toolbar menu,
+while `SPECFORGE_PROFILE=1` remains the startup automation contract.
+High-frequency events enter a bounded in-memory queue and a background writer
+owns all steady-state file writes. The queue mutex is never held during file I/O;
+ordinary producer/writer lock contention waits for the short in-memory critical
+section instead of discarding evidence. Only actual queue-capacity pressure drops
+and counts records. Menu stop requests an asynchronous drain, and recorder state
+changes wake the event-driven UI. Every completed file ends with a recorder
+summary. A session stops after five minutes or 100 MiB so an accidentally left
+enabled recorder cannot grow package-local state without bound.
 Dear ImGui layout state is also SpecForge-owned default state. Portable builds
 store the default ImGui ini file under `Data` instead of writing it beside the
 current working directory.

@@ -3,6 +3,7 @@
 #include "domain/spectrum_loader.h"
 #include "domain/source_path_identity.h"
 #include "plot/spectrum_plot.h"
+#include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
 
 #include <Windows.h>
@@ -142,10 +143,47 @@ void RenderStatusBar(
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
-    ImGui::TextUnformatted(status.profile_open ? "Profile active" : "Profile off");
-    if (status.profile_open && status.profile_path != nullptr && ImGui::IsItemHovered()) {
-        const std::string profile_path = NarrowPath(*status.profile_path);
-        ImGui::SetTooltip("%s", profile_path.c_str());
+    const ProfileRecordingUiPresentation recording_presentation =
+        ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
+    if (recording_presentation.show_recording_indicator) {
+        constexpr float kRecordingIndicatorRadius = 4.0f;
+        constexpr float kRecordingIndicatorSpacing = 5.0f;
+        const ImVec2 indicator_min = ImGui::GetCursorScreenPos();
+        const float indicator_height = ImGui::GetTextLineHeight();
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(
+                indicator_min.x + kRecordingIndicatorRadius,
+                indicator_min.y + indicator_height * 0.5f),
+            kRecordingIndicatorRadius,
+            IM_COL32(235, 64, 58, 255));
+        ImGui::Dummy(ImVec2(kRecordingIndicatorRadius * 2.0f, indicator_height));
+        ImGui::SameLine(0.0f, kRecordingIndicatorSpacing);
+        ImGui::TextUnformatted(
+            recording_presentation.status_text.data(),
+            recording_presentation.status_text.data() + recording_presentation.status_text.size());
+    } else {
+        ImGui::TextUnformatted(
+            recording_presentation.status_text.data(),
+            recording_presentation.status_text.data() + recording_presentation.status_text.size());
+    }
+    if (ImGui::IsItemHovered() &&
+        (status.profile_path != nullptr || !status.profile_status_message.empty())) {
+        const std::string profile_path =
+            status.profile_path != nullptr ? NarrowPath(*status.profile_path) : std::string();
+        if (!profile_path.empty() && !status.profile_status_message.empty()) {
+            ImGui::SetTooltip(
+                "%.*s\n%s",
+                static_cast<int>(status.profile_status_message.size()),
+                status.profile_status_message.data(),
+                profile_path.c_str());
+        } else if (!profile_path.empty()) {
+            ImGui::SetTooltip("%s", profile_path.c_str());
+        } else {
+            ImGui::SetTooltip(
+                "%.*s",
+                static_cast<int>(status.profile_status_message.size()),
+                status.profile_status_message.data());
+        }
     }
 }
 
@@ -668,6 +706,13 @@ bool ShellUi::TakeImmersivePlotModeToggleRequest()
     return requested;
 }
 
+bool ShellUi::TakeProfileRecordingToggleRequest()
+{
+    const bool requested = profile_recording_toggle_requested_;
+    profile_recording_toggle_requested_ = false;
+    return requested;
+}
+
 bool ShellUi::immersive_plot_mode() const
 {
     return immersive_plot_mode_;
@@ -1083,7 +1128,7 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     ImGui::Begin(kDockHostWindow, nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    RenderMainMenuBar();
+    RenderMainMenuBar(status);
 
     const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
     const ImVec2 content_origin = ImGui::GetCursorScreenPos();
@@ -1143,6 +1188,24 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         MakeImmersivePlotDisplayOptions(),
         touchpad_gestures_);
 
+    if (status.profile_open) {
+        constexpr const char* kRecordingLabel = "REC  Performance";
+        const ImVec2 text_size = ImGui::CalcTextSize(kRecordingLabel);
+        const ImVec2 window_pos = ImGui::GetWindowPos();
+        const ImVec2 window_size = ImGui::GetWindowSize();
+        const ImVec2 label_min(
+            window_pos.x + window_size.x - text_size.x - 30.0f,
+            window_pos.y + 12.0f);
+        const ImVec2 label_max(label_min.x + text_size.x + 18.0f, label_min.y + text_size.y + 10.0f);
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        draw_list->AddRectFilled(label_min, label_max, IM_COL32(22, 22, 24, 220), 4.0f);
+        draw_list->AddCircleFilled(
+            ImVec2(label_min.x + 9.0f, label_min.y + 5.0f + text_size.y * 0.5f),
+            3.5f,
+            IM_COL32(235, 64, 58, 255));
+        draw_list->AddText(ImVec2(label_min.x + 17.0f, label_min.y + 5.0f), IM_COL32_WHITE, kRecordingLabel);
+    }
+
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SourceCollectionLabelingView& labeling = SessionView().labeling;
@@ -1158,7 +1221,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     ImGui::End();
 }
 
-void ShellUi::RenderMainMenuBar()
+void ShellUi::RenderMainMenuBar(const ShellStatus& status)
 {
     if (!ImGui::BeginMenuBar()) {
         return;
@@ -1210,6 +1273,37 @@ void ShellUi::RenderMainMenuBar()
         ImGui::MenuItem("Smoothing", nullptr, &panel_visibility_.smoothing);
         ImGui::MenuItem("Information", nullptr, &panel_visibility_.information);
         ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility_.spectral_lines);
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Performance")) {
+        const ProfileRecordingUiPresentation recording_presentation =
+            ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
+        if (!recording_presentation.menu_action_enabled) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::MenuItem(recording_presentation.menu_action.data())) {
+            profile_recording_toggle_requested_ = true;
+        }
+        if (!recording_presentation.menu_action_enabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("Automatically stops after 5 minutes or 100 MiB.");
+        if (status.profile_path != nullptr) {
+            const std::string profile_file_name = NarrowPath(status.profile_path->filename());
+            ImGui::TextDisabled("Output: %s", profile_file_name.c_str());
+            if (ImGui::IsItemHovered()) {
+                const std::string profile_path = NarrowPath(*status.profile_path);
+                ImGui::SetTooltip("%s", profile_path.c_str());
+            }
+        }
+        if (!status.profile_status_message.empty()) {
+            ImGui::TextDisabled(
+                "%.*s",
+                static_cast<int>(status.profile_status_message.size()),
+                status.profile_status_message.data());
+        }
         ImGui::EndMenu();
     }
 

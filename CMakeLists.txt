@@ -118,6 +118,7 @@ add_library(specforge_core STATIC
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
+    src/profile/profile_recording_status.cpp
     src/profile/profile_sink.cpp
 )
 specforge_configure_production_target(specforge_core)
@@ -245,6 +246,22 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
+specforge_add_test(
+    specforge_profile_recording_ui_state_tests
+    tests/profile_recording_ui_state_tests.cpp
+    specforge_core
+)
+specforge_add_test(
+    specforge_profile_sink_tests
+    tests/profile_sink_tests.cpp
+    specforge_core
+)
+add_test(
+    NAME specforge_analyze_profile_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/analyze_profile_tests.ps1"
+        -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-profile.ps1"
+)
 specforge_add_test(
     specforge_win32_compositor_clock_tests
     tests/win32_compositor_clock_tests.cpp

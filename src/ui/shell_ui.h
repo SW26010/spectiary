@@ -19,6 +19,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -30,8 +31,10 @@ class PlotTouchpadGestureSource;
 
 struct ShellStatus {
     bool profile_open = false;
+    bool profile_stopping = false;
     ProfileSink* profile = nullptr;
     const std::filesystem::path* profile_path = nullptr;
+    std::string_view profile_status_message;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
     std::uint64_t frame_index = 0;
@@ -50,6 +53,7 @@ public:
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
+    [[nodiscard]] bool TakeProfileRecordingToggleRequest();
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
@@ -60,7 +64,7 @@ private:
     void OpenAnnotationFromFilePicker();
     void RenderDockHost(const ShellStatus& status);
     void RenderImmersivePlot(const ShellStatus& status);
-    void RenderMainMenuBar();
+    void RenderMainMenuBar(const ShellStatus& status);
     void RenderFilesPanel();
     void RenderInfoTagsPanel();
     void RenderNavigationPanel();
@@ -129,6 +133,7 @@ private:
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;
+    bool profile_recording_toggle_requested_ = false;
     SampleWorkflowShortcut sample_workflow_shortcut_;
     bool layout_seeded_ = false;
     PanelVisibilityStatePersistence panel_visibility_state_;

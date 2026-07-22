@@ -55,8 +55,13 @@
 - `ImPlot pan-drag window time >= 10000 ms`。
 - 左键拖拽 `pointer_move` 样本数 `>= 100`。
 - 必须存在 `implot.pan_drag.sample`、`implot.axis_limits_changed` 和 `present` 事件。
+- JSONL 必须可完整解析，且最后一条事件是唯一的 `profile_recorder_summary`。
+- summary 必须给出受支持的停止原因，且 `dropped_events == 0`。
 
-`scripts/analyze-profile.ps1` 默认是门禁工具：质量门禁或主指标失败时返回非零。只想观察报告、不让脚本失败时，加 `-ReportOnly`。
+`scripts/analyze-profile.ps1` 默认是门禁工具：录制完整性、质量门禁或主指标失败时返回非零。只想观察报告、
+不让脚本失败时，加 `-ReportOnly`。没有 summary 的历史日志默认失败；只有明确分析旧格式时才加
+`-AllowLegacyIncompleteRecording`，脚本会显示 legacy 警告，且无法证明录制完整性。截断或非法 JSONL
+即使在 legacy 模式下也不会被接受。
 
 ## 标准采集
 
@@ -86,7 +91,18 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 
 程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
 
-`SPECFORGE_PROFILE=1` 是唯一的 profile 开关。Portable build 不设置 `SPECFORGE_PROFILE_DIR` 时默认写入可执行文件旁的 `Data/logs/`；性能脚本会显式设置 `SPECFORGE_PROFILE_DIR`，把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态混在一起。
+自动化采集继续使用 `SPECFORGE_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
+工具栏的 `Performance > Start Recording` / `Stop Recording` 在运行时开始/停止采集；沉浸模式右上角的
+`REC` 标记表示正在录制。复现卡顿后尽快停止录制，分析时结合停止前的一段帧时间线和输入事件定位。
+Portable build 不设置 `SPECFORGE_PROFILE_DIR` 时默认写入可执行文件旁的
+`Data/logs/`；性能脚本会显式设置 `SPECFORGE_PROFILE_DIR`，把本次分析日志重定向到仓库 `logs/`，避免和
+portable 包内状态混在一起。
+
+运行时录制使用 4 MiB 有界队列和后台批量写入，不在输入/UI 热路径同步写磁盘。单次录制达到 5 分钟或
+100 MiB 时自动停止。producer/writer 的普通内存锁争用不会丢事件；只有队列确实达到 4 MiB 容量时才
+拒绝新事件，并在末尾的 `profile_recorder_summary` 中记录 `dropped_events`。菜单停止只请求后台 drain，
+不会在 UI 帧同步等待文件 flush；自动停止和 writer 完成都会唤醒事件驱动渲染以刷新 `REC` 状态。
+用于定量回归时必须由 analyzer 确认 summary 完整且 `dropped_events == 0`。
 
 如果只想采集、不自动分析：
 
@@ -105,25 +121,25 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -ReportO
 手动分析某个日志：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl
 ```
 
 手动只看报告：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -ReportOnly
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -ReportOnly
 ```
 
 144Hz stretch 预算：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -BudgetMs 6.9444
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 6.9444
 ```
 
 120Hz 预算：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS.jsonl -BudgetMs 8.3333
+powershell -ExecutionPolicy Bypass -File scripts\analyze-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl -BudgetMs 8.3333
 ```
 
 ## DRR boost 验证

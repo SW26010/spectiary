@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace specforge {
@@ -63,6 +64,12 @@ private:
     void ToggleImmersivePlotMode();
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
+    void ToggleProfileRecording();
+    void StartProfileRecording(std::string_view trigger);
+    void StopProfileRecording(std::string_view trigger);
+    void LogProfileRecordingStarted(std::string_view trigger, std::string_view configuration_reason);
+    void WriteRuntimeConfiguration(std::string_view reason);
+    void RefreshProfileRecordingStatus();
     void LogDisplayEnvironment(std::string_view reason);
     void LogPresentationUpdates();
     void WritePresentationUpdate(
@@ -103,6 +110,8 @@ private:
     std::optional<PendingResize> pending_resize_;
     std::optional<WindowedPlacement> fullscreen_restore_;
     bool immersive_plot_entered_fullscreen_ = false;
+    ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
+    std::string profile_status_message_ = "Use the Performance menu to record.";
     std::uint64_t frame_index_ = 0;
 };
 

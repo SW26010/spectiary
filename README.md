@@ -104,9 +104,14 @@ shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
 The executable is written under
 `build/ninja-msvc-portable-debug/SpecForge.exe`. Portable runtime state is
 owned by the executable directory's `Data` folder: ImGui layout is
-`Data/specforge-imgui-v2.ini`. Set `SPECFORGE_PROFILE=1` before launch to write
-JSONL profile output under `Data/logs/`, or set `SPECFORGE_PROFILE_DIR` to
-write profile output to a specific directory.
+`Data/specforge-imgui-v2.ini`. Release builds can start or stop a performance
+diagnostic recording from the toolbar's `Performance` menu; JSONL output is written
+under `Data/logs/`. `SPECFORGE_PROFILE=1` remains available for scripted startup
+capture, and `SPECFORGE_PROFILE_DIR` redirects either capture path.
+Recording uses a bounded asynchronous writer and stops automatically after five
+minutes or 100 MiB. Stopping from the menu drains in the background; completed
+recordings are accepted by the analyzer only when their final summary reports
+zero dropped events.
 
 ## Portable Package
 

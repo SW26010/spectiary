@@ -175,9 +175,11 @@ build/ninja-msvc-portable-debug/SpecForge.exe
 ```
 
 Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgui-v2.ini`，panel 显示/隐藏状态写入
-`Data/panel-visibility.json`。设置
-`SPECFORGE_PROFILE=1` 后启动程序，运行时 profile JSONL 默认写入 `Data/logs/`；需要指定输出位置时，
-设置 `SPECFORGE_PROFILE_DIR`。
+`Data/panel-visibility.json`。Release 程序可用工具栏的 `Performance` 下拉菜单开始/停止性能诊断录制；设置
+`SPECFORGE_PROFILE=1` 则从启动阶段自动录制。profile JSONL 默认写入 `Data/logs/`，需要指定输出位置时
+设置 `SPECFORGE_PROFILE_DIR`。录制器使用有界异步写入，单次 5 分钟或 100 MiB 自动停止；分析前检查
+`profile_recorder_summary.dropped_events == 0`。`scripts/analyze-profile.ps1` 默认强制检查 summary 位于日志
+末尾、停止原因有效且没有丢事件；旧格式日志只有显式传入 `-AllowLegacyIncompleteRecording` 才可继续分析。
 
 ## Portable release
 

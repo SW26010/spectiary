@@ -1,10 +1,13 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
+#include <functional>
 #include <initializer_list>
+#include <memory>
+#include <ostream>
 #include <string>
 #include <string_view>
 
@@ -12,6 +15,8 @@ namespace specforge {
 
 class ProfileSink {
 public:
+    using StateChangeCallback = std::function<void()>;
+
     struct Field {
         std::string_view name;
         std::string value;
@@ -22,30 +27,83 @@ public:
         static Field Bool(std::string_view name, bool value);
     };
 
-    ProfileSink() = default;
-    explicit ProfileSink(std::filesystem::path path);
+    struct Limits {
+        std::size_t max_queue_bytes = 4U * 1024U * 1024U;
+        std::uint64_t max_file_bytes = 100ULL * 1024ULL * 1024ULL;
+        std::chrono::steady_clock::duration max_duration = std::chrono::minutes(5);
+    };
 
-    ProfileSink(ProfileSink&&) noexcept = default;
-    ProfileSink& operator=(ProfileSink&&) noexcept = default;
+    enum class StopReason : std::uint8_t {
+        None,
+        Explicit,
+        DurationLimit,
+        FileSizeLimit,
+        WriteFailure,
+    };
+
+    ProfileSink();
+    explicit ProfileSink(std::filesystem::path path);
+    ProfileSink(std::filesystem::path path, Limits limits);
+    ~ProfileSink();
+
+    ProfileSink(ProfileSink&& other) noexcept;
+    ProfileSink& operator=(ProfileSink&& other) noexcept;
 
     ProfileSink(const ProfileSink&) = delete;
     ProfileSink& operator=(const ProfileSink&) = delete;
 
     static ProfileSink CreateDefault();
+    static const char* StopReasonName(StopReason reason) noexcept;
 
-    [[nodiscard]] bool is_open() const noexcept { return stream_.is_open(); }
+    [[nodiscard]] bool StartDefault();
+    [[nodiscard]] bool Start(std::filesystem::path path);
+    [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
+    void SetStateChangeCallback(StateChangeCallback callback);
+    // Stops accepting events and asks the writer to drain without joining it.
+    void RequestStop();
+    // Finalizes a completed background stop without waiting for file I/O.
+    [[nodiscard]] bool TryFinalizeStop();
+    // Stops accepting events, drains the bounded queue, writes the summary, and joins the writer.
+    void Stop();
+
+    [[nodiscard]] bool is_open() const noexcept;
+    [[nodiscard]] bool is_stopping() const noexcept;
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+    [[nodiscard]] StopReason stop_reason() const noexcept;
+    [[nodiscard]] std::uint64_t dropped_event_count() const noexcept;
+    [[nodiscard]] const std::string& error_message() const noexcept { return error_message_; }
 
-    void WriteEvent(std::string_view event_name, std::initializer_list<Field> fields = {});
+    // Returns false when recording is inactive or the event was rejected by a recorder limit.
+    bool WriteEvent(std::string_view event_name, std::initializer_list<Field> fields = {});
     void WriteDuration(std::string_view event_name, std::uint64_t frame_index, double milliseconds);
 
 private:
+    struct WriterState;
+    using OutputStreamFactory =
+        std::function<std::unique_ptr<std::ostream>(const std::filesystem::path&)>;
+
+    friend struct ProfileSinkTestAccess;
+
     static std::int64_t SteadyNanoseconds();
-    static std::string EscapeJson(std::string_view value);
+    static std::string BuildEventLine(std::string_view event_name, std::initializer_list<Field> fields);
+    static void AppendEscapedJson(std::string& output, std::string_view value);
     static std::string TimestampForFileName();
+    static void WriterMain(WriterState* state);
+    static void NotifyStateChange(WriterState* state) noexcept;
+
+    bool Enqueue(std::string line);
+    bool StartWithOutputStreamFactory(
+        std::filesystem::path path,
+        Limits limits,
+        OutputStreamFactory output_stream_factory);
+    void FinalizeStoppedState();
 
     std::filesystem::path path_;
-    std::ofstream stream_;
+    std::unique_ptr<WriterState> state_;
+    StopReason last_stop_reason_ = StopReason::None;
+    std::uint64_t last_dropped_event_count_ = 0;
+    std::string error_message_;
+    StateChangeCallback state_change_callback_;
 };
 
 class ProfileTimer {

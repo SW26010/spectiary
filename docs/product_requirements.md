@@ -9,7 +9,7 @@
 - 主图通过 `SpectrumSnapshotHandle` 消费 domain 快照；synthetic fixture、`.npy`、CSV 和 FITS loader 使用同一条 UI/plot 路径。
 - loader 支持 1D/2D `.npy`、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱。
 - 已有第一版公开谱线表 `config/spectral_lines.public.tsv`，由 Spectral Lines 面板搜索和组织，并在主图中显示 line/band 参考 overlay；公开表不包含 subtype 组合、窗口预设或私有判据。
-- 可选 JSONL profile sink 已经接入，用于解释输入、view update、draw、render/present 的基本链路。
+- Release 可在运行时开启/停止 JSONL 性能诊断录制，用于解释输入、view update、draw、render/present 的基本链路；录制状态在普通和沉浸模式下均可见，磁盘写入与交互热路径隔离。
 
 当前最新真实数据 profile 只证明主图 pan/drag 在 130Hz 预算下通过；144Hz 仍是未达标的 stretch target。任何刷新率或延迟结论必须来自真实数据和新日志。
 
@@ -52,7 +52,7 @@ UI 跟手程度是产品基础能力，不是可以被其它功能换取的优�
 - 子窗口必须支持自由 docking。
 - `F11` immersive mode 是主图检查用的非 dockable presentation mode，用于临时绕过 dock host 直接全屏呈现绘图区；它不改变普通子窗口必须支持自由 docking 的默认合同。
 - 所有用户可见文案使用领域语言，不暴露 backend 名称。
-- profiling 是产品能力，不是可选开发工具。
+- profiling 是产品能力，不是可选开发工具；Release 必须提供运行时开关、明确录制指示、有界存储和丢事件计数，不能在输入/UI 热路径同步写磁盘。
 - 真实性能结论必须来自真实数据和新日志。
 - 实时交互响应优先于附加功能；功能验收必须证明没有牺牲主图 pan、zoom、spectrum switch、range navigation 的跟手程度。
 - 旧实验只能作为参考，不作为新产品主线。

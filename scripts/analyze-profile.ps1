@@ -9,7 +9,9 @@ param(
 
     [int]$MinInputSamples = 100,
 
-    [switch]$ReportOnly
+    [switch]$ReportOnly,
+
+    [switch]$AllowLegacyIncompleteRecording
 )
 
 $ErrorActionPreference = 'Stop'
@@ -387,11 +389,7 @@ function Read-ProfileEvents {
             $event = $line | ConvertFrom-Json
         }
         catch {
-            if ($index -eq ($lines.Count - 1)) {
-                Write-Warning "Ignoring truncated final JSONL line $($index + 1): $($_.Exception.Message)"
-                break
-            }
-            throw "${Path}:$($index + 1): invalid JSON: $($_.Exception.Message)"
+            throw "${Path}:$($index + 1): invalid or truncated JSON: $($_.Exception.Message)"
         }
 
         if ($null -ne (Get-EventValue $event 'steady_ns') -and $null -ne (Get-EventValue $event 'event')) {
@@ -399,7 +397,7 @@ function Read-ProfileEvents {
         }
     }
 
-    return [object[]]@($events.ToArray() | Sort-Object { [int64](Get-EventValue $_ 'steady_ns') })
+    return [object[]]$events.ToArray()
 }
 
 function Add-GateFailure {
@@ -412,10 +410,56 @@ function Add-GateFailure {
 }
 
 $resolvedProfile = Resolve-Path -Path $Profile
-$events = @(Read-ProfileEvents $resolvedProfile.Path)
-if ($events.Count -eq 0) {
+$rawEvents = @(Read-ProfileEvents $resolvedProfile.Path)
+if ($rawEvents.Count -eq 0) {
     throw "$($resolvedProfile.Path): no profile events found"
 }
+
+$gateFailures = [System.Collections.Generic.List[string]]::new()
+$summaryEvents = @($rawEvents | Where-Object { (Get-EventValue $_ 'event') -eq 'profile_recorder_summary' })
+$recordingCompleteness = 'PASS'
+if ($summaryEvents.Count -eq 0) {
+    if ($AllowLegacyIncompleteRecording) {
+        $recordingCompleteness = 'LEGACY (summary unavailable)'
+        Write-Warning 'Legacy profile has no profile_recorder_summary; recording completeness cannot be verified.'
+    }
+    else {
+        $recordingCompleteness = 'FAIL (summary missing)'
+        Add-GateFailure $gateFailures 'profile_recorder_summary is missing; recording completeness cannot be verified.'
+    }
+}
+elseif ($summaryEvents.Count -ne 1) {
+    $recordingCompleteness = 'FAIL (multiple summaries)'
+    Add-GateFailure $gateFailures "Expected exactly one profile_recorder_summary, found $($summaryEvents.Count)."
+}
+else {
+    $summary = $summaryEvents[0]
+    if ((Get-EventValue $rawEvents[-1] 'event') -ne 'profile_recorder_summary') {
+        $recordingCompleteness = 'FAIL (summary is not final)'
+        Add-GateFailure $gateFailures 'profile_recorder_summary is not the final event.'
+    }
+
+    $droppedEventsValue = Get-EventValue $summary 'dropped_events'
+    if ($null -eq $droppedEventsValue) {
+        $recordingCompleteness = 'FAIL (dropped_events missing)'
+        Add-GateFailure $gateFailures 'profile_recorder_summary.dropped_events is missing.'
+    }
+    else {
+        $droppedEvents = [long]$droppedEventsValue
+        if ($droppedEvents -ne 0) {
+            $recordingCompleteness = "FAIL ($droppedEvents dropped events)"
+            Add-GateFailure $gateFailures "profile_recorder_summary.dropped_events is $droppedEvents; recording is incomplete."
+        }
+    }
+
+    $stopReason = [string](Get-EventValue $summary 'stop_reason' '')
+    if ($stopReason -notin @('explicit', 'duration_limit', 'file_size_limit')) {
+        $recordingCompleteness = "FAIL (invalid stop reason '$stopReason')"
+        Add-GateFailure $gateFailures "profile_recorder_summary.stop_reason '$stopReason' does not describe a completed recording."
+    }
+}
+
+$events = @($rawEvents | Sort-Object { [int64](Get-EventValue $_ 'steady_ns') })
 
 $windows = @(Get-DragWindows $events)
 $totalWindowMs = 0.0
@@ -448,6 +492,7 @@ $presentNs = [int64[]]@(Get-EventTimes $events 'present')
 
 Write-Host "Profile: $($resolvedProfile.Path)"
 Write-Host "Events: $($events.Count)"
+Write-Host "Recording completeness: $recordingCompleteness"
 Write-Host "ImPlot pan-drag windows: $($windows.Count)"
 Write-Host ('ImPlot pan-drag window time: {0:F1} ms' -f $totalWindowMs)
 Write-DisplayEnvironment $events
@@ -469,7 +514,6 @@ $metrics = @(
     Write-Metric 'present duration' (Get-DurationValues $events 'present') $BudgetMs
 )
 
-$gateFailures = [System.Collections.Generic.List[string]]::new()
 if ($windows.Count -eq 0) {
     Add-GateFailure $gateFailures 'No ImPlot pan-drag window was detected.'
 }

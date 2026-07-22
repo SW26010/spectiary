@@ -2,6 +2,8 @@
 
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
+#include "profile/profile_recording_status.h"
+#include "ui/profile_recording_ui_state.h"
 
 #include <dwmapi.h>
 #include <imgui.h>
@@ -31,6 +33,7 @@ namespace {
 constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
 constexpr UINT kCompositorClockTickMessage = WM_APP + 0x54U;
+constexpr UINT kProfileRecorderStateChangedMessage = WM_APP + 0x55U;
 constexpr UINT_PTR kPresentationRefreshTimer = 0x5350U;
 constexpr UINT kPresentationRefreshDelayMs = 500U;
 constexpr float kDefaultWindowsDpi = 96.0f;
@@ -375,38 +378,13 @@ void SpecForgeApp::Initialize(
         ui_.OpenSource(*initial_source);
     }
 
-    const RuntimePaths runtime_paths = DefaultRuntimePaths();
     profile_ = ProfileSink::CreateDefault();
-    const SpectrumSnapshotHandle startup_snapshot = ui_.current_snapshot();
-    const std::string source_type(
-        startup_snapshot ? MetadataValue(startup_snapshot->source.metadata, "source_type") : std::string_view{});
-    profile_.WriteEvent("runtime_config", {
-                                            ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
-                                            ProfileSink::Field::String(
-                                                "release_profile",
-                                                ReleaseProfileName(runtime_paths.release_profile)),
-                                            ProfileSink::Field::String(
-                                                "package_root",
-                                                PathToUtf8(runtime_paths.package_root)),
-                                            ProfileSink::Field::String(
-                                                "local_user_state_root",
-                                                PathToUtf8(runtime_paths.local_user_state_root)),
-                                            ProfileSink::Field::String("profile_path", profile_.path().string()),
-                                            ProfileSink::Field::String(
-                                                "source",
-                                                startup_snapshot ? startup_snapshot->source.display_name : ""),
-                                            ProfileSink::Field::String("source_type", source_type),
-                                            ProfileSink::Field::Bool(
-                                                "can_plot_current_spectrum",
-                                                startup_snapshot &&
-                                                    startup_snapshot->capabilities.can_plot_current_spectrum),
-                                            ProfileSink::Field::Number(
-                                                "spectrum_count",
-                                                std::to_string(
-                                                    startup_snapshot
-                                                        ? startup_snapshot->collection.spectrum_count
-                                                        : 0)),
-                                        });
+    if (profile_.is_open()) {
+        profile_status_message_ = "Recording started by SPECFORGE_PROFILE.";
+        LogProfileRecordingStarted("environment", "startup");
+    } else if (!profile_.error_message().empty()) {
+        profile_status_message_ = "Could not start recording: " + profile_.error_message();
+    }
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
@@ -421,6 +399,10 @@ void SpecForgeApp::Initialize(
     if (!window_created) {
         throw std::runtime_error("Failed to create the Win32 window.");
     }
+    const HWND profile_state_window = window_.hwnd();
+    profile_.SetStateChangeCallback([profile_state_window]() noexcept {
+        (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
+    });
     ApplyTitleBarTheme(window_.hwnd());
 
     const HRESULT renderer_result = renderer_.Initialize(window_.hwnd());
@@ -563,6 +545,8 @@ void SpecForgeApp::Shutdown()
     pending_resize_.reset();
     fullscreen_restore_.reset();
     immersive_plot_entered_fullscreen_ = false;
+    profile_.SetStateChangeCallback({});
+    profile_.Stop();
     window_.ClearMessageHandler();
     window_.Destroy();
 }
@@ -579,16 +563,22 @@ void SpecForgeApp::RenderFrame()
 
     {
         ProfileTimer timer(profile_, "view_update", frame_index_);
+        RefreshProfileRecordingStatus();
         ShellStatus status;
         status.profile_open = profile_.is_open();
+        status.profile_stopping = profile_.is_stopping();
         status.profile = &profile_;
-        status.profile_path = status.profile_open ? &profile_.path() : nullptr;
+        status.profile_path = profile_.path().empty() ? nullptr : &profile_.path();
+        status.profile_status_message = profile_status_message_;
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
         ui_.Render(status);
         if (ui_.TakeImmersivePlotModeToggleRequest()) {
             ToggleImmersivePlotMode();
+        }
+        if (ui_.TakeProfileRecordingToggleRequest()) {
+            ToggleProfileRecording();
         }
     }
 
@@ -862,6 +852,183 @@ void SpecForgeApp::ExitImmersivePlotMode()
 
     if (was_immersive) {
         profile_.WriteEvent("immersive_plot", {ProfileSink::Field::Bool("enabled", false)});
+    }
+}
+
+void SpecForgeApp::ToggleProfileRecording()
+{
+    switch (ResolveProfileRecordingToggleAction(profile_.is_open(), profile_.is_stopping())) {
+    case ProfileRecordingToggleAction::Stop:
+        StopProfileRecording("user_toggle");
+        break;
+    case ProfileRecordingToggleAction::Start:
+        StartProfileRecording("user_toggle");
+        break;
+    case ProfileRecordingToggleAction::None:
+        return;
+    }
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::StartProfileRecording(std::string_view trigger)
+{
+    if (profile_.is_open() || profile_.is_stopping()) {
+        return;
+    }
+    if (!profile_.StartDefault()) {
+        profile_status_message_ = "Could not start recording: " + profile_.error_message();
+        displayed_profile_stop_reason_ = ProfileSink::StopReason::WriteFailure;
+        return;
+    }
+
+    displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
+    profile_status_message_ = "Recording performance diagnostics.";
+    LogProfileRecordingStarted(trigger, "recording_started");
+    profile_.WriteEvent("compositor_clock", {
+                                                  ProfileSink::Field::String("action", "recording_snapshot"),
+                                                  ProfileSink::Field::Bool(
+                                                      "available",
+                                                      compositor_clock_.available()),
+                                                  ProfileSink::Field::Bool(
+                                                      "requested",
+                                                      compositor_clock_.boost_requested()),
+                                                  ProfileSink::Field::Bool(
+                                                      "active",
+                                                      compositor_clock_.boost_active()),
+                                                  ProfileSink::Field::String(
+                                                      "result",
+                                                      HResultHex(compositor_clock_.last_boost_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "last_wait_result",
+                                                      std::to_string(compositor_clock_.last_wait_result())),
+                                                  ProfileSink::Field::Number(
+                                                      "tick_count",
+                                                      std::to_string(compositor_clock_.tick_count())),
+                                              });
+    LogDisplayEnvironment("recording_started");
+}
+
+void SpecForgeApp::StopProfileRecording(std::string_view trigger)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+    profile_.WriteEvent("profile_recording", {
+                                                   ProfileSink::Field::String("action", "stop"),
+                                                   ProfileSink::Field::String("trigger", std::string(trigger)),
+                                                   ProfileSink::Field::Number(
+                                                       "dropped_events",
+                                                       std::to_string(profile_.dropped_event_count())),
+                                               });
+    displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
+    profile_status_message_ = "Finishing recording...";
+    profile_.RequestStop();
+}
+
+void SpecForgeApp::LogProfileRecordingStarted(
+    std::string_view trigger,
+    std::string_view configuration_reason)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+    const ProfileSink::Limits limits;
+    profile_.WriteEvent("profile_recording", {
+                                                   ProfileSink::Field::String("action", "start"),
+                                                   ProfileSink::Field::String("trigger", std::string(trigger)),
+                                                   ProfileSink::Field::String("writer", "bounded_async_jsonl"),
+                                                   ProfileSink::Field::Number(
+                                                       "max_queue_bytes",
+                                                       std::to_string(limits.max_queue_bytes)),
+                                                   ProfileSink::Field::Number(
+                                                       "max_file_bytes",
+                                                       std::to_string(limits.max_file_bytes)),
+                                                   ProfileSink::Field::Number(
+                                                       "max_duration_seconds",
+                                                       std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                                                                          limits.max_duration)
+                                                                          .count())),
+                                               });
+    WriteRuntimeConfiguration(configuration_reason);
+}
+
+void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+    const RuntimePaths runtime_paths = DefaultRuntimePaths();
+    const SpectrumSnapshotHandle snapshot = ui_.current_snapshot();
+    const std::string source_type(
+        snapshot ? MetadataValue(snapshot->source.metadata, "source_type") : std::string_view{});
+    profile_.WriteEvent("runtime_config", {
+                                            ProfileSink::Field::String("reason", std::string(reason)),
+                                            ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
+                                            ProfileSink::Field::String(
+                                                "release_profile",
+                                                ReleaseProfileName(runtime_paths.release_profile)),
+                                            ProfileSink::Field::String(
+                                                "package_root",
+                                                PathToUtf8(runtime_paths.package_root)),
+                                            ProfileSink::Field::String(
+                                                "local_user_state_root",
+                                                PathToUtf8(runtime_paths.local_user_state_root)),
+                                            ProfileSink::Field::String(
+                                                "profile_path",
+                                                PathToUtf8(profile_.path())),
+                                            ProfileSink::Field::String(
+                                                "source",
+                                                snapshot ? snapshot->source.display_name : ""),
+                                            ProfileSink::Field::String("source_type", source_type),
+                                            ProfileSink::Field::Bool(
+                                                "can_plot_current_spectrum",
+                                                snapshot && snapshot->capabilities.can_plot_current_spectrum),
+                                            ProfileSink::Field::Bool(
+                                                "immersive_plot",
+                                                ui_.immersive_plot_mode()),
+                                            ProfileSink::Field::Bool(
+                                                "fullscreen",
+                                                fullscreen_restore_.has_value()),
+                                            ProfileSink::Field::Number(
+                                                "client_width",
+                                                std::to_string(window_.client_width())),
+                                            ProfileSink::Field::Number(
+                                                "client_height",
+                                                std::to_string(window_.client_height())),
+                                            ProfileSink::Field::Number(
+                                                "frame",
+                                                std::to_string(frame_index_)),
+                                            ProfileSink::Field::Number(
+                                                "spectrum_count",
+                                                std::to_string(snapshot ? snapshot->collection.spectrum_count : 0)),
+                                        });
+}
+
+void SpecForgeApp::RefreshProfileRecordingStatus()
+{
+    (void)profile_.TryFinalizeStop();
+    if (profile_.is_open()) {
+        if (profile_.dropped_event_count() > 0) {
+            profile_status_message_ = std::to_string(profile_.dropped_event_count()) +
+                                      " events dropped under recorder queue pressure.";
+        }
+        return;
+    }
+    if (profile_.is_stopping()) {
+        profile_status_message_ = "Finishing recording...";
+        return;
+    }
+
+    const ProfileSink::StopReason reason = profile_.stop_reason();
+    if (reason == displayed_profile_stop_reason_) {
+        return;
+    }
+    displayed_profile_stop_reason_ = reason;
+    if (reason != ProfileSink::StopReason::None) {
+        profile_status_message_ = ProfileRecordingStatusMessage(
+            reason,
+            profile_.dropped_event_count(),
+            profile_.error_message());
     }
 }
 
@@ -1372,6 +1539,11 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
             message,
             kCompositorClockTickMessage)) {
         RequestMessageRender();
+    }
+
+    if (message == kProfileRecorderStateChangedMessage) {
+        RequestMessageRender();
+        return 0;
     }
 
     if (profile_.is_open() && IsProfiledInputMessage(message)) {
