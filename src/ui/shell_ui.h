@@ -5,6 +5,7 @@
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/sample_workflow_panel.h"
+#include "ui/settings_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_session.h"
@@ -77,6 +78,7 @@ private:
     void RenderSortingPanel();
     void RenderSmoothingPanel();
     void RenderMainPlot(const ShellStatus& status);
+    void RenderSettingsPanel();
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
@@ -158,6 +160,7 @@ private:
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
+    SettingsPanelUi settings_panel_ui_;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;

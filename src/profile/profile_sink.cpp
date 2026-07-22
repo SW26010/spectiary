@@ -54,15 +54,6 @@ bool IsProfileEnabled()
     return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes";
 }
 
-std::filesystem::path ProfileDirectory()
-{
-    std::optional<std::string> directory = ReadEnvironmentVariable("SPECFORGE_PROFILE_DIR");
-    if (directory && !directory->empty()) {
-        return std::filesystem::path(*directory);
-    }
-    return DefaultRuntimePaths().profile_log_directory;
-}
-
 bool IsFiniteJsonNumber(std::string_view value)
 {
     if (value.empty()) {
@@ -183,11 +174,20 @@ const char* ProfileSink::StopReasonName(StopReason reason) noexcept
     return "unknown";
 }
 
+std::filesystem::path ProfileSink::EffectiveOutputDirectory()
+{
+    std::optional<std::string> directory = ReadEnvironmentVariable("SPECFORGE_PROFILE_DIR");
+    if (directory && !directory->empty()) {
+        return std::filesystem::path(*directory);
+    }
+    return DefaultRuntimePaths().profile_log_directory;
+}
+
 bool ProfileSink::StartDefault()
 {
     Stop();
     error_message_.clear();
-    const std::filesystem::path directory = ProfileDirectory();
+    const std::filesystem::path directory = EffectiveOutputDirectory();
     const std::string stem = "specforge-profile-" + TimestampForFileName();
     std::filesystem::path path = directory / (stem + ".jsonl");
     std::error_code exists_error;

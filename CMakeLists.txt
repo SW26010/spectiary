@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge LANGUAGES CXX)
+project(SpecForge VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,6 +155,7 @@ add_library(specforge_desktop_ui STATIC
     src/plot/spectrum_plot.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
+    src/ui/settings_panel.cpp
     src/ui/shell_ui.cpp
     src/ui/source_collection_panel.cpp
     src/ui/spectral_lines_grouping_view.cpp
@@ -162,11 +163,16 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectrum_view_session.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
+target_compile_definitions(specforge_desktop_ui PRIVATE
+    SPECFORGE_VERSION="${PROJECT_VERSION}"
+)
 target_link_libraries(specforge_desktop_ui
     PUBLIC
         specforge_sessions
         imgui::imgui
         implot::implot
+    PRIVATE
+        shell32
 )
 
 add_library(specforge_renderer STATIC
@@ -255,6 +261,14 @@ specforge_add_test(
     specforge_profile_sink_tests
     tests/profile_sink_tests.cpp
     specforge_core
+)
+specforge_add_test(
+    specforge_settings_panel_tests
+    tests/settings_panel_tests.cpp
+    specforge_desktop_ui
+)
+target_compile_definitions(specforge_settings_panel_tests PRIVATE
+    SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
 )
 add_test(
     NAME specforge_analyze_profile_tests

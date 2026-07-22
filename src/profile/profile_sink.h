@@ -54,6 +54,7 @@ public:
 
     static ProfileSink CreateDefault();
     static const char* StopReasonName(StopReason reason) noexcept;
+    [[nodiscard]] static std::filesystem::path EffectiveOutputDirectory();
 
     [[nodiscard]] bool StartDefault();
     [[nodiscard]] bool Start(std::filesystem::path path);

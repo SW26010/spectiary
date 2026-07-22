@@ -651,6 +651,7 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
+    RenderSettingsPanel();
     HandleSampleWorkflowShortcut();
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
@@ -1395,6 +1396,10 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         ImGui::EndMenu();
     }
 
+    if (ImGui::MenuItem("Settings")) {
+        settings_panel_ui_.Open();
+    }
+
     if (ImGui::BeginMenu("Performance")) {
         const ProfileRecordingUiPresentation recording_presentation =
             ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
@@ -1696,6 +1701,11 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         },
         labeling.label_set));
     ImGui::End();
+}
+
+void ShellUi::RenderSettingsPanel()
+{
+    settings_panel_ui_.Render();
 }
 
 void ShellUi::QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut)
