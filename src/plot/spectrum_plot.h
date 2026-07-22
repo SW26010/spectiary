@@ -4,11 +4,13 @@
 #include "domain/spectrum_snapshot.h"
 #include "overlays/spectral_line_catalog.h"
 #include "plot/plot_touchpad_gesture.h"
+#include "plot/spectral_line_label_layout.h"
 
 #include <imgui.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace specforge {
 
@@ -35,6 +37,8 @@ struct SpectrumPlotState {
     double last_y_min = 0.0;
     double last_y_max = 0.0;
     bool sync_last_limits_next_frame = false;
+    SpectralLineLabelLayoutWorkspace spectral_line_name_layout;
+    SpectralLineLabelLayoutWorkspace spectral_line_wavelength_layout;
 };
 
 struct SpectrumPlotProfileContext {
@@ -51,6 +55,7 @@ struct SpectrumPlotOverlays {
     const SpectralLineMarker* const* spectral_lines = nullptr;
     std::size_t spectral_line_count = 0;
     bool show_spectral_line_labels = true;
+    std::string_view layout_scope_id;
 };
 
 struct SpectrumPlotDisplayOptions {

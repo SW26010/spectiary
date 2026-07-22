@@ -1138,7 +1138,8 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         SpectrumPlotOverlays{
             spectral_lines.visible_markers.data(),
             spectral_lines.visible_markers.size(),
-            spectral_lines.marker_labels_visible},
+            spectral_lines.marker_labels_visible,
+            spectral_lines.layout_scope_id},
         MakeImmersivePlotDisplayOptions(),
         touchpad_gestures_);
 
@@ -1465,7 +1466,8 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         SpectrumPlotOverlays{
             spectral_lines.visible_markers.data(),
             spectral_lines.visible_markers.size(),
-            spectral_lines.marker_labels_visible},
+            spectral_lines.marker_labels_visible,
+            spectral_lines.layout_scope_id},
         {},
         touchpad_gestures_);
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);

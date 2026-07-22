@@ -187,6 +187,9 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
         const specforge::SpectralLinePlotView no_snapshot = session.PlotView(nullptr);
         Require(no_snapshot.visible_markers.empty(), "a missing snapshot must not expose plot markers");
         Require(no_snapshot.marker_labels_visible, "plot label visibility should be available without a snapshot");
+        Require(
+            no_snapshot.layout_scope_id == specforge::PublicSpectralLineCatalogIdentity().id,
+            "plot layout scope should use the stable catalog identity");
 
         const specforge::SpectralLinePlotView unsupported = session.PlotView(Snapshot(false));
         Require(unsupported.visible_markers.empty(), "an unsupported snapshot must not expose plot markers");

@@ -171,6 +171,7 @@ struct CatalogUserStateView {
 struct SpectralLinePlotView {
     std::vector<const SpectralLineMarker*> visible_markers;
     bool marker_labels_visible = true;
+    std::string_view layout_scope_id;
 };
 
 class SpectralLinesPanelController {

@@ -1,5 +1,6 @@
 #include "plot/spectrum_plot.h"
 
+#include "plot/spectral_line_label_layout.h"
 #include "profile/profile_sink.h"
 
 #include <imgui.h>
@@ -22,6 +23,36 @@ struct Bounds {
     double y_min = 0.0;
     double y_max = 1.0;
 };
+
+struct EdgeAxisMetrics {
+    float edge_padding = 0.0f;
+    float tick_length = 0.0f;
+    float tick_label_gap = 0.0f;
+    float x_tick_target_spacing = 0.0f;
+    float y_tick_target_spacing = 0.0f;
+    float interaction_band = 0.0f;
+};
+
+struct SpectrumPlotMetrics {
+    SpectralLineLabelMetrics spectral_line_labels;
+    EdgeAxisMetrics edge_axis;
+};
+
+SpectrumPlotMetrics MakeSpectrumPlotMetrics(float font_size, float text_line_height)
+{
+    const float em = std::max(1.0f, font_size);
+    return {
+        .spectral_line_labels = MakeSpectralLineLabelMetrics(font_size, text_line_height),
+        .edge_axis = {
+            .edge_padding = em * 0.125f,
+            .tick_length = em * 0.55f,
+            .tick_label_gap = em * 0.25f,
+            .x_tick_target_spacing = em * 5.50f,
+            .y_tick_target_spacing = em * 4.50f,
+            .interaction_band = em * 2.75f,
+        },
+    };
+}
 
 struct ScopedTransparentPlotStyle {
     explicit ScopedTransparentPlotStyle(bool enabled)
@@ -250,12 +281,15 @@ ImVec4 SpectralLineColor(const SpectralLineMarker& marker)
     return ImVec4(0.66f, 0.72f, 0.82f, 0.72f);
 }
 
-void RenderSpectralLineOverlays(const SpectrumPlotOverlays& overlays)
+void RenderSpectralLineOverlays(
+    const SpectrumPlotOverlays& overlays,
+    bool force_new_layout_epoch,
+    bool defer_lane_compaction,
+    float bottom_reserved_height,
+    const SpectralLineLabelMetrics& metrics,
+    SpectralLineLabelLayoutWorkspace& name_layout,
+    SpectralLineLabelLayoutWorkspace& wavelength_layout)
 {
-    if (overlays.spectral_lines == nullptr || overlays.spectral_line_count == 0) {
-        return;
-    }
-
     const ImPlotRect limits = ImPlot::GetPlotLimits();
     const double y_span = limits.Y.Max - limits.Y.Min;
     if (y_span <= 0.0) {
@@ -267,16 +301,36 @@ void RenderSpectralLineOverlays(const SpectrumPlotOverlays& overlays)
         return;
     }
 
+    const ImVec2 plot_pos = ImPlot::GetPlotPos();
+    const ImVec2 plot_size = ImPlot::GetPlotSize();
+    const ImVec2 plot_max(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
+    const SpectralLineLabelLayoutContext layout_context{
+        .scope_id = overlays.layout_scope_id,
+        .x_span = limits.X.Max - limits.X.Min,
+        .plot_width = plot_size.x,
+        .font_size = ImGui::GetFontSize(),
+        .force_new_epoch = force_new_layout_epoch,
+        .defer_lane_compaction = defer_lane_compaction,
+    };
+    UpdateSpectralLineLabelLayoutContext(name_layout, layout_context);
+    UpdateSpectralLineLabelLayoutContext(wavelength_layout, layout_context);
+    name_layout.inputs.clear();
+    wavelength_layout.inputs.clear();
+    if (overlays.show_spectral_line_labels) {
+        name_layout.inputs.reserve(overlays.spectral_line_count);
+        wavelength_layout.inputs.reserve(overlays.spectral_line_count);
+    }
+
+    const std::size_t marker_count =
+        overlays.spectral_lines != nullptr ? overlays.spectral_line_count : 0;
     ImPlot::PushPlotClipRect();
-    int visible_index = 0;
-    for (std::size_t index = 0; index < overlays.spectral_line_count; ++index) {
+    for (std::size_t index = 0; index < marker_count; ++index) {
         const SpectralLineMarker* marker = overlays.spectral_lines[index];
         if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
             continue;
         }
 
         const ImVec4 color = SpectralLineColor(*marker);
-        const double label_y = limits.Y.Min + y_span * (0.92 - 0.08 * static_cast<double>(visible_index % 3));
 
         if (marker->kind == SpectralLineMarkerKind::Band) {
             const ImVec2 start_min = ImPlot::PlotToPixels(*marker->start_vacuum_angstrom, limits.Y.Min);
@@ -285,28 +339,108 @@ void RenderSpectralLineOverlays(const SpectrumPlotOverlays& overlays)
             const ImVec2 rect_max(std::max(start_min.x, end_max.x), std::max(start_min.y, end_max.y));
             draw_list->AddRectFilled(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.10f)));
             draw_list->AddRect(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.34f)));
-            if (overlays.show_spectral_line_labels) {
-                const double x_mid = (*marker->start_vacuum_angstrom + *marker->end_vacuum_angstrom) * 0.5;
-                const ImVec2 label_pos = ImPlot::PlotToPixels(x_mid, label_y);
-                draw_list->AddText(
-                    ImVec2(label_pos.x + 4.0f, label_pos.y),
-                    ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.92f)),
-                    marker->display_label.c_str());
-            }
         } else if (marker->vacuum_angstrom) {
             const double x = *marker->vacuum_angstrom;
             const ImVec2 bottom = ImPlot::PlotToPixels(x, limits.Y.Min);
             const ImVec2 top = ImPlot::PlotToPixels(x, limits.Y.Max);
             draw_list->AddLine(bottom, top, ImGui::GetColorU32(color), 1.0f);
-            if (overlays.show_spectral_line_labels) {
-                const ImVec2 label_pos = ImPlot::PlotToPixels(x, label_y);
+        }
+
+        const double label_anchor = SpectralLineMarkerPosition(*marker);
+        if (overlays.show_spectral_line_labels &&
+            IsSpectralLineLabelAnchorInViewport(label_anchor, limits.X.Min, limits.X.Max)) {
+            const float label_anchor_x = ImPlot::PlotToPixels(label_anchor, limits.Y.Min).x;
+            const std::string& name = marker->label.empty() ? marker->id : marker->label;
+            const std::string& wavelength =
+                marker->display_label.empty() ? marker->id : marker->display_label;
+            name_layout.inputs.push_back({
+                marker->id,
+                label_anchor_x,
+                ImGui::CalcTextSize(name.c_str()).x,
+            });
+            wavelength_layout.inputs.push_back({
+                marker->id,
+                label_anchor_x,
+                ImGui::CalcTextSize(wavelength.c_str()).x,
+            });
+        }
+    }
+
+    const std::span<const SpectralLineLabelLayoutResult> name_placements = LayoutSpectralLineLabels(
+        name_layout,
+        plot_pos.x + metrics.edge_padding,
+        plot_max.x - metrics.edge_padding,
+        metrics.horizontal_gap);
+    const std::span<const SpectralLineLabelLayoutResult> wavelength_placements =
+        LayoutSpectralLineLabels(
+            wavelength_layout,
+            plot_pos.x + metrics.edge_padding,
+            plot_max.x - metrics.edge_padding,
+            metrics.horizontal_gap);
+
+    if (!name_layout.inputs.empty()) {
+        const float bottom_inset = metrics.bottom_gap + bottom_reserved_height;
+        const float lane_height = ImGui::GetTextLineHeight() + metrics.lane_gap;
+        const float plot_mid_y = plot_pos.y + plot_size.y * 0.5f;
+        const SpectralLineVerticalLayoutContext vertical_context{
+            .plot_top = plot_pos.y,
+            .plot_bottom = plot_max.y,
+            .plot_mid_y = plot_mid_y,
+            .top_inset = metrics.top_legend_inset,
+            .bottom_inset = bottom_inset,
+            .lane_height = lane_height,
+        };
+
+        std::size_t label_index = 0;
+        for (std::size_t index = 0; index < marker_count; ++index) {
+            const SpectralLineMarker* marker = overlays.spectral_lines[index];
+            if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
+                continue;
+            }
+            if (!IsSpectralLineLabelAnchorInViewport(
+                    SpectralLineMarkerPosition(*marker),
+                    limits.X.Min,
+                    limits.X.Max)) {
+                continue;
+            }
+
+            const std::string& name = marker->label.empty() ? marker->id : marker->label;
+            const std::string& wavelength =
+                marker->display_label.empty() ? marker->id : marker->display_label;
+            const ImVec2 name_size = ImGui::CalcTextSize(name.c_str());
+            const ImVec2 wavelength_size = ImGui::CalcTextSize(wavelength.c_str());
+            const SpectralLineLabelLayoutResult& name_placement = name_placements[label_index];
+            const SpectralLineLabelLayoutResult& wavelength_placement =
+                wavelength_placements[label_index];
+            ++label_index;
+
+            const ImVec4 color = SpectralLineColor(*marker);
+            const ImU32 text_color =
+                ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.95f));
+            const SpectralLineVerticalLabelPlacement name_vertical =
+                PlaceSpectralLineNameLabel(
+                    vertical_context,
+                    name_size.y,
+                    name_placement.lane);
+            if (name_vertical.visible) {
                 draw_list->AddText(
-                    ImVec2(label_pos.x + 4.0f, label_pos.y),
-                    ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.95f)),
-                    marker->display_label.c_str());
+                    ImVec2(name_placement.left, name_vertical.y),
+                    text_color,
+                    name.c_str());
+            }
+
+            const SpectralLineVerticalLabelPlacement wavelength_vertical =
+                PlaceSpectralLineWavelengthLabel(
+                    vertical_context,
+                    wavelength_size.y,
+                    wavelength_placement.lane);
+            if (wavelength_vertical.visible) {
+                draw_list->AddText(
+                    ImVec2(wavelength_placement.left, wavelength_vertical.y),
+                    text_color,
+                    wavelength.c_str());
             }
         }
-        ++visible_index;
     }
     ImPlot::PopPlotClipRect();
 }
@@ -416,7 +550,7 @@ float ClampTextStart(float desired, float minimum, float maximum)
     return std::clamp(desired, minimum, maximum);
 }
 
-void RenderEdgeAxisOverlay()
+void RenderEdgeAxisOverlay(const EdgeAxisMetrics& metrics)
 {
     const ImPlotRect limits = ImPlot::GetPlotLimits();
     const ImVec2 plot_pos = ImPlot::GetPlotPos();
@@ -434,12 +568,9 @@ void RenderEdgeAxisOverlay()
     const ImVec2 plot_max(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
     const ImU32 tick_color = ImGui::GetColorU32(ImVec4(0.72f, 0.78f, 0.82f, 0.58f));
     const ImU32 label_color = ImGui::GetColorU32(ImVec4(0.78f, 0.84f, 0.88f, 0.74f));
-    constexpr float kMajorTickLength = 9.0f;
-    constexpr float kTickLabelGap = 4.0f;
-
     ImPlot::PushPlotClipRect();
 
-    const int x_tick_count = DesiredTickCount(plot_size.x, 88.0f, 6, 14);
+    const int x_tick_count = DesiredTickCount(plot_size.x, metrics.x_tick_target_spacing, 6, 14);
     const double x_step = NiceTickStep(limits.X.Max - limits.X.Min, x_tick_count);
     const double x_start = std::ceil(limits.X.Min / x_step) * x_step;
     for (int index = 0; index < 128; ++index) {
@@ -454,7 +585,7 @@ void RenderEdgeAxisOverlay()
         const float pixel_x = ImPlot::PlotToPixels(x, limits.Y.Min).x;
         draw_list->AddLine(
             ImVec2(pixel_x, plot_max.y),
-            ImVec2(pixel_x, plot_max.y - kMajorTickLength),
+            ImVec2(pixel_x, plot_max.y - metrics.tick_length),
             tick_color,
             1.0f);
 
@@ -462,13 +593,14 @@ void RenderEdgeAxisOverlay()
         const ImVec2 label_size = ImGui::CalcTextSize(label.c_str());
         const float label_x = ClampTextStart(
             pixel_x - label_size.x * 0.5f,
-            plot_min.x + 2.0f,
-            plot_max.x - label_size.x - 2.0f);
-        const float label_y = plot_max.y - kMajorTickLength - kTickLabelGap - label_size.y;
+            plot_min.x + metrics.edge_padding,
+            plot_max.x - label_size.x - metrics.edge_padding);
+        const float label_y = plot_max.y - metrics.tick_length -
+                              metrics.tick_label_gap - label_size.y;
         draw_list->AddText(ImVec2(label_x, label_y), label_color, label.c_str());
     }
 
-    const int y_tick_count = DesiredTickCount(plot_size.y, 72.0f, 5, 12);
+    const int y_tick_count = DesiredTickCount(plot_size.y, metrics.y_tick_target_spacing, 5, 12);
     const double y_step = NiceTickStep(limits.Y.Max - limits.Y.Min, y_tick_count);
     const double y_start = std::ceil(limits.Y.Min / y_step) * y_step;
     for (int index = 0; index < 128; ++index) {
@@ -483,17 +615,17 @@ void RenderEdgeAxisOverlay()
         const float pixel_y = ImPlot::PlotToPixels(limits.X.Min, y).y;
         draw_list->AddLine(
             ImVec2(plot_min.x, pixel_y),
-            ImVec2(plot_min.x + kMajorTickLength, pixel_y),
+            ImVec2(plot_min.x + metrics.tick_length, pixel_y),
             tick_color,
             1.0f);
 
         const std::string label = FormatTickValue(y, y_step);
         const ImVec2 label_size = ImGui::CalcTextSize(label.c_str());
-        const float label_x = plot_min.x + kMajorTickLength + kTickLabelGap;
+        const float label_x = plot_min.x + metrics.tick_length + metrics.tick_label_gap;
         const float label_y = ClampTextStart(
             pixel_y - label_size.y * 0.5f,
-            plot_min.y + 2.0f,
-            plot_max.y - label_size.y - 2.0f);
+            plot_min.y + metrics.edge_padding,
+            plot_max.y - label_size.y - metrics.edge_padding);
         draw_list->AddText(ImVec2(label_x, label_y), label_color, label.c_str());
     }
 
@@ -703,6 +835,9 @@ void RenderSpectrumPlot(
     }
 
     const std::uintptr_t native_window = CurrentNativeWindow();
+    const SpectrumPlotMetrics plot_metrics = MakeSpectrumPlotMetrics(
+        ImGui::GetFontSize(),
+        ImGui::GetTextLineHeight());
     PlotTouchpadGestureBatch touchpad_batch;
     if (touchpad_gestures != nullptr && native_window != 0) {
         touchpad_batch = touchpad_gestures->Poll(native_window);
@@ -733,14 +868,14 @@ void RenderSpectrumPlot(
         SetNextViewLimits(requested_limits);
     }
 
-    constexpr float kEdgeAxisBandPixels = 44.0f;
+    const float edge_axis_band = plot_metrics.edge_axis.interaction_band;
     const ImVec2 plot_widget_pos = ImGui::GetCursorScreenPos();
     const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
     const ImVec2 plot_size = PlotSizeForDisplay(display, plot_widget_size);
     const bool edge_axis_wheel_zoomed =
         display.edge_axis_overlay && !fit_requested && !touchpad_batch.active &&
         touchpad_batch.deltas.empty() &&
-        ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, kEdgeAxisBandPixels);
+        ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, edge_axis_band);
 
     const bool transparent_native_axes = display.native_transparent_axes && !display.edge_axis_overlay;
     const ScopedTransparentPlotStyle transparent_plot_style(display.edge_axis_overlay || transparent_native_axes);
@@ -831,11 +966,31 @@ void RenderSpectrumPlot(
                 base_spec);
         }
 
+        const bool hovered = ImPlot::IsPlotHovered();
+        const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
+        const bool pan_drag_active =
+            IsPlotPanDragActive(state.pan_drag_active, hovered, left_down, left_dragging);
+        const bool defer_spectral_line_lane_compaction =
+            pan_drag_active || touchpad_batch.active;
+
         if (snapshot->capabilities.can_show_spectral_lines) {
-            RenderSpectralLineOverlays(overlays);
+            const float bottom_reserved_height =
+                display.edge_axis_overlay
+                    ? plot_metrics.edge_axis.tick_length + plot_metrics.edge_axis.tick_label_gap +
+                          ImGui::GetTextLineHeight()
+                    : 0.0f;
+            RenderSpectralLineOverlays(
+                overlays,
+                fit_requested,
+                defer_spectral_line_lane_compaction,
+                bottom_reserved_height,
+                plot_metrics.spectral_line_labels,
+                state.spectral_line_name_layout,
+                state.spectral_line_wavelength_layout);
         }
         if (display.edge_axis_overlay) {
-            RenderEdgeAxisOverlay();
+            RenderEdgeAxisOverlay(plot_metrics.edge_axis);
         }
 
         if (touchpad_gestures != nullptr && native_window != 0) {
@@ -844,16 +999,11 @@ void RenderSpectrumPlot(
                 plot_widget_pos,
                 plot_widget_size,
                 display.edge_axis_overlay,
-                kEdgeAxisBandPixels));
+                edge_axis_band));
         }
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         StoreLastLimits(limits, state);
-        const bool hovered = ImPlot::IsPlotHovered();
-        const bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-        const bool left_dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
-        const bool pan_drag_active =
-            IsPlotPanDragActive(state.pan_drag_active, hovered, left_down, left_dragging);
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
             for (const PlotTouchpadGestureDelta& gesture : touchpad_batch.deltas) {

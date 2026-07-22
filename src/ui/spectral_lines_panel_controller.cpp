@@ -681,6 +681,7 @@ SpectralLinePlotView SpectralLinesPanelController::PlotView(
 {
     SpectralLinePlotView result;
     result.marker_labels_visible = marker_labels_visible_;
+    result.layout_scope_id = catalog_identity_.id;
     if (!snapshot || !snapshot->capabilities.can_show_spectral_lines || catalog_.markers.empty()) {
         return result;
     }

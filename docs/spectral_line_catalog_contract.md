@@ -95,3 +95,47 @@ draws the supplied markers against the current X axis.
 Labels should be staggered for nearby markers. Dense catalogs must remain
 readable enough for inspection; hiding labels must keep the reference lines and
 bands visible.
+
+### Label placement contract
+
+- A marker name is placed near the top of the plot. Its wavelength text is placed
+  above the X axis. The two label sets avoid collisions independently.
+- Outside an active pan gesture, labels are assigned in appearance-priority order
+  to their most comfortable available lane: nearest the top for marker names and
+  nearest the bottom for wavelength text. A continuously visible label keeps
+  priority over a later or returning label; unseen labels reserve no lane.
+- A label participates only while its physical anchor is inside the viewport: a
+  line uses its wavelength and a band uses its midpoint. An intersecting band is
+  still drawn when its midpoint is outside, but its label occupies no collision
+  space. Outside an active pan, leaving ends the label's visibility tenure, so
+  re-entry is a new appearance; during a pan it retains its gesture snapshot.
+- Comfortable-lane compaction is deferred while a direct pan gesture remains
+  active, such as while the mouse button is held or a supported
+  touch/direct-manipulation gesture is still active. Each pre-existing label
+  snapshots an immutable preferred lane at gesture start; a label first seen
+  during the gesture snapshots its first feasible lane. Current geometry may
+  require a temporary fallback lane, but that fallback never replaces the
+  gesture preference. Necessary collision avoidance is still applied, and
+  returning to the gesture-start geometry restores the same feasible layout
+  before release, independent of the path taken.
+- Pan visibility is transactional. Labels visible both at gesture start and at
+  release preserve their committed appearance priority even if they temporarily
+  leave and return. Labels absent at release end their tenure; labels first seen
+  during the gesture are appended after surviving pre-gesture labels. The final
+  visible set is committed atomically before comfortable-lane selection resumes,
+  preventing release-time lane swaps. A future touchscreen pan path must drive
+  the same transaction at least until the final contact is released.
+- Fit view, X-scale changes, catalog changes, font/DPI changes, and material plot
+  width changes start a new epoch. The initially visible labels are then ordered
+  left to right.
+- Spacing and insets are font-relative. Fixed pixels are reserved for hairline
+  strokes or platform hit-testing, not text placement.
+- Labels are rendered under the plot clip rect and edge-clamped horizontally.
+  Text wider than the available plot width occupies that full width for collision
+  detection; the original text is submitted unchanged and clipped, not omitted,
+  truncated, or abbreviated. Top lanes grow downward, bottom lanes grow upward,
+  and labels crossing the plot midpoint are omitted rather than drawn over the
+  opposite label region.
+- `spectral_line_label_layout` owns placement policy. Rendering supplies stable
+  IDs, anchors, text widths, and layout context, then consumes placements. The
+  algorithm may be replaced if this contract and its regression tests remain true.
