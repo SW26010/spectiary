@@ -45,6 +45,7 @@ struct NavigationLatencyPreparationRoundReport {
     bool hint_present = false;
     bool generation_current_at_start = false;
     bool listing_scan_performed = false;
+    bool context_reused = false;
     bool revalidation_succeeded = false;
     std::int64_t preparation_started_ns = 0;
     std::int64_t snapshot_load_started_ns = 0;
@@ -59,6 +60,7 @@ struct NavigationLatencyAttemptReport {
     std::uint64_t source_task_id = 0;
     bool source_is_folder = false;
     bool workflow_reused = false;
+    bool context_reused = false;
 
     std::int64_t load_enqueued_ns = 0;
     std::int64_t worker_started_ns = 0;
@@ -86,6 +88,9 @@ public:
     void MarkFolderListingScanPerformed() noexcept;
     void MarkSnapshotLoadFinished(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
     void MarkContextPrepared(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
+    void MarkContextPrepared(
+        bool context_reused,
+        NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
     void MarkSourceRevalidated(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
     void MarkSourceRevalidated(
         bool succeeded,
@@ -117,6 +122,7 @@ private:
     std::atomic_uint64_t source_task_id_ = 0;
     std::atomic_bool source_is_folder_ = false;
     std::atomic_bool workflow_reused_ = false;
+    std::atomic_bool context_reused_ = false;
     std::atomic_int64_t worker_started_ns_ = 0;
     std::atomic_int64_t snapshot_load_started_ns_ = 0;
     std::atomic_int64_t snapshot_load_finished_ns_ = 0;

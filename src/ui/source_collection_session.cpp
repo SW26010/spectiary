@@ -811,7 +811,8 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
         *identity,
         *current_index,
         revision == live_workflow_revisions_.end() ? 0 : revision->second,
-        roster_->FolderListingGeneration(path)};
+        roster_->FolderListingGeneration(path),
+        roster_->ContextReuseProof(path)};
 }
 
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
@@ -952,7 +953,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
     PreparedSourceCollectionPayload payload,
-    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation,
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
 {
     SourceCollectionSessionResult result;
     const auto retire_folder_listing_generation = [&]() {
@@ -1059,7 +1061,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             path,
             spectrum_index,
             std::move(snapshot),
-            std::move(folder_listing_generation));
+            std::move(folder_listing_generation),
+            std::move(context_reuse_proof));
     MergeSourceCollectionSessionAction(result.action, roster_result.action);
     const bool is_prepared_plan =
         std::holds_alternative<PreparedSourceCollectionPlan>(payload);

@@ -36,6 +36,7 @@ struct SourceCollectionLoadHint {
     std::size_t spectrum_index = 0;
     std::uint64_t live_workflow_revision = 0;
     SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
 };
 
 enum class SourceCollectionSessionIntentKind {
@@ -300,7 +301,9 @@ public:
         std::size_t spectrum_index,
         SpectrumSnapshotHandle snapshot,
         PreparedSourceCollectionPayload payload,
-        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
+        std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
+            std::nullopt);
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,

@@ -160,7 +160,9 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   首个可见代理帧。
 - 汇总事件的 `from_index`、最终 `target_index`、`input_kind`、`attempt_count`、
   `presentation_viewport_id` 和 `cache_hit`，以及 attempt 事件的 `target_index`、
-  `source_task_id`、`source_kind`、`workflow_reused`：用于关联请求性质。当前尚未实现导航
+  `source_task_id`、`source_kind`、`workflow_reused`、`context_reused`：用于关联请求性质。
+  每个 preparation round 也有自己的 `context_reused`，因此 TOCTOU retry 不会覆盖前一轮。
+  当前尚未实现导航
   缓存，所以 `cache_hit` 固定为 `false`；后续缓存实现可沿用同一口径做冷/热路径 A/B。
 
 Folder source 的 warm navigation 会复用上一次验证通过的 immutable listing generation。
@@ -171,6 +173,13 @@ Folder source 的 warm navigation 会复用上一次验证通过的 immutable li
 这个 listing generation cache 不是 adjacent spectrum snapshot cache，不应据此把
 `cache_hit` 写为 `true`。
 
+Known source 还会保留上一次完整准备并通过 post-decode 检查的 context reuse proof。
+当 source/companion/annotation dependency state、decoded count/path 和 folder generation
+（若适用）均未变化时，`context_reused=true`，worker 不再读取完整 sample-name/annotation
+manifest，也不再遍历 folder listing 重建 identity/sample names。任一证明条件不成立时
+`context_reused=false` 并走原完整 context materialization；`workflow_reused=true` 仍只表示
+最终 identity 可沿用既有 workflow，两者不能混为同一字段。
+
 每条新的 folder `navigation_latency_preparation_round` 还提供三项失效诊断：
 
 - `hint_present`：本轮开始时是否持有可复用的 listing generation；
@@ -180,6 +189,10 @@ Folder source 的 warm navigation 会复用上一次验证通过的 immutable li
 分析器会按这三个字段分组报告 folder inspection 的 p50/p95。旧 profile 没有这些字段时
 仍可分析；一旦 profile 中出现任一新字段，所有 preparation round 都必须提供合法的
 JSON boolean。
+
+分析器也会按 `source_kind × context_reused` 报告 context prepare 的 count、p50 和 p95。
+旧 profile 没有 `context_reused` 时仍可分析；新 profile 中 attempt 与 preparation round
+必须提供合法 JSON boolean，且 attempt 值必须等于最终 preparation round。
 
 采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
 下一条，等最后一条显示后再 `Stop Recording`。然后运行：

@@ -93,6 +93,48 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
+specforge::SourceCollectionContextReuseProof MakeFileReuseProof(
+    const specforge::SpectrumSnapshot& snapshot,
+    const std::vector<std::filesystem::path>& annotation_paths = {})
+{
+    const specforge::SourceCollectionSingleFileState dependency_state =
+        specforge::CaptureSourceCollectionSingleFileState(
+            snapshot.source.path,
+            annotation_paths);
+    specforge::SourceCollectionContext context =
+        specforge::LoadSourceCollectionContextCancelable(
+            snapshot,
+            dependency_state,
+            []() {});
+    specforge::FinalizeSourceCollectionAnnotationContextFingerprint(
+        context,
+        annotation_paths);
+    return {
+        std::move(context.identity),
+        dependency_state,
+    };
+}
+
+specforge::SourceCollectionContextReuseProof MakeFolderReuseProof(
+    const specforge::SpectrumSnapshot& snapshot,
+    const specforge::SourceCollectionFolderListing& listing,
+    const std::vector<std::filesystem::path>& annotation_paths = {})
+{
+    const specforge::SourceCollectionSingleFileState dependency_state =
+        specforge::CaptureSourceCollectionSingleFileState(
+            snapshot.source.path,
+            annotation_paths);
+    specforge::SourceCollectionContext context =
+        specforge::BuildFolderSourceCollectionContext(snapshot, listing);
+    specforge::FinalizeSourceCollectionAnnotationContextFingerprint(
+        context,
+        annotation_paths);
+    return {
+        std::move(context.identity),
+        dependency_state,
+    };
+}
+
 specforge::SourceCollectionLoadDependencies Dependencies(
     specforge::SourceCollectionLoadDependencies::SnapshotLoader loader,
     std::atomic_int* cache_loads = nullptr)
@@ -218,6 +260,287 @@ void TestMatchingIdentitySkipsWorkflowCacheLoad()
         "matching source generation should use snapshot-only reuse");
     Require(cache_loads.load() == 0, "snapshot-only reuse should not read workflow caches");
     std::filesystem::remove(path);
+}
+
+void TestStableKnownFileSkipsFullContextBuilder()
+{
+    const std::filesystem::path path = UniqueTempPath("_stable_reuse.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path, 2);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*snapshot);
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [snapshot](const auto&, std::size_t, const auto&) { return snapshot; });
+    dependencies.file_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& state,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::LoadSourceCollectionContextCancelable(
+                decoded,
+                state,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = path,
+        .spectrum_index = 2,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "stable known file should prepare");
+    Require(
+        context_builds.load() == 0,
+        "stable known file navigation must not call the full context builder");
+    Require(
+        std::holds_alternative<specforge::PreparedSourceCollectionReuse>(
+            completions.front().prepared->payload),
+        "stable known file should reuse its existing workflow");
+    Require(
+        completions.front().prepared->context_reuse_proof.has_value(),
+        "stable known file should republish its verified reuse proof");
+    std::filesystem::remove(path);
+}
+
+void TestStableKnownFolderSkipsFullContextBuilder()
+{
+    const std::filesystem::path folder = UniqueTempPath("_stable_reuse_folder");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    const auto generation = std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation =
+        MakeFolderListingGeneration(folder, generation);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(folder, 0, listing_generation->listing.spectra.size());
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFolderReuseProof(*snapshot, listing_generation->listing);
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_snapshot_loader =
+        [snapshot](const auto&, std::size_t, const auto&, const auto&) {
+            return snapshot;
+        };
+    dependencies.folder_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& listing,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::BuildFolderSourceCollectionContextCancelable(
+                decoded,
+                listing,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = folder,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint = listing_generation,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "stable known folder should prepare");
+    Require(
+        context_builds.load() == 0,
+        "stable known folder navigation must not call the full context builder");
+    Require(
+        std::holds_alternative<specforge::PreparedSourceCollectionReuse>(
+            completions.front().prepared->payload),
+        "stable known folder should reuse its existing workflow");
+    std::filesystem::remove_all(folder);
+}
+
+void TestKnownFileSourceChangeMaterializesContext()
+{
+    const std::filesystem::path path = UniqueTempPath("_changed_reuse_source.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*snapshot);
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::app);
+        stream << "changed";
+    }
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [snapshot](const auto&, std::size_t, const auto&) { return snapshot; });
+    dependencies.file_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& state,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::LoadSourceCollectionContextCancelable(
+                decoded,
+                state,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = path,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed source should prepare");
+    Require(
+        context_builds.load() == 1,
+        "changed source state must fall back to the full context builder");
+    std::filesystem::remove(path);
+}
+
+void TestKnownFileCompanionChangeMaterializesContext()
+{
+    const std::filesystem::path path = UniqueTempPath("_changed_reuse_companion.npy");
+    WriteFixture(path);
+    const std::optional<std::filesystem::path> companion =
+        specforge::SourceCollectionCompanionNamePath(path);
+    Require(companion.has_value(), "NPY fixture should have a companion-name path");
+    WriteFixture(*companion);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*snapshot);
+    {
+        std::ofstream stream(*companion, std::ios::binary | std::ios::app);
+        stream << "changed";
+    }
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [snapshot](const auto&, std::size_t, const auto&) { return snapshot; });
+    dependencies.file_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& state,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::LoadSourceCollectionContextCancelable(
+                decoded,
+                state,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = path,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed companion should prepare");
+    Require(
+        context_builds.load() == 1,
+        "changed companion state must fall back to the full context builder");
+    std::filesystem::remove(*companion);
+    std::filesystem::remove(path);
+}
+
+void TestKnownFileAnnotationChangeMaterializesContext()
+{
+    const std::filesystem::path path = UniqueTempPath("_changed_reuse_annotation.csv");
+    const std::filesystem::path annotation =
+        UniqueTempPath("_changed_reuse_annotation.npy");
+    WriteFixture(path);
+    WriteFixture(annotation);
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path);
+    const std::vector<std::filesystem::path> annotation_paths = {annotation};
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*snapshot, annotation_paths);
+    {
+        std::ofstream stream(annotation, std::ios::binary | std::ios::app);
+        stream << "changed";
+    }
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [snapshot](const auto&, std::size_t, const auto&) { return snapshot; });
+    dependencies.file_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& state,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::LoadSourceCollectionContextCancelable(
+                decoded,
+                state,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = path,
+        .annotation_paths = annotation_paths,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed annotation should prepare");
+    Require(
+        context_builds.load() == 1,
+        "changed annotation dependency must fall back to the full context builder");
+    std::filesystem::remove(annotation);
+    std::filesystem::remove(path);
+}
+
+void TestKnownFolderGenerationChangeMaterializesContext()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_changed_reuse_generation");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    const auto generation = std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation =
+        MakeFolderListingGeneration(folder, generation);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(folder, 0, listing_generation->listing.spectra.size());
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFolderReuseProof(*snapshot, listing_generation->listing);
+    generation->Invalidate();
+    std::atomic_int context_builds = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_change_generation_factory =
+        [](const auto&, const auto&) {
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        };
+    dependencies.folder_snapshot_loader =
+        [snapshot](const auto&, std::size_t, const auto&, const auto&) {
+            return snapshot;
+        };
+    dependencies.folder_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& listing,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::BuildFolderSourceCollectionContextCancelable(
+                decoded,
+                listing,
+                checkpoint);
+        };
+
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = folder,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint = listing_generation,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed generation should prepare");
+    Require(
+        context_builds.load() == 1,
+        "invalidated folder generation must fall back to the full context builder");
+    std::filesystem::remove_all(folder);
 }
 
 void TestChangedContextFullPlanCarriesLiveWorkflowRevision()
@@ -988,7 +1311,12 @@ void TestChangedFileRetriesOneStableGeneration()
 {
     const std::filesystem::path path = UniqueTempPath("_retry.csv");
     WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        MakeSnapshot(path, 1);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*initial_snapshot);
     std::atomic_int loader_calls = 0;
+    std::atomic_int context_builds = 0;
     specforge::NavigationLatencyTrace trace(
         1,
         0,
@@ -999,18 +1327,38 @@ void TestChangedFileRetriesOneStableGeneration()
         specforge::NavigationLatencyTrace::Now());
     const specforge::NavigationLatencyAttemptHandle navigation_attempt =
         trace.BeginLoadAttempt(1);
-    specforge::SourceCollectionLoadQueue queue(Dependencies(
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
         [&](const auto& source, std::size_t index, const auto&) {
             if (++loader_calls == 1) {
                 std::ofstream stream(source, std::ios::binary | std::ios::app);
                 stream << "changed";
             }
             return MakeSnapshot(source, index);
-        }));
-    (void)queue.Enqueue({.path = path, .navigation_attempt = navigation_attempt});
+        });
+    dependencies.file_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& state,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::LoadSourceCollectionContextCancelable(
+                decoded,
+                state,
+                checkpoint);
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = path,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .navigation_attempt = navigation_attempt,
+    });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed file should settle on a stable retry");
     Require(loader_calls.load() == 2, "changed file should be decoded exactly one additional time");
+    Require(
+        context_builds.load() == 1,
+        "a failed reuse-proof round should materialize only the stable retry");
     const specforge::NavigationLatencyAttemptReport report = navigation_attempt->Report();
     Require(
         report.preparation_rounds.size() == 2,
@@ -1019,6 +1367,10 @@ void TestChangedFileRetriesOneStableGeneration()
         !report.preparation_rounds[0].revalidation_succeeded &&
             report.preparation_rounds[1].revalidation_succeeded,
         "the trace should distinguish the rejected generation from the accepted retry");
+    Require(
+        report.preparation_rounds[0].context_reused &&
+            !report.preparation_rounds[1].context_reused,
+        "TOCTOU retry should distinguish the rejected proof from the materialized retry");
     std::filesystem::remove(path);
 }
 
@@ -1031,8 +1383,18 @@ void TestChangedFolderRetriesOneStableGeneration()
         std::make_shared<MutableDirectoryChangeGeneration>();
     const specforge::SourceCollectionFolderListingGenerationHandle listing_generation_hint =
         MakeFolderListingGeneration(folder, initial_change_generation);
+    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        MakeSnapshot(
+            folder,
+            0,
+            listing_generation_hint->listing.spectra.size());
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFolderReuseProof(
+            *initial_snapshot,
+            listing_generation_hint->listing);
     std::atomic_int loader_calls = 0;
     std::atomic_int folder_scan_calls = 0;
+    std::atomic_int context_builds = 0;
     specforge::NavigationLatencyTrace trace(
         1,
         0,
@@ -1064,15 +1426,31 @@ void TestChangedFolderRetriesOneStableGeneration()
             ++folder_scan_calls;
             return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
         };
+    dependencies.folder_context_builder =
+        [&context_builds](
+            const auto& decoded,
+            const auto& listing,
+            const auto& checkpoint) {
+            ++context_builds;
+            return specforge::BuildFolderSourceCollectionContextCancelable(
+                decoded,
+                listing,
+                checkpoint);
+        };
     specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
     (void)queue.Enqueue({
         .path = folder,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
         .folder_listing_generation_hint = listing_generation_hint,
         .navigation_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed folder should settle on a stable retry");
     Require(loader_calls.load() == 2, "changed folder should be decoded exactly one additional time");
+    Require(
+        context_builds.load() == 1,
+        "an invalidated proof should materialize only the replacement generation");
     Require(
         folder_scan_calls.load() == 1,
         "a changed hinted folder should scan only the replacement generation");
@@ -1091,6 +1469,10 @@ void TestChangedFolderRetriesOneStableGeneration()
             !report.preparation_rounds[0].revalidation_succeeded &&
             report.preparation_rounds[1].revalidation_succeeded,
         "the folder trace should distinguish the rejected generation from the accepted retry");
+    Require(
+        report.preparation_rounds[0].context_reused &&
+            !report.preparation_rounds[1].context_reused,
+        "folder retry should distinguish the rejected proof from the materialized generation");
     Require(
         report.preparation_rounds[0].hint_present &&
             report.preparation_rounds[0].generation_current_at_start &&
@@ -1348,6 +1730,12 @@ int main()
 {
     TestEnqueueReturnsBeforeLoaderCompletes();
     TestMatchingIdentitySkipsWorkflowCacheLoad();
+    TestStableKnownFileSkipsFullContextBuilder();
+    TestStableKnownFolderSkipsFullContextBuilder();
+    TestKnownFileSourceChangeMaterializesContext();
+    TestKnownFileCompanionChangeMaterializesContext();
+    TestKnownFileAnnotationChangeMaterializesContext();
+    TestKnownFolderGenerationChangeMaterializesContext();
     TestChangedContextFullPlanCarriesLiveWorkflowRevision();
     TestBatchLoadsWorkflowCachesOnce();
     TestSourcesUseIndependentThreads();

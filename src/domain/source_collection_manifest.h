@@ -56,6 +56,15 @@ struct SourceCollectionSingleFileState {
     [[nodiscard]] bool operator==(const SourceCollectionSingleFileState&) const = default;
 };
 
+// Proof captured only after a decoded snapshot and all source/context
+// dependencies passed the post-decode consistency check. A later load may use
+// it to prove that the already-owned context remains valid without rebuilding
+// its manifest.
+struct SourceCollectionContextReuseProof {
+    SourceCollectionIdentity identity;
+    SourceCollectionSingleFileState dependency_state;
+};
+
 struct SourceCollectionManifest {
     std::vector<std::string> sample_names;
     std::vector<SampleAnnotationResult> annotations;

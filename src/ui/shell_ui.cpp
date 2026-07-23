@@ -811,6 +811,9 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .spectrum_index = spectrum_index,
             .annotation_paths = std::move(annotation_paths),
             .reuse_identity = hint ? std::optional<SourceCollectionIdentity>{hint->identity} : std::nullopt,
+            .context_reuse_proof =
+                hint ? hint->context_reuse_proof
+                     : std::optional<SourceCollectionContextReuseProof>{},
             .base_live_workflow_revision =
                 hint ? std::optional<std::uint64_t>{hint->live_workflow_revision}
                      : std::nullopt,
@@ -1070,7 +1073,8 @@ void ShellUi::DrainSourceLoadCompletions(
             prepared.spectrum_index,
             std::move(prepared.snapshot),
             std::move(prepared.payload),
-            std::move(prepared.folder_listing_generation));
+            std::move(prepared.folder_listing_generation),
+            std::move(prepared.context_reuse_proof));
         const bool completes_navigation_trace =
             result.loaded && !result.follow_up_spectrum_index && ticket.navigation_trace;
         if (completes_navigation_trace) {

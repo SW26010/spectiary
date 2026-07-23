@@ -130,6 +130,7 @@ bool WritePreparationRoundEvent(
         ProfileSink::Field::Bool(
             "listing_scan_performed",
             round.listing_scan_performed),
+        ProfileSink::Field::Bool("context_reused", round.context_reused),
         ProfileSink::Field::Bool("revalidation_succeeded", round.revalidation_succeeded),
         ProfileSink::Field::Number("preparation_started_steady_ns", NumberOrNull(round.preparation_started_ns)),
         ProfileSink::Field::Number("snapshot_load_started_steady_ns", NumberOrNull(round.snapshot_load_started_ns)),
@@ -160,6 +161,7 @@ bool WriteAttemptEvent(
         ProfileSink::Field::Number("source_task_id", std::to_string(attempt.source_task_id)),
         ProfileSink::Field::String("source_kind", attempt.source_is_folder ? "folder" : "file"),
         ProfileSink::Field::Bool("workflow_reused", attempt.workflow_reused),
+        ProfileSink::Field::Bool("context_reused", attempt.context_reused),
         ProfileSink::Field::Number("preparation_round_count", std::to_string(attempt.preparation_rounds.size())),
         ProfileSink::Field::Number("load_enqueued_steady_ns", NumberOrNull(attempt.load_enqueued_ns)),
         ProfileSink::Field::Number("worker_started_steady_ns", NumberOrNull(attempt.worker_started_ns)),
@@ -284,10 +286,19 @@ void NavigationLatencyAttempt::MarkSnapshotLoadFinished(NavigationLatencyTimePoi
 
 void NavigationLatencyAttempt::MarkContextPrepared(NavigationLatencyTimePoint at) noexcept
 {
+    MarkContextPrepared(false, at);
+}
+
+void NavigationLatencyAttempt::MarkContextPrepared(
+    bool context_reused,
+    NavigationLatencyTimePoint at) noexcept
+{
     const std::int64_t prepared_ns = ToNanoseconds(at);
+    context_reused_.store(context_reused, std::memory_order_relaxed);
     context_prepared_ns_.store(prepared_ns, std::memory_order_relaxed);
     std::lock_guard lock(preparation_rounds_mutex_);
     if (!preparation_rounds_.empty()) {
+        preparation_rounds_.back().context_reused = context_reused;
         preparation_rounds_.back().context_prepared_ns = prepared_ns;
     }
 }
@@ -343,6 +354,7 @@ NavigationLatencyAttemptReport NavigationLatencyAttempt::Report() const noexcept
     report.source_task_id = source_task_id_.load(std::memory_order_relaxed);
     report.source_is_folder = source_is_folder_.load(std::memory_order_relaxed);
     report.workflow_reused = workflow_reused_.load(std::memory_order_relaxed);
+    report.context_reused = context_reused_.load(std::memory_order_relaxed);
     report.load_enqueued_ns = load_enqueued_ns_;
     report.worker_started_ns = worker_started_ns_.load(std::memory_order_relaxed);
     report.snapshot_load_started_ns = snapshot_load_started_ns_.load(std::memory_order_relaxed);

@@ -46,6 +46,8 @@ public:
     [[nodiscard]] std::vector<std::string> SavedSourceKeys() const;
     [[nodiscard]] SourceCollectionFolderListingGenerationHandle FolderListingGeneration(
         const std::filesystem::path& path) const;
+    [[nodiscard]] std::optional<SourceCollectionContextReuseProof>
+        ContextReuseProof(const std::filesystem::path& path) const;
 
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
         const std::filesystem::path& path,
@@ -54,7 +56,9 @@ public:
         const std::filesystem::path& path,
         std::size_t spectrum_index,
         SpectrumSnapshotHandle snapshot,
-        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
+        std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
+            std::nullopt);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
@@ -81,6 +85,9 @@ private:
         // Retained with the source entry so the next row load can reuse the
         // listing while its invalidation boundary remains current.
         SourceCollectionFolderListingGenerationHandle folder_listing_generation;
+        // Paired with the snapshot and folder generation accepted by the same
+        // prepared-open transaction.
+        std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
         std::size_t last_spectrum_index = 0;
     };
 
@@ -89,7 +96,9 @@ private:
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,
         std::size_t spectrum_index,
-        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
+        std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
+            std::nullopt);
     void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
 
     SnapshotLoader snapshot_loader_;

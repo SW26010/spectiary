@@ -4553,6 +4553,13 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
             delete value;
             listing_destroyed_promise->set_value(std::this_thread::get_id());
         });
+    const specforge::SourceCollectionContextReuseProof reuse_proof{
+        identity,
+        {
+            .source_stat_fingerprint = "folder-stat",
+            .companion_name_fingerprint = "none",
+            .companion_annotation_fingerprint = "none",
+        }};
 
     const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
         source_path,
@@ -4561,7 +4568,8 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         specforge::PreparedSourceCollectionPlan{
             std::move(context),
             std::move(workflow)},
-        verified_generation);
+        verified_generation,
+        reuse_proof);
     Require(result.loaded, "prepared folder generation should load");
     std::optional<specforge::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
@@ -4569,6 +4577,12 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
     Require(
         hint->folder_listing_generation_hint == verified_generation,
         "subsequent navigation should reuse the exact immutable listing generation");
+    Require(
+        hint->context_reuse_proof.has_value() &&
+            hint->context_reuse_proof->identity.id == identity.id &&
+            hint->context_reuse_proof->dependency_state ==
+                reuse_proof.dependency_state,
+        "subsequent navigation should carry the proof accepted with that generation");
 
     const std::weak_ptr<const specforge::SourceCollectionFolderListingGeneration>
         retired_listing_generation = verified_generation;

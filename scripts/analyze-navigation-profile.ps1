@@ -200,6 +200,11 @@ $hasFolderListingDiagnostics = @(
             }
             return $false
         }).Count -gt 0
+$hasContextReuseDiagnostics = @(
+    @($attemptEvents) + @($preparationRoundEvents) |
+        Where-Object {
+            $null -ne $_.PSObject.Properties['context_reused']
+        }).Count -gt 0
 if ($navigationEvents.Count -eq 0) {
     Add-Failure $failures 'No navigation_latency events were found.'
 }
@@ -358,6 +363,9 @@ foreach ($event in $presentedEvents) {
             Add-Failure $failures "$attemptContext.source_kind '$sourceKind' is unsupported."
         }
         Test-RequiredBoolean $attempt 'workflow_reused' $attemptContext $failures
+        if ($hasContextReuseDiagnostics) {
+            Test-RequiredBoolean $attempt 'context_reused' $attemptContext $failures
+        }
 
         $enqueuedNs = Get-RequiredInt64 $attempt 'load_enqueued_steady_ns' 1 $attemptContext $failures
         $workerNs = Get-RequiredInt64 $attempt 'worker_started_steady_ns' 1 $attemptContext $failures
@@ -440,6 +448,9 @@ foreach ($event in $presentedEvents) {
                         Add-Failure $failures "$roundContext cannot report a current generation without a hint."
                     }
                 }
+                if ($hasContextReuseDiagnostics) {
+                    Test-RequiredBoolean $round 'context_reused' $roundContext $failures
+                }
                 Test-RequiredBoolean $round 'revalidation_succeeded' $roundContext $failures
                 $roundSucceeded = Get-EventValue $round 'revalidation_succeeded'
                 if ($roundIndex -lt $rounds.Count - 1 -and $roundSucceeded -eq $true) {
@@ -483,6 +494,11 @@ foreach ($event in $presentedEvents) {
                 }
                 foreach ($field in @('source_inspection_ms', 'decode_ms', 'context_prepare_ms', 'source_revalidation_ms')) {
                     Test-AggregateDurationSum $attempt $rounds $field $attemptContext $failures
+                }
+                if ($hasContextReuseDiagnostics -and
+                    (Get-EventValue $attempt 'context_reused') -ne
+                    (Get-EventValue $rounds[-1] 'context_reused')) {
+                    Add-Failure $failures "$attemptContext.context_reused does not match its final preparation round."
                 }
             }
         }
@@ -564,6 +580,44 @@ foreach ($group in @($validPresentedEvents | Group-Object { [string](Get-EventVa
     Write-Host "Input kind: $($group.Name); count: $($group.Count)"
     @($metricFields | ForEach-Object { Format-Metric ([object[]]$group.Group) $_ }) |
         Format-Table -AutoSize
+}
+
+if ($hasContextReuseDiagnostics) {
+    $validNavigationIds = @{}
+    foreach ($event in $validPresentedEvents) {
+        $validNavigationIds[[string](Get-EventValue $event 'navigation_id')] = $true
+    }
+    $validAttempts = @(
+        $attemptEvents |
+            Where-Object {
+                $validNavigationIds.ContainsKey(
+                    [string](Get-EventValue $_ 'navigation_id'))
+            })
+    if ($validAttempts.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Context materialization diagnostics:'
+        @(
+            $validAttempts |
+                Group-Object {
+                    '{0}|{1}' -f
+                        [string](Get-EventValue $_ 'source_kind'),
+                        [bool](Get-EventValue $_ 'context_reused')
+                } |
+                Sort-Object Name |
+                ForEach-Object {
+                    $parts = $_.Name -split '\|'
+                    $stats = Get-Stats (
+                        Get-MetricValues ([object[]]$_.Group) 'context_prepare_ms')
+                    [pscustomobject]@{
+                        SourceKind = $parts[0]
+                        ContextReused = $parts[1]
+                        Count = $stats.Count
+                        ContextP50 = '{0:F3}' -f $stats.P50
+                        ContextP95 = '{0:F3}' -f $stats.P95
+                    }
+                }) |
+            Format-Table -AutoSize
+    }
 }
 
 if ($hasFolderListingDiagnostics) {

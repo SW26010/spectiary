@@ -52,6 +52,7 @@ function New-ValidNavigationEvents {
         source_task_id = 99
         source_kind = 'file'
         workflow_reused = $false
+        context_reused = $false
         load_enqueued_steady_ns = $BaseNs + 4 * $ms
         worker_started_steady_ns = $BaseNs + 5 * $ms
         snapshot_load_started_steady_ns = $BaseNs + 6 * $ms
@@ -192,6 +193,7 @@ try {
             hint_present = $true
             generation_current_at_start = $true
             listing_scan_performed = $false
+            context_reused = $true
             revalidation_succeeded = $false
             preparation_started_steady_ns = 5000000
             snapshot_load_started_steady_ns = 6000000
@@ -216,6 +218,7 @@ try {
             hint_present = $false
             generation_current_at_start = $false
             listing_scan_performed = $true
+            context_reused = $false
             revalidation_succeeded = $true
             preparation_started_steady_ns = 10000000
             snapshot_load_started_steady_ns = 11000000
@@ -242,6 +245,8 @@ try {
     Assert-True ($multiRound.ExitCode -eq 0) "A correctly attributed TOCTOU retry should pass:`n$($multiRound.Output)"
     Assert-True ($multiRound.Output -match 'Folder listing generation diagnostics') `
         "Folder listing diagnostics should be summarized:`n$($multiRound.Output)"
+    Assert-True ($multiRound.Output -match 'Context materialization diagnostics') `
+        "Context reuse diagnostics should be summarized:`n$($multiRound.Output)"
 
     $multiRoundAttempt.decode_ms = 99.0
     Write-ProfileFixture $multiRoundPath $multiRoundEvents
@@ -255,6 +260,13 @@ try {
     Assert-True ($invalidFolderDiagnostics.ExitCode -ne 0) `
         "A current folder generation without a hint must fail:`n$($invalidFolderDiagnostics.Output)"
     $multiRoundEvents[1].generation_current_at_start = $false
+
+    $multiRoundEvents[1].context_reused = 'false'
+    Write-ProfileFixture $multiRoundPath $multiRoundEvents
+    $invalidContextReuse = Invoke-Analyzer $multiRoundPath
+    Assert-True ($invalidContextReuse.ExitCode -ne 0) `
+        "A non-boolean context_reused field must fail:`n$($invalidContextReuse.Output)"
+    $multiRoundEvents[1].context_reused = $false
 
     $nonMonotonicPath = Join-Path $temporaryDirectory 'non-monotonic.jsonl'
     $nonMonotonicEvents = @(New-ValidNavigationEvents 3 'keyboard_previous' 0)

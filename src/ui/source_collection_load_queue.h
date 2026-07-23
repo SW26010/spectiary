@@ -23,6 +23,7 @@ struct SourceCollectionLoadRequest {
     std::size_t spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
     std::optional<SourceCollectionIdentity> reuse_identity;
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
     std::optional<std::uint64_t> base_live_workflow_revision;
     // The last stable listing generation observed for this loaded source. It
     // remains an optimization hint; the worker revalidates its generation and
@@ -37,6 +38,9 @@ struct PreparedSourceCollection {
     std::size_t spectrum_index = 0;
     SpectrumSnapshotHandle snapshot;
     PreparedSourceCollectionPayload payload;
+    // Published only after the post-decode dependency check succeeds. The
+    // source roster retains it alongside the accepted snapshot/generation.
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
     // Immutable listing cache and invalidation boundary accepted by the
     // successful post-decode revalidation pass.
     SourceCollectionFolderListingGenerationHandle folder_listing_generation;
@@ -71,6 +75,14 @@ struct SourceCollectionLoadDependencies {
     using WorkflowCacheLoader = std::function<SampleWorkflowPreparationCacheBundle(
         const SampleWorkflowPreparationPaths&,
         const std::function<void()>&)>;
+    using FileContextBuilder = std::function<SourceCollectionContext(
+        const SpectrumSnapshot&,
+        const SourceCollectionSingleFileState&,
+        const SourceCollectionCancellationCheckpoint&)>;
+    using FolderContextBuilder = std::function<SourceCollectionContext(
+        const SpectrumSnapshot&,
+        const SourceCollectionFolderListing&,
+        const SourceCollectionCancellationCheckpoint&)>;
 
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
@@ -81,6 +93,9 @@ struct SourceCollectionLoadDependencies {
     DirectoryChangeGenerationMonitor::RegistrationFactory
         folder_change_generation_registration_factory;
     WorkflowCacheLoader workflow_cache_loader;
+    // Test/measurement seams for the full manifest-building path.
+    FileContextBuilder file_context_builder;
+    FolderContextBuilder folder_context_builder;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };
 

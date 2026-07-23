@@ -183,6 +183,20 @@ SourceCollectionFolderListingGenerationHandle SourceCollectionRoster::FolderList
         : match->folder_listing_generation;
 }
 
+std::optional<SourceCollectionContextReuseProof>
+SourceCollectionRoster::ContextReuseProof(
+    const std::filesystem::path& path) const
+{
+    const std::string key = SourcePathIdentityKey(path);
+    const auto match = std::find_if(
+        sources_.begin(),
+        sources_.end(),
+        [&key](const SourceListEntry& entry) { return entry.key == key; });
+    return match == sources_.end()
+        ? std::optional<SourceCollectionContextReuseProof>{}
+        : match->context_reuse_proof;
+}
+
 SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
@@ -199,14 +213,16 @@ SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSou
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
-    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation,
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
 {
     SourceCollectionRosterPreparedOpenResult result;
     AddOrUpdateSourceResult update = AddOrUpdateSource(
         path,
         snapshot,
         spectrum_index,
-        std::move(folder_listing_generation));
+        std::move(folder_listing_generation),
+        std::move(context_reuse_proof));
     current_source_index_ = update.source_index;
     result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
     result.replaced_folder_listing_generation =
@@ -307,7 +323,8 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     const std::filesystem::path& path,
     SpectrumSnapshotHandle snapshot,
     std::size_t spectrum_index,
-    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation,
+    std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
 {
     AddOrUpdateSourceResult result;
     const std::string key = SourcePathIdentityKey(path);
@@ -324,6 +341,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         result.replaced_folder_listing_generation =
             std::move(match->folder_listing_generation);
         match->folder_listing_generation = std::move(folder_listing_generation);
+        match->context_reuse_proof = std::move(context_reuse_proof);
         match->last_spectrum_index = spectrum_index;
         result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));
         return result;
@@ -337,6 +355,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     entry.state_label = SnapshotStateLabelText(snapshot);
     entry.cached_snapshot = std::move(snapshot);
     entry.folder_listing_generation = std::move(folder_listing_generation);
+    entry.context_reuse_proof = std::move(context_reuse_proof);
     entry.last_spectrum_index = spectrum_index;
     sources_.push_back(std::move(entry));
     result.source_index = sources_.size() - 1;

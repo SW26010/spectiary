@@ -60,7 +60,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
         },
         AtMilliseconds(6));
     attempt->MarkSnapshotLoadFinished(AtMilliseconds(8));
-    attempt->MarkContextPrepared(AtMilliseconds(9));
+    attempt->MarkContextPrepared(true, AtMilliseconds(9));
     attempt->MarkSourceRevalidated(AtMilliseconds(10));
     attempt->MarkWorkflowReused(true);
     attempt->MarkWorkerPrepared(AtMilliseconds(11));
@@ -86,6 +86,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(report->presentation_viewport_id == 7, "presenting viewport should survive the trace");
     Require(report->outcome == specforge::NavigationLatencyOutcome::Presented, "outcome should be presented");
     Require(report->attempts[0].workflow_reused, "workflow reuse should be recorded");
+    Require(report->attempts[0].context_reused, "context reuse should be recorded");
     Require(report->first_present_ns == 17'000'000, "first Present timestamp should be recorded");
 
     const std::filesystem::path path = UniqueTempPath();
@@ -117,6 +118,9 @@ void TestPresentedTraceCapturesCorrelatedPhases()
             text.find("\"listing_scan_performed\":true") !=
                 std::string::npos,
         "folder listing generation diagnostics should serialize");
+    Require(
+        text.find("\"context_reused\":true") != std::string::npos,
+        "context reuse diagnostics should serialize");
     Require(text.find("\"input_kind\":\"ui_next\"") != std::string::npos, "input kind should serialize");
     Require(text.find("\"presentation_viewport_id\":7") != std::string::npos, "viewport id should serialize");
     Require(text.find("\"decode_ms\":2.0000") != std::string::npos, "decode duration should be calculated");
@@ -270,7 +274,7 @@ void TestRepeatedPreparationKeepsDistinctRounds()
     attempt->MarkWorkerStarted(AtMilliseconds(5));
     attempt->MarkSnapshotLoadStarted(false, AtMilliseconds(6));
     attempt->MarkSnapshotLoadFinished(AtMilliseconds(8));
-    attempt->MarkContextPrepared(AtMilliseconds(9));
+    attempt->MarkContextPrepared(true, AtMilliseconds(9));
     attempt->MarkSourceRevalidated(AtMilliseconds(10));
     attempt->MarkSnapshotLoadStarted(false, AtMilliseconds(11));
     attempt->MarkSnapshotLoadFinished(AtMilliseconds(14));
@@ -281,6 +285,11 @@ void TestRepeatedPreparationKeepsDistinctRounds()
     Require(
         report.preparation_rounds.size() == 2,
         "repeated preparation on one source task must retain two diagnostic rounds");
+    Require(
+        report.preparation_rounds[0].context_reused &&
+            !report.preparation_rounds[1].context_reused &&
+            !report.context_reused,
+        "each round should retain context reuse and the attempt should report its final round");
 }
 
 }  // namespace

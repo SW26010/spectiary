@@ -203,6 +203,75 @@ scan、加载期间目录变化只扫描 replacement generation，以及 notific
 1 次 full revalidation。真实 Release profile 仍需重新采集，才能量化
 `source_revalidation_ms` 与 input-to-Present 的新分布；这些测试只证明调用次数和失效合同。
 
+第三阶段的修改前 Release 基线是
+`dist/SpecForge-portable/Data/logs/specforge-profile-20260723-155759-657.jsonl`。
+在重建会清空 package `Data` 的 Portable 包之前，已将同 SHA-256 的本地证据副本保存在
+`logs/specforge-profile-20260723-155759-657.jsonl`。
+该日志 summary 完整、`dropped_events=0`，582 次导航中 578 次 presented、4 次正常
+superseded。navigation analyzer 的 `Result: PASS` 只证明日志结构、时间戳关联和录制完整，
+不表示达到某个导航预算；通用 pan analyzer 因只有一次 57.3ms 的偶发拖拽、没有合格测试
+窗口而产生的 FAIL 与本次导航分析无关。
+
+按 source 类型和连续导航区间拆分，修改前结果为：
+
+| 区段 | 样本数 | total p95 | 约合 120Hz 帧数 | 主要耗时 |
+|---|---:|---:|---:|---|
+| file | 164 | 21.60ms | 2.6 帧 | context、activation、UI |
+| folder A | 121 | 25.13ms | 3.0 帧 | decode 11.18ms |
+| folder B，最慢 | 178 | 51.94ms | 6.2 帧 | context 24.59ms |
+| folder C，小型 | 34 | 15.16ms | 1.8 帧 | decode、activation |
+| folder D | 81 | 25.05ms | 3.0 帧 | decode/context 各约 8ms |
+
+最慢 folder B 的 p95 中，`context_prepare=24.59ms`、`decode=7.44ms`、
+`target_resolution=6.47ms`、`ui_update=7.37ms`、`activation=6.07ms`；
+inspection、revalidation、queue wait 和 UI-to-Present 均已很小。414 个 folder round
+全部为 `hint_present=true`、`generation_current=true`、`listing_scan=false`，因此该
+24.59ms 不是目录扫描，而是 stable warm navigation 仍在复用判断之前重建完整 identity、
+sample-name manifest 和 annotation manifest。仅扣除此项的估算残余 p95 为 28.70ms；
+这只是定位优先级，不替代修改后的实测。
+
+第三阶段修复把上一次成功提交时的 `SourceCollectionIdentity` 与 source/companion/
+annotation dependency state 组成 context reuse proof，并由 roster 与同一次接受的 snapshot
+和 folder generation 一起持有。worker 仍在 decode 前后各捕获一次 dependency state；
+folder 还要求原 immutable listing generation 从开始到 post-decode 都 current。只有 proof、
+known identity、decoded count/path 和两次 dependency state 全部一致时，才直接发布
+`PreparedSourceCollectionReuse`，不调用完整 context builder。source、companion、
+annotation、目标 member 或 generation 任一变化，或 change generation 不可用时，均回退到
+原完整 materialize/TOCTOU 路径。取消、retarget、有序发布和 background retirement 的所有权
+不变。
+
+自动化测试直接统计 full file/folder context builder 调用次数：stable known-source warm
+navigation 为 0；source、companion、annotation 或 generation 变化为 1；decode 期间变化时
+第一轮 proof 被拒绝，仅稳定重试 materialize 一次。profile 的 attempt 和 preparation round
+新增 `context_reused`，旧日志仍可由 analyzer 读取。
+
+修改后的同数据 Portable Release 记录为
+`logs/context-reuse-ab-after/specforge-profile-20260723-163115-308.jsonl`。日志 summary
+完整、`dropped_events=0`，429 次导航中 421 次 presented、8 次正常 superseded；
+navigation analyzer 为 `PASS`。全部 421 个最终 attempt 都是 `context_reused=true`：
+file 110 个，`context_prepare` p50/p95 为 0.033/0.055ms；folder 311 个，
+0.007/0.009ms。全部 311 个 folder round 仍为 `hint_present=true`、
+`generation_current=true`、`listing_scan=false`。
+
+同源 A/B 使用连续区段配对：修改后区段的起始 index 必须等于修改前该 source 的终止
+index（file 580，folder A/B/C/D 分别为 494/6074/108/305）。另外三个没有 before
+连续边界的新增 folder 区段不纳入下表。p95 使用 nearest-rank，与修改前分析口径相同：
+
+| 区段 | before/after 样本数 | total p95 before → after | context p95 before → after | after 约合 120Hz 帧数 |
+|---|---:|---:|---:|---:|
+| file | 164 / 110 | 21.60 → 13.76ms | 4.18 → 0.06ms | 1.7 帧 |
+| folder A | 121 / 42 | 25.13 → 18.71ms | 4.06 → 0.01ms | 2.2 帧 |
+| folder B，修改前最慢 | 178 / 74 | 51.94 → 31.59ms | 24.59 → 0.01ms | 3.8 帧 |
+| folder C，小型 | 34 / 23 | 15.16 → 15.88ms | 0.09 → 0.01ms | 1.9 帧 |
+| folder D | 81 / 20 | 25.05 → 14.37ms | 7.54 → 0.01ms | 1.7 帧 |
+
+这里最直接的验收证据是每个 stable warm attempt 的 `context_reused=true` 以及
+`context_prepare` 降至测量噪声量级；不同窗口的样本数、方向、目标 spectrum 和其他阶段
+并非逐项配对，因此 total p95 只用于同一真实数据环境下的整体 Release 结果，不据此把
+folder C 的小幅波动归因于本修改。修改前最慢 folder B 的 context 浪费已消除，total p95
+下降 20.35ms（39.2%），与修改前扣除 context 后 28.70ms 的估算残余处于同一量级；其
+after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独立 owner。
+
 ## 设计规则
 
 1. Full view 不是 snapshot accessor。任何只需要当前光谱的 UI 必须使用 cheap snapshot API，不能调用 full session/workflow view。
@@ -217,7 +286,8 @@ scan、加载期间目录变化只扫描 replacement generation，以及 notific
 10. 新 panel 抽取或 session boundary refactor 必须检查每帧调用点。结构更干净不自动代表响应更快。
 11. 单元测试只能证明规则正确，不能证明交互预算。触碰热路径时必须补 profile 或至少解释为什么该改动不进入热路径。
 12. 长 build 不是合格反馈环。人工或 agent 验证 full CMake build 时必须带超时；性能问题优先建立可重复 profile 或 focused compile/test loop。
-13. Folder navigation 可以复用上一次 post-decode 验证通过的 immutable listing 来省掉 pre-decode 全扫描，但每个发布的 snapshot 仍必须经过 fresh post-decode full revalidation；cache hint 不能升级为 source-of-truth。
+13. Folder navigation 可以复用上一次 post-decode 验证通过、且仍 current 的 immutable listing generation；notification 不可用时才保留 fresh post-decode full scan fallback。cache hint 不能升级为 source-of-truth。
+14. Known-source context 只能在已提交 identity、source/companion/annotation dependency proof 和 folder generation（若适用）均通过两阶段检查时复用；单独的 identity 或 generation hint 不能跳过 manifest materialization。
 
 ## 推荐实现形态
 
