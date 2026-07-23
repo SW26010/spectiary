@@ -552,10 +552,12 @@ void TestCacheSaveReplacesExistingFileWithoutLeavingTempFile()
     specforge::CatalogUserStateCache cache;
     cache.catalogs.emplace(state.catalog_identity.id, state);
 
-    const std::filesystem::path path =
-        std::filesystem::temp_directory_path() / "specforge_spectral_line_user_state_atomic_save_test.json";
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / "specforge_spectral_line_user_state_atomic_save_test";
+    const std::filesystem::path path = root / "state.json";
     std::error_code remove_error;
-    std::filesystem::remove(path, remove_error);
+    std::filesystem::remove_all(root, remove_error);
+    std::filesystem::create_directories(root);
     {
         std::ofstream stream(path);
         stream << "{ invalid old cache";
@@ -565,17 +567,16 @@ void TestCacheSaveReplacesExistingFileWithoutLeavingTempFile()
     Require(specforge::SaveCatalogUserStateCache(path, cache, error), error);
     const specforge::CatalogUserStateCacheLoadResult loaded = specforge::LoadCatalogUserStateCache(path);
 
-    const std::filesystem::path parent = path.parent_path();
     const std::string temporary_prefix = path.filename().string() + ".tmp.";
     bool found_temporary_file = false;
-    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(parent)) {
+    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(root)) {
         if (entry.path().filename().string().starts_with(temporary_prefix)) {
             found_temporary_file = true;
             break;
         }
     }
 
-    std::filesystem::remove(path, remove_error);
+    std::filesystem::remove_all(root, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
     Require(loaded.cache.catalogs.find("specforge.public") != loaded.cache.catalogs.end(), "saved cache should load");
