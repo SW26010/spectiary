@@ -584,7 +584,7 @@ void SpecForgeApp::RenderFrame()
         ShellStatus status;
         status.profile_open = profile_state.open;
         status.profile_stopping = profile_state.stopping;
-        status.navigation_trace_recording_active = profile_state.frame_recording_active;
+        status.latency_trace_recording_active = profile_state.frame_recording_active;
         status.profile = &profile_;
         status.profile_path = profile_.path().empty() ? nullptr : &profile_.path();
         status.profile_status_message = profile_status_message_;
@@ -626,10 +626,10 @@ void SpecForgeApp::RenderFrame()
         }
     }
 
-    std::vector<NavigationLatencyPresentation> navigation_presentations;
+    std::vector<NavigationLatencyPresentation> latency_presentations;
     for (const D3D11ViewportPresentCompletion& completion :
          viewport_renderer_.TakePresentCompletions()) {
-        navigation_presentations.push_back({completion.viewport_id, completion.completed_at});
+        latency_presentations.push_back({completion.viewport_id, completion.completed_at});
     }
 
     const D3D11PresentMode present_mode = compositor_clock_.boost_active()
@@ -659,12 +659,19 @@ void SpecForgeApp::RenderFrame()
         render_wake_scheduler_.RequestFrame();
     }
     if (present_result == S_OK) {
-        navigation_presentations.push_back({ImGui::GetMainViewport()->ID, present_completed_at});
+        latency_presentations.push_back({ImGui::GetMainViewport()->ID, present_completed_at});
     }
     std::vector<NavigationLatencyReport> navigation_reports =
-        ui_.CompleteFramePresentations(frame_index_, navigation_presentations);
+        ui_.CompleteFramePresentations(frame_index_, latency_presentations);
     for (const NavigationLatencyReport& report : navigation_reports) {
         (void)WriteNavigationLatencyProfileEvent(profile_, report);
+    }
+    std::vector<SourceLoadLatencyReport> source_load_reports =
+        ui_.CompleteSourceLoadFramePresentations(
+            frame_index_,
+            latency_presentations);
+    for (const SourceLoadLatencyReport& report : source_load_reports) {
+        (void)WriteSourceLoadLatencyProfileEvent(profile_, report);
     }
     LogPresentationUpdates();
 }

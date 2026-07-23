@@ -426,14 +426,14 @@ private:
         std::shared_ptr<BatchCompletionSlot> ordered_completion = nullptr)
     {
         const std::uint64_t id = next_task_id_++;
-        if (request.navigation_attempt) {
-            request.navigation_attempt->MarkSourceTaskId(id);
+        if (request.latency_attempt) {
+            request.latency_attempt->MarkSourceTaskId(id);
         }
         auto canceled = std::make_shared<std::atomic_bool>(false);
         auto finished = std::make_shared<std::atomic_bool>(false);
         const std::filesystem::path failure_path = request.path;
         const std::size_t failure_spectrum_index = request.spectrum_index;
-        NavigationLatencyAttemptHandle failure_navigation_attempt = request.navigation_attempt;
+        NavigationLatencyAttemptHandle failure_latency_attempt = request.latency_attempt;
         std::shared_ptr<BatchState> failure_batch = batch;
         std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
         Task task{
@@ -457,9 +457,9 @@ private:
             completion.spectrum_index = failure_spectrum_index;
             completion.error_message =
                 std::string("Could not start the source loading thread: ") + error.what();
-            completion.navigation_attempt = std::move(failure_navigation_attempt);
-            if (completion.navigation_attempt) {
-                completion.navigation_attempt->MarkCompletionReady();
+            completion.latency_attempt = std::move(failure_latency_attempt);
+            if (completion.latency_attempt) {
+                completion.latency_attempt->MarkCompletionReady();
             }
             if (failure_batch) {
                 FinishBatchTask(
@@ -661,8 +661,8 @@ private:
     {
         const SourceCollectionIdentity identity =
             task.request.context_reuse_proof->identity;
-        if (task.request.navigation_attempt) {
-            task.request.navigation_attempt->MarkWorkflowReused(true);
+        if (task.request.latency_attempt) {
+            task.request.latency_attempt->MarkWorkflowReused(true);
         }
         PreparedSourceCollection prepared{
             task.id,
@@ -688,8 +688,8 @@ private:
         SourceCollectionFolderListingGenerationHandle folder_listing_generation = {})
     {
         if (CanReusePreparedWorkflow(context.identity, task.request.reuse_identity)) {
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkWorkflowReused(true);
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkWorkflowReused(true);
             }
             SourceCollectionContextReuseProof reuse_proof{
                 context.identity,
@@ -705,8 +705,8 @@ private:
             prepared.folder_listing_generation = std::move(folder_listing_generation);
             return prepared;
         }
-        if (task.request.navigation_attempt) {
-            task.request.navigation_attempt->MarkWorkflowReused(false);
+        if (task.request.latency_attempt) {
+            task.request.latency_attempt->MarkWorkflowReused(false);
         }
         PreparedSampleWorkflowState workflow =
             PrepareWorkflow(task, *snapshot, context, checkpoint);
@@ -801,8 +801,8 @@ private:
                         true);
                 resident_candidate_available = false;
                 if (resident_current) {
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkFolderSnapshotLoadStarted({
                                 .hint_present = hint_present,
                                 .generation_current_at_start =
@@ -813,10 +813,10 @@ private:
                     SpectrumSnapshotHandle snapshot = resident.snapshot;
                     checkpoint();
                     ValidateDecodedSnapshot(snapshot);
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkSnapshotLoadFinished();
-                        task.request.navigation_attempt
+                        task.request.latency_attempt
                             ->MarkContextPrepared(true);
                     }
                     const SourceCollectionSingleFileState verified_state =
@@ -831,8 +831,8 @@ private:
                             initial_state,
                             verified_state) &&
                         listing_generation_is_current;
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkSourceRevalidated(
                                 revalidation_succeeded);
                     }
@@ -850,8 +850,8 @@ private:
                     continue;
                 }
             }
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkFolderSnapshotLoadStarted({
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkFolderSnapshotLoadStarted({
                     .hint_present = hint_present,
                     .generation_current_at_start =
                         generation_current_at_start,
@@ -872,8 +872,8 @@ private:
                 });
             checkpoint();
             ValidateDecodedSnapshot(snapshot);
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSnapshotLoadFinished();
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkSnapshotLoadFinished();
             }
             const bool can_reuse_context =
                 CanReuseKnownContext(
@@ -894,8 +894,8 @@ private:
                         checkpoint));
                 FinalizeContext(task, *context, checkpoint);
             }
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkContextPrepared(
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkContextPrepared(
                     can_reuse_context);
             }
             const SourceCollectionSingleFileState verified_state =
@@ -914,8 +914,8 @@ private:
                 // full post-decode comparison as the correctness fallback.
                 verified_generation =
                     ScanFolderListingGeneration(task.request.path, checkpoint);
-                if (task.request.navigation_attempt) {
-                    task.request.navigation_attempt
+                if (task.request.latency_attempt) {
+                    task.request.latency_attempt
                         ->MarkFolderListingScanPerformed();
                 }
                 listing_generation_is_current =
@@ -929,8 +929,8 @@ private:
             const bool revalidation_succeeded =
                 SourceCollectionSingleFileStatesMatch(initial_state, verified_state) &&
                 listing_generation_is_current;
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSourceRevalidated(
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkSourceRevalidated(
                     revalidation_succeeded);
             }
             if (revalidation_succeeded) {
@@ -993,17 +993,17 @@ private:
                         false);
                 resident_candidate_available = false;
                 if (resident_current) {
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkSnapshotLoadStarted(false);
                     }
                     SpectrumSnapshotHandle snapshot = resident.snapshot;
                     checkpoint();
                     ValidateDecodedSnapshot(snapshot);
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkSnapshotLoadFinished();
-                        task.request.navigation_attempt
+                        task.request.latency_attempt
                             ->MarkContextPrepared(true);
                     }
                     const SourceCollectionSingleFileState verified_state =
@@ -1015,8 +1015,8 @@ private:
                         SourceCollectionSingleFileStatesMatch(
                             initial_state,
                             verified_state);
-                    if (task.request.navigation_attempt) {
-                        task.request.navigation_attempt
+                    if (task.request.latency_attempt) {
+                        task.request.latency_attempt
                             ->MarkSourceRevalidated(
                                 revalidation_succeeded);
                     }
@@ -1031,8 +1031,8 @@ private:
                     continue;
                 }
             }
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSnapshotLoadStarted(false);
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkSnapshotLoadStarted(false);
             }
             SpectrumSnapshotHandle snapshot = dependencies_.snapshot_loader(
                 task.request.path,
@@ -1047,8 +1047,8 @@ private:
                 });
             checkpoint();
             ValidateDecodedSnapshot(snapshot);
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSnapshotLoadFinished();
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkSnapshotLoadFinished();
             }
             const bool can_reuse_context =
                 CanReuseKnownContext(
@@ -1065,8 +1065,8 @@ private:
                         checkpoint));
                 FinalizeContext(task, *context, checkpoint);
             }
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkContextPrepared(
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkContextPrepared(
                     can_reuse_context);
             }
             const SourceCollectionSingleFileState verified_state =
@@ -1076,8 +1076,8 @@ private:
                     checkpoint);
             const bool revalidation_succeeded =
                 SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSourceRevalidated(
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkSourceRevalidated(
                     revalidation_succeeded);
             }
             if (revalidation_succeeded) {
@@ -1120,8 +1120,8 @@ private:
             slot.canceled && slot.canceled->load(std::memory_order_relaxed);
         if (slot.completion) {
             if (!canceled) {
-                if (slot.completion->navigation_attempt) {
-                    slot.completion->navigation_attempt->MarkCompletionPublished();
+                if (slot.completion->latency_attempt) {
+                    slot.completion->latency_attempt->MarkCompletionPublished();
                 }
                 completed_.push_back(std::move(*slot.completion));
             } else if (slot.completion->prepared) {
@@ -1277,8 +1277,8 @@ private:
 
     void RunTask(const Task& task, std::stop_token stop_token)
     {
-        if (task.request.navigation_attempt) {
-            task.request.navigation_attempt->MarkWorkerStarted();
+        if (task.request.latency_attempt) {
+            task.request.latency_attempt->MarkWorkerStarted();
         }
         if (task.canceled->load(std::memory_order_relaxed)) {
             FinishCanceledTask(task);
@@ -1289,11 +1289,11 @@ private:
         completion.task_id = task.id;
         completion.path = task.request.path;
         completion.spectrum_index = task.request.spectrum_index;
-        completion.navigation_attempt = task.request.navigation_attempt;
+        completion.latency_attempt = task.request.latency_attempt;
         try {
             completion.prepared = Prepare(task, stop_token);
-            if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkWorkerPrepared();
+            if (task.request.latency_attempt) {
+                task.request.latency_attempt->MarkWorkerPrepared();
             }
         } catch (const SourceLoadCanceled&) {
             FinishCanceledTask(task);
@@ -1303,8 +1303,8 @@ private:
         } catch (...) {
             completion.error_message = "Unknown source loading failure.";
         }
-        if (task.request.navigation_attempt) {
-            task.request.navigation_attempt->MarkCompletionReady();
+        if (task.request.latency_attempt) {
+            task.request.latency_attempt->MarkCompletionReady();
         }
         FinishTask(task, std::move(completion));
     }

@@ -1387,7 +1387,7 @@ void TestCurrentFolderListingGenerationAvoidsFullRescan()
         (void)queue.Enqueue({
             .path = folder,
             .folder_listing_generation_hint = listing_generation_hint,
-            .navigation_attempt = navigation_attempt,
+            .latency_attempt = navigation_attempt,
         });
         auto completions = WaitForCompletions(queue, 1);
         prepared = completions.front().prepared.has_value();
@@ -1544,7 +1544,7 @@ void TestStaleFolderListingGenerationRefreshesBeforeDecode()
     (void)queue.Enqueue({
         .path = folder,
         .folder_listing_generation_hint = listing_generation_hint,
-        .navigation_attempt = navigation_attempt,
+        .latency_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "stale hinted folder task should refresh and succeed");
@@ -1607,7 +1607,7 @@ void TestChangedFileRetriesOneStableGeneration()
         .path = path,
         .reuse_identity = proof.identity,
         .context_reuse_proof = proof,
-        .navigation_attempt = navigation_attempt,
+        .latency_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed file should settle on a stable retry");
@@ -1699,7 +1699,7 @@ void TestChangedFolderRetriesOneStableGeneration()
         .reuse_identity = proof.identity,
         .context_reuse_proof = proof,
         .folder_listing_generation_hint = listing_generation_hint,
-        .navigation_attempt = navigation_attempt,
+        .latency_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed folder should settle on a stable retry");

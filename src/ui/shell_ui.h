@@ -2,6 +2,7 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "profile/navigation_latency_trace.h"
+#include "profile/source_load_latency_trace.h"
 #include "ui/source_collection_panel.h"
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/sample_workflow_shortcut.h"
@@ -35,7 +36,7 @@ class PlotTouchpadGestureSource;
 struct ShellStatus {
     bool profile_open = false;
     bool profile_stopping = false;
-    bool navigation_trace_recording_active = false;
+    bool latency_trace_recording_active = false;
     ProfileSink* profile = nullptr;
     const std::filesystem::path* profile_path = nullptr;
     std::string_view profile_status_message;
@@ -68,6 +69,10 @@ public:
         NavigationLatencyInputKind kind,
         NavigationLatencyTimePoint at = NavigationLatencyTrace::Now());
     [[nodiscard]] std::vector<NavigationLatencyReport> CompleteFramePresentations(
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation> presentations);
+    [[nodiscard]] std::vector<SourceLoadLatencyReport>
+    CompleteSourceLoadFramePresentations(
         std::uint64_t frame_index,
         std::span<const NavigationLatencyPresentation> presentations);
 
@@ -123,6 +128,9 @@ private:
         NavigationLatencyTimePoint target_resolved_at,
         NavigationTargetResolutionReport target_resolution,
         std::optional<NavigationTraceOrigin> navigation_origin);
+    [[nodiscard]] SourceLoadLatencyTraceHandle StartSourceLoadTrace(
+        std::size_t target_index,
+        NavigationLatencyTimePoint accepted_at);
 
     enum class PendingSourceLoadPurpose {
         ExplicitOpen,
@@ -135,7 +143,8 @@ private:
         std::size_t spectrum_index,
         std::vector<std::filesystem::path> annotation_paths,
         PendingSourceLoadPurpose purpose,
-        NavigationLatencyTraceHandle navigation_trace = {});
+        NavigationLatencyTraceHandle navigation_trace = {},
+        SourceLoadLatencyTraceHandle source_load_trace = {});
     void BeginSourceActivationIntent(bool preserve_pending_explicit_opens);
     void QueueSessionFollowUp(
         const SourceCollectionSessionResult& result,
@@ -158,6 +167,7 @@ private:
         std::uint64_t activation_epoch = 0;
         PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
         NavigationLatencyTraceHandle navigation_trace;
+        SourceLoadLatencyTraceHandle source_load_trace;
     };
 
     [[nodiscard]] static std::optional<PendingSourceLoad> TakeCurrentPendingSourceLoad(
@@ -196,6 +206,8 @@ private:
         SpectrumSnapshotHandle snapshot);
     void SupersedePresentableNavigationIfSnapshotChanged(
         const SpectrumSnapshotHandle& current_snapshot);
+    void SupersedePresentableSourceLoadIfSnapshotChanged(
+        const SpectrumSnapshotHandle& current_snapshot);
 
     friend struct ShellUiTestAccess;
 
@@ -227,15 +239,19 @@ private:
     std::string source_load_error_;
     std::uint64_t source_activation_epoch_ = 0;
     bool deferred_restore_active_ = false;
-    bool navigation_tracing_enabled_ = false;
+    bool latency_tracing_enabled_ = false;
     std::uint64_t current_frame_index_ = 0;
     std::uint64_t next_navigation_trace_id_ = 1;
+    std::uint64_t next_source_load_trace_id_ = 1;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
     std::optional<SpectrumDrawSubmission> spectrum_draw_submission_;
     NavigationLatencyTraceHandle presentable_navigation_trace_;
     SpectrumSnapshotHandle presentable_navigation_snapshot_;
     std::unordered_map<std::uint64_t, NavigationLatencyTraceHandle> navigation_traces_;
+    SourceLoadLatencyTraceHandle presentable_source_load_trace_;
+    SpectrumSnapshotHandle presentable_source_load_snapshot_;
+    std::unordered_map<std::uint64_t, SourceLoadLatencyTraceHandle> source_load_traces_;
 };
 
 }  // namespace specforge

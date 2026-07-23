@@ -12,6 +12,7 @@
 namespace specforge {
 
 class ProfileSink;
+class SourceLoadLatencyTrace;
 
 using NavigationLatencyClock = std::chrono::steady_clock;
 using NavigationLatencyTimePoint = NavigationLatencyClock::time_point;
@@ -105,6 +106,7 @@ public:
 
 private:
     friend class NavigationLatencyTrace;
+    friend class SourceLoadLatencyTrace;
 
     NavigationLatencyAttempt(
         std::size_t attempt_index,

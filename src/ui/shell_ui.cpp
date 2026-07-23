@@ -697,13 +697,16 @@ void ShellUi::Render(const ShellStatus& status)
 {
     current_frame_index_ = status.frame_index;
     spectrum_draw_submission_.reset();
-    navigation_tracing_enabled_ = status.navigation_trace_recording_active;
-    if (!navigation_tracing_enabled_) {
+    latency_tracing_enabled_ = status.latency_trace_recording_active;
+    if (!latency_tracing_enabled_) {
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
         presentable_navigation_trace_.reset();
         presentable_navigation_snapshot_.reset();
         navigation_traces_.clear();
+        presentable_source_load_trace_.reset();
+        presentable_source_load_snapshot_.reset();
+        source_load_traces_.clear();
     }
     DrainSourceLoads();
     sample_workflow_shortcut_ = {};
@@ -843,6 +846,9 @@ bool ShellUi::latency_sensitive_plot_interaction_active() const
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
+    SourceLoadLatencyTraceHandle source_load_trace = StartSourceLoadTrace(
+        spectrum_index,
+        NavigationLatencyTrace::Now());
     BeginSourceActivationIntent(true);
     if (session_.CancelActivePendingSampleNavigation()) {
         session_view_cache_dirty_ = true;
@@ -854,7 +860,9 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
         path,
         spectrum_index,
         session_.AnnotationPathsForSource(path),
-        PendingSourceLoadPurpose::ExplicitOpen);
+        PendingSourceLoadPurpose::ExplicitOpen,
+        {},
+        std::move(source_load_trace));
 }
 
 std::uint64_t ShellUi::QueueSourceLoad(
@@ -862,7 +870,8 @@ std::uint64_t ShellUi::QueueSourceLoad(
     std::size_t spectrum_index,
     std::vector<std::filesystem::path> annotation_paths,
     PendingSourceLoadPurpose purpose,
-    NavigationLatencyTraceHandle navigation_trace)
+    NavigationLatencyTraceHandle navigation_trace,
+    SourceLoadLatencyTraceHandle source_load_trace)
 {
     const std::string path_key = SourcePathIdentityKey(path);
     for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
@@ -874,6 +883,10 @@ std::uint64_t ShellUi::QueueSourceLoad(
             (void)pending->second.navigation_trace->MarkTerminal(
                 NavigationLatencyOutcome::Superseded);
         }
+        if (pending->second.source_load_trace) {
+            (void)pending->second.source_load_trace->MarkTerminal(
+                SourceLoadLatencyOutcome::Superseded);
+        }
         source_load_queue_.Cancel(pending->first);
         deferred_restore_task_ids_.erase(pending->first);
         pending = pending_source_loads_.erase(pending);
@@ -882,10 +895,13 @@ std::uint64_t ShellUi::QueueSourceLoad(
     const std::uint64_t generation = ++source_load_generations_[path_key];
     std::optional<SourceCollectionLoadHint> hint =
         session_.LoadHintForSource(path, spectrum_index);
-    NavigationLatencyAttemptHandle navigation_attempt;
+    NavigationLatencyAttemptHandle latency_attempt;
     if (navigation_trace) {
         navigation_trace->SetTargetIndex(spectrum_index);
-        navigation_attempt = navigation_trace->BeginLoadAttempt(spectrum_index);
+        latency_attempt = navigation_trace->BeginLoadAttempt(spectrum_index);
+    } else if (source_load_trace) {
+        source_load_trace->SetTargetIndex(spectrum_index);
+        latency_attempt = source_load_trace->BeginLoadAttempt(spectrum_index);
     }
     const std::uint64_t task_id = source_load_queue_.Enqueue(
         {
@@ -905,7 +921,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .resident_snapshot =
                 hint ? std::move(hint->resident_snapshot)
                      : std::optional<SourceCollectionResidentSnapshot>{},
-            .navigation_attempt = std::move(navigation_attempt),
+            .latency_attempt = std::move(latency_attempt),
         });
     pending_source_loads_.emplace(
         task_id,
@@ -917,6 +933,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .activation_epoch = source_activation_epoch_,
             .purpose = purpose,
             .navigation_trace = std::move(navigation_trace),
+            .source_load_trace = std::move(source_load_trace),
         });
     if (purpose == PendingSourceLoadPurpose::DeferredRestore) {
         deferred_restore_task_ids_.insert(task_id);
@@ -958,6 +975,10 @@ void ShellUi::AdvanceSourceActivationIntent(
             (void)ticket.navigation_trace->MarkTerminal(
                 NavigationLatencyOutcome::Superseded);
         }
+        if (ticket.source_load_trace) {
+            (void)ticket.source_load_trace->MarkTerminal(
+                SourceLoadLatencyOutcome::Superseded);
+        }
         cancel(pending->first);
         pending = pending_loads.erase(pending);
     }
@@ -995,6 +1016,10 @@ std::optional<ShellUi::PendingSourceLoad> ShellUi::TakeCurrentPendingSourceLoad(
     if (!current && ticket.navigation_trace) {
         (void)ticket.navigation_trace->MarkTerminal(
             NavigationLatencyOutcome::Superseded);
+    }
+    if (!current && ticket.source_load_trace) {
+        (void)ticket.source_load_trace->MarkTerminal(
+            SourceLoadLatencyOutcome::Superseded);
     }
     return current ? std::optional<PendingSourceLoad>{std::move(ticket)} : std::nullopt;
 }
@@ -1072,6 +1097,10 @@ void ShellUi::CancelSourceFollowUpsForPathInState(
             (void)pending->second.navigation_trace->MarkTerminal(
                 NavigationLatencyOutcome::Superseded);
         }
+        if (pending->second.source_load_trace) {
+            (void)pending->second.source_load_trace->MarkTerminal(
+                SourceLoadLatencyOutcome::Superseded);
+        }
         cancel(pending->first);
         deferred_restore_task_ids.erase(pending->first);
         pending = pending_loads.erase(pending);
@@ -1128,8 +1157,8 @@ void ShellUi::DrainSourceLoadCompletions(
         }
 
         PendingSourceLoad ticket = std::move(*current_ticket);
-        if (completion.navigation_attempt) {
-            completion.navigation_attempt->MarkCompletionDrained();
+        if (completion.latency_attempt) {
+            completion.latency_attempt->MarkCompletionDrained();
         }
         if (!completion.prepared) {
             source_load_error_ = completion.error_message.empty()
@@ -1141,6 +1170,10 @@ void ShellUi::DrainSourceLoadCompletions(
             if (ticket.navigation_trace) {
                 (void)ticket.navigation_trace->MarkTerminal(
                     NavigationLatencyOutcome::Failed);
+            }
+            if (ticket.source_load_trace) {
+                (void)ticket.source_load_trace->MarkTerminal(
+                    SourceLoadLatencyOutcome::Failed);
             }
             continue;
         }
@@ -1166,6 +1199,9 @@ void ShellUi::DrainSourceLoadCompletions(
             std::move(prepared.context_reuse_proof));
         const bool completes_navigation_trace =
             result.loaded && !result.follow_up_spectrum_index && ticket.navigation_trace;
+        const bool completes_source_load_trace =
+            result.loaded && !result.follow_up_spectrum_index &&
+            ticket.source_load_trace;
         if (completes_navigation_trace) {
             if (presentable_navigation_trace_ &&
                 presentable_navigation_trace_ != ticket.navigation_trace) {
@@ -1176,11 +1212,24 @@ void ShellUi::DrainSourceLoadCompletions(
             presentable_navigation_snapshot_ = session_.CurrentSampleSnapshot();
             ticket.navigation_trace->MarkSnapshotActivated(current_frame_index_);
         }
+        if (completes_source_load_trace) {
+            if (presentable_source_load_trace_ &&
+                presentable_source_load_trace_ != ticket.source_load_trace) {
+                (void)presentable_source_load_trace_->MarkTerminal(
+                    SourceLoadLatencyOutcome::Superseded);
+            }
+            presentable_source_load_trace_ = ticket.source_load_trace;
+            presentable_source_load_snapshot_ = session_.CurrentSampleSnapshot();
+            ticket.source_load_trace->MarkSnapshotActivated(current_frame_index_);
+        }
         CancelSourceFollowUps(result);
         session_view_cache_dirty_ = true;
         HandleSessionAction(result.action);
         if (completes_navigation_trace) {
             ticket.navigation_trace->MarkUiUpdated();
+        }
+        if (completes_source_load_trace) {
+            ticket.source_load_trace->MarkUiUpdated();
         }
         for (BackgroundRetirementHandle& resource : result.background_retirement) {
             source_load_queue_.RetireResource(std::move(resource));
@@ -1199,6 +1248,10 @@ void ShellUi::DrainSourceLoadCompletions(
                 (void)ticket.navigation_trace->MarkTerminal(
                     NavigationLatencyOutcome::Rejected);
             }
+            if (ticket.source_load_trace) {
+                (void)ticket.source_load_trace->MarkTerminal(
+                    SourceLoadLatencyOutcome::Rejected);
+            }
         } else {
             source_load_error_.clear();
             if (starts_activation_intent) {
@@ -1212,6 +1265,10 @@ void ShellUi::DrainSourceLoadCompletions(
             if (ticket.navigation_trace) {
                 ticket.navigation_trace->SetTargetIndex(*result.follow_up_spectrum_index);
             }
+            if (ticket.source_load_trace) {
+                ticket.source_load_trace->SetTargetIndex(
+                    *result.follow_up_spectrum_index);
+            }
             (void)QueueSourceLoad(
                 ticket.path,
                 *result.follow_up_spectrum_index,
@@ -1219,7 +1276,8 @@ void ShellUi::DrainSourceLoadCompletions(
                 ticket.purpose == PendingSourceLoadPurpose::DeferredRestore
                     ? PendingSourceLoadPurpose::DeferredRestore
                     : PendingSourceLoadPurpose::SessionFollowUp,
-                ticket.navigation_trace);
+                ticket.navigation_trace,
+                ticket.source_load_trace);
         }
         RestoreDeferredActiveSourceIfAvailable();
     }
@@ -1346,6 +1404,8 @@ void ShellUi::RecordSpectrumDrawSubmission(
     };
     SupersedePresentableNavigationIfSnapshotChanged(
         spectrum_draw_submission_->snapshot);
+    SupersedePresentableSourceLoadIfSnapshotChanged(
+        spectrum_draw_submission_->snapshot);
 }
 
 void ShellUi::SupersedePresentableNavigationIfSnapshotChanged(
@@ -1359,6 +1419,19 @@ void ShellUi::SupersedePresentableNavigationIfSnapshotChanged(
         NavigationLatencyOutcome::Superseded);
     presentable_navigation_trace_.reset();
     presentable_navigation_snapshot_.reset();
+}
+
+void ShellUi::SupersedePresentableSourceLoadIfSnapshotChanged(
+    const SpectrumSnapshotHandle& current_snapshot)
+{
+    if (!presentable_source_load_trace_ ||
+        presentable_source_load_snapshot_ == current_snapshot) {
+        return;
+    }
+    (void)presentable_source_load_trace_->MarkTerminal(
+        SourceLoadLatencyOutcome::Superseded);
+    presentable_source_load_trace_.reset();
+    presentable_source_load_snapshot_.reset();
 }
 
 std::vector<NavigationLatencyReport> ShellUi::CompleteFramePresentations(
@@ -1397,6 +1470,52 @@ std::vector<NavigationLatencyReport> ShellUi::CompleteFramePresentations(
             presentable_navigation_snapshot_.reset();
         }
         trace = navigation_traces_.erase(trace);
+    }
+    return reports;
+}
+
+std::vector<SourceLoadLatencyReport>
+ShellUi::CompleteSourceLoadFramePresentations(
+    std::uint64_t frame_index,
+    std::span<const NavigationLatencyPresentation> presentations)
+{
+    std::vector<SourceLoadLatencyReport> reports;
+    SupersedePresentableSourceLoadIfSnapshotChanged(
+        session_.CurrentSampleSnapshot());
+    for (auto trace = source_load_traces_.begin();
+         trace != source_load_traces_.end();) {
+        const bool matching_draw_submission =
+            trace->second == presentable_source_load_trace_ &&
+            spectrum_draw_submission_ &&
+            spectrum_draw_submission_->frame_index == frame_index &&
+            spectrum_draw_submission_->snapshot ==
+                presentable_source_load_snapshot_;
+        if (matching_draw_submission) {
+            for (const NavigationLatencyPresentation& presentation :
+                 presentations) {
+                if (presentation.viewport_id !=
+                    spectrum_draw_submission_->viewport_id) {
+                    continue;
+                }
+                (void)trace->second->MarkPresentedForViewport(
+                    frame_index,
+                    presentation.viewport_id,
+                    presentation.completed_at);
+                break;
+            }
+        }
+        std::optional<SourceLoadLatencyReport> report =
+            trace->second->TerminalReport();
+        if (!report) {
+            ++trace;
+            continue;
+        }
+        reports.push_back(std::move(*report));
+        if (trace->second == presentable_source_load_trace_) {
+            presentable_source_load_trace_.reset();
+            presentable_source_load_snapshot_.reset();
+        }
+        trace = source_load_traces_.erase(trace);
     }
     return reports;
 }
@@ -1449,7 +1568,7 @@ NavigationLatencyTraceHandle ShellUi::StartNavigationTrace(
     NavigationTargetResolutionReport target_resolution,
     std::optional<NavigationTraceOrigin> navigation_origin)
 {
-    if (!navigation_tracing_enabled_ || !navigation_origin || !from_index ||
+    if (!latency_tracing_enabled_ || !navigation_origin || !from_index ||
         !result.follow_up_spectrum_index) {
         return {};
     }
@@ -1475,11 +1594,29 @@ NavigationLatencyTraceHandle ShellUi::StartNavigationTrace(
     return trace;
 }
 
+SourceLoadLatencyTraceHandle ShellUi::StartSourceLoadTrace(
+    std::size_t target_index,
+    NavigationLatencyTimePoint accepted_at)
+{
+    if (!latency_tracing_enabled_) {
+        return {};
+    }
+    const std::uint64_t source_load_id = next_source_load_trace_id_++;
+    auto trace = std::make_shared<SourceLoadLatencyTrace>(
+        source_load_id,
+        target_index,
+        SourceLoadLatencyRequestKind::ExplicitOpen,
+        accepted_at);
+    source_load_traces_.emplace(source_load_id, trace);
+    return trace;
+}
+
 SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
     SourceCollectionSessionIntent command,
     std::optional<NavigationTraceOrigin> navigation_origin)
 {
-    const bool trace_requested = navigation_tracing_enabled_ && navigation_origin.has_value();
+    const bool trace_requested =
+        latency_tracing_enabled_ && navigation_origin.has_value();
     const NavigationLatencyTimePoint requested_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};
@@ -1531,7 +1668,8 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
     SourceCollectionSessionIntent command,
     std::optional<NavigationLatencyInputKind> navigation_kind)
 {
-    const bool trace_requested = navigation_tracing_enabled_ && navigation_kind.has_value();
+    const bool trace_requested =
+        latency_tracing_enabled_ && navigation_kind.has_value();
     const NavigationLatencyTimePoint requested_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};

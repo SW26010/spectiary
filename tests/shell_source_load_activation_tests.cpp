@@ -96,7 +96,7 @@ struct ShellUiTestAccess {
 
     static void EnableNavigationTracing(ShellUi& shell, std::uint64_t frame_index)
     {
-        shell.navigation_tracing_enabled_ = true;
+        shell.latency_tracing_enabled_ = true;
         shell.current_frame_index_ = frame_index;
     }
 
@@ -138,6 +138,30 @@ struct ShellUiTestAccess {
     static std::size_t NavigationTraceCount(const ShellUi& shell)
     {
         return shell.navigation_traces_.size();
+    }
+
+    static std::vector<SourceLoadLatencyReport>
+    CompleteSourceLoadFramePresentation(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        unsigned int viewport_id = 7)
+    {
+        SubmitSpectrumDraw(
+            shell,
+            frame_index,
+            shell.session_.CurrentSampleSnapshot(),
+            viewport_id);
+        const NavigationLatencyPresentation presentation{
+            viewport_id,
+            NavigationLatencyTrace::Now()};
+        return shell.CompleteSourceLoadFramePresentations(
+            frame_index,
+            std::span(&presentation, 1));
+    }
+
+    static std::size_t SourceLoadTraceCount(const ShellUi& shell)
+    {
+        return shell.source_load_traces_.size();
     }
 
     static void RecordNavigationKeyInput(
@@ -353,6 +377,203 @@ specforge::SourceCollectionSession MakePreparedDeferredSession(
             .loaded,
         "Shell drain fixture should commit its initial source");
     return session;
+}
+
+void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_source_load_present.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "source load trace fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "the Shell async source open must not use synchronous loading");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [](const std::filesystem::path& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&, const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        std::move(session),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t presentation_frame = 300;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
+
+    shell->OpenSource(path);
+    const auto activation_deadline = std::chrono::steady_clock::now() + 2s;
+    bool activated = false;
+    while (std::chrono::steady_clock::now() < activation_deadline) {
+        Access::Drain(*shell);
+        const specforge::SpectrumSnapshotHandle snapshot =
+            Access::Session(*shell).CurrentSampleSnapshot();
+        activated = snapshot && snapshot->source.path == path &&
+                    Access::PendingLoadCount(*shell) == 0;
+        if (activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    const bool waits_for_present =
+        activated && Access::SourceLoadTraceCount(*shell) == 1;
+    Access::SubmitSpectrumDraw(
+        *shell,
+        presentation_frame,
+        Access::Session(*shell).CurrentSampleSnapshot(),
+        7);
+    const specforge::NavigationLatencyPresentation wrong_viewport_presentation{
+        8,
+        specforge::NavigationLatencyTrace::Now()};
+    const std::vector<specforge::SourceLoadLatencyReport>
+        wrong_viewport_reports = shell->CompleteSourceLoadFramePresentations(
+            presentation_frame,
+            std::span(&wrong_viewport_presentation, 1));
+    const bool waits_for_matching_viewport =
+        wrong_viewport_reports.empty() &&
+        Access::SourceLoadTraceCount(*shell) == 1;
+    const std::vector<specforge::SourceLoadLatencyReport> reports =
+        Access::CompleteSourceLoadFramePresentation(
+            *shell,
+            presentation_frame + 1,
+            7);
+
+    shell->OpenSource(path);
+    const auto replacement_deadline = std::chrono::steady_clock::now() + 2s;
+    bool replacement_activated = false;
+    while (std::chrono::steady_clock::now() < replacement_deadline) {
+        Access::Drain(*shell);
+        replacement_activated =
+            Access::PendingLoadCount(*shell) == 0 &&
+            Access::SourceLoadTraceCount(*shell) == 1;
+        if (replacement_activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    Access::SubmitSpectrumDraw(
+        *shell,
+        presentation_frame + 2,
+        MakeSnapshot(path, 0),
+        7);
+    const specforge::NavigationLatencyPresentation replacement_presentation{
+        7,
+        specforge::NavigationLatencyTrace::Now()};
+    const std::vector<specforge::SourceLoadLatencyReport>
+        wrong_snapshot_reports = shell->CompleteSourceLoadFramePresentations(
+            presentation_frame + 2,
+            std::span(&replacement_presentation, 1));
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(activated, "the explicit source should activate through the async queue");
+    Require(
+        waits_for_present,
+        "a loaded source trace should remain pending until its snapshot is presented");
+    Require(
+        waits_for_matching_viewport,
+        "a successful Present from another viewport must not complete the source load trace");
+    Require(
+        reports.size() == 1 &&
+            reports.front().outcome ==
+                specforge::SourceLoadLatencyOutcome::Presented &&
+            reports.front().attempts.size() == 1 &&
+            reports.front().presentation_viewport_id == 7,
+        "the exact loaded snapshot Present should complete one source load trace");
+    Require(
+        reports.front().accepted_ns <=
+                reports.front().attempts.front().load_enqueued_ns &&
+            reports.front().attempts.front().completion_drained_ns <=
+                reports.front().snapshot_activated_ns &&
+            reports.front().snapshot_activated_ns <=
+                reports.front().ui_updated_ns &&
+            reports.front().ui_updated_ns <= reports.front().first_present_ns,
+        "the source load report should retain a monotonic accepted-to-Present chain");
+    Require(
+        replacement_activated && wrong_snapshot_reports.size() == 1 &&
+            wrong_snapshot_reports.front().outcome ==
+                specforge::SourceLoadLatencyOutcome::Superseded &&
+            wrong_snapshot_reports.front().first_present_ns == 0,
+        "drawing a different snapshot must supersede rather than present the source load trace");
+}
+
+void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_source_load_failure.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "failed source load trace fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "the Shell async source open must not use synchronous loading");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [](const std::filesystem::path&, std::size_t, const auto&)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("synthetic decode failure");
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        std::move(session),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t frame_index = 301;
+    Access::EnableNavigationTracing(*shell, frame_index);
+
+    shell->OpenSource(path);
+    const auto failure_deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < failure_deadline &&
+           Access::PendingLoadCount(*shell) != 0) {
+        Access::Drain(*shell);
+        std::this_thread::sleep_for(2ms);
+    }
+    Access::Drain(*shell);
+    const std::vector<specforge::SourceLoadLatencyReport> reports =
+        shell->CompleteSourceLoadFramePresentations(
+            frame_index,
+            std::span<const specforge::NavigationLatencyPresentation>{});
+    const bool load_error_visible = !Access::LoadError(*shell).empty();
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(
+        reports.size() == 1 &&
+            reports.front().outcome ==
+                specforge::SourceLoadLatencyOutcome::Failed &&
+            reports.front().attempts.size() == 1 &&
+            reports.front().first_present_ns == 0,
+        "a failed explicit open should emit one terminal report without a Present");
+    Require(
+        reports.front().attempts.front().completion_drained_ns > 0 &&
+            load_error_visible,
+        "the failed report should include completion drain and preserve the UI error");
 }
 
 void TestLaterExplicitOpenCancelsEarlierFollowUp()
@@ -1877,6 +2098,8 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
 int main()
 {
     try {
+        TestExplicitOpenTracesAcceptedPathThroughFirstPresent();
+        TestFailedExplicitOpenProducesTerminalSourceLoadReport();
         TestLaterExplicitOpenCancelsEarlierFollowUp();
         TestRemovedSourceResultCancelsOnlyThatSourcesDerivedTickets();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();

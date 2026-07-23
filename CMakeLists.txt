@@ -172,6 +172,7 @@ add_library(specforge_core STATIC
     src/profile/navigation_latency_trace.cpp
     src/profile/profile_recording_status.cpp
     src/profile/profile_sink.cpp
+    src/profile/source_load_latency_trace.cpp
 )
 specforge_configure_production_target(specforge_core)
 specforge_use_runtime_paths(specforge_core)
@@ -374,6 +375,11 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_source_load_latency_trace_tests
+    tests/source_load_latency_trace_tests.cpp
+    specforge_core
+)
+specforge_add_test(
     specforge_settings_panel_tests
     tests/settings_panel_tests.cpp
     specforge_desktop_ui
@@ -392,6 +398,12 @@ add_test(
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_navigation_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-navigation-profile.ps1"
+)
+add_test(
+    NAME specforge_analyze_source_load_profile_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/analyze_source_load_profile_tests.ps1"
+        -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-source-load-profile.ps1"
 )
 add_test(
     NAME specforge_release_artifacts_tests

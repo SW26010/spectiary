@@ -34,7 +34,7 @@ struct SourceCollectionLoadRequest {
     // residency. The worker must prove this boundary is still current before
     // it may skip decode.
     std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
-    NavigationLatencyAttemptHandle navigation_attempt;
+    NavigationLatencyAttemptHandle latency_attempt;
 };
 
 struct PreparedSourceCollection {
@@ -60,7 +60,7 @@ struct SourceCollectionLoadCompletion {
     std::size_t spectrum_index = 0;
     std::optional<PreparedSourceCollection> prepared;
     std::string error_message;
-    NavigationLatencyAttemptHandle navigation_attempt;
+    NavigationLatencyAttemptHandle latency_attempt;
 };
 
 struct SourceCollectionLoadDependencies {
