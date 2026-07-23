@@ -78,6 +78,8 @@ public:
     void RemoveSource(std::string_view source_identity);
 
     [[nodiscard]] SampleLabelingControllerView View() const;
+    [[nodiscard]] std::uint64_t
+        active_source_tasks_generation() const;
     [[nodiscard]] std::optional<SourceState> SourceStateForIdentity(
         std::string_view source_identity);
     [[nodiscard]] SampleLabelingOperationResult CreateTask(
@@ -128,6 +130,11 @@ private:
         PersistOutputIfSelected,
     };
 
+    enum class TaskProjectionEffect {
+        Unchanged,
+        Changed,
+    };
+
     [[nodiscard]] SampleLabelingTask* ActiveTask();
     [[nodiscard]] const SampleLabelingTask* ActiveTask() const;
     [[nodiscard]] SampleLabelingTask* TemporaryTask();
@@ -138,10 +145,12 @@ private:
     [[nodiscard]] SampleLabelingOperationResult RejectOperation() const;
     [[nodiscard]] SampleLabelingOperationResult CompleteMutation(
         SampleLabelingTask* task,
-        PersistencePolicy persistence);
+        PersistencePolicy persistence,
+        TaskProjectionEffect projection_effect);
     [[nodiscard]] bool PersistTaskOutput(
         SampleLabelingTask& task,
         const SourceState* source_state = nullptr);
+    void BumpActiveSourceTasksGeneration();
     void Touch();
     void EnsureStateCacheLoaded();
     void QueueStateSave();
@@ -160,6 +169,7 @@ private:
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
     std::uint64_t revision_ = 0;
+    std::uint64_t active_source_tasks_generation_ = 0;
     bool state_cache_loaded_ = false;
     std::string state_cache_load_warning_;
 };

@@ -7,6 +7,7 @@
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -21,6 +22,8 @@ struct SampleWorkflowSourceContext {
     const SourceCollectionManifest* collection = nullptr;
     const std::vector<SampleLabelingTask>* labeling_tasks = nullptr;
     std::size_t sample_count = 0;
+    std::uint64_t context_generation = 0;
+    std::uint64_t labeling_generation = 0;
 };
 
 struct SampleWorkflowSortChoiceResult {
@@ -38,8 +41,6 @@ struct SampleWorkflowSortChoiceResult {
 class SampleWorkflowSourcePolicy {
 public:
     void Clear();
-    void InvalidateFilterViewCache();
-    void InvalidateSortingSourceCache();
 
     [[nodiscard]] bool RenameAnnotationDisplayName(
         const SampleWorkflowSourceContext& context,
@@ -106,6 +107,22 @@ public:
     [[nodiscard]] bool HasState() const;
 
 private:
+    struct DerivedCacheKey {
+        const SourceCollectionManifest* collection = nullptr;
+        const std::vector<SampleLabelingTask>*
+            labeling_tasks = nullptr;
+        std::size_t sample_count = 0;
+        std::uint64_t context_generation = 0;
+        std::uint64_t labeling_generation = 0;
+
+        bool operator==(
+            const DerivedCacheKey&) const = default;
+    };
+
+    [[nodiscard]] static DerivedCacheKey CacheKeyFor(
+        const SampleWorkflowSourceContext& context);
+    void InvalidateFilterViewCache();
+    void InvalidateSortingSourceCache();
     [[nodiscard]] bool IsSelectedFilterSource(std::string_view source_id) const;
     [[nodiscard]] bool IsSelectedSampleSortSource(std::string_view source_id) const;
     [[nodiscard]] SampleNavigationSortDirection SampleSortSourceDirection(
@@ -143,13 +160,11 @@ private:
         SampleNavigationSortDirection::Ascending;
     bool restored_filter_conditions_need_reconciliation_ = false;
 
-    mutable bool sorting_source_cache_valid_ = false;
-    mutable std::size_t sorting_source_cache_sample_count_ = 0;
-    mutable const SourceCollectionManifest* sorting_source_cache_context_ = nullptr;
+    mutable std::optional<DerivedCacheKey>
+        sorting_source_cache_key_;
     mutable std::vector<SourceCollectionSampleSortSourceView> sorting_source_cache_;
-    mutable bool filter_view_cache_valid_ = false;
-    mutable std::size_t filter_view_cache_sample_count_ = 0;
-    mutable const SourceCollectionManifest* filter_view_cache_context_ = nullptr;
+    mutable std::optional<DerivedCacheKey>
+        filter_view_cache_key_;
     mutable SourceCollectionFilterView filter_view_cache_;
 };
 

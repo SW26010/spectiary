@@ -326,11 +326,24 @@ void TestControllerAddsManualAnnotationToActiveContext()
 
     specforge::SampleNavigationController controller(cache_path);
     controller.ActivateSource("source", MakeSnapshot(path, "file:source", 2, 0));
+    const std::uint64_t initial_generation =
+        controller.active_context_generation();
+    (void)controller.Navigate(
+        specforge::SampleNavigationRequest::Next());
+    Require(
+        controller.active_context_generation() ==
+            initial_generation,
+        "ordinary navigation should preserve the active context generation");
 
     std::string message;
     Require(
         controller.AddReadOnlyAnnotationToActiveSource(annotation_path, &message),
         "manual annotation should attach to active source");
+    const std::uint64_t added_generation =
+        controller.active_context_generation();
+    Require(
+        added_generation > initial_generation,
+        "loading an annotation should advance the active context generation");
     const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr, "active context should exist after manual annotation");
     Require(context->annotations.size() == 1, "manual annotation should be appended");
@@ -345,6 +358,11 @@ void TestControllerAddsManualAnnotationToActiveContext()
     Require(
         controller.AddReadOnlyAnnotationToActiveSource(annotation_path, &message),
         "reopened manual annotation should replace same path");
+    const std::uint64_t replaced_generation =
+        controller.active_context_generation();
+    Require(
+        replaced_generation > added_generation,
+        "reloading an annotation in place should advance the active context generation");
     context = controller.active_context();
     Require(context != nullptr, "active context should still exist after replacement");
     Require(context->annotations.size() == 1, "same annotation path should replace instead of duplicating");
@@ -357,6 +375,10 @@ void TestControllerAddsManualAnnotationToActiveContext()
     Require(
         !controller.AddReadOnlyAnnotationToActiveSource(mismatched_path, &message),
         "mismatched manual annotation should be rejected");
+    Require(
+        controller.active_context_generation() ==
+            replaced_generation,
+        "a rejected annotation should not advance the source projection generation");
     context = controller.active_context();
     Require(context != nullptr, "active context should still exist after rejected annotation");
     Require(context->annotations.size() == 1, "rejected annotation should not be appended");
@@ -381,9 +403,16 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
 
     specforge::SampleNavigationController controller(cache_path);
     controller.ActivateSource("source", MakeSnapshot(path, "file:source", 3, 0));
+    const std::uint64_t initial_generation =
+        controller.active_context_generation();
     Require(
         controller.RestoreReadOnlyAnnotationsForActiveSource({annotation_path}),
         "provided annotation should restore into active navigation context");
+    const std::uint64_t restored_generation =
+        controller.active_context_generation();
+    Require(
+        restored_generation > initial_generation,
+        "restoring annotations should advance the active context generation");
     const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr && context->annotations.size() == 1, "provided annotation should be visible");
     Require(context->annotations[0].path == annotation_path, "restored annotation should keep its path");
@@ -396,6 +425,10 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
     Require(
         controller.RemoveReadOnlyAnnotationFromActiveSource(annotation_path),
         "provided annotation should be removable");
+    Require(
+        controller.active_context_generation() >
+            restored_generation,
+        "removing an annotation should advance the active context generation");
     context = controller.active_context();
     Require(context != nullptr && context->annotations.empty(), "removed annotation should leave active context");
 }

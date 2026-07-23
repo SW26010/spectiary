@@ -449,6 +449,117 @@ void TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting()
         "policy sort choice should use annotation values");
 }
 
+void TestWorkflowSourcePolicyTracksOwnerGenerations()
+{
+    const std::filesystem::path rank_path =
+        TempPath("_generation_rank.npy");
+    const std::filesystem::path other_path =
+        TempPath("_generation_other.npy");
+    specforge::SourceCollectionManifest manifest;
+    std::vector<specforge::SampleLabelingTask> tasks;
+    specforge::SampleWorkflowSourcePolicy policy;
+    specforge::SampleWorkflowSourceContext context{
+        .collection = &manifest,
+        .labeling_tasks = &tasks,
+        .sample_count = 3,
+        .context_generation = 1,
+        .labeling_generation = 1,
+    };
+
+    Require(
+        policy.BuildFilterView(context)
+                .available_sources.empty() &&
+            policy.BuildSortingView(context)
+                .available_sources.empty(),
+        "empty owner projections should prime empty caches");
+
+    manifest.annotations.push_back(
+        MakeIntegerAnnotation(
+            "Rank",
+            rank_path,
+            {2, 1, 1}));
+    ++context.context_generation;
+    specforge::SourceCollectionFilterView filter_view =
+        policy.BuildFilterView(context);
+    specforge::SourceCollectionSampleSortingView
+        sorting_view = policy.BuildSortingView(context);
+    Require(
+        filter_view.available_sources.size() == 1 &&
+            sorting_view.available_sources.size() == 1,
+        "an in-place annotation load should refresh both caches when the owner generation advances");
+
+    manifest.annotations[0].name = "Updated rank";
+    ++context.context_generation;
+    filter_view = policy.BuildFilterView(context);
+    sorting_view = policy.BuildSortingView(context);
+    Require(
+        filter_view.available_sources[0].name ==
+                "Updated rank" &&
+            sorting_view.available_sources[0].name ==
+                "Updated rank",
+        "an in-place annotation display change should refresh cached projections");
+
+    tasks.push_back(
+        MakeTask(
+            "rank",
+            "Local rank",
+            3,
+            rank_path));
+    ++context.labeling_generation;
+    filter_view = policy.BuildFilterView(context);
+    sorting_view = policy.BuildSortingView(context);
+    Require(
+        filter_view.available_sources.size() == 1 &&
+            filter_view.available_sources[0].name ==
+                "Local rank",
+        "an in-place labeling task addition should refresh the filter projection");
+    Require(
+        sorting_view.available_sources.empty(),
+        "a local labeling task should invalidate the matching annotation sort source");
+
+    tasks[0].task_name = "Reviewed rank";
+    ++context.labeling_generation;
+    filter_view = policy.BuildFilterView(context);
+    Require(
+        filter_view.available_sources[0].name ==
+            "Reviewed rank",
+        "an in-place labeling task mutation should refresh its cached display");
+
+    tasks.clear();
+    ++context.labeling_generation;
+    sorting_view = policy.BuildSortingView(context);
+    Require(
+        sorting_view.available_sources.size() == 1,
+        "removing an in-place labeling task should restore the annotation sort source");
+
+    manifest.annotations.clear();
+    ++context.context_generation;
+    Require(
+        policy.BuildFilterView(context)
+                .available_sources.empty() &&
+            policy.BuildSortingView(context)
+                .available_sources.empty(),
+        "an in-place annotation removal should refresh both caches");
+
+    manifest = specforge::SourceCollectionManifest{};
+    manifest.annotations.push_back(
+        MakeIntegerAnnotation(
+            "Other source",
+            other_path,
+            {3, 2, 1}));
+    ++context.context_generation;
+    filter_view = policy.BuildFilterView(context);
+    sorting_view = policy.BuildSortingView(context);
+    Require(
+        filter_view.available_sources.size() == 1 &&
+            filter_view.available_sources[0].name ==
+                "Other source" &&
+            sorting_view.available_sources.size() == 1 &&
+            sorting_view.available_sources[0].name ==
+                "Other source",
+        "reusing the same manifest address for a new source generation must not reuse stale projections");
+}
+
 void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
 {
     const std::filesystem::path annotation_path = TempPath("_legacy_mapped_filter.npy");
@@ -550,6 +661,7 @@ int main()
     TestTypedAnnotationSortingPreservesNumericPrecision();
     TestAnnotationSortingExclusions();
     TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
+    TestWorkflowSourcePolicyTracksOwnerGenerations();
     TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys();
     return 0;
 }

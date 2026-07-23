@@ -730,25 +730,50 @@ void TestControllerRevisionTracksOwnedTaskChanges()
 {
     const std::filesystem::path cache_path =
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_revision_state.json";
+    const std::filesystem::path annotation_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_revision_annotation.npy";
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(annotation_path, cleanup_error);
 
     specforge::SampleLabelingController controller(cache_path);
     const std::uint64_t initial_revision = controller.View().revision;
+    const std::uint64_t initial_generation =
+        controller.active_source_tasks_generation();
     controller.ActivateSource("source-identity", 3);
     const std::uint64_t source_revision = controller.View().revision;
+    const std::uint64_t source_generation =
+        controller.active_source_tasks_generation();
     Require(source_revision > initial_revision, "source activation should advance labeling revision");
+    Require(
+        source_generation > initial_generation,
+        "source activation should advance the active task projection generation");
+
+    controller.ActivateSource("source-identity", 3);
+    Require(
+        controller.active_source_tasks_generation() ==
+            source_generation,
+        "repeating an unchanged source activation should preserve the task projection cache generation");
 
     const specforge::SampleLabelingOperationResult created =
         controller.CreateTask("quality", "Quality");
     Require(created.accepted && created.changed, "task creation should report an owned mutation");
     Require(created.revision > source_revision, "task creation should advance labeling revision");
     Require(controller.View().revision == created.revision, "operation revision should match immutable view revision");
+    const std::uint64_t created_generation =
+        controller.active_source_tasks_generation();
+    Require(
+        created_generation == source_generation,
+        "an internal draft should not invalidate filter and sorting projections");
 
     const specforge::SampleLabelingOperationResult no_change =
         controller.SetActiveAutoAdvance(false);
     Require(no_change.accepted && !no_change.changed, "setting an existing value should report a no-op");
     Require(no_change.revision == created.revision, "no-op should not invalidate labeling projections");
+    Require(
+        controller.active_source_tasks_generation() ==
+            created_generation,
+        "a task no-op should preserve the task projection generation");
 
     const specforge::SampleLabelingOperationResult changed =
         controller.SetActiveAutoAdvance(true);
@@ -758,7 +783,63 @@ void TestControllerRevisionTracksOwnedTaskChanges()
     const specforge::SampleLabelingTask* task = ActiveTask(controller);
     Require(task != nullptr && task->auto_advance, "borrowed read-only view should expose the committed setting");
 
+    Require(
+        controller.active_source_tasks_generation() ==
+            created_generation,
+        "auto-advance should not invalidate filter and sorting projections");
+    Require(
+        controller.SetActiveSkipLabeledOnAdvance(true).changed,
+        "skip-labeled setting should report a mutation");
+    Require(
+        controller.RememberActivePosition(2).changed,
+        "remembered position should report a mutation");
+    Require(controller.FlushStateCache(), "remembered position should flush");
+    Require(
+        controller.active_source_tasks_generation() ==
+            created_generation,
+        "workflow settings, navigation position, and persistence should preserve the task projection generation");
+
+    specforge::SampleLabelSet label_set;
+    label_set.labels.push_back(
+        specforge::SampleLabelDefinition{5, "review", 'r'});
+    const specforge::SampleLabelingOperationResult
+        formal_task =
+            controller.CreateTaskFromAnnotation(
+                "formal",
+                "Formal",
+                std::move(label_set),
+                {-1, -1, -1},
+                annotation_path,
+                true);
+    Require(
+        formal_task.accepted && formal_task.changed,
+        "output-backed task creation should report a mutation");
+    const std::uint64_t projection_generation =
+        controller.active_source_tasks_generation();
+    Require(
+        projection_generation > created_generation,
+        "an output-backed task should invalidate filter and sorting projections");
+
+    Require(
+        controller.DeactivateActiveTask().changed,
+        "clean output-backed task should deactivate");
+    Require(
+        controller.active_source_tasks_generation() ==
+            projection_generation,
+        "active task selection should preserve the task projection generation");
+    Require(
+        controller.ActivateTask("formal").changed,
+        "formal task should reactivate");
+    Require(
+        controller.active_source_tasks_generation() ==
+            projection_generation,
+        "task activation should preserve the task projection generation");
+
     controller.ClearActiveSource();
+    Require(
+        controller.active_source_tasks_generation() >
+            projection_generation,
+        "clearing the active source should advance the task projection generation");
     const std::uint64_t inactive_revision = controller.View().revision;
     const specforge::SampleLabelingWriteOperationResult rejected_assign =
         controller.AssignLabel(0, 1);

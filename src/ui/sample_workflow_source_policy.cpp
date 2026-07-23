@@ -314,12 +314,27 @@ void SampleWorkflowSourcePolicy::Clear()
 
 void SampleWorkflowSourcePolicy::InvalidateFilterViewCache()
 {
-    filter_view_cache_valid_ = false;
+    filter_view_cache_key_.reset();
 }
 
 void SampleWorkflowSourcePolicy::InvalidateSortingSourceCache()
 {
-    sorting_source_cache_valid_ = false;
+    sorting_source_cache_key_.reset();
+}
+
+SampleWorkflowSourcePolicy::DerivedCacheKey
+SampleWorkflowSourcePolicy::CacheKeyFor(
+    const SampleWorkflowSourceContext& context)
+{
+    return DerivedCacheKey{
+        .collection = context.collection,
+        .labeling_tasks = context.labeling_tasks,
+        .sample_count = context.sample_count,
+        .context_generation =
+            context.context_generation,
+        .labeling_generation =
+            context.labeling_generation,
+    };
 }
 
 bool SampleWorkflowSourcePolicy::RenameAnnotationDisplayName(
@@ -929,9 +944,10 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
     const SampleWorkflowSourceContext& context,
     const std::function<void()>& cancellation_checkpoint) const
 {
-    if (!filter_view_cache_valid_ ||
-        filter_view_cache_context_ != context.collection ||
-        filter_view_cache_sample_count_ != context.sample_count) {
+    const DerivedCacheKey cache_key =
+        CacheKeyFor(context);
+    if (!filter_view_cache_key_ ||
+        *filter_view_cache_key_ != cache_key) {
         SourceCollectionFilterView view;
         view.sample_count = context.sample_count;
         const std::vector<SampleFilterSource> filter_sources =
@@ -1009,9 +1025,7 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
             }
         }
         filter_view_cache_ = std::move(view);
-        filter_view_cache_context_ = context.collection;
-        filter_view_cache_sample_count_ = context.sample_count;
-        filter_view_cache_valid_ = true;
+        filter_view_cache_key_ = cache_key;
         if (cancellation_checkpoint) {
             cancellation_checkpoint();
         }
@@ -1031,9 +1045,10 @@ SampleWorkflowSourcePolicy::CachedSortingSourceViews(
     const SampleWorkflowSourceContext& context,
     const std::function<void()>& cancellation_checkpoint) const
 {
-    if (!sorting_source_cache_valid_ ||
-        sorting_source_cache_context_ != context.collection ||
-        sorting_source_cache_sample_count_ != context.sample_count) {
+    const DerivedCacheKey cache_key =
+        CacheKeyFor(context);
+    if (!sorting_source_cache_key_ ||
+        *sorting_source_cache_key_ != cache_key) {
         sorting_source_cache_ = BuildSampleSortingSourceViews(
             context.collection,
             context.labeling_tasks,
@@ -1050,9 +1065,7 @@ SampleWorkflowSourcePolicy::CachedSortingSourceViews(
                 }
             }
         }
-        sorting_source_cache_context_ = context.collection;
-        sorting_source_cache_sample_count_ = context.sample_count;
-        sorting_source_cache_valid_ = true;
+        sorting_source_cache_key_ = cache_key;
     }
     return sorting_source_cache_;
 }

@@ -297,6 +297,9 @@ void SampleNavigationController::ActivateSource(
 
     source_key_to_session_key_[source_key] = identity.id;
     active_source_key_ = identity.id;
+    if (active_source_changed || context_changed) {
+        ++active_context_generation_;
+    }
     PersistActiveIndex();
 }
 
@@ -344,6 +347,7 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
 
     source_key_to_session_key_[source_key] = identity.id;
     active_source_key_ = identity.id;
+    ++active_context_generation_;
     return retired_session;
 }
 
@@ -357,6 +361,7 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::ActivateKnow
     const auto mapped = source_key_to_session_key_.find(std::string(source_key));
     if (!active_source_key_ || *active_source_key_ != mapped->second) {
         InvalidateSequenceState(sessions_.at(mapped->second));
+        ++active_context_generation_;
     }
     active_source_key_ = mapped->second;
     PersistActiveIndex();
@@ -430,12 +435,16 @@ BackgroundRetirementHandle SampleNavigationController::RemoveSource(std::string_
     }
     if (active_source_key_ && *active_source_key_ == session_key) {
         active_source_key_.reset();
+        ++active_context_generation_;
     }
     return retired;
 }
 
 void SampleNavigationController::ClearActiveSource()
 {
+    if (active_source_key_) {
+        ++active_context_generation_;
+    }
     active_source_key_.reset();
 }
 
@@ -454,6 +463,7 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
     const bool loaded = LoadReadOnlyAnnotationIntoSession(*session, path, message);
     if (loaded) {
         InvalidateSequenceState(*session);
+        ++active_context_generation_;
     }
     return loaded;
 }
@@ -479,6 +489,7 @@ bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const 
     }
 
     InvalidateSequenceState(*session);
+    ++active_context_generation_;
     return true;
 }
 
@@ -505,6 +516,7 @@ bool SampleNavigationController::RestoreReadOnlyAnnotationsForActiveSource(
     }
     if (restored) {
         InvalidateSequenceState(*session);
+        ++active_context_generation_;
     }
     return restored;
 }
@@ -999,6 +1011,12 @@ const SourceCollectionManifest* SampleNavigationController::active_context() con
 {
     const SourceSession* session = ActiveSession();
     return session == nullptr ? nullptr : &session->manifest;
+}
+
+std::uint64_t
+SampleNavigationController::active_context_generation() const
+{
+    return active_context_generation_;
 }
 
 void SampleNavigationController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)

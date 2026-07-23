@@ -9,6 +9,7 @@
 #include "ui/sample_navigation_state_cache_io.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -147,6 +148,7 @@ public:
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
     [[nodiscard]] const SourceCollectionManifest* active_context() const;
+    [[nodiscard]] std::uint64_t active_context_generation() const;
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
@@ -209,6 +211,7 @@ private:
     std::filesystem::path state_cache_path_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     std::optional<std::string> active_source_key_;
+    std::uint64_t active_context_generation_ = 0;
     bool state_cache_loaded_ = false;
 };
 

@@ -432,10 +432,7 @@ void SampleWorkflowCoordinator::EndRestoringSourceSession()
 
 BackgroundRetirementHandle SampleWorkflowCoordinator::RemoveSource(std::string_view source_key)
 {
-    BackgroundRetirementHandle retired = navigation_.RemoveSource(source_key);
-    workflow_sources_.InvalidateFilterViewCache();
-    workflow_sources_.InvalidateSortingSourceCache();
-    return retired;
+    return navigation_.RemoveSource(source_key);
 }
 
 void SampleWorkflowCoordinator::DiscardPreparedViewCaches()
@@ -584,8 +581,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::AddReadOnlyAnnotationTo
         *loaded = annotation_loaded;
     }
     if (annotation_loaded) {
-        workflow_sources_.InvalidateSortingSourceCache();
-        workflow_sources_.InvalidateFilterViewCache();
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -610,7 +605,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
         return action;
     }
 
-    workflow_sources_.InvalidateSortingSourceCache();
     if (removed_source_id) {
         (void)workflow_sources_.RemoveFilterSource(*removed_source_id);
         (void)workflow_sources_.RemoveSampleSortSource(*removed_source_id);
@@ -645,8 +639,6 @@ bool SampleWorkflowCoordinator::RestoreReadOnlyAnnotationsForActiveSource(
 {
     const bool restored = navigation_.RestoreReadOnlyAnnotationsForActiveSource(paths);
     if (restored) {
-        workflow_sources_.InvalidateSortingSourceCache();
-        workflow_sources_.InvalidateFilterViewCache();
         (void)ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true});
@@ -691,7 +683,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryL
         labeling_.StartOrResumeTemporaryTask();
     if (result.changed) {
         ClearLabelUndoHistory();
-        workflow_sources_.InvalidateSortingSourceCache();
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -749,7 +740,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
     if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
         if (labeling_.ActivateTask(plan.task_id).accepted) {
             ClearLabelUndoHistory();
-            workflow_sources_.InvalidateSortingSourceCache();
             ApplyNavigationInputEffects(
                 action,
                 ReconcileNavigationInputs(
@@ -776,7 +766,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
     if (!plan.metadata_clean && create_result.output_saved) {
         (void)navigation_.AddReadOnlyAnnotationToActiveSource(annotation->path);
     }
-    workflow_sources_.InvalidateSortingSourceCache();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -802,8 +791,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTas
         (void)workflow_sources_.RemoveFilterSource(deleted_task_source_id);
     }
     MarkActiveWorkflowStateDirty();
-    workflow_sources_.InvalidateFilterViewCache();
-    workflow_sources_.InvalidateSortingSourceCache();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -930,8 +917,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
             }
         }
         MarkActiveWorkflowStateDirty();
-        workflow_sources_.InvalidateFilterViewCache();
-        workflow_sources_.InvalidateSortingSourceCache();
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -950,8 +935,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelin
     ClearLabelUndoHistory();
 
     MarkActiveWorkflowStateDirty();
-    workflow_sources_.InvalidateFilterViewCache();
-    workflow_sources_.InvalidateSortingSourceCache();
     ApplyNavigationInputEffects(
         action,
         ReconcileNavigationInputs(
@@ -1407,16 +1390,12 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
         labeling_.ActivateSource(identity);
         RestoreActiveWorkflowState(identity.id);
-        workflow_sources_.InvalidateFilterViewCache();
-        workflow_sources_.InvalidateSortingSourceCache();
         action.workflow_changed = true;
     } else if (
         !active_sample_workflow_context_fingerprint_ ||
         *active_sample_workflow_context_fingerprint_ != identity.context_fingerprint) {
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
         labeling_.ActivateSource(identity);
-        workflow_sources_.InvalidateFilterViewCache();
-        workflow_sources_.InvalidateSortingSourceCache();
         action.workflow_changed = true;
     } else {
         labeling_.ActivateSource(identity);
@@ -1476,7 +1455,6 @@ void SampleWorkflowCoordinator::ApplyNavigationInputEffects(
 
 std::optional<std::size_t> SampleWorkflowCoordinator::ApplySampleFilters(const SpectrumSnapshotHandle& snapshot)
 {
-    workflow_sources_.InvalidateFilterViewCache();
     const std::size_t sample_count = ActiveSampleCount(snapshot);
     if (sample_count == 0) {
         return navigation_.ClearSampleFilter(deferred_sample_navigation_);
@@ -1528,10 +1506,18 @@ std::optional<std::size_t> SampleWorkflowCoordinator::ActiveSampleIndex(const Sp
 SampleWorkflowSourceContext SampleWorkflowCoordinator::SourcePolicyContext(
     const SpectrumSnapshotHandle& snapshot) const
 {
+    const SampleLabelingControllerView labeling_view =
+        labeling_.View();
     return SampleWorkflowSourceContext{
         .collection = navigation_.active_context(),
-        .labeling_tasks = labeling_.View().active_source_tasks,
-        .sample_count = ActiveSampleCount(snapshot)};
+        .labeling_tasks =
+            labeling_view.active_source_tasks,
+        .sample_count = ActiveSampleCount(snapshot),
+        .context_generation =
+            navigation_.active_context_generation(),
+        .labeling_generation =
+            labeling_.active_source_tasks_generation(),
+    };
 }
 
 void SampleWorkflowCoordinator::EnsureWorkflowStateCacheLoaded()

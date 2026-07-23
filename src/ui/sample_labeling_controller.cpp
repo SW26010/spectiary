@@ -115,16 +115,24 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
         return;
     }
 
+    const bool active_source_changed =
+        !active_source_identity_ ||
+        *active_source_identity_ != source_identity;
     SourceState* materialized = MaterializeSource(source_identity);
     SourceState& state = materialized == nullptr ? sources_[source_identity] : *materialized;
+    bool tasks_replaced = false;
     if (state.sample_count != 0 && state.sample_count != sample_count) {
         state.tasks.clear();
         state.active_task_id.reset();
+        tasks_replaced = true;
     }
     state.sample_count = sample_count;
     active_source_identity_ = std::move(source_identity);
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
+    }
+    if (active_source_changed || tasks_replaced) {
+        BumpActiveSourceTasksGeneration();
     }
     Touch();
 }
@@ -156,17 +164,23 @@ BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
         ClearActiveSource();
         return retired;
     }
+    const bool active_source_changed =
+        !active_source_identity_ ||
+        *active_source_identity_ != identity.id;
     auto existing = sources_.find(identity.id);
     BackgroundRetirementHandle retired;
+    bool tasks_replaced = false;
     if (existing == sources_.end()) {
         SourceState state = prepared_state ? std::move(*prepared_state) : SourceState{};
         existing = sources_.emplace(identity.id, std::move(state)).first;
+        tasks_replaced = true;
     } else if (existing->second.sample_count != 0 &&
                existing->second.sample_count != identity.spectrum_count) {
         auto retired_state = std::make_shared<SourceState>();
         *retired_state = std::move(existing->second);
         retired = std::move(retired_state);
         existing->second = prepared_state ? std::move(*prepared_state) : SourceState{};
+        tasks_replaced = true;
     } else if (prepared_state) {
         retired = MakeBackgroundRetirementHandle(std::move(*prepared_state));
     }
@@ -181,6 +195,9 @@ BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
     }
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
+    }
+    if (active_source_changed || tasks_replaced) {
+        BumpActiveSourceTasksGeneration();
     }
     Touch();
     return retired;
@@ -215,6 +232,7 @@ std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgro
     }
     active_source_identity_.reset();
     if (changed) {
+        BumpActiveSourceTasksGeneration();
         Touch();
     }
     return resources;
@@ -226,6 +244,7 @@ void SampleLabelingController::ClearActiveSource()
         return;
     }
     active_source_identity_.reset();
+    BumpActiveSourceTasksGeneration();
     Touch();
 }
 
@@ -233,6 +252,7 @@ void SampleLabelingController::RemoveSource(std::string_view source_identity)
 {
     if (active_source_identity_ && *active_source_identity_ == source_identity) {
         active_source_identity_.reset();
+        BumpActiveSourceTasksGeneration();
         Touch();
     }
 }
@@ -245,6 +265,12 @@ SampleLabelingControllerView SampleLabelingController::View() const
         .temporary_task = TemporaryTask(),
         .active_source_tasks = state == nullptr ? nullptr : &state->tasks,
         .revision = revision_};
+}
+
+std::uint64_t
+SampleLabelingController::active_source_tasks_generation() const
+{
+    return active_source_tasks_generation_;
 }
 
 SampleLabelingTask* SampleLabelingController::ActiveTask()
@@ -321,7 +347,10 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
             return result;
         }
         state->active_task_id = existing_temporary_task->task_id;
-        return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
+        return CompleteMutation(
+            nullptr,
+            PersistencePolicy::ScheduleStateSave,
+            TaskProjectionEffect::Unchanged);
     }
 
     auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
@@ -337,7 +366,10 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
         return result;
     }
     state->active_task_id = match->task_id;
-    return CompleteMutation(&*match, PersistencePolicy::ScheduleStateSave);
+    return CompleteMutation(
+        &*match,
+        PersistencePolicy::ScheduleStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult
@@ -384,7 +416,8 @@ SampleLabelingController::StartOrResumeTemporaryTask()
         std::move(temporary_task_id);
     return CompleteMutation(
         nullptr,
-        PersistencePolicy::ScheduleStateSave);
+        PersistencePolicy::ScheduleStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(
@@ -414,7 +447,10 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
             return result;
         }
         state->active_task_id = output_match->task_id;
-        return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
+        return CompleteMutation(
+            nullptr,
+            PersistencePolicy::ScheduleStateSave,
+            TaskProjectionEffect::Unchanged);
     }
 
     const auto id_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
@@ -441,7 +477,8 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         &state->tasks.back(),
         metadata_clean
             ? PersistencePolicy::ScheduleStateSave
-            : PersistencePolicy::PersistOutputIfSelected);
+            : PersistencePolicy::PersistOutputIfSelected,
+        TaskProjectionEffect::Changed);
 }
 
 SampleLabelingOperationResult SampleLabelingController::ActivateTask(std::string_view task_id)
@@ -464,7 +501,10 @@ SampleLabelingOperationResult SampleLabelingController::ActivateTask(std::string
     }
 
     state->active_task_id = match->task_id;
-    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
+    return CompleteMutation(
+        nullptr,
+        PersistencePolicy::ScheduleStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
@@ -476,7 +516,12 @@ SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(Sample
         return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::PersistOutputIfSelected,
+        task->output_path
+            ? TaskProjectionEffect::Changed
+            : TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
@@ -492,7 +537,12 @@ SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
         return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::PersistOutputIfSelected,
+        task->output_path
+            ? TaskProjectionEffect::Changed
+            : TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int code)
@@ -504,7 +554,12 @@ SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int co
         return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::PersistOutputIfSelected,
+        task->output_path
+            ? TaskProjectionEffect::Changed
+            : TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(std::string task_name)
@@ -518,7 +573,12 @@ SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(std::st
 
     task->task_name = std::move(task_name);
     MarkSampleLabelTaskMetadataPending(*task);
-    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::PersistOutputIfSelected,
+        task->output_path
+            ? TaskProjectionEffect::Changed
+            : TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::SetActiveAutoAdvance(bool enabled)
@@ -530,7 +590,10 @@ SampleLabelingOperationResult SampleLabelingController::SetActiveAutoAdvance(boo
         return result;
     }
     task->auto_advance = enabled;
-    return CompleteMutation(task, PersistencePolicy::FlushStateSave);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::FlushStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAdvance(bool enabled)
@@ -542,7 +605,10 @@ SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAd
         return result;
     }
     task->skip_labeled_on_advance = enabled;
-    return CompleteMutation(task, PersistencePolicy::FlushStateSave);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::FlushStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskToOutput(
@@ -562,7 +628,10 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     if (conflict != state->tasks.end()) {
         task->save_state.message = "Output path is already used by another local labeling task.";
         SampleLabelingOperationResult result =
-            CompleteMutation(task, PersistencePolicy::ScheduleStateSave);
+            CompleteMutation(
+                task,
+                PersistencePolicy::ScheduleStateSave,
+                TaskProjectionEffect::Unchanged);
         result.accepted = false;
         return result;
     }
@@ -583,6 +652,9 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         *task = std::move(candidate);
     }
 
+    if (persist_result.output_saved) {
+        BumpActiveSourceTasksGeneration();
+    }
     Touch();
     QueueStateSave();
     SampleLabelingOperationResult result;
@@ -618,7 +690,10 @@ SampleLabelingOperationResult SampleLabelingController::DeactivateActiveTask()
         return RejectOperation();
     }
     state->active_task_id.reset();
-    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
+    return CompleteMutation(
+        nullptr,
+        PersistencePolicy::ScheduleStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
@@ -628,6 +703,11 @@ SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
         return RejectOperation();
     }
 
+    const SampleLabelingTask* active_task = ActiveTask();
+    const TaskProjectionEffect projection_effect =
+        active_task != nullptr && active_task->output_path
+        ? TaskProjectionEffect::Changed
+        : TaskProjectionEffect::Unchanged;
     const std::string task_id = *state->active_task_id;
     state->tasks.erase(
         std::remove_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
@@ -635,7 +715,10 @@ SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
         }),
         state->tasks.end());
     state->active_task_id.reset();
-    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
+    return CompleteMutation(
+        nullptr,
+        PersistencePolicy::ScheduleStateSave,
+        projection_effect);
 }
 
 SampleLabelingOperationResult SampleLabelingController::RememberActivePosition(std::size_t sample_index)
@@ -650,7 +733,10 @@ SampleLabelingOperationResult SampleLabelingController::RememberActivePosition(s
         return result;
     }
     task->remembered_position = sample_index;
-    return CompleteMutation(task, PersistencePolicy::ScheduleStateSave);
+    return CompleteMutation(
+        task,
+        PersistencePolicy::ScheduleStateSave,
+        TaskProjectionEffect::Unchanged);
 }
 
 SampleLabelingOperationResult SampleLabelingController::RejectOperation() const
@@ -660,8 +746,12 @@ SampleLabelingOperationResult SampleLabelingController::RejectOperation() const
 
 SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
     SampleLabelingTask* task,
-    PersistencePolicy persistence)
+    PersistencePolicy persistence,
+    TaskProjectionEffect projection_effect)
 {
+    if (projection_effect == TaskProjectionEffect::Changed) {
+        BumpActiveSourceTasksGeneration();
+    }
     Touch();
     QueueStateSave();
 
@@ -700,6 +790,12 @@ bool SampleLabelingController::PersistTaskOutput(
     return result.output_saved;
 }
 
+void SampleLabelingController::
+    BumpActiveSourceTasksGeneration()
+{
+    ++active_source_tasks_generation_;
+}
+
 void SampleLabelingController::Touch()
 {
     ++revision_;
@@ -719,7 +815,12 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
     result.write = AssignSampleLabel(*task, sample_index, code);
     if (result.write.changed) {
         result.operation =
-            CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+            CompleteMutation(
+                task,
+                PersistencePolicy::PersistOutputIfSelected,
+                task->output_path
+                    ? TaskProjectionEffect::Changed
+                    : TaskProjectionEffect::Unchanged);
     } else {
         result.operation = RejectOperation();
         result.operation.accepted = result.write.accepted;
@@ -739,7 +840,12 @@ SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::siz
     result.write = ClearSampleLabel(*task, sample_index);
     if (result.write.changed) {
         result.operation =
-            CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+            CompleteMutation(
+                task,
+                PersistencePolicy::PersistOutputIfSelected,
+                task->output_path
+                    ? TaskProjectionEffect::Changed
+                    : TaskProjectionEffect::Unchanged);
     } else {
         result.operation = RejectOperation();
         result.operation.accepted = result.write.accepted;
