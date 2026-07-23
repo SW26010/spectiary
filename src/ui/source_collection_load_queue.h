@@ -6,6 +6,7 @@
 #include "ui/background_retirement.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_folder_listing_generation.h"
+#include "ui/source_collection_resident_snapshot.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,10 @@ struct SourceCollectionLoadRequest {
     // remains an optimization hint; the worker revalidates its generation and
     // the source/annotation dependencies before publishing a snapshot.
     SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
+    // Selected by SourceCollectionSession from the roster's bounded
+    // residency. The worker must prove this boundary is still current before
+    // it may skip decode.
+    std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
     NavigationLatencyAttemptHandle navigation_attempt;
 };
 
@@ -44,6 +49,9 @@ struct PreparedSourceCollection {
     // Immutable listing cache and invalidation boundary accepted by the
     // successful post-decode revalidation pass.
     SourceCollectionFolderListingGenerationHandle folder_listing_generation;
+    // True only when the worker reused a resident snapshot and did not invoke
+    // either snapshot decoder.
+    bool snapshot_cache_hit = false;
 };
 
 struct SourceCollectionLoadCompletion {

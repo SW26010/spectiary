@@ -627,12 +627,37 @@ private:
             proof->identity);
     }
 
+    bool CanReuseResidentSnapshot(
+        const Task& task,
+        const SourceCollectionResidentSnapshot& resident,
+        const SourceCollectionSingleFileState& initial_state,
+        bool folder_generation_proven) const
+    {
+        return resident.snapshot &&
+               resident.spectrum_index == task.request.spectrum_index &&
+               resident.snapshot->collection.current_index ==
+                   task.request.spectrum_index &&
+               task.request.context_reuse_proof &&
+               resident.context_reuse_proof.identity ==
+                   task.request.context_reuse_proof->identity &&
+               resident.context_reuse_proof.dependency_state ==
+                   task.request.context_reuse_proof->dependency_state &&
+               resident.folder_listing_generation ==
+                   task.request.folder_listing_generation_hint &&
+               CanReuseKnownContext(
+                   task,
+                   *resident.snapshot,
+                   initial_state,
+                   folder_generation_proven);
+    }
+
     PreparedSourceCollection BuildReusedPrepared(
         const Task& task,
         SpectrumSnapshotHandle snapshot,
         const SourceCollectionSingleFileState& verified_state,
         SourceCollectionFolderListingGenerationHandle
-            folder_listing_generation = {})
+            folder_listing_generation = {},
+        bool snapshot_cache_hit = false)
     {
         const SourceCollectionIdentity identity =
             task.request.context_reuse_proof->identity;
@@ -650,6 +675,7 @@ private:
             SourceCollectionContextReuseProof{identity, verified_state};
         prepared.folder_listing_generation =
             std::move(folder_listing_generation);
+        prepared.snapshot_cache_hit = snapshot_cache_hit;
         return prepared;
     }
 
@@ -724,6 +750,8 @@ private:
         constexpr std::size_t kMaximumAttempts = 2;
         SourceCollectionFolderListingGenerationHandle listing_generation =
             task.request.folder_listing_generation_hint;
+        bool resident_candidate_available =
+            task.request.resident_snapshot.has_value();
         for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
             checkpoint();
             const bool hint_present = listing_generation != nullptr;
@@ -758,6 +786,70 @@ private:
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
+            if (resident_candidate_available) {
+                const SourceCollectionResidentSnapshot& resident =
+                    *task.request.resident_snapshot;
+                const bool resident_current =
+                    !listing_scan_performed &&
+                    generation_current_at_start &&
+                    listing_generation ==
+                        resident.folder_listing_generation &&
+                    CanReuseResidentSnapshot(
+                        task,
+                        resident,
+                        initial_state,
+                        true);
+                resident_candidate_available = false;
+                if (resident_current) {
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkFolderSnapshotLoadStarted({
+                                .hint_present = hint_present,
+                                .generation_current_at_start =
+                                    generation_current_at_start,
+                                .listing_scan_performed = false,
+                            });
+                    }
+                    SpectrumSnapshotHandle snapshot = resident.snapshot;
+                    checkpoint();
+                    ValidateDecodedSnapshot(snapshot);
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkSnapshotLoadFinished();
+                        task.request.navigation_attempt
+                            ->MarkContextPrepared(true);
+                    }
+                    const SourceCollectionSingleFileState verified_state =
+                        CaptureSourceCollectionSingleFileState(
+                            task.request.path,
+                            task.request.annotation_paths,
+                            checkpoint);
+                    const bool listing_generation_is_current =
+                        listing_generation->IsCurrent();
+                    const bool revalidation_succeeded =
+                        SourceCollectionSingleFileStatesMatch(
+                            initial_state,
+                            verified_state) &&
+                        listing_generation_is_current;
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkSourceRevalidated(
+                                revalidation_succeeded);
+                    }
+                    if (revalidation_succeeded) {
+                        return BuildReusedPrepared(
+                            task,
+                            std::move(snapshot),
+                            verified_state,
+                            std::move(listing_generation),
+                            true);
+                    }
+                    if (!listing_generation_is_current) {
+                        listing_generation.reset();
+                    }
+                    continue;
+                }
+            }
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkFolderSnapshotLoadStarted({
                     .hint_present = hint_present,
@@ -881,6 +973,8 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         constexpr std::size_t kMaximumAttempts = 2;
+        bool resident_candidate_available =
+            task.request.resident_snapshot.has_value();
         for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
             checkpoint();
             const SourceCollectionSingleFileState initial_state =
@@ -888,6 +982,55 @@ private:
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
+            if (resident_candidate_available) {
+                const SourceCollectionResidentSnapshot& resident =
+                    *task.request.resident_snapshot;
+                const bool resident_current =
+                    CanReuseResidentSnapshot(
+                        task,
+                        resident,
+                        initial_state,
+                        false);
+                resident_candidate_available = false;
+                if (resident_current) {
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkSnapshotLoadStarted(false);
+                    }
+                    SpectrumSnapshotHandle snapshot = resident.snapshot;
+                    checkpoint();
+                    ValidateDecodedSnapshot(snapshot);
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkSnapshotLoadFinished();
+                        task.request.navigation_attempt
+                            ->MarkContextPrepared(true);
+                    }
+                    const SourceCollectionSingleFileState verified_state =
+                        CaptureSourceCollectionSingleFileState(
+                            task.request.path,
+                            task.request.annotation_paths,
+                            checkpoint);
+                    const bool revalidation_succeeded =
+                        SourceCollectionSingleFileStatesMatch(
+                            initial_state,
+                            verified_state);
+                    if (task.request.navigation_attempt) {
+                        task.request.navigation_attempt
+                            ->MarkSourceRevalidated(
+                                revalidation_succeeded);
+                    }
+                    if (revalidation_succeeded) {
+                        return BuildReusedPrepared(
+                            task,
+                            std::move(snapshot),
+                            verified_state,
+                            {},
+                            true);
+                    }
+                    continue;
+                }
+            }
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkSnapshotLoadStarted(false);
             }

@@ -3,9 +3,11 @@
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/source_collection_folder_listing_generation.h"
+#include "ui/source_collection_resident_snapshot.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -24,9 +26,9 @@ struct SourceCollectionRosterRemoveResult {
     SourceCollectionFolderListingGenerationHandle retired_folder_listing_generation;
 };
 
-struct SourceCollectionRosterPreparedOpenResult {
+struct SourceCollectionRosterOpenResult {
     SourceCollectionSessionAction action;
-    SpectrumSnapshotHandle replaced_cached_snapshot;
+    std::vector<SpectrumSnapshotHandle> retired_snapshots;
     SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
 };
 
@@ -48,11 +50,16 @@ public:
         const std::filesystem::path& path) const;
     [[nodiscard]] std::optional<SourceCollectionContextReuseProof>
         ContextReuseProof(const std::filesystem::path& path) const;
+    [[nodiscard]] std::optional<SourceCollectionResidentSnapshot>
+        ResidentSnapshot(
+            const std::filesystem::path& path,
+            std::size_t spectrum_index,
+            const SourceCollectionIdentity& identity);
 
-    [[nodiscard]] SourceCollectionSessionAction OpenSource(
+    [[nodiscard]] SourceCollectionRosterOpenResult OpenSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index);
-    [[nodiscard]] SourceCollectionRosterPreparedOpenResult OpenPreparedSource(
+    [[nodiscard]] SourceCollectionRosterOpenResult OpenPreparedSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
         SpectrumSnapshotHandle snapshot,
@@ -61,14 +68,24 @@ public:
             std::nullopt);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
-    [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
+    [[nodiscard]] SourceCollectionRosterOpenResult LoadActiveSourceAt(
+        std::size_t spectrum_index);
     void RememberActiveSourceIndex(std::size_t spectrum_index);
 
 private:
     struct AddOrUpdateSourceResult {
         std::size_t source_index = 0;
-        SpectrumSnapshotHandle replaced_cached_snapshot;
+        std::vector<SpectrumSnapshotHandle> retired_snapshots;
         SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
+    };
+
+    struct ResidentSnapshotEntry {
+        std::size_t spectrum_index = 0;
+        SpectrumSnapshotHandle snapshot;
+        SourceCollectionContextReuseProof context_reuse_proof;
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation;
+        std::size_t estimated_payload_bytes = 0;
+        std::uint64_t access_epoch = 0;
     };
 
     struct SourceListEntry {
@@ -89,6 +106,7 @@ private:
         // prepared-open transaction.
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
         std::size_t last_spectrum_index = 0;
+        std::vector<ResidentSnapshotEntry> resident_snapshots;
     };
 
     [[nodiscard]] const SourceListEntry* current_source() const;
@@ -99,12 +117,26 @@ private:
         SourceCollectionFolderListingGenerationHandle folder_listing_generation = {},
         std::optional<SourceCollectionContextReuseProof> context_reuse_proof =
             std::nullopt);
+    void RetainPreviousSnapshot(
+        SourceListEntry& source,
+        SpectrumSnapshotHandle snapshot,
+        std::size_t spectrum_index,
+        const std::optional<SourceCollectionContextReuseProof>& context_reuse_proof,
+        const SourceCollectionFolderListingGenerationHandle& folder_listing_generation,
+        std::vector<SpectrumSnapshotHandle>& retired_snapshots);
+    void InvalidateResidentSnapshots(
+        SourceListEntry& source,
+        std::vector<SpectrumSnapshotHandle>& retired_snapshots);
+    void EvictResidentSnapshots(std::vector<SpectrumSnapshotHandle>& retired_snapshots);
     void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
 
     SnapshotLoader snapshot_loader_;
     SpectrumSnapshotHandle snapshot_;
     std::vector<SourceListEntry> sources_;
     std::optional<std::size_t> current_source_index_;
+    std::size_t resident_snapshot_count_ = 0;
+    std::size_t resident_snapshot_payload_bytes_ = 0;
+    std::uint64_t resident_access_epoch_ = 0;
 };
 
 }  // namespace specforge

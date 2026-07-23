@@ -18,6 +18,8 @@ struct SourceCollectionIdentity {
     std::string source_fingerprint;
     std::string context_fingerprint;
     std::size_t spectrum_count = 0;
+
+    [[nodiscard]] bool operator==(const SourceCollectionIdentity&) const = default;
 };
 
 struct SourceCollectionFolderSpectrumFile {

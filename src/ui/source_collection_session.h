@@ -6,6 +6,7 @@
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_folder_listing_generation.h"
+#include "ui/source_collection_resident_snapshot.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -24,6 +25,7 @@ namespace specforge {
 class SampleWorkflowCoordinator;
 struct SampleWorkflowCommandResult;
 class SourceCollectionRoster;
+struct SourceCollectionRosterOpenResult;
 class SourceCollectionSessionStatePersistence;
 
 enum class SourceCollectionSessionRestoreMode {
@@ -37,6 +39,7 @@ struct SourceCollectionLoadHint {
     std::uint64_t live_workflow_revision = 0;
     SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
     std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
+    std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
 };
 
 enum class SourceCollectionSessionIntentKind {
@@ -297,7 +300,8 @@ public:
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSource(
         const std::filesystem::path& path) const;
     [[nodiscard]] std::optional<SourceCollectionLoadHint> LoadHintForSource(
-        const std::filesystem::path& path) const;
+        const std::filesystem::path& path,
+        std::optional<std::size_t> spectrum_index = std::nullopt);
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,
@@ -404,6 +408,8 @@ private:
         SourceCollectionSessionAction& action,
         const SampleWorkflowCommandResult& command_result,
         SampleNavigationResult* navigation_result = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction AdoptRosterOpenResult(
+        SourceCollectionRosterOpenResult result);
 
     std::unique_ptr<SourceCollectionRoster> roster_;
     std::unique_ptr<SampleWorkflowCoordinator> workflow_;
@@ -413,6 +419,7 @@ private:
     bool deferred_restore_active_ = false;
     bool background_loads_required_ = false;
     std::optional<std::size_t> pending_background_spectrum_index_;
+    std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;
 };
 

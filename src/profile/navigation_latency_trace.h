@@ -196,6 +196,7 @@ public:
     [[nodiscard]] static NavigationLatencyTimePoint Now() noexcept;
 
     void SetTargetIndex(std::size_t target_index) noexcept;
+    void SetCacheHit(bool cache_hit) noexcept;
     [[nodiscard]] NavigationLatencyAttemptHandle BeginLoadAttempt(
         std::size_t target_index,
         NavigationLatencyTimePoint at = Now());
@@ -219,7 +220,7 @@ private:
     std::uint64_t navigation_id_ = 0;
     std::size_t from_index_ = 0;
     NavigationLatencyInputKind input_kind_ = NavigationLatencyInputKind::UiNext;
-    bool cache_hit_ = false;
+    std::atomic_bool cache_hit_ = false;
     NavigationTargetResolutionReport target_resolution_;
     std::int64_t input_ns_ = 0;
     std::int64_t requested_ns_ = 0;

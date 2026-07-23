@@ -292,6 +292,7 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 12. 长 build 不是合格反馈环。人工或 agent 验证 full CMake build 时必须带超时；性能问题优先建立可重复 profile 或 focused compile/test loop。
 13. Folder navigation 可以复用上一次 post-decode 验证通过、且仍 current 的 immutable listing generation；notification 不可用时才保留 fresh post-decode full scan fallback。cache hint 不能升级为 source-of-truth。
 14. Known-source context 只能在已提交 identity、source/companion/annotation dependency proof 和 folder generation（若适用）均通过两阶段检查时复用；单独的 identity 或 generation hint 不能跳过 manifest materialization。
+15. Resident snapshot 由 roster 按 raw row 和完整 source/context/generation 边界管理；session 只选择候选，load worker 在后台完成 currentness/TOCTOU 验证后才能跳过 decode。命中、淘汰、取消和 stale completion 都不能绕过原 pending/commit/supersede 事务。
 
 ## 推荐实现形态
 
@@ -301,6 +302,7 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 - `SpectralLinesPanelController::PlotView()` 这类只投影当前 render 所需状态的 narrow view。
 - invalidation-driven view cache；状态未变化时跨帧复用，command 和 maintenance 后显式 dirty。
 - owner-owned cache，例如 navigation sequence cache、filter view cache、sorting view cache。
+- roster-owned bounded resident snapshot LRU；淘汰项继续交给 background reclaimer，不在 UI thread 释放大 payload。
 - 在 load/mutation 路径规范化 owned state，让 read view 保持纯投影。
 - context fingerprint 驱动失效，而不是每次 sample index 变化都重算。
 - source-order implicit representation，避免 `[0..N)` 常规场景分配和复制。
@@ -337,5 +339,6 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 - previous/next 和 label auto-advance 是否只加载目标 sample，不触发 source/workflow 全量重同步。
 - panel view 是否只包含显示需要的状态，没有复制 owner 内部大列表。
 - cache 失效条件是否覆盖 source、annotation、labeling、filter/sort choice、workflow context 和 maintenance 可见状态变化。
+- resident snapshot 的 key 是否使用 raw row 和完整 source/context/generation 边界，cache hit 是否真的跳过 decoder，淘汰是否走后台 retirement。
 - 新增测试是否覆盖规则正确性；新增或更新 profile 是否覆盖交互预算。
 - 运行 build/test/profile 命令时是否设置了合理超时，避免诊断卡死。

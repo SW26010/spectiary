@@ -9,6 +9,7 @@
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_load_queue.h"
+#include "ui/source_collection_roster.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -4510,6 +4511,518 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         "prepared source activation should reconcile against the retained filter without rescanning");
 }
 
+void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_resident_rows.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "resident snapshot fixture must remain on the prepared path");
+        },
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "resident-rows",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        12,
+    };
+    const specforge::SourceCollectionIdentity identity =
+        context.identity;
+    context.manifest.sample_names = {
+        "00", "01", "02", "03", "04", "05",
+        "06", "07", "08", "09", "10", "11",
+    };
+    const specforge::SourceCollectionContextReuseProof proof{
+        identity,
+        {
+            .source_stat_fingerprint = "stable-source",
+            .companion_name_fingerprint = "stable-name",
+            .companion_annotation_fingerprint =
+                "stable-annotation",
+        }};
+
+    auto payload_destroyed_promise =
+        std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> payload_destroyed =
+        payload_destroyed_promise->get_future();
+    auto* payload = new std::vector<double>(1U << 20U, 1.0);
+    specforge::SpectrumValueVector payload_handle(
+        payload,
+        [payload_destroyed_promise](
+            const std::vector<double>* value) {
+            delete value;
+            payload_destroyed_promise->set_value(
+                std::this_thread::get_id());
+        });
+    auto first_mutable =
+        std::make_shared<specforge::SpectrumSnapshot>(
+            *MakeSnapshot(source_path, 12, 0));
+    first_mutable->current_spectrum.x_values =
+        std::move(payload_handle);
+    first_mutable->current_spectrum.point_count = 1U << 20U;
+    specforge::SpectrumSnapshotHandle first_snapshot =
+        first_mutable;
+    specforge::PreparedSampleWorkflowState workflow =
+        PrepareWorkflow(first_snapshot, context, 0, {}, {});
+    specforge::SourceCollectionSessionResult initial =
+        session.OpenPreparedSource(
+            source_path,
+            0,
+            first_snapshot,
+            specforge::PreparedSourceCollectionPlan{
+                std::move(context),
+                std::move(workflow)},
+            {},
+            proof);
+    Require(initial.loaded, "resident fixture should load row 0");
+    first_mutable.reset();
+    first_snapshot.reset();
+
+    const std::thread::id caller_thread =
+        std::this_thread::get_id();
+    specforge::SourceCollectionLoadQueue retirement_queue;
+    for (specforge::BackgroundRetirementHandle& resource :
+         initial.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    for (std::size_t row = 1; row <= 8; ++row) {
+        const specforge::SourceCollectionSessionResult navigation =
+            Submit(
+                session,
+                MoveSampleNavigation(
+                    specforge::SampleNavigationRequest::Next()));
+        Require(
+            navigation.follow_up_spectrum_index == row,
+            "resident history should request the next raw row");
+        specforge::SourceCollectionSessionResult loaded =
+            session.OpenPreparedSource(
+                source_path,
+                row,
+                MakeSnapshot(source_path, 12, row),
+                specforge::PreparedSourceCollectionReuse{
+                    identity},
+                {},
+                proof);
+        Require(loaded.loaded, "resident history row should load");
+        for (specforge::BackgroundRetirementHandle& resource :
+             loaded.background_retirement) {
+            retirement_queue.RetireResource(
+                std::move(resource));
+        }
+    }
+    const std::optional<specforge::SourceCollectionLoadHint>
+        row_seven_before_view_changes =
+            session.LoadHintForSource(source_path, 7);
+    Require(
+        row_seven_before_view_changes &&
+            row_seven_before_view_changes->resident_snapshot &&
+            row_seven_before_view_changes->resident_snapshot
+                ->snapshot,
+        "the eight-entry history should retain raw row 7");
+
+    (void)Submit(
+        session,
+        SetSampleNameQuery("0"));
+    (void)Submit(
+        session,
+        AddSampleSortSource("sample-name"));
+    (void)Submit(
+        session,
+        SetSampleSortSource("sample-name"));
+    const std::optional<specforge::SourceCollectionLoadHint>
+        row_seven_after_view_changes =
+            session.LoadHintForSource(source_path, 7);
+    Require(
+        row_seven_after_view_changes &&
+            row_seven_after_view_changes->resident_snapshot &&
+            row_seven_after_view_changes->resident_snapshot
+                    ->snapshot ==
+                row_seven_before_view_changes
+                    ->resident_snapshot
+                    ->snapshot,
+        "query and sorting should only change access order, not copy or invalidate resident snapshots");
+
+    Require(
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 9,
+        "resident eviction should be driven by a committed row 9 navigation");
+    specforge::SourceCollectionSessionResult eviction =
+        session.OpenPreparedSource(
+            source_path,
+            9,
+            MakeSnapshot(source_path, 12, 9),
+            specforge::PreparedSourceCollectionReuse{identity},
+            {},
+            proof);
+    Require(eviction.loaded, "row 9 should commit");
+    const std::optional<specforge::SourceCollectionLoadHint>
+        row_zero_after_eviction =
+            session.LoadHintForSource(source_path, 0);
+    Require(
+        row_zero_after_eviction &&
+            !row_zero_after_eviction->resident_snapshot,
+        "the ninth non-current row should evict untouched raw row 0");
+    for (specforge::BackgroundRetirementHandle& resource :
+         eviction.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    Require(
+        payload_destroyed.wait_for(std::chrono::seconds(2)) ==
+            std::future_status::ready,
+        "evicted snapshot payload should be reclaimed promptly");
+    Require(
+        payload_destroyed.get() != caller_thread,
+        "evicted snapshot payload must be destroyed by background retirement");
+
+    specforge::SourceCollectionContext changed_context;
+    changed_context.identity = identity;
+    changed_context.identity.context_fingerprint =
+        "changed-context";
+    changed_context.manifest.sample_names = {
+        "00", "01", "02", "03", "04", "05",
+        "06", "07", "08", "09", "10", "11",
+    };
+    const specforge::SourceCollectionContextReuseProof
+        changed_proof{
+            changed_context.identity,
+            proof.dependency_state};
+    specforge::PreparedSampleWorkflowState changed_workflow =
+        PrepareWorkflow(
+            MakeSnapshot(source_path, 12, 10),
+            changed_context,
+            10,
+            {},
+            {});
+    Require(
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 10,
+        "context invalidation should be driven by row 10 navigation");
+    specforge::SourceCollectionSessionResult changed =
+        session.OpenPreparedSource(
+            source_path,
+            10,
+            MakeSnapshot(source_path, 12, 10),
+            specforge::PreparedSourceCollectionPlan{
+                std::move(changed_context),
+                std::move(changed_workflow)},
+            {},
+            changed_proof);
+    Require(changed.loaded, "changed context row should load");
+    const std::optional<specforge::SourceCollectionLoadHint>
+        invalidated_old_row =
+            session.LoadHintForSource(source_path, 8);
+    Require(
+        invalidated_old_row &&
+            !invalidated_old_row->resident_snapshot,
+        "context generation changes must invalidate old resident rows");
+    for (specforge::BackgroundRetirementHandle& resource :
+         changed.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+}
+
+void TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_synchronous_resident_retirement.npy");
+    TouchFile(source_path);
+
+    auto payload_destroyed_promise =
+        std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> payload_destroyed =
+        payload_destroyed_promise->get_future();
+    specforge::SpectrumValueVector payload(
+        new std::vector<double>(1024, 1.0),
+        [payload_destroyed_promise](
+            const std::vector<double>* value) {
+            delete value;
+            payload_destroyed_promise->set_value(
+                std::this_thread::get_id());
+        });
+    auto first_mutable =
+        std::make_shared<specforge::SpectrumSnapshot>(
+            *MakeSnapshot(source_path, 3, 0));
+    first_mutable->current_spectrum.x_values = std::move(payload);
+    first_mutable->current_spectrum.point_count = 1024;
+    specforge::SpectrumSnapshotHandle first_snapshot =
+        first_mutable;
+
+    specforge::SourceCollectionSession session(
+        [source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "synchronous retirement fixture should reload its source");
+            return MakeSnapshot(path, 3, spectrum_index);
+        },
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "synchronous-resident-retirement",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        3,
+    };
+    context.manifest.sample_names = {"0", "1", "2"};
+    const specforge::SourceCollectionIdentity identity =
+        context.identity;
+    const specforge::SourceCollectionContextReuseProof proof{
+        identity,
+        {
+            .source_stat_fingerprint = "stable-source",
+            .companion_name_fingerprint = "stable-name",
+            .companion_annotation_fingerprint =
+                "stable-annotation",
+        }};
+    specforge::PreparedSampleWorkflowState workflow =
+        PrepareWorkflow(first_snapshot, context, 0, {}, {});
+    specforge::SourceCollectionLoadQueue retirement_queue;
+    specforge::SourceCollectionSessionResult initial =
+        session.OpenPreparedSource(
+            source_path,
+            0,
+            first_snapshot,
+            specforge::PreparedSourceCollectionPlan{
+                std::move(context),
+                std::move(workflow)},
+            {},
+            proof);
+    for (specforge::BackgroundRetirementHandle& resource :
+         initial.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    Require(
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "synchronous retirement fixture should prepare row 1");
+    specforge::SourceCollectionSessionResult second =
+        session.OpenPreparedSource(
+            source_path,
+            1,
+            MakeSnapshot(source_path, 3, 1),
+            specforge::PreparedSourceCollectionReuse{identity},
+            {},
+            proof);
+    for (specforge::BackgroundRetirementHandle& resource :
+         second.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    first_mutable.reset();
+    first_snapshot.reset();
+
+    const std::thread::id caller_thread =
+        std::this_thread::get_id();
+    specforge::SourceCollectionSessionResult synchronous =
+        Submit(session, OpenSourceCollection(source_path, 2));
+    Require(
+        payload_destroyed.wait_for(std::chrono::milliseconds(0)) !=
+            std::future_status::ready,
+        "synchronous invalidation must not destroy resident payloads on the caller thread");
+    Require(
+        !synchronous.background_retirement.empty(),
+        "synchronous invalidation should return background-retirement ownership");
+    for (specforge::BackgroundRetirementHandle& resource :
+         synchronous.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    Require(
+        payload_destroyed.wait_for(std::chrono::seconds(2)) ==
+            std::future_status::ready,
+        "synchronously invalidated resident payload should be reclaimed promptly");
+    Require(
+        payload_destroyed.get() != caller_thread,
+        "synchronously invalidated resident payload must be destroyed by background retirement");
+    std::filesystem::remove(source_path);
+}
+
+void TestSynchronousLoadAtReturnsResidentRetirementOwnership()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_synchronous_load_at_retirement.npy");
+    specforge::SourceCollectionRoster roster(
+        [](const std::filesystem::path& path,
+           std::size_t spectrum_index) {
+            return MakeSnapshot(path, 3, spectrum_index);
+        });
+    const specforge::SourceCollectionIdentity identity{
+        "synchronous-load-at-retirement",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        3,
+    };
+    const specforge::SourceCollectionContextReuseProof proof{
+        identity,
+        {
+            .source_stat_fingerprint = "stable-source",
+            .companion_name_fingerprint = "stable-name",
+            .companion_annotation_fingerprint =
+                "stable-annotation",
+        }};
+    specforge::SpectrumSnapshotHandle first_snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const std::weak_ptr<const specforge::SpectrumSnapshot>
+        first_snapshot_lifetime = first_snapshot;
+    (void)roster.OpenPreparedSource(
+        source_path,
+        0,
+        first_snapshot,
+        {},
+        proof);
+    (void)roster.OpenPreparedSource(
+        source_path,
+        1,
+        MakeSnapshot(source_path, 3, 1),
+        {},
+        proof);
+    first_snapshot.reset();
+
+    specforge::SourceCollectionRosterOpenResult result =
+        roster.LoadActiveSourceAt(2);
+    Require(
+        !result.retired_snapshots.empty(),
+        "synchronous LoadActiveSourceAt should return invalidated resident ownership");
+    Require(
+        !first_snapshot_lifetime.expired(),
+        "returned retirement ownership should keep the invalidated resident alive");
+    specforge::SourceCollectionLoadQueue retirement_queue;
+    retirement_queue.RetireResource(
+        specforge::MakeBackgroundRetirementHandle(
+            std::move(result.retired_snapshots)));
+    const auto deadline =
+        std::chrono::steady_clock::now() +
+        std::chrono::seconds(2);
+    while (!first_snapshot_lifetime.expired() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(1));
+    }
+    Require(
+        first_snapshot_lifetime.expired(),
+        "LoadActiveSourceAt retirement ownership should release on the background reclaimer");
+}
+
+void TestResidentSnapshotByteCapEvictsBeforeCountCap()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_resident_byte_cap.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "resident byte-cap fixture must remain on the prepared path");
+        },
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "resident-byte-cap",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        3,
+    };
+    context.manifest.sample_names = {"0", "1", "2"};
+    const specforge::SourceCollectionIdentity identity =
+        context.identity;
+    const specforge::SourceCollectionContextReuseProof proof{
+        identity,
+        {
+            .source_stat_fingerprint = "stable-source",
+            .companion_name_fingerprint = "stable-name",
+            .companion_annotation_fingerprint =
+                "stable-annotation",
+        }};
+    constexpr std::size_t kLargePayloadBytes =
+        65U * 1024U * 1024U;
+    const auto large_values =
+        std::make_shared<const std::vector<double>>(
+            kLargePayloadBytes / sizeof(double),
+            1.0);
+    const auto make_large_snapshot =
+        [&source_path, &large_values](std::size_t row) {
+            auto snapshot =
+                std::make_shared<specforge::SpectrumSnapshot>(
+                    *MakeSnapshot(source_path, 3, row));
+            snapshot->current_spectrum.x_values = large_values;
+            snapshot->current_spectrum.point_count =
+                large_values->size();
+            return specforge::SpectrumSnapshotHandle{
+                std::move(snapshot)};
+        };
+
+    specforge::SpectrumSnapshotHandle first_snapshot =
+        make_large_snapshot(0);
+    specforge::PreparedSampleWorkflowState workflow =
+        PrepareWorkflow(first_snapshot, context, 0, {}, {});
+    specforge::SourceCollectionLoadQueue retirement_queue;
+    specforge::SourceCollectionSessionResult initial =
+        session.OpenPreparedSource(
+            source_path,
+            0,
+            first_snapshot,
+            specforge::PreparedSourceCollectionPlan{
+                std::move(context),
+                std::move(workflow)},
+            {},
+            proof);
+    for (specforge::BackgroundRetirementHandle& resource :
+         initial.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    first_snapshot.reset();
+
+    for (std::size_t row = 1; row <= 2; ++row) {
+        Require(
+            Submit(
+                session,
+                MoveSampleNavigation(
+                    specforge::SampleNavigationRequest::Next()))
+                    .follow_up_spectrum_index == row,
+            "resident byte-cap fixture should request the next row");
+        specforge::SourceCollectionSessionResult loaded =
+            session.OpenPreparedSource(
+                source_path,
+                row,
+                make_large_snapshot(row),
+                specforge::PreparedSourceCollectionReuse{
+                    identity},
+                {},
+                proof);
+        for (specforge::BackgroundRetirementHandle& resource :
+             loaded.background_retirement) {
+            retirement_queue.RetireResource(
+                std::move(resource));
+        }
+    }
+
+    const auto row_zero =
+        session.LoadHintForSource(source_path, 0);
+    const auto row_one =
+        session.LoadHintForSource(source_path, 1);
+    Require(
+        row_zero && !row_zero->resident_snapshot,
+        "two 65 MiB residents should evict the older row at the 128 MiB byte cap");
+    Require(
+        row_one && row_one->resident_snapshot,
+        "byte-cap eviction should retain the newer row while below the eight-entry count cap");
+}
+
 void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
 {
     const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
@@ -4745,6 +5258,10 @@ void RunAllTests()
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();
+    TestPreparedSnapshotsBecomeBoundedRawRowResidency();
+    TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement();
+    TestSynchronousLoadAtReturnsResidentRetirementOwnership();
+    TestResidentSnapshotByteCapEvictsBeforeCountCap();
     TestFolderListingGenerationFlowsIntoSubsequentLoadHint();
     TestSourceSessionFlushFailureKeepsDirtyState();
 }

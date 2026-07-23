@@ -799,8 +799,14 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
         stream << "fixture";
     }
 
+    std::atomic_int decoder_calls = 0;
     specforge::SourceCollectionLoadDependencies dependencies;
-    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+    dependencies.snapshot_loader = [&decoder_calls](
+                                       const std::filesystem::path& source,
+                                       std::size_t index,
+                                       const auto&) {
+        ++decoder_calls;
+        std::this_thread::sleep_for(12ms);
         return MakeSnapshot(source, index);
     };
     dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
@@ -818,13 +824,19 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
         std::vector<std::int64_t> target_ns;
     };
     std::array<ProjectionTimings, 4> timings;
+    std::vector<std::int64_t> cold_decode_ns;
+    std::vector<std::int64_t> hit_decode_ns;
     std::uint64_t presentation_frame = 200;
     const auto navigate_and_present =
-        [&shell, &presentation_frame](
+        [&shell,
+         &presentation_frame,
+         &cold_decode_ns,
+         &hit_decode_ns](
             specforge::NavigationLatencyInputKind input_kind,
             const specforge::SampleNavigationRequest& request,
             std::size_t from_index,
             std::size_t target_index,
+            bool expected_cache_hit,
             ProjectionTimings& projection_timings) {
             const specforge::SpectrumSnapshotHandle before =
                 Access::Session(*shell).CurrentSampleSnapshot();
@@ -881,8 +893,9 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                 report.outcome == specforge::NavigationLatencyOutcome::Presented &&
                     report.input_kind == input_kind &&
                     report.from_index == from_index &&
-                    report.target_index == target_index,
-                "warm navigation should preserve input kind, indices, and presented outcome");
+                    report.target_index == target_index &&
+                    report.cache_hit == expected_cache_hit,
+                "warm navigation should preserve input kind, indices, presented outcome, and actual decode reuse");
             Require(
                 !resolution.pending_present &&
                     resolution.sequence_cache_hit &&
@@ -893,6 +906,11 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                     resolution.target_sequence_ns >= 0 &&
                     report.attempts.size() == 1,
                 "warm navigation should retain valid projection timings and one load attempt");
+            const std::int64_t decode_ns =
+                report.attempts[0].snapshot_load_finished_ns -
+                report.attempts[0].snapshot_load_started_ns;
+            (expected_cache_hit ? hit_decode_ns : cold_decode_ns)
+                .push_back(decode_ns);
             projection_timings.base_ns.push_back(resolution.base_sequence_ns);
             projection_timings.target_ns.push_back(resolution.target_sequence_ns);
         };
@@ -903,12 +921,14 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
             specforge::SampleNavigationRequest::Next(),
             0,
             1,
+            repetition > 0,
             timings[0]);
         navigate_and_present(
             specforge::NavigationLatencyInputKind::UiPrevious,
             specforge::SampleNavigationRequest::Previous(),
             1,
             0,
+            repetition > 0,
             timings[1]);
     }
     for (std::size_t repetition = 0; repetition < 100; ++repetition) {
@@ -917,12 +937,14 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
             specforge::SampleNavigationRequest::Next(),
             0,
             1,
+            true,
             timings[2]);
         navigate_and_present(
             specforge::NavigationLatencyInputKind::KeyboardPrevious,
             specforge::SampleNavigationRequest::Previous(),
             1,
             0,
+            true,
             timings[3]);
     }
 
@@ -953,6 +975,23 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
             static_cast<long long>(percentile(timings[index].target_ns, 50)),
             static_cast<long long>(percentile(timings[index].target_ns, 95)));
     }
+    Require(
+        decoder_calls.load() == 2,
+        "400 fixed-index Previous/Next visits should decode only the two initial cold rows");
+    Require(
+        cold_decode_ns.size() == 2 &&
+            hit_decode_ns.size() == 398,
+        "cache-hit timing groups should match the two cold and 398 resident visits");
+    const std::int64_t cold_decode_min =
+        *std::min_element(
+            cold_decode_ns.begin(),
+            cold_decode_ns.end());
+    const std::int64_t hit_decode_p95 =
+        percentile(hit_decode_ns, 95);
+    Require(
+        cold_decode_min >= 8'000'000 &&
+            hit_decode_p95 * 2 < cold_decode_min,
+        "resident hit decode_ms p95 should remain near zero relative to the deliberately slow decoder");
 
     shell.reset();
     std::filesystem::remove(path);

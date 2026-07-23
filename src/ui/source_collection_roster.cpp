@@ -4,10 +4,15 @@
 #include "domain/spectrum_fixture.h"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace specforge {
 namespace {
+
+constexpr std::size_t kMaximumResidentSnapshotCount = 8;
+constexpr std::size_t kMaximumResidentSnapshotPayloadBytes =
+    128U * 1024U * 1024U;
 
 std::string PathToUtf8(const std::filesystem::path& path)
 {
@@ -93,6 +98,35 @@ std::string SnapshotTypeLabelText(const SpectrumSnapshotHandle& snapshot)
 std::string SnapshotStateLabelText(const SpectrumSnapshotHandle& snapshot)
 {
     return std::string{SourceStateLabel(snapshot)};
+}
+
+std::size_t EstimatedSnapshotPayloadBytes(const SpectrumSnapshotHandle& snapshot)
+{
+    if (!snapshot) {
+        return 0;
+    }
+    std::size_t bytes = 0;
+    if (snapshot->current_spectrum.x_values) {
+        bytes += snapshot->current_spectrum.x_values->size() * sizeof(double);
+    }
+    if (snapshot->current_spectrum.y_values &&
+        snapshot->current_spectrum.y_values !=
+            snapshot->current_spectrum.x_values) {
+        bytes += snapshot->current_spectrum.y_values->size() * sizeof(double);
+    }
+    return bytes;
+}
+
+bool ResidencyBoundariesMatch(
+    const std::optional<SourceCollectionContextReuseProof>& left_proof,
+    const SourceCollectionFolderListingGenerationHandle& left_generation,
+    const std::optional<SourceCollectionContextReuseProof>& right_proof,
+    const SourceCollectionFolderListingGenerationHandle& right_generation)
+{
+    return left_proof && right_proof &&
+           left_proof->identity == right_proof->identity &&
+           left_proof->dependency_state == right_proof->dependency_state &&
+           left_generation == right_generation;
 }
 
 }  // namespace
@@ -197,26 +231,75 @@ SourceCollectionRoster::ContextReuseProof(
         : match->context_reuse_proof;
 }
 
-SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
+std::optional<SourceCollectionResidentSnapshot>
+SourceCollectionRoster::ResidentSnapshot(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index,
+    const SourceCollectionIdentity& identity)
+{
+    const std::string key = SourcePathIdentityKey(path);
+    const auto source = std::find_if(
+        sources_.begin(),
+        sources_.end(),
+        [&key](const SourceListEntry& entry) { return entry.key == key; });
+    if (source == sources_.end()) {
+        return std::nullopt;
+    }
+
+    if (source->cached_snapshot &&
+        source->last_spectrum_index == spectrum_index &&
+        source->context_reuse_proof &&
+        source->context_reuse_proof->identity == identity) {
+        return SourceCollectionResidentSnapshot{
+            spectrum_index,
+            source->cached_snapshot,
+            *source->context_reuse_proof,
+            source->folder_listing_generation,
+        };
+    }
+
+    const auto resident = std::find_if(
+        source->resident_snapshots.begin(),
+        source->resident_snapshots.end(),
+        [spectrum_index, &identity](const ResidentSnapshotEntry& entry) {
+            return entry.spectrum_index == spectrum_index &&
+                   entry.context_reuse_proof.identity == identity;
+        });
+    if (resident == source->resident_snapshots.end()) {
+        return std::nullopt;
+    }
+    resident->access_epoch = ++resident_access_epoch_;
+    return SourceCollectionResidentSnapshot{
+        resident->spectrum_index,
+        resident->snapshot,
+        resident->context_reuse_proof,
+        resident->folder_listing_generation,
+    };
+}
+
+SourceCollectionRosterOpenResult SourceCollectionRoster::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
-    SourceCollectionSessionAction action;
+    SourceCollectionRosterOpenResult result;
     SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
     AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
     current_source_index_ = update.source_index;
-    SetSnapshot(std::move(loaded_snapshot), action);
-    return action;
+    result.retired_snapshots = std::move(update.retired_snapshots);
+    result.replaced_folder_listing_generation =
+        std::move(update.replaced_folder_listing_generation);
+    SetSnapshot(std::move(loaded_snapshot), result.action);
+    return result;
 }
 
-SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSource(
+SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
     SourceCollectionFolderListingGenerationHandle folder_listing_generation,
     std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
 {
-    SourceCollectionRosterPreparedOpenResult result;
+    SourceCollectionRosterOpenResult result;
     AddOrUpdateSourceResult update = AddOrUpdateSource(
         path,
         snapshot,
@@ -224,7 +307,7 @@ SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSou
         std::move(folder_listing_generation),
         std::move(context_reuse_proof));
     current_source_index_ = update.source_index;
-    result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
+    result.retired_snapshots = std::move(update.retired_snapshots);
     result.replaced_folder_listing_generation =
         std::move(update.replaced_folder_listing_generation);
     SetSnapshot(std::move(snapshot), result.action);
@@ -258,6 +341,9 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
     if (sources_[source_index].cached_snapshot) {
         result.retired_snapshots.push_back(std::move(sources_[source_index].cached_snapshot));
     }
+    InvalidateResidentSnapshots(
+        sources_[source_index],
+        result.retired_snapshots);
     result.retired_folder_listing_generation =
         std::move(sources_[source_index].folder_listing_generation);
     if (result.removed_current && snapshot_) {
@@ -287,20 +373,24 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
     return result;
 }
 
-SourceCollectionSessionAction SourceCollectionRoster::LoadActiveSourceAt(std::size_t spectrum_index)
+SourceCollectionRosterOpenResult SourceCollectionRoster::LoadActiveSourceAt(
+    std::size_t spectrum_index)
 {
-    SourceCollectionSessionAction action;
+    SourceCollectionRosterOpenResult result;
     const SourceListEntry* source = current_source();
     if (source == nullptr || source->path.empty()) {
-        return action;
+        return result;
     }
 
     const std::filesystem::path path = source->path;
     SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
     AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
     current_source_index_ = update.source_index;
-    SetSnapshot(std::move(loaded_snapshot), action);
-    return action;
+    result.retired_snapshots = std::move(update.retired_snapshots);
+    result.replaced_folder_listing_generation =
+        std::move(update.replaced_folder_listing_generation);
+    SetSnapshot(std::move(loaded_snapshot), result.action);
+    return result;
 }
 
 void SourceCollectionRoster::RememberActiveSourceIndex(std::size_t spectrum_index)
@@ -336,13 +426,54 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         match->display_name = SnapshotDisplayNameText(snapshot, path);
         match->type_label = SnapshotTypeLabelText(snapshot);
         match->state_label = SnapshotStateLabelText(snapshot);
-        result.replaced_cached_snapshot = std::move(match->cached_snapshot);
+        const bool same_residency_boundary = ResidencyBoundariesMatch(
+            match->context_reuse_proof,
+            match->folder_listing_generation,
+            context_reuse_proof,
+            folder_listing_generation);
+        if (!same_residency_boundary) {
+            InvalidateResidentSnapshots(
+                *match,
+                result.retired_snapshots);
+        } else {
+            const auto resident = std::find_if(
+                match->resident_snapshots.begin(),
+                match->resident_snapshots.end(),
+                [spectrum_index](const ResidentSnapshotEntry& entry) {
+                    return entry.spectrum_index == spectrum_index;
+                });
+            if (resident != match->resident_snapshots.end()) {
+                --resident_snapshot_count_;
+                resident_snapshot_payload_bytes_ -=
+                    resident->estimated_payload_bytes;
+                if (resident->snapshot != snapshot) {
+                    result.retired_snapshots.push_back(
+                        std::move(resident->snapshot));
+                }
+                match->resident_snapshots.erase(resident);
+            }
+            if (match->cached_snapshot &&
+                match->last_spectrum_index != spectrum_index) {
+                RetainPreviousSnapshot(
+                    *match,
+                    std::move(match->cached_snapshot),
+                    match->last_spectrum_index,
+                    match->context_reuse_proof,
+                    match->folder_listing_generation,
+                    result.retired_snapshots);
+            }
+        }
+        if (match->cached_snapshot && match->cached_snapshot != snapshot) {
+            result.retired_snapshots.push_back(
+                std::move(match->cached_snapshot));
+        }
         match->cached_snapshot = std::move(snapshot);
         result.replaced_folder_listing_generation =
             std::move(match->folder_listing_generation);
         match->folder_listing_generation = std::move(folder_listing_generation);
         match->context_reuse_proof = std::move(context_reuse_proof);
         match->last_spectrum_index = spectrum_index;
+        EvictResidentSnapshots(result.retired_snapshots);
         result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));
         return result;
     }
@@ -360,6 +491,109 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     sources_.push_back(std::move(entry));
     result.source_index = sources_.size() - 1;
     return result;
+}
+
+void SourceCollectionRoster::RetainPreviousSnapshot(
+    SourceListEntry& source,
+    SpectrumSnapshotHandle snapshot,
+    std::size_t spectrum_index,
+    const std::optional<SourceCollectionContextReuseProof>& context_reuse_proof,
+    const SourceCollectionFolderListingGenerationHandle&
+        folder_listing_generation,
+    std::vector<SpectrumSnapshotHandle>& retired_snapshots)
+{
+    if (!snapshot || !context_reuse_proof) {
+        if (snapshot) {
+            retired_snapshots.push_back(std::move(snapshot));
+        }
+        return;
+    }
+
+    const auto existing = std::find_if(
+        source.resident_snapshots.begin(),
+        source.resident_snapshots.end(),
+        [spectrum_index](const ResidentSnapshotEntry& entry) {
+            return entry.spectrum_index == spectrum_index;
+        });
+    if (existing != source.resident_snapshots.end()) {
+        --resident_snapshot_count_;
+        resident_snapshot_payload_bytes_ -=
+            existing->estimated_payload_bytes;
+        if (existing->snapshot != snapshot) {
+            retired_snapshots.push_back(std::move(existing->snapshot));
+        }
+        source.resident_snapshots.erase(existing);
+    }
+
+    ResidentSnapshotEntry resident;
+    resident.spectrum_index = spectrum_index;
+    resident.estimated_payload_bytes =
+        EstimatedSnapshotPayloadBytes(snapshot);
+    resident.snapshot = std::move(snapshot);
+    resident.context_reuse_proof = *context_reuse_proof;
+    resident.folder_listing_generation = folder_listing_generation;
+    resident.access_epoch = ++resident_access_epoch_;
+    resident_snapshot_payload_bytes_ +=
+        resident.estimated_payload_bytes;
+    ++resident_snapshot_count_;
+    source.resident_snapshots.push_back(std::move(resident));
+}
+
+void SourceCollectionRoster::InvalidateResidentSnapshots(
+    SourceListEntry& source,
+    std::vector<SpectrumSnapshotHandle>& retired_snapshots)
+{
+    for (ResidentSnapshotEntry& resident : source.resident_snapshots) {
+        --resident_snapshot_count_;
+        resident_snapshot_payload_bytes_ -=
+            resident.estimated_payload_bytes;
+        if (resident.snapshot) {
+            retired_snapshots.push_back(std::move(resident.snapshot));
+        }
+    }
+    source.resident_snapshots.clear();
+}
+
+void SourceCollectionRoster::EvictResidentSnapshots(
+    std::vector<SpectrumSnapshotHandle>& retired_snapshots)
+{
+    while (resident_snapshot_count_ > kMaximumResidentSnapshotCount ||
+           resident_snapshot_payload_bytes_ >
+               kMaximumResidentSnapshotPayloadBytes) {
+        SourceListEntry* oldest_source = nullptr;
+        std::vector<ResidentSnapshotEntry>::iterator oldest;
+        std::uint64_t oldest_epoch =
+            std::numeric_limits<std::uint64_t>::max();
+        for (SourceListEntry& source : sources_) {
+            const auto candidate = std::min_element(
+                source.resident_snapshots.begin(),
+                source.resident_snapshots.end(),
+                [](const ResidentSnapshotEntry& left,
+                   const ResidentSnapshotEntry& right) {
+                    return left.access_epoch < right.access_epoch;
+                });
+            if (candidate != source.resident_snapshots.end() &&
+                candidate->access_epoch < oldest_epoch) {
+                oldest_source = &source;
+                oldest = candidate;
+                oldest_epoch = candidate->access_epoch;
+            }
+        }
+        if (oldest_source == nullptr) {
+            resident_snapshot_count_ = 0;
+            resident_snapshot_payload_bytes_ = 0;
+            return;
+        }
+
+        --resident_snapshot_count_;
+        resident_snapshot_payload_bytes_ -=
+            oldest->estimated_payload_bytes;
+        if (oldest->snapshot) {
+            retired_snapshots.push_back(
+                std::move(oldest->snapshot));
+        }
+        oldest_source->resident_snapshots.erase(oldest);
+    }
 }
 
 void SourceCollectionRoster::SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action)

@@ -77,6 +77,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     attempt->MarkCompletionReady(AtMilliseconds(12));
     attempt->MarkCompletionPublished(AtMilliseconds(13));
     attempt->MarkCompletionDrained(AtMilliseconds(14));
+    trace.SetCacheHit(true);
     trace.MarkSnapshotActivated(42, AtMilliseconds(15));
     trace.MarkUiUpdated(AtMilliseconds(16));
 
@@ -95,6 +96,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(report->activation_frame == 42, "activation frame should survive the trace");
     Require(report->presentation_viewport_id == 7, "presenting viewport should survive the trace");
     Require(report->outcome == specforge::NavigationLatencyOutcome::Presented, "outcome should be presented");
+    Require(report->cache_hit, "verified decode reuse should survive the trace");
     Require(report->attempts[0].workflow_reused, "workflow reuse should be recorded");
     Require(report->attempts[0].context_reused, "context reuse should be recorded");
     Require(report->first_present_ns == 17'000'000, "first Present timestamp should be recorded");
@@ -143,6 +145,7 @@ void TestPresentedTraceCapturesCorrelatedPhases()
                 std::string::npos,
         "target-resolution phases should serialize and preserve the aggregate");
     Require(text.find("\"presentation_viewport_id\":7") != std::string::npos, "viewport id should serialize");
+    Require(text.find("\"cache_hit\":true") != std::string::npos, "decode reuse should serialize");
     Require(text.find("\"decode_ms\":2.0000") != std::string::npos, "decode duration should be calculated");
     Require(text.find("\"completion_service_wait_ms\":1.0000") != std::string::npos, "service wait should be calculated");
     Require(text.find("\"total_ms\":16.0000") != std::string::npos, "input-to-Present total should be calculated");

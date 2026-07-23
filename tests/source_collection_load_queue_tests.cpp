@@ -358,6 +358,262 @@ void TestStableKnownFolderSkipsFullContextBuilder()
     std::filesystem::remove_all(folder);
 }
 
+void TestVerifiedResidentFileSkipsDecoder()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_resident_hit.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle resident_snapshot =
+        MakeSnapshot(path, 1);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*resident_snapshot);
+    std::atomic_int decoder_calls = 0;
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&decoder_calls](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            ++decoder_calls;
+            return MakeSnapshot(source, index);
+        }));
+
+    (void)queue.Enqueue({
+        .path = path,
+        .spectrum_index = 1,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .resident_snapshot =
+            specforge::SourceCollectionResidentSnapshot{
+                1,
+                resident_snapshot,
+                proof,
+                {},
+            },
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(
+        completions.front().prepared.has_value(),
+        "verified resident file should prepare");
+    Require(
+        completions.front().prepared->snapshot_cache_hit,
+        "verified resident file should report a true cache hit");
+    Require(
+        completions.front().prepared->snapshot == resident_snapshot,
+        "resident hit should publish the already-decoded snapshot");
+    Require(
+        decoder_calls.load() == 0,
+        "resident hit must not invoke the file decoder");
+    std::filesystem::remove(path);
+}
+
+void TestBufferedResidentHitCanBeCanceled()
+{
+    const std::filesystem::path blocking_path =
+        UniqueTempPath("_resident_cancel_blocking.csv");
+    const std::filesystem::path resident_path =
+        UniqueTempPath("_resident_cancel_hit.csv");
+    WriteFixture(blocking_path);
+    WriteFixture(resident_path);
+    const specforge::SpectrumSnapshotHandle resident_snapshot =
+        MakeSnapshot(resident_path, 1);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*resident_snapshot);
+    std::promise<void> blocking_decoder_entered_promise;
+    std::future<void> blocking_decoder_entered =
+        blocking_decoder_entered_promise.get_future();
+    std::promise<void> release_blocking_promise;
+    std::shared_future<void> release_blocking =
+        release_blocking_promise.get_future().share();
+    std::atomic_int decoder_calls = 0;
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& source, std::size_t index, const auto& canceled) {
+            ++decoder_calls;
+            Require(
+                source == blocking_path,
+                "resident cancellation must not decode the hit");
+            blocking_decoder_entered_promise.set_value();
+            WaitForRelease(
+                release_blocking,
+                canceled,
+                "timed out waiting to release the resident-cancel blocker");
+            return MakeSnapshot(source, index);
+        }));
+
+    const std::vector<std::uint64_t> ids =
+        queue.EnqueueBatch({
+            {.path = blocking_path},
+            {
+                .path = resident_path,
+                .spectrum_index = 1,
+                .reuse_identity = proof.identity,
+                .context_reuse_proof = proof,
+                .resident_snapshot =
+                    specforge::SourceCollectionResidentSnapshot{
+                        1,
+                        resident_snapshot,
+                        proof,
+                        {},
+                    },
+            },
+        });
+    Require(
+        blocking_decoder_entered.wait_for(2s) ==
+            std::future_status::ready,
+        "resident cancellation blocker should start");
+    std::this_thread::sleep_for(100ms);
+    queue.Cancel(ids[1]);
+    release_blocking_promise.set_value();
+
+    const auto completions = WaitForCompletions(queue, 1);
+    Require(
+        completions.size() == 1 &&
+            completions.front().task_id == ids[0],
+        "a canceled resident hit must not publish a stale completion");
+    Require(
+        decoder_calls.load() == 1,
+        "resident hit cancellation must still skip its decoder");
+    Require(
+        !queue.NeedsService(),
+        "canceled resident hit should leave no activatable completion");
+    std::filesystem::remove(blocking_path);
+    std::filesystem::remove(resident_path);
+}
+
+void TestChangedResidentFileFallsBackToDecoder()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_resident_changed.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle resident_snapshot =
+        MakeSnapshot(path, 1);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*resident_snapshot);
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::app);
+        stream << "changed";
+    }
+    std::atomic_int decoder_calls = 0;
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&decoder_calls](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            ++decoder_calls;
+            return MakeSnapshot(source, index);
+        }));
+
+    (void)queue.Enqueue({
+        .path = path,
+        .spectrum_index = 1,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .resident_snapshot =
+            specforge::SourceCollectionResidentSnapshot{
+                1,
+                resident_snapshot,
+                proof,
+                {},
+            },
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(
+        completions.front().prepared.has_value(),
+        "changed resident file should fall back and prepare");
+    Require(
+        !completions.front().prepared->snapshot_cache_hit,
+        "changed file state must be a cache miss");
+    Require(
+        decoder_calls.load() == 1,
+        "changed file state must invoke the decoder");
+    std::filesystem::remove(path);
+}
+
+void TestFolderGenerationControlsResidentDecodeReuse()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_resident_folder");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    const auto generation =
+        std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle
+        listing_generation =
+            MakeFolderListingGeneration(folder, generation);
+    const specforge::SpectrumSnapshotHandle resident_snapshot =
+        MakeSnapshot(
+            folder,
+            0,
+            listing_generation->listing.spectra.size());
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFolderReuseProof(
+            *resident_snapshot,
+            listing_generation->listing);
+    std::atomic_int decoder_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies =
+        Dependencies(
+            [](const auto&, std::size_t, const auto&)
+                -> specforge::SpectrumSnapshotHandle {
+                throw std::runtime_error(
+                    "folder task must not use the file loader");
+            });
+    dependencies.folder_snapshot_loader =
+        [&decoder_calls](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const specforge::SourceCollectionFolderListing& listing,
+            const auto&) {
+            ++decoder_calls;
+            return MakeSnapshot(
+                source,
+                index,
+                listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(
+        std::move(dependencies));
+    const specforge::SourceCollectionResidentSnapshot resident{
+        0,
+        resident_snapshot,
+        proof,
+        listing_generation,
+    };
+
+    (void)queue.Enqueue({
+        .path = folder,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint = listing_generation,
+        .resident_snapshot = resident,
+    });
+    auto hit_completions = WaitForCompletions(queue, 1);
+    Require(
+        hit_completions.front().prepared &&
+            hit_completions.front()
+                .prepared->snapshot_cache_hit,
+        "current folder generation should reuse the resident snapshot");
+    Require(
+        decoder_calls.load() == 0,
+        "current folder generation should skip folder decode");
+
+    generation->Invalidate();
+    (void)queue.Enqueue({
+        .path = folder,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint = listing_generation,
+        .resident_snapshot = resident,
+    });
+    auto miss_completions = WaitForCompletions(queue, 1);
+    Require(
+        miss_completions.front().prepared &&
+            !miss_completions.front()
+                 .prepared->snapshot_cache_hit,
+        "changed folder generation must be a cache miss");
+    Require(
+        decoder_calls.load() == 1,
+        "changed folder generation must invoke folder decode");
+    std::filesystem::remove_all(folder);
+}
+
 void TestKnownFileSourceChangeMaterializesContext()
 {
     const std::filesystem::path path = UniqueTempPath("_changed_reuse_source.csv");
@@ -1732,6 +1988,10 @@ int main()
     TestMatchingIdentitySkipsWorkflowCacheLoad();
     TestStableKnownFileSkipsFullContextBuilder();
     TestStableKnownFolderSkipsFullContextBuilder();
+    TestVerifiedResidentFileSkipsDecoder();
+    TestBufferedResidentHitCanBeCanceled();
+    TestChangedResidentFileFallsBackToDecoder();
+    TestFolderGenerationControlsResidentDecodeReuse();
     TestKnownFileSourceChangeMaterializesContext();
     TestKnownFileCompanionChangeMaterializesContext();
     TestKnownFileAnnotationChangeMaterializesContext();

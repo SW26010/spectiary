@@ -778,6 +778,11 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         active_identity && !active_identity->id.empty()) {
         ++live_workflow_revisions_[active_identity->id];
     }
+    for (BackgroundRetirementHandle& resource :
+         pending_background_retirement_) {
+        result.background_retirement.push_back(std::move(resource));
+    }
+    pending_background_retirement_.clear();
     return result;
 }
 
@@ -834,7 +839,8 @@ std::vector<std::filesystem::path> SourceCollectionSession::AnnotationPathsForSo
 }
 
 std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSource(
-    const std::filesystem::path& path) const
+    const std::filesystem::path& path,
+    std::optional<std::size_t> spectrum_index)
 {
     const std::string source_key = SourcePathIdentityKey(path);
     const std::optional<SourceCollectionIdentity> identity = workflow_->KnownSourceIdentity(source_key);
@@ -843,19 +849,26 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
         return std::nullopt;
     }
     const auto revision = live_workflow_revisions_.find(identity->id);
+    std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
+    if (spectrum_index) {
+        resident_snapshot =
+            roster_->ResidentSnapshot(path, *spectrum_index, *identity);
+    }
     return SourceCollectionLoadHint{
         *identity,
         *current_index,
         revision == live_workflow_revisions_.end() ? 0 : revision->second,
         roster_->FolderListingGeneration(path),
-        roster_->ContextReuseProof(path)};
+        roster_->ContextReuseProof(path),
+        std::move(resident_snapshot)};
 }
 
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
-    SourceCollectionSessionAction action = roster_->OpenSource(path, spectrum_index);
+    SourceCollectionSessionAction action =
+        AdoptRosterOpenResult(roster_->OpenSource(path, spectrum_index));
     MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation(true));
     MarkSourceSessionCacheDirty();
     return action;
@@ -1097,7 +1110,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         return result;
     }
 
-    SourceCollectionRosterPreparedOpenResult roster_result =
+    SourceCollectionRosterOpenResult roster_result =
         roster_->OpenPreparedSource(
             path,
             spectrum_index,
@@ -1110,9 +1123,10 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     if (completes_pending_navigation && !is_prepared_plan) {
         (void)workflow_->CommitDeferredSampleNavigation(spectrum_index);
     }
-    if (roster_result.replaced_cached_snapshot &&
-        roster_result.replaced_cached_snapshot != previous_snapshot) {
-        result.background_retirement.push_back(std::move(roster_result.replaced_cached_snapshot));
+    if (!roster_result.retired_snapshots.empty()) {
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(
+                std::move(roster_result.retired_snapshots)));
     }
     if (previous_snapshot && previous_snapshot != roster_->snapshot()) {
         result.background_retirement.push_back(std::move(previous_snapshot));
@@ -1479,7 +1493,9 @@ SourceCollectionSessionAction SourceCollectionSession::LoadActiveSourceAt(std::s
         return {};
     }
 
-    SourceCollectionSessionAction action = roster_->LoadActiveSourceAt(spectrum_index);
+    SourceCollectionSessionAction action =
+        AdoptRosterOpenResult(
+            roster_->LoadActiveSourceAt(spectrum_index));
     action.navigation_inputs_changed = true;
     MarkSourceSessionCacheDirty();
     return action;
@@ -1515,7 +1531,14 @@ std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWi
 
 std::vector<BackgroundRetirementHandle> SourceCollectionSession::ReleaseBackgroundResourcesForShutdown()
 {
-    return workflow_->ReleaseBackgroundResourcesForShutdown();
+    std::vector<BackgroundRetirementHandle> resources =
+        workflow_->ReleaseBackgroundResourcesForShutdown();
+    for (BackgroundRetirementHandle& resource :
+         pending_background_retirement_) {
+        resources.push_back(std::move(resource));
+    }
+    pending_background_retirement_.clear();
+    return resources;
 }
 
 void SourceCollectionSession::PreserveRequiredBackgroundSnapshotLoad()
@@ -1623,6 +1646,21 @@ void SourceCollectionSession::ApplyWorkflowCommandResult(
             MergeSourceCollectionSessionAction(action, LoadActiveSourceAt(*command_result.snapshot_index_to_load));
         }
     }
+}
+
+SourceCollectionSessionAction SourceCollectionSession::AdoptRosterOpenResult(
+    SourceCollectionRosterOpenResult result)
+{
+    if (!result.retired_snapshots.empty()) {
+        pending_background_retirement_.push_back(
+            MakeBackgroundRetirementHandle(
+                std::move(result.retired_snapshots)));
+    }
+    if (result.replaced_folder_listing_generation) {
+        pending_background_retirement_.push_back(
+            std::move(result.replaced_folder_listing_generation));
+    }
+    return result.action;
 }
 
 }  // namespace specforge

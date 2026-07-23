@@ -424,6 +424,11 @@ void NavigationLatencyTrace::SetTargetIndex(std::size_t target_index) noexcept
     target_index_.store(target_index, std::memory_order_relaxed);
 }
 
+void NavigationLatencyTrace::SetCacheHit(bool cache_hit) noexcept
+{
+    cache_hit_.store(cache_hit, std::memory_order_relaxed);
+}
+
 NavigationLatencyAttemptHandle NavigationLatencyTrace::BeginLoadAttempt(
     std::size_t target_index,
     NavigationLatencyTimePoint at)
@@ -501,7 +506,7 @@ std::optional<NavigationLatencyReport> NavigationLatencyTrace::TerminalReport() 
     report.from_index = from_index_;
     report.target_index = target_index_.load(std::memory_order_relaxed);
     report.input_kind = input_kind_;
-    report.cache_hit = cache_hit_;
+    report.cache_hit = cache_hit_.load(std::memory_order_relaxed);
     report.target_resolution = target_resolution_;
     report.input_ns = input_ns_;
     report.requested_ns = requested_ns_;

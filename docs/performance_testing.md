@@ -172,8 +172,12 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   `presentation_viewport_id` 和 `cache_hit`，以及 attempt 事件的 `target_index`、
   `source_task_id`、`source_kind`、`workflow_reused`、`context_reused`：用于关联请求性质。
   每个 preparation round 也有自己的 `context_reused`，因此 TOCTOU retry 不会覆盖前一轮。
-  当前尚未实现导航
-  缓存，所以 `cache_hit` 固定为 `false`；后续缓存实现可沿用同一口径做冷/热路径 A/B。
+  `cache_hit=true` 只表示最终 worker attempt 复用了 roster 中已经成功解码、验证并激活过的
+  immutable snapshot，且本轮没有调用 file/folder decoder。候选 snapshot 仍必须在后台
+  worker 对 source/companion/annotation dependency 和 folder generation（若适用）执行
+  pre/post currentness 检查；证明失败会回退 decode，并保持 `cache_hit=false`。命中时
+  `decode_ms` 只包围已有 handle 的验证，正常应接近 0；单纯的 listing、context 或 workflow
+  reuse 不算 snapshot cache hit。
 - target-resolution 诊断还记录 `row_count`、`filter_active`、`sort_active`、
   `query_active`、`pending_present`、`sequence_cache_hit` 和
   `sequence_build_count`。这里 `pending_present` 是 command 进入 Navigation 时是否已有
@@ -191,8 +195,8 @@ Folder source 的 warm navigation 会复用上一次验证通过的 immutable li
 `source_revalidation_ms` 也只包含 generation poll 与 source/annotation dependency stat，
 不再执行 full folder scan、sort 或 listing compare。首次打开、stale target、目录变化
 重试，或系统无法建立 directory-change generation 时，full scan 可以重新出现。
-这个 listing generation cache 不是 adjacent spectrum snapshot cache，不应据此把
-`cache_hit` 写为 `true`。
+这个 listing generation cache 自身不是 snapshot cache hit；只有同一验证边界下的 resident
+snapshot 真正跳过 decoder 时才把 `cache_hit` 写为 `true`。
 
 Known source 还会保留上一次完整准备并通过 post-decode 检查的 context reuse proof。
 当 source/companion/annotation dependency state、decoded count/path 和 folder generation
@@ -200,6 +204,14 @@ Known source 还会保留上一次完整准备并通过 post-decode 检查的 co
 manifest，也不再遍历 folder listing 重建 identity/sample names。任一证明条件不成立时
 `context_reused=false` 并走原完整 context materialization；`workflow_reused=true` 仍只表示
 最终 identity 可沿用既有 workflow，两者不能混为同一字段。
+
+Roster 还维护 raw row index 驱动的 resident snapshot history。每个 source 继续保留最后一个
+snapshot 以维持 source reactivation 语义，额外的非当前 snapshot 使用跨 source LRU，全局最多
+8 个且估算的 x/y payload 总量不超过 128 MiB；超限项通过现有 background reclaimer 释放。
+键包含 source identity/fingerprint、context/dependency proof、folder generation handle
+（若适用）和 raw row index。query/filter/sort 只改变访问顺序，不复制 snapshot；source、
+文件内容、annotation/context 或 directory generation 变化会 miss 并在新结果提交时清空旧
+边界。本阶段不主动预取，只有实际成功激活过的 snapshot 会进入 history。
 
 每条新的 folder `navigation_latency_preparation_round` 还提供三项失效诊断：
 

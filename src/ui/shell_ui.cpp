@@ -880,7 +880,8 @@ std::uint64_t ShellUi::QueueSourceLoad(
     }
 
     const std::uint64_t generation = ++source_load_generations_[path_key];
-    const std::optional<SourceCollectionLoadHint> hint = session_.LoadHintForSource(path);
+    std::optional<SourceCollectionLoadHint> hint =
+        session_.LoadHintForSource(path, spectrum_index);
     NavigationLatencyAttemptHandle navigation_attempt;
     if (navigation_trace) {
         navigation_trace->SetTargetIndex(spectrum_index);
@@ -901,6 +902,9 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .folder_listing_generation_hint =
                 hint ? hint->folder_listing_generation_hint
                      : SourceCollectionFolderListingGenerationHandle{},
+            .resident_snapshot =
+                hint ? std::move(hint->resident_snapshot)
+                     : std::optional<SourceCollectionResidentSnapshot>{},
             .navigation_attempt = std::move(navigation_attempt),
         });
     pending_source_loads_.emplace(
@@ -1142,6 +1146,10 @@ void ShellUi::DrainSourceLoadCompletions(
         }
 
         PreparedSourceCollection prepared = std::move(*completion.prepared);
+        if (ticket.navigation_trace) {
+            ticket.navigation_trace->SetCacheHit(
+                prepared.snapshot_cache_hit);
+        }
         if (session_view_cache_) {
             source_load_queue_.RetireResource(
                 std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
