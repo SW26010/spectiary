@@ -682,24 +682,25 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
 SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
 {
     SourceCollectionSessionAction action;
-    const SampleLabelingTask* active_task = labeling_.active_task();
-    const SampleLabelingTask* temporary_task = labeling_.temporary_task();
+    const SampleLabelingControllerView labeling_view = labeling_.View();
+    const SampleLabelingTask* active_task = labeling_view.active_task;
+    const SampleLabelingTask* temporary_task = labeling_view.temporary_task;
     if (active_task != nullptr && temporary_task != nullptr && active_task->task_id == temporary_task->task_id) {
         return action;
     }
     if (active_task != nullptr &&
-        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask())) {
+        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask().changed)) {
         return action;
     }
 
     bool started_or_resumed = false;
     if (temporary_task != nullptr) {
-        started_or_resumed = labeling_.ActivateTask(temporary_task->task_id);
+        started_or_resumed = labeling_.ActivateTask(temporary_task->task_id).accepted;
     } else {
-        const std::vector<SampleLabelingTask>* tasks = labeling_.active_source_tasks();
+        const std::vector<SampleLabelingTask>* tasks = labeling_view.active_source_tasks;
         const std::string task_id = TaskIdForNewSampleLabelingTask(kTemporarySampleLabelingTaskName, tasks);
         started_or_resumed =
-            labeling_.CreateTask(task_id, std::string{kTemporarySampleLabelingTaskName}) != nullptr;
+            labeling_.CreateTask(task_id, std::string{kTemporarySampleLabelingTaskName}).accepted;
     }
     if (started_or_resumed) {
         ClearLabelUndoHistory();
@@ -725,7 +726,8 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         return action;
     }
 
-    const std::vector<SampleLabelingTask>* active_source_tasks = labeling_.active_source_tasks();
+    const std::vector<SampleLabelingTask>* active_source_tasks =
+        labeling_.View().active_source_tasks;
     const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, annotation_path);
     std::optional<SampleAnnotationResult> loaded_annotation;
     if (annotation == nullptr) {
@@ -738,7 +740,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         annotation = &*loaded_annotation;
     }
 
-    const SampleLabelingTask* active_task = labeling_.active_task();
+    const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::optional<SampleLabelResultMetadata> metadata = LoadVerifiedLabelMetadataForAnnotation(*annotation);
     SampleAnnotationLabelingActivationPlan plan = PlanSampleAnnotationLabelingActivation(
         SampleAnnotationLabelingActivationRequest{
@@ -752,12 +754,12 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         return action;
     }
     if (active_task != nullptr &&
-        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask())) {
+        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask().changed)) {
         return action;
     }
 
     if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
-        if (labeling_.ActivateTask(plan.task_id)) {
+        if (labeling_.ActivateTask(plan.task_id).accepted) {
             ClearLabelUndoHistory();
             workflow_sources_.InvalidateSortingSourceCache();
             ApplyNavigationInputEffects(
@@ -772,24 +774,19 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         return action;
     }
 
-    SampleLabelingTask* task = labeling_.CreateTaskFromAnnotation(
+    const SampleLabelingOperationResult create_result = labeling_.CreateTaskFromAnnotation(
         std::move(plan.task_id),
         std::move(plan.task_name),
         std::move(plan.label_set),
         std::move(plan.values),
         annotation->path,
         plan.metadata_clean);
-    if (task == nullptr) {
+    if (!create_result.accepted) {
         return action;
     }
     ClearLabelUndoHistory();
-    if (!plan.metadata_clean && task->output_path) {
-        const bool metadata_saved = labeling_.PersistActiveTask();
-        if (!metadata_saved) {
-            (void)labeling_.MarkActiveOutputSaveFailed("Could not write converted annotation metadata.");
-        } else {
-            (void)navigation_.AddReadOnlyAnnotationToActiveSource(annotation->path);
-        }
+    if (!plan.metadata_clean && create_result.output_saved) {
+        (void)navigation_.AddReadOnlyAnnotationToActiveSource(annotation->path);
     }
     workflow_sources_.InvalidateSortingSourceCache();
     ApplyNavigationInputEffects(
@@ -806,9 +803,9 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
 SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTask()
 {
     SourceCollectionSessionAction action;
-    const SampleLabelingTask* task = labeling_.active_task();
+    const SampleLabelingTask* task = labeling_.View().active_task;
     const std::string deleted_task_source_id = task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*task);
-    if (!labeling_.DeleteActiveTask()) {
+    if (!labeling_.DeleteActiveTask().changed) {
         return action;
     }
     ClearLabelUndoHistory();
@@ -833,15 +830,14 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTas
 SourceCollectionSessionAction SampleWorkflowCoordinator::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
 {
     SourceCollectionSessionAction action;
-    const bool label_changed = labeling_.UpsertActiveLabel(std::move(label));
+    const SampleLabelingOperationResult operation =
+        labeling_.UpsertActiveLabel(std::move(label));
+    const bool label_changed = operation.changed;
     if (changed != nullptr) {
         *changed = label_changed;
     }
     if (label_changed) {
         ClearLabelUndoHistory();
-        if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
-            (void)labeling_.PersistActiveTask();
-        }
         ApplyNavigationInputEffects(
             action,
             ReconcileNavigationInputs(
@@ -859,11 +855,12 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
 {
     SourceCollectionSessionAction action;
     const int updated_code = label.code;
-    const SampleLabelingTask* active_task = labeling_.active_task();
+    const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::string sample_filter_source_id =
         active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
-    const bool label_changed =
+    const SampleLabelingOperationResult operation =
         labeling_.UpdateActiveLabel(original_code, std::move(label), allow_used_code_change);
+    const bool label_changed = operation.changed;
     if (changed != nullptr) {
         *changed = label_changed;
     }
@@ -875,9 +872,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
                 std::to_string(original_code),
                 std::to_string(updated_code))) {
             MarkActiveWorkflowStateDirty();
-        }
-        if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
-            (void)labeling_.PersistActiveTask();
         }
         ApplyNavigationInputEffects(
             action,
@@ -891,10 +885,11 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
 SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int code, bool* changed)
 {
     SourceCollectionSessionAction action;
-    const SampleLabelingTask* active_task = labeling_.active_task();
+    const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::string sample_filter_source_id =
         active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
-    const bool label_changed = labeling_.RemoveActiveLabel(code);
+    const SampleLabelingOperationResult operation = labeling_.RemoveActiveLabel(code);
+    const bool label_changed = operation.changed;
     if (changed != nullptr) {
         *changed = label_changed;
     }
@@ -905,9 +900,6 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int c
                 sample_filter_source_id,
                 std::to_string(code))) {
             MarkActiveWorkflowStateDirty();
-        }
-        if (const SampleLabelingTask* task = labeling_.active_task(); task != nullptr && task->output_path) {
-            (void)labeling_.PersistActiveTask();
         }
         ApplyNavigationInputEffects(
             action,
@@ -921,26 +913,14 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int c
 SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingAutoAdvance(bool enabled)
 {
     SourceCollectionSessionAction action;
-    SampleLabelingTask* task = labeling_.active_task();
-    if (task == nullptr || task->auto_advance == enabled) {
-        return action;
-    }
-
-    task->auto_advance = enabled;
-    (void)labeling_.PersistActiveTaskRecord();
+    (void)labeling_.SetActiveAutoAdvance(enabled);
     return action;
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
 {
     SourceCollectionSessionAction action;
-    SampleLabelingTask* task = labeling_.active_task();
-    if (task == nullptr || task->skip_labeled_on_advance == enabled) {
-        return action;
-    }
-
-    task->skip_labeled_on_advance = enabled;
-    (void)labeling_.PersistActiveTaskRecord();
+    (void)labeling_.SetActiveSkipLabeledOnAdvance(enabled);
     return action;
 }
 
@@ -948,9 +928,11 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
 {
     SourceCollectionSessionAction action;
     const std::filesystem::path selected_output_path = output_path;
-    if (labeling_.SaveActiveTemporaryTaskToOutput(
+    const SampleLabelingOperationResult operation =
+        labeling_.SaveActiveTemporaryTaskToOutput(
             std::move(output_path),
-            SampleLabelingTaskNameForOutputPath(selected_output_path))) {
+            SampleLabelingTaskNameForOutputPath(selected_output_path));
+    if (operation.output_saved) {
         if (const SourceCollectionManifest* context = navigation_.active_context()) {
             if (const SampleAnnotationResult* annotation =
                     FindSampleWorkflowAnnotationByPath(*context, selected_output_path)) {
@@ -974,7 +956,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
 SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelingTask()
 {
     SourceCollectionSessionAction action;
-    if (!labeling_.DeactivateActiveTask()) {
+    if (!labeling_.DeactivateActiveTask().changed) {
         return action;
     }
     ClearLabelUndoHistory();
@@ -1002,9 +984,11 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::AssignActiveLabelToCurren
     if (!sample_index) {
         return {};
     }
+    const SampleLabelingWriteOperationResult write =
+        labeling_.AssignLabel(*sample_index, code);
     return ApplyLabelWriteResult(
         snapshot,
-        labeling_.AssignLabel(*sample_index, code),
+        write.write,
         target_resolution);
 }
 
@@ -1016,9 +1000,11 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ClearActiveLabelForCurren
     if (!sample_index) {
         return {};
     }
+    const SampleLabelingWriteOperationResult write =
+        labeling_.ClearLabel(*sample_index);
     return ApplyLabelWriteResult(
         snapshot,
-        labeling_.ClearLabel(*sample_index),
+        write.write,
         target_resolution);
 }
 
@@ -1029,7 +1015,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
         return {};
     }
 
-    SampleLabelingTask* task = labeling_.active_task();
+    const SampleLabelingTask* task = labeling_.View().active_task;
     const LabelUndoEntry entry = label_undo_history_->entries.back();
     if (task == nullptr || entry.sample_index >= task->values.size() ||
         task->values[entry.sample_index] != entry.current_code) {
@@ -1037,9 +1023,11 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
         return {};
     }
 
-    SampleLabelWriteResult write_result = entry.previous_code == kUnlabeledSampleLabelCode
+    SampleLabelingWriteOperationResult write_operation =
+        entry.previous_code == kUnlabeledSampleLabelCode
         ? labeling_.ClearLabel(entry.sample_index)
         : labeling_.AssignLabel(entry.sample_index, entry.previous_code);
+    SampleLabelWriteResult& write_result = write_operation.write;
     if (!write_result.changed) {
         ClearLabelUndoHistory();
         return {};
@@ -1239,7 +1227,9 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
             view.current_annotations.reserve(context->annotations.size());
             for (const SampleAnnotationResult& annotation : context->annotations) {
                 const SampleLabelingTask* local_task =
-                    FindLocalTaskForLoadedAnnotation(labeling_.active_source_tasks(), annotation);
+                    FindLocalTaskForLoadedAnnotation(
+                        labeling_.View().active_source_tasks,
+                        annotation);
                 view.current_annotations.push_back(BuildAnnotationValueView(
                     annotation,
                     current_index,
@@ -1247,7 +1237,8 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
                     workflow_sources_.AnnotationDisplayName(annotation, local_task)));
             }
 
-            if (const std::vector<SampleLabelingTask>* tasks = labeling_.active_source_tasks()) {
+            if (const std::vector<SampleLabelingTask>* tasks =
+                    labeling_.View().active_source_tasks) {
                 for (const SampleLabelingTask& task : *tasks) {
                     if (!task.output_path) {
                         continue;
@@ -1294,10 +1285,11 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
 SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const SpectrumSnapshotHandle& snapshot) const
 {
     SourceCollectionLabelingView view;
+    const SampleLabelingControllerView labeling_view = labeling_.View();
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     view.current_index = ActiveSampleIndex(snapshot);
-    view.has_temporary_task = labeling_.temporary_task() != nullptr;
-    if (const SampleLabelingTask* task = labeling_.active_task()) {
+    view.has_temporary_task = labeling_view.temporary_task != nullptr;
+    if (const SampleLabelingTask* task = labeling_view.active_task) {
         view.has_active_task = true;
         view.active_task_is_temporary = !task->output_path;
         view.task_id = task->task_id;
@@ -1550,7 +1542,7 @@ SampleWorkflowSourceContext SampleWorkflowCoordinator::SourcePolicyContext(
 {
     return SampleWorkflowSourceContext{
         .collection = navigation_.active_context(),
-        .labeling_tasks = labeling_.active_source_tasks(),
+        .labeling_tasks = labeling_.View().active_source_tasks,
         .sample_count = ActiveSampleCount(snapshot)};
 }
 
@@ -1685,10 +1677,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
         RecordLabelUndo(result);
     }
 
-    SampleLabelingTask* task = labeling_.active_task();
-    if (task != nullptr && task->output_path) {
-        (void)labeling_.PersistActiveTask();
-    }
+    const SampleLabelingTask* task = labeling_.View().active_task;
 
     const NavigationInputReconcileEffects effects = ReconcileNavigationInputs(
         snapshot,
@@ -1717,7 +1706,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
 
 void SampleWorkflowCoordinator::RecordLabelUndo(const SampleLabelWriteResult& result)
 {
-    const SampleLabelingTask* task = labeling_.active_task();
+    const SampleLabelingTask* task = labeling_.View().active_task;
     if (!active_sample_workflow_identity_ || task == nullptr) {
         return;
     }
@@ -1742,7 +1731,7 @@ void SampleWorkflowCoordinator::ClearLabelUndoHistory()
 
 bool SampleWorkflowCoordinator::LabelUndoHistoryMatchesActiveTask() const
 {
-    const SampleLabelingTask* task = labeling_.active_task();
+    const SampleLabelingTask* task = labeling_.View().active_task;
     return label_undo_history_ && active_sample_workflow_identity_ && task != nullptr &&
            label_undo_history_->workflow_identity == *active_sample_workflow_identity_ &&
            label_undo_history_->task_id == task->task_id;

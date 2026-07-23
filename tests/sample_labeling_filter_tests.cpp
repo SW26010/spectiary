@@ -43,6 +43,24 @@ void RunMaintenanceUntilIdle(specforge::SampleLabelingController& controller)
         "sample-labeling maintenance should converge after successful persistence");
 }
 
+const specforge::SampleLabelingTask* ActiveTask(
+    const specforge::SampleLabelingController& controller)
+{
+    return controller.View().active_task;
+}
+
+const specforge::SampleLabelingTask* TemporaryTask(
+    const specforge::SampleLabelingController& controller)
+{
+    return controller.View().temporary_task;
+}
+
+const std::vector<specforge::SampleLabelingTask>* ActiveSourceTasks(
+    const specforge::SampleLabelingController& controller)
+{
+    return controller.View().active_source_tasks;
+}
+
 std::int32_t ReadLittleEndianI32(const std::array<unsigned char, 4>& bytes)
 {
     const std::uint32_t value = static_cast<std::uint32_t>(bytes[0]) |
@@ -522,16 +540,16 @@ void TestSampleLabelingControllerAutosavesDraftRecord()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        specforge::SampleLabelingTask* task = controller.CreateTask("quality", "Quality");
-        Require(task != nullptr, "controller should create an active task");
+        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create an active task");
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
             "controller should persist label-set edits");
-        task = controller.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(controller);
         Require(task != nullptr, "task should remain active after label edit");
-        task->auto_advance = true;
-        Require(controller.PersistActiveTaskRecord(), "workflow setting should persist to local task record");
-        Require(controller.AssignLabel(1, 5).accepted, "controller should label a sample");
+        const specforge::SampleLabelingOperationResult setting =
+            controller.SetActiveAutoAdvance(true);
+        Require(setting.changed && setting.state_saved, "workflow setting should persist to local task record");
+        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label a sample");
         Require(controller.state_save_pending(), "sample label writes should queue a debounced local task save");
         const auto deadline = controller.NextMaintenanceDeadline();
         Require(deadline.has_value(), "queued sample-labeling save should expose its deadline");
@@ -546,7 +564,7 @@ void TestSampleLabelingControllerAutosavesDraftRecord()
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
-        const specforge::SampleLabelingTask* task = restored.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "controller should restore active task from local record");
         Require(task->task_id == "quality", "restored task id should match");
         Require(task->auto_advance, "restored workflow setting should match");
@@ -556,14 +574,16 @@ void TestSampleLabelingControllerAutosavesDraftRecord()
         Require(
             task->save_state.kind == specforge::SampleLabelSaveStateKind::InternalDraftOnly,
             "restored draft should report internal autosave state");
-        Require(restored.RememberActivePosition(2), "remembered position should be persisted through controller");
+        Require(
+            restored.RememberActivePosition(2).changed,
+            "remembered position should be persisted through controller");
         Require(restored.FlushStateCache(), "remembered position should flush to local task record");
     }
 
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
-        const specforge::SampleLabelingTask* task = restored.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "task should restore after remembered-position update");
         Require(task->remembered_position && *task->remembered_position == 2, "remembered position should restore");
     }
@@ -578,20 +598,67 @@ void TestTaskRecordFlushKeepsActiveTaskAddressStable()
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    specforge::SampleLabelingTask* task = controller.CreateTask("quality", "Quality");
-    Require(task != nullptr, "controller should create task");
+    Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
         "controller should add label");
-    task = controller.active_task();
+    const specforge::SampleLabelingTask* task = ActiveTask(controller);
     Require(task != nullptr, "task should remain active after label edit");
-    Require(controller.AssignLabel(1, 5).accepted, "controller should label a draft sample");
+    Require(controller.AssignLabel(1, 5).write.accepted, "controller should label a draft sample");
 
-    const specforge::SampleLabelingTask* before_flush = controller.active_task();
+    const specforge::SampleLabelingTask* before_flush = ActiveTask(controller);
     Require(before_flush != nullptr, "active task should exist before flush");
-    Require(controller.PersistActiveTaskRecord(), "local task record should flush");
-    const specforge::SampleLabelingTask* after_flush = controller.active_task();
+    Require(controller.FlushStateCache(), "local task record should flush");
+    const specforge::SampleLabelingTask* after_flush = ActiveTask(controller);
     Require(after_flush == before_flush, "flushing local task record must not invalidate active task pointer");
+}
+
+void TestControllerRevisionTracksOwnedTaskChanges()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_revision_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleLabelingController controller(cache_path);
+    const std::uint64_t initial_revision = controller.View().revision;
+    controller.ActivateSource("source-identity", 3);
+    const std::uint64_t source_revision = controller.View().revision;
+    Require(source_revision > initial_revision, "source activation should advance labeling revision");
+
+    const specforge::SampleLabelingOperationResult created =
+        controller.CreateTask("quality", "Quality");
+    Require(created.accepted && created.changed, "task creation should report an owned mutation");
+    Require(created.revision > source_revision, "task creation should advance labeling revision");
+    Require(controller.View().revision == created.revision, "operation revision should match immutable view revision");
+
+    const specforge::SampleLabelingOperationResult no_change =
+        controller.SetActiveAutoAdvance(false);
+    Require(no_change.accepted && !no_change.changed, "setting an existing value should report a no-op");
+    Require(no_change.revision == created.revision, "no-op should not invalidate labeling projections");
+
+    const specforge::SampleLabelingOperationResult changed =
+        controller.SetActiveAutoAdvance(true);
+    Require(changed.changed && changed.state_saved, "workflow setting mutation should own its record save");
+    Require(changed.revision > no_change.revision, "workflow setting mutation should advance revision");
+    Require(controller.View().revision == changed.revision, "saved mutation revision should include persistence state");
+    const specforge::SampleLabelingTask* task = ActiveTask(controller);
+    Require(task != nullptr && task->auto_advance, "borrowed read-only view should expose the committed setting");
+
+    controller.ClearActiveSource();
+    const std::uint64_t inactive_revision = controller.View().revision;
+    const specforge::SampleLabelingWriteOperationResult rejected_assign =
+        controller.AssignLabel(0, 1);
+    Require(!rejected_assign.write.accepted, "assign without an active task should be rejected");
+    Require(
+        rejected_assign.operation.revision == inactive_revision,
+        "rejected assign should report the controller's current revision");
+    const specforge::SampleLabelingWriteOperationResult rejected_clear =
+        controller.ClearLabel(0);
+    Require(!rejected_clear.write.accepted, "clear without an active task should be rejected");
+    Require(
+        rejected_clear.operation.revision == inactive_revision,
+        "rejected clear should report the controller's current revision");
 }
 
 void TestControllerKeepsOneTemporaryTaskPerSource()
@@ -607,27 +674,37 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    specforge::SampleLabelingTask* first = controller.CreateTask("temporary", "Temporary labeling task");
-    Require(first != nullptr, "controller should create the first temporary task");
+    Require(
+        controller.CreateTask("temporary", "Temporary labeling task").accepted,
+        "controller should create the first temporary task");
+    const specforge::SampleLabelingTask* first = ActiveTask(controller);
+    Require(first != nullptr, "created temporary task should be active");
     const std::string temporary_task_id = first->task_id;
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "review", 'r'}),
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "review", 'r'}).changed,
         "temporary task should accept a label definition");
-    Require(controller.AssignLabel(1, 5).accepted, "temporary task should accept writes");
-    Require(controller.DeactivateActiveTask(), "temporary task should be pausable");
+    Require(controller.AssignLabel(1, 5).write.accepted, "temporary task should accept writes");
+    Require(controller.DeactivateActiveTask().changed, "temporary task should be pausable");
 
-    specforge::SampleLabelingTask* resumed = controller.CreateTask("another", "Another temporary task");
+    Require(
+        controller.CreateTask("another", "Another temporary task").accepted,
+        "create should resume the existing temporary task");
+    const specforge::SampleLabelingTask* resumed = ActiveTask(controller);
     Require(resumed != nullptr && resumed->task_id == temporary_task_id, "create should resume the existing temporary task");
     Require(resumed->values[1] == 5, "resumed temporary task should keep its draft values");
-    const std::vector<specforge::SampleLabelingTask>* tasks = controller.active_source_tasks();
+    const std::vector<specforge::SampleLabelingTask>* tasks = ActiveSourceTasks(controller);
     Require(tasks != nullptr && tasks->size() == 1, "source should keep only one temporary task");
 
-    Require(controller.SetActiveTaskOutputPath(output_path), "temporary task should accept a formal output path");
-    Require(controller.PersistActiveTask(), "formalized task should persist before it is closed");
-    Require(controller.DeactivateActiveTask(), "formalized task should be closable");
-    specforge::SampleLabelingTask* fresh = controller.CreateTask("temporary-2", "Temporary labeling task");
+    const specforge::SampleLabelingOperationResult save =
+        controller.SaveActiveTemporaryTaskToOutput(output_path, "Temporary labeling task");
+    Require(save.output_saved && save.state_saved, "formalized task should persist before it is closed");
+    Require(controller.DeactivateActiveTask().changed, "formalized task should be closable");
+    Require(
+        controller.CreateTask("temporary-2", "Temporary labeling task").accepted,
+        "formal save should allow a fresh temporary task");
+    const specforge::SampleLabelingTask* fresh = ActiveTask(controller);
     Require(fresh != nullptr && !fresh->output_path, "formal save should allow a fresh temporary task");
-    tasks = controller.active_source_tasks();
+    tasks = ActiveSourceTasks(controller);
     Require(tasks != nullptr && tasks->size() == 2, "formal annotation and one temporary task should coexist");
 }
 
@@ -644,15 +721,16 @@ void TestExternalOutputIsResultSourceOfTruth()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
             "controller should persist label definition");
-        Require(controller.AssignLabel(1, 5).accepted, "controller should label draft value");
-        Require(controller.SetActiveTaskOutputPath(output_path), "controller should store external output path");
-        const specforge::SampleLabelingTask* task = controller.active_task();
+        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label draft value");
+        const specforge::SampleLabelingOperationResult save =
+            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
+        Require(save.output_saved && save.state_saved, "controller should persist output-backed task");
+        const specforge::SampleLabelingTask* task = ActiveTask(controller);
         Require(task != nullptr, "task should remain active after output path is selected");
-        Require(controller.PersistActiveTask(), "controller should persist output-backed task through its service seam");
     }
 
     const std::string cache_text = ReadTextFile(cache_path);
@@ -662,7 +740,7 @@ void TestExternalOutputIsResultSourceOfTruth()
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
-        const specforge::SampleLabelingTask* task = restored.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "output-backed task should restore");
         Require(task->output_path && *task->output_path == output_path, "output path should restore");
         Require(task->values.size() == 3 && task->values[1] == 5, "output-backed task should load values from NPY");
@@ -738,31 +816,38 @@ void TestMetadataOnlyChangesRewriteSidecarOnRetry()
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
-    std::filesystem::remove(metadata_path, cleanup_error);
+    std::filesystem::remove_all(metadata_path, cleanup_error);
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+    Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
         "controller should add initial label");
-    Require(controller.AssignLabel(1, 5).accepted, "controller should label a sample");
-    Require(controller.SetActiveTaskOutputPath(output_path), "controller should select output path");
-    Require(controller.PersistActiveTask(), "controller should persist initial output and metadata");
+    Require(controller.AssignLabel(1, 5).write.accepted, "controller should label a sample");
+    const specforge::SampleLabelingOperationResult initial_save =
+        controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
+    Require(initial_save.output_saved && initial_save.state_saved, "controller should persist initial output and metadata");
     Require(ReadTextFile(metadata_path).find("\"name\": \"bad\"") != std::string::npos, "initial metadata should contain the first label name");
 
+    std::filesystem::remove_all(metadata_path, cleanup_error);
+    std::filesystem::create_directory(metadata_path, cleanup_error);
+    Require(!cleanup_error, "test should block metadata replacement with a directory");
+    WriteTextFile(metadata_path / "blocker.txt", "blocked");
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "excellent", 'e'}),
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "excellent", 'e'}).changed,
         "renaming an output-backed label should be accepted");
-    const specforge::SampleLabelingTask* task = controller.active_task();
+    const specforge::SampleLabelingTask* task = ActiveTask(controller);
     Require(task != nullptr && task->metadata_save_pending, "metadata-only edit should mark metadata pending");
     Require(
-        task->save_state.kind == specforge::SampleLabelSaveStateKind::Pending,
-        "metadata-only edit should enter pending save state");
+        task->save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
+        "failed atomic metadata save should enter retryable failed state");
     Require(task->save_state.pending_count == 0, "metadata-only pending state should not invent pending samples");
 
+    std::filesystem::remove_all(metadata_path, cleanup_error);
+    Require(!cleanup_error, "test should remove the directory blocking metadata retry");
     RunMaintenanceUntilIdle(controller);
-    task = controller.active_task();
+    task = ActiveTask(controller);
     Require(task != nullptr && !task->metadata_save_pending, "metadata retry should clear metadata pending");
     Require(
         task->save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
@@ -785,11 +870,15 @@ void TestOutputPathConflictIsRejectedWithinSource()
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("first", "First") != nullptr, "first task should be created");
-    Require(controller.SetActiveTaskOutputPath(output_path), "first task should claim the output path");
-    Require(controller.CreateTask("second", "Second") != nullptr, "second task should be created");
-    Require(!controller.SetActiveTaskOutputPath(output_path), "second task must not claim an already-owned output path");
-    const specforge::SampleLabelingTask* second = controller.active_task();
+    Require(controller.CreateTask("first", "First").accepted, "first task should be created");
+    Require(
+        controller.SaveActiveTemporaryTaskToOutput(output_path, "First").output_saved,
+        "first task should claim the output path");
+    Require(controller.CreateTask("second", "Second").accepted, "second task should be created");
+    Require(
+        !controller.SaveActiveTemporaryTaskToOutput(output_path, "Second").accepted,
+        "second task must not claim an already-owned output path");
+    const specforge::SampleLabelingTask* second = ActiveTask(controller);
     Require(second != nullptr && !second->output_path, "conflicting output path should not be stored on the second task");
     Require(
         second != nullptr && second->save_state.message.find("already used") != std::string::npos,
@@ -809,20 +898,21 @@ void TestMissingExternalOutputRestoresFailedState()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
             "controller should persist label definition");
-        Require(controller.AssignLabel(1, 5).accepted, "controller should label draft value");
-        Require(controller.SetActiveTaskOutputPath(output_path), "controller should store external output path");
-        Require(controller.PersistActiveTask(), "controller should persist output-backed task");
+        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label draft value");
+        Require(
+            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+            "controller should persist output-backed task");
     }
 
     std::filesystem::remove(output_path, cleanup_error);
 
     specforge::SampleLabelingController restored(cache_path);
     restored.ActivateSource("source-identity", 3);
-    const specforge::SampleLabelingTask* task = restored.active_task();
+    const specforge::SampleLabelingTask* task = ActiveTask(restored);
     Require(task != nullptr, "output-backed task should restore even when output is missing");
     Require(
         task->save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
@@ -841,19 +931,21 @@ void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
             "controller should add label definition");
-        Require(controller.AssignLabel(1, 5).accepted, "controller should label draft value");
-        Require(controller.PersistActiveTaskRecord(), "draft-only autosave should succeed before output selection");
+        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label draft value");
+        Require(controller.FlushStateCache(), "draft-only autosave should succeed before output selection");
 
+        const specforge::SampleLabelingOperationResult save =
+            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
         Require(
-            !controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality"),
+            save.output_save_attempted && !save.output_saved,
             "saving to a directory path should fail as an output file");
-        const specforge::SampleLabelingTask* task = controller.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(controller);
         Require(task != nullptr && !task->output_path, "failed first save should keep an output-free draft");
-        Require(controller.temporary_task() != nullptr, "failed first save should keep the task resumable");
+        Require(TemporaryTask(controller) != nullptr, "failed first save should keep the task resumable");
         Require(controller.CanDeactivateActiveTask(), "failed first save should keep the draft pausable");
     }
 
@@ -865,10 +957,10 @@ void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
-        const specforge::SampleLabelingTask* task = restored.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr && !task->output_path, "failed temporary draft should restore without an output");
         Require(task->values.size() == 3 && task->values[1] == 5, "failed draft restore should preserve its label");
-        Require(restored.temporary_task() != nullptr, "restored failed draft should remain resumable");
+        Require(TemporaryTask(restored) != nullptr, "restored failed draft should remain resumable");
         Require(restored.CanDeactivateActiveTask(), "restored failed draft should remain pausable");
         Require(
             task->save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
@@ -895,9 +987,9 @@ void TestCorruptLocalTaskRecordIsIgnored()
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    Require(controller.active_task() == nullptr, "corrupt local task record should be ignored");
+    Require(ActiveTask(controller) == nullptr, "corrupt local task record should be ignored");
     Require(!controller.state_load_warning().empty(), "corrupt local task record should report a load warning");
-    Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should remain usable after corrupt cache");
+    Require(controller.CreateTask("quality", "Quality").accepted, "controller should remain usable after corrupt cache");
 }
 
 void TestFailedExternalOutputPersistsPendingOverlay()
@@ -911,26 +1003,42 @@ void TestFailedExternalOutputPersistsPendingOverlay()
     std::filesystem::remove(output_path, cleanup_error);
 
     {
-        specforge::SampleLabelingController controller(cache_path);
+        bool fail_output_save = false;
+        specforge::SampleLabelingController controller(
+            cache_path,
+            [](const std::filesystem::path& path) {
+                return specforge::LoadSampleLabelingStateCache(path);
+            },
+            [&fail_output_save](
+                specforge::SampleLabelingTask& task,
+                const specforge::SampleLabelResultMetadataSource* source) {
+                if (!fail_output_save) {
+                    return specforge::PersistSampleLabelingTaskResult(task, source);
+                }
+                specforge::MarkSampleLabelTaskSaveFailed(task, "disk full");
+                return specforge::SampleLabelTaskPersistResult{
+                    .output_path_selected = task.output_path.has_value(),
+                    .output_saved = false,
+                    .message = "disk full"};
+            });
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
             "controller should persist label definition");
-        Require(controller.SetActiveTaskOutputPath(output_path), "controller should store external output path");
-
-        const specforge::SampleLabelingTask* task = controller.active_task();
-        Require(task != nullptr, "task should remain active after output path is selected");
-        std::string error;
-        Require(specforge::SaveSampleLabelResultNpy(output_path, *task, &error), error.empty() ? "NPY save failed" : error);
-        Require(controller.MarkActiveOutputPersisted(), "controller should start from a clean external output");
-        Require(controller.PersistActiveTaskRecord(), "clean output metadata should persist");
-
-        Require(controller.AssignLabel(1, 5).accepted, "controller should label a pending output value");
         Require(
-            controller.MarkActiveOutputSaveFailed("disk full"),
-            "controller should record the failed output save state");
-        Require(controller.FlushStateCache(), "failed output state should flush to local task record");
+            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+            "controller should start from a clean external output");
+
+        fail_output_save = true;
+        const specforge::SampleLabelingWriteOperationResult write =
+            controller.AssignLabel(1, 5);
+        Require(write.write.accepted, "controller should label a pending output value");
+        Require(
+            write.operation.output_save_attempted && !write.operation.output_saved,
+            "controller should own and report the failed output save");
+        Require(write.operation.output_retry_scheduled, "failed owned output save should schedule retry");
+        Require(write.operation.state_saved, "failed output state should flush to local task record");
     }
 
     const std::vector<std::int32_t> output_values = ReadTestInt32NpyPayload(output_path);
@@ -947,7 +1055,7 @@ void TestFailedExternalOutputPersistsPendingOverlay()
     {
         specforge::SampleLabelingController restored(cache_path);
         restored.ActivateSource("source-identity", 3);
-        const specforge::SampleLabelingTask* task = restored.active_task();
+        const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "failed output-backed task should restore");
         Require(task->output_path && *task->output_path == output_path, "output path should restore");
         Require(task->values.size() == 3 && task->values[1] == 5, "pending overlay should restore over the output base");
@@ -967,32 +1075,57 @@ void TestFailedExternalOutputRetriesAfterBackoff()
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_retry_external_result.npy";
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
-    std::filesystem::remove_all(output_path, cleanup_error);
-    std::filesystem::create_directory(output_path, cleanup_error);
-    Require(!cleanup_error, "test should create a directory at the output path");
+    std::filesystem::remove(output_path, cleanup_error);
 
-    specforge::SampleLabelingController controller(cache_path);
+    bool fail_output_save = false;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [&fail_output_save](
+            specforge::SampleLabelingTask& task,
+            const specforge::SampleLabelResultMetadataSource* source) {
+            if (!fail_output_save) {
+                return specforge::PersistSampleLabelingTaskResult(task, source);
+            }
+            specforge::MarkSampleLabelTaskSaveFailed(task, "disk full");
+            return specforge::SampleLabelTaskPersistResult{
+                .output_path_selected = task.output_path.has_value(),
+                .output_saved = false,
+                .message = "disk full"};
+        });
     controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("quality", "Quality") != nullptr, "controller should create task");
+    Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}),
+        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
         "controller should persist label definition");
-    Require(controller.AssignLabel(1, 5).accepted, "controller should label a pending output value");
-    Require(controller.SetActiveTaskOutputPath(output_path), "controller should store external output path");
-    Require(!controller.PersistActiveTask(), "directory output path should fail the first output save");
+    Require(
+        controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+        "controller should establish a clean output before the simulated failure");
+    fail_output_save = true;
+    const specforge::SampleLabelingWriteOperationResult failed_write =
+        controller.AssignLabel(1, 5);
+    Require(failed_write.write.accepted, "controller should label a pending output value");
+    Require(
+        failed_write.operation.output_save_attempted && !failed_write.operation.output_saved,
+        "simulated output failure should be reported by the domain operation");
 
-    const specforge::SampleLabelingTask* task = controller.active_task();
+    const specforge::SampleLabelingTask* task = ActiveTask(controller);
     Require(task != nullptr, "task should remain active after failed save");
     Require(
         task->save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
         "failed output save should mark task failed");
     Require(task->save_state.pending_count == 1, "failed output save should keep the pending count");
 
-    std::filesystem::remove_all(output_path, cleanup_error);
-    Require(!cleanup_error, "test should remove the directory blocking the retry");
+    const std::uint64_t failed_revision = controller.View().revision;
+    fail_output_save = false;
     RunMaintenanceUntilIdle(controller);
 
-    task = controller.active_task();
+    task = ActiveTask(controller);
+    Require(
+        controller.View().revision > failed_revision,
+        "successful owned retry should advance labeling revision");
     Require(task != nullptr, "task should remain active after retry");
     Require(
         task->save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
@@ -1079,6 +1212,7 @@ int main()
         TestFailedNpySaveDoesNotDamageExistingOutput();
         TestSampleLabelingControllerAutosavesDraftRecord();
         TestTaskRecordFlushKeepsActiveTaskAddressStable();
+        TestControllerRevisionTracksOwnedTaskChanges();
         TestControllerKeepsOneTemporaryTaskPerSource();
         TestExternalOutputIsResultSourceOfTruth();
         TestSampleLabelingStateCacheStoresPackageRelativeOutputPath();

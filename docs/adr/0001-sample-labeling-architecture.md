@@ -11,6 +11,17 @@ belongs behind a domain or service boundary; UI code consumes loaded annotation
 results and save state rather than parsing dtype, shape, or file write
 capabilities.
 
+`SampleLabelingController` is the single mutable owner of active tasks, drafts,
+output-save state, retry scheduling, and the labeling state cache. Callers
+receive a borrowed read-only view with a revision and submit atomic domain
+operations. View pointers are valid only until the controller's next mutation
+or destruction and must not be retained across command submission or
+maintenance. Operation results report the resulting revision and output/state
+persistence status, including rejected operations. `SampleWorkflowCoordinator`
+still owns navigation order, filters, sorting, and undo coordination. A
+labeling write may request advance, but only the coordinator resolves and
+applies that navigation request.
+
 We keep sample navigation, sample filtering, sample annotation inspection, and
 active manual labeling as separate UI surfaces. This avoids letting a labeling
 window own unrelated concerns like current index, sample-filter composition, loaded

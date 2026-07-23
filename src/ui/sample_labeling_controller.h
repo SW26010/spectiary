@@ -5,6 +5,7 @@
 #include "ui/sample_labeling_state_cache_io.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -18,17 +19,51 @@ namespace specforge {
 
 struct SourceCollectionIdentity;
 
+// Borrowed read-only projection. The pointers remain valid only until the
+// controller's next mutation or destruction; callers must not retain them
+// across command submission or maintenance.
+struct SampleLabelingControllerView {
+    const SampleLabelingTask* active_task = nullptr;
+    const SampleLabelingTask* temporary_task = nullptr;
+    const std::vector<SampleLabelingTask>* active_source_tasks = nullptr;
+    std::uint64_t revision = 0;
+};
+
+struct SampleLabelingOperationResult {
+    bool accepted = false;
+    bool changed = false;
+    bool output_save_attempted = false;
+    bool output_saved = false;
+    bool output_retry_scheduled = false;
+    bool state_save_scheduled = false;
+    bool state_save_attempted = false;
+    bool state_saved = false;
+    std::uint64_t revision = 0;
+};
+
+struct SampleLabelingWriteOperationResult {
+    SampleLabelWriteResult write;
+    SampleLabelingOperationResult operation;
+};
+
 class SampleLabelingController {
 public:
     using SourceState = SampleLabelingSourceState;
     using StateCacheLoader =
         std::function<SampleLabelingStateCacheLoadResult(const std::filesystem::path&)>;
+    using TaskPersister = std::function<SampleLabelTaskPersistResult(
+        SampleLabelingTask&,
+        const SampleLabelResultMetadataSource*)>;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        TaskPersister task_persister);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -42,47 +77,37 @@ public:
     void ClearActiveSource();
     void RemoveSource(std::string_view source_identity);
 
-    [[nodiscard]] bool has_active_source() const;
-    [[nodiscard]] SampleLabelingTask* active_task();
-    [[nodiscard]] const SampleLabelingTask* active_task() const;
-    [[nodiscard]] SampleLabelingTask* temporary_task();
-    [[nodiscard]] const SampleLabelingTask* temporary_task() const;
-    [[nodiscard]] const std::vector<SampleLabelingTask>* active_source_tasks() const;
+    [[nodiscard]] SampleLabelingControllerView View() const;
     [[nodiscard]] std::optional<SourceState> SourceStateForIdentity(
         std::string_view source_identity);
-    [[nodiscard]] const SampleLabelingTask* FindActiveSourceTaskByOutputPath(
-        const std::filesystem::path& output_path,
-        std::string_view task_id,
-        std::size_t sample_count) const;
-    [[nodiscard]] SampleLabelingTask* CreateTask(std::string task_id, std::string task_name);
-    [[nodiscard]] SampleLabelingTask* CreateTaskFromAnnotation(
+    [[nodiscard]] SampleLabelingOperationResult CreateTask(
+        std::string task_id,
+        std::string task_name);
+    [[nodiscard]] SampleLabelingOperationResult CreateTaskFromAnnotation(
         std::string task_id,
         std::string task_name,
         SampleLabelSet label_set,
         std::vector<int> values,
         std::filesystem::path output_path,
         bool metadata_clean);
-    [[nodiscard]] bool ActivateTask(std::string_view task_id);
-    [[nodiscard]] bool UpsertActiveLabel(SampleLabelDefinition label);
-    [[nodiscard]] bool UpdateActiveLabel(
+    [[nodiscard]] SampleLabelingOperationResult ActivateTask(std::string_view task_id);
+    [[nodiscard]] SampleLabelingOperationResult UpsertActiveLabel(SampleLabelDefinition label);
+    [[nodiscard]] SampleLabelingOperationResult UpdateActiveLabel(
         int original_code,
         SampleLabelDefinition label,
         bool allow_used_code_change);
-    [[nodiscard]] bool RemoveActiveLabel(int code);
-    [[nodiscard]] bool RenameActiveTask(std::string task_name);
-    [[nodiscard]] bool SetActiveTaskOutputPath(std::filesystem::path output_path);
-    [[nodiscard]] bool SaveActiveTemporaryTaskToOutput(
+    [[nodiscard]] SampleLabelingOperationResult RemoveActiveLabel(int code);
+    [[nodiscard]] SampleLabelingOperationResult RenameActiveTask(std::string task_name);
+    [[nodiscard]] SampleLabelingOperationResult SetActiveAutoAdvance(bool enabled);
+    [[nodiscard]] SampleLabelingOperationResult SetActiveSkipLabeledOnAdvance(bool enabled);
+    [[nodiscard]] SampleLabelingOperationResult SaveActiveTemporaryTaskToOutput(
         std::filesystem::path output_path,
         std::string task_name);
     [[nodiscard]] bool CanDeactivateActiveTask() const;
     [[nodiscard]] bool CanDeleteActiveTask() const;
-    [[nodiscard]] bool DeactivateActiveTask();
-    [[nodiscard]] bool DeleteActiveTask();
-    [[nodiscard]] bool RememberActivePosition(std::size_t sample_index);
-    [[nodiscard]] bool PersistActiveTask();
-    [[nodiscard]] bool PersistActiveTaskRecord();
-    [[nodiscard]] bool MarkActiveOutputPersisted();
-    [[nodiscard]] bool MarkActiveOutputSaveFailed(std::string message);
+    [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();
+    [[nodiscard]] SampleLabelingOperationResult DeleteActiveTask();
+    [[nodiscard]] SampleLabelingOperationResult RememberActivePosition(std::size_t sample_index);
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
@@ -91,13 +116,31 @@ public:
     [[nodiscard]] std::string_view state_save_error() const;
     [[nodiscard]] std::string_view state_load_warning() const;
 
-    [[nodiscard]] SampleLabelWriteResult AssignLabel(std::size_t sample_index, int code);
-    [[nodiscard]] SampleLabelWriteResult ClearLabel(std::size_t sample_index);
+    [[nodiscard]] SampleLabelingWriteOperationResult AssignLabel(std::size_t sample_index, int code);
+    [[nodiscard]] SampleLabelingWriteOperationResult ClearLabel(std::size_t sample_index);
 
 private:
+    enum class PersistencePolicy {
+        ScheduleStateSave,
+        FlushStateSave,
+        PersistOutputIfSelected,
+    };
+
+    [[nodiscard]] SampleLabelingTask* ActiveTask();
+    [[nodiscard]] const SampleLabelingTask* ActiveTask() const;
+    [[nodiscard]] SampleLabelingTask* TemporaryTask();
+    [[nodiscard]] const SampleLabelingTask* TemporaryTask() const;
     [[nodiscard]] SourceState* ActiveSource();
     [[nodiscard]] const SourceState* ActiveSource() const;
     [[nodiscard]] SourceState* MaterializeSource(std::string_view source_identity);
+    [[nodiscard]] SampleLabelingOperationResult RejectOperation() const;
+    [[nodiscard]] SampleLabelingOperationResult CompleteMutation(
+        SampleLabelingTask* task,
+        PersistencePolicy persistence);
+    [[nodiscard]] bool PersistTaskOutput(
+        SampleLabelingTask& task,
+        const SourceState* source_state = nullptr);
+    void Touch();
     void EnsureStateCacheLoaded();
     void QueueStateSave();
     void QueueOutputRetry();
@@ -109,10 +152,12 @@ private:
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> state_cache_snapshot_;
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
+    TaskPersister task_persister_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
+    std::uint64_t revision_ = 0;
     bool state_cache_loaded_ = false;
     std::string state_cache_load_warning_;
 };

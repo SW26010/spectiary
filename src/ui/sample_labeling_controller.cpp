@@ -85,8 +85,22 @@ SampleLabelingController::SampleLabelingController(std::filesystem::path state_c
 SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          [](SampleLabelingTask& task, const SampleLabelResultMetadataSource* source) {
+              return PersistSampleLabelingTaskResult(task, source);
+          })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    TaskPersister task_persister)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
+      task_persister_(std::move(task_persister)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -111,6 +125,7 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
     }
+    Touch();
 }
 
 void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& identity)
@@ -124,6 +139,7 @@ void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& id
     state->source_fingerprint = identity.source_fingerprint;
     state->context_fingerprint = identity.context_fingerprint;
     QueueStateSave();
+    Touch();
 }
 
 BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
@@ -165,6 +181,7 @@ BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
     }
+    Touch();
     return retired;
 }
 
@@ -180,11 +197,14 @@ BackgroundRetirementHandle SampleLabelingController::AdoptPreparedStateCache(
     if (state_cache_load_warning_.empty()) {
         state_cache_load_warning_ = state_cache_snapshot_->warning;
     }
+    Touch();
     return retired;
 }
 
 std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgroundResourcesForShutdown()
 {
+    const bool changed =
+        state_cache_snapshot_ != nullptr || !sources_.empty() || active_source_identity_.has_value();
     std::vector<BackgroundRetirementHandle> resources;
     if (state_cache_snapshot_) {
         resources.push_back(std::move(state_cache_snapshot_));
@@ -193,27 +213,40 @@ std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgro
         resources.push_back(MakeBackgroundRetirementHandle(std::exchange(sources_, {})));
     }
     active_source_identity_.reset();
+    if (changed) {
+        Touch();
+    }
     return resources;
 }
 
 void SampleLabelingController::ClearActiveSource()
 {
+    if (!active_source_identity_) {
+        return;
+    }
     active_source_identity_.reset();
+    Touch();
 }
 
 void SampleLabelingController::RemoveSource(std::string_view source_identity)
 {
     if (active_source_identity_ && *active_source_identity_ == source_identity) {
         active_source_identity_.reset();
+        Touch();
     }
 }
 
-bool SampleLabelingController::has_active_source() const
+SampleLabelingControllerView SampleLabelingController::View() const
 {
-    return ActiveSource() != nullptr;
+    const SourceState* state = ActiveSource();
+    return SampleLabelingControllerView{
+        .active_task = ActiveTask(),
+        .temporary_task = TemporaryTask(),
+        .active_source_tasks = state == nullptr ? nullptr : &state->tasks,
+        .revision = revision_};
 }
 
-SampleLabelingTask* SampleLabelingController::active_task()
+SampleLabelingTask* SampleLabelingController::ActiveTask()
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || !state->active_task_id) {
@@ -226,7 +259,7 @@ SampleLabelingTask* SampleLabelingController::active_task()
     return match == state->tasks.end() ? nullptr : &*match;
 }
 
-const SampleLabelingTask* SampleLabelingController::active_task() const
+const SampleLabelingTask* SampleLabelingController::ActiveTask() const
 {
     const SourceState* state = ActiveSource();
     if (state == nullptr || !state->active_task_id) {
@@ -239,7 +272,7 @@ const SampleLabelingTask* SampleLabelingController::active_task() const
     return match == state->tasks.end() ? nullptr : &*match;
 }
 
-SampleLabelingTask* SampleLabelingController::temporary_task()
+SampleLabelingTask* SampleLabelingController::TemporaryTask()
 {
     SourceState* state = ActiveSource();
     if (state == nullptr) {
@@ -251,7 +284,7 @@ SampleLabelingTask* SampleLabelingController::temporary_task()
     return match == state->tasks.end() ? nullptr : &*match;
 }
 
-const SampleLabelingTask* SampleLabelingController::temporary_task() const
+const SampleLabelingTask* SampleLabelingController::TemporaryTask() const
 {
     const SourceState* state = ActiveSource();
     if (state == nullptr) {
@@ -261,12 +294,6 @@ const SampleLabelingTask* SampleLabelingController::temporary_task() const
         return !task.output_path;
     });
     return match == state->tasks.end() ? nullptr : &*match;
-}
-
-const std::vector<SampleLabelingTask>* SampleLabelingController::active_source_tasks() const
-{
-    const SourceState* state = ActiveSource();
-    return state == nullptr ? nullptr : &state->tasks;
 }
 
 std::optional<SampleLabelingController::SourceState> SampleLabelingController::SourceStateForIdentity(
@@ -277,34 +304,23 @@ std::optional<SampleLabelingController::SourceState> SampleLabelingController::S
     return state == nullptr ? std::nullopt : std::optional<SourceState>{*state};
 }
 
-const SampleLabelingTask* SampleLabelingController::FindActiveSourceTaskByOutputPath(
-    const std::filesystem::path& output_path,
-    std::string_view task_id,
-    std::size_t sample_count) const
-{
-    const SourceState* state = ActiveSource();
-    if (state == nullptr || output_path.empty()) {
-        return nullptr;
-    }
-
-    const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& task) {
-        return task.output_path && task.task_id == task_id && task.values.size() == sample_count &&
-               OutputPathMatches(*task.output_path, output_path);
-    });
-    return match == state->tasks.end() ? nullptr : &*match;
-}
-
-SampleLabelingTask* SampleLabelingController::CreateTask(std::string task_id, std::string task_name)
+SampleLabelingOperationResult SampleLabelingController::CreateTask(
+    std::string task_id,
+    std::string task_name)
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || task_id.empty()) {
-        return nullptr;
+        return RejectOperation();
     }
 
-    if (SampleLabelingTask* existing_temporary_task = temporary_task()) {
+    if (SampleLabelingTask* existing_temporary_task = TemporaryTask()) {
+        if (state->active_task_id && *state->active_task_id == existing_temporary_task->task_id) {
+            SampleLabelingOperationResult result = RejectOperation();
+            result.accepted = true;
+            return result;
+        }
         state->active_task_id = existing_temporary_task->task_id;
-        QueueStateSave();
-        return active_task();
+        return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
     }
 
     auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
@@ -314,12 +330,16 @@ SampleLabelingTask* SampleLabelingController::CreateTask(std::string task_id, st
         state->tasks.push_back(CreateSampleLabelingTask(std::move(task_id), std::move(task_name), state->sample_count));
         match = state->tasks.end() - 1;
     }
+    if (state->active_task_id && *state->active_task_id == match->task_id) {
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = true;
+        return result;
+    }
     state->active_task_id = match->task_id;
-    QueueStateSave();
-    return active_task();
+    return CompleteMutation(&*match, PersistencePolicy::ScheduleStateSave);
 }
 
-SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
+SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(
     std::string task_id,
     std::string task_name,
     SampleLabelSet label_set,
@@ -329,7 +349,7 @@ SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || task_id.empty() || output_path.empty() || values.size() != state->sample_count) {
-        return nullptr;
+        return RejectOperation();
     }
 
     const auto output_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& task) {
@@ -338,18 +358,22 @@ SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
     });
     if (output_match != state->tasks.end()) {
         if (output_match->task_id != task_id) {
-            return nullptr;
+            return RejectOperation();
+        }
+        if (state->active_task_id && *state->active_task_id == output_match->task_id) {
+            SampleLabelingOperationResult result = RejectOperation();
+            result.accepted = true;
+            return result;
         }
         state->active_task_id = output_match->task_id;
-        QueueStateSave();
-        return active_task();
+        return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
     }
 
     const auto id_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&task_id](const auto& task) {
         return task.task_id == task_id;
     });
     if (id_match != state->tasks.end()) {
-        return nullptr;
+        return RejectOperation();
     }
 
     SampleLabelingTask task = CreateSampleLabelingTask(std::move(task_id), std::move(task_name), state->sample_count);
@@ -365,128 +389,122 @@ SampleLabelingTask* SampleLabelingController::CreateTaskFromAnnotation(
 
     state->tasks.push_back(std::move(task));
     state->active_task_id = state->tasks.back().task_id;
-    if (ShouldRetryOutputSave(state->tasks.back())) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return active_task();
+    return CompleteMutation(
+        &state->tasks.back(),
+        metadata_clean
+            ? PersistencePolicy::ScheduleStateSave
+            : PersistencePolicy::PersistOutputIfSelected);
 }
 
-bool SampleLabelingController::ActivateTask(std::string_view task_id)
+SampleLabelingOperationResult SampleLabelingController::ActivateTask(std::string_view task_id)
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || task_id.empty()) {
-        return false;
+        return RejectOperation();
     }
 
     const auto match = std::find_if(state->tasks.begin(), state->tasks.end(), [task_id](const auto& task) {
         return task.task_id == task_id;
     });
     if (match == state->tasks.end()) {
-        return false;
+        return RejectOperation();
+    }
+    if (state->active_task_id && *state->active_task_id == match->task_id) {
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = true;
+        return result;
     }
 
     state->active_task_id = match->task_id;
-    QueueStateSave();
-    return true;
+    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
 }
 
-bool SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
+SampleLabelingOperationResult SampleLabelingController::UpsertActiveLabel(SampleLabelDefinition label)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || !UpsertSampleLabel(task->label_set, std::move(label))) {
-        return false;
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr;
+        return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
+    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
 }
 
-bool SampleLabelingController::UpdateActiveLabel(
+SampleLabelingOperationResult SampleLabelingController::UpdateActiveLabel(
     int original_code,
     SampleLabelDefinition label,
     bool allow_used_code_change)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr ||
         !UpdateSampleLabel(*task, original_code, std::move(label), allow_used_code_change)) {
-        return false;
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr;
+        return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
+    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
 }
 
-bool SampleLabelingController::RemoveActiveLabel(int code)
+SampleLabelingOperationResult SampleLabelingController::RemoveActiveLabel(int code)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || !RemoveSampleLabel(*task, code)) {
-        return false;
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr;
+        return result;
     }
     MarkSampleLabelTaskMetadataPending(*task);
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
+    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
 }
 
-bool SampleLabelingController::RenameActiveTask(std::string task_name)
+SampleLabelingOperationResult SampleLabelingController::RenameActiveTask(std::string task_name)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || task_name.empty() || task->task_name == task_name) {
-        return false;
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr && !task_name.empty();
+        return result;
     }
 
     task->task_name = std::move(task_name);
     MarkSampleLabelTaskMetadataPending(*task);
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
+    return CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
 }
 
-bool SampleLabelingController::SetActiveTaskOutputPath(std::filesystem::path output_path)
+SampleLabelingOperationResult SampleLabelingController::SetActiveAutoAdvance(bool enabled)
 {
-    SampleLabelingTask* task = active_task();
-    if (task == nullptr || output_path.empty()) {
-        return false;
+    SampleLabelingTask* task = ActiveTask();
+    if (task == nullptr || task->auto_advance == enabled) {
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr;
+        return result;
     }
-    SourceState* state = ActiveSource();
-    if (state != nullptr) {
-        const auto conflict = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& existing) {
-            return existing.task_id != task->task_id && existing.output_path &&
-                   OutputPathMatches(*existing.output_path, output_path);
-        });
-        if (conflict != state->tasks.end()) {
-            task->save_state.message = "Output path is already used by another local labeling task.";
-            QueueStateSave();
-            return false;
-        }
-    }
-    SelectSampleLabelTaskOutputPath(*task, std::move(output_path));
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
+    task->auto_advance = enabled;
+    return CompleteMutation(task, PersistencePolicy::FlushStateSave);
 }
 
-bool SampleLabelingController::SaveActiveTemporaryTaskToOutput(
+SampleLabelingOperationResult SampleLabelingController::SetActiveSkipLabeledOnAdvance(bool enabled)
+{
+    SampleLabelingTask* task = ActiveTask();
+    if (task == nullptr || task->skip_labeled_on_advance == enabled) {
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = task != nullptr;
+        return result;
+    }
+    task->skip_labeled_on_advance = enabled;
+    return CompleteMutation(task, PersistencePolicy::FlushStateSave);
+}
+
+SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskToOutput(
     std::filesystem::path output_path,
     std::string task_name)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     SourceState* state = ActiveSource();
     if (task == nullptr || state == nullptr || task->output_path || output_path.empty() || task_name.empty()) {
-        return false;
+        return RejectOperation();
     }
 
     const auto conflict = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& existing) {
@@ -495,33 +513,45 @@ bool SampleLabelingController::SaveActiveTemporaryTaskToOutput(
     });
     if (conflict != state->tasks.end()) {
         task->save_state.message = "Output path is already used by another local labeling task.";
-        QueueStateSave();
-        return false;
+        SampleLabelingOperationResult result =
+            CompleteMutation(task, PersistencePolicy::ScheduleStateSave);
+        result.accepted = false;
+        return result;
     }
 
     SampleLabelingTask candidate = *task;
     candidate.task_name = std::move(task_name);
     SelectSampleLabelTaskOutputPath(candidate, std::move(output_path));
     const SampleLabelResultMetadataSource source = SourceMetadataFromState(*state);
-    const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(candidate, &source);
-    if (!result.output_saved) {
+    const SampleLabelTaskPersistResult persist_result =
+        task_persister_(candidate, &source);
+    if (!persist_result.output_saved) {
         task->save_state.kind = SampleLabelSaveStateKind::Failed;
         task->save_state.pending_count = candidate.save_state.pending_count;
-        task->save_state.message = result.message.empty() ? "Could not save labeling output." : result.message;
-        QueueStateSave();
-        (void)FlushStateCache();
-        return false;
+        task->save_state.message = persist_result.message.empty()
+            ? "Could not save labeling output."
+            : persist_result.message;
+    } else {
+        *task = std::move(candidate);
     }
 
-    *task = std::move(candidate);
+    Touch();
     QueueStateSave();
-    (void)FlushStateCache();
-    return true;
+    SampleLabelingOperationResult result;
+    result.accepted = true;
+    result.changed = true;
+    result.output_save_attempted = true;
+    result.output_saved = persist_result.output_saved;
+    result.state_save_scheduled = true;
+    result.state_save_attempted = true;
+    result.state_saved = FlushStateCache();
+    result.revision = revision_;
+    return result;
 }
 
 bool SampleLabelingController::CanDeactivateActiveTask() const
 {
-    const SampleLabelingTask* task = active_task();
+    const SampleLabelingTask* task = ActiveTask();
     if (task == nullptr) {
         return false;
     }
@@ -533,22 +563,21 @@ bool SampleLabelingController::CanDeleteActiveTask() const
     return CanDeactivateActiveTask();
 }
 
-bool SampleLabelingController::DeactivateActiveTask()
+SampleLabelingOperationResult SampleLabelingController::DeactivateActiveTask()
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || !state->active_task_id || !CanDeactivateActiveTask()) {
-        return false;
+        return RejectOperation();
     }
     state->active_task_id.reset();
-    QueueStateSave();
-    return true;
+    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
 }
 
-bool SampleLabelingController::DeleteActiveTask()
+SampleLabelingOperationResult SampleLabelingController::DeleteActiveTask()
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || !state->active_task_id || !CanDeleteActiveTask()) {
-        return false;
+        return RejectOperation();
     }
 
     const std::string task_id = *state->active_task_id;
@@ -558,105 +587,114 @@ bool SampleLabelingController::DeleteActiveTask()
         }),
         state->tasks.end());
     state->active_task_id.reset();
-    QueueStateSave();
-    return true;
+    return CompleteMutation(nullptr, PersistencePolicy::ScheduleStateSave);
 }
 
-bool SampleLabelingController::RememberActivePosition(std::size_t sample_index)
+SampleLabelingOperationResult SampleLabelingController::RememberActivePosition(std::size_t sample_index)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || sample_index >= task->values.size()) {
-        return false;
+        return RejectOperation();
+    }
+    if (task->remembered_position && *task->remembered_position == sample_index) {
+        SampleLabelingOperationResult result = RejectOperation();
+        result.accepted = true;
+        return result;
     }
     task->remembered_position = sample_index;
-    QueueStateSave();
-    return true;
+    return CompleteMutation(task, PersistencePolicy::ScheduleStateSave);
 }
 
-bool SampleLabelingController::PersistActiveTask()
+SampleLabelingOperationResult SampleLabelingController::RejectOperation() const
 {
-    SampleLabelingTask* task = active_task();
-    if (task == nullptr) {
-        return false;
-    }
+    return SampleLabelingOperationResult{.revision = revision_};
+}
 
-    if (!task->output_path) {
-        return PersistActiveTaskRecord();
-    }
+SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
+    SampleLabelingTask* task,
+    PersistencePolicy persistence)
+{
+    Touch();
+    QueueStateSave();
 
-    SourceState* state = ActiveSource();
+    SampleLabelingOperationResult result;
+    result.accepted = true;
+    result.changed = true;
+    result.state_save_scheduled = true;
+    if (persistence == PersistencePolicy::PersistOutputIfSelected &&
+        task != nullptr && task->output_path) {
+        result.output_save_attempted = true;
+        result.output_saved = PersistTaskOutput(*task);
+        result.output_retry_scheduled = ShouldRetryOutputSave(*task);
+        result.state_save_attempted = true;
+        result.state_saved = FlushStateCache();
+    } else if (persistence == PersistencePolicy::FlushStateSave) {
+        result.state_save_attempted = true;
+        result.state_saved = FlushStateCache();
+    }
+    result.revision = revision_;
+    return result;
+}
+
+bool SampleLabelingController::PersistTaskOutput(
+    SampleLabelingTask& task,
+    const SourceState* source_state)
+{
+    const SourceState* state = source_state == nullptr ? ActiveSource() : source_state;
     const SampleLabelResultMetadataSource source_metadata = state == nullptr
         ? SampleLabelResultMetadataSource{}
         : SourceMetadataFromState(*state);
     const SampleLabelResultMetadataSource* source = state == nullptr ? nullptr : &source_metadata;
-    const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(*task, source);
-    if (!result.output_saved && ShouldRetryOutputSave(*task)) {
+    const SampleLabelTaskPersistResult result = task_persister_(task, source);
+    if (!result.output_saved && ShouldRetryOutputSave(task)) {
         QueueOutputRetry();
     }
-    QueueStateSave();
-    const bool record_saved = FlushStateCache();
-    return result.output_saved && record_saved;
+    return result.output_saved;
 }
 
-bool SampleLabelingController::PersistActiveTaskRecord()
+void SampleLabelingController::Touch()
 {
-    QueueStateSave();
-    return FlushStateCache();
+    ++revision_;
 }
 
-bool SampleLabelingController::MarkActiveOutputPersisted()
+SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
+    std::size_t sample_index,
+    int code)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr) {
-        return false;
+        SampleLabelingWriteOperationResult result;
+        result.operation = RejectOperation();
+        return result;
     }
-    MarkSampleLabelTaskPersisted(*task, SampleLabelSaveStateKind::AutosavedToOutput);
-    QueueStateSave();
-    return true;
-}
-
-bool SampleLabelingController::MarkActiveOutputSaveFailed(std::string message)
-{
-    SampleLabelingTask* task = active_task();
-    if (task == nullptr) {
-        return false;
-    }
-    MarkSampleLabelTaskSaveFailed(*task, std::move(message));
-    if (ShouldRetryOutputSave(*task)) {
-        QueueOutputRetry();
-    }
-    QueueStateSave();
-    return true;
-}
-
-SampleLabelWriteResult SampleLabelingController::AssignLabel(std::size_t sample_index, int code)
-{
-    SampleLabelingTask* task = active_task();
-    if (task == nullptr) {
-        return {};
-    }
-    SampleLabelWriteResult result = AssignSampleLabel(*task, sample_index, code);
-    if (result.changed) {
-        if (ShouldRetryOutputSave(*task)) {
-            QueueOutputRetry();
-        }
-        QueueStateSave();
+    SampleLabelingWriteOperationResult result;
+    result.write = AssignSampleLabel(*task, sample_index, code);
+    if (result.write.changed) {
+        result.operation =
+            CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    } else {
+        result.operation = RejectOperation();
+        result.operation.accepted = result.write.accepted;
     }
     return result;
 }
 
-SampleLabelWriteResult SampleLabelingController::ClearLabel(std::size_t sample_index)
+SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::size_t sample_index)
 {
-    SampleLabelingTask* task = active_task();
+    SampleLabelingTask* task = ActiveTask();
     if (task == nullptr) {
-        return {};
+        SampleLabelingWriteOperationResult result;
+        result.operation = RejectOperation();
+        return result;
     }
-    SampleLabelWriteResult result = ClearSampleLabel(*task, sample_index);
-    if (result.changed) {
-        if (ShouldRetryOutputSave(*task)) {
-            QueueOutputRetry();
-        }
-        QueueStateSave();
+    SampleLabelingWriteOperationResult result;
+    result.write = ClearSampleLabel(*task, sample_index);
+    if (result.write.changed) {
+        result.operation =
+            CompleteMutation(task, PersistencePolicy::PersistOutputIfSelected);
+    } else {
+        result.operation = RejectOperation();
+        result.operation.accepted = result.write.accepted;
     }
     return result;
 }
@@ -707,6 +745,7 @@ void SampleLabelingController::EnsureStateCacheLoaded()
         sources_.try_emplace(std::move(identity), std::move(state));
     }
     state_cache_load_warning_ = std::move(result.warning);
+    Touch();
 }
 
 void SampleLabelingController::QueueStateSave()
@@ -733,9 +772,7 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 continue;
             }
             attempted = true;
-            const SampleLabelResultMetadataSource source = SourceMetadataFromState(state);
-            const SampleLabelTaskPersistResult result = PersistSampleLabelingTaskResult(task, &source);
-            all_succeeded = all_succeeded && result.output_saved;
+            all_succeeded = PersistTaskOutput(task, &state) && all_succeeded;
         }
     }
 
@@ -744,6 +781,7 @@ bool SampleLabelingController::TryRetryOutputSaves()
     }
 
     QueueStateSave();
+    Touch();
     return all_succeeded;
 }
 
@@ -809,6 +847,7 @@ bool SampleLabelingController::TrySaveStateCache()
         state_cache_save_scheduler_.MarkDirty();
         state_cache_save_status_.MarkFailed("could not write local sample-labeling task record");
     }
+    Touch();
     return saved;
 }
 
