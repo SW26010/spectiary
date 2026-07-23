@@ -23,9 +23,7 @@ public:
     [[nodiscard]] static const char* NavigationWindowName();
     [[nodiscard]] static const char* AnnotationsWindowName();
 
-    void SyncNavigationInputs(
-        const SourceCollectionSessionView& session_view,
-        const SourceCollectionSessionIntentSubmitter& submit);
+    void SyncNavigationInputs(const SourceCollectionSessionView& session_view);
 
     [[nodiscard]] SourceCollectionSessionAction RenderFiles(
         const SourceCollectionSessionView& session_view,
@@ -69,6 +67,7 @@ private:
     bool sample_name_matches_open_ = false;
     bool sample_name_search_active_ = false;
     bool annotation_display_name_focus_pending_ = false;
+    std::string displayed_sample_name_;
     std::string sample_name_search_restore_name_;
     std::string annotation_display_name_edit_key_;
 };

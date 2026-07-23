@@ -2080,9 +2080,7 @@ void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
         sample_workflow_panel_ui_.ResetForSampleWorkflow();
     }
     if (action.navigation_inputs_changed) {
-        source_collection_panel_ui_.SyncNavigationInputs(SessionView(), [this](SourceCollectionSessionIntent command) {
-            return SubmitSessionCommandForPanel(std::move(command));
-        });
+        source_collection_panel_ui_.SyncNavigationInputs(SessionView());
     }
 }
 

@@ -257,8 +257,7 @@ const char* SourceCollectionPanelUi::AnnotationsWindowName()
 }
 
 void SourceCollectionPanelUi::SyncNavigationInputs(
-    const SourceCollectionSessionView& session_view,
-    const SourceCollectionSessionIntentSubmitter& submit)
+    const SourceCollectionSessionView& session_view)
 {
     const SourceCollectionNavigationView& navigation = session_view.navigation;
     const std::optional<std::size_t> navigation_index = navigation.current_index;
@@ -271,8 +270,8 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
     } else {
         row_index_buffer_.fill('\0');
     }
-    CopyToBuffer(sample_name_query_buffer_, navigation.current_sample_name);
-    (void)submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(navigation.current_sample_name)));
+    displayed_sample_name_ = navigation.current_sample_name;
+    CopyToBuffer(sample_name_query_buffer_, displayed_sample_name_);
     ClearSampleNameSearch();
 }
 
@@ -451,7 +450,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         }
     }
     if (index_deactivated_after_edit) {
-        SyncNavigationInputs(view, submit);
+        SyncNavigationInputs(view);
     }
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
@@ -798,7 +797,8 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
 void SourceCollectionPanelUi::BeginSampleNameSearch(const SourceCollectionSessionView& session_view)
 {
     sample_name_search_active_ = true;
-    sample_name_search_restore_name_ = session_view.navigation.current_sample_name;
+    displayed_sample_name_ = session_view.navigation.current_sample_name;
+    sample_name_search_restore_name_ = displayed_sample_name_;
 }
 
 void SourceCollectionPanelUi::ClearSampleNameSearch()

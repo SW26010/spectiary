@@ -979,7 +979,6 @@ void SampleNavigationController::SetSampleNameQuery(std::string query)
         return;
     }
     session->sample_name_query = std::move(query);
-    InvalidateSequenceState(*session);
     RecomputeMatches(*session);
 }
 
@@ -1086,12 +1085,10 @@ SampleNavigationSequence SampleNavigationController::BuildSequenceState(
 {
     SampleNavigationSequenceInput input;
     input.source_row_count = session.spectrum_count;
-    input.sample_names = session.manifest.sample_names;
     input.filter_active = session.filter_active;
     input.materialize_source_order = false;
     input.included_samples = &session.filter_included_samples;
     input.sort_choice = &session.sort_choice;
-    input.sample_name_query = session.sample_name_query;
     return BuildSampleNavigationSequence(input);
 }
 
@@ -1256,7 +1253,10 @@ void SampleNavigationController::RecomputeMatches(SourceSession& session)
     if (session.sample_name_query.empty() || session.manifest.sample_names.empty()) {
         return;
     }
-    session.sample_name_matches = CachedSequenceState(session).sample_name_matches;
+    session.sample_name_matches = FindSampleNameMatches(
+        CachedSequenceState(session),
+        session.manifest.sample_names,
+        session.sample_name_query);
 }
 
 }  // namespace specforge

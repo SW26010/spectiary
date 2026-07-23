@@ -82,6 +82,15 @@ struct SampleNavigationSequence {
 void ApplySampleNavigationSequenceProjection(
     SampleNavigationSequence& sequence,
     const SampleNavigationSequenceProjection& projection);
+[[nodiscard]] std::vector<std::size_t> FindSampleNameMatches(
+    const SampleNavigationSequence& sequence,
+    std::span<const std::string> sample_names,
+    std::string_view query);
+[[nodiscard]] std::vector<std::size_t> FindSampleNameMatches(
+    const SampleNavigationSequence& sequence,
+    std::span<const std::string> sample_names,
+    std::string_view query,
+    const std::function<void()>& cancellation_checkpoint);
 [[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(
     const SampleNavigationSequenceInput& input);
 [[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(

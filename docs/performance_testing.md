@@ -234,10 +234,11 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   `sequence_build_count`。这里 `pending_present` 是 command 进入 Navigation 时是否已有
   deferred sample target；`sequence_cache_hit` 只表示本次 target resolution 是否真的读取
   已 materialize 的 sequence cache，不能从“owner 存在 cache”推断为 `true`；
-  `sequence_build_count` 是本次实际构造次数。sequence state 缓存排序拓扑、active membership、
-  source-row position 和 query matches；committed/pending/base/target index 只做 O(1) cursor
-  投影，不使 state 失效。query、filter、sort 或 source/context 输入改变时完整失效并由 owner
-  重建；label advance 的 eligibility 仍在每次 `target_lookup_ms` 内按需计算，不进入缓存。
+  `sequence_build_count` 是本次实际构造次数。sequence state 只缓存排序拓扑、active membership
+  和 source-row position；committed/pending/base/target index 只做 O(1) cursor 投影，名称搜索
+  query 只基于既有 topology 重算 matches，两者都不使 topology 失效。filter、sort 或
+  source/context 输入改变时才完整失效并由 owner 重建；label advance 的 eligibility 仍在每次
+  `target_lookup_ms` 内按需计算，不进入缓存。
   因此 warm previous/next 应记录 `true / 0`；真正 cold 的首次 target resolution 最多构造一次，
   记录 `false / 1`。
 

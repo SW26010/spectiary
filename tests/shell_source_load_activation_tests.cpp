@@ -1276,6 +1276,12 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
                     resolution.sequence_cache_hit &&
                     resolution.sequence_build_count == 0,
                 "fixed-index warm navigation should reuse sequence state without rebuilding");
+            const specforge::SourceCollectionNavigationView navigation =
+                Access::Session(*shell).View().navigation;
+            Require(
+                !navigation.exact_sample_name_match &&
+                    navigation.sample_name_matches.empty(),
+                "passive UI and keyboard navigation sync must not submit the current sample name as a search query");
             Require(
                 resolution.base_sequence_ns >= 0 &&
                     resolution.target_sequence_ns >= 0 &&

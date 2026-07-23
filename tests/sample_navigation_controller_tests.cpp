@@ -1020,6 +1020,9 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
     Require(
         controller.sample_name_matches() == std::vector<std::size_t>({1, 3}),
         "query change should build matches from the current context");
+    Require(
+        controller.current_sequence().sample_name_matches.empty(),
+        "search matches should remain separate from cached navigation topology");
 
     (void)controller.SetSampleFilter({false, true, false, true, false});
     Require(controller.current_index() == 1, "filter change should reconcile onto row 1");
@@ -1045,6 +1048,9 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
     };
     sort.direction = specforge::SampleNavigationSortDirection::Descending;
     (void)controller.SetSampleSorting(std::move(sort));
+    Require(
+        controller.sample_name_matches() == std::vector<std::size_t>({3, 1}),
+        "query matches should follow the filtered and sorted topology");
     report = {};
     result = controller.NavigateDeferred(
         specforge::SampleNavigationRequest::Previous(),

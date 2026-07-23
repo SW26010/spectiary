@@ -171,7 +171,7 @@ private:
         std::size_t filtered_sample_count = 0;
         std::optional<std::size_t> index_before_active_filter;
         SampleNavigationSortChoice sort_choice;
-        // Cached topology and query matches never own committed/pending cursor state.
+        // Cached topology never owns search-query or committed/pending cursor state.
         mutable bool sequence_state_cache_valid = false;
         mutable SampleNavigationSequence sequence_state_cache;
     };
