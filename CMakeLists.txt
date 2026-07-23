@@ -20,6 +20,56 @@ find_package(ZLIB REQUIRED)
 
 set(SPECFORGE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/specforge.exe.manifest")
 set(SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
+set(SPECFORGE_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
+set(SPECFORGE_RELEASE_DOCUMENTS
+    "${CMAKE_SOURCE_DIR}/legal/EULA.txt"
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "${CMAKE_SOURCE_DIR}/legal/DATA_SOURCES.txt"
+)
+
+include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
+specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
+specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
+specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "Dear ImGui"
+    "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, including docking, Win32, and DirectX 11 backends"
+)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "ImPlot"
+    "ImPlot ${SPECFORGE_IMPLOT_VERSION}"
+)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "zlib"
+    "zlib ${SPECFORGE_ZLIB_VERSION}"
+)
+message(STATUS
+    "Resolved third-party versions: "
+    "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, "
+    "ImPlot ${SPECFORGE_IMPLOT_VERSION}, "
+    "zlib ${SPECFORGE_ZLIB_VERSION}"
+)
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/specforge")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/third_party_versions.h.in"
+    "${CMAKE_BINARY_DIR}/generated/specforge/third_party_versions.h"
+    @ONLY
+)
+configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_metadata.json.in"
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_metadata.json.in"
+    @ONLY
+)
+file(GENERATE
+    OUTPUT
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
+    INPUT
+        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_metadata.json.in"
+)
 
 if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     set(SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER
@@ -165,6 +215,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectrum_view_session.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
+target_include_directories(specforge_desktop_ui PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_compile_definitions(specforge_desktop_ui PRIVATE
     SPECFORGE_VERSION="${PROJECT_VERSION}"
 )
@@ -227,6 +278,48 @@ if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     )
 endif()
 
+add_custom_command(TARGET specforge_native POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
+        "$<TARGET_FILE_DIR:specforge_native>/specforge_build_metadata.json"
+)
+
+if(CMAKE_CONFIGURATION_TYPES)
+    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>")
+else()
+    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
+
+set(SPECFORGE_RELEASE_DOCUMENT_OUTPUTS)
+set(SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS)
+foreach(release_document IN LISTS SPECFORGE_RELEASE_DOCUMENTS)
+    get_filename_component(release_document_name "${release_document}" NAME)
+    set(release_document_output
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/Legal/${release_document_name}"
+    )
+    list(APPEND SPECFORGE_RELEASE_DOCUMENT_OUTPUTS "${release_document_output}")
+    list(APPEND SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${release_document}"
+            "${release_document_output}"
+    )
+endforeach()
+
+add_custom_target(specforge_release_documents
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/EULA.txt"
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/THIRD_PARTY_NOTICES.txt"
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/DATA_SOURCES.txt"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/Legal"
+    ${SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS}
+    BYPRODUCTS ${SPECFORGE_RELEASE_DOCUMENT_OUTPUTS}
+    DEPENDS ${SPECFORGE_RELEASE_DOCUMENTS}
+    COMMENT "Synchronizing SpecForge release documents"
+    VERBATIM
+)
+add_dependencies(specforge_native specforge_release_documents)
+
 enable_testing()
 
 function(specforge_add_test target_name source_file production_target)
@@ -288,6 +381,19 @@ add_test(
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_navigation_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-navigation-profile.ps1"
+)
+add_test(
+    NAME specforge_release_artifacts_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/release_artifacts_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+        -DearImGuiVersion "${SPECFORGE_IMGUI_VERSION}"
+        -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
+        -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
+        -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+        -SpecForgeVersion "${PROJECT_VERSION}"
+        -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
+        -Configuration "$<CONFIG>"
 )
 specforge_add_test(
     specforge_win32_compositor_clock_tests

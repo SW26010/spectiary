@@ -6,43 +6,42 @@
 # Boundary: public physical reference markers only. Do not add subtype presets,
 # classification combinations, zoom windows, local research notes, or private
 # criteria to this file.
-# Atomic visible/NIR values use vacuum Angstroms. NIST Handbook visible values
-# are commonly listed in standard air; values below are the vacuum equivalents
-# needed by LAMOST/SDSS-style vacuum wavelength axes.
+# Atomic visible/NIR values use vacuum Angstroms. Source and transformation
+# details for redistributed data are recorded in legal/DATA_SOURCES.txt.
 id	label	kind	group	vacuum_angstrom	start_vacuum_angstrom	end_vacuum_angstrom	display_label	source_ref	notes
-ca_ii_k	Ca II K	line	Ca II	3934.777			3935	nist_air_to_vacuum	Air source is near 3933.661 A.
-ca_ii_h	Ca II H	line	Ca II	3969.591			3970	nist_air_to_vacuum	Air source is near 3968.469 A.
-sr_ii_4078	Sr II	line	Sr II	4078.865			4078	nist_air_to_vacuum	Air source is near 4077.71 A.
-h_delta	H delta	line	Balmer	4102.892			4103	nist_air_to_vacuum	Balmer rest vacuum marker.
+ca_ii_k	Ca II K	line	Ca II	3934.777			3935	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+ca_ii_h	Ca II H	line	Ca II	3969.591			3970	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+sr_ii_4078	Sr II	line	Sr II	4078.9			4078	specforge_curated_approximate	Approximate visual marker; not for wavelength calibration.
+h_delta	H delta	line	Balmer	4102.892			4103	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
 cn_4216	CN	line	CN	4216.000			4216	carbon_star_requirements	Approximate molecular feature marker.
-ca_i_4228	Ca I	line	Ca I	4227.920			4228	nist_air_to_vacuum	Air source is near 4226.727 A.
+ca_i_4228	Ca I	line	Ca I	4227.918			4228	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 ch_g_band	CH G band	band	CH		4300.000	4314.000	4300-4314	carbon_star_requirements	Approximate molecular band marker, not a zoom window.
-h_gamma	H gamma	line	Balmer	4341.684			4342	nist_air_to_vacuum	Balmer rest vacuum marker.
+h_gamma	H gamma	line	Balmer	4341.684			4342	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
 ch_p_branch	CH P branch	band	CH		4341.690	4342.000	4342	carbon_star_requirements	Approximate CH P-branch marker near H gamma.
 c2_4383	C2	line	C2	4382.500			4383	carbon_star_requirements	Approximate C2 molecular marker.
-ba_ii_4555	Ba II	line	Ba II	4555.310			4555	nist_air_to_vacuum	Air source is near 4554.033 A.
+ba_ii_4555	Ba II	line	Ba II	4555.301			4555	ferrara_et_al_2024_air_to_vacuum	Observed 4554.024 A air wavelength converted to vacuum and rounded.
 c2_4737	C2	line	C2	4737.100			4737	carbon_star_requirements	Approximate C2 Swan-band marker.
 c13_c12_4744_4754	13C12C	band	Isotope		4744.000	4754.000	4744-4754	carbon_star_requirements	Approximate isotopic molecular band marker.
-h_beta	H beta	line	Balmer	4862.683			4863	nist_air_to_vacuum	Balmer rest vacuum marker.
+h_beta	H beta	line	Balmer	4862.683			4863	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
 c2_5165	C2	line	C2	5165.200			5165	carbon_star_requirements	Approximate C2 Swan-band marker.
-mg_i_b_5169	Mg I b	line	Mg I	5168.761			5169	nist_air_to_vacuum	Air source is near 5167.322 A.
-mg_i_b_5174	Mg I b	line	Mg I	5174.125			5174	nist_air_to_vacuum	Air source is near 5172.684 A.
-mg_i_b_5185	Mg I b	line	Mg I	5185.048			5185	nist_air_to_vacuum	Air source is near 5183.604 A.
+mg_i_b_5169	Mg I b	line	Mg I	5168.761			5169	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+mg_i_b_5174	Mg I b	line	Mg I	5174.125			5174	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+mg_i_b_5185	Mg I b	line	Mg I	5185.048			5185	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 c2_5635	C2	line	C2	5635.500			5635	carbon_star_requirements	Approximate C2 Swan-band marker.
-na_i_d2	Na I D2	line	Na I	5891.583			5892	nist_air_to_vacuum	Air source is near 5889.950 A.
-na_i_d1	Na I D1	line	Na I	5897.558			5898	nist_air_to_vacuum	Air source is near 5895.924 A.
+na_i_d2	Na I D2	line	Na I	5891.583			5892	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+na_i_d1	Na I D1	line	Na I	5897.558			5898	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 c13_c12_6100	13C12C	line	Isotope	6100.000			6100	carbon_star_requirements	Approximate isotopic molecular marker.
 c13_c12_6168	13C12C	line	Isotope	6168.000			6168	carbon_star_requirements	Approximate isotopic molecular marker.
 feature_6192	6192 feature	line	Isotope	6192.000			6192	carbon_star_requirements	Approximate isotope-region feature marker.
 c12_cn_6206	12CN	line	CN	6206.000			6206	carbon_star_requirements	Approximate molecular marker.
 c13_cn_6260	13CN	line	CN	6260.000			6260	carbon_star_requirements	Approximate molecular marker.
-ba_ii_6499	Ba II	line	Ba II	6498.693			6499	nist_air_to_vacuum	Air source is near 6496.898 A.
+ba_ii_6499	Ba II	line	Ba II	6498.686			6499	ferrara_et_al_2024_air_to_vacuum	Observed 6496.891 A air wavelength converted to vacuum and rounded.
 cn_6500	CN	line	CN	6500.000			6500	carbon_star_requirements	Approximate molecular marker.
-h_alpha	H alpha	line	Balmer	6564.614			6565	nist_air_to_vacuum	Balmer rest vacuum marker; do not use 6562.801 A air.
+h_alpha	H alpha	line	Balmer	6564.608			6565	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
 cn_6928	CN	line	CN	6927.600			6928	carbon_star_requirements	Approximate red CN marker.
 cn_6945	CN	line	CN	6945.400			6945	carbon_star_requirements	Approximate red CN marker.
 cn_7853	CN	line	CN	7852.900			7853	carbon_star_requirements	Approximate red CN marker.
 cn_7899	CN	line	CN	7898.600			7899	carbon_star_requirements	Approximate red CN marker.
-ca_ii_8500	Ca II	line	Ca II	8500.360			8500	nist_air_to_vacuum	Air source is near 8498.018 A.
-ca_ii_8544	Ca II	line	Ca II	8544.440			8544	nist_air_to_vacuum	Air source is near 8542.089 A.
-ca_ii_8665	Ca II	line	Ca II	8664.520			8665	nist_air_to_vacuum	Air source is near 8662.140 A.
+ca_ii_8500	Ca II	line	Ca II	8500.358			8500	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+ca_ii_8544	Ca II	line	Ca II	8544.438			8544	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+ca_ii_8665	Ca II	line	Ca II	8664.520			8665	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.

@@ -85,11 +85,14 @@ void TestUsesVacuumWavelengthsForAtomicMarkers()
     const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
     Require(catalog.load_error.empty(), catalog.load_error);
 
-    Require(NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6564.614, 1.0e-6), "H alpha should use vacuum wavelength");
+    Require(NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6564.608, 1.0e-6), "H alpha should use Atomic Line List vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "h_beta").vacuum_angstrom, 4862.683, 1.0e-6), "H beta should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d2").vacuum_angstrom, 5891.583, 1.0e-6), "Na I D2 should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d1").vacuum_angstrom, 5897.558, 1.0e-6), "Na I D1 should use vacuum wavelength");
-    Require(NearlyEqual(*FindMarker(catalog, "ca_ii_8500").vacuum_angstrom, 8500.360, 1.0e-6), "Ca II triplet should use vacuum wavelength");
+    Require(NearlyEqual(*FindMarker(catalog, "ca_ii_8500").vacuum_angstrom, 8500.358, 1.0e-6), "Ca II triplet should use Atomic Line List vacuum wavelength");
+    Require(NearlyEqual(*FindMarker(catalog, "sr_ii_4078").vacuum_angstrom, 4078.9, 1.0e-6), "Sr II should remain the curated approximate vacuum marker");
+    Require(NearlyEqual(*FindMarker(catalog, "ba_ii_4555").vacuum_angstrom, 4555.301, 1.0e-6), "Ba II should use the converted observed wavelength");
+    Require(NearlyEqual(*FindMarker(catalog, "ba_ii_6499").vacuum_angstrom, 6498.686, 1.0e-6), "Ba II should use the converted observed wavelength");
 
     Require(
         !NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6562.801, 1.0e-3),

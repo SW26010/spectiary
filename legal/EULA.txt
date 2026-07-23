@@ -1,0 +1,58 @@
+SPECFORGE END USER LICENSE AGREEMENT
+
+Copyright (c) 2026 SpecForge. All rights reserved.
+
+This End User License Agreement ("Agreement") applies to the proprietary
+SpecForge executable and other SpecForge-owned materials distributed with it
+(collectively, the "Application"). By copying, installing, or using the
+Application, you agree to this Agreement.
+
+1. License grant
+
+The SpecForge copyright holder ("Licensor") grants you a revocable,
+non-exclusive, non-transferable license to use the Application for lawful
+personal, academic, or commercial work.
+
+2. Restrictions
+
+Except where applicable law expressly permits otherwise, you may not copy or
+redistribute the Application, sublicense it, sell it, rent it, reverse engineer
+it, decompile it, disassemble it, or remove proprietary notices. You may make
+reasonable backup copies for your own use.
+
+3. Ownership and user data
+
+The Application is licensed, not sold. Licensor retains all rights in the
+Application. This Agreement does not claim ownership of your input files,
+annotations, results, or other user-created data.
+
+4. Third-party software and data
+
+Third-party components and data remain subject to their own licenses and
+notices. Those terms are listed in THIRD_PARTY_NOTICES.txt and
+DATA_SOURCES.txt and prevail over this Agreement for the corresponding
+third-party material.
+
+5. Disclaimer
+
+THE APPLICATION IS PROVIDED "AS IS", WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, ACCURACY, AND NON-INFRINGEMENT. THE APPLICATION IS AN INSPECTION AND
+LABELING TOOL AND IS NOT A SUBSTITUTE FOR INDEPENDENT SCIENTIFIC VALIDATION.
+
+6. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, LICENSOR WILL NOT BE LIABLE
+FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR
+FOR LOSS OF DATA, PROFITS, OR BUSINESS, ARISING FROM USE OF OR INABILITY TO USE
+THE APPLICATION.
+
+7. Termination
+
+This Agreement terminates automatically if you materially breach it. On
+termination, you must stop using and delete your copies of the Application,
+except to the extent retention is required by applicable law.
+
+This Agreement applies only to releases distributed under it. A future source
+code release may be offered under a separate license without changing the terms
+for this release.

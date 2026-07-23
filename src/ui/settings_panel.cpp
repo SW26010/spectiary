@@ -2,6 +2,7 @@
 
 #include "app/runtime_paths.h"
 #include "profile/profile_sink.h"
+#include "specforge/third_party_versions.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -310,14 +311,31 @@ void SettingsPanelUi::RenderDataAndRecovery()
 
 void SettingsPanelUi::RenderAbout()
 {
-    RenderSectionHeading("About", "Version, release, storage, and diagnostic information for this build.");
+    RenderSectionHeading("About", "Version, licensing, and diagnostic information for this build.");
 
     ImGui::TextUnformatted("SpecForge");
     ImGui::TextDisabled("Local astronomical spectrum inspection and labeling.");
+    ImGui::PushTextWrapPos();
+    ImGui::TextUnformatted("Copyright (c) 2026 SpecForge.");
+    ImGui::TextDisabled("Proprietary software. Use is subject to the SpecForge EULA.");
+    ImGui::PopTextWrapPos();
     ImGui::Spacing();
     RenderReadOnlyValue("Version", environment_.version.c_str());
     RenderReadOnlyValue("Release profile", environment_.release_profile.c_str());
     RenderReadOnlyValue("Graphics", "Direct3D 11 / SDR");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Third-party components");
+    ImGui::BulletText(
+        "Dear ImGui %s (docking / Win32 / DirectX 11) - MIT License",
+        build_info::kDearImGuiVersion);
+    ImGui::BulletText("ImPlot %s - MIT License", build_info::kImPlotVersion);
+    ImGui::BulletText("zlib %s - zlib License", build_info::kZlibVersion);
+    ImGui::BulletText("Modified stb headers bundled with Dear ImGui - MIT License");
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled("Full terms: Legal/EULA.txt and Legal/THIRD_PARTY_NOTICES.txt.");
+    ImGui::TextDisabled("Scientific data attribution: Legal/DATA_SOURCES.txt.");
+    ImGui::PopTextWrapPos();
 
     ImGui::Spacing();
     ImGui::SeparatorText("Diagnostics");

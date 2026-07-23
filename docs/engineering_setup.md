@@ -185,7 +185,8 @@ Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgu
 
 ## Portable release
 
-第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe` 和 `Data`。构建并打包：
+第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe`、`Data\`
+和 `Legal\`。构建并打包：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
@@ -195,6 +196,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
 agent 运行中执行；它不复用 Ninja debug wrapper 的日志、timeout 和 preflight 形态。
 
 输出位于 `dist\SpecForge-portable`，zip 为 `dist\SpecForge-portable.zip`，旁边生成 `.sha256`。
+目录和 ZIP 根部只保留 `SpecForge.exe`、`Data\` 和 `Legal\`；`Legal\`
+必须包含 `EULA.txt`、`THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt`。
+缺少任一发布文档时打包脚本会失败。
+
+第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。About 编译时使用
+`build\<preset>\generated\specforge\third_party_versions.h`。构建成功后，
+CMake 将包含 SpecForge 版本、release profile、configuration 和第三方版本的
+`specforge_build_metadata.json` 复制到实际 EXE 旁；打包脚本只读取这个旁置文件，
+并据此校验 `THIRD_PARTY_NOTICES.txt`。仅重新 configure 不会改变可打包 EXE
+对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包必须失败，
+而不是发布过期版本声明。
 
 ## 仓库卫生
 

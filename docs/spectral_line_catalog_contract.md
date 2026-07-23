@@ -55,6 +55,14 @@ are valid.
 | `source_ref` | yes | Non-empty short public source handle or derivation handle. |
 | `notes` | no | Public source/precision note only. No classification criteria. |
 
+The built-in catalog's third-party attribution and transformation record lives
+in the repository at `legal/DATA_SOURCES.txt` and is shipped as
+`Legal/DATA_SOURCES.txt` under the executable directory. An approximate marker
+may use a SpecForge-owned derivation handle, but its note must state that it is
+approximate and must not imply laboratory or calibration precision. Removing
+an external attribution requires replacing both the value and its provenance;
+changing only `source_ref` is not sufficient.
+
 Rows are sorted by marker position after loading. `line` rows draw vertical
 reference lines. `band` rows draw shaded ranges. Bands are display markers, not
 range-navigation windows.
