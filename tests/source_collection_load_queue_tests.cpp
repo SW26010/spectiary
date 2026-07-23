@@ -531,6 +531,16 @@ void TestCurrentFolderListingGenerationAvoidsFullRescan()
         [](const auto& path, std::size_t index, const auto& listing, const auto&) {
             return MakeSnapshot(path, index, listing.spectra.size());
         };
+    specforge::NavigationLatencyTrace trace(
+        1,
+        0,
+        0,
+        specforge::NavigationLatencyInputKind::UiNext,
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now());
+    const specforge::NavigationLatencyAttemptHandle navigation_attempt =
+        trace.BeginLoadAttempt(0);
     bool prepared = false;
     bool published_listing = false;
     {
@@ -538,6 +548,7 @@ void TestCurrentFolderListingGenerationAvoidsFullRescan()
         (void)queue.Enqueue({
             .path = folder,
             .folder_listing_generation_hint = listing_generation_hint,
+            .navigation_attempt = navigation_attempt,
         });
         auto completions = WaitForCompletions(queue, 1);
         prepared = completions.front().prepared.has_value();
@@ -552,6 +563,14 @@ void TestCurrentFolderListingGenerationAvoidsFullRescan()
     Require(
         published_listing,
         "a successful folder load should publish its post-decode verified listing");
+    const specforge::NavigationLatencyAttemptReport report =
+        navigation_attempt->Report();
+    Require(
+        report.preparation_rounds.size() == 1 &&
+            report.preparation_rounds[0].hint_present &&
+            report.preparation_rounds[0].generation_current_at_start &&
+            !report.preparation_rounds[0].listing_scan_performed,
+        "a stable warm folder round should report a current hint and no full scan");
     std::filesystem::remove_all(folder);
 }
 
@@ -669,10 +688,21 @@ void TestStaleFolderListingGenerationRefreshesBeforeDecode()
                 "the decoder should receive a refreshed listing after the target file changes");
             return MakeSnapshot(path, index, listing.spectra.size());
         };
+    specforge::NavigationLatencyTrace trace(
+        1,
+        0,
+        0,
+        specforge::NavigationLatencyInputKind::UiNext,
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now());
+    const specforge::NavigationLatencyAttemptHandle navigation_attempt =
+        trace.BeginLoadAttempt(0);
     specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
     (void)queue.Enqueue({
         .path = folder,
         .folder_listing_generation_hint = listing_generation_hint,
+        .navigation_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "stale hinted folder task should refresh and succeed");
@@ -680,6 +710,14 @@ void TestStaleFolderListingGenerationRefreshesBeforeDecode()
     Require(
         folder_scan_calls.load() == 1,
         "a stale target should refresh once and validate the new generation without a second scan");
+    const specforge::NavigationLatencyAttemptReport report =
+        navigation_attempt->Report();
+    Require(
+        report.preparation_rounds.size() == 1 &&
+            report.preparation_rounds[0].hint_present &&
+            report.preparation_rounds[0].generation_current_at_start &&
+            report.preparation_rounds[0].listing_scan_performed,
+        "a stale target should report that its current generation still required a listing scan");
     std::filesystem::remove_all(folder);
 }
 
@@ -790,6 +828,14 @@ void TestChangedFolderRetriesOneStableGeneration()
             !report.preparation_rounds[0].revalidation_succeeded &&
             report.preparation_rounds[1].revalidation_succeeded,
         "the folder trace should distinguish the rejected generation from the accepted retry");
+    Require(
+        report.preparation_rounds[0].hint_present &&
+            report.preparation_rounds[0].generation_current_at_start &&
+            !report.preparation_rounds[0].listing_scan_performed &&
+            !report.preparation_rounds[1].hint_present &&
+            !report.preparation_rounds[1].generation_current_at_start &&
+            report.preparation_rounds[1].listing_scan_performed,
+        "the folder trace should attribute the retry scan to the invalidated generation");
     std::filesystem::remove_all(folder);
 }
 

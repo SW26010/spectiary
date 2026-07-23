@@ -153,6 +153,7 @@ try {
     $multiRoundBase = @(New-ValidNavigationEvents 8 'ui_next' 0)
     $multiRoundAttempt = $multiRoundBase[0]
     $multiRoundNavigation = $multiRoundBase[1]
+    $multiRoundAttempt.source_kind = 'folder'
     $multiRoundAttempt | Add-Member -NotePropertyName preparation_round_count -NotePropertyValue 2
     $multiRoundAttempt.snapshot_load_finished_steady_ns = 12000000
     $multiRoundAttempt.context_prepared_steady_ns = 13000000
@@ -187,7 +188,10 @@ try {
             preparation_round_index = 0
             target_index = 1
             source_task_id = 99
-            source_kind = 'file'
+            source_kind = 'folder'
+            hint_present = $true
+            generation_current_at_start = $true
+            listing_scan_performed = $false
             revalidation_succeeded = $false
             preparation_started_steady_ns = 5000000
             snapshot_load_started_steady_ns = 6000000
@@ -208,7 +212,10 @@ try {
             preparation_round_index = 1
             target_index = 1
             source_task_id = 99
-            source_kind = 'file'
+            source_kind = 'folder'
+            hint_present = $false
+            generation_current_at_start = $false
+            listing_scan_performed = $true
             revalidation_succeeded = $true
             preparation_started_steady_ns = 10000000
             snapshot_load_started_steady_ns = 11000000
@@ -233,11 +240,21 @@ try {
     Write-ProfileFixture $multiRoundPath $multiRoundEvents
     $multiRound = Invoke-Analyzer $multiRoundPath
     Assert-True ($multiRound.ExitCode -eq 0) "A correctly attributed TOCTOU retry should pass:`n$($multiRound.Output)"
+    Assert-True ($multiRound.Output -match 'Folder listing generation diagnostics') `
+        "Folder listing diagnostics should be summarized:`n$($multiRound.Output)"
 
     $multiRoundAttempt.decode_ms = 99.0
     Write-ProfileFixture $multiRoundPath $multiRoundEvents
     $invalidMultiRound = Invoke-Analyzer $multiRoundPath
     Assert-True ($invalidMultiRound.ExitCode -ne 0) "Attempt stages that disagree with preparation rounds must fail:`n$($invalidMultiRound.Output)"
+    $multiRoundAttempt.decode_ms = 3.0
+
+    $multiRoundEvents[1].generation_current_at_start = $true
+    Write-ProfileFixture $multiRoundPath $multiRoundEvents
+    $invalidFolderDiagnostics = Invoke-Analyzer $multiRoundPath
+    Assert-True ($invalidFolderDiagnostics.ExitCode -ne 0) `
+        "A current folder generation without a hint must fail:`n$($invalidFolderDiagnostics.Output)"
+    $multiRoundEvents[1].generation_current_at_start = $false
 
     $nonMonotonicPath = Join-Path $temporaryDirectory 'non-monotonic.jsonl'
     $nonMonotonicEvents = @(New-ValidNavigationEvents 3 'keyboard_previous' 0)

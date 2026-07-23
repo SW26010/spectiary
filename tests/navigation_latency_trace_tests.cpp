@@ -52,7 +52,13 @@ void TestPresentedTraceCapturesCorrelatedPhases()
         trace.BeginLoadAttempt(11, AtMilliseconds(4));
     attempt->MarkSourceTaskId(99);
     attempt->MarkWorkerStarted(AtMilliseconds(5));
-    attempt->MarkSnapshotLoadStarted(false, AtMilliseconds(6));
+    attempt->MarkFolderSnapshotLoadStarted(
+        {
+            .hint_present = true,
+            .generation_current_at_start = false,
+            .listing_scan_performed = true,
+        },
+        AtMilliseconds(6));
     attempt->MarkSnapshotLoadFinished(AtMilliseconds(8));
     attempt->MarkContextPrepared(AtMilliseconds(9));
     attempt->MarkSourceRevalidated(AtMilliseconds(10));
@@ -104,6 +110,13 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(
         text.find("\"preparation_round_count\":1") != std::string::npos,
         "the attempt should declare its preparation round count");
+    Require(
+        text.find("\"hint_present\":true") != std::string::npos &&
+            text.find("\"generation_current_at_start\":false") !=
+                std::string::npos &&
+            text.find("\"listing_scan_performed\":true") !=
+                std::string::npos,
+        "folder listing generation diagnostics should serialize");
     Require(text.find("\"input_kind\":\"ui_next\"") != std::string::npos, "input kind should serialize");
     Require(text.find("\"presentation_viewport_id\":7") != std::string::npos, "viewport id should serialize");
     Require(text.find("\"decode_ms\":2.0000") != std::string::npos, "decode duration should be calculated");

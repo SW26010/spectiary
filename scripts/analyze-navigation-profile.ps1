@@ -185,6 +185,21 @@ $navigationEvents = @($events | Where-Object { (Get-EventValue $_ 'event') -eq '
 $attemptEvents = @($events | Where-Object { (Get-EventValue $_ 'event') -eq 'navigation_latency_attempt' })
 $preparationRoundEvents = @(
     $events | Where-Object { (Get-EventValue $_ 'event') -eq 'navigation_latency_preparation_round' })
+$folderDiagnosticFields = @(
+    'hint_present',
+    'generation_current_at_start',
+    'listing_scan_performed'
+)
+$hasFolderListingDiagnostics = @(
+    $preparationRoundEvents |
+        Where-Object {
+            foreach ($field in $folderDiagnosticFields) {
+                if ($null -ne $_.PSObject.Properties[$field]) {
+                    return $true
+                }
+            }
+            return $false
+        }).Count -gt 0
 if ($navigationEvents.Count -eq 0) {
     Add-Failure $failures 'No navigation_latency events were found.'
 }
@@ -408,6 +423,23 @@ foreach ($event in $presentedEvents) {
                 if ($roundSourceKind -ne $sourceKind) {
                     Add-Failure $failures "$roundContext.source_kind '$roundSourceKind' does not match '$sourceKind'."
                 }
+                if ($hasFolderListingDiagnostics) {
+                    foreach ($field in $folderDiagnosticFields) {
+                        Test-RequiredBoolean $round $field $roundContext $failures
+                    }
+                    $hintPresent = Get-EventValue $round 'hint_present'
+                    $generationCurrent = Get-EventValue $round 'generation_current_at_start'
+                    $listingScanned = Get-EventValue $round 'listing_scan_performed'
+                    if ($roundSourceKind -eq 'file' -and
+                        ($hintPresent -eq $true -or
+                         $generationCurrent -eq $true -or
+                         $listingScanned -eq $true)) {
+                        Add-Failure $failures "$roundContext file rounds cannot report folder-listing diagnostics."
+                    }
+                    if ($generationCurrent -eq $true -and $hintPresent -ne $true) {
+                        Add-Failure $failures "$roundContext cannot report a current generation without a hint."
+                    }
+                }
                 Test-RequiredBoolean $round 'revalidation_succeeded' $roundContext $failures
                 $roundSucceeded = Get-EventValue $round 'revalidation_succeeded'
                 if ($roundIndex -lt $rounds.Count - 1 -and $roundSucceeded -eq $true) {
@@ -532,6 +564,47 @@ foreach ($group in @($validPresentedEvents | Group-Object { [string](Get-EventVa
     Write-Host "Input kind: $($group.Name); count: $($group.Count)"
     @($metricFields | ForEach-Object { Format-Metric ([object[]]$group.Group) $_ }) |
         Format-Table -AutoSize
+}
+
+if ($hasFolderListingDiagnostics) {
+    $validNavigationIds = @{}
+    foreach ($event in $validPresentedEvents) {
+        $validNavigationIds[[string](Get-EventValue $event 'navigation_id')] = $true
+    }
+    $validFolderRounds = @(
+        $preparationRoundEvents |
+            Where-Object {
+                (Get-EventValue $_ 'source_kind') -eq 'folder' -and
+                $validNavigationIds.ContainsKey(
+                    [string](Get-EventValue $_ 'navigation_id'))
+            })
+    if ($validFolderRounds.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Folder listing generation diagnostics:'
+        @(
+            $validFolderRounds |
+                Group-Object {
+                    '{0}|{1}|{2}' -f
+                        [bool](Get-EventValue $_ 'hint_present'),
+                        [bool](Get-EventValue $_ 'generation_current_at_start'),
+                        [bool](Get-EventValue $_ 'listing_scan_performed')
+                } |
+                Sort-Object Name |
+                ForEach-Object {
+                    $parts = $_.Name -split '\|'
+                    $stats = Get-Stats (
+                        Get-MetricValues ([object[]]$_.Group) 'source_inspection_ms')
+                    [pscustomobject]@{
+                        HintPresent = $parts[0]
+                        GenerationCurrent = $parts[1]
+                        ListingScan = $parts[2]
+                        Count = $stats.Count
+                        InspectionP50 = '{0:F3}' -f $stats.P50
+                        InspectionP95 = '{0:F3}' -f $stats.P95
+                    }
+                }) |
+            Format-Table -AutoSize
+    }
 }
 
 if ($failures.Count -eq 0) {

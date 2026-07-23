@@ -171,6 +171,16 @@ Folder source 的 warm navigation 会复用上一次验证通过的 immutable li
 这个 listing generation cache 不是 adjacent spectrum snapshot cache，不应据此把
 `cache_hit` 写为 `true`。
 
+每条新的 folder `navigation_latency_preparation_round` 还提供三项失效诊断：
+
+- `hint_present`：本轮开始时是否持有可复用的 listing generation；
+- `generation_current_at_start`：该 hint 的目录变更 token 在本轮开始时是否仍有效；
+- `listing_scan_performed`：本轮是否执行过完整目录枚举、排序和 fingerprint 构建。
+
+分析器会按这三个字段分组报告 folder inspection 的 p50/p95。旧 profile 没有这些字段时
+仍可分析；一旦 profile 中出现任一新字段，所有 preparation round 都必须提供合法的
+JSON boolean。
+
 采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
 下一条，等最后一条显示后再 `Stop Recording`。然后运行：
 

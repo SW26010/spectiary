@@ -123,6 +123,13 @@ bool WritePreparationRoundEvent(
         ProfileSink::Field::Number("target_index", std::to_string(attempt.target_index)),
         ProfileSink::Field::Number("source_task_id", std::to_string(attempt.source_task_id)),
         ProfileSink::Field::String("source_kind", round.source_is_folder ? "folder" : "file"),
+        ProfileSink::Field::Bool("hint_present", round.hint_present),
+        ProfileSink::Field::Bool(
+            "generation_current_at_start",
+            round.generation_current_at_start),
+        ProfileSink::Field::Bool(
+            "listing_scan_performed",
+            round.listing_scan_performed),
         ProfileSink::Field::Bool("revalidation_succeeded", round.revalidation_succeeded),
         ProfileSink::Field::Number("preparation_started_steady_ns", NumberOrNull(round.preparation_started_ns)),
         ProfileSink::Field::Number("snapshot_load_started_steady_ns", NumberOrNull(round.snapshot_load_started_ns)),
@@ -218,6 +225,21 @@ void NavigationLatencyAttempt::MarkSnapshotLoadStarted(
     bool source_is_folder,
     NavigationLatencyTimePoint at)
 {
+    MarkSnapshotLoadStarted(source_is_folder, {}, at);
+}
+
+void NavigationLatencyAttempt::MarkFolderSnapshotLoadStarted(
+    NavigationLatencyFolderListingObservation observation,
+    NavigationLatencyTimePoint at)
+{
+    MarkSnapshotLoadStarted(true, observation, at);
+}
+
+void NavigationLatencyAttempt::MarkSnapshotLoadStarted(
+    bool source_is_folder,
+    NavigationLatencyFolderListingObservation observation,
+    NavigationLatencyTimePoint at)
+{
     const std::int64_t started_ns = ToNanoseconds(at);
     source_is_folder_.store(source_is_folder, std::memory_order_relaxed);
     std::int64_t missing = 0;
@@ -232,9 +254,22 @@ void NavigationLatencyAttempt::MarkSnapshotLoadStarted(
     preparation_rounds_.push_back({
         .round_index = preparation_rounds_.size(),
         .source_is_folder = source_is_folder,
+        .hint_present = observation.hint_present,
+        .generation_current_at_start =
+            observation.generation_current_at_start,
+        .listing_scan_performed = observation.listing_scan_performed,
         .preparation_started_ns = preparation_started_ns,
         .snapshot_load_started_ns = started_ns,
     });
+}
+
+void NavigationLatencyAttempt::MarkFolderListingScanPerformed() noexcept
+{
+    std::lock_guard lock(preparation_rounds_mutex_);
+    if (!preparation_rounds_.empty() &&
+        preparation_rounds_.back().source_is_folder) {
+        preparation_rounds_.back().listing_scan_performed = true;
+    }
 }
 
 void NavigationLatencyAttempt::MarkSnapshotLoadFinished(NavigationLatencyTimePoint at) noexcept

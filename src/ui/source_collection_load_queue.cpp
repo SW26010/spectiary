@@ -522,13 +522,19 @@ private:
             task.request.folder_listing_generation_hint;
         for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
             checkpoint();
+            const bool hint_present = listing_generation != nullptr;
+            const bool generation_current_at_start =
+                listing_generation &&
+                listing_generation->change_generation &&
+                listing_generation->IsCurrent();
+            bool listing_scan_performed = false;
             // A retained generation may be stale. Poll its invalidation token
             // and validate the requested file cheaply before decoding so
             // deletion or replacement refreshes the full listing instead of
             // surfacing a stale-path decode error.
             if (listing_generation &&
                 ((listing_generation->change_generation &&
-                  !listing_generation->IsCurrent()) ||
+                  !generation_current_at_start) ||
                  task.request.spectrum_index >=
                      listing_generation->listing.spectra.size() ||
                  !SourceCollectionFolderSpectrumFileMatchesCurrentState(
@@ -539,6 +545,7 @@ private:
             if (!listing_generation) {
                 listing_generation =
                     ScanFolderListingGeneration(task.request.path, checkpoint);
+                listing_scan_performed = true;
             }
             const SourceCollectionFolderListing& listing =
                 listing_generation->listing;
@@ -548,7 +555,12 @@ private:
                     task.request.annotation_paths,
                     checkpoint);
             if (task.request.navigation_attempt) {
-                task.request.navigation_attempt->MarkSnapshotLoadStarted(true);
+                task.request.navigation_attempt->MarkFolderSnapshotLoadStarted({
+                    .hint_present = hint_present,
+                    .generation_current_at_start =
+                        generation_current_at_start,
+                    .listing_scan_performed = listing_scan_performed,
+                });
             }
             SpectrumSnapshotHandle snapshot = dependencies_.folder_snapshot_loader(
                 task.request.path,
@@ -591,6 +603,10 @@ private:
                 // full post-decode comparison as the correctness fallback.
                 verified_generation =
                     ScanFolderListingGeneration(task.request.path, checkpoint);
+                if (task.request.navigation_attempt) {
+                    task.request.navigation_attempt
+                        ->MarkFolderListingScanPerformed();
+                }
                 listing_generation_is_current =
                     SourceCollectionFolderListingsMatch(
                         listing,

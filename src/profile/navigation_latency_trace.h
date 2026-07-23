@@ -33,9 +33,18 @@ enum class NavigationLatencyOutcome : std::uint8_t {
     Coalesced,
 };
 
+struct NavigationLatencyFolderListingObservation {
+    bool hint_present = false;
+    bool generation_current_at_start = false;
+    bool listing_scan_performed = false;
+};
+
 struct NavigationLatencyPreparationRoundReport {
     std::size_t round_index = 0;
     bool source_is_folder = false;
+    bool hint_present = false;
+    bool generation_current_at_start = false;
+    bool listing_scan_performed = false;
     bool revalidation_succeeded = false;
     std::int64_t preparation_started_ns = 0;
     std::int64_t snapshot_load_started_ns = 0;
@@ -71,6 +80,10 @@ public:
     void MarkSnapshotLoadStarted(
         bool source_is_folder,
         NavigationLatencyTimePoint at = NavigationLatencyClock::now());
+    void MarkFolderSnapshotLoadStarted(
+        NavigationLatencyFolderListingObservation observation,
+        NavigationLatencyTimePoint at = NavigationLatencyClock::now());
+    void MarkFolderListingScanPerformed() noexcept;
     void MarkSnapshotLoadFinished(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
     void MarkContextPrepared(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
     void MarkSourceRevalidated(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
@@ -93,6 +106,10 @@ private:
         std::size_t target_index,
         NavigationLatencyTimePoint load_enqueued_at);
     [[nodiscard]] static std::int64_t ToNanoseconds(NavigationLatencyTimePoint at) noexcept;
+    void MarkSnapshotLoadStarted(
+        bool source_is_folder,
+        NavigationLatencyFolderListingObservation observation,
+        NavigationLatencyTimePoint at);
 
     std::size_t attempt_index_ = 0;
     std::size_t target_index_ = 0;
