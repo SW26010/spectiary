@@ -875,6 +875,14 @@ bool SourceCollectionFolderListingsMatch(
     return true;
 }
 
+bool SourceCollectionFolderSpectrumFileMatchesCurrentState(
+    const SourceCollectionFolderSpectrumFile& file)
+{
+    std::error_code type_error;
+    return std::filesystem::is_regular_file(file.path, type_error) && !type_error &&
+           FileStatFingerprint(file.path) == file.stat_fingerprint;
+}
+
 SourceCollectionContext BuildFolderSourceCollectionContext(
     const SpectrumSnapshot& snapshot,
     const SourceCollectionFolderListing& listing)

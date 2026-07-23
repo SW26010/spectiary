@@ -479,6 +479,91 @@ void TestFolderUsesOnePreparedListing()
     std::filesystem::remove_all(folder);
 }
 
+void TestFolderListingHintAvoidsRedundantInitialScan()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_listing_hint");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    const specforge::SourceCollectionFolderListingHandle listing_hint =
+        std::make_shared<const specforge::SourceCollectionFolderListing>(
+            specforge::ScanSourceCollectionFolder(folder));
+    std::atomic_int folder_scan_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = folder,
+        .folder_listing_hint = listing_hint,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "hinted folder task should prepare successfully");
+    Require(
+        folder_scan_calls.load() == 1,
+        "a verified folder listing hint should eliminate the redundant initial scan");
+    Require(
+        completions.front().prepared->verified_folder_listing != nullptr,
+        "a successful folder load should publish its post-decode verified listing");
+    std::filesystem::remove_all(folder);
+}
+
+void TestStaleFolderListingHintRefreshesBeforeDecode()
+{
+    const std::filesystem::path folder = UniqueTempPath("_stale_folder_listing_hint");
+    std::filesystem::create_directory(folder);
+    const std::filesystem::path sample = folder / "sample.csv";
+    WriteFixture(sample);
+    const specforge::SourceCollectionFolderListingHandle listing_hint =
+        std::make_shared<const specforge::SourceCollectionFolderListing>(
+            specforge::ScanSourceCollectionFolder(folder));
+    {
+        std::ofstream stream(sample, std::ios::binary | std::ios::app);
+        stream << "changed";
+    }
+    std::atomic_int folder_scan_calls = 0;
+    std::atomic_int folder_loader_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
+    dependencies.folder_snapshot_loader =
+        [&](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            ++folder_loader_calls;
+            Require(
+                listing.spectra.front().stat_fingerprint !=
+                    listing_hint->spectra.front().stat_fingerprint,
+                "the decoder should receive a refreshed listing after the target file changes");
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = folder,
+        .folder_listing_hint = listing_hint,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "stale hinted folder task should refresh and succeed");
+    Require(folder_loader_calls.load() == 1, "a stale target should not be decoded before its listing refresh");
+    Require(
+        folder_scan_calls.load() == 2,
+        "a stale target should use one refresh scan and one post-decode revalidation scan");
+    std::filesystem::remove_all(folder);
+}
+
 void TestChangedFileRetriesOneStableGeneration()
 {
     const std::filesystem::path path = UniqueTempPath("_retry.csv");
@@ -522,7 +607,11 @@ void TestChangedFolderRetriesOneStableGeneration()
     const std::filesystem::path folder = UniqueTempPath("_retry_folder");
     std::filesystem::create_directory(folder);
     WriteFixture(folder / "sample.csv");
+    const specforge::SourceCollectionFolderListingHandle listing_hint =
+        std::make_shared<const specforge::SourceCollectionFolderListing>(
+            specforge::ScanSourceCollectionFolder(folder));
     std::atomic_int loader_calls = 0;
+    std::atomic_int folder_scan_calls = 0;
     specforge::NavigationLatencyTrace trace(
         1,
         0,
@@ -544,11 +633,27 @@ void TestChangedFolderRetriesOneStableGeneration()
             }
             return MakeSnapshot(path, index, listing.spectra.size());
         };
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
     specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
-    (void)queue.Enqueue({.path = folder, .navigation_attempt = navigation_attempt});
+    (void)queue.Enqueue({
+        .path = folder,
+        .folder_listing_hint = listing_hint,
+        .navigation_attempt = navigation_attempt,
+    });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed folder should settle on a stable retry");
     Require(loader_calls.load() == 2, "changed folder should be decoded exactly one additional time");
+    Require(
+        folder_scan_calls.load() == 2,
+        "a changed hinted folder should scan once per decoded generation, not twice");
+    Require(
+        completions.front().prepared->verified_folder_listing &&
+            completions.front().prepared->verified_folder_listing->spectra.size() == 2,
+        "the stable retry should publish the newly verified folder generation");
     const specforge::NavigationLatencyAttemptReport report = navigation_attempt->Report();
     Require(
         report.preparation_rounds.size() == 2,
@@ -730,6 +835,8 @@ int main()
     TestBatchPublishesInRequestOrder();
     TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
+    TestFolderListingHintAvoidsRedundantInitialScan();
+    TestStaleFolderListingHintRefreshesBeforeDecode();
     TestChangedFileRetriesOneStableGeneration();
     TestChangedFolderRetriesOneStableGeneration();
     TestCancelSuppressesCompletion();

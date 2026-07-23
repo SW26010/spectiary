@@ -23,6 +23,10 @@ struct SourceCollectionLoadRequest {
     std::vector<std::filesystem::path> annotation_paths;
     std::optional<SourceCollectionIdentity> reuse_identity;
     std::optional<std::uint64_t> base_live_workflow_revision;
+    // The last post-decode listing verified for this loaded source. It is an
+    // optimization hint only; every prepared result still requires a fresh
+    // post-decode folder scan.
+    SourceCollectionFolderListingHandle folder_listing_hint;
     NavigationLatencyAttemptHandle navigation_attempt;
 };
 
@@ -32,6 +36,8 @@ struct PreparedSourceCollection {
     std::size_t spectrum_index = 0;
     SpectrumSnapshotHandle snapshot;
     PreparedSourceCollectionPayload payload;
+    // Immutable evidence from the successful post-decode revalidation pass.
+    SourceCollectionFolderListingHandle verified_folder_listing;
 };
 
 struct SourceCollectionLoadCompletion {
@@ -54,12 +60,16 @@ struct SourceCollectionLoadDependencies {
         std::size_t,
         const SourceCollectionFolderListing&,
         const CancellationCheck&)>;
+    using FolderScanner = std::function<SourceCollectionFolderListing(
+        const std::filesystem::path&,
+        const SourceCollectionCancellationCheckpoint&)>;
     using WorkflowCacheLoader = std::function<SampleWorkflowPreparationCacheBundle(
         const SampleWorkflowPreparationPaths&,
         const std::function<void()>&)>;
 
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
+    FolderScanner folder_scanner;
     WorkflowCacheLoader workflow_cache_loader;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };

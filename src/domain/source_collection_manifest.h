@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -37,6 +38,9 @@ struct SourceCollectionFolderListing {
     std::vector<std::string> ignored_file_examples;
     std::vector<std::string> ignored_directory_examples;
 };
+
+using SourceCollectionFolderListingHandle =
+    std::shared_ptr<const SourceCollectionFolderListing>;
 
 struct SourceCollectionFileDependencyState {
     std::string path_key;
@@ -123,6 +127,8 @@ void FinalizeSourceCollectionAnnotationContextFingerprint(
     const SourceCollectionFolderListing& left,
     const SourceCollectionFolderListing& right,
     const SourceCollectionCancellationCheckpoint& cancellation_checkpoint = {});
+[[nodiscard]] bool SourceCollectionFolderSpectrumFileMatchesCurrentState(
+    const SourceCollectionFolderSpectrumFile& file);
 [[nodiscard]] SourceCollectionContext BuildFolderSourceCollectionContext(
     const SpectrumSnapshot& snapshot,
     const SourceCollectionFolderListing& listing);

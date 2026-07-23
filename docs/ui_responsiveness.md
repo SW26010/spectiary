@@ -124,6 +124,45 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 剩余边界：发生 session mutation 或维护后，完整 view 仍会一次性重建；若 future profile 显示 previous/next、labeling 或 filter/sort command 的单次延迟受此影响，应继续缩窄或 owner-cache 对应子 view，而不是恢复 per-frame 重建。当前没有不启动 ImGui/Win32 Shell 即可验证 Render 调用次数的自动化接缝，因此本回归以同数据 Release A/B profile 锁定；session command/view 的业务正确性仍由现有 focused tests 覆盖。
 
+## 复盘：2026-07-23 folder navigation 重复扫描
+
+现象：完整且 `dropped_events=0` 的
+`specforge-profile-20260723-110532-476.jsonl` 包含 385 次 folder load attempt。
+folder attempt 的 `source_inspection_ms` p50/p95 为 31.964/133.228ms，
+`source_revalidation_ms` p50/p95 为 18.106/137.465ms，而 decode p50/p95
+仅为 7.607/15.241ms。一次代表性翻页在解码前扫描 127.536ms、解码后扫描
+133.496ms，最终 input-to-Present 为 331.560ms。
+
+引入原因：
+
+- `SourceCollectionLoadQueue::PrepareFolder()` 每次翻页先扫描并排序整个目录，用同一
+  listing 解码 snapshot 和构造 source identity/context。
+- 为保证 snapshot、identity、annotation dependencies 属于同一稳定 filesystem
+  generation，解码完成后又扫描整个目录并逐项比较；一致性保护正确，但稳定目录的每次
+  翻页都支付两次完整枚举成本。
+- 已成功加载的 source session 只保留 snapshot 和 workflow identity，没有保留完成
+  post-decode revalidation 的 immutable folder listing，因此下一行无法复用已有观察。
+
+修复方式：
+
+- worker 成功后把 post-decode revalidation 得到的 listing 作为 immutable shared
+  handle 随 prepared result 发布，由 source roster 按 source entry 保留；下一次 load
+  request 只把它作为 optimization hint 传回 worker，不把 UI 变成 filesystem owner。
+- warm navigation 先用 O(1) 的目标文件 stat 检查保护 stale/deleted target，然后复用
+  listing 解码；解码后仍执行一次完整扫描。只有 fresh post-decode listing 与候选
+  generation 完全匹配时才发布 snapshot。
+- 如果目录在加载期间变化，fresh listing 会成为下一轮候选并重新解码，随后再次完整
+  revalidate。缓存不会绕过 TOCTOU protection，也不会让 stale identity 进入 session。
+- folder scanner 进入 loader dependency seam；测试明确锁定稳定 warm navigation 为一次
+  完整扫描、stale target 为 refresh + revalidation 两次扫描、并发目录变化为每个 decoded
+  generation 一次扫描。
+
+验证边界：focused load-queue/session tests 证明调用次数、stale target refresh、目录变化
+重试和 immutable listing 在 worker-session-worker 之间的闭环；新的真实大目录 profile
+仍应确认 warm folder navigation 的 `source_inspection_ms` 不再包含完整枚举，且
+`source_revalidation_ms` 仍保留一次扫描。这里的 listing reuse 不是 adjacent spectrum
+snapshot cache，`navigation_latency.cache_hit` 仍保持原语义。
+
 ## 设计规则
 
 1. Full view 不是 snapshot accessor。任何只需要当前光谱的 UI 必须使用 cheap snapshot API，不能调用 full session/workflow view。
@@ -138,6 +177,7 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 10. 新 panel 抽取或 session boundary refactor 必须检查每帧调用点。结构更干净不自动代表响应更快。
 11. 单元测试只能证明规则正确，不能证明交互预算。触碰热路径时必须补 profile 或至少解释为什么该改动不进入热路径。
 12. 长 build 不是合格反馈环。人工或 agent 验证 full CMake build 时必须带超时；性能问题优先建立可重复 profile 或 focused compile/test loop。
+13. Folder navigation 可以复用上一次 post-decode 验证通过的 immutable listing 来省掉 pre-decode 全扫描，但每个发布的 snapshot 仍必须经过 fresh post-decode full revalidation；cache hint 不能升级为 source-of-truth。
 
 ## 推荐实现形态
 

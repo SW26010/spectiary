@@ -4507,6 +4507,55 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         "prepared source activation should reconcile against the retained filter without rescanning");
 }
 
+void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder listing hint test must remain on the prepared path");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 2, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "folder-listing-hint",
+        "folder",
+        "source-fingerprint",
+        "context-fingerprint",
+        2,
+    };
+    context.manifest.sample_names = {"a.csv", "b.csv"};
+    specforge::PreparedSampleWorkflowState workflow =
+        PrepareWorkflow(snapshot, context, 0, {}, {});
+    auto mutable_listing = std::make_shared<specforge::SourceCollectionFolderListing>();
+    mutable_listing->spectra = {
+        {source_path / "a.csv", "csv", "a-stat"},
+        {source_path / "b.csv", "csv", "b-stat"},
+    };
+    const specforge::SourceCollectionFolderListingHandle verified_listing = mutable_listing;
+
+    const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
+        source_path,
+        0,
+        snapshot,
+        specforge::PreparedSourceCollectionPlan{
+            std::move(context),
+            std::move(workflow)},
+        verified_listing);
+    Require(result.loaded, "prepared folder generation should load");
+    const std::optional<specforge::SourceCollectionLoadHint> hint =
+        session.LoadHintForSource(source_path);
+    Require(hint.has_value(), "known folder source should expose a subsequent load hint");
+    Require(
+        hint->folder_listing_hint == verified_listing,
+        "subsequent navigation should reuse the exact immutable verified listing");
+}
+
 void TestSourceSessionFlushFailureKeepsDirtyState()
 {
     const std::filesystem::path blocker = UniqueTempPath("_blocked");
@@ -4628,6 +4677,7 @@ void RunAllTests()
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();
+    TestVerifiedFolderListingFlowsIntoSubsequentLoadHint();
     TestSourceSessionFlushFailureKeepsDirtyState();
 }
 

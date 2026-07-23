@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/source_collection_session_types.h"
 
@@ -40,6 +41,8 @@ public:
     [[nodiscard]] std::vector<SourceCollectionSourceView> SourceViews() const;
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSources() const;
     [[nodiscard]] std::vector<std::string> SavedSourceKeys() const;
+    [[nodiscard]] SourceCollectionFolderListingHandle ValidatedFolderListing(
+        const std::filesystem::path& path) const;
 
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
         const std::filesystem::path& path,
@@ -47,7 +50,8 @@ public:
     [[nodiscard]] SourceCollectionRosterPreparedOpenResult OpenPreparedSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
-        SpectrumSnapshotHandle snapshot);
+        SpectrumSnapshotHandle snapshot,
+        SourceCollectionFolderListingHandle validated_folder_listing = {});
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
@@ -70,6 +74,9 @@ private:
         // optimization without retesting CSV/folder error snapshots: that change
         // reproduced 0xc0000005 shared_ptr refcount crashes.
         SpectrumSnapshotHandle cached_snapshot;
+        // Retained with the source entry so the next row load can skip only
+        // the redundant pre-decode scan, never post-decode revalidation.
+        SourceCollectionFolderListingHandle validated_folder_listing;
         std::size_t last_spectrum_index = 0;
     };
 
@@ -77,7 +84,8 @@ private:
     [[nodiscard]] AddOrUpdateSourceResult AddOrUpdateSource(
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,
-        std::size_t spectrum_index);
+        std::size_t spectrum_index,
+        SourceCollectionFolderListingHandle validated_folder_listing = {});
     void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
 
     SnapshotLoader snapshot_loader_;

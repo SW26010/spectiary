@@ -170,6 +170,18 @@ std::vector<std::string> SourceCollectionRoster::SavedSourceKeys() const
     return keys;
 }
 
+SourceCollectionFolderListingHandle SourceCollectionRoster::ValidatedFolderListing(
+    const std::filesystem::path& path) const
+{
+    const std::string key = SourcePathIdentityKey(path);
+    const auto match = std::find_if(
+        sources_.begin(),
+        sources_.end(),
+        [&key](const SourceListEntry& entry) { return entry.key == key; });
+    return match == sources_.end() ? SourceCollectionFolderListingHandle{}
+                                   : match->validated_folder_listing;
+}
+
 SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
@@ -185,10 +197,15 @@ SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
 SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
-    SpectrumSnapshotHandle snapshot)
+    SpectrumSnapshotHandle snapshot,
+    SourceCollectionFolderListingHandle validated_folder_listing)
 {
     SourceCollectionRosterPreparedOpenResult result;
-    AddOrUpdateSourceResult update = AddOrUpdateSource(path, snapshot, spectrum_index);
+    AddOrUpdateSourceResult update = AddOrUpdateSource(
+        path,
+        snapshot,
+        spectrum_index,
+        std::move(validated_folder_listing));
     current_source_index_ = update.source_index;
     result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
     SetSnapshot(std::move(snapshot), result.action);
@@ -284,7 +301,8 @@ const SourceCollectionRoster::SourceListEntry* SourceCollectionRoster::current_s
 SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpdateSource(
     const std::filesystem::path& path,
     SpectrumSnapshotHandle snapshot,
-    std::size_t spectrum_index)
+    std::size_t spectrum_index,
+    SourceCollectionFolderListingHandle validated_folder_listing)
 {
     AddOrUpdateSourceResult result;
     const std::string key = SourcePathIdentityKey(path);
@@ -298,6 +316,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         match->state_label = SnapshotStateLabelText(snapshot);
         result.replaced_cached_snapshot = std::move(match->cached_snapshot);
         match->cached_snapshot = std::move(snapshot);
+        match->validated_folder_listing = std::move(validated_folder_listing);
         match->last_spectrum_index = spectrum_index;
         result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));
         return result;
@@ -310,6 +329,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     entry.type_label = SnapshotTypeLabelText(snapshot);
     entry.state_label = SnapshotStateLabelText(snapshot);
     entry.cached_snapshot = std::move(snapshot);
+    entry.validated_folder_listing = std::move(validated_folder_listing);
     entry.last_spectrum_index = spectrum_index;
     sources_.push_back(std::move(entry));
     result.source_index = sources_.size() - 1;

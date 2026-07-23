@@ -77,6 +77,11 @@ SourceCollectionLoadDependencies DefaultDependencies()
     SourceCollectionLoadDependencies dependencies;
     dependencies.snapshot_loader = LoadSpectrumSnapshotFromPathCancelable;
     dependencies.folder_snapshot_loader = LoadFolderSpectrumSnapshotFromListingCancelable;
+    dependencies.folder_scanner =
+        [](const std::filesystem::path& path,
+           const SourceCollectionCancellationCheckpoint& checkpoint) {
+            return ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
     dependencies.workflow_cache_loader = LoadSampleWorkflowPreparationCacheBundle;
     dependencies.workflow_cache_paths = {
         DefaultSampleLabelingStateCachePath(),
@@ -93,6 +98,9 @@ void FillMissingDependencies(SourceCollectionLoadDependencies& dependencies)
     }
     if (!dependencies.folder_snapshot_loader) {
         dependencies.folder_snapshot_loader = std::move(defaults.folder_snapshot_loader);
+    }
+    if (!dependencies.folder_scanner) {
+        dependencies.folder_scanner = std::move(defaults.folder_scanner);
     }
     if (!dependencies.workflow_cache_loader) {
         dependencies.workflow_cache_loader = std::move(defaults.workflow_cache_loader);
@@ -448,27 +456,30 @@ private:
         const Task& task,
         SpectrumSnapshotHandle snapshot,
         SourceCollectionContext context,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
+        const SourceCollectionCancellationCheckpoint& checkpoint,
+        SourceCollectionFolderListingHandle verified_folder_listing = {})
     {
         if (CanReusePreparedWorkflow(context.identity, task.request.reuse_identity)) {
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkWorkflowReused(true);
             }
             SourceCollectionIdentity identity = context.identity;
-            return PreparedSourceCollection{
+            PreparedSourceCollection prepared{
                 task.id,
                 task.request.path,
                 task.request.spectrum_index,
                 std::move(snapshot),
                 PreparedSourceCollectionReuse{std::move(identity)},
             };
+            prepared.verified_folder_listing = std::move(verified_folder_listing);
+            return prepared;
         }
         if (task.request.navigation_attempt) {
             task.request.navigation_attempt->MarkWorkflowReused(false);
         }
         PreparedSampleWorkflowState workflow =
             PrepareWorkflow(task, *snapshot, context, checkpoint);
-        return PreparedSourceCollection{
+        PreparedSourceCollection prepared{
             task.id,
             task.request.path,
             task.request.spectrum_index,
@@ -478,6 +489,8 @@ private:
                 std::move(workflow),
                 task.request.base_live_workflow_revision},
         };
+        prepared.verified_folder_listing = std::move(verified_folder_listing);
+        return prepared;
     }
 
     PreparedSourceCollection PrepareFolder(
@@ -485,22 +498,34 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         constexpr std::size_t kMaximumAttempts = 2;
+        SourceCollectionFolderListingHandle listing = task.request.folder_listing_hint;
         for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
             checkpoint();
+            // A retained listing may be stale. Validate the requested file
+            // cheaply before decoding so deletion or replacement refreshes the
+            // full generation instead of surfacing a stale-path decode error.
+            if (listing &&
+                (task.request.spectrum_index >= listing->spectra.size() ||
+                 !SourceCollectionFolderSpectrumFileMatchesCurrentState(
+                     listing->spectra[task.request.spectrum_index]))) {
+                listing.reset();
+            }
+            if (!listing) {
+                listing = std::make_shared<const SourceCollectionFolderListing>(
+                    dependencies_.folder_scanner(task.request.path, checkpoint));
+            }
             const SourceCollectionSingleFileState initial_state =
                 CaptureSourceCollectionSingleFileState(
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
-            const SourceCollectionFolderListing listing =
-                ScanSourceCollectionFolder(task.request.path, {}, checkpoint);
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkSnapshotLoadStarted(true);
             }
             SpectrumSnapshotHandle snapshot = dependencies_.folder_snapshot_loader(
                 task.request.path,
                 task.request.spectrum_index,
-                listing,
+                *listing,
                 [checkpoint]() {
                     try {
                         checkpoint();
@@ -516,29 +541,38 @@ private:
             }
             SourceCollectionContext context = BuildFolderSourceCollectionContextCancelable(
                 *snapshot,
-                listing,
+                *listing,
                 checkpoint);
             FinalizeContext(task, context, checkpoint);
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkContextPrepared();
             }
-            const SourceCollectionFolderListing verified_listing =
-                ScanSourceCollectionFolder(task.request.path, {}, checkpoint);
+            SourceCollectionFolderListingHandle verified_listing =
+                std::make_shared<const SourceCollectionFolderListing>(
+                    dependencies_.folder_scanner(task.request.path, checkpoint));
             const SourceCollectionSingleFileState verified_state =
                 CaptureSourceCollectionSingleFileState(
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
             const bool revalidation_succeeded =
-                SourceCollectionFolderListingsMatch(listing, verified_listing, checkpoint) &&
+                SourceCollectionFolderListingsMatch(*listing, *verified_listing, checkpoint) &&
                 SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkSourceRevalidated(
                     revalidation_succeeded);
             }
             if (revalidation_succeeded) {
-                return BuildPrepared(task, std::move(snapshot), std::move(context), checkpoint);
+                return BuildPrepared(
+                    task,
+                    std::move(snapshot),
+                    std::move(context),
+                    checkpoint,
+                    std::move(verified_listing));
             }
+            // Promote the fresh observation to the next attempt. It remains a
+            // candidate until another post-decode scan proves it stable.
+            listing = std::move(verified_listing);
         }
         throw std::runtime_error(
             "The source folder kept changing while it was loaded; try again after synchronization settles.");
