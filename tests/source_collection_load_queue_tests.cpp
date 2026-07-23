@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -38,6 +39,34 @@ void WriteFixture(const std::filesystem::path& path)
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     Require(stream.good(), "could not create source queue fixture");
     stream << "fixture";
+}
+
+class MutableDirectoryChangeGeneration final
+    : public specforge::DirectoryChangeGeneration {
+public:
+    [[nodiscard]] bool IsCurrent() const noexcept override
+    {
+        return current_.load(std::memory_order_relaxed);
+    }
+
+    void Invalidate() noexcept
+    {
+        current_.store(false, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic_bool current_ = true;
+};
+
+specforge::SourceCollectionFolderListingGenerationHandle MakeFolderListingGeneration(
+    const std::filesystem::path& folder,
+    specforge::DirectoryChangeGenerationHandle change_generation)
+{
+    return std::make_shared<const specforge::SourceCollectionFolderListingGeneration>(
+        specforge::SourceCollectionFolderListingGeneration{
+            specforge::ScanSourceCollectionFolder(folder),
+            std::move(change_generation),
+        });
 }
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
@@ -479,14 +508,15 @@ void TestFolderUsesOnePreparedListing()
     std::filesystem::remove_all(folder);
 }
 
-void TestFolderListingHintAvoidsRedundantInitialScan()
+void TestCurrentFolderListingGenerationAvoidsFullRescan()
 {
     const std::filesystem::path folder = UniqueTempPath("_folder_listing_hint");
     std::filesystem::create_directory(folder);
     WriteFixture(folder / "sample.csv");
-    const specforge::SourceCollectionFolderListingHandle listing_hint =
-        std::make_shared<const specforge::SourceCollectionFolderListing>(
-            specforge::ScanSourceCollectionFolder(folder));
+    const auto change_generation =
+        std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation_hint =
+        MakeFolderListingGeneration(folder, change_generation);
     std::atomic_int folder_scan_calls = 0;
     specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
         [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
@@ -501,31 +531,116 @@ void TestFolderListingHintAvoidsRedundantInitialScan()
         [](const auto& path, std::size_t index, const auto& listing, const auto&) {
             return MakeSnapshot(path, index, listing.spectra.size());
         };
-    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
-    (void)queue.Enqueue({
-        .path = folder,
-        .folder_listing_hint = listing_hint,
-    });
-    auto completions = WaitForCompletions(queue, 1);
-    Require(completions.front().prepared.has_value(), "hinted folder task should prepare successfully");
+    bool prepared = false;
+    bool published_listing = false;
+    {
+        specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+        (void)queue.Enqueue({
+            .path = folder,
+            .folder_listing_generation_hint = listing_generation_hint,
+        });
+        auto completions = WaitForCompletions(queue, 1);
+        prepared = completions.front().prepared.has_value();
+        published_listing =
+            prepared &&
+            completions.front().prepared->folder_listing_generation != nullptr;
+    }
+    Require(prepared, "hinted folder task should prepare successfully");
     Require(
-        folder_scan_calls.load() == 1,
-        "a verified folder listing hint should eliminate the redundant initial scan");
+        folder_scan_calls.load() == 0,
+        "a current folder listing generation should not rescan a stable folder");
     Require(
-        completions.front().prepared->verified_folder_listing != nullptr,
+        published_listing,
         "a successful folder load should publish its post-decode verified listing");
     std::filesystem::remove_all(folder);
 }
 
-void TestStaleFolderListingHintRefreshesBeforeDecode()
+void TestDirectoryChangeGenerationInvalidatesAfterMutation()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_change_generation");
+    std::filesystem::create_directory(folder);
+    const std::filesystem::path sample = folder / "sample.csv";
+    const std::filesystem::path added = folder / "added.csv";
+    const std::filesystem::path renamed = folder / "renamed.csv";
+    WriteFixture(sample);
+
+    const auto require_invalidation =
+        [&folder](const std::function<void()>& mutate, std::string_view message) {
+            const specforge::DirectoryChangeGenerationHandle generation =
+                specforge::BeginDirectoryChangeGeneration(folder);
+            Require(generation != nullptr, "Windows folder change generation should be available");
+            Require(generation->IsCurrent(), "a new folder change generation should start current");
+            mutate();
+            Require(
+                WaitUntil([&generation]() { return !generation->IsCurrent(); }),
+                message);
+        };
+    require_invalidation(
+        [&added]() { WriteFixture(added); },
+        "adding a first-level file should invalidate the folder change generation");
+    require_invalidation(
+        [&sample]() {
+            std::ofstream stream(sample, std::ios::binary | std::ios::app);
+            stream << "changed";
+        },
+        "modifying a member file should invalidate the folder change generation");
+    require_invalidation(
+        [&added, &renamed]() { std::filesystem::rename(added, renamed); },
+        "renaming a first-level file should invalidate the folder change generation");
+    require_invalidation(
+        [&renamed]() { std::filesystem::remove(renamed); },
+        "removing a first-level file should invalidate the folder change generation");
+    std::filesystem::remove_all(folder);
+}
+
+void TestUnavailableFolderGenerationKeepsFullRevalidationFallback()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_generation_fallback");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation_hint =
+        MakeFolderListingGeneration(folder, {});
+    std::atomic_int folder_scan_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
+    dependencies.folder_change_generation_factory =
+        [](const auto&) -> specforge::DirectoryChangeGenerationHandle {
+            return {};
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({
+        .path = folder,
+        .folder_listing_generation_hint = listing_generation_hint,
+    });
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "fallback folder task should prepare");
+    Require(
+        folder_scan_calls.load() == 1,
+        "an unavailable change generation should preserve one full post-decode scan");
+    std::filesystem::remove_all(folder);
+}
+
+void TestStaleFolderListingGenerationRefreshesBeforeDecode()
 {
     const std::filesystem::path folder = UniqueTempPath("_stale_folder_listing_hint");
     std::filesystem::create_directory(folder);
     const std::filesystem::path sample = folder / "sample.csv";
     WriteFixture(sample);
-    const specforge::SourceCollectionFolderListingHandle listing_hint =
-        std::make_shared<const specforge::SourceCollectionFolderListing>(
-            specforge::ScanSourceCollectionFolder(folder));
+    const auto change_generation =
+        std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation_hint =
+        MakeFolderListingGeneration(folder, change_generation);
     {
         std::ofstream stream(sample, std::ios::binary | std::ios::app);
         stream << "changed";
@@ -541,26 +656,30 @@ void TestStaleFolderListingHintRefreshesBeforeDecode()
             ++folder_scan_calls;
             return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
         };
+    dependencies.folder_change_generation_factory =
+        [](const auto&) {
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        };
     dependencies.folder_snapshot_loader =
         [&](const auto& path, std::size_t index, const auto& listing, const auto&) {
             ++folder_loader_calls;
             Require(
                 listing.spectra.front().stat_fingerprint !=
-                    listing_hint->spectra.front().stat_fingerprint,
+                    listing_generation_hint->listing.spectra.front().stat_fingerprint,
                 "the decoder should receive a refreshed listing after the target file changes");
             return MakeSnapshot(path, index, listing.spectra.size());
         };
     specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
     (void)queue.Enqueue({
         .path = folder,
-        .folder_listing_hint = listing_hint,
+        .folder_listing_generation_hint = listing_generation_hint,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "stale hinted folder task should refresh and succeed");
     Require(folder_loader_calls.load() == 1, "a stale target should not be decoded before its listing refresh");
     Require(
-        folder_scan_calls.load() == 2,
-        "a stale target should use one refresh scan and one post-decode revalidation scan");
+        folder_scan_calls.load() == 1,
+        "a stale target should refresh once and validate the new generation without a second scan");
     std::filesystem::remove_all(folder);
 }
 
@@ -607,9 +726,10 @@ void TestChangedFolderRetriesOneStableGeneration()
     const std::filesystem::path folder = UniqueTempPath("_retry_folder");
     std::filesystem::create_directory(folder);
     WriteFixture(folder / "sample.csv");
-    const specforge::SourceCollectionFolderListingHandle listing_hint =
-        std::make_shared<const specforge::SourceCollectionFolderListing>(
-            specforge::ScanSourceCollectionFolder(folder));
+    const auto initial_change_generation =
+        std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation_hint =
+        MakeFolderListingGeneration(folder, initial_change_generation);
     std::atomic_int loader_calls = 0;
     std::atomic_int folder_scan_calls = 0;
     specforge::NavigationLatencyTrace trace(
@@ -630,8 +750,13 @@ void TestChangedFolderRetriesOneStableGeneration()
         [&](const auto& path, std::size_t index, const auto& listing, const auto&) {
             if (++loader_calls == 1) {
                 WriteFixture(path / "added.csv");
+                initial_change_generation->Invalidate();
             }
             return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    dependencies.folder_change_generation_factory =
+        [](const auto&) {
+            return std::make_shared<MutableDirectoryChangeGeneration>();
         };
     dependencies.folder_scanner =
         [&](const auto& path, const auto& checkpoint) {
@@ -641,18 +766,19 @@ void TestChangedFolderRetriesOneStableGeneration()
     specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
     (void)queue.Enqueue({
         .path = folder,
-        .folder_listing_hint = listing_hint,
+        .folder_listing_generation_hint = listing_generation_hint,
         .navigation_attempt = navigation_attempt,
     });
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed folder should settle on a stable retry");
     Require(loader_calls.load() == 2, "changed folder should be decoded exactly one additional time");
     Require(
-        folder_scan_calls.load() == 2,
-        "a changed hinted folder should scan once per decoded generation, not twice");
+        folder_scan_calls.load() == 1,
+        "a changed hinted folder should scan only the replacement generation");
     Require(
-        completions.front().prepared->verified_folder_listing &&
-            completions.front().prepared->verified_folder_listing->spectra.size() == 2,
+        completions.front().prepared->folder_listing_generation &&
+            completions.front().prepared->folder_listing_generation
+                    ->listing.spectra.size() == 2,
         "the stable retry should publish the newly verified folder generation");
     const specforge::NavigationLatencyAttemptReport report = navigation_attempt->Report();
     Require(
@@ -835,8 +961,10 @@ int main()
     TestBatchPublishesInRequestOrder();
     TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
-    TestFolderListingHintAvoidsRedundantInitialScan();
-    TestStaleFolderListingHintRefreshesBeforeDecode();
+    TestCurrentFolderListingGenerationAvoidsFullRescan();
+    TestDirectoryChangeGenerationInvalidatesAfterMutation();
+    TestUnavailableFolderGenerationKeepsFullRevalidationFallback();
+    TestStaleFolderListingGenerationRefreshesBeforeDecode();
     TestChangedFileRetriesOneStableGeneration();
     TestChangedFolderRetriesOneStableGeneration();
     TestCancelSuppressesCompletion();

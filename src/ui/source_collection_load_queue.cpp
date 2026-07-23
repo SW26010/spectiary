@@ -82,6 +82,7 @@ SourceCollectionLoadDependencies DefaultDependencies()
            const SourceCollectionCancellationCheckpoint& checkpoint) {
             return ScanSourceCollectionFolder(path, {}, checkpoint);
         };
+    dependencies.folder_change_generation_factory = BeginDirectoryChangeGeneration;
     dependencies.workflow_cache_loader = LoadSampleWorkflowPreparationCacheBundle;
     dependencies.workflow_cache_paths = {
         DefaultSampleLabelingStateCachePath(),
@@ -101,6 +102,10 @@ void FillMissingDependencies(SourceCollectionLoadDependencies& dependencies)
     }
     if (!dependencies.folder_scanner) {
         dependencies.folder_scanner = std::move(defaults.folder_scanner);
+    }
+    if (!dependencies.folder_change_generation_factory) {
+        dependencies.folder_change_generation_factory =
+            std::move(defaults.folder_change_generation_factory);
     }
     if (!dependencies.workflow_cache_loader) {
         dependencies.workflow_cache_loader = std::move(defaults.workflow_cache_loader);
@@ -457,7 +462,7 @@ private:
         SpectrumSnapshotHandle snapshot,
         SourceCollectionContext context,
         const SourceCollectionCancellationCheckpoint& checkpoint,
-        SourceCollectionFolderListingHandle verified_folder_listing = {})
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {})
     {
         if (CanReusePreparedWorkflow(context.identity, task.request.reuse_identity)) {
             if (task.request.navigation_attempt) {
@@ -471,7 +476,7 @@ private:
                 std::move(snapshot),
                 PreparedSourceCollectionReuse{std::move(identity)},
             };
-            prepared.verified_folder_listing = std::move(verified_folder_listing);
+            prepared.folder_listing_generation = std::move(folder_listing_generation);
             return prepared;
         }
         if (task.request.navigation_attempt) {
@@ -489,8 +494,23 @@ private:
                 std::move(workflow),
                 task.request.base_live_workflow_revision},
         };
-        prepared.verified_folder_listing = std::move(verified_folder_listing);
+        prepared.folder_listing_generation = std::move(folder_listing_generation);
         return prepared;
+    }
+
+    SourceCollectionFolderListingGenerationHandle ScanFolderListingGeneration(
+        const std::filesystem::path& path,
+        const SourceCollectionCancellationCheckpoint& checkpoint)
+    {
+        DirectoryChangeGenerationHandle change_generation =
+            dependencies_.folder_change_generation_factory(path);
+        SourceCollectionFolderListing listing =
+            dependencies_.folder_scanner(path, checkpoint);
+        return std::make_shared<const SourceCollectionFolderListingGeneration>(
+            SourceCollectionFolderListingGeneration{
+                std::move(listing),
+                std::move(change_generation),
+            });
     }
 
     PreparedSourceCollection PrepareFolder(
@@ -498,22 +518,30 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         constexpr std::size_t kMaximumAttempts = 2;
-        SourceCollectionFolderListingHandle listing = task.request.folder_listing_hint;
+        SourceCollectionFolderListingGenerationHandle listing_generation =
+            task.request.folder_listing_generation_hint;
         for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
             checkpoint();
-            // A retained listing may be stale. Validate the requested file
-            // cheaply before decoding so deletion or replacement refreshes the
-            // full generation instead of surfacing a stale-path decode error.
-            if (listing &&
-                (task.request.spectrum_index >= listing->spectra.size() ||
+            // A retained generation may be stale. Poll its invalidation token
+            // and validate the requested file cheaply before decoding so
+            // deletion or replacement refreshes the full listing instead of
+            // surfacing a stale-path decode error.
+            if (listing_generation &&
+                ((listing_generation->change_generation &&
+                  !listing_generation->IsCurrent()) ||
+                 task.request.spectrum_index >=
+                     listing_generation->listing.spectra.size() ||
                  !SourceCollectionFolderSpectrumFileMatchesCurrentState(
-                     listing->spectra[task.request.spectrum_index]))) {
-                listing.reset();
+                     listing_generation
+                         ->listing.spectra[task.request.spectrum_index]))) {
+                listing_generation.reset();
             }
-            if (!listing) {
-                listing = std::make_shared<const SourceCollectionFolderListing>(
-                    dependencies_.folder_scanner(task.request.path, checkpoint));
+            if (!listing_generation) {
+                listing_generation =
+                    ScanFolderListingGeneration(task.request.path, checkpoint);
             }
+            const SourceCollectionFolderListing& listing =
+                listing_generation->listing;
             const SourceCollectionSingleFileState initial_state =
                 CaptureSourceCollectionSingleFileState(
                     task.request.path,
@@ -525,7 +553,7 @@ private:
             SpectrumSnapshotHandle snapshot = dependencies_.folder_snapshot_loader(
                 task.request.path,
                 task.request.spectrum_index,
-                *listing,
+                listing,
                 [checkpoint]() {
                     try {
                         checkpoint();
@@ -541,23 +569,39 @@ private:
             }
             SourceCollectionContext context = BuildFolderSourceCollectionContextCancelable(
                 *snapshot,
-                *listing,
+                listing,
                 checkpoint);
             FinalizeContext(task, context, checkpoint);
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkContextPrepared();
             }
-            SourceCollectionFolderListingHandle verified_listing =
-                std::make_shared<const SourceCollectionFolderListing>(
-                    dependencies_.folder_scanner(task.request.path, checkpoint));
             const SourceCollectionSingleFileState verified_state =
                 CaptureSourceCollectionSingleFileState(
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
+            SourceCollectionFolderListingGenerationHandle verified_generation =
+                listing_generation;
+            bool listing_generation_is_current = false;
+            if (listing_generation->change_generation) {
+                listing_generation_is_current = listing_generation->IsCurrent();
+            } else {
+                // Change notifications are an optimization. If the platform
+                // cannot provide a generation boundary, preserve the previous
+                // full post-decode comparison as the correctness fallback.
+                verified_generation =
+                    ScanFolderListingGeneration(task.request.path, checkpoint);
+                listing_generation_is_current =
+                    SourceCollectionFolderListingsMatch(
+                        listing,
+                        verified_generation->listing,
+                        checkpoint) &&
+                    (!verified_generation->change_generation ||
+                     verified_generation->IsCurrent());
+            }
             const bool revalidation_succeeded =
-                SourceCollectionFolderListingsMatch(*listing, *verified_listing, checkpoint) &&
-                SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
+                SourceCollectionSingleFileStatesMatch(initial_state, verified_state) &&
+                listing_generation_is_current;
             if (task.request.navigation_attempt) {
                 task.request.navigation_attempt->MarkSourceRevalidated(
                     revalidation_succeeded);
@@ -568,11 +612,22 @@ private:
                     std::move(snapshot),
                     std::move(context),
                     checkpoint,
-                    std::move(verified_listing));
+                    std::move(verified_generation));
             }
-            // Promote the fresh observation to the next attempt. It remains a
-            // candidate until another post-decode scan proves it stable.
-            listing = std::move(verified_listing);
+            if (listing_generation_is_current) {
+                // The folder generation is still reusable when only an
+                // annotation dependency changed during preparation.
+                listing_generation = std::move(verified_generation);
+            } else if (!listing_generation->change_generation &&
+                       verified_generation &&
+                       (!verified_generation->change_generation ||
+                        verified_generation->IsCurrent())) {
+                // In fallback mode, promote the fresh observation to the next
+                // attempt just as the previous scan-and-compare path did.
+                listing_generation = std::move(verified_generation);
+            } else {
+                listing_generation.reset();
+            }
         }
         throw std::runtime_error(
             "The source folder kept changing while it was loaded; try again after synchronization settles.");

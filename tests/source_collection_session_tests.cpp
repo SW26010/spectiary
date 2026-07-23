@@ -4510,7 +4510,7 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         "prepared source activation should reconcile against the retained filter without rescanning");
 }
 
-void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
+void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
 {
     const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
     specforge::SourceCollectionSession session(
@@ -4536,8 +4536,9 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
     context.manifest.sample_names = {"a.csv", "b.csv"};
     specforge::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(snapshot, context, 0, {}, {});
-    auto* listing_value = new specforge::SourceCollectionFolderListing();
-    listing_value->spectra = {
+    auto* listing_generation_value =
+        new specforge::SourceCollectionFolderListingGeneration();
+    listing_generation_value->listing.spectra = {
         {source_path / "a.csv", "csv", "a-stat"},
         {source_path / "b.csv", "csv", "b-stat"},
     };
@@ -4545,10 +4546,10 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
         std::make_shared<std::promise<std::thread::id>>();
     std::future<std::thread::id> listing_destroyed =
         listing_destroyed_promise->get_future();
-    specforge::SourceCollectionFolderListingHandle verified_listing(
-        listing_value,
+    specforge::SourceCollectionFolderListingGenerationHandle verified_generation(
+        listing_generation_value,
         [listing_destroyed_promise](
-            const specforge::SourceCollectionFolderListing* value) {
+            const specforge::SourceCollectionFolderListingGeneration* value) {
             delete value;
             listing_destroyed_promise->set_value(std::this_thread::get_id());
         });
@@ -4560,20 +4561,22 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
         specforge::PreparedSourceCollectionPlan{
             std::move(context),
             std::move(workflow)},
-        verified_listing);
+        verified_generation);
     Require(result.loaded, "prepared folder generation should load");
     std::optional<specforge::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint.has_value(), "known folder source should expose a subsequent load hint");
     Require(
-        hint->folder_listing_hint == verified_listing,
-        "subsequent navigation should reuse the exact immutable verified listing");
+        hint->folder_listing_generation_hint == verified_generation,
+        "subsequent navigation should reuse the exact immutable listing generation");
 
-    const std::weak_ptr<const specforge::SourceCollectionFolderListing> retired_listing =
-        verified_listing;
+    const std::weak_ptr<const specforge::SourceCollectionFolderListingGeneration>
+        retired_listing_generation = verified_generation;
     hint.reset();
-    verified_listing.reset();
-    Require(!retired_listing.expired(), "the roster should own the active verified listing");
+    verified_generation.reset();
+    Require(
+        !retired_listing_generation.expired(),
+        "the roster should own the active listing generation");
     Require(
         Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
@@ -4584,11 +4587,11 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
         1,
         MakeSnapshot(source_path, 2, 1),
         specforge::PreparedSourceCollectionReuse{identity},
-        std::make_shared<const specforge::SourceCollectionFolderListing>());
+        std::make_shared<const specforge::SourceCollectionFolderListingGeneration>());
     Require(replacement.loaded, "the replacement folder generation should load");
     Require(
-        !retired_listing.expired(),
-        "the replaced listing should remain owned until background retirement");
+        !retired_listing_generation.expired(),
+        "the replaced listing generation should remain owned until background retirement");
     const std::thread::id caller_thread = std::this_thread::get_id();
     specforge::SourceCollectionLoadQueue retirement_queue;
     for (specforge::BackgroundRetirementHandle& resource :
@@ -4600,8 +4603,8 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
             std::future_status::ready,
         "the replaced listing should be reclaimed promptly");
     Require(
-        retired_listing.expired(),
-        "background retirement should release the replaced listing");
+        retired_listing_generation.expired(),
+        "background retirement should release the replaced listing generation");
     Require(
         listing_destroyed.get() != caller_thread,
         "the replaced listing should be reclaimed off the UI caller thread");
@@ -4728,7 +4731,7 @@ void RunAllTests()
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();
-    TestVerifiedFolderListingFlowsIntoSubsequentLoadHint();
+    TestFolderListingGenerationFlowsIntoSubsequentLoadHint();
     TestSourceSessionFlushFailureKeepsDirtyState();
 }
 

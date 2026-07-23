@@ -169,12 +169,39 @@ post-decode scan 仍在。437 次 presented navigation 的总体 input-to-Presen
 成本与 activation 的相关系数约为 0.73。代码检查确认 roster 替换 listing 时，旧
 listing 的最后一个引用可能在 UI thread 同步析构。修复沿用现有 background reclaimer：
 roster 把被替换的 listing 随 prepared-open result 交回 session，session 将原
-`shared_ptr<const SourceCollectionFolderListing>` 直接作为 opaque retirement token
+listing generation handle 直接作为 opaque retirement token
 返回 Shell；不新增线程、队列或 source-of-truth。回归测试锁定旧 listing 在
 `background_retirement` drain 前保持存活，现有 reclaimer test 继续保证实际析构不在
 调用线程。这里的 listing reuse 不是 adjacent spectrum snapshot cache，
-`navigation_latency.cache_hit` 仍保持原语义。reclaimer 后的真实 profile 只需复核
-activation 尾部，不需要重新证明 inspection/revalidation 的扫描次数合同。
+`navigation_latency.cache_hit` 仍保持原语义。
+
+随后完整且 `dropped_events=0` 的
+`specforge-profile-20260723-121328-397.jsonl` 再次确认剩余热点。312 次 presented
+navigation 中，keyboard Next 的 `source_revalidation_ms` p50/p95 为
+16.825/146.121ms，UI Next 为 142.839/146.576ms；相对地 keyboard Next 的
+`source_inspection_ms` p50/p95 仅为 0.235/0.323ms，decode 为 0.791/5.463ms。
+这证明 warm pre-decode 路径已足够窄，而每次 post-decode 全目录枚举、排序和逐项比较
+仍主导长尾。
+
+第二阶段修复把 immutable listing 与一次性 directory-change generation 绑定：
+
+- worker 在完整扫描前先建立只观察目录第一层的 generation boundary；同一 generation
+  内的 listing 由 source roster 保留并随下一次请求作为 opaque cache hint 返回。
+- Windows generation 由 change notification 提供，文件/目录名、attributes、size、
+  last-write、creation 或 security 变化都会让该 generation 永久失效；测试覆盖新增、
+  成员修改、重命名和删除。
+- warm navigation 仍先对目标 spectrum 做 O(1) stat，解码和 context 构造后再检查
+  annotation/source dependency state 与 generation。generation 未变时不再重新枚举、
+  排序或比较整个目录；失效时重扫并按同一最多两轮的 TOCTOU 合同重新解码。
+- change notification 不可用时，不信任 cache，保留原有 post-decode full
+  scan-and-compare 作为 correctness fallback。
+- listing generation 被替换、source 被移除或 prepared result 被拒绝时，继续交给现有
+  background reclaimer 释放，避免大 listing 或 change handle 在 UI thread 析构。
+
+自动化回归锁定 stable warm generation 为 0 次 full scan、stale target 为 1 次 refresh
+scan、加载期间目录变化只扫描 replacement generation，以及 notification 不可用时仍执行
+1 次 full revalidation。真实 Release profile 仍需重新采集，才能量化
+`source_revalidation_ms` 与 input-to-Present 的新分布；这些测试只证明调用次数和失效合同。
 
 ## 设计规则
 

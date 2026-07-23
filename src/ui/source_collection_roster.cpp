@@ -170,7 +170,7 @@ std::vector<std::string> SourceCollectionRoster::SavedSourceKeys() const
     return keys;
 }
 
-SourceCollectionFolderListingHandle SourceCollectionRoster::ValidatedFolderListing(
+SourceCollectionFolderListingGenerationHandle SourceCollectionRoster::FolderListingGeneration(
     const std::filesystem::path& path) const
 {
     const std::string key = SourcePathIdentityKey(path);
@@ -178,8 +178,9 @@ SourceCollectionFolderListingHandle SourceCollectionRoster::ValidatedFolderListi
         sources_.begin(),
         sources_.end(),
         [&key](const SourceListEntry& entry) { return entry.key == key; });
-    return match == sources_.end() ? SourceCollectionFolderListingHandle{}
-                                   : match->validated_folder_listing;
+    return match == sources_.end()
+        ? SourceCollectionFolderListingGenerationHandle{}
+        : match->folder_listing_generation;
 }
 
 SourceCollectionSessionAction SourceCollectionRoster::OpenSource(
@@ -198,18 +199,18 @@ SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSou
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
-    SourceCollectionFolderListingHandle validated_folder_listing)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
 {
     SourceCollectionRosterPreparedOpenResult result;
     AddOrUpdateSourceResult update = AddOrUpdateSource(
         path,
         snapshot,
         spectrum_index,
-        std::move(validated_folder_listing));
+        std::move(folder_listing_generation));
     current_source_index_ = update.source_index;
     result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
-    result.replaced_validated_folder_listing =
-        std::move(update.replaced_validated_folder_listing);
+    result.replaced_folder_listing_generation =
+        std::move(update.replaced_folder_listing_generation);
     SetSnapshot(std::move(snapshot), result.action);
     return result;
 }
@@ -241,6 +242,8 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
     if (sources_[source_index].cached_snapshot) {
         result.retired_snapshots.push_back(std::move(sources_[source_index].cached_snapshot));
     }
+    result.retired_folder_listing_generation =
+        std::move(sources_[source_index].folder_listing_generation);
     if (result.removed_current && snapshot_) {
         result.retired_snapshots.push_back(std::move(snapshot_));
     }
@@ -304,7 +307,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     const std::filesystem::path& path,
     SpectrumSnapshotHandle snapshot,
     std::size_t spectrum_index,
-    SourceCollectionFolderListingHandle validated_folder_listing)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
 {
     AddOrUpdateSourceResult result;
     const std::string key = SourcePathIdentityKey(path);
@@ -318,9 +321,9 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         match->state_label = SnapshotStateLabelText(snapshot);
         result.replaced_cached_snapshot = std::move(match->cached_snapshot);
         match->cached_snapshot = std::move(snapshot);
-        result.replaced_validated_folder_listing =
-            std::move(match->validated_folder_listing);
-        match->validated_folder_listing = std::move(validated_folder_listing);
+        result.replaced_folder_listing_generation =
+            std::move(match->folder_listing_generation);
+        match->folder_listing_generation = std::move(folder_listing_generation);
         match->last_spectrum_index = spectrum_index;
         result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));
         return result;
@@ -333,7 +336,7 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     entry.type_label = SnapshotTypeLabelText(snapshot);
     entry.state_label = SnapshotStateLabelText(snapshot);
     entry.cached_snapshot = std::move(snapshot);
-    entry.validated_folder_listing = std::move(validated_folder_listing);
+    entry.folder_listing_generation = std::move(folder_listing_generation);
     entry.last_spectrum_index = spectrum_index;
     sources_.push_back(std::move(entry));
     result.source_index = sources_.size() - 1;

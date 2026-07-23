@@ -811,7 +811,7 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
         *identity,
         *current_index,
         revision == live_workflow_revisions_.end() ? 0 : revision->second,
-        roster_->ValidatedFolderListing(path)};
+        roster_->FolderListingGeneration(path)};
 }
 
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
@@ -856,6 +856,10 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
     if (!remove_result.retired_snapshots.empty()) {
         background_retirement.push_back(
             MakeBackgroundRetirementHandle(std::move(remove_result.retired_snapshots)));
+    }
+    if (remove_result.retired_folder_listing_generation) {
+        background_retirement.push_back(
+            std::move(remove_result.retired_folder_listing_generation));
     }
     if (BackgroundRetirementHandle retired_workflow =
             workflow_->RemoveSource(remove_result.removed_source_key)) {
@@ -948,9 +952,15 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     std::size_t spectrum_index,
     SpectrumSnapshotHandle snapshot,
     PreparedSourceCollectionPayload payload,
-    SourceCollectionFolderListingHandle verified_folder_listing)
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation)
 {
     SourceCollectionSessionResult result;
+    const auto retire_folder_listing_generation = [&]() {
+        if (folder_listing_generation) {
+            result.background_retirement.push_back(
+                std::move(folder_listing_generation));
+        }
+    };
     if (const auto* reuse = std::get_if<PreparedSourceCollectionReuse>(&payload);
         reuse != nullptr && !workflow_->CanReusePreparedKnownSource(
                                 SourcePathIdentityKey(path),
@@ -958,6 +968,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         if (snapshot) {
             result.background_retirement.push_back(std::move(snapshot));
         }
+        retire_folder_listing_generation();
         result.message = "The prepared source reuse target is no longer available.";
         return result;
     }
@@ -993,6 +1004,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         }
         result.background_retirement.push_back(
             MakeBackgroundRetirementHandle(std::move(payload)));
+        retire_folder_listing_generation();
         result.message = "The prepared known-source plan is no longer current.";
         return result;
     }
@@ -1038,6 +1050,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             result.canceled_source_follow_up_path = previous_snapshot->source.path;
             result.message = "Prepared navigation no longer has a selectable final spectrum.";
         }
+        retire_folder_listing_generation();
         return result;
     }
 
@@ -1046,7 +1059,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             path,
             spectrum_index,
             std::move(snapshot),
-            std::move(verified_folder_listing));
+            std::move(folder_listing_generation));
     MergeSourceCollectionSessionAction(result.action, roster_result.action);
     const bool is_prepared_plan =
         std::holds_alternative<PreparedSourceCollectionPlan>(payload);
@@ -1060,9 +1073,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     if (previous_snapshot && previous_snapshot != roster_->snapshot()) {
         result.background_retirement.push_back(std::move(previous_snapshot));
     }
-    if (roster_result.replaced_validated_folder_listing) {
+    if (roster_result.replaced_folder_listing_generation) {
         result.background_retirement.push_back(
-            std::move(roster_result.replaced_validated_folder_listing));
+            std::move(roster_result.replaced_folder_listing_generation));
     }
     if (auto* plan = std::get_if<PreparedSourceCollectionPlan>(&payload)) {
         PreparedSampleWorkflowActivationResult activation =

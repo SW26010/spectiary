@@ -5,6 +5,7 @@
 #include "profile/navigation_latency_trace.h"
 #include "ui/background_retirement.h"
 #include "ui/sample_workflow_preparation.h"
+#include "ui/source_collection_folder_listing_generation.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -23,10 +24,10 @@ struct SourceCollectionLoadRequest {
     std::vector<std::filesystem::path> annotation_paths;
     std::optional<SourceCollectionIdentity> reuse_identity;
     std::optional<std::uint64_t> base_live_workflow_revision;
-    // The last post-decode listing verified for this loaded source. It is an
-    // optimization hint only; every prepared result still requires a fresh
-    // post-decode folder scan.
-    SourceCollectionFolderListingHandle folder_listing_hint;
+    // The last stable listing generation observed for this loaded source. It
+    // remains an optimization hint; the worker revalidates its generation and
+    // the source/annotation dependencies before publishing a snapshot.
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
     NavigationLatencyAttemptHandle navigation_attempt;
 };
 
@@ -36,8 +37,9 @@ struct PreparedSourceCollection {
     std::size_t spectrum_index = 0;
     SpectrumSnapshotHandle snapshot;
     PreparedSourceCollectionPayload payload;
-    // Immutable evidence from the successful post-decode revalidation pass.
-    SourceCollectionFolderListingHandle verified_folder_listing;
+    // Immutable listing cache and invalidation boundary accepted by the
+    // successful post-decode revalidation pass.
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation;
 };
 
 struct SourceCollectionLoadCompletion {
@@ -63,6 +65,8 @@ struct SourceCollectionLoadDependencies {
     using FolderScanner = std::function<SourceCollectionFolderListing(
         const std::filesystem::path&,
         const SourceCollectionCancellationCheckpoint&)>;
+    using FolderChangeGenerationFactory = std::function<DirectoryChangeGenerationHandle(
+        const std::filesystem::path&)>;
     using WorkflowCacheLoader = std::function<SampleWorkflowPreparationCacheBundle(
         const SampleWorkflowPreparationPaths&,
         const std::function<void()>&)>;
@@ -70,6 +74,7 @@ struct SourceCollectionLoadDependencies {
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
     FolderScanner folder_scanner;
+    FolderChangeGenerationFactory folder_change_generation_factory;
     WorkflowCacheLoader workflow_cache_loader;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };

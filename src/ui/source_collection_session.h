@@ -5,6 +5,7 @@
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_preparation.h"
+#include "ui/source_collection_folder_listing_generation.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -34,7 +35,7 @@ struct SourceCollectionLoadHint {
     SourceCollectionIdentity identity;
     std::size_t spectrum_index = 0;
     std::uint64_t live_workflow_revision = 0;
-    SourceCollectionFolderListingHandle folder_listing_hint;
+    SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
 };
 
 enum class SourceCollectionSessionIntentKind {
@@ -299,7 +300,7 @@ public:
         std::size_t spectrum_index,
         SpectrumSnapshotHandle snapshot,
         PreparedSourceCollectionPayload payload,
-        SourceCollectionFolderListingHandle verified_folder_listing = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,

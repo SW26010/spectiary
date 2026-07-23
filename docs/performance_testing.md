@@ -163,11 +163,13 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   `source_task_id`、`source_kind`、`workflow_reused`：用于关联请求性质。当前尚未实现导航
   缓存，所以 `cache_hit` 固定为 `false`；后续缓存实现可沿用同一口径做冷/热路径 A/B。
 
-Folder source 的 warm navigation 会复用上一次 post-decode 验证通过的 immutable
-listing，因此 `source_inspection_ms` 正常只包含窄的目标文件/依赖检查；一次 fresh full
-folder scan 仍应保留在 `source_revalidation_ms`。首次打开、stale target 或目录变化重试
-可以在 inspection 阶段重新出现 full scan。这个 listing reuse 不是 adjacent spectrum
-snapshot cache，不应据此把 `cache_hit` 写为 `true`。
+Folder source 的 warm navigation 会复用上一次验证通过的 immutable listing generation。
+`source_inspection_ms` 正常只包含窄的目标文件/依赖检查；若目录 generation 未失效，
+`source_revalidation_ms` 也只包含 generation poll 与 source/annotation dependency stat，
+不再执行 full folder scan、sort 或 listing compare。首次打开、stale target、目录变化
+重试，或系统无法建立 directory-change generation 时，full scan 可以重新出现。
+这个 listing generation cache 不是 adjacent spectrum snapshot cache，不应据此把
+`cache_hit` 写为 `true`。
 
 采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
 下一条，等最后一条显示后再 `Stop Recording`。然后运行：

@@ -2,6 +2,7 @@
 
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/source_collection_folder_listing_generation.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -20,12 +21,13 @@ struct SourceCollectionRosterRemoveResult {
     std::filesystem::path removed_path;
     std::string removed_source_key;
     std::vector<SpectrumSnapshotHandle> retired_snapshots;
+    SourceCollectionFolderListingGenerationHandle retired_folder_listing_generation;
 };
 
 struct SourceCollectionRosterPreparedOpenResult {
     SourceCollectionSessionAction action;
     SpectrumSnapshotHandle replaced_cached_snapshot;
-    SourceCollectionFolderListingHandle replaced_validated_folder_listing;
+    SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
 };
 
 class SourceCollectionRoster {
@@ -42,7 +44,7 @@ public:
     [[nodiscard]] std::vector<SourceCollectionSourceView> SourceViews() const;
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSources() const;
     [[nodiscard]] std::vector<std::string> SavedSourceKeys() const;
-    [[nodiscard]] SourceCollectionFolderListingHandle ValidatedFolderListing(
+    [[nodiscard]] SourceCollectionFolderListingGenerationHandle FolderListingGeneration(
         const std::filesystem::path& path) const;
 
     [[nodiscard]] SourceCollectionSessionAction OpenSource(
@@ -52,7 +54,7 @@ public:
         const std::filesystem::path& path,
         std::size_t spectrum_index,
         SpectrumSnapshotHandle snapshot,
-        SourceCollectionFolderListingHandle validated_folder_listing = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
@@ -62,7 +64,7 @@ private:
     struct AddOrUpdateSourceResult {
         std::size_t source_index = 0;
         SpectrumSnapshotHandle replaced_cached_snapshot;
-        SourceCollectionFolderListingHandle replaced_validated_folder_listing;
+        SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
     };
 
     struct SourceListEntry {
@@ -76,9 +78,9 @@ private:
         // optimization without retesting CSV/folder error snapshots: that change
         // reproduced 0xc0000005 shared_ptr refcount crashes.
         SpectrumSnapshotHandle cached_snapshot;
-        // Retained with the source entry so the next row load can skip only
-        // the redundant pre-decode scan, never post-decode revalidation.
-        SourceCollectionFolderListingHandle validated_folder_listing;
+        // Retained with the source entry so the next row load can reuse the
+        // listing while its invalidation boundary remains current.
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation;
         std::size_t last_spectrum_index = 0;
     };
 
@@ -87,7 +89,7 @@ private:
         const std::filesystem::path& path,
         SpectrumSnapshotHandle snapshot,
         std::size_t spectrum_index,
-        SourceCollectionFolderListingHandle validated_folder_listing = {});
+        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {});
     void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
 
     SnapshotLoader snapshot_loader_;

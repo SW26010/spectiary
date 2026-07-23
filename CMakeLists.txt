@@ -115,6 +115,7 @@ add_library(specforge_core STATIC
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp
+    src/platform/win32_directory_change_generation.cpp
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp

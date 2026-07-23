@@ -803,8 +803,9 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .base_live_workflow_revision =
                 hint ? std::optional<std::uint64_t>{hint->live_workflow_revision}
                      : std::nullopt,
-            .folder_listing_hint = hint ? hint->folder_listing_hint
-                                        : SourceCollectionFolderListingHandle{},
+            .folder_listing_generation_hint =
+                hint ? hint->folder_listing_generation_hint
+                     : SourceCollectionFolderListingGenerationHandle{},
             .navigation_attempt = std::move(navigation_attempt),
         });
     pending_source_loads_.emplace(
@@ -1058,7 +1059,7 @@ void ShellUi::DrainSourceLoadCompletions(
             prepared.spectrum_index,
             std::move(prepared.snapshot),
             std::move(prepared.payload),
-            std::move(prepared.verified_folder_listing));
+            std::move(prepared.folder_listing_generation));
         const bool completes_navigation_trace =
             result.loaded && !result.follow_up_spectrum_index && ticket.navigation_trace;
         if (completes_navigation_trace) {
