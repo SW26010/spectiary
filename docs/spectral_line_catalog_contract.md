@@ -63,6 +63,11 @@ approximate and must not imply laboratory or calibration precision. Removing
 an external attribution requires replacing both the value and its provenance;
 changing only `source_ref` is not sufficient.
 
+When one catalog marker combines multiple source transitions, such as an
+unresolved multiplet represented as a band, `legal/DATA_SOURCES.txt` must list
+every constituent transition wavelength and describe how they were combined.
+A shared `source_ref` alone is not a sufficient transformation record.
+
 Rows are sorted by marker position after loading. `line` rows draw vertical
 reference lines. `band` rows draw shaded ranges. Bands are display markers, not
 range-navigation windows.

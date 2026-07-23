@@ -212,6 +212,11 @@ foreach ($expected in @(
     'Atomic Line List v3.00b5',
     'Creative Commons Attribution 4.0 International',
     '5707fb5304021392540c66bbf4a76535373d48cf008164f9f22a1f5343d49097',
+    '6709.613 and',
+    '6709.764 Angstrom into one unresolved band marker',
+    'beta release offered for testing',
+    'uses these values for visual line identification',
+    'wavelength-calibration',
     'https://doi.org/10.1093/mnras/stad3230',
     'approximate 4078.9 Angstrom vacuum'
 )) {
@@ -235,9 +240,19 @@ if ($sr.Count -ne 1 -or $sr[0].vacuum_angstrom -ne '4078.9' -or
     throw 'Sr II must remain the curated approximate 4078.9 Angstrom marker.'
 }
 
+foreach ($markerId in @('li_i_6708', 'k_i_7667', 'k_i_7701', 'mg_i_8809')) {
+    $markerRows = @($catalog | Where-Object { $_.id -eq $markerId })
+    if ($markerRows.Count -ne 1) {
+        throw "Expected exactly one release-catalog row for '$markerId', found $($markerRows.Count)."
+    }
+    if ($markerRows[0].source_ref -ne 'atll_v3_00b5') {
+        throw "Release-catalog marker '$markerId' must use source_ref 'atll_v3_00b5'."
+    }
+}
+
 $atllRows = @($catalog | Where-Object { $_.source_ref -eq 'atll_v3_00b5' })
-if ($atllRows.Count -ne 15) {
-    throw "Expected 15 Atomic Line List rows, found $($atllRows.Count)."
+if ($atllRows.Count -ne 19) {
+    throw "Expected 19 Atomic Line List rows, found $($atllRows.Count)."
 }
 
 $baRows = @($catalog | Where-Object { $_.source_ref -eq 'ferrara_et_al_2024_air_to_vacuum' })

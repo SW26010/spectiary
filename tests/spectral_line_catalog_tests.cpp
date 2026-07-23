@@ -89,7 +89,20 @@ void TestUsesVacuumWavelengthsForAtomicMarkers()
     Require(NearlyEqual(*FindMarker(catalog, "h_beta").vacuum_angstrom, 4862.683, 1.0e-6), "H beta should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d2").vacuum_angstrom, 5891.583, 1.0e-6), "Na I D2 should use vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "na_i_d1").vacuum_angstrom, 5897.558, 1.0e-6), "Na I D1 should use vacuum wavelength");
+    const specforge::SpectralLineMarker& lithium = FindMarker(catalog, "li_i_6708");
+    Require(lithium.kind == specforge::SpectralLineMarkerKind::Band, "Li I doublet should be one unresolved band marker");
+    Require(
+        NearlyEqual(*lithium.start_vacuum_angstrom, 6709.613, 1.0e-6) &&
+            NearlyEqual(*lithium.end_vacuum_angstrom, 6709.764, 1.0e-6),
+        "Li I band should preserve both Atomic Line List vacuum transitions");
+    Require(Contains(lithium.notes, "unresolved"), "Li I notes should state that the doublet is unresolved");
+    Require(NearlyEqual(*FindMarker(catalog, "k_i_7667").vacuum_angstrom, 7667.021, 1.0e-6), "K I 7667 should use Atomic Line List vacuum wavelength");
+    Require(
+        Contains(FindMarker(catalog, "k_i_7667").notes, "telluric O2"),
+        "K I 7667 should carry a telluric O2 warning");
+    Require(NearlyEqual(*FindMarker(catalog, "k_i_7701").vacuum_angstrom, 7701.093, 1.0e-6), "K I 7701 should use Atomic Line List vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "ca_ii_8500").vacuum_angstrom, 8500.358, 1.0e-6), "Ca II triplet should use Atomic Line List vacuum wavelength");
+    Require(NearlyEqual(*FindMarker(catalog, "mg_i_8809").vacuum_angstrom, 8809.175, 1.0e-6), "Mg I 8809 should use Atomic Line List vacuum wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "sr_ii_4078").vacuum_angstrom, 4078.9, 1.0e-6), "Sr II should remain the curated approximate vacuum marker");
     Require(NearlyEqual(*FindMarker(catalog, "ba_ii_4555").vacuum_angstrom, 4555.301, 1.0e-6), "Ba II should use the converted observed wavelength");
     Require(NearlyEqual(*FindMarker(catalog, "ba_ii_6499").vacuum_angstrom, 6498.686, 1.0e-6), "Ba II should use the converted observed wavelength");

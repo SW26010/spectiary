@@ -38,10 +38,14 @@ c13_cn_6260	13CN	line	CN	6260.000			6260	carbon_star_requirements	Approximate mo
 ba_ii_6499	Ba II	line	Ba II	6498.686			6499	ferrara_et_al_2024_air_to_vacuum	Observed 6496.891 A air wavelength converted to vacuum and rounded.
 cn_6500	CN	line	CN	6500.000			6500	carbon_star_requirements	Approximate molecular marker.
 h_alpha	H alpha	line	Balmer	6564.608			6565	atll_v3_00b5	Atomic Line List weighted vacuum marker, rounded to 0.001 A.
+li_i_6708	Li I 6708 multiplet	band	Li I		6709.613	6709.764	6708	atll_v3_00b5	Atomic Line List vacuum transitions 6709.613 and 6709.764 A combined as an unresolved resonance doublet; not for wavelength calibration.
 cn_6928	CN	line	CN	6927.600			6928	carbon_star_requirements	Approximate red CN marker.
 cn_6945	CN	line	CN	6945.400			6945	carbon_star_requirements	Approximate red CN marker.
+k_i_7667	K I	line	K I	7667.021			7667	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A; near strong telluric O2 absorption.
+k_i_7701	K I	line	K I	7701.093			7701	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 cn_7853	CN	line	CN	7852.900			7853	carbon_star_requirements	Approximate red CN marker.
 cn_7899	CN	line	CN	7898.600			7899	carbon_star_requirements	Approximate red CN marker.
 ca_ii_8500	Ca II	line	Ca II	8500.358			8500	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 ca_ii_8544	Ca II	line	Ca II	8544.438			8544	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
 ca_ii_8665	Ca II	line	Ca II	8664.520			8665	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
+mg_i_8809	Mg I	line	Mg I	8809.175			8809	atll_v3_00b5	Atomic Line List vacuum wavelength, rounded to 0.001 A.
