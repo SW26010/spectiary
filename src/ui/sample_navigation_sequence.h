@@ -35,6 +35,13 @@ struct SampleNavigationSequenceInput {
     std::string_view sample_name_query;
 };
 
+struct SampleNavigationSequenceProjection {
+    std::optional<std::size_t> current_source_row;
+    std::optional<std::size_t> current_sequence_position;
+    std::optional<std::size_t> previous_target;
+    std::optional<std::size_t> next_target;
+};
+
 struct SampleNavigationSequence {
     bool active = false;
     bool empty = false;
@@ -42,6 +49,8 @@ struct SampleNavigationSequence {
     std::size_t source_row_count = 0;
     std::vector<std::size_t> ordered_rows;
     std::vector<bool> included_rows;
+    // Materialized orders cache row -> position; max<size_t> marks an excluded row.
+    std::vector<std::size_t> source_row_positions;
     std::optional<std::size_t> current_source_row;
     std::optional<std::size_t> current_sequence_position;
     std::optional<std::size_t> previous_target;
@@ -60,10 +69,19 @@ struct SampleNavigationSequence {
         std::string_view sample_name) const;
     [[nodiscard]] std::optional<std::size_t> LabelAdvanceTarget(
         const std::vector<bool>& eligible_samples) const;
+    [[nodiscard]] std::optional<std::size_t> LabelAdvanceTarget(
+        const SampleNavigationSequenceProjection& projection,
+        const std::vector<bool>& eligible_samples) const;
 };
 
 [[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(double value);
 [[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(std::string value);
+[[nodiscard]] SampleNavigationSequenceProjection ProjectSampleNavigationSequence(
+    const SampleNavigationSequence& sequence,
+    std::optional<std::size_t> current_source_row);
+void ApplySampleNavigationSequenceProjection(
+    SampleNavigationSequence& sequence,
+    const SampleNavigationSequenceProjection& projection);
 [[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(
     const SampleNavigationSequenceInput& input);
 [[nodiscard]] SampleNavigationSequence BuildSampleNavigationSequence(

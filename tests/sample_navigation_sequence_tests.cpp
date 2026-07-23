@@ -140,6 +140,46 @@ void TestSortingStableTieBreak()
     RequireRows(sequence.ordered_rows, {3, 0, 1, 2}, "descending sort should keep source order for equal values");
 }
 
+void TestSortedTopologySupportsIndependentCursorProjections()
+{
+    specforge::SampleNavigationSortChoice sort;
+    sort.active = true;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(2.0),
+        specforge::MakeSampleNavigationSortValue(1.0),
+        specforge::MakeSampleNavigationSortValue(1.0),
+        specforge::MakeSampleNavigationSortValue(3.0),
+    };
+
+    specforge::SampleNavigationSequenceInput input;
+    input.source_row_count = 4;
+    input.sort_choice = &sort;
+    input.current_source_row = std::nullopt;
+    const specforge::SampleNavigationSequence sequence =
+        specforge::BuildSampleNavigationSequence(input);
+
+    const specforge::SampleNavigationSequenceProjection row_zero =
+        specforge::ProjectSampleNavigationSequence(sequence, 0);
+    Require(
+        row_zero.current_sequence_position && *row_zero.current_sequence_position == 2,
+        "row 0 should project to its cached sorted position");
+    Require(
+        row_zero.previous_target && *row_zero.previous_target == 2 &&
+            row_zero.next_target && *row_zero.next_target == 3,
+        "row 0 projection should resolve adjacent sorted targets");
+    Require(
+        sequence.LabelAdvanceTarget(row_zero, {false, false, false, true}) == 3,
+        "label eligibility should be evaluated against each projected cursor on demand");
+
+    const specforge::SampleNavigationSequenceProjection row_one =
+        specforge::ProjectSampleNavigationSequence(sequence, 1);
+    Require(
+        row_one.current_sequence_position && *row_one.current_sequence_position == 0 &&
+            row_one.previous_target && *row_one.previous_target == 1 &&
+            row_one.next_target && *row_one.next_target == 2,
+        "the same topology should independently project a different cursor");
+}
+
 }  // namespace
 
 int main()
@@ -149,5 +189,6 @@ int main()
     TestEmptySequence();
     TestCurrentRowExcluded();
     TestSortingStableTieBreak();
+    TestSortedTopologySupportsIndependentCursorProjections();
     return 0;
 }

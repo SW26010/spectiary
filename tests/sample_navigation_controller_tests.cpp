@@ -1,4 +1,5 @@
 #include "domain/spectrum_snapshot.h"
+#include "profile/navigation_latency_trace.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
 
@@ -689,6 +690,230 @@ void TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter()
         "sort-only row location must not claim that an inactive filter blocked the target");
 }
 
+void TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_deferred_sequence_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleNavigationController controller(cache_path);
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {"zero", "one", "two", "three", "four"};
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot("C:/synthetic/deferred-sequence.npy", "deferred-sequence", 5, 1),
+        specforge::SourceCollectionIdentity{
+            .id = "deferred-sequence-identity",
+            .source_name = "deferred-sequence",
+            .source_fingerprint = "deferred-sequence-source",
+            .context_fingerprint = "deferred-sequence-context",
+            .spectrum_count = 5,
+        },
+        std::move(manifest));
+
+    specforge::NavigationTargetResolutionReport report;
+    const auto navigate_warm =
+        [&controller, &report](
+            const specforge::SampleNavigationRequest& request,
+            bool remember_labeling_position = false,
+            std::optional<std::size_t> base_index = std::nullopt) {
+            report = {};
+            const specforge::SampleNavigationResult result = controller.NavigateDeferred(
+                request,
+                remember_labeling_position,
+                base_index,
+                &report);
+            Require(report.sequence_cache_hit, "warm deferred navigation should reuse sequence state");
+            Require(
+                report.sequence_build_count == 0,
+                "warm deferred navigation should not rebuild its sequence state");
+            Require(
+                report.base_sequence_ns >= 0 && report.target_sequence_ns >= 0,
+                "cursor projection timings should remain valid non-negative measurements");
+            return result;
+        };
+
+    specforge::SampleNavigationResult result =
+        navigate_warm(specforge::SampleNavigationRequest::Next());
+    Require(
+        result.target_found && result.current_index == 2 &&
+            controller.current_index() == 1 && controller.pending_index() == 2 &&
+            !report.pending_present,
+        "first deferred next should project from committed row 1 without committing it");
+
+    result = navigate_warm(specforge::SampleNavigationRequest::Next());
+    Require(
+        result.current_index == 3 && controller.current_index() == 1 &&
+            controller.pending_index() == 3 && report.pending_present,
+        "rapid next should project from the pending cursor");
+
+    Require(controller.RetargetDeferredNavigation(4), "retarget should preserve deferred ownership");
+    result = navigate_warm(specforge::SampleNavigationRequest::Previous());
+    Require(
+        result.current_index == 3 && controller.current_index() == 1 &&
+            controller.pending_index() == 3,
+        "retargeted previous should project from the replacement pending cursor");
+
+    controller.CancelDeferredNavigation();
+    Require(
+        controller.current_index() == 1 && !controller.pending_index(),
+        "cancel should retain the committed cursor and clear only pending intent");
+
+    result = navigate_warm(specforge::SampleNavigationRequest::Next(), true);
+    Require(
+        result.current_index == 2 && controller.pending_navigation_remembers_labeling_position(),
+        "deferred navigation should retain labeling-position intent");
+    result = navigate_warm(specforge::SampleNavigationRequest::Next(), false, 1);
+    Require(
+        result.current_index == 2 && controller.pending_navigation_remembers_labeling_position(),
+        "retargeting the same pending row must preserve the stronger labeling-position intent");
+    Require(controller.CommitDeferredNavigation(2), "matching pending navigation should commit");
+    Require(
+        controller.current_index() == 2 && !controller.pending_index() &&
+            !controller.pending_navigation_remembers_labeling_position(),
+        "commit should promote pending to committed and clear pending metadata");
+
+    result = navigate_warm(specforge::SampleNavigationRequest::LabelAdvanceToEligible(
+        {false, false, false, false, true}));
+    Require(result.current_index == 4, "label advance should evaluate the first eligibility set");
+    controller.CancelDeferredNavigation();
+    result = navigate_warm(specforge::SampleNavigationRequest::LabelAdvanceToEligible(
+        {false, false, false, true, false}));
+    Require(
+        result.current_index == 3,
+        "label advance eligibility must be recomputed instead of cached with sequence topology");
+    controller.CancelDeferredNavigation();
+
+    for (std::size_t repetition = 0; repetition < 100; ++repetition) {
+        result = navigate_warm(specforge::SampleNavigationRequest::Next());
+        Require(result.current_index == 3, "repeated warm next should resolve from committed row 2");
+        controller.CancelDeferredNavigation();
+        result = navigate_warm(specforge::SampleNavigationRequest::Previous());
+        Require(result.current_index == 1, "repeated warm previous should resolve from committed row 2");
+        controller.CancelDeferredNavigation();
+    }
+}
+
+void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_sequence_invalidation.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SampleNavigationController controller(cache_path);
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {"alpha", "beta", "gamma", "delta", "omega"};
+    const auto activate = [&controller](
+                              std::string source_fingerprint,
+                              std::string context_fingerprint,
+                              specforge::SourceCollectionManifest next_manifest) {
+        controller.ActivateSource(
+            "source",
+            MakeSnapshot("C:/synthetic/sequence-invalidation.npy", "sequence-invalidation", 5, 0),
+            specforge::SourceCollectionIdentity{
+                .id = "sequence-invalidation-identity",
+                .source_name = "sequence-invalidation",
+                .source_fingerprint = std::move(source_fingerprint),
+                .context_fingerprint = std::move(context_fingerprint),
+                .spectrum_count = 5,
+            },
+            std::move(next_manifest));
+    };
+    activate("source-v1", "context-v1", std::move(manifest));
+
+    controller.SetSampleNameQuery("ta");
+    Require(
+        controller.sample_name_matches() == std::vector<std::size_t>({1, 3}),
+        "query change should build matches from the current context");
+
+    (void)controller.SetSampleFilter({false, true, false, true, false});
+    Require(controller.current_index() == 1, "filter change should reconcile onto row 1");
+    specforge::NavigationTargetResolutionReport report;
+    specforge::SampleNavigationResult result = controller.NavigateDeferred(
+        specforge::SampleNavigationRequest::Next(),
+        false,
+        std::nullopt,
+        &report);
+    Require(
+        result.current_index == 3 && report.sequence_cache_hit &&
+            report.sequence_build_count == 0,
+        "deferred next should use the rebuilt filtered topology");
+    controller.CancelDeferredNavigation();
+
+    specforge::SampleNavigationSortChoice sort;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(0.0),
+        specforge::MakeSampleNavigationSortValue(1.0),
+        specforge::MakeSampleNavigationSortValue(2.0),
+        specforge::MakeSampleNavigationSortValue(3.0),
+        specforge::MakeSampleNavigationSortValue(4.0),
+    };
+    sort.direction = specforge::SampleNavigationSortDirection::Descending;
+    (void)controller.SetSampleSorting(std::move(sort));
+    report = {};
+    result = controller.NavigateDeferred(
+        specforge::SampleNavigationRequest::Previous(),
+        false,
+        std::nullopt,
+        &report);
+    Require(
+        result.current_index == 3 && report.sequence_cache_hit &&
+            report.sequence_build_count == 0,
+        "sort change should replace the cached topology before deferred navigation");
+    controller.CancelDeferredNavigation();
+
+    specforge::SourceCollectionManifest changed_manifest;
+    changed_manifest.sample_names = {"zero", "one", "two", "three", "four"};
+    activate("source-v2", "context-v2", std::move(changed_manifest));
+    Require(
+        controller.sample_name_matches().empty(),
+        "source/context change must not retain query matches from the old manifest");
+    controller.SetSampleNameQuery("thr");
+    Require(
+        controller.sample_name_matches() == std::vector<std::size_t>({3}),
+        "query matches should rebuild from the replacement context");
+
+    specforge::SourceCollectionManifest second_manifest;
+    second_manifest.sample_names = {"a", "b", "c", "d", "e"};
+    controller.ActivateSource(
+        "source-two",
+        MakeSnapshot("C:/synthetic/sequence-invalidation-two.npy", "sequence-invalidation-two", 5, 0),
+        specforge::SourceCollectionIdentity{
+            .id = "sequence-invalidation-identity-two",
+            .source_name = "sequence-invalidation-two",
+            .source_fingerprint = "source-two",
+            .context_fingerprint = "context-two",
+            .spectrum_count = 5,
+        },
+        std::move(second_manifest));
+    Require(
+        controller.ActivateKnownSource("source").has_value(),
+        "source switch fixture should restore the first known source");
+    report = {};
+    result = controller.NavigateDeferred(
+        specforge::SampleNavigationRequest::Previous(),
+        false,
+        std::nullopt,
+        &report);
+    Require(
+        result.current_index == 3 && !report.sequence_cache_hit &&
+            report.sequence_build_count == 1,
+        "switching sources should fully invalidate and cold-build the restored sequence state once");
+    controller.CancelDeferredNavigation();
+    report = {};
+    result = controller.NavigateDeferred(
+        specforge::SampleNavigationRequest::Previous(),
+        false,
+        std::nullopt,
+        &report);
+    Require(
+        result.current_index == 3 && report.sequence_cache_hit &&
+            report.sequence_build_count == 0,
+        "the next same-source navigation should use the newly warmed state");
+}
+
 }  // namespace
 
 int main()
@@ -707,5 +932,7 @@ int main()
     TestFilterConstrainsSequentialNavigation();
     TestEmptyFilterClearsCurrentSequenceRow();
     TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
+    TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions();
+    TestSequenceStateInvalidatesWithNavigationInputsAndContext();
     return 0;
 }

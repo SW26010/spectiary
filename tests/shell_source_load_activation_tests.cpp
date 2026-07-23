@@ -4,6 +4,7 @@
 #include "domain/sample_labeling.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -564,8 +565,8 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         !superseded_report->target_resolution.pending_present &&
         presented_report->target_resolution.row_count == 3 &&
         presented_report->target_resolution.pending_present &&
-        !presented_report->target_resolution.sequence_cache_hit &&
-        presented_report->target_resolution.sequence_build_count == 2 &&
+        presented_report->target_resolution.sequence_cache_hit &&
+        presented_report->target_resolution.sequence_build_count == 0 &&
         target_resolution_sum(*presented_report) ==
             presented_report->target_resolved_ns -
                 presented_report->requested_ns;
@@ -720,8 +721,8 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
                 resolution.navigation_state_result_ns;
             return resolution.row_count >= 1 &&
                 !resolution.pending_present &&
-                !resolution.sequence_cache_hit &&
-                resolution.sequence_build_count == 2 &&
+                resolution.sequence_cache_hit &&
+                resolution.sequence_build_count == 0 &&
                 resolution.effective_index_ns >= 0 &&
                 resolution.pending_activation_supersede_ns >= 0 &&
                 resolution.base_sequence_ns >= 0 &&
@@ -786,6 +787,175 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
     Require(
         clear_report_complete,
         "label clearing auto-advance should emit an analyzer-compatible target-resolution report");
+}
+
+void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_warm_sequence_reuse.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "warm sequence reuse fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    Access::EnableNavigationTracing(*shell, 200);
+
+    struct ProjectionTimings {
+        std::vector<std::int64_t> base_ns;
+        std::vector<std::int64_t> target_ns;
+    };
+    std::array<ProjectionTimings, 4> timings;
+    std::uint64_t presentation_frame = 200;
+    const auto navigate_and_present =
+        [&shell, &presentation_frame](
+            specforge::NavigationLatencyInputKind input_kind,
+            const specforge::SampleNavigationRequest& request,
+            std::size_t from_index,
+            std::size_t target_index,
+            ProjectionTimings& projection_timings) {
+            const specforge::SpectrumSnapshotHandle before =
+                Access::Session(*shell).CurrentSampleSnapshot();
+            Require(
+                before && before->collection.current_index == from_index,
+                "warm navigation repetition should start from its fixed source index");
+            Access::EnableNavigationTracing(*shell, presentation_frame);
+            const bool keyboard_input =
+                input_kind == specforge::NavigationLatencyInputKind::KeyboardPrevious ||
+                input_kind == specforge::NavigationLatencyInputKind::KeyboardNext;
+            const specforge::SourceCollectionSessionResult result = Access::SubmitNavigation(
+                *shell,
+                specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::Move(request)),
+                input_kind,
+                keyboard_input
+                    ? std::optional<specforge::NavigationLatencyTimePoint>{
+                          specforge::NavigationLatencyTrace::Now()}
+                    : std::nullopt);
+            Require(
+                result.follow_up_spectrum_index == target_index,
+                "warm navigation repetition should enqueue the expected target");
+
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            while (std::chrono::steady_clock::now() < deadline) {
+                Access::Drain(*shell);
+                const specforge::SpectrumSnapshotHandle snapshot =
+                    Access::Session(*shell).CurrentSampleSnapshot();
+                if (snapshot && snapshot->collection.current_index == target_index &&
+                    Access::PendingLoadCount(*shell) == 0) {
+                    break;
+                }
+                std::this_thread::sleep_for(1ms);
+            }
+
+            const std::vector<specforge::NavigationLatencyReport> reports =
+                Access::CompleteFramePresentation(*shell, presentation_frame++, 7);
+            if (reports.size() != 1) {
+                const specforge::SpectrumSnapshotHandle after =
+                    Access::Session(*shell).CurrentSampleSnapshot();
+                throw std::runtime_error(
+                    "each warm navigation should complete one trace; frame=" +
+                    std::to_string(presentation_frame - 1) +
+                    "; reports=" + std::to_string(reports.size()) +
+                    "; current=" +
+                    (after ? std::to_string(after->collection.current_index) : "none") +
+                    "; pending_loads=" + std::to_string(Access::PendingLoadCount(*shell)) +
+                    "; load_error=" + std::string(Access::LoadError(*shell)));
+            }
+            const specforge::NavigationLatencyReport& report = reports.front();
+            const specforge::NavigationTargetResolutionReport& resolution =
+                report.target_resolution;
+            Require(
+                report.outcome == specforge::NavigationLatencyOutcome::Presented &&
+                    report.input_kind == input_kind &&
+                    report.from_index == from_index &&
+                    report.target_index == target_index,
+                "warm navigation should preserve input kind, indices, and presented outcome");
+            Require(
+                !resolution.pending_present &&
+                    resolution.sequence_cache_hit &&
+                    resolution.sequence_build_count == 0,
+                "fixed-index warm navigation should reuse sequence state without rebuilding");
+            Require(
+                resolution.base_sequence_ns >= 0 &&
+                    resolution.target_sequence_ns >= 0 &&
+                    report.attempts.size() == 1,
+                "warm navigation should retain valid projection timings and one load attempt");
+            projection_timings.base_ns.push_back(resolution.base_sequence_ns);
+            projection_timings.target_ns.push_back(resolution.target_sequence_ns);
+        };
+
+    for (std::size_t repetition = 0; repetition < 100; ++repetition) {
+        navigate_and_present(
+            specforge::NavigationLatencyInputKind::UiNext,
+            specforge::SampleNavigationRequest::Next(),
+            0,
+            1,
+            timings[0]);
+        navigate_and_present(
+            specforge::NavigationLatencyInputKind::UiPrevious,
+            specforge::SampleNavigationRequest::Previous(),
+            1,
+            0,
+            timings[1]);
+    }
+    for (std::size_t repetition = 0; repetition < 100; ++repetition) {
+        navigate_and_present(
+            specforge::NavigationLatencyInputKind::KeyboardNext,
+            specforge::SampleNavigationRequest::Next(),
+            0,
+            1,
+            timings[2]);
+        navigate_and_present(
+            specforge::NavigationLatencyInputKind::KeyboardPrevious,
+            specforge::SampleNavigationRequest::Previous(),
+            1,
+            0,
+            timings[3]);
+    }
+
+    const auto percentile = [](std::vector<std::int64_t> values, std::size_t numerator) {
+        std::sort(values.begin(), values.end());
+        const std::size_t rank =
+            std::max<std::size_t>(1, (values.size() * numerator + 99) / 100);
+        return values[rank - 1];
+    };
+    constexpr std::array<std::string_view, 4> kTimingLabels = {
+        "ui_next",
+        "ui_previous",
+        "keyboard_next",
+        "keyboard_previous",
+    };
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        Require(
+            timings[index].base_ns.size() == 100 &&
+                timings[index].target_ns.size() == 100,
+            "each fixed-index input/direction group should contain 100 warm samples");
+        std::printf(
+            "%.*s count=100 base_ns_p50=%lld base_ns_p95=%lld "
+            "target_ns_p50=%lld target_ns_p95=%lld\n",
+            static_cast<int>(kTimingLabels[index].size()),
+            kTimingLabels[index].data(),
+            static_cast<long long>(percentile(timings[index].base_ns, 50)),
+            static_cast<long long>(percentile(timings[index].base_ns, 95)),
+            static_cast<long long>(percentile(timings[index].target_ns, 50)),
+            static_cast<long long>(percentile(timings[index].target_ns, 95)));
+    }
+
+    shell.reset();
+    std::filesystem::remove(path);
 }
 
 void TestNewActivationSupersedesAnUnpresentedOlderTrace()
@@ -1674,6 +1844,7 @@ int main()
         TestAcceptedNavigationUsesLatestMatchingRawKeyInput();
         TestGenericRowLocationDoesNotStartPreviousNextTrace();
         TestWorkflowAutoAdvanceStartsExplicitTrace();
+        TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices();
         TestNewActivationSupersedesAnUnpresentedOlderTrace();
         TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation();
         TestSameFrameSourceSwitchSupersedesActivatedNavigation();

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -75,6 +76,8 @@ bool UsesImplicitSourceOrder(const SampleNavigationSequence& sequence)
 {
     return !sequence.active && sequence.ordered_rows.empty();
 }
+
+constexpr std::size_t kMissingSequencePosition = std::numeric_limits<std::size_t>::max();
 
 }  // namespace
 
@@ -167,7 +170,21 @@ std::optional<std::size_t> SampleNavigationSequence::LocateSampleNameMatch(
 std::optional<std::size_t> SampleNavigationSequence::LabelAdvanceTarget(
     const std::vector<bool>& eligible_samples) const
 {
-    if (!current_source_row) {
+    return LabelAdvanceTarget(
+        SampleNavigationSequenceProjection{
+            .current_source_row = current_source_row,
+            .current_sequence_position = current_sequence_position,
+            .previous_target = previous_target,
+            .next_target = next_target,
+        },
+        eligible_samples);
+}
+
+std::optional<std::size_t> SampleNavigationSequence::LabelAdvanceTarget(
+    const SampleNavigationSequenceProjection& projection,
+    const std::vector<bool>& eligible_samples) const
+{
+    if (!projection.current_source_row) {
         return std::nullopt;
     }
 
@@ -176,24 +193,75 @@ std::optional<std::size_t> SampleNavigationSequence::LabelAdvanceTarget(
     };
 
     if (UsesImplicitSourceOrder(*this)) {
-        for (std::size_t row = *current_source_row + 1; row < source_row_count; ++row) {
+        for (std::size_t row = *projection.current_source_row + 1; row < source_row_count; ++row) {
             if (eligible(row)) {
                 return row;
             }
         }
-        return current_source_row;
+        return projection.current_source_row;
     }
 
-    if (!current_sequence_position) {
+    if (!projection.current_sequence_position) {
         return std::nullopt;
     }
-    for (std::size_t position = *current_sequence_position + 1; position < ordered_rows.size(); ++position) {
+    for (std::size_t position = *projection.current_sequence_position + 1;
+         position < ordered_rows.size();
+         ++position) {
         const std::size_t row = ordered_rows[position];
         if (eligible(row)) {
             return row;
         }
     }
-    return current_source_row;
+    return projection.current_source_row;
+}
+
+SampleNavigationSequenceProjection ProjectSampleNavigationSequence(
+    const SampleNavigationSequence& sequence,
+    std::optional<std::size_t> current_source_row)
+{
+    SampleNavigationSequenceProjection projection;
+    if (!current_source_row || *current_source_row >= sequence.source_row_count) {
+        return projection;
+    }
+
+    std::optional<std::size_t> current_sequence_position;
+    if (UsesImplicitSourceOrder(sequence)) {
+        current_sequence_position = *current_source_row;
+    } else if (*current_source_row < sequence.source_row_positions.size()) {
+        const std::size_t position = sequence.source_row_positions[*current_source_row];
+        if (position != kMissingSequencePosition) {
+            current_sequence_position = position;
+        }
+    }
+    if (!current_sequence_position) {
+        return projection;
+    }
+
+    projection.current_source_row = *current_source_row;
+    projection.current_sequence_position = *current_sequence_position;
+    const std::size_t position = *current_sequence_position;
+    if (UsesImplicitSourceOrder(sequence)) {
+        projection.previous_target = position > 0 ? position - 1 : *current_source_row;
+        projection.next_target =
+            position + 1 < sequence.source_row_count ? position + 1 : *current_source_row;
+    } else {
+        projection.previous_target =
+            position > 0 ? sequence.ordered_rows[position - 1] : *current_source_row;
+        projection.next_target = position + 1 < sequence.ordered_rows.size()
+            ? sequence.ordered_rows[position + 1]
+            : *current_source_row;
+    }
+    return projection;
+}
+
+void ApplySampleNavigationSequenceProjection(
+    SampleNavigationSequence& sequence,
+    const SampleNavigationSequenceProjection& projection)
+{
+    sequence.current_source_row = projection.current_source_row;
+    sequence.current_sequence_position = projection.current_sequence_position;
+    sequence.previous_target = projection.previous_target;
+    sequence.next_target = projection.next_target;
 }
 
 SampleNavigationSequence BuildSampleNavigationSequence(const SampleNavigationSequenceInput& input)
@@ -258,41 +326,25 @@ SampleNavigationSequence BuildSampleNavigationSequence(
                 cancellation_checkpoint();
             }
         }
+
+        sequence.source_row_positions.assign(
+            input.source_row_count,
+            kMissingSequencePosition);
+        for (std::size_t position = 0; position < sequence.ordered_rows.size(); ++position) {
+            if ((position & 0xfffU) == 0U && cancellation_checkpoint) {
+                cancellation_checkpoint();
+            }
+            sequence.source_row_positions[sequence.ordered_rows[position]] = position;
+        }
     }
 
     sequence.empty = materialize_order ? sequence.ordered_rows.empty() : input.source_row_count == 0;
     sequence.row_location_available = !materialize_order ||
                                       IsFullSourceOrder(sequence.ordered_rows, input.source_row_count);
 
-    if (input.current_source_row && *input.current_source_row < input.source_row_count) {
-        if (materialize_order) {
-            const auto current = std::find(
-                sequence.ordered_rows.begin(),
-                sequence.ordered_rows.end(),
-                *input.current_source_row);
-            if (current != sequence.ordered_rows.end()) {
-                sequence.current_source_row = *current;
-                sequence.current_sequence_position =
-                    static_cast<std::size_t>(std::distance(sequence.ordered_rows.begin(), current));
-            }
-        } else {
-            sequence.current_source_row = *input.current_source_row;
-            sequence.current_sequence_position = *input.current_source_row;
-        }
-    }
-
-    if (sequence.current_sequence_position && sequence.current_source_row) {
-        const std::size_t position = *sequence.current_sequence_position;
-        if (materialize_order) {
-            sequence.previous_target =
-                position > 0 ? sequence.ordered_rows[position - 1] : *sequence.current_source_row;
-            sequence.next_target = position + 1 < sequence.ordered_rows.size() ? sequence.ordered_rows[position + 1]
-                                                                               : *sequence.current_source_row;
-        } else {
-            sequence.previous_target = position > 0 ? position - 1 : *sequence.current_source_row;
-            sequence.next_target = position + 1 < input.source_row_count ? position + 1 : *sequence.current_source_row;
-        }
-    }
+    ApplySampleNavigationSequenceProjection(
+        sequence,
+        ProjectSampleNavigationSequence(sequence, input.current_source_row));
 
     if (!input.sample_name_query.empty() && !input.sample_names.empty()) {
         const std::string query = LowerAscii(std::string(input.sample_name_query));

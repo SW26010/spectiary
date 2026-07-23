@@ -152,9 +152,10 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   `target_resolution_ms` 进一步严格拆成六项，且六项之和必须等于 aggregate：
   `effective_index_ms`（读取 committed/pending effective index）、
   `pending_activation_supersede_ms`（检查和更新既有 pending activation/follow-up 的
-  supersede/cancel bookkeeping）、`base_sequence_ms`（构造导航起点 sequence）、
+  supersede/cancel bookkeeping）、`base_sequence_ms`（读取或必要时构造 sequence state，
+  并投影导航起点 cursor）、
   `target_lookup_ms`（按 previous/next/label/locate 规则求目标）、
-  `target_sequence_ms`（以目标 source row 构造结果 sequence）和
+  `target_sequence_ms`（把同一 sequence state 投影到目标 cursor）和
   `navigation_state_result_ms`（其余 navigation state mutation、result propagation 与
   owner-boundary orchestration）。最后一项是从完整 `target_resolution_ms` 扣除前五项所得，
   因而保留边界调用、轻量 bookkeeping 和插桩本身的残余，不应解释成某个隐藏 cache。
@@ -178,9 +179,12 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   `sequence_build_count`。这里 `pending_present` 是 command 进入 Navigation 时是否已有
   deferred sample target；`sequence_cache_hit` 只表示本次 target resolution 是否真的读取
   已 materialize 的 sequence cache，不能从“owner 存在 cache”推断为 `true`；
-  `sequence_build_count` 是本次实际构造次数。当前 `NavigateDeferred` 的 base/target 两条路径
-  都调用 `BuildSequence`，典型成功 previous/next 因而应记录 `false / 2`，这是诊断事实，不是
-  缓存优化。
+  `sequence_build_count` 是本次实际构造次数。sequence state 缓存排序拓扑、active membership、
+  source-row position 和 query matches；committed/pending/base/target index 只做 O(1) cursor
+  投影，不使 state 失效。query、filter、sort 或 source/context 输入改变时完整失效并由 owner
+  重建；label advance 的 eligibility 仍在每次 `target_lookup_ms` 内按需计算，不进入缓存。
+  因此 warm previous/next 应记录 `true / 0`；真正 cold 的首次 target resolution 最多构造一次，
+  记录 `false / 1`。
 
 Folder source 的 warm navigation 会复用上一次验证通过的 immutable listing generation。
 `source_inspection_ms` 正常只包含窄的目标文件/依赖检查；若目录 generation 未失效，
@@ -229,6 +233,13 @@ source-row 区间，分开录制纯 UI 与纯键盘各至少 100 次成功 prese
 目标显示后再继续，除非实验明确要比较 rapid-navigation pending path；普通输入对比要求
 `pending_present=false`。记录 source、起止 index、方向、样本数和 profile 路径，不能把不同
 目录、不同 index window 或 Previous/Next 混成输入设备差异。
+
+`specforge_shell_source_load_activation_tests` 还在同一 synthetic source 的固定 `0 ↔ 1`
+窗口，对 UI/keyboard 的 Previous/Next 各执行 100 次 presented 复测，并输出
+`base_sequence_ns`/`target_sequence_ns` 的 p50/p95。它锁定 accepted-command 之后的 input kind、
+cache/build 计数、load/activation/Present 行为和投影成本；它不模拟物理点击/按键，也不替代真实
+Portable source 的 JSONL A/B。真实 IO/decode/context/renderer phase 是否无回退，仍以随后实际
+数据采集为准。
 
 Portable build 的实际日志通常在 `Data\logs\`，也可以把对应完整路径传给脚本。分析器会
 校验唯一且位于末尾的 recorder summary、`dropped_events == 0`、至少一条导航事件和至少

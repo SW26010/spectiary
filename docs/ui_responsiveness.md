@@ -74,8 +74,12 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 修复方式：
 
 - 增加 cheap snapshot accessor，只返回当前 sample snapshot，不构造 full session view。主图、smoothing、information、spectral lines 等 snapshot-only call site 改用该 accessor。
-- `SampleNavigationController` 持有 sequence cache；navigation read path 通过同一个 cached sequence 解析 previous/next、label auto-advance、sample-name match 和 row location policy。
-- `SampleNavigationSequence` 支持不 materialize source-order rows；active membership 用 mask 表示，`ContainsSourceRow()` 走 O(1)。
+- `SampleNavigationController` 持有 sequence state cache；navigation read path 通过同一个 cached
+  topology/query matches 解析 previous/next、label auto-advance、sample-name match 和 row
+  location policy。committed/pending cursor 只投影，不因 current index 变化重建 state。
+- `SampleNavigationSequence` 支持不 materialize source-order rows；active membership 用 mask
+  表示，排序后的 source row → sequence position 也随 topology 缓存，`ContainsSourceRow()` 和
+  cursor projection 都走 O(1)。
 - per-frame `SourceCollectionNavigationView` 不再复制 `sequence_rows`，只暴露 sequence-facing 状态，例如 active flag、sequence count、current sequence position、source row index 和 row location availability。
 - filter view 和 sorting source view 建 cache，只在 source、annotation、labeling、filter/sort choice 或 workflow context 变化时失效。
 - `SyncActiveSource()` 只在 source identity 或 workflow context fingerprint 变化时 reapply filter/sorting；纯 current-index snapshot load 不再重建工作流状态。

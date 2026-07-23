@@ -158,22 +158,19 @@ private:
         std::size_t filtered_sample_count = 0;
         std::optional<std::size_t> index_before_active_filter;
         SampleNavigationSortChoice sort_choice;
-        mutable bool sequence_cache_valid = false;
-        mutable SampleNavigationSequence sequence_cache;
-        mutable std::optional<std::size_t> interaction_sequence_index;
-        mutable SampleNavigationSequence interaction_sequence_cache;
+        // Cached topology and query matches never own committed/pending cursor state.
+        mutable bool sequence_state_cache_valid = false;
+        mutable SampleNavigationSequence sequence_state_cache;
     };
 
     [[nodiscard]] SourceSession* ActiveSession();
     [[nodiscard]] const SourceSession* ActiveSession() const;
-    [[nodiscard]] static SampleNavigationSequence BuildSequence(const SourceSession& session);
-    [[nodiscard]] static SampleNavigationSequence BuildSequence(
-        const SourceSession& session,
-        std::optional<std::size_t> current_index);
-    [[nodiscard]] static const SampleNavigationSequence& CachedSequence(const SourceSession& session);
-    [[nodiscard]] static const SampleNavigationSequence& InteractionSequence(
+    [[nodiscard]] static SampleNavigationSequence BuildSequenceState(
         const SourceSession& session);
-    static void InvalidateSequence(SourceSession& session);
+    [[nodiscard]] static const SampleNavigationSequence& CachedSequenceState(
+        const SourceSession& session);
+    [[nodiscard]] static const SampleNavigationSequence& CachedSequence(const SourceSession& session);
+    static void InvalidateSequenceState(SourceSession& session);
     static std::optional<std::size_t> ReconcileCurrentWithSequence(SourceSession& session);
     static std::optional<std::size_t> ReconcileDeferredWithSequence(
         SourceSession& session,
@@ -182,7 +179,8 @@ private:
     static void PopulateResultFromSequence(
         SampleNavigationResult& result,
         const SourceSession& session,
-        const SampleNavigationSequence& sequence);
+        const SampleNavigationSequence& sequence,
+        const SampleNavigationSequenceProjection& projection);
     [[nodiscard]] static bool LoadReadOnlyAnnotationIntoSession(
         SourceSession& session,
         const std::filesystem::path& path,
