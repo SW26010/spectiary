@@ -540,7 +540,7 @@ std::optional<std::filesystem::path> ShowSourceFilePicker()
     return DialogResultPath(dialog.Get());
 }
 
-std::optional<std::filesystem::path> ShowSourceFolderPicker()
+std::optional<std::filesystem::path> ShowFolderPicker(const wchar_t* title)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -557,7 +557,7 @@ std::optional<std::filesystem::path> ShowSourceFolderPicker()
         options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_PICKFOLDERS;
         dialog->SetOptions(options);
     }
-    dialog->SetTitle(L"Add source folder");
+    dialog->SetTitle(title);
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
@@ -565,6 +565,11 @@ std::optional<std::filesystem::path> ShowSourceFolderPicker()
     }
 
     return DialogResultPath(dialog.Get());
+}
+
+std::optional<std::filesystem::path> ShowSourceFolderPicker()
+{
+    return ShowFolderPicker(L"Add source folder");
 }
 
 std::optional<std::filesystem::path> ShowAnnotationFilePicker()
@@ -755,7 +760,7 @@ void ShellUi::Render(const ShellStatus& status)
     if (panel_visibility_.spectral_lines) {
         RenderSpectralLinesPanel();
     }
-    RenderSettingsPanel();
+    RenderSettingsPanel(status);
     HandleSampleWorkflowShortcut();
     pending_keyboard_previous_at_.reset();
     pending_keyboard_next_at_.reset();
@@ -837,9 +842,7 @@ bool ShellUi::TakeImmersivePlotModeToggleRequest()
 
 bool ShellUi::TakeProfileRecordingToggleRequest()
 {
-    const bool requested = profile_recording_toggle_requested_;
-    profile_recording_toggle_requested_ = false;
-    return requested;
+    return settings_panel_ui_.TakeProfileRecordingToggleRequest();
 }
 
 bool ShellUi::immersive_plot_mode() const
@@ -2243,37 +2246,6 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         settings_panel_ui_.Open();
     }
 
-    if (ImGui::BeginMenu("Performance")) {
-        const ProfileRecordingUiPresentation recording_presentation =
-            ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
-        if (!recording_presentation.menu_action_enabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::MenuItem(recording_presentation.menu_action.data())) {
-            profile_recording_toggle_requested_ = true;
-        }
-        if (!recording_presentation.menu_action_enabled) {
-            ImGui::EndDisabled();
-        }
-        ImGui::Separator();
-        ImGui::TextDisabled("Automatically stops after 5 minutes or 100 MiB.");
-        if (status.profile_path != nullptr) {
-            const std::string profile_file_name = NarrowPath(status.profile_path->filename());
-            ImGui::TextDisabled("Output: %s", profile_file_name.c_str());
-            if (ImGui::IsItemHovered()) {
-                const std::string profile_path = NarrowPath(*status.profile_path);
-                ImGui::SetTooltip("%s", profile_path.c_str());
-            }
-        }
-        if (!status.profile_status_message.empty()) {
-            ImGui::TextDisabled(
-                "%.*s",
-                static_cast<int>(status.profile_status_message.size()),
-                status.profile_status_message.data());
-        }
-        ImGui::EndMenu();
-    }
-
     RenderTopBarStatus(status, source_load_queue_.NeedsService(), source_load_error_);
 
     ImGui::EndMenuBar();
@@ -2567,9 +2539,21 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     ImGui::End();
 }
 
-void ShellUi::RenderSettingsPanel()
+void ShellUi::RenderSettingsPanel(const ShellStatus& status)
 {
-    settings_panel_ui_.Render();
+    settings_panel_ui_.Render({
+        .profile_open = status.profile_open,
+        .profile_stopping = status.profile_stopping,
+        .profile_path = status.profile_path,
+        .profile_status_message = status.profile_status_message,
+    });
+    if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
+        if (std::optional<std::filesystem::path> directory =
+                ShowFolderPicker(L"Choose performance profile output folder")) {
+            settings_panel_ui_.ApplyProfileOutputDirectorySelection(
+                std::move(*directory));
+        }
+    }
 }
 
 void ShellUi::QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut)

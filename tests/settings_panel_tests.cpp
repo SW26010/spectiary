@@ -27,6 +27,14 @@ struct SettingsPanelUiTestAccess {
     static const std::string& TransientFeedback(const SettingsPanelUi& panel) { return panel.action_status_; }
     static bool ActionFailed(const SettingsPanelUi& panel) { return panel.action_failed_; }
     static void SelectSection(SettingsPanelUi& panel, SettingsSection section) { panel.selected_section_ = section; }
+    static const SettingsPanelEnvironment& Environment(const SettingsPanelUi& panel)
+    {
+        return panel.environment_;
+    }
+    static void ResetProfileOutputDirectory(SettingsPanelUi& panel)
+    {
+        panel.ResetProfileOutputDirectory();
+    }
 };
 
 }  // namespace specforge
@@ -103,9 +111,10 @@ void TestDefaultEnvironmentDescribesThisBuild()
         "settings should expose the CMake project version");
     Require(!environment.release_profile.empty(), "settings should expose the release profile");
     Require(!environment.data_directory.empty(), "settings should expose the application data directory");
+    Require(!environment.log_directory.empty(), "settings should expose the profile output directory");
     Require(
-        environment.log_directory.parent_path() == environment.data_directory,
-        "the diagnostics directory should remain below application data");
+        environment.default_profile_output_directory.parent_path() == environment.data_directory,
+        "the default diagnostics directory should remain below application data");
 }
 
 void TestEnvironmentOverrideControlsDisplayedLogDirectory()
@@ -119,6 +128,52 @@ void TestEnvironmentOverrideControlsDisplayedLogDirectory()
     Require(
         environment.log_directory == override_path,
         "settings should display the same overridden directory used by ProfileSink");
+    Require(
+        environment.profile_output_directory_source ==
+            specforge::ProfileOutputDirectorySource::Environment,
+        "settings should identify an environment-controlled output directory");
+}
+
+void TestProfileOutputDirectorySelectionPersistsAndResets()
+{
+    const std::filesystem::path test_root =
+        std::filesystem::temp_directory_path() / "specforge-settings-panel-profile-output";
+    const std::filesystem::path settings_path = test_root / "profile-settings.json";
+    const std::filesystem::path default_directory = test_root / "default";
+    const std::filesystem::path selected_directory =
+        test_root / L"selected-\u65E5\u5FD7";
+    std::error_code ignored;
+    std::filesystem::remove_all(test_root, ignored);
+
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .release_profile = "Portable",
+        .data_directory = test_root,
+        .log_directory = default_directory,
+        .default_profile_output_directory = default_directory,
+        .profile_settings_path = settings_path,
+    });
+
+    panel.ApplyProfileOutputDirectorySelection(selected_directory);
+    Require(
+        specforge::SettingsPanelUiTestAccess::Environment(panel).log_directory ==
+            selected_directory,
+        "choosing a profile output directory should update the settings view");
+    Require(
+        specforge::LoadProfileSettings(settings_path).output_directory ==
+            selected_directory,
+        "choosing a profile output directory should persist for future recordings");
+
+    specforge::SettingsPanelUiTestAccess::ResetProfileOutputDirectory(panel);
+    Require(
+        specforge::SettingsPanelUiTestAccess::Environment(panel).log_directory ==
+            default_directory,
+        "restoring the default should update the settings view");
+    Require(
+        !specforge::LoadProfileSettings(settings_path).output_directory,
+        "restoring the default should clear the custom directory");
+
+    std::filesystem::remove_all(test_root, ignored);
 }
 
 void TestOpenIsIdempotent()
@@ -179,6 +234,7 @@ void TestRenderSmoke()
         specforge::SettingsSection::Language,
         specforge::SettingsSection::Input,
         specforge::SettingsSection::DataAndRecovery,
+        specforge::SettingsSection::Diagnostics,
         specforge::SettingsSection::About,
     };
     for (const specforge::SettingsSection section : sections) {
@@ -202,6 +258,7 @@ int main()
 {
     TestDefaultEnvironmentDescribesThisBuild();
     TestEnvironmentOverrideControlsDisplayedLogDirectory();
+    TestProfileOutputDirectorySelectionPersistsAndResets();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestRenderSmoke();

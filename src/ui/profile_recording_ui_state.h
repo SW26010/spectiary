@@ -27,7 +27,7 @@ struct ProfileRecordingUiPresentation {
     if (recording) {
         return {"Performance recording", "Stop Recording", true, true};
     }
-    return {"Not recording", "Start Recording", false, true};
+    return {"", "Start Recording", false, true};
 }
 
 [[nodiscard]] constexpr ProfileRecordingToggleAction ResolveProfileRecordingToggleAction(

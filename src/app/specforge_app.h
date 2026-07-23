@@ -115,7 +115,8 @@ private:
     std::optional<WindowedPlacement> fullscreen_restore_;
     bool immersive_plot_entered_fullscreen_ = false;
     ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
-    std::string profile_status_message_ = "Use the Performance menu to record.";
+    std::string profile_status_message_ =
+        "Use Settings > Diagnostics to record.";
     std::uint64_t frame_index_ = 0;
 };
 

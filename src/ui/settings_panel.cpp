@@ -1,7 +1,7 @@
 #include "ui/settings_panel.h"
 
 #include "app/runtime_paths.h"
-#include "profile/profile_sink.h"
+#include "ui/profile_recording_ui_state.h"
 #include "specforge/third_party_versions.h"
 
 #include <Windows.h>
@@ -28,12 +28,13 @@ constexpr float kMinimumNavigationWidth = 190.0f;
 constexpr float kInitialSettingsWidth = 860.0f;
 constexpr float kInitialSettingsHeight = 560.0f;
 
-constexpr std::array<SettingsSection, 6> kSettingsSections = {
+constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::General,
     SettingsSection::Appearance,
     SettingsSection::Language,
     SettingsSection::Input,
     SettingsSection::DataAndRecovery,
+    SettingsSection::Diagnostics,
     SettingsSection::About,
 };
 
@@ -50,6 +51,8 @@ const char* SectionLabel(SettingsSection section)
         return "Input";
     case SettingsSection::DataAndRecovery:
         return "Data & Recovery";
+    case SettingsSection::Diagnostics:
+        return "Diagnostics";
     case SettingsSection::About:
         return "About";
     }
@@ -92,11 +95,16 @@ void RenderReadOnlyValue(const char* label, const char* value)
 SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
 {
     const RuntimePaths paths = DefaultRuntimePaths();
+    const ProfileOutputDirectoryResolution profile_directory =
+        EffectiveProfileOutputDirectory();
     return {
         .version = SPECFORGE_VERSION,
         .release_profile = ReleaseProfileName(paths.release_profile),
         .data_directory = paths.local_user_state_root,
-        .log_directory = ProfileSink::EffectiveOutputDirectory(),
+        .log_directory = profile_directory.directory,
+        .default_profile_output_directory = paths.profile_log_directory,
+        .profile_settings_path = DefaultProfileSettingsPath(),
+        .profile_output_directory_source = profile_directory.source,
     };
 }
 
@@ -108,6 +116,12 @@ SettingsPanelUi::SettingsPanelUi()
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
     : environment_(std::move(environment))
 {
+    if (environment_.default_profile_output_directory.empty()) {
+        environment_.default_profile_output_directory = environment_.log_directory;
+    }
+    if (environment_.profile_settings_path.empty()) {
+        environment_.profile_settings_path = DefaultProfileSettingsPath();
+    }
 }
 
 void SettingsPanelUi::Open()
@@ -120,7 +134,7 @@ void SettingsPanelUi::Open()
     focus_requested_ = true;
 }
 
-void SettingsPanelUi::Render()
+void SettingsPanelUi::Render(const SettingsPanelStatus& status)
 {
     if (!open_) {
         return;
@@ -160,7 +174,7 @@ void SettingsPanelUi::Render()
             ImGui::SetScrollY(0.0f);
             content_scroll_reset_requested_ = false;
         }
-        RenderSelectedSection();
+        RenderSelectedSection(status);
     }
     ImGui::EndChild();
     ImGui::End();
@@ -169,6 +183,55 @@ void SettingsPanelUi::Render()
 bool SettingsPanelUi::open() const
 {
     return open_;
+}
+
+bool SettingsPanelUi::TakeProfileRecordingToggleRequest()
+{
+    const bool requested = profile_recording_toggle_requested_;
+    profile_recording_toggle_requested_ = false;
+    return requested;
+}
+
+bool SettingsPanelUi::TakeProfileOutputDirectorySelectionRequest()
+{
+    const bool requested = profile_output_directory_selection_requested_;
+    profile_output_directory_selection_requested_ = false;
+    return requested;
+}
+
+void SettingsPanelUi::ApplyProfileOutputDirectorySelection(std::filesystem::path directory)
+{
+    if (environment_.profile_output_directory_source ==
+        ProfileOutputDirectorySource::Environment) {
+        action_failed_ = true;
+        action_status_ =
+            "The output directory is controlled by SPECFORGE_PROFILE_DIR.";
+        return;
+    }
+    if (directory.empty()) {
+        action_failed_ = true;
+        action_status_ = "The profile output directory cannot be empty.";
+        return;
+    }
+
+    std::string error;
+    if (!SaveProfileSettings(
+            environment_.profile_settings_path,
+            {.output_directory = directory},
+            &error)) {
+        action_failed_ = true;
+        action_status_ = error.empty()
+            ? "Could not save the profile output directory."
+            : "Could not save the profile output directory: " + error;
+        return;
+    }
+
+    environment_.log_directory = std::move(directory);
+    environment_.profile_output_directory_source =
+        ProfileOutputDirectorySource::UserSetting;
+    action_failed_ = false;
+    action_status_ =
+        "Profile output directory updated. It will be used for the next recording.";
 }
 
 void SettingsPanelUi::RenderNavigation()
@@ -185,7 +248,7 @@ void SettingsPanelUi::RenderNavigation()
     }
 }
 
-void SettingsPanelUi::RenderSelectedSection()
+void SettingsPanelUi::RenderSelectedSection(const SettingsPanelStatus& status)
 {
     switch (selected_section_) {
     case SettingsSection::General:
@@ -202,6 +265,9 @@ void SettingsPanelUi::RenderSelectedSection()
         return;
     case SettingsSection::DataAndRecovery:
         RenderDataAndRecovery();
+        return;
+    case SettingsSection::Diagnostics:
+        RenderDiagnostics(status);
         return;
     case SettingsSection::About:
         RenderAbout();
@@ -309,6 +375,136 @@ void SettingsPanelUi::RenderDataAndRecovery()
     }
 }
 
+void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
+{
+    RenderSectionHeading(
+        "Diagnostics",
+        "Record bounded performance profiles for investigating interaction and loading latency.");
+
+    const ProfileRecordingUiPresentation presentation =
+        ResolveProfileRecordingUiPresentation(
+            status.profile_open,
+            status.profile_stopping);
+    ImGui::TextDisabled("Performance profile");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(
+        status.profile_open
+            ? "Recording"
+            : (status.profile_stopping ? "Finishing..." : "Not recording"));
+
+    if (!presentation.menu_action_enabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(presentation.menu_action.data())) {
+        profile_recording_toggle_requested_ = true;
+    }
+    if (!presentation.menu_action_enabled) {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Automatically stops after 5 minutes or 100 MiB.");
+
+    if (status.profile_path != nullptr) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("Current profile");
+        ImGui::PushTextWrapPos();
+        const std::string active_path = PathToUtf8(*status.profile_path);
+        ImGui::TextUnformatted(active_path.c_str());
+        ImGui::PopTextWrapPos();
+    }
+    if (!status.profile_status_message.empty()) {
+        ImGui::PushTextWrapPos();
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(status.profile_status_message.size()),
+            status.profile_status_message.data());
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Profile output directory");
+    const std::string output_path = PathToUtf8(environment_.log_directory);
+    ImGui::PushTextWrapPos();
+    ImGui::TextUnformatted(output_path.c_str());
+    ImGui::PopTextWrapPos();
+
+    switch (environment_.profile_output_directory_source) {
+    case ProfileOutputDirectorySource::Default:
+        ImGui::TextDisabled("Source: release-profile default");
+        break;
+    case ProfileOutputDirectorySource::UserSetting:
+        ImGui::TextDisabled("Source: saved setting");
+        break;
+    case ProfileOutputDirectorySource::Environment:
+        ImGui::TextDisabled("Source: SPECFORGE_PROFILE_DIR environment override");
+        break;
+    }
+
+    const bool directory_editing_disabled =
+        status.profile_open ||
+        status.profile_stopping ||
+        environment_.profile_output_directory_source ==
+            ProfileOutputDirectorySource::Environment;
+    if (directory_editing_disabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Choose Folder...")) {
+        profile_output_directory_selection_requested_ = true;
+    }
+    if (directory_editing_disabled) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    const bool reset_disabled =
+        directory_editing_disabled ||
+        environment_.profile_output_directory_source !=
+            ProfileOutputDirectorySource::UserSetting;
+    if (reset_disabled) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Restore Default")) {
+        ResetProfileOutputDirectory();
+    }
+    if (reset_disabled) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Open Output Folder")) {
+        OpenDirectory(environment_.log_directory, "profile output folder");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Copy Path##ProfileOutput")) {
+        CopyPath(environment_.log_directory, "Profile output path copied.");
+    }
+
+    if (environment_.profile_output_directory_source ==
+        ProfileOutputDirectorySource::Environment) {
+        ImGui::PushTextWrapPos();
+        ImGui::TextDisabled(
+            "Remove SPECFORGE_PROFILE_DIR before changing this path in Settings.");
+        ImGui::PopTextWrapPos();
+    } else if (status.profile_open || status.profile_stopping) {
+        ImGui::PushTextWrapPos();
+        ImGui::TextDisabled(
+            "Stop the current recording before changing its output directory.");
+        ImGui::PopTextWrapPos();
+    }
+
+    if (!action_status_.empty()) {
+        ImGui::Spacing();
+        if (action_failed_) {
+            ImGui::TextColored(
+                ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+                "%s",
+                action_status_.c_str());
+        } else {
+            ImGui::TextDisabled("%s", action_status_.c_str());
+        }
+    }
+}
+
 void SettingsPanelUi::RenderAbout()
 {
     RenderSectionHeading("About", "Version, licensing, and diagnostic information for this build.");
@@ -352,8 +548,6 @@ void SettingsPanelUi::RenderAbout()
         CopyDiagnosticInformation();
     }
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("Performance recording is available from the Performance menu.");
     if (!action_status_.empty()) {
         ImGui::Spacing();
         if (action_failed_) {
@@ -362,6 +556,34 @@ void SettingsPanelUi::RenderAbout()
             ImGui::TextDisabled("%s", action_status_.c_str());
         }
     }
+}
+
+void SettingsPanelUi::ResetProfileOutputDirectory()
+{
+    if (environment_.profile_output_directory_source ==
+        ProfileOutputDirectorySource::Environment) {
+        action_failed_ = true;
+        action_status_ =
+            "The output directory is controlled by SPECFORGE_PROFILE_DIR.";
+        return;
+    }
+
+    std::string error;
+    if (!SaveProfileSettings(environment_.profile_settings_path, {}, &error)) {
+        action_failed_ = true;
+        action_status_ = error.empty()
+            ? "Could not restore the default profile output directory."
+            : "Could not restore the default profile output directory: " + error;
+        return;
+    }
+
+    environment_.log_directory =
+        environment_.default_profile_output_directory;
+    environment_.profile_output_directory_source =
+        ProfileOutputDirectorySource::Default;
+    action_failed_ = false;
+    action_status_ =
+        "Default profile output directory restored for the next recording.";
 }
 
 void SettingsPanelUi::OpenDirectory(const std::filesystem::path& path, const char* label)

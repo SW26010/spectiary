@@ -172,6 +172,7 @@ add_library(specforge_core STATIC
     src/profile/navigation_latency_trace.cpp
     src/profile/navigation_prefetch_trace.cpp
     src/profile/profile_recording_status.cpp
+    src/profile/profile_settings.cpp
     src/profile/profile_sink.cpp
     src/profile/source_load_latency_trace.cpp
 )
@@ -368,6 +369,11 @@ target_link_libraries(specforge_top_bar_status_hover_tests PRIVATE imgui::imgui)
 specforge_add_test(
     specforge_profile_sink_tests
     tests/profile_sink_tests.cpp
+    specforge_core
+)
+specforge_add_test(
+    specforge_profile_settings_tests
+    tests/profile_settings_tests.cpp
     specforge_core
 )
 specforge_add_test(

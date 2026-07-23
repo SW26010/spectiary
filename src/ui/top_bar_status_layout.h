@@ -47,13 +47,10 @@ struct TopBarStatusLayout {
         try_show(layout.show_operation, widths.operation);
     }
 
-    // Diagnostics yield from least to most useful as the bar narrows:
-    // inactive profile state, frame counter, then client dimensions.
+    // Routine diagnostics yield from least to most useful as the bar narrows.
+    // An inactive profile is intentionally absent from the everyday status bar.
     try_show(layout.show_dimensions, widths.dimensions);
     try_show(layout.show_frame, widths.frame);
-    if (!profile_important) {
-        try_show(layout.show_profile, widths.profile);
-    }
 
     return layout;
 }

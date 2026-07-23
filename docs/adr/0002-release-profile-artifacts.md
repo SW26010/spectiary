@@ -66,11 +66,12 @@ an explicit migration strategy. `Data` is not a user workspace and should not be
 used for user-selected source, annotation, or output files.
 
 Portable profile logs are also SpecForge-owned default writes, so the Portable
-default profile directory is `Data/logs`. An explicit diagnostic override such
-as `SPECFORGE_PROFILE_DIR` may still redirect profile output because that is a
-developer-selected path, not the artifact's default storage location.
-Release artifacts expose the same profiler through a runtime `Performance` toolbar menu,
-while `SPECFORGE_PROFILE=1` remains the startup automation contract.
+default profile directory is `Data/logs`. Users may select a profile output
+directory in `Settings > Diagnostics`; that choice is local state and does not
+change the deployment profile. An explicit diagnostic override such as
+`SPECFORGE_PROFILE_DIR` may still redirect profile output for automation and
+takes precedence over the saved UI setting. `SPECFORGE_PROFILE=1` remains the
+startup automation contract.
 High-frequency events enter a bounded in-memory queue and a background writer
 owns all steady-state file writes. The queue mutex is never held during file I/O;
 ordinary producer/writer lock contention waits for the short in-memory critical

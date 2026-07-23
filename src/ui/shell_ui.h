@@ -98,7 +98,7 @@ private:
     void RenderSortingPanel();
     void RenderSmoothingPanel();
     void RenderMainPlot(const ShellStatus& status);
-    void RenderSettingsPanel();
+    void RenderSettingsPanel(const ShellStatus& status);
     void RenderSpectralLinesPanel();
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
@@ -263,7 +263,6 @@ private:
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;
-    bool profile_recording_toggle_requested_ = false;
     SampleWorkflowShortcut sample_workflow_shortcut_;
     bool persist_local_state_ = true;
     bool layout_seeded_ = false;

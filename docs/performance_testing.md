@@ -92,15 +92,15 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
 
 自动化采集继续使用 `SPECFORGE_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
-工具栏的 `Performance > Start Recording` / `Stop Recording` 在运行时开始/停止采集；沉浸模式右上角的
-`REC` 标记表示正在录制。复现卡顿后尽快停止录制，分析时结合停止前的一段帧时间线和输入事件定位。
-Portable build 不设置 `SPECFORGE_PROFILE_DIR` 时默认写入可执行文件旁的
-`Data/logs/`；性能脚本会显式设置 `SPECFORGE_PROFILE_DIR`，把本次分析日志重定向到仓库 `logs/`，避免和
-portable 包内状态混在一起。
+`Settings > Diagnostics` 在运行时开始/停止采集；沉浸模式右上角的 `REC` 标记表示正在录制。复现卡顿后
+尽快停止录制，分析时结合停止前的一段帧时间线和输入事件定位。Portable build 的默认输出目录是可执行
+文件旁的 `Data/logs/`，用户可在 Diagnostics 设置中修改；性能脚本会显式设置
+`SPECFORGE_PROFILE_DIR`，覆盖 UI 设置并把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态
+混在一起。
 
 运行时录制使用 4 MiB 有界队列和后台批量写入，不在输入/UI 热路径同步写磁盘。单次录制达到 5 分钟或
 100 MiB 时自动停止。producer/writer 的普通内存锁争用不会丢事件；只有队列确实达到 4 MiB 容量时才
-拒绝新事件，并在末尾的 `profile_recorder_summary` 中记录 `dropped_events`。菜单停止只请求后台 drain，
+拒绝新事件，并在末尾的 `profile_recorder_summary` 中记录 `dropped_events`。设置页停止只请求后台 drain，
 不会在 UI 帧同步等待文件 flush。显式停止以及时长/大小自动边界都会先关闭普通录制；若真实 render
 frame 已经在途，则只保留该帧的 duration、成功 Present、`navigation_latency` 和
 `source_load_latency` 尾部事件，等 Present 处理完才封口并由后台 writer 写 summary，因此同帧完成的
@@ -301,8 +301,8 @@ schema 分析。一旦同一 profile 的任一 `navigation_latency` 事件出现
 duration，且六项 duration 之和必须与 `target_resolution_ms` 在 0.001ms 容差内一致。这样旧证据
 可继续读取，同时不允许部分升级的新日志被当成完整采集。
 
-采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
-下一条，等最后一条显示后再 `Stop Recording`。然后运行：
+采集时先在 `Settings > Diagnostics` 开始录制，用真实数据连续执行若干次上一条/
+下一条，等最后一条显示后再停止录制。然后运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\analyze-navigation-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl

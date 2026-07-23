@@ -18,7 +18,7 @@ void TestInactivePresentationStartsRecording()
 {
     const specforge::ProfileRecordingUiPresentation presentation =
         specforge::ResolveProfileRecordingUiPresentation(false, false);
-    Require(presentation.status_text == "Not recording", "inactive status should be explicit");
+    Require(presentation.status_text.empty(), "inactive status should stay out of the everyday status bar");
     Require(presentation.menu_action == "Start Recording", "inactive menu should start recording");
     Require(!presentation.show_recording_indicator, "inactive status should not show the red recording indicator");
     Require(

@@ -1,6 +1,6 @@
 #include "profile/profile_sink.h"
 
-#include "app/runtime_paths.h"
+#include "profile/profile_settings.h"
 
 #include <algorithm>
 #include <atomic>
@@ -183,11 +183,7 @@ const char* ProfileSink::StopReasonName(StopReason reason) noexcept
 
 std::filesystem::path ProfileSink::EffectiveOutputDirectory()
 {
-    std::optional<std::string> directory = ReadEnvironmentVariable("SPECFORGE_PROFILE_DIR");
-    if (directory && !directory->empty()) {
-        return std::filesystem::path(*directory);
-    }
-    return DefaultRuntimePaths().profile_log_directory;
+    return EffectiveProfileOutputDirectory().directory;
 }
 
 bool ProfileSink::StartDefault()

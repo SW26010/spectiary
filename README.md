@@ -112,11 +112,14 @@ The executable is written under
 `build/ninja-msvc-portable-debug/SpecForge.exe`. Portable runtime state is
 owned by the executable directory's `Data` folder: ImGui layout is
 `Data/specforge-imgui-v2.ini`. Release builds can start or stop a performance
-diagnostic recording from the toolbar's `Performance` menu; JSONL output is written
-under `Data/logs/`. `SPECFORGE_PROFILE=1` remains available for scripted startup
-capture, and `SPECFORGE_PROFILE_DIR` redirects either capture path.
+diagnostic recording from `Settings > Diagnostics`, where users can also choose
+the output directory. That choice is saved in `Data/profile-settings.json`.
+JSONL output defaults to `Data/logs/`; resolution order is
+`SPECFORGE_PROFILE_DIR` environment override, saved user setting, then the
+release-profile default. `SPECFORGE_PROFILE=1` remains available for scripted
+startup capture.
 Recording uses a bounded asynchronous writer and stops automatically after five
-minutes or 100 MiB. Stopping from the menu drains in the background; completed
+minutes or 100 MiB. Stopping from Settings drains in the background; completed
 recordings are accepted by the analyzer only when their final summary reports
 zero dropped events.
 

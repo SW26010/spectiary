@@ -22,7 +22,7 @@ constexpr specforge::TopBarStatusWidths kWidths{
     .separator = 2.0f,
 };
 
-void TestWideBarShowsEveryStatusComponent()
+void TestWideBarOmitsInactiveProfileStatus()
 {
     const specforge::TopBarStatusLayout layout =
         specforge::ResolveTopBarStatusLayout(46.0f, kWidths, false, false);
@@ -30,8 +30,8 @@ void TestWideBarShowsEveryStatusComponent()
     Require(layout.show_operation, "wide bar should show the operation state");
     Require(layout.show_frame, "wide bar should show the frame counter");
     Require(layout.show_dimensions, "wide bar should show the client dimensions");
-    Require(layout.show_profile, "wide bar should show the inactive profile state");
-    Require(layout.width == 46.0f, "wide layout should account for every separator");
+    Require(!layout.show_profile, "wide bar should omit the inactive profile state");
+    Require(layout.width == 34.0f, "inactive profile state should consume no status-bar width");
 }
 
 void TestRoutineStatusDropsLowPriorityDetailsFirst()
@@ -42,7 +42,7 @@ void TestRoutineStatusDropsLowPriorityDetailsFirst()
     Require(layout.show_operation, "routine operation state should remain visible");
     Require(layout.show_dimensions, "dimensions should survive before lower-priority diagnostics");
     Require(!layout.show_frame, "frame counter should yield before dimensions");
-    Require(!layout.show_profile, "inactive profile state should yield first");
+    Require(!layout.show_profile, "inactive profile state should remain omitted");
 }
 
 void TestActiveRecordingOutranksRoutineReadyState()
@@ -80,7 +80,7 @@ void TestStatusDisappearsInsteadOfOverlappingMenus()
 int main()
 {
     try {
-        TestWideBarShowsEveryStatusComponent();
+        TestWideBarOmitsInactiveProfileStatus();
         TestRoutineStatusDropsLowPriorityDetailsFirst();
         TestActiveRecordingOutranksRoutineReadyState();
         TestLoadFailureOutranksActiveRecording();
