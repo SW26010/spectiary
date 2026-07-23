@@ -100,6 +100,9 @@ SpecForge 的 UI 字符串边界是 UTF-8。业务状态、JSON cache、sample n
 ImGui widget buffer 都应继续使用 UTF-8 `std::string`；不要为了 Windows 输入把这些字段改成本地 ANSI code page 或在
 业务层传播 `std::wstring`。
 
+新增或已迁移的可见内置 UI 文案归 `src/ui/ui_text.h` 和 `src/ui/ui_text.cpp` 所有，并通过类型化词条 ID 查询。
+ImGui 稳定 ID（包括 `###`/`##` 标识）、JSON 字段和领域标识属于程序协议或身份边界，不进入内置文案词条表。
+
 Win32 shell 必须继续使用 `RegisterClassExW`、`CreateWindowExW`、`DefWindowProcW` 和 Dear ImGui 的 Win32 backend，
 让中文输入先以 Unicode 进入 ImGui，再由 ImGui 写入 UTF-8 buffer。中文显示依赖 ImGui font atlas 覆盖 CJK glyph。
 native app 启动时先加载 ImGui 默认字体作为主字体，保留英文和 ASCII 的默认视觉；然后从 Windows Fonts 目录合并
