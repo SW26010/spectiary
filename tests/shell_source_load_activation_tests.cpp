@@ -220,6 +220,23 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+template <typename Future, typename CancellationCheck>
+void WaitForRelease(
+    const Future& release,
+    const CancellationCheck& canceled,
+    std::string_view timeout_message)
+{
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (release.wait_for(2ms) != std::future_status::ready) {
+        if (canceled()) {
+            return;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error(std::string(timeout_message));
+        }
+    }
+}
+
 specforge::ShellUiTestAccess::PendingLoad Pending(
     std::string_view name,
     std::uint64_t activation_epoch,
@@ -429,13 +446,22 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     dependencies.snapshot_loader =
         [&row_one_entered_promise,
          &row_two_entered_promise,
-         release_decoders](const std::filesystem::path& source, std::size_t index, const auto&) {
+         release_decoders](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
             if (index == 1) {
                 row_one_entered_promise.set_value();
-                release_decoders.wait();
+                WaitForRelease(
+                    release_decoders,
+                    canceled,
+                    "timed out waiting to release navigation row one");
             } else if (index == 2) {
                 row_two_entered_promise.set_value();
-                release_decoders.wait();
+                WaitForRelease(
+                    release_decoders,
+                    canceled,
+                    "timed out waiting to release navigation row two");
             }
             return MakeSnapshot(source, index);
         };
@@ -930,7 +956,10 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     dependencies.snapshot_loader =
         [stale_snapshot_destroyed_promise,
          &row_two_entered_promise,
-         release_row_two](const std::filesystem::path& source, std::size_t index, const auto&) {
+         release_row_two](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
             if (index == 1) {
                 return MakeSnapshotWithDestructionProbe(
                     source,
@@ -939,7 +968,10 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
             }
             if (index == 2) {
                 row_two_entered_promise.set_value();
-                release_row_two.wait();
+                WaitForRelease(
+                    release_row_two,
+                    canceled,
+                    "timed out waiting to release stale row two");
             }
             return MakeSnapshot(source, index);
         };
@@ -1034,9 +1066,15 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.snapshot_loader =
         [&decoder_entered_promise,
-         release_decoder](const std::filesystem::path& source, std::size_t index, const auto&) {
+         release_decoder](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
             decoder_entered_promise.set_value();
-            release_decoder.wait();
+            WaitForRelease(
+                release_decoder,
+                canceled,
+                "timed out waiting to release the stale-plan decoder");
             return MakeSnapshot(source, index);
         };
     dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
@@ -1163,11 +1201,14 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
          &row_one_decode_count](
             const std::filesystem::path& source,
             std::size_t index,
-            const auto&) {
+            const auto& canceled) {
             if (index == 1) {
                 if (row_one_decode_count.fetch_add(1) == 0) {
                     first_decode_entered_promise.set_value();
-                    release_first_decode.wait();
+                    WaitForRelease(
+                        release_first_decode,
+                        canceled,
+                        "timed out waiting to release the first retry decoder");
                     return MakeSnapshot(source, index);
                 }
                 return MakeSnapshotWithDestructionProbe(
@@ -1177,7 +1218,10 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
             }
             if (index == 2) {
                 row_two_entered_promise.set_value();
-                release_row_two.wait();
+                WaitForRelease(
+                    release_row_two,
+                    canceled,
+                    "timed out waiting to release retry row two");
             }
             return MakeSnapshot(source, index);
         };

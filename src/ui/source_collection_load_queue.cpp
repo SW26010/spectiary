@@ -82,7 +82,6 @@ SourceCollectionLoadDependencies DefaultDependencies()
            const SourceCollectionCancellationCheckpoint& checkpoint) {
             return ScanSourceCollectionFolder(path, {}, checkpoint);
         };
-    dependencies.folder_change_generation_factory = BeginDirectoryChangeGeneration;
     dependencies.workflow_cache_loader = LoadSampleWorkflowPreparationCacheBundle;
     dependencies.workflow_cache_paths = {
         DefaultSampleLabelingStateCachePath(),
@@ -102,10 +101,6 @@ void FillMissingDependencies(SourceCollectionLoadDependencies& dependencies)
     }
     if (!dependencies.folder_scanner) {
         dependencies.folder_scanner = std::move(defaults.folder_scanner);
-    }
-    if (!dependencies.folder_change_generation_factory) {
-        dependencies.folder_change_generation_factory =
-            std::move(defaults.folder_change_generation_factory);
     }
     if (!dependencies.workflow_cache_loader) {
         dependencies.workflow_cache_loader = std::move(defaults.workflow_cache_loader);
@@ -130,6 +125,24 @@ public:
               RetirementLoop(stop_token);
           })
     {
+        if (!dependencies_.folder_change_generation_factory) {
+            if (dependencies_.folder_change_generation_registration_factory) {
+                directory_change_generation_monitor_ =
+                    std::make_unique<DirectoryChangeGenerationMonitor>(
+                        std::move(
+                            dependencies_
+                                .folder_change_generation_registration_factory));
+            } else {
+                directory_change_generation_monitor_ =
+                    std::make_unique<DirectoryChangeGenerationMonitor>();
+            }
+            dependencies_.folder_change_generation_factory =
+                [monitor = directory_change_generation_monitor_.get()](
+                    const std::filesystem::path& path,
+                    const SourceCollectionCancellationCheckpoint& checkpoint) {
+                    return monitor->Begin(path, checkpoint);
+                };
+        }
     }
 
     ~Impl()
@@ -503,7 +516,7 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         DirectoryChangeGenerationHandle change_generation =
-            dependencies_.folder_change_generation_factory(path);
+            dependencies_.folder_change_generation_factory(path, checkpoint);
         SourceCollectionFolderListing listing =
             dependencies_.folder_scanner(path, checkpoint);
         return std::make_shared<const SourceCollectionFolderListingGeneration>(
@@ -928,6 +941,8 @@ private:
         }
     }
 
+    std::unique_ptr<DirectoryChangeGenerationMonitor>
+        directory_change_generation_monitor_;
     SourceCollectionLoadDependencies dependencies_;
     mutable std::mutex mutex_;
     std::condition_variable_any retirement_condition_;

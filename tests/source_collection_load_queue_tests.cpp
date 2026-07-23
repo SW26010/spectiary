@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -55,6 +56,11 @@ public:
     }
 
 private:
+    void Close() noexcept override
+    {
+        Invalidate();
+    }
+
     std::atomic_bool current_ = true;
 };
 
@@ -118,6 +124,23 @@ bool WaitUntil(Predicate predicate, std::chrono::milliseconds timeout = 2s)
     return predicate();
 }
 
+template <typename Future, typename CancellationCheck>
+void WaitForRelease(
+    const Future& release,
+    const CancellationCheck& canceled,
+    std::string_view timeout_message)
+{
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (release.wait_for(2ms) != std::future_status::ready) {
+        if (canceled()) {
+            return;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error(std::string(timeout_message));
+        }
+    }
+}
+
 std::vector<specforge::SourceCollectionLoadCompletion> WaitForCompletions(
     specforge::SourceCollectionLoadQueue& queue,
     std::size_t expected_count)
@@ -147,11 +170,11 @@ void TestEnqueueReturnsBeforeLoaderCompletes()
     std::atomic_bool entered_once = false;
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const std::filesystem::path& source, std::size_t index, const auto&) {
+        [&](const std::filesystem::path& source, std::size_t index, const auto& canceled) {
             if (!entered_once.exchange(true)) {
                 entered_promise.set_value();
             }
-            release.wait();
+            WaitForRelease(release, canceled, "timed out waiting to release the decoder");
             return MakeSnapshot(source, index);
         }));
     const std::uint64_t task_id = queue.Enqueue({.path = path, .spectrum_index = 1});
@@ -242,11 +265,14 @@ void TestBatchLoadsWorkflowCachesOnce()
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto& canceled) {
             if (decoder_entries.fetch_add(1) + 1 == 2) {
                 both_decoders_entered_promise.set_value();
             }
-            release_decoders.wait();
+            WaitForRelease(
+                release_decoders,
+                canceled,
+                "timed out waiting to release the batch decoders");
             return MakeSnapshot(path, index);
         },
         &cache_loads));
@@ -287,7 +313,7 @@ void TestSourcesUseIndependentThreads()
     std::vector<std::thread::id> thread_ids;
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto& canceled) {
             {
                 std::lock_guard lock(thread_ids_mutex);
                 thread_ids.push_back(std::this_thread::get_id());
@@ -295,7 +321,10 @@ void TestSourcesUseIndependentThreads()
             if (decoder_entries.fetch_add(1) + 1 == 2) {
                 both_decoders_entered_promise.set_value();
             }
-            release_decoders.wait();
+            WaitForRelease(
+                release_decoders,
+                canceled,
+                "timed out waiting to release the parallel decoders");
             return MakeSnapshot(path, index);
         }));
 
@@ -331,9 +360,12 @@ void TestIndividualLoadsPublishInRequestOrder()
     std::shared_future<void> release_first = release_first_promise.get_future().share();
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
-                release_first.wait();
+                WaitForRelease(
+                    release_first,
+                    canceled,
+                    "timed out waiting to release the first individual decoder");
                 return MakeSnapshot(path, index);
             }
             second_decoder_entered_promise.set_value();
@@ -391,9 +423,12 @@ void TestBatchPublishesInRequestOrder()
     std::shared_future<void> release_first = release_first_promise.get_future().share();
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
-                release_first.wait();
+                WaitForRelease(
+                    release_first,
+                    canceled,
+                    "timed out waiting to release the first batch decoder");
                 return MakeSnapshot(path, index);
             }
             second_decoder_entered_promise.set_value();
@@ -453,9 +488,12 @@ void TestBufferedBatchCompletionCanBeCanceled()
     std::shared_future<void> release_first = release_first_promise.get_future().share();
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
-        [&](const auto& path, std::size_t index, const auto&) {
+        [&](const auto& path, std::size_t index, const auto& canceled) {
             if (path == first) {
-                release_first.wait();
+                WaitForRelease(
+                    release_first,
+                    canceled,
+                    "timed out waiting to release the buffered first decoder");
                 return MakeSnapshot(path, index);
             }
             second_decoder_entered_promise.set_value();
@@ -505,6 +543,147 @@ void TestFolderUsesOnePreparedListing()
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "folder task should prepare successfully");
     Require(folder_loader_calls.load() == 1, "folder decoder should consume one prepared listing");
+    std::filesystem::remove_all(folder);
+}
+
+void TestStableFolderListingGenerationSurvivesLoadWorkerExit()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_generation_worker_exit");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    std::atomic_int folder_scan_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+
+    (void)queue.Enqueue({.path = folder});
+    auto first_completions = WaitForCompletions(queue, 1);
+    Require(
+        first_completions.front().prepared.has_value(),
+        "the initial folder task should prepare successfully");
+    const specforge::SourceCollectionFolderListingGenerationHandle listing_generation =
+        first_completions.front().prepared->folder_listing_generation;
+    Require(
+        listing_generation != nullptr,
+        "the initial folder task should publish its listing generation");
+
+    // TakeCompleted reaps and joins the finished request worker before it
+    // returns, so this reuses the hint only after its creator worker exited.
+    (void)queue.Enqueue({
+        .path = folder,
+        .folder_listing_generation_hint = listing_generation,
+    });
+    auto second_completions = WaitForCompletions(queue, 1);
+    Require(
+        second_completions.front().prepared.has_value(),
+        "the stable follow-up folder task should prepare successfully");
+    Require(
+        folder_scan_calls.load() == 1,
+        "a stable folder should reuse its listing after the request worker exits");
+    std::filesystem::remove_all(folder);
+}
+
+void TestFolderListingGenerationInvalidatesSafelyAfterQueueDestruction()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_generation_queue_exit");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    specforge::SourceCollectionFolderListingGenerationHandle listing_generation;
+    {
+        specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+            [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+                throw std::runtime_error("folder task must not use the file loader");
+            });
+        dependencies.folder_snapshot_loader =
+            [](const auto& path, std::size_t index, const auto& listing, const auto&) {
+                return MakeSnapshot(path, index, listing.spectra.size());
+            };
+        specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+        (void)queue.Enqueue({.path = folder});
+        auto completions = WaitForCompletions(queue, 1);
+        Require(
+            completions.front().prepared.has_value(),
+            "the monitored folder task should prepare successfully");
+        listing_generation =
+            completions.front().prepared->folder_listing_generation;
+    }
+
+    Require(
+        listing_generation && !listing_generation->IsCurrent(),
+        "monitor shutdown should safely invalidate a published generation lease");
+    listing_generation.reset();
+    std::filesystem::remove_all(folder);
+}
+
+void TestCanceledBlockedRegistrationStopsBeforeQueueDestruction()
+{
+    const std::filesystem::path folder = UniqueTempPath("_folder_generation_cancel");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    std::promise<void> registration_entered_promise;
+    std::shared_future<void> registration_entered =
+        registration_entered_promise.get_future().share();
+    std::promise<void> registration_stopped_promise;
+    std::future<void> registration_stopped =
+        registration_stopped_promise.get_future();
+    std::mutex registration_mutex;
+    std::condition_variable_any registration_condition;
+
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_change_generation_registration_factory =
+        [&](const std::filesystem::path&, std::stop_token stop_token) {
+            registration_entered_promise.set_value();
+            std::unique_lock lock(registration_mutex);
+            const bool released = registration_condition.wait_for(
+                lock,
+                stop_token,
+                2s,
+                []() {
+                    return false;
+                });
+            Require(
+                !released && stop_token.stop_requested(),
+                "blocked registration should be canceled by monitor shutdown");
+            registration_stopped_promise.set_value();
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+
+    {
+        specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+        const std::uint64_t task_id = queue.Enqueue({.path = folder});
+        Require(
+            registration_entered.wait_for(2s) == std::future_status::ready,
+            "folder registration should enter its blocking operation");
+        queue.Cancel(task_id);
+        Require(
+            WaitUntil([&queue]() { return !queue.NeedsService(); }),
+            "canceling the folder task should release its registration caller");
+        Require(
+            queue.TakeCompleted().empty(),
+            "a canceled registration must not publish a source completion");
+    }
+
+    Require(
+        registration_stopped.wait_for(2s) == std::future_status::ready,
+        "queue destruction should stop and join the blocked monitor registration");
     std::filesystem::remove_all(folder);
 }
 
@@ -582,11 +761,14 @@ void TestDirectoryChangeGenerationInvalidatesAfterMutation()
     const std::filesystem::path added = folder / "added.csv";
     const std::filesystem::path renamed = folder / "renamed.csv";
     WriteFixture(sample);
+    specforge::DirectoryChangeGenerationMonitor monitor;
 
     const auto require_invalidation =
-        [&folder](const std::function<void()>& mutate, std::string_view message) {
+        [&folder, &monitor](
+            const std::function<void()>& mutate,
+            std::string_view message) {
             const specforge::DirectoryChangeGenerationHandle generation =
-                specforge::BeginDirectoryChangeGeneration(folder);
+                monitor.Begin(folder, []() {});
             Require(generation != nullptr, "Windows folder change generation should be available");
             Require(generation->IsCurrent(), "a new folder change generation should start current");
             mutate();
@@ -630,7 +812,7 @@ void TestUnavailableFolderGenerationKeepsFullRevalidationFallback()
             return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
         };
     dependencies.folder_change_generation_factory =
-        [](const auto&) -> specforge::DirectoryChangeGenerationHandle {
+        [](const auto&, const auto&) -> specforge::DirectoryChangeGenerationHandle {
             return {};
         };
     dependencies.folder_snapshot_loader =
@@ -676,7 +858,7 @@ void TestStaleFolderListingGenerationRefreshesBeforeDecode()
             return specforge::ScanSourceCollectionFolder(path, {}, checkpoint);
         };
     dependencies.folder_change_generation_factory =
-        [](const auto&) {
+        [](const auto&, const auto&) {
             return std::make_shared<MutableDirectoryChangeGeneration>();
         };
     dependencies.folder_snapshot_loader =
@@ -793,7 +975,7 @@ void TestChangedFolderRetriesOneStableGeneration()
             return MakeSnapshot(path, index, listing.spectra.size());
         };
     dependencies.folder_change_generation_factory =
-        [](const auto&) {
+        [](const auto&, const auto&) {
             return std::make_shared<MutableDirectoryChangeGeneration>();
         };
     dependencies.folder_scanner =
@@ -1007,6 +1189,9 @@ int main()
     TestBatchPublishesInRequestOrder();
     TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
+    TestStableFolderListingGenerationSurvivesLoadWorkerExit();
+    TestFolderListingGenerationInvalidatesSafelyAfterQueueDestruction();
+    TestCanceledBlockedRegistrationStopsBeforeQueueDestruction();
     TestCurrentFolderListingGenerationAvoidsFullRescan();
     TestDirectoryChangeGenerationInvalidatesAfterMutation();
     TestUnavailableFolderGenerationKeepsFullRevalidationFallback();

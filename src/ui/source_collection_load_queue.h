@@ -66,7 +66,8 @@ struct SourceCollectionLoadDependencies {
         const std::filesystem::path&,
         const SourceCollectionCancellationCheckpoint&)>;
     using FolderChangeGenerationFactory = std::function<DirectoryChangeGenerationHandle(
-        const std::filesystem::path&)>;
+        const std::filesystem::path&,
+        const SourceCollectionCancellationCheckpoint&)>;
     using WorkflowCacheLoader = std::function<SampleWorkflowPreparationCacheBundle(
         const SampleWorkflowPreparationPaths&,
         const std::function<void()>&)>;
@@ -75,6 +76,10 @@ struct SourceCollectionLoadDependencies {
     FolderSnapshotLoader folder_snapshot_loader;
     FolderScanner folder_scanner;
     FolderChangeGenerationFactory folder_change_generation_factory;
+    // Lower-level lifecycle seam for the default monitor. Ignored when a
+    // complete folder_change_generation_factory is injected.
+    DirectoryChangeGenerationMonitor::RegistrationFactory
+        folder_change_generation_registration_factory;
     WorkflowCacheLoader workflow_cache_loader;
     SampleWorkflowPreparationPaths workflow_cache_paths;
 };
