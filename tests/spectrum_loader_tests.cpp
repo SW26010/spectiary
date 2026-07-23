@@ -623,8 +623,16 @@ void TestLoadsNpySampleAnnotationContext()
     Require(context.annotations.size() == 1, "sample context should auto-load same-prefix y annotation");
     Require(context.annotations[0].kind == SampleAnnotationKind::CategoricalInteger, "integer y should be categorical");
     Require(context.annotations[0].values.size() == 2, "annotation should carry one value per source sample");
-    Require(context.annotations[0].values[0].display_text == "7", "integer annotation should display raw code");
-    Require(context.annotations[0].values[1].display_text == "-1", "integer annotation should display unlabeled sentinel raw");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context.annotations[0],
+            context.annotations[0].values[0]) == "7",
+        "integer annotation should display raw code");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context.annotations[0],
+            context.annotations[0].values[1]) == "-1",
+        "integer annotation should display unlabeled sentinel raw");
 }
 
 void TestLoadsReadOnlyAnnotationDtypes()
@@ -641,7 +649,11 @@ void TestLoadsReadOnlyAnnotationDtypes()
     Require(
         float_context.annotations[0].kind == SampleAnnotationKind::ContinuousFloat,
         "floating-point y should be continuous");
-    Require(float_context.annotations[0].values[1].display_text == "-2.5", "float annotation should display raw value");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            float_context.annotations[0],
+            float_context.annotations[0].values[1]) == "-2.5",
+        "float annotation should display raw value");
 
     const std::filesystem::path string_path = std::filesystem::temp_directory_path() / "specforge_annotation_string_X.npy";
     const std::filesystem::path string_annotation_path =
@@ -653,8 +665,114 @@ void TestLoadsReadOnlyAnnotationDtypes()
     const specforge::SourceCollectionManifest string_context = specforge::LoadSourceCollectionManifest(*string_snapshot);
     Require(string_context.annotations.size() == 1, "string y annotation should be loaded");
     Require(string_context.annotations[0].kind == SampleAnnotationKind::Text, "string y should stay read-only text");
-    Require(string_context.annotations[0].values[0].display_text == "good", "string annotation should be decoded");
-    Require(string_context.annotations[0].values[1].display_text == "bad", "string annotation should be decoded");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            string_context.annotations[0],
+            string_context.annotations[0].values[0]) == "good",
+        "string annotation should be decoded");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            string_context.annotations[0],
+            string_context.annotations[0].values[1]) == "bad",
+        "string annotation should be decoded");
+}
+
+void TestAnnotationAdapterPreservesWideNumericSemantics()
+{
+    const std::filesystem::path signed_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_i8.npy";
+    const std::filesystem::path unsigned_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_u8.npy";
+    const std::filesystem::path floating_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_f8.npy";
+
+    WriteNpy(
+        signed_path,
+        "<i8",
+        {2},
+        BytesFor<std::int64_t>({
+            std::numeric_limits<std::int64_t>::max() - 1,
+            std::numeric_limits<std::int64_t>::max(),
+        }));
+    WriteNpy(
+        unsigned_path,
+        "<u8",
+        {2},
+        BytesFor<std::uint64_t>({
+            std::numeric_limits<std::uint64_t>::max() - 1,
+            std::numeric_limits<std::uint64_t>::max(),
+        }));
+    const double adjacent = std::nextafter(1.0, 2.0);
+    WriteNpy(floating_path, "<f8", {2}, BytesFor<double>({1.0, adjacent}));
+
+    const specforge::SampleAnnotationIoAdapter adapter;
+    std::string error;
+    const std::optional<specforge::SampleAnnotationResult> signed_annotation =
+        adapter.Load(signed_path, 2, &error);
+    Require(signed_annotation.has_value(), error.empty() ? "int64 annotation should load" : error);
+    Require(
+        std::get<std::int64_t>(signed_annotation->values[1].semantic) ==
+            std::numeric_limits<std::int64_t>::max(),
+        "int64 annotation should preserve values above exact-double range");
+
+    const std::optional<specforge::SampleAnnotationResult> unsigned_annotation =
+        adapter.Load(unsigned_path, 2, &error);
+    Require(unsigned_annotation.has_value(), error.empty() ? "uint64 annotation should load" : error);
+    Require(
+        std::get<std::uint64_t>(unsigned_annotation->values[1].semantic) ==
+            std::numeric_limits<std::uint64_t>::max(),
+        "uint64 annotation should preserve its full range");
+
+    const std::optional<specforge::SampleAnnotationResult> floating_annotation =
+        adapter.Load(floating_path, 2, &error);
+    Require(floating_annotation.has_value(), error.empty() ? "float64 annotation should load" : error);
+    Require(
+        std::get<double>(floating_annotation->values[1].semantic) == adjacent,
+        "float64 annotation should retain the original adjacent value");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            *floating_annotation,
+            floating_annotation->values[0]) !=
+            specforge::FormatSampleAnnotationValue(
+                *floating_annotation,
+                floating_annotation->values[1]),
+        "adjacent float64 values should project to distinct round-trip text");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(signed_path, cleanup_error);
+    std::filesystem::remove(unsigned_path, cleanup_error);
+    std::filesystem::remove(floating_path, cleanup_error);
+}
+
+void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
+{
+    const std::filesystem::path shape_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_bad_shape.npy";
+    const std::filesystem::path dtype_path =
+        std::filesystem::temp_directory_path() / "specforge_annotation_adapter_bad_dtype.npy";
+    WriteNpy(shape_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
+    WriteNpy(dtype_path, "<f8", {2}, BytesFor<double>({1.0, 2.0}));
+
+    const specforge::SampleAnnotationIoAdapter adapter;
+    std::string error;
+    Require(
+        !adapter.LoadLabelResult(shape_path, 3, {}, &error).has_value(),
+        "label adapter should reject a shape mismatch");
+    Require(
+        error.find("length") != std::string::npos,
+        "shape mismatch should explain the source-count contract");
+
+    error.clear();
+    Require(
+        !adapter.LoadLabelResult(dtype_path, 2, {}, &error).has_value(),
+        "label adapter should reject a dtype mismatch");
+    Require(
+        error.find("int32") != std::string::npos,
+        "dtype mismatch should explain the int32 label contract");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(shape_path, cleanup_error);
+    std::filesystem::remove(dtype_path, cleanup_error);
 }
 
 void TestRejectsMismatchedSampleAnnotationLength()
@@ -1042,7 +1160,7 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::LoadSampleAnnotationResultFromPathCancelable(
+        (void)specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -1060,7 +1178,7 @@ void TestCancelableAnnotationLoadStopsInsidePayloadConversion()
     std::filesystem::remove(path, error);
 }
 
-void TestCancelableAnnotationLoadStopsInsideMetadataFormatting()
+void TestCancelableAnnotationLoadStopsInsideMetadataPairing()
 {
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "specforge_loader_cancelable_annotation_metadata.npy";
@@ -1076,7 +1194,11 @@ void TestCancelableAnnotationLoadStopsInsideMetadataFormatting()
         "metadata cancellation fixture label should be valid");
     std::string metadata_error;
     Require(
-        specforge::SaveSampleLabelResultMetadataSidecar(path, task, nullptr, &metadata_error),
+        specforge::SampleAnnotationIoAdapter{}.SaveLabelMetadata(
+            path,
+            task,
+            nullptr,
+            &metadata_error),
         metadata_error.empty() ? "metadata cancellation fixture should save" : metadata_error);
 
     class CancellationMarker final : public std::runtime_error {
@@ -1097,7 +1219,7 @@ void TestCancelableAnnotationLoadStopsInsideMetadataFormatting()
     std::size_t cancellation_checks = 0;
     bool canceled = false;
     try {
-        (void)specforge::LoadSampleAnnotationResultFromPathCancelable(
+        (void)specforge::SampleAnnotationIoAdapter{}.LoadCancelable(
             path,
             kValueCount,
             [&cancellation_checks]() {
@@ -1108,14 +1230,16 @@ void TestCancelableAnnotationLoadStopsInsideMetadataFormatting()
     } catch (const CancellationMarker&) {
         canceled = true;
     }
-    Require(canceled, "annotation label metadata formatting should honor cooperative cancellation");
+    Require(canceled, "annotation label metadata pairing should honor cooperative cancellation");
     Require(
         cancellation_checks >= kFirstMetadataFormattingCheck,
         "metadata cancellation should occur after payload conversion has completed");
 
     std::error_code error;
     std::filesystem::remove(path, error);
-    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(path), error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path),
+        error);
 }
 
 void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
@@ -1124,7 +1248,9 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
         std::filesystem::temp_directory_path() / "specforge_annotation_ingestion_warning.npy";
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({1, 2}));
     {
-        std::ofstream metadata(specforge::SampleLabelResultMetadataPathForResult(annotation_path), std::ios::trunc);
+        std::ofstream metadata(
+            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path),
+            std::ios::trunc);
         metadata << "{invalid-json";
     }
 
@@ -1517,6 +1643,8 @@ int main()
     TestLoadsSelectedNpyRow();
     TestLoadsNpySampleAnnotationContext();
     TestLoadsReadOnlyAnnotationDtypes();
+    TestAnnotationAdapterPreservesWideNumericSemantics();
+    TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch();
     TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates();
     TestRejectsMismatchedSampleAnnotationLength();
     TestRejectsAuxiliaryNpyArrays();
@@ -1525,7 +1653,7 @@ int main()
     TestLoadsCsvSpectrum();
     TestCancelableCsvLoadStopsInsideParsingAndSorting();
     TestCancelableAnnotationLoadStopsInsidePayloadConversion();
-    TestCancelableAnnotationLoadStopsInsideMetadataFormatting();
+    TestCancelableAnnotationLoadStopsInsideMetadataPairing();
     TestLoadsFitsScalarTableSpectrum();
     TestLoadsFitsVectorTableSpectrum();
     TestBlocksInvalidFitsRedshiftForRestFrameInput();

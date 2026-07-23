@@ -286,7 +286,7 @@ std::vector<SourceCollectionFileDependencyState> CaptureAnnotationDependencies(
             continue;
         }
         expanded.push_back(path);
-        expanded.push_back(SampleLabelResultMetadataPathForResult(path));
+        expanded.push_back(SampleAnnotationIoAdapter::MetadataPathForResult(path));
     }
 
     std::vector<SourceCollectionFileDependencyState> dependencies;
@@ -402,7 +402,7 @@ void LoadNpyAutoAnnotations(
 
     std::string error_message;
     std::optional<SampleAnnotationResult> annotation =
-        LoadSampleAnnotationResultFromPathCancelable(
+        SampleAnnotationIoAdapter{}.LoadCancelable(
             *annotation_path,
             spectrum_count,
             cancellation_checkpoint,
@@ -609,7 +609,7 @@ bool IngestReadOnlySampleAnnotationCancelable(
     Checkpoint(cancellation_checkpoint);
     std::string load_error;
     std::optional<SampleAnnotationResult> annotation =
-        LoadSampleAnnotationResultFromPathCancelable(
+        SampleAnnotationIoAdapter{}.LoadCancelable(
             path,
             expected_count,
             cancellation_checkpoint,

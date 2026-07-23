@@ -384,7 +384,9 @@ void TestSampleLabelResultWritesCompactNpy()
 
     const std::filesystem::path path = std::filesystem::temp_directory_path() / "specforge_sample_label_result.npy";
     std::string error;
-    Require(specforge::SaveSampleLabelResultNpy(path, task, &error), error.empty() ? "NPY save failed" : error);
+    Require(
+        specforge::SampleAnnotationIoAdapter{}.SaveLabelArray(path, task, &error),
+        error.empty() ? "NPY save failed" : error);
     const std::vector<std::int32_t> values = ReadTestInt32NpyPayload(path);
     Require(values.size() == 3, "written NPY should have one value per sample");
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
@@ -399,7 +401,8 @@ void TestSampleLabelResultWritesMetadataSidecar()
 
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "specforge_sample_label_result_metadata.npy";
-    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(path);
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path);
     std::error_code cleanup_error;
     std::filesystem::remove(path, cleanup_error);
     std::filesystem::remove(metadata_path, cleanup_error);
@@ -430,6 +433,99 @@ void TestSampleLabelResultWritesMetadataSidecar()
     Require(metadata.find(PathToUtf8(std::filesystem::temp_directory_path())) == std::string::npos, "metadata must not store a local absolute source path");
 }
 
+void TestAnnotationAdapterRoundTripsLabelArtifacts()
+{
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask("round-trip", "Round trip", 3);
+    Require(
+        specforge::UpsertSampleLabel(
+            task.label_set,
+            specforge::SampleLabelDefinition{9, "accepted", 'a'}),
+        "round-trip label should be accepted");
+    Require(
+        specforge::AssignSampleLabel(task, 1, 9).accepted,
+        "round-trip sample should be labelable");
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_annotation_adapter_round_trip.npy";
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path);
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+
+    specforge::SampleLabelResultMetadataSource source;
+    source.source_name = "source.npy";
+    source.source_fingerprint = "source-fingerprint";
+    source.context_fingerprint = "context-fingerprint";
+    source.spectrum_count = 3;
+
+    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::SampleLabelResultWriteOutcome saved =
+        adapter.SaveLabelResult(path, task, &source);
+    Require(saved.array_saved, saved.message.empty() ? "adapter array should save" : saved.message);
+    Require(saved.metadata_saved, saved.message.empty() ? "adapter metadata should save" : saved.message);
+
+    std::string error;
+    const std::optional<specforge::LoadedSampleLabelResult> loaded =
+        adapter.LoadLabelResult(path, 3, {}, &error);
+    Require(loaded.has_value(), error.empty() ? "adapter label result should load" : error);
+    Require(
+        loaded->values == task.values,
+        "adapter round-trip should preserve every int32 label value");
+    Require(
+        loaded->metadata_sidecar_exists && loaded->metadata &&
+            loaded->metadata->task_id == task.task_id,
+        "adapter round-trip should pair the matching sidecar");
+    Require(
+        loaded->metadata->source &&
+            loaded->metadata->source->context_fingerprint == source.context_fingerprint,
+        "adapter round-trip should preserve source metadata");
+
+    std::filesystem::remove(path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+}
+
+void TestAnnotationAdapterRejectsEmptyTaskIdBeforeWriting()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_annotation_adapter_empty_task_id.npy";
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path);
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+    std::filesystem::remove(metadata_path, cleanup_error);
+
+    const specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask("", "Missing identity", 3);
+    const specforge::SampleAnnotationIoAdapter adapter;
+    const specforge::SampleLabelResultWriteOutcome outcome =
+        adapter.SaveLabelResult(path, task);
+
+    Require(
+        !outcome.array_saved && !outcome.metadata_saved,
+        "empty task identity should reject the label-result pair before either file is written");
+    Require(
+        outcome.message.find("task id") != std::string::npos,
+        "empty task identity should report the violated metadata contract");
+    Require(
+        !std::filesystem::exists(path) && !std::filesystem::exists(metadata_path),
+        "empty task identity should not leave a partial label-result pair");
+
+    std::string error;
+    Require(
+        !adapter.SaveLabelMetadata(path, task, nullptr, &error),
+        "metadata-only save should reject an empty task identity");
+    Require(
+        error.find("task id") != std::string::npos,
+        "metadata-only save should report the same task identity contract");
+    Require(
+        !std::filesystem::exists(metadata_path),
+        "rejected metadata-only save should not create a sidecar");
+}
+
 void TestSampleAnnotationUsesMatchingLabelMetadata()
 {
     specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
@@ -440,7 +536,9 @@ void TestSampleAnnotationUsesMatchingLabelMetadata()
         std::filesystem::temp_directory_path() / "specforge_sample_annotation_metadata.npy";
     std::error_code cleanup_error;
     std::filesystem::remove(path, cleanup_error);
-    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(path), cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path),
+        cleanup_error);
 
     specforge::SelectSampleLabelTaskOutputPath(task, path);
     const specforge::SampleLabelTaskPersistResult saved = specforge::PersistSampleLabelingTaskResult(task);
@@ -448,14 +546,19 @@ void TestSampleAnnotationUsesMatchingLabelMetadata()
 
     std::string error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::LoadSampleAnnotationResultFromPath(path, 3, &error);
+        specforge::SampleAnnotationIoAdapter{}.Load(path, 3, &error);
     Require(annotation.has_value(), error.empty() ? "metadata-backed annotation should load" : error);
     Require(
         annotation->relationship == specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "matching metadata should mark annotation as an external label result");
     Require(annotation->name == "Quality", "metadata task name should become the row name");
-    Require(annotation->values[0].display_text == "bad (5)", "metadata should map numeric codes to labels");
-    Require(annotation->values[1].display_text == "Unlabeled (-1)", "metadata should map the unlabeled sentinel");
+    Require(
+        specforge::FormatSampleAnnotationValue(*annotation, annotation->values[0]) == "bad (5)",
+        "metadata should map numeric codes to labels");
+    Require(
+        specforge::FormatSampleAnnotationValue(*annotation, annotation->values[1]) ==
+            "Unlabeled (-1)",
+        "metadata should map the unlabeled sentinel");
     Require(annotation->label_metadata && annotation->label_metadata->task_id == "quality", "metadata should be attached to the annotation");
 }
 
@@ -469,10 +572,13 @@ void TestMismatchedLabelMetadataFallsBackToRawAnnotationValues()
         std::filesystem::temp_directory_path() / "specforge_sample_annotation_bad_metadata.npy";
     std::error_code cleanup_error;
     std::filesystem::remove(path, cleanup_error);
-    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(path);
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(path);
     std::filesystem::remove(metadata_path, cleanup_error);
     std::string error;
-    Require(specforge::SaveSampleLabelResultNpy(path, task, &error), error.empty() ? "NPY save failed" : error);
+    Require(
+        specforge::SampleAnnotationIoAdapter{}.SaveLabelArray(path, task, &error),
+        error.empty() ? "NPY save failed" : error);
     WriteTextFile(
         metadata_path,
         "{\n"
@@ -488,12 +594,14 @@ void TestMismatchedLabelMetadataFallsBackToRawAnnotationValues()
         "}\n");
 
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::LoadSampleAnnotationResultFromPath(path, 3, &error);
+        specforge::SampleAnnotationIoAdapter{}.Load(path, 3, &error);
     Require(annotation.has_value(), error.empty() ? "annotation should still load" : error);
     Require(
         annotation->relationship == specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "mismatched metadata should not be applied");
-    Require(annotation->values[0].display_text == "5", "mismatched metadata should fall back to raw numeric value");
+    Require(
+        specforge::FormatSampleAnnotationValue(*annotation, annotation->values[0]) == "5",
+        "mismatched metadata should fall back to raw numeric value");
     Require(!annotation->metadata_warning.empty(), "mismatched metadata should produce a warning");
 }
 
@@ -508,7 +616,10 @@ void TestFailedNpySaveDoesNotDamageExistingOutput()
     Require(specforge::UpsertSampleLabel(original.label_set, specforge::SampleLabelDefinition{5, "bad", 'b'}), "label should be accepted");
     Require(specforge::AssignSampleLabel(original, 0, 5).accepted, "original output should be labelable");
     std::string error;
-    Require(specforge::SaveSampleLabelResultNpy(path, original, &error), error.empty() ? "initial NPY save failed" : error);
+    const specforge::SampleAnnotationIoAdapter adapter;
+    Require(
+        adapter.SaveLabelArray(path, original, &error),
+        error.empty() ? "initial NPY save failed" : error);
 
     std::filesystem::permissions(
         path,
@@ -521,7 +632,9 @@ void TestFailedNpySaveDoesNotDamageExistingOutput()
     Require(specforge::UpsertSampleLabel(replacement.label_set, specforge::SampleLabelDefinition{7, "good", 'g'}), "replacement label should be accepted");
     Require(specforge::AssignSampleLabel(replacement, 1, 7).accepted, "replacement output should be labelable");
     error.clear();
-    Require(!specforge::SaveSampleLabelResultNpy(path, replacement, &error), "read-only target should reject replacement");
+    Require(
+        !adapter.SaveLabelArray(path, replacement, &error),
+        "read-only target should reject replacement");
 
     const std::vector<std::int32_t> values = ReadTestInt32NpyPayload(path);
     Require(values.size() == 3, "existing output should still be readable after failed save");
@@ -670,7 +783,9 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
-    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(output_path), cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path),
+        cleanup_error);
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
@@ -812,7 +927,8 @@ void TestMetadataOnlyChangesRewriteSidecarOnRetry()
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_metadata_retry_state.json";
     const std::filesystem::path output_path =
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_metadata_retry_result.npy";
-    const std::filesystem::path metadata_path = specforge::SampleLabelResultMetadataPathForResult(output_path);
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path);
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
@@ -866,7 +982,9 @@ void TestOutputPathConflictIsRejectedWithinSource()
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
-    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(output_path), cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path),
+        cleanup_error);
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
@@ -1180,7 +1298,10 @@ void TestFloatingAnnotationsAreNotFilterable()
     specforge::SampleAnnotationResult annotation;
     annotation.name = "score_y.npy";
     annotation.kind = specforge::SampleAnnotationKind::ContinuousFloat;
-    annotation.values = {{"0.1"}, {"0.2"}};
+    annotation.values = {
+        specforge::SampleAnnotationValue{0.1},
+        specforge::SampleAnnotationValue{0.2},
+    };
 
     const specforge::SampleFilterSource source = specforge::BuildAnnotationFilterSource(annotation);
     Require(!source.filterable, "floating annotations should not be filterable");
@@ -1207,6 +1328,8 @@ int main()
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
         TestSampleLabelResultWritesMetadataSidecar();
+        TestAnnotationAdapterRoundTripsLabelArtifacts();
+        TestAnnotationAdapterRejectsEmptyTaskIdBeforeWriting();
         TestSampleAnnotationUsesMatchingLabelMetadata();
         TestMismatchedLabelMetadataFallsBackToRawAnnotationValues();
         TestFailedNpySaveDoesNotDamageExistingOutput();

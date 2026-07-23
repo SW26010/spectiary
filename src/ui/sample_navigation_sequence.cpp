@@ -37,6 +37,26 @@ int CompareSortValues(const SampleNavigationSortValue& left, const SampleNavigat
     if (left.index() != right.index()) {
         return left.index() < right.index() ? -1 : 1;
     }
+    if (const std::int64_t* left_number = std::get_if<std::int64_t>(&left)) {
+        const std::int64_t right_number = std::get<std::int64_t>(right);
+        if (*left_number < right_number) {
+            return -1;
+        }
+        if (*left_number > right_number) {
+            return 1;
+        }
+        return 0;
+    }
+    if (const std::uint64_t* left_number = std::get_if<std::uint64_t>(&left)) {
+        const std::uint64_t right_number = std::get<std::uint64_t>(right);
+        if (*left_number < right_number) {
+            return -1;
+        }
+        if (*left_number > right_number) {
+            return 1;
+        }
+        return 0;
+    }
     if (const double* left_number = std::get_if<double>(&left)) {
         const double right_number = std::get<double>(right);
         if (*left_number < right_number) {
@@ -80,6 +100,16 @@ bool UsesImplicitSourceOrder(const SampleNavigationSequence& sequence)
 constexpr std::size_t kMissingSequencePosition = std::numeric_limits<std::size_t>::max();
 
 }  // namespace
+
+SampleNavigationSortValue MakeSampleNavigationSortValue(std::int64_t value)
+{
+    return SampleNavigationSortValue{value};
+}
+
+SampleNavigationSortValue MakeSampleNavigationSortValue(std::uint64_t value)
+{
+    return SampleNavigationSortValue{value};
+}
 
 SampleNavigationSortValue MakeSampleNavigationSortValue(double value)
 {

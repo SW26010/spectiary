@@ -280,7 +280,11 @@ void TestControllerReloadsCompanionContextOnReactivate()
     const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr, "active context should exist");
     Require(context->sample_names[0] == "alpha", "initial name should load");
-    Require(context->annotations[0].values[0].display_text == "1", "initial annotation should load");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations[0],
+            context->annotations[0].values[0]) == "1",
+        "initial annotation should load");
 
     specforge::SampleNavigationResult result = controller.Navigate(specforge::SampleNavigationRequest::Next());
     Require(result.current_index == 1, "test should move before reactivation");
@@ -297,7 +301,11 @@ void TestControllerReloadsCompanionContextOnReactivate()
     context = controller.active_context();
     Require(context != nullptr, "reactivated context should exist");
     Require(context->sample_names[0] == "delta", "reactivate should reload changed sample names");
-    Require(context->annotations[0].values[0].display_text == "42", "reactivate should reload changed annotations");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations[0],
+            context->annotations[0].values[0]) == "42",
+        "reactivate should reload changed annotations");
     Require(controller.current_index() && *controller.current_index() == 1, "context reload should preserve current index");
 }
 
@@ -327,7 +335,11 @@ void TestControllerAddsManualAnnotationToActiveContext()
     Require(context != nullptr, "active context should exist after manual annotation");
     Require(context->annotations.size() == 1, "manual annotation should be appended");
     Require(context->annotations[0].name == "specforge_nav_manual_annotation_score.npy", "annotation name should be file name");
-    Require(context->annotations[0].values[0].display_text == "7", "manual annotation should load first value");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations[0],
+            context->annotations[0].values[0]) == "7",
+        "manual annotation should load first value");
 
     WriteNpy(annotation_path, "<i4", {2}, BytesFor<std::int32_t>({99, 100}));
     Require(
@@ -336,7 +348,11 @@ void TestControllerAddsManualAnnotationToActiveContext()
     context = controller.active_context();
     Require(context != nullptr, "active context should still exist after replacement");
     Require(context->annotations.size() == 1, "same annotation path should replace instead of duplicating");
-    Require(context->annotations[0].values[0].display_text == "99", "replacement should refresh annotation values");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations[0],
+            context->annotations[0].values[0]) == "99",
+        "replacement should refresh annotation values");
 
     Require(
         !controller.AddReadOnlyAnnotationToActiveSource(mismatched_path, &message),
@@ -371,7 +387,11 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
     const specforge::SourceCollectionManifest* context = controller.active_context();
     Require(context != nullptr && context->annotations.size() == 1, "provided annotation should be visible");
     Require(context->annotations[0].path == annotation_path, "restored annotation should keep its path");
-    Require(context->annotations[0].values[0].display_text == "5", "restored annotation should reload values");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations[0],
+            context->annotations[0].values[0]) == "5",
+        "restored annotation should reload values");
 
     Require(
         controller.RemoveReadOnlyAnnotationFromActiveSource(annotation_path),

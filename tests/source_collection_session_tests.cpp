@@ -1,5 +1,6 @@
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
+#include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
@@ -193,13 +194,14 @@ void SaveLabelResultFixture(
     task.values = std::move(values);
     task.label_set = std::move(label_set);
     std::string error;
+    const specforge::SampleAnnotationIoAdapter adapter;
     Require(
-        specforge::SaveSampleLabelResultNpy(path, task, &error),
+        adapter.SaveLabelArray(path, task, &error),
         error.empty() ? "label result fixture NPY should save" : error);
     if (write_metadata) {
         error.clear();
         Require(
-            specforge::SaveSampleLabelResultMetadataSidecar(path, task, nullptr, &error),
+            adapter.SaveLabelMetadata(path, task, nullptr, &error),
             error.empty() ? "label result fixture metadata should save" : error);
     }
 }
@@ -1132,10 +1134,16 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
         "migrated sample filtering should keep the spectrum snapshot aligned");
 
     std::string load_error;
-    const std::optional<std::vector<int>> persisted =
-        specforge::LoadSampleLabelResultNpy(output_path, 3, &load_error);
+    const std::optional<specforge::LoadedSampleLabelResult> persisted =
+        specforge::SampleAnnotationIoAdapter{}.LoadLabelResult(
+            output_path,
+            3,
+            {},
+            &load_error);
     Require(persisted.has_value(), load_error.empty() ? "recode output should load" : load_error);
-    Require(*persisted == std::vector<int>({7, 4, -1}), "confirmed recode should persist migrated values");
+    Require(
+        persisted->values == std::vector<int>({7, 4, -1}),
+        "confirmed recode should persist migrated values");
 }
 
 void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
@@ -2061,7 +2069,8 @@ void TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_metadata_blocked.npy");
     const std::filesystem::path replacement_output_path = UniqueTempPath("_metadata_replacement.npy");
-    std::filesystem::create_directories(specforge::SampleLabelResultMetadataPathForResult(output_path));
+    std::filesystem::create_directories(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path));
 
     std::vector<std::size_t> loaded_indices;
     specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
@@ -2220,7 +2229,8 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
         session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::AutosavedToOutput,
         "plain annotation activation should write its new metadata sidecar");
     Require(
-        std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
+        std::filesystem::exists(
+            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path)),
         "plain annotation activation should create metadata sidecar");
     Require(
         session.View().navigation.current_annotations[0].relationship ==
@@ -2248,10 +2258,12 @@ void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
         Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(session.View().labeling.has_active_task, "plain annotation should become a local task");
     Require(
-        std::filesystem::exists(specforge::SampleLabelResultMetadataPathForResult(annotation_path)),
+        std::filesystem::exists(
+            specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path)),
         "test should start with a converted metadata sidecar");
 
-    std::filesystem::remove(specforge::SampleLabelResultMetadataPathForResult(annotation_path));
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(annotation_path));
     result = Submit(session, AddReadOnlyAnnotation(annotation_path));
     Require(
         session.View().navigation.current_annotations.size() == 1,
@@ -3136,7 +3148,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     context.identity = specforge::BuildSourceCollectionIdentity(*prepared_snapshot);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "prepared restore annotation fixture should load");
     context.manifest.annotations.push_back(std::move(*annotation));
     specforge::PreparedSampleWorkflowState prepared_workflow =
@@ -3161,7 +3173,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
     specforge::SourceCollectionContext corrected_context;
     corrected_context.identity = specforge::BuildSourceCollectionIdentity(*corrected_snapshot);
     std::optional<specforge::SampleAnnotationResult> corrected_annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(corrected_annotation.has_value(), "corrected prepared annotation fixture should load");
     corrected_context.manifest.annotations.push_back(std::move(*corrected_annotation));
     specforge::PreparedSampleWorkflowState corrected_workflow =
@@ -3765,7 +3777,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(initial_annotation.has_value(), "initial context annotation should load");
     initial_context.manifest.annotations.push_back(std::move(*initial_annotation));
     specforge::PreparedSampleWorkflowState initial_workflow =
@@ -3817,7 +3829,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     const specforge::SourceCollectionIdentity changed_identity = changed_context.identity;
     changed_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::optional<specforge::SampleAnnotationResult> changed_annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(changed_annotation.has_value(), "changed context annotation should load");
     changed_context.manifest.annotations.push_back(std::move(*changed_annotation));
     specforge::PreparedSampleWorkflowState stale_workflow =
@@ -3851,7 +3863,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
     final_context.identity = changed_identity;
     final_context.manifest.sample_names = {"alpha", "beta", "gamma"};
     std::optional<specforge::SampleAnnotationResult> final_annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(final_annotation.has_value(), "final context annotation should load");
     final_context.manifest.annotations.push_back(std::move(*final_annotation));
     specforge::PreparedSampleWorkflowState final_workflow =
@@ -4037,7 +4049,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         false);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "same-identity reload annotation fixture should load");
 
     std::size_t synchronous_loader_calls = 0;
@@ -4361,7 +4373,7 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         false);
     std::string annotation_error;
     std::optional<specforge::SampleAnnotationResult> annotation =
-        specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &annotation_error);
+        specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "interrupted follow-up annotation fixture should load");
 
     std::size_t synchronous_loader_calls = 0;
@@ -4468,7 +4480,7 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         if (include_annotation) {
             std::string error;
             std::optional<specforge::SampleAnnotationResult> annotation =
-                specforge::LoadSampleAnnotationResultFromPath(annotation_path, 3, &error);
+                specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &error);
             Require(annotation.has_value(), "prepared source annotation fixture should load");
             context.manifest.annotations.push_back(std::move(*annotation));
         }

@@ -73,7 +73,10 @@ std::optional<SampleLabelResultMetadata> LoadVerifiedLabelMetadataForAnnotation(
     }
 
     SampleLabelResultMetadataLoadResult metadata =
-        LoadSampleLabelResultMetadataForResult(annotation.path, annotation.values.size(), annotation.dtype_name);
+        SampleAnnotationIoAdapter{}.LoadLabelMetadata(
+            annotation.path,
+            annotation.values.size(),
+            annotation.dtype_name);
     if (!metadata.warning.empty() || !metadata.metadata) {
         return std::nullopt;
     }
@@ -97,7 +100,7 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     if (local_task != nullptr && current_index < local_task->values.size()) {
         view.display_text = FormatSampleLabelValue(local_task->label_set, local_task->values[current_index]);
     } else if (current_index < annotation.values.size()) {
-        view.display_text = annotation.values[current_index].display_text;
+        view.display_text = FormatSampleAnnotationValue(annotation, annotation.values[current_index]);
     } else {
         view.missing = true;
     }
@@ -110,7 +113,8 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     view.can_remove_annotation = local_task == nullptr;
     if (local_task != nullptr && local_task->output_path) {
         view.output_missing = !PathExists(*local_task->output_path);
-        view.metadata_missing = !PathExists(SampleLabelResultMetadataPathForResult(*local_task->output_path));
+        view.metadata_missing = !PathExists(
+            SampleAnnotationIoAdapter::MetadataPathForResult(*local_task->output_path));
     }
     return view;
 }
@@ -137,7 +141,8 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_remove_annotation = false;
     if (task.output_path) {
         view.output_missing = !PathExists(*task.output_path);
-        view.metadata_missing = !PathExists(SampleLabelResultMetadataPathForResult(*task.output_path));
+        view.metadata_missing = !PathExists(
+            SampleAnnotationIoAdapter::MetadataPathForResult(*task.output_path));
     }
     return view;
 }
@@ -733,7 +738,8 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
     if (annotation == nullptr) {
         const std::size_t sample_count = navigation_.spectrum_count().value_or(0);
         std::string load_error;
-        loaded_annotation = LoadSampleAnnotationResultFromPath(annotation_path, sample_count, &load_error);
+        loaded_annotation =
+            SampleAnnotationIoAdapter{}.Load(annotation_path, sample_count, &load_error);
         if (!loaded_annotation) {
             return action;
         }

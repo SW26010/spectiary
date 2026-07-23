@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>
@@ -16,7 +17,8 @@ enum class SampleNavigationSortDirection {
     Descending,
 };
 
-using SampleNavigationSortValue = std::variant<double, std::string>;
+using SampleNavigationSortValue =
+    std::variant<std::int64_t, std::uint64_t, double, std::string>;
 
 struct SampleNavigationSortChoice {
     bool active = false;
@@ -74,6 +76,8 @@ struct SampleNavigationSequence {
         const std::vector<bool>& eligible_samples) const;
 };
 
+[[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(std::int64_t value);
+[[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(std::uint64_t value);
 [[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(double value);
 [[nodiscard]] SampleNavigationSortValue MakeSampleNavigationSortValue(std::string value);
 [[nodiscard]] SampleNavigationSequenceProjection ProjectSampleNavigationSequence(

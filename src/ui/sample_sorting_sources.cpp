@@ -4,10 +4,8 @@
 #include "ui/sample_annotation_labeling_rules.h"
 
 #include <algorithm>
-#include <cerrno>
-#include <cctype>
 #include <cmath>
-#include <cstdlib>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -17,37 +15,6 @@ namespace specforge {
 namespace {
 
 constexpr std::string_view kSourceOrderSortSourceId = "source-order";
-
-std::string TrimAscii(std::string value)
-{
-    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    });
-    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    }).base();
-
-    if (first >= last) {
-        return {};
-    }
-    return std::string(first, last);
-}
-
-std::optional<double> ParseFiniteDouble(std::string_view text)
-{
-    std::string trimmed = TrimAscii(std::string{text});
-    if (trimmed.empty()) {
-        return std::nullopt;
-    }
-
-    char* end = nullptr;
-    errno = 0;
-    const double value = std::strtod(trimmed.c_str(), &end);
-    if (end == trimmed.c_str() || *end != '\0' || errno == ERANGE || !std::isfinite(value)) {
-        return std::nullopt;
-    }
-    return value;
-}
 
 SourceCollectionSampleSortSourceView MakeSampleSortSourceView(
     std::string id,
@@ -112,7 +79,8 @@ std::optional<SampleSortingSource> BuildSourceOrderSortingSource(
         if ((row & 0xfffU) == 0U && cancellation_checkpoint) {
             cancellation_checkpoint();
         }
-        source.values.push_back(MakeSampleNavigationSortValue(static_cast<double>(row)));
+        source.values.push_back(
+            MakeSampleNavigationSortValue(static_cast<std::uint64_t>(row)));
     }
     if (cancellation_checkpoint) {
         cancellation_checkpoint();
@@ -152,21 +120,30 @@ std::optional<SampleSortingSource> BuildAnnotationSortingSource(
         const SampleAnnotationValue& value = annotation.values[index];
         switch (annotation.kind) {
         case SampleAnnotationKind::CategoricalInteger:
-            if (!value.integer_value) {
+            if (const std::int64_t* signed_value =
+                    std::get_if<std::int64_t>(&value.semantic)) {
+                source.values.push_back(MakeSampleNavigationSortValue(*signed_value));
+            } else if (const std::uint64_t* unsigned_value =
+                           std::get_if<std::uint64_t>(&value.semantic)) {
+                source.values.push_back(MakeSampleNavigationSortValue(*unsigned_value));
+            } else {
                 return std::nullopt;
             }
-            source.values.push_back(
-                MakeSampleNavigationSortValue(static_cast<double>(*value.integer_value)));
             break;
         case SampleAnnotationKind::ContinuousFloat:
-            if (const std::optional<double> parsed = ParseFiniteDouble(value.display_text)) {
-                source.values.push_back(MakeSampleNavigationSortValue(*parsed));
+            if (const double* floating_value = std::get_if<double>(&value.semantic);
+                floating_value != nullptr && std::isfinite(*floating_value)) {
+                source.values.push_back(MakeSampleNavigationSortValue(*floating_value));
             } else {
                 return std::nullopt;
             }
             break;
         case SampleAnnotationKind::Text:
-            source.values.push_back(MakeSampleNavigationSortValue(value.display_text));
+            if (const std::string* text = std::get_if<std::string>(&value.semantic)) {
+                source.values.push_back(MakeSampleNavigationSortValue(*text));
+            } else {
+                return std::nullopt;
+            }
             break;
         }
     }

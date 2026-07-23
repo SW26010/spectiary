@@ -1,7 +1,8 @@
 #include "ui/shell_ui.h"
 
-#include "domain/source_path_identity.h"
+#include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "domain/source_path_identity.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
@@ -248,7 +249,7 @@ bool SaveAnnotationFixture(
         "Shell drain annotation",
         values.size());
     task.values = std::move(values);
-    return specforge::SaveSampleLabelResultNpy(path, task, error);
+    return specforge::SampleAnnotationIoAdapter{}.SaveLabelArray(path, task, error);
 }
 
 specforge::SourceCollectionSession MakePreparedDeferredSession(
@@ -1697,7 +1698,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
 
     specforge::SourceCollectionSession session = MakePreparedDeferredSession(path);
     std::optional<specforge::SampleAnnotationResult> initial_annotation =
-        specforge::LoadSampleAnnotationResultFromPath(
+        specforge::SampleAnnotationIoAdapter{}.Load(
             *annotation_path,
             3,
             &annotation_error);

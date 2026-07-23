@@ -133,34 +133,5 @@ void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message
 [[nodiscard]] SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     SampleLabelingTask& task,
     const SampleLabelResultMetadataSource* source = nullptr);
-[[nodiscard]] bool SaveSampleLabelResultNpy(
-    const std::filesystem::path& path,
-    const SampleLabelingTask& task,
-    std::string* error_message = nullptr);
-[[nodiscard]] std::optional<std::vector<int>> LoadSampleLabelResultNpy(
-    const std::filesystem::path& path,
-    std::size_t expected_count,
-    std::string* error_message = nullptr);
-[[nodiscard]] std::optional<std::vector<int>> LoadSampleLabelResultNpyCancelable(
-    const std::filesystem::path& path,
-    std::size_t expected_count,
-    const std::function<void()>& cancellation_checkpoint,
-    std::string* error_message = nullptr);
-[[nodiscard]] std::filesystem::path SampleLabelResultMetadataPathForResult(
-    const std::filesystem::path& result_path);
-[[nodiscard]] bool SaveSampleLabelResultMetadataSidecar(
-    const std::filesystem::path& result_path,
-    const SampleLabelingTask& task,
-    const SampleLabelResultMetadataSource* source = nullptr,
-    std::string* error_message = nullptr);
-[[nodiscard]] SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResult(
-    const std::filesystem::path& result_path,
-    std::size_t expected_count,
-    std::string_view expected_dtype);
-[[nodiscard]] SampleLabelResultMetadataLoadResult LoadSampleLabelResultMetadataForResultCancelable(
-    const std::filesystem::path& result_path,
-    std::size_t expected_count,
-    std::string_view expected_dtype,
-    const std::function<void()>& cancellation_checkpoint);
 
 }  // namespace specforge

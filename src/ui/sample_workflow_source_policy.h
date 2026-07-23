@@ -69,10 +69,10 @@ public:
         std::string_view new_value_key);
     [[nodiscard]] bool has_filter_conditions() const;
     [[nodiscard]] SampleFilterEvaluation EvaluateFilters(
-        const SampleWorkflowSourceContext& context) const;
+        const SampleWorkflowSourceContext& context);
     [[nodiscard]] SampleFilterEvaluation EvaluateFilters(
         const SampleWorkflowSourceContext& context,
-        const std::function<void()>& cancellation_checkpoint) const;
+        const std::function<void()>& cancellation_checkpoint);
     [[nodiscard]] SourceCollectionFilterView BuildFilterView(
         const SampleWorkflowSourceContext& context) const;
     [[nodiscard]] SourceCollectionFilterView BuildFilterView(
@@ -114,6 +114,9 @@ private:
         std::string_view source_id,
         SampleNavigationSortDirection direction);
     [[nodiscard]] bool RemoveSelectedSampleSortSource(std::string_view source_id);
+    void ReconcileRestoredFilterConditions(
+        const SampleWorkflowSourceContext& context,
+        const std::function<void()>& cancellation_checkpoint);
     [[nodiscard]] std::vector<SampleFilterSource> BuildSelectedFilterSources(
         const SampleWorkflowSourceContext& context) const;
     [[nodiscard]] std::vector<SampleFilterSource> BuildSelectedFilterSources(
@@ -138,6 +141,7 @@ private:
     std::optional<std::string> selected_sample_sort_source_id_;
     SampleNavigationSortDirection selected_sample_sort_direction_ =
         SampleNavigationSortDirection::Ascending;
+    bool restored_filter_conditions_need_reconciliation_ = false;
 
     mutable bool sorting_source_cache_valid_ = false;
     mutable std::size_t sorting_source_cache_sample_count_ = 0;

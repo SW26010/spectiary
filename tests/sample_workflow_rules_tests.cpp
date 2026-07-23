@@ -4,7 +4,11 @@
 #include "ui/sample_sorting_sources.h"
 #include "ui/sample_workflow_source_policy.h"
 
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -54,7 +58,8 @@ specforge::SampleAnnotationResult MakeIntegerAnnotation(
     annotation.kind = specforge::SampleAnnotationKind::CategoricalInteger;
     annotation.values.reserve(values.size());
     for (int value : values) {
-        annotation.values.push_back(specforge::SampleAnnotationValue{std::to_string(value), value});
+        annotation.values.push_back(
+            specforge::SampleAnnotationValue{static_cast<std::int64_t>(value)});
     }
     return annotation;
 }
@@ -70,7 +75,7 @@ specforge::SampleAnnotationResult MakeTextAnnotation(
     annotation.kind = specforge::SampleAnnotationKind::Text;
     annotation.values.reserve(values.size());
     for (std::string& value : values) {
-        annotation.values.push_back(specforge::SampleAnnotationValue{std::move(value), std::nullopt});
+        annotation.values.push_back(specforge::SampleAnnotationValue{std::move(value)});
     }
     return annotation;
 }
@@ -78,15 +83,15 @@ specforge::SampleAnnotationResult MakeTextAnnotation(
 specforge::SampleAnnotationResult MakeFloatAnnotation(
     std::string name,
     std::filesystem::path path,
-    std::vector<std::string> values)
+    std::vector<double> values)
 {
     specforge::SampleAnnotationResult annotation;
     annotation.name = std::move(name);
     annotation.path = std::move(path);
     annotation.kind = specforge::SampleAnnotationKind::ContinuousFloat;
     annotation.values.reserve(values.size());
-    for (std::string& value : values) {
-        annotation.values.push_back(specforge::SampleAnnotationValue{std::move(value), std::nullopt});
+    for (const double value : values) {
+        annotation.values.push_back(specforge::SampleAnnotationValue{value});
     }
     return annotation;
 }
@@ -235,7 +240,9 @@ void TestSampleNameSortingSource()
         specforge::BuildSampleSortingSource(nullptr, nullptr, 3, "source-order");
     Require(source.has_value(), "source-order should build without annotation context");
     Require(source->id == "source-order", "source-order source should use the fixed id");
-    Require(std::get<double>(source->values[2]) == 2.0, "source-order values should preserve row indexes");
+    Require(
+        std::get<std::uint64_t>(source->values[2]) == 2,
+        "source-order values should preserve row indexes");
 
     source = specforge::BuildSampleSortingSource(&manifest, nullptr, 3, "sample-name");
 
@@ -265,7 +272,9 @@ void TestAnnotationSortingSources()
     std::optional<specforge::SampleSortingSource> source =
         specforge::BuildSampleSortingSource(&manifest, nullptr, 3, rank_source_id);
     Require(source.has_value(), "plain integer annotations should build sortable values");
-    Require(std::get<double>(source->values[0]) == 2.0, "integer annotation values should sort numerically");
+    Require(
+        std::get<std::int64_t>(source->values[0]) == 2,
+        "integer annotation values should sort numerically");
 
     source = specforge::BuildSampleSortingSource(
         &manifest,
@@ -274,6 +283,82 @@ void TestAnnotationSortingSources()
         specforge::BuildAnnotationFilterSourceId(manifest.annotations[1]));
     Require(source.has_value(), "plain text annotations should build sortable values");
     Require(std::get<std::string>(source->values[1]) == "x", "text annotation values should sort lexically");
+}
+
+void TestTypedAnnotationSortingPreservesNumericPrecision()
+{
+    specforge::SourceCollectionManifest manifest;
+
+    specforge::SampleAnnotationResult signed_annotation;
+    signed_annotation.name = "Signed";
+    signed_annotation.path = TempPath("_signed_i8.npy");
+    signed_annotation.kind = specforge::SampleAnnotationKind::CategoricalInteger;
+    signed_annotation.values = {
+        specforge::SampleAnnotationValue{std::numeric_limits<std::int64_t>::max()},
+        specforge::SampleAnnotationValue{std::numeric_limits<std::int64_t>::max() - 1},
+    };
+    manifest.annotations.push_back(signed_annotation);
+
+    const std::string signed_source_id =
+        specforge::BuildAnnotationFilterSourceId(manifest.annotations.back());
+    std::optional<specforge::SampleSortingSource> source =
+        specforge::BuildSampleSortingSource(&manifest, nullptr, 2, signed_source_id);
+    Require(source.has_value(), "int64 annotation should remain sortable");
+    Require(
+        std::get<std::int64_t>(source->values[0]) ==
+            std::numeric_limits<std::int64_t>::max(),
+        "int64 annotation should not pass through double");
+
+    specforge::SampleNavigationSortChoice choice;
+    choice.active = true;
+    choice.values = source->values;
+    specforge::SampleNavigationSequenceInput input;
+    input.source_row_count = 2;
+    input.sort_choice = &choice;
+    Require(
+        specforge::BuildSampleNavigationSequence(input).ordered_rows ==
+            std::vector<std::size_t>({1, 0}),
+        "adjacent large int64 values should sort distinctly");
+
+    specforge::SampleAnnotationResult unsigned_annotation;
+    unsigned_annotation.name = "Unsigned";
+    unsigned_annotation.path = TempPath("_unsigned_u8.npy");
+    unsigned_annotation.kind = specforge::SampleAnnotationKind::CategoricalInteger;
+    unsigned_annotation.values = {
+        specforge::SampleAnnotationValue{std::numeric_limits<std::uint64_t>::max()},
+        specforge::SampleAnnotationValue{std::numeric_limits<std::uint64_t>::max() - 1},
+    };
+    manifest.annotations.push_back(unsigned_annotation);
+    source = specforge::BuildSampleSortingSource(
+        &manifest,
+        nullptr,
+        2,
+        specforge::BuildAnnotationFilterSourceId(manifest.annotations.back()));
+    Require(source.has_value(), "uint64 annotation should remain sortable");
+    Require(
+        std::get<std::uint64_t>(source->values[0]) ==
+            std::numeric_limits<std::uint64_t>::max(),
+        "uint64 annotation should not pass through double");
+
+    const double adjacent = std::nextafter(1.0, 2.0);
+    specforge::SampleAnnotationResult float_annotation =
+        MakeFloatAnnotation("Adjacent", TempPath("_adjacent_f8.npy"), {adjacent, 1.0});
+    manifest.annotations.push_back(float_annotation);
+    source = specforge::BuildSampleSortingSource(
+        &manifest,
+        nullptr,
+        2,
+        specforge::BuildAnnotationFilterSourceId(manifest.annotations.back()));
+    Require(source.has_value(), "finite double annotation should remain sortable");
+    choice.values = source->values;
+    Require(
+        specforge::BuildSampleNavigationSequence(input).ordered_rows ==
+            std::vector<std::size_t>({1, 0}),
+        "adjacent doubles should sort by their typed values");
+    Require(
+        specforge::FormatSampleAnnotationValue(float_annotation, float_annotation.values[0]) !=
+            specforge::FormatSampleAnnotationValue(float_annotation, float_annotation.values[1]),
+        "adjacent doubles should have distinct round-trip display projections");
 }
 
 void TestAnnotationSortingExclusions()
@@ -298,7 +383,11 @@ void TestAnnotationSortingExclusions()
         "metadata-backed label result annotations should not be sort sources");
 
     specforge::SourceCollectionManifest float_manifest;
-    float_manifest.annotations.push_back(MakeFloatAnnotation("Score", TempPath("_score.npy"), {"0.5", "bad"}));
+    float_manifest.annotations.push_back(
+        MakeFloatAnnotation(
+            "Score",
+            TempPath("_score.npy"),
+            {0.5, std::numeric_limits<double>::quiet_NaN()}));
     Require(
         specforge::BuildSampleSortingSourceViews(&float_manifest, nullptr, 2).empty(),
         "non-comparable float annotations should be excluded from view sources");
@@ -356,8 +445,95 @@ void TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting()
         sort_choice.choice->direction == specforge::SampleNavigationSortDirection::Descending,
         "policy should keep the selected source direction");
     Require(
-        std::get<double>(sort_choice.choice->values[0]) == 2.0,
+        std::get<std::int64_t>(sort_choice.choice->values[0]) == 2,
         "policy sort choice should use annotation values");
+}
+
+void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
+{
+    const std::filesystem::path annotation_path = TempPath("_legacy_mapped_filter.npy");
+    const std::filesystem::path cache_path = TempPath("_legacy_mapped_filter_cache.json");
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    specforge::SourceCollectionManifest manifest;
+    manifest.annotations.push_back(
+        MakeIntegerAnnotation("Quality", annotation_path, {5, 9, 5}));
+    specforge::SampleLabelResultMetadata metadata;
+    metadata.task_id = "quality";
+    metadata.task_name = "Quality";
+    metadata.label_set.labels.push_back(
+        specforge::SampleLabelDefinition{5, "bad", 'b'});
+    metadata.label_set.labels.push_back(
+        specforge::SampleLabelDefinition{9, "good", 'g'});
+    manifest.annotations[0].label_metadata = std::move(metadata);
+    manifest.annotations[0].relationship =
+        specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult;
+
+    const std::string source_id =
+        specforge::BuildAnnotationFilterSourceId(manifest.annotations[0]);
+    specforge::SampleWorkflowSourceState legacy_state;
+    legacy_state.selected_filter_source_ids.push_back(source_id);
+    specforge::SampleFilterCondition legacy_condition;
+    legacy_condition.source_id = source_id;
+    legacy_condition.allowed_value_keys.insert("bad (5)");
+    legacy_state.filter_conditions.push_back(std::move(legacy_condition));
+
+    specforge::SampleWorkflowStateCache legacy_v2_cache;
+    legacy_v2_cache.sources_by_identity.emplace(
+        "legacy-mapped-source",
+        std::move(legacy_state));
+    Require(
+        specforge::SaveSampleWorkflowStateCache(cache_path, legacy_v2_cache),
+        "legacy schema-v2 workflow cache fixture should save");
+    {
+        std::ifstream cache_stream(cache_path);
+        std::string cache_text;
+        std::getline(cache_stream, cache_text, '\0');
+        Require(
+            cache_text.find("\"schema_version\": 2") != std::string::npos,
+            "legacy mapped-key regression fixture should remain pinned to schema v2");
+    }
+
+    const specforge::SampleWorkflowStateCache loaded =
+        specforge::LoadSampleWorkflowStateCache(cache_path);
+    std::filesystem::remove(cache_path, cleanup_error);
+    const auto restored = loaded.sources_by_identity.find("legacy-mapped-source");
+    Require(
+        restored != loaded.sources_by_identity.end(),
+        "legacy schema-v2 workflow cache fixture should load");
+
+    specforge::SampleWorkflowSourcePolicy policy;
+    policy.RestoreState(restored->second);
+    const specforge::SampleWorkflowSourceContext context{
+        .collection = &manifest,
+        .labeling_tasks = nullptr,
+        .sample_count = 3};
+    const specforge::SampleFilterEvaluation evaluation =
+        policy.EvaluateFilters(context);
+
+    Require(evaluation.active, "mapped legacy filter should remain active");
+    Require(
+        evaluation.included_count == 2,
+        "mapped legacy display key should match its canonical annotation code");
+    const specforge::SampleWorkflowSourceState migrated = policy.StoreState();
+    Require(
+        migrated.filter_conditions.size() == 1 &&
+            migrated.filter_conditions[0].allowed_value_keys ==
+                std::unordered_set<std::string>{"5"},
+        "restored mapped filter state should be rewritten to the canonical key");
+
+    specforge::SampleWorkflowSourceState unmappable = restored->second;
+    unmappable.filter_conditions[0].allowed_value_keys = {"renamed label (5)"};
+    policy.RestoreState(unmappable);
+    const specforge::SampleFilterEvaluation safe_evaluation =
+        policy.EvaluateFilters(context);
+    Require(
+        !safe_evaluation.active && safe_evaluation.included_count == 3,
+        "an unmappable legacy display key should safely disable its filter condition");
+    Require(
+        policy.StoreState().filter_conditions.empty(),
+        "an unmappable legacy display key should be removed from restored state");
 }
 
 }  // namespace
@@ -371,7 +547,9 @@ int main()
     TestMetadataActivationPlanRejectsSamePathIdentityMismatch();
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
+    TestTypedAnnotationSortingPreservesNumericPrecision();
     TestAnnotationSortingExclusions();
     TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
+    TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys();
     return 0;
 }

@@ -112,10 +112,11 @@ std::optional<std::vector<int>> AnnotationIntegerValues(const SampleAnnotationRe
     std::vector<int> values;
     values.reserve(annotation.values.size());
     for (const SampleAnnotationValue& value : annotation.values) {
-        if (!value.integer_value) {
+        const std::optional<int> integer_value = SampleAnnotationValueAsInt(value);
+        if (!integer_value) {
             return std::nullopt;
         }
-        values.push_back(*value.integer_value);
+        values.push_back(*integer_value);
     }
     return values;
 }

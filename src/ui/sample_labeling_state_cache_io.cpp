@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "domain/sample_annotation_io.h"
 #include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
@@ -180,36 +181,28 @@ std::optional<SampleLabelingTask> ParseTask(
     bool metadata_retry_pending = false;
     std::string metadata_load_error;
     if (task.output_path) {
-        if (std::optional<std::vector<int>> values =
-                LoadSampleLabelResultNpyCancelable(
-                    *task.output_path,
-                    sample_count,
-                    cancellation_checkpoint,
-                    &output_load_error)) {
-            task.values = std::move(*values);
+        std::optional<LoadedSampleLabelResult> loaded =
+            SampleAnnotationIoAdapter{}.LoadLabelResult(
+                *task.output_path,
+                sample_count,
+                cancellation_checkpoint,
+                &output_load_error);
+        if (loaded) {
+            task.values = std::move(loaded->values);
         } else {
             output_load_failed = true;
         }
         if (!output_load_failed) {
-            const std::filesystem::path metadata_path = SampleLabelResultMetadataPathForResult(*task.output_path);
-            std::error_code metadata_exists_error;
-            const bool metadata_exists = std::filesystem::exists(metadata_path, metadata_exists_error) &&
-                                         !metadata_exists_error;
-            SampleLabelResultMetadataLoadResult metadata =
-                LoadSampleLabelResultMetadataForResultCancelable(
-                    *task.output_path,
-                    sample_count,
-                    "int32",
-                    cancellation_checkpoint);
-            if (metadata.metadata) {
-                if (metadata.metadata->task_id != task.task_id) {
+            if (loaded->metadata) {
+                if (loaded->metadata->task_id != task.task_id) {
                     metadata_load_failed = true;
                     metadata_load_error = "metadata task id does not match the local task record";
                 }
-            } else if (metadata_exists) {
+            } else if (loaded->metadata_sidecar_exists) {
                 metadata_load_failed = true;
-                metadata_load_error = metadata.warning.empty() ? "metadata does not match the label output"
-                                                               : metadata.warning;
+                metadata_load_error = loaded->metadata_warning.empty()
+                    ? "metadata does not match the label output"
+                    : loaded->metadata_warning;
             } else {
                 metadata_load_failed = true;
                 metadata_retry_pending = true;

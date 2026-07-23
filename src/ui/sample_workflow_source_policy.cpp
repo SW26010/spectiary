@@ -235,6 +235,42 @@ bool HasStoredState(const SampleWorkflowSourceState& state)
            state.selected_sample_sort_direction != SampleNavigationSortDirection::Ascending;
 }
 
+std::unordered_set<std::string> ReconciledAllowedValueKeys(
+    const SampleFilterCondition& condition,
+    const SampleFilterSource& source)
+{
+    std::unordered_set<std::string> canonical_keys;
+    canonical_keys.reserve(source.options.size());
+    std::unordered_map<std::string, std::string> canonical_key_by_display_text;
+    std::unordered_set<std::string> ambiguous_display_texts;
+    for (const SampleFilterValueOption& option : source.options) {
+        canonical_keys.insert(option.key);
+        if (ambiguous_display_texts.contains(option.display_text)) {
+            continue;
+        }
+        const auto [existing, inserted] =
+            canonical_key_by_display_text.emplace(option.display_text, option.key);
+        if (!inserted && existing->second != option.key) {
+            canonical_key_by_display_text.erase(existing);
+            ambiguous_display_texts.insert(option.display_text);
+        }
+    }
+
+    std::unordered_set<std::string> reconciled;
+    reconciled.reserve(condition.allowed_value_keys.size());
+    for (const std::string& stored_key : condition.allowed_value_keys) {
+        if (canonical_keys.contains(stored_key)) {
+            reconciled.insert(stored_key);
+            continue;
+        }
+        const auto mapped = canonical_key_by_display_text.find(stored_key);
+        if (mapped != canonical_key_by_display_text.end()) {
+            reconciled.insert(mapped->second);
+        }
+    }
+    return reconciled;
+}
+
 }  // namespace
 
 bool SampleWorkflowPathsReferToSameFile(
@@ -271,6 +307,7 @@ void SampleWorkflowSourcePolicy::Clear()
     sample_sort_source_directions_.clear();
     selected_sample_sort_source_id_.reset();
     selected_sample_sort_direction_ = SampleNavigationSortDirection::Ascending;
+    restored_filter_conditions_need_reconciliation_ = false;
     InvalidateFilterViewCache();
     InvalidateSortingSourceCache();
 }
@@ -395,6 +432,7 @@ bool SampleWorkflowSourcePolicy::SetFilterValueSelected(
     std::string value_key,
     bool selected)
 {
+    ReconcileRestoredFilterConditions(context, {});
     if (!IsSelectedFilterSource(source_id) || !IsSampleFilterSourceAvailable(context, source_id)) {
         return false;
     }
@@ -464,15 +502,16 @@ bool SampleWorkflowSourcePolicy::has_filter_conditions() const
 }
 
 SampleFilterEvaluation SampleWorkflowSourcePolicy::EvaluateFilters(
-    const SampleWorkflowSourceContext& context) const
+    const SampleWorkflowSourceContext& context)
 {
     return EvaluateFilters(context, {});
 }
 
 SampleFilterEvaluation SampleWorkflowSourcePolicy::EvaluateFilters(
     const SampleWorkflowSourceContext& context,
-    const std::function<void()>& cancellation_checkpoint) const
+    const std::function<void()>& cancellation_checkpoint)
 {
+    ReconcileRestoredFilterConditions(context, cancellation_checkpoint);
     return EvaluateFilterSources(
         filters_,
         BuildSelectedFilterSources(context, cancellation_checkpoint),
@@ -673,6 +712,7 @@ void SampleWorkflowSourcePolicy::RestoreState(const SampleWorkflowSourceState& s
             (void)AddSelectedSourceId(selected_filter_source_ids_, condition.source_id);
         }
     }
+    restored_filter_conditions_need_reconciliation_ = !filters_.conditions().empty();
     for (const std::string& source_id : state.selected_sample_sort_source_ids) {
         if (!IsDefaultSampleSortSourceId(source_id)) {
             (void)AddSelectedSourceId(selected_sample_sort_source_ids_, source_id);
@@ -760,6 +800,45 @@ bool SampleWorkflowSourcePolicy::RemoveSelectedSampleSortSource(std::string_view
         changed = true;
     }
     return changed;
+}
+
+void SampleWorkflowSourcePolicy::ReconcileRestoredFilterConditions(
+    const SampleWorkflowSourceContext& context,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    if (!restored_filter_conditions_need_reconciliation_) {
+        return;
+    }
+
+    const std::vector<SampleFilterSource> sources =
+        BuildSelectedFilterSources(context, cancellation_checkpoint);
+    const std::vector<SampleFilterCondition> restored_conditions = filters_.conditions();
+    bool has_unavailable_condition = false;
+    bool changed = false;
+    for (const SampleFilterCondition& condition : restored_conditions) {
+        const auto source = std::find_if(
+            sources.begin(),
+            sources.end(),
+            [&condition](const SampleFilterSource& candidate) {
+                return candidate.id == condition.source_id;
+            });
+        if (source == sources.end()) {
+            has_unavailable_condition = true;
+            continue;
+        }
+
+        std::unordered_set<std::string> reconciled =
+            ReconciledAllowedValueKeys(condition, *source);
+        if (reconciled != condition.allowed_value_keys) {
+            filters_.SetCondition(condition.source_id, std::move(reconciled));
+            changed = true;
+        }
+    }
+
+    restored_filter_conditions_need_reconciliation_ = has_unavailable_condition;
+    if (changed) {
+        InvalidateFilterViewCache();
+    }
 }
 
 std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterSources(

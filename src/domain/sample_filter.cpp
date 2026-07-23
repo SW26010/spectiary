@@ -190,9 +190,11 @@ SampleFilterSource BuildAnnotationFilterSource(
             cancellation_checkpoint();
         }
         const SampleAnnotationValue& value = annotation.values[index];
-        source.value_keys_by_sample.push_back(value.display_text);
+        const std::string key = SampleAnnotationValueKey(value);
+        const std::string display_text = FormatSampleAnnotationValue(annotation, value);
+        source.value_keys_by_sample.push_back(key);
         if (source.filterable) {
-            AddOption(source.options, option_indices, value.display_text, value.display_text);
+            AddOption(source.options, option_indices, key, display_text);
         }
     }
     if (cancellation_checkpoint) {
