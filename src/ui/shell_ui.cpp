@@ -5,6 +5,8 @@
 #include "plot/spectrum_plot.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
+#include "ui/top_bar_status_hover.h"
+#include "ui/top_bar_status_layout.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -32,7 +34,6 @@ constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kImmersivePlotWindow = "Spectrum###SpecForgeSpectrumImmersiveV1";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
-constexpr float kStatusBarSeparatorThickness = 1.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
 std::int64_t ElapsedNavigationResolutionNanoseconds(
@@ -105,76 +106,148 @@ std::string NarrowPath(const std::filesystem::path& path)
     return PathToUtf8(path);
 }
 
-float StatusBarHeight()
-{
-    return kStatusBarSeparatorThickness + ImGui::GetFrameHeight();
-}
-
-void RenderStatusBar(
+void RenderTopBarStatus(
     const ShellStatus& status,
-    const ImVec2& size,
     bool source_load_active,
     std::string_view source_load_error)
 {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
     const ImGuiStyle& style = ImGui::GetStyle();
-    const ImVec2 min = ImGui::GetCursorScreenPos();
-    const ImVec2 max(min.x + size.x, min.y + size.y);
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    draw_list->AddLine(
-        min,
-        ImVec2(max.x, min.y),
-        ImGui::GetColorU32(ImGuiCol_Separator),
-        kStatusBarSeparatorThickness);
+    const ImRect menu_bar_rect = window->MenuBarRect();
+    const ImRect menu_clip_rect = window->ClipRect;
+    const float menu_end_x = ImGui::GetCursorScreenPos().x;
+    const float right_x = menu_clip_rect.Max.x - style.FramePadding.x;
+    const float available_width =
+        std::max(0.0f, right_x - menu_end_x - style.ItemSpacing.x * 2.0f);
 
-    const float text_y = min.y + kStatusBarSeparatorThickness +
-                         std::max(
-                             0.0f,
-                             (size.y - kStatusBarSeparatorThickness - ImGui::GetTextLineHeight()) * 0.5f);
-    ImGui::SetCursorScreenPos(ImVec2(min.x + style.FramePadding.x, text_y));
-    if (!source_load_error.empty()) {
-        ImGui::TextColored(
-            ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
-            "Load failed: %.*s",
-            static_cast<int>(source_load_error.size()),
-            source_load_error.data());
-    } else {
-        ImGui::TextUnformatted(source_load_active ? "Loading source..." : "Ready");
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Text("Frame %llu", static_cast<unsigned long long>(status.frame_index));
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Text("%ux%u", status.client_width, status.client_height);
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
+    const bool operation_error = !source_load_error.empty();
+    const bool operation_important = operation_error || source_load_active;
+    const std::string operation_text = operation_error
+        ? "Load failed"
+        : (source_load_active ? "Loading source..." : "Ready");
+    const std::string frame_text =
+        "Frame " + std::to_string(static_cast<unsigned long long>(status.frame_index));
+    const std::string dimensions_text =
+        std::to_string(status.client_width) + "x" + std::to_string(status.client_height);
     const ProfileRecordingUiPresentation recording_presentation =
         ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
-    if (recording_presentation.show_recording_indicator) {
-        constexpr float kRecordingIndicatorRadius = 4.0f;
-        constexpr float kRecordingIndicatorSpacing = 5.0f;
-        const ImVec2 indicator_min = ImGui::GetCursorScreenPos();
-        const float indicator_height = ImGui::GetTextLineHeight();
-        ImGui::GetWindowDrawList()->AddCircleFilled(
-            ImVec2(
-                indicator_min.x + kRecordingIndicatorRadius,
-                indicator_min.y + indicator_height * 0.5f),
-            kRecordingIndicatorRadius,
-            IM_COL32(235, 64, 58, 255));
-        ImGui::Dummy(ImVec2(kRecordingIndicatorRadius * 2.0f, indicator_height));
-        ImGui::SameLine(0.0f, kRecordingIndicatorSpacing);
-        ImGui::TextUnformatted(
-            recording_presentation.status_text.data(),
-            recording_presentation.status_text.data() + recording_presentation.status_text.size());
-    } else {
-        ImGui::TextUnformatted(
-            recording_presentation.status_text.data(),
-            recording_presentation.status_text.data() + recording_presentation.status_text.size());
+
+    constexpr float kRecordingIndicatorRadius = 4.0f;
+    constexpr float kRecordingIndicatorSpacing = 5.0f;
+    const float separator_text_width = ImGui::CalcTextSize("|").x;
+    const float recording_indicator_width = recording_presentation.show_recording_indicator
+        ? kRecordingIndicatorRadius * 2.0f + kRecordingIndicatorSpacing
+        : 0.0f;
+    const TopBarStatusWidths widths{
+        .operation = ImGui::CalcTextSize(operation_text.c_str()).x,
+        .frame = ImGui::CalcTextSize(frame_text.c_str()).x,
+        .dimensions = ImGui::CalcTextSize(dimensions_text.c_str()).x,
+        .profile = recording_indicator_width +
+                   ImGui::CalcTextSize(
+                       recording_presentation.status_text.data(),
+                       recording_presentation.status_text.data() +
+                           recording_presentation.status_text.size())
+                       .x,
+        .separator = style.ItemSpacing.x * 2.0f + separator_text_width,
+    };
+    const TopBarStatusLayout layout = ResolveTopBarStatusLayout(
+        available_width,
+        widths,
+        operation_important,
+        status.profile_open || status.profile_stopping);
+    if (layout.width <= 0.0f) {
+        return;
     }
-    if (ImGui::IsItemHovered() &&
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const float text_height = ImGui::GetTextLineHeight();
+    const float text_y =
+        menu_bar_rect.Min.y + std::max(0.0f, (menu_bar_rect.GetHeight() - text_height) * 0.5f);
+    float cursor_x = right_x - layout.width;
+    bool has_component = false;
+    ImRect operation_rect;
+    ImRect profile_rect;
+
+    const auto draw_separator = [&]() {
+        if (!has_component) {
+            return;
+        }
+        cursor_x += style.ItemSpacing.x;
+        draw_list->AddText(
+            ImVec2(cursor_x, text_y),
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),
+            "|");
+        cursor_x += separator_text_width + style.ItemSpacing.x;
+    };
+    const auto draw_text = [&](std::string_view text, ImU32 color) {
+        draw_list->AddText(
+            ImVec2(cursor_x, text_y),
+            color,
+            text.data(),
+            text.data() + text.size());
+        cursor_x += ImGui::CalcTextSize(text.data(), text.data() + text.size()).x;
+        has_component = true;
+    };
+
+    draw_list->PushClipRect(menu_clip_rect.Min, menu_clip_rect.Max, true);
+    if (!source_load_error.empty()) {
+        if (layout.show_operation) {
+            const float operation_start_x = cursor_x;
+            draw_text(operation_text, IM_COL32(242, 89, 77, 255));
+            operation_rect = ImRect(
+                ImVec2(operation_start_x, text_y),
+                ImVec2(cursor_x, text_y + text_height));
+        }
+    } else if (layout.show_operation) {
+        const float operation_start_x = cursor_x;
+        draw_text(
+            operation_text,
+            ImGui::GetColorU32(
+                source_load_active ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+        operation_rect = ImRect(
+            ImVec2(operation_start_x, text_y),
+            ImVec2(cursor_x, text_y + text_height));
+    }
+    if (layout.show_frame) {
+        draw_separator();
+        draw_text(frame_text, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+    }
+    if (layout.show_dimensions) {
+        draw_separator();
+        draw_text(dimensions_text, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+    }
+    if (layout.show_profile) {
+        draw_separator();
+        const float profile_start_x = cursor_x;
+        if (recording_presentation.show_recording_indicator) {
+            draw_list->AddCircleFilled(
+                ImVec2(
+                    cursor_x + kRecordingIndicatorRadius,
+                    text_y + text_height * 0.5f),
+                kRecordingIndicatorRadius,
+                IM_COL32(235, 64, 58, 255));
+            cursor_x += kRecordingIndicatorRadius * 2.0f + kRecordingIndicatorSpacing;
+        }
+        draw_text(
+            recording_presentation.status_text,
+            status.profile_open || status.profile_stopping
+                ? ImGui::GetColorU32(ImGuiCol_Text)
+                : ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        profile_rect = ImRect(
+            ImVec2(profile_start_x, text_y),
+            ImVec2(cursor_x, text_y + text_height));
+    }
+    draw_list->PopClipRect();
+
+    if (layout.show_operation && operation_error &&
+        IsTopBarStatusHoverTarget(operation_rect.Min, operation_rect.Max)) {
+        ImGui::SetTooltip(
+            "Load failed:\n%.*s",
+            static_cast<int>(source_load_error.size()),
+            source_load_error.data());
+    }
+    if (layout.show_profile &&
+        IsTopBarStatusHoverTarget(profile_rect.Min, profile_rect.Max) &&
         (status.profile_path != nullptr || !status.profile_status_message.empty())) {
         const std::string profile_path =
             status.profile_path != nullptr ? NarrowPath(*status.profile_path) : std::string();
@@ -1545,10 +1618,7 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     RenderMainMenuBar(status);
 
     const ImGuiID dockspace_id = ImGui::GetID("SpecForgeDockSpaceSampleNavigationV1");
-    const ImVec2 content_origin = ImGui::GetCursorScreenPos();
-    const ImVec2 content_size = ImGui::GetContentRegionAvail();
-    const float status_bar_height = StatusBarHeight();
-    ImVec2 dockspace_size(content_size.x, std::max(0.0f, content_size.y - status_bar_height));
+    const ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
 
     if (!layout_seeded_) {
         layout_seeded_ = true;
@@ -1558,12 +1628,6 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
     }
 
     ImGui::DockSpace(dockspace_id, dockspace_size, ImGuiDockNodeFlags_None);
-    ImGui::SetCursorScreenPos(ImVec2(content_origin.x, content_origin.y + dockspace_size.y));
-    RenderStatusBar(
-        status,
-        ImVec2(content_size.x, status_bar_height),
-        source_load_queue_.NeedsService(),
-        source_load_error_);
 
     ImGui::End();
 }
@@ -1732,6 +1796,8 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         }
         ImGui::EndMenu();
     }
+
+    RenderTopBarStatus(status, source_load_queue_.NeedsService(), source_load_error_);
 
     ImGui::EndMenuBar();
 }

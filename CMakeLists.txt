@@ -353,6 +353,17 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_top_bar_status_layout_tests
+    tests/top_bar_status_layout_tests.cpp
+    specforge_core
+)
+specforge_add_test(
+    specforge_top_bar_status_hover_tests
+    tests/top_bar_status_hover_tests.cpp
+    specforge_core
+)
+target_link_libraries(specforge_top_bar_status_hover_tests PRIVATE imgui::imgui)
+specforge_add_test(
     specforge_profile_sink_tests
     tests/profile_sink_tests.cpp
     specforge_core
