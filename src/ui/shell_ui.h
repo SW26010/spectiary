@@ -2,8 +2,6 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "profile/navigation_latency_trace.h"
-#include "profile/navigation_prefetch_trace.h"
-#include "profile/source_load_latency_trace.h"
 #include "ui/source_collection_panel.h"
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/sample_workflow_shortcut.h"
@@ -13,7 +11,6 @@
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session.h"
-#include "ui/source_collection_load_queue.h"
 #include "ui/spectrum_view_session.h"
 
 #include <imgui.h>
@@ -26,7 +23,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace specforge {
@@ -105,114 +101,29 @@ private:
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
     void HandleSampleWorkflowShortcut();
     [[nodiscard]] const SourceCollectionSessionView& SessionView();
-    struct NavigationTraceOrigin {
-        NavigationLatencyInputKind kind = NavigationLatencyInputKind::UiNext;
-        std::optional<NavigationLatencyTimePoint> input_at;
-    };
-
-    struct SpectrumDrawSubmission {
-        std::uint64_t frame_index = 0;
-        unsigned int viewport_id = 0;
-        SpectrumSnapshotHandle snapshot;
-    };
-
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(
         SourceCollectionSessionIntent command,
-        std::optional<NavigationTraceOrigin> navigation_origin = std::nullopt);
+        std::optional<
+            SourceCollectionActivationTransaction::NavigationIntent>
+            navigation = std::nullopt);
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(
         SourceCollectionSessionIntent command,
         std::optional<NavigationLatencyInputKind> navigation_kind = std::nullopt);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
     [[nodiscard]] std::optional<NavigationLatencyTimePoint> TakeNavigationKeyInput(
         NavigationLatencyInputKind kind);
-    [[nodiscard]] NavigationLatencyTraceHandle StartNavigationTrace(
-        const SourceCollectionSessionResult& result,
-        std::optional<std::size_t> from_index,
-        NavigationLatencyTimePoint requested_at,
-        NavigationLatencyTimePoint target_resolved_at,
-        NavigationTargetResolutionReport target_resolution,
-        std::optional<NavigationTraceOrigin> navigation_origin);
-    [[nodiscard]] SourceLoadLatencyTraceHandle StartSourceLoadTrace(
-        std::size_t target_index,
-        NavigationLatencyTimePoint accepted_at);
-
-    [[nodiscard]] std::uint64_t QueueSourceLoad(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index,
-        std::vector<std::filesystem::path> annotation_paths,
-        SourceCollectionActivationTransaction::Purpose purpose,
-        NavigationLatencyTraceHandle navigation_trace = {},
-        SourceLoadLatencyTraceHandle source_load_trace = {},
-        std::optional<SampleNavigationDirection> prefetch_direction =
-            std::nullopt);
-    void BeginSourceActivationIntent(bool preserve_pending_explicit_opens);
-    void CancelSupersededSourceLoads(
-        std::vector<SourceCollectionActivationTransaction::PendingTask>
-            pending_tasks);
-    void QueueSessionFollowUp(
-        const SourceCollectionSessionResult& result,
-        bool deferred_restore = false,
-        NavigationLatencyTraceHandle navigation_trace = {},
-        std::optional<SampleNavigationDirection> prefetch_direction =
-            std::nullopt);
-    void CancelSourceFollowUps(const SourceCollectionSessionResult& result);
-    void RetireSessionResources(SourceCollectionSessionResult& result);
-    void DrainSourceLoads();
-    void DrainSourceLoadCompletions(
-        std::vector<SourceCollectionLoadCompletion> completions);
-    void ScheduleSnapshotPrefetch(
-        SampleNavigationDirection direction);
-    void ServiceSnapshotPrefetch();
-    void CancelSnapshotPrefetch();
-    void DrainSnapshotPrefetchCompletion(
-        SourceCollectionLoadCompletion completion);
-    void RecordSnapshotPrefetchOutcome(
-        std::uint64_t prefetch_id,
-        std::uint64_t source_task_id,
-        std::size_t target_index,
-        SampleNavigationDirection direction,
-        NavigationPrefetchOutcome outcome,
-        NavigationLatencyTimePoint scheduled_at,
-        NavigationLatencyTimePoint terminal_at = {},
-        NavigationLatencyTimePoint cancel_requested_at = {});
-    [[nodiscard]] static std::optional<SampleNavigationDirection>
-        PrefetchDirectionForInputKind(
-            NavigationLatencyInputKind kind);
+    void DrainSourceLoads(
+        bool allow_snapshot_prefetch = true);
     void BeginDeferredSourceRestore();
-    void RestoreDeferredActiveSourceIfAvailable();
-    void FinishDeferredSourceRestoreIfReady();
-
-    struct PendingSnapshotPrefetch {
-        std::uint64_t prefetch_id = 0;
-        std::uint64_t task_id = 0;
-        std::filesystem::path path;
-        std::string path_key;
-        std::size_t spectrum_index = 0;
-        std::uint64_t generation = 0;
-        std::uint64_t activation_epoch = 0;
-        SampleNavigationDirection direction =
-            SampleNavigationDirection::Next;
-        NavigationLatencyTimePoint scheduled_at;
-        NavigationLatencyTimePoint cancel_requested_at;
-        bool invalidated = false;
-    };
-
-    [[nodiscard]] static bool CancelFailedPendingSampleNavigation(
-        SourceCollectionSession& session,
-        const SourceCollectionActivationTransaction::Ticket& ticket);
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,
         SpectrumSnapshotHandle snapshot);
-    void SupersedePresentableNavigationIfSnapshotChanged(
-        const SpectrumSnapshotHandle& current_snapshot);
-    void SupersedePresentableSourceLoadIfSnapshotChanged(
-        const SpectrumSnapshotHandle& current_snapshot);
 
     friend struct ShellUiTestAccess;
 
     SourceCollectionSession session_;
-    SourceCollectionLoadQueue source_load_queue_;
+    SourceCollectionActivationTransaction source_activation_;
     SpectrumViewSession spectrum_view_session_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
@@ -231,32 +142,9 @@ private:
     // SessionView() can derive state across every sample; retain it until a session mutation.
     std::optional<SourceCollectionSessionView> session_view_cache_;
     bool session_view_cache_dirty_ = false;
-    SourceCollectionActivationTransaction source_activation_;
-    std::optional<SampleNavigationDirection>
-        pending_snapshot_prefetch_direction_;
-    std::optional<PendingSnapshotPrefetch>
-        active_snapshot_prefetch_;
-    SampleNavigationPrefetchPolicy snapshot_prefetch_policy_;
-    std::uint64_t next_snapshot_prefetch_id_ = 1;
-    std::vector<NavigationPrefetchReport>
-        navigation_prefetch_reports_;
-    std::optional<std::filesystem::path> deferred_restore_active_path_;
     mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
-    std::string source_load_error_;
-    bool deferred_restore_active_ = false;
-    bool latency_tracing_enabled_ = false;
-    std::uint64_t current_frame_index_ = 0;
-    std::uint64_t next_navigation_trace_id_ = 1;
-    std::uint64_t next_source_load_trace_id_ = 1;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
-    std::optional<SpectrumDrawSubmission> spectrum_draw_submission_;
-    NavigationLatencyTraceHandle presentable_navigation_trace_;
-    SpectrumSnapshotHandle presentable_navigation_snapshot_;
-    std::unordered_map<std::uint64_t, NavigationLatencyTraceHandle> navigation_traces_;
-    SourceLoadLatencyTraceHandle presentable_source_load_trace_;
-    SpectrumSnapshotHandle presentable_source_load_snapshot_;
-    std::unordered_map<std::uint64_t, SourceLoadLatencyTraceHandle> source_load_traces_;
 };
 
 }  // namespace specforge

@@ -52,20 +52,15 @@ struct ShellUiTestAccess {
     {
         return shell.SubmitSessionCommand(
             std::move(intent),
-            ShellUi::NavigationTraceOrigin{kind, input_at});
+            SourceCollectionActivationTransaction::
+                NavigationIntent{kind, input_at});
     }
 
-    static void QueueFollowUp(
+    static void Drain(
         ShellUi& shell,
-        const SourceCollectionSessionResult& result,
-        bool deferred_restore)
+        bool allow_snapshot_prefetch = true)
     {
-        shell.QueueSessionFollowUp(result, deferred_restore);
-    }
-
-    static void Drain(ShellUi& shell)
-    {
-        shell.DrainSourceLoads();
+        shell.DrainSourceLoads(allow_snapshot_prefetch);
     }
 
     static void BeginDeferredRestore(ShellUi& shell)
@@ -73,26 +68,15 @@ struct ShellUiTestAccess {
         shell.BeginDeferredSourceRestore();
     }
 
-    static std::vector<SourceCollectionLoadCompletion> TakeCompleted(ShellUi& shell)
-    {
-        return shell.source_load_queue_.TakeCompleted();
-    }
-
-    static void DrainCompleted(
-        ShellUi& shell,
-        std::vector<SourceCollectionLoadCompletion> completions)
-    {
-        shell.DrainSourceLoadCompletions(std::move(completions));
-    }
-
     static std::size_t PendingLoadCount(const ShellUi& shell)
     {
-        return shell.source_activation_.PendingLoadCount();
+        return shell.source_activation_.
+            PendingLoadCount();
     }
 
     static bool PrefetchActive(const ShellUi& shell)
     {
-        return shell.active_snapshot_prefetch_.has_value();
+        return shell.source_activation_.PrefetchActive();
     }
 
     static std::vector<NavigationPrefetchReport>
@@ -103,13 +87,14 @@ struct ShellUiTestAccess {
 
     static std::string_view LoadError(const ShellUi& shell)
     {
-        return shell.source_load_error_;
+        return shell.source_activation_.ErrorMessage();
     }
 
     static void EnableNavigationTracing(ShellUi& shell, std::uint64_t frame_index)
     {
-        shell.latency_tracing_enabled_ = true;
-        shell.current_frame_index_ = frame_index;
+        shell.source_activation_.SetPresentationContext(
+            true,
+            frame_index);
     }
 
     static std::vector<NavigationLatencyReport> CompleteFramePresentation(
@@ -147,11 +132,6 @@ struct ShellUiTestAccess {
         return shell.CompleteFramePresentations(frame_index, std::span(&presentation, 1));
     }
 
-    static std::size_t NavigationTraceCount(const ShellUi& shell)
-    {
-        return shell.navigation_traces_.size();
-    }
-
     static std::vector<SourceLoadLatencyReport>
     CompleteSourceLoadFramePresentation(
         ShellUi& shell,
@@ -169,11 +149,6 @@ struct ShellUiTestAccess {
         return shell.CompleteSourceLoadFramePresentations(
             frame_index,
             std::span(&presentation, 1));
-    }
-
-    static std::size_t SourceLoadTraceCount(const ShellUi& shell)
-    {
-        return shell.source_load_traces_.size();
     }
 
     static void RecordNavigationKeyInput(
@@ -274,20 +249,6 @@ bool SaveAnnotationFixture(
         values.size());
     task.values = std::move(values);
     return specforge::SaveSampleLabelResultNpy(path, task, error);
-}
-
-std::vector<specforge::SourceCollectionLoadCompletion> WaitForCompletions(
-    specforge::SourceCollectionLoadQueue& queue)
-{
-    const auto deadline = std::chrono::steady_clock::now() + 2s;
-    while (std::chrono::steady_clock::now() < deadline) {
-        std::vector<specforge::SourceCollectionLoadCompletion> ready = queue.TakeCompleted();
-        if (!ready.empty()) {
-            return ready;
-        }
-        std::this_thread::sleep_for(2ms);
-    }
-    return queue.TakeCompleted();
 }
 
 specforge::SourceCollectionSession MakePreparedDeferredSession(
@@ -515,8 +476,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         }
         std::this_thread::sleep_for(2ms);
     }
-    const bool waits_for_present =
-        activated && Access::SourceLoadTraceCount(*shell) == 1;
+    const bool waits_for_present = activated;
     Access::SubmitSpectrumDraw(
         *shell,
         presentation_frame,
@@ -530,8 +490,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
             presentation_frame,
             std::span(&wrong_viewport_presentation, 1));
     const bool waits_for_matching_viewport =
-        wrong_viewport_reports.empty() &&
-        Access::SourceLoadTraceCount(*shell) == 1;
+        wrong_viewport_reports.empty();
     const std::vector<specforge::SourceLoadLatencyReport> reports =
         Access::CompleteSourceLoadFramePresentation(
             *shell,
@@ -544,8 +503,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     while (std::chrono::steady_clock::now() < replacement_deadline) {
         Access::Drain(*shell);
         replacement_activated =
-            Access::PendingLoadCount(*shell) == 0 &&
-            Access::SourceLoadTraceCount(*shell) == 1;
+            Access::PendingLoadCount(*shell) == 0;
         if (replacement_activated) {
             break;
         }
@@ -745,7 +703,14 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::vector<specforge::NavigationLatencyReport> navigation_reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 99);
     const bool detached_mismatch_retained_presented_trace =
-        Access::NavigationTraceCount(*shell) == 1;
+        std::none_of(
+            navigation_reports.begin(),
+            navigation_reports.end(),
+            [](const auto& report) {
+                return report.outcome ==
+                    specforge::NavigationLatencyOutcome::
+                        Presented;
+            });
     std::vector<specforge::NavigationLatencyReport> presented_reports =
         Access::CompleteFramePresentation(*shell, presentation_frame, 7);
     navigation_reports.insert(
@@ -854,12 +819,25 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
                 specforge::SampleNavigationRequest::LocateRow(2))));
-    const std::size_t trace_count = Access::NavigationTraceCount(*shell);
+    const auto deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < deadline &&
+           Access::PendingLoadCount(*shell) != 0) {
+        Access::Drain(*shell);
+        std::this_thread::sleep_for(2ms);
+    }
+    const std::vector<specforge::NavigationLatencyReport>
+        reports = Access::CompleteFramePresentation(
+            *shell,
+            90,
+            7);
     shell.reset();
     std::filesystem::remove(path);
 
     Require(result.follow_up_spectrum_index == 2, "row location should still queue its real source load");
-    Require(trace_count == 0, "LocateRow must not be classified as previous/next navigation latency");
+    Require(
+        reports.empty(),
+        "LocateRow must not be classified as previous/next navigation latency");
 }
 
 void TestAcceptedNavigationUsesLatestMatchingRawKeyInput()
@@ -1095,7 +1073,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
 
             const auto deadline = std::chrono::steady_clock::now() + 2s;
             while (std::chrono::steady_clock::now() < deadline) {
-                Access::Drain(*shell);
+                Access::Drain(*shell, false);
                 const specforge::SpectrumSnapshotHandle snapshot =
                     Access::Session(*shell).CurrentSampleSnapshot();
                 if (snapshot && snapshot->collection.current_index == target_index &&
@@ -1214,9 +1192,11 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
             static_cast<long long>(percentile(timings[index].target_ns, 50)),
             static_cast<long long>(percentile(timings[index].target_ns, 95)));
     }
-    Require(
-        decoder_calls.load() == 2,
-        "400 fixed-index Previous/Next visits should decode only the two initial cold rows");
+    if (decoder_calls.load() != 2) {
+        throw std::runtime_error(
+            "400 fixed-index Previous/Next visits should decode only the two initial cold rows; decoder_calls=" +
+            std::to_string(decoder_calls.load()));
+    }
     Require(
         cold_decode_ns.size() == 2 &&
             hit_decode_ns.size() == 398,
@@ -1286,7 +1266,12 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
 
     const bool first_requested = submit_next().follow_up_spectrum_index == 1;
     const bool first_activated = drain_to_index(1);
-    const bool first_still_waiting_for_present = Access::NavigationTraceCount(*shell) == 1;
+    const bool first_still_waiting_for_present =
+        Access::CompleteFramePresentationWithoutSpectrumDraw(
+            *shell,
+            presentation_frame,
+            7)
+            .empty();
     const bool second_requested = submit_next().follow_up_spectrum_index == 2;
     const bool second_activated = drain_to_index(2);
     const std::vector<specforge::NavigationLatencyReport> reports =
@@ -1461,7 +1446,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
     }
     const std::vector<specforge::NavigationLatencyReport> reports =
         Access::CompleteFramePresentationWithoutSpectrumDraw(*shell, presentation_frame, 7);
-    const std::size_t remaining_traces = Access::NavigationTraceCount(*shell);
+    const bool trace_retained = reports.empty();
     Access::SubmitSpectrumDraw(
         *shell,
         presentation_frame + 1,
@@ -1480,7 +1465,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
 
     Require(navigation.follow_up_spectrum_index == 1 && target_activated, "the hidden Spectrum target should activate");
     Require(
-        reports.empty() && remaining_traces == 1,
+        reports.empty() && trace_retained,
         "a successful viewport Present without a submitted Spectrum draw must not complete navigation");
     Require(
         presented_after_visible_draw,
@@ -1539,23 +1524,26 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
         specforge::SourceCollectionLoadQueue(std::move(dependencies)));
     const specforge::SpectrumSnapshotHandle initial_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
+    std::promise<void> completion_ready_promise;
+    std::shared_future<void> completion_ready =
+        completion_ready_promise.get_future().share();
+    std::atomic_bool completion_ready_signaled = false;
+    shell->RegisterSourceLoadCompletionReadyCallback(
+        [&completion_ready_promise,
+         &completion_ready_signaled]() {
+            if (!completion_ready_signaled.exchange(true)) {
+                completion_ready_promise.set_value();
+            }
+        });
 
     const specforge::SourceCollectionSessionResult first = Access::Submit(
         *shell,
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
                 specforge::SampleNavigationRequest::Next())));
-    std::vector<specforge::SourceCollectionLoadCompletion> stale_completions;
-    const auto completion_deadline = std::chrono::steady_clock::now() + 2s;
-    while (std::chrono::steady_clock::now() < completion_deadline) {
-        stale_completions = Access::TakeCompleted(*shell);
-        if (!stale_completions.empty()) {
-            break;
-        }
-        std::this_thread::sleep_for(2ms);
-    }
-    const bool stale_completion_taken =
-        stale_completions.size() == 1 && stale_completions.front().prepared.has_value();
+    const bool stale_completion_published =
+        completion_ready.wait_for(2s) ==
+        std::future_status::ready;
 
     const specforge::SourceCollectionSessionResult second = Access::Submit(
         *shell,
@@ -1565,7 +1553,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     const bool row_two_started =
         row_two_entered.wait_for(2s) == std::future_status::ready;
     const std::thread::id drain_thread = std::this_thread::get_id();
-    Access::DrainCompleted(*shell, std::move(stale_completions));
+    Access::Drain(*shell);
 
     const bool stale_snapshot_retired =
         stale_snapshot_destroyed.wait_for(2s) == std::future_status::ready;
@@ -1585,8 +1573,8 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
 
     Require(first.follow_up_spectrum_index == 1, "row 1 should create the old Shell ticket");
     Require(
-        stale_completion_taken,
-        "row 1 completion should be published and taken before supersession");
+        stale_completion_published,
+        "row 1 completion should be published before supersession");
     Require(
         second.follow_up_spectrum_index == 2 && row_two_started,
         "new navigation should invalidate row 1 and start the row 2 worker");
@@ -1868,7 +1856,6 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
 
 void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
 {
-    using Access = specforge::ShellUiTestAccess;
     const std::filesystem::path path = UniqueTempPath("_late.csv");
     const std::filesystem::path other_path = UniqueTempPath("_other.csv");
     {
@@ -1877,37 +1864,10 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("the Shell async chain must not use the session's synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
-    const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(path, 0);
-    specforge::SourceCollectionContext initial_context;
-    initial_context.identity = specforge::BuildSourceCollectionIdentity(
-        *initial_snapshot,
-        specforge::CaptureSourceCollectionSingleFileState(path));
-    initial_context.manifest.sample_names = {"alpha", "beta", "gamma"};
-    const specforge::SourceCollectionIdentity initial_identity = initial_context.identity;
-    specforge::PreparedSampleWorkflowState initial_workflow =
-        specforge::PrepareSampleWorkflowState(
-            *initial_snapshot,
-            initial_context,
-            0,
-            {{}, {}});
-    Require(
-        session.OpenPreparedSource(
-                   path,
-                   0,
-                   initial_snapshot,
-                   std::move(initial_context),
-                   std::move(initial_workflow))
-            .loaded,
-        "source A should enter the session before its async follow-up");
+    specforge::SourceCollectionSession session =
+        MakePreparedDeferredSession(path);
+    const specforge::SpectrumSnapshotHandle
+        initial_snapshot = session.CurrentSampleSnapshot();
 
     const specforge::SpectrumSnapshotHandle other_snapshot = MakeSnapshot(other_path, 0);
     specforge::SourceCollectionContext other_context;
@@ -1919,7 +1879,35 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             other_context,
             0,
             {{}, {}});
-    const specforge::SourceCollectionSessionResult navigation = session.Submit(
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    specforge::SourceCollectionActivationTransaction activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+    std::promise<void> completion_ready_promise;
+    std::shared_future<void> completion_ready =
+        completion_ready_promise.get_future().share();
+    activation.RegisterCompletionReadyCallback(
+        [&completion_ready_promise]() {
+            completion_ready_promise.set_value();
+        });
+
+    const specforge::SourceCollectionSessionResult
+        navigation = activation.Submit(
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
                 specforge::SampleNavigationRequest::Next())));
@@ -1927,92 +1915,49 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         navigation.follow_up_spectrum_index == 1,
         "source A should issue the async row 1 follow-up used by the Shell ticket");
 
-    bool session_navigation_preserved = false;
-    bool shell_ticket_preserved = false;
-    bool pending_intent_restored = false;
-    bool existing_ticket_reused = false;
-    bool completion_admitted = false;
-    bool row_one_committed = false;
-    {
-        specforge::SourceCollectionLoadDependencies dependencies;
-        dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
-            return MakeSnapshot(source, index);
-        };
-        dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
-            checkpoint();
-            return specforge::SampleWorkflowPreparationCacheBundle{};
-        };
-        dependencies.workflow_cache_paths = {{}, {}};
-        specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
-
-        specforge::SourceCollectionActivationTransaction activation;
-        const std::uint64_t task_id = queue.Enqueue({
-            .path = path,
-            .spectrum_index = 1,
-            .reuse_identity = initial_identity,
-        });
-        activation.RegisterLoad(
-            task_id,
-            activation.ReserveLoad(
-                path,
-                1,
-                specforge::SourceCollectionActivationTransaction::
-                    Purpose::SessionFollowUp));
-        std::vector<specforge::SourceCollectionLoadCompletion> completions = WaitForCompletions(queue);
-        Require(
-            completions.size() == 1 && completions.front().prepared.has_value(),
-            "background queue should produce the follow-up before Shell drains it");
-
-        const specforge::SourceCollectionSessionResult switched_to_b = session.OpenPreparedSource(
+    const bool completion_published =
+        completion_ready.wait_for(2s) ==
+        std::future_status::ready;
+    const specforge::SourceCollectionSessionResult
+        switched_to_b = session.OpenPreparedSource(
             other_path,
             0,
             other_snapshot,
             std::move(other_context),
             std::move(other_workflow));
-        session_navigation_preserved =
-            switched_to_b.loaded && !switched_to_b.canceled_source_follow_up_path;
+    const bool session_navigation_preserved =
+        switched_to_b.loaded &&
+        !switched_to_b.canceled_source_follow_up_path;
+    const bool lifecycle_ticket_preserved =
+        activation.PendingLoadCount() == 1;
 
-        std::vector<
-            specforge::SourceCollectionActivationTransaction::
-                PendingTask>
-            canceled;
-        if (switched_to_b.canceled_source_follow_up_path) {
-            canceled = activation.CancelNonExplicitFollowUps(
-                *switched_to_b.canceled_source_follow_up_path);
-            for (const auto& pending : canceled) {
-                queue.Cancel(pending.task_id);
-            }
+    const specforge::SourceCollectionSessionResult
+        switched_back_to_a = activation.Submit(
+            specforge::SourceCollectionSessionIntent::
+                EditSourceCollection(
+                    specforge::SourceCollectionIntent::
+                        SwitchActive(0)));
+    const bool pending_intent_restored =
+        switched_back_to_a.follow_up_spectrum_index == 1 &&
+        session.CurrentSampleSnapshot() ==
+            initial_snapshot;
+    const bool existing_ticket_reused =
+        activation.PendingLoadCount() == 1;
+    bool row_one_committed = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        (void)activation.Drain(false);
+        const auto snapshot =
+            session.CurrentSampleSnapshot();
+        row_one_committed =
+            snapshot &&
+            snapshot->collection.current_index == 1 &&
+            !activation.HasPendingLoads();
+        if (row_one_committed) {
+            break;
         }
-        shell_ticket_preserved =
-            canceled.empty() &&
-            activation.PendingLoadCount() == 1 &&
-            !activation.HasPendingDeferredRestore();
-        const specforge::SourceCollectionSessionResult switched_back_to_a =
-            session.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
-                specforge::SourceCollectionIntent::SwitchActive(0)));
-        pending_intent_restored =
-            switched_back_to_a.follow_up_spectrum_index == 1 &&
-            session.CurrentSampleSnapshot() == initial_snapshot;
-        existing_ticket_reused = switched_back_to_a.follow_up_spectrum_index &&
-            activation.HasMatchingFollowUp(
-                path,
-                *switched_back_to_a.follow_up_spectrum_index);
-        const auto admission = activation.TakeCompletion(
-            completions.front().task_id,
-            completions.front().path,
-            completions.front().spectrum_index);
-        completion_admitted =
-            admission && admission->accepted;
-        if (completion_admitted) {
-            specforge::PreparedSourceCollection prepared = std::move(*completions.front().prepared);
-            row_one_committed = session.OpenPreparedSource(
-                prepared.path,
-                prepared.spectrum_index,
-                std::move(prepared.snapshot),
-                std::move(prepared.payload)).loaded;
-        } else {
-            queue.RetirePrepared(std::move(*completions.front().prepared));
-        }
+        std::this_thread::sleep_for(2ms);
     }
     std::filesystem::remove(path);
 
@@ -2020,8 +1965,9 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         session_navigation_preserved,
         "source B's deferred completion must not cancel source A's navigation intent");
     Require(
-        shell_ticket_preserved,
-        "source B's deferred completion must retain source A's Shell ticket and restore bookkeeping");
+        completion_published &&
+            lifecycle_ticket_preserved,
+        "source B's completion must retain source A's lifecycle ticket");
     Require(
         pending_intent_restored,
         "switching back to A should expose its still-pending row 1 intent");
@@ -2029,11 +1975,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         existing_ticket_reused,
         "restoring A should reuse its existing row 1 Shell ticket instead of restarting the worker");
     Require(
-        completion_admitted,
-        "source A's already-completed worker result should retain admission after B restores");
-    Require(
-        row_one_committed && session.CurrentSampleSnapshot() &&
-            session.CurrentSampleSnapshot()->collection.current_index == 1,
+        row_one_committed,
         "source A should finish the user-requested row 1 navigation");
 }
 
@@ -2063,12 +2005,12 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         MakePreparedDeferredSession(path),
         specforge::SourceCollectionLoadQueue(std::move(dependencies)));
 
-    const specforge::SourceCollectionSessionResult navigation = Access::Session(*shell).Submit(
+    const specforge::SourceCollectionSessionResult navigation = Access::Submit(
+        *shell,
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
                 specforge::SampleNavigationRequest::Next())));
     const bool deferred_follow_up_created = navigation.follow_up_spectrum_index == 1;
-    Access::QueueFollowUp(*shell, navigation, true);
 
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     bool failure_drained = false;
@@ -2548,13 +2490,28 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
         stream << "fixture";
     }
     std::array<std::atomic_int, 3> decoder_calls{};
+    std::promise<void> prefetch_entered_promise;
+    std::shared_future<void> prefetch_entered =
+        prefetch_entered_promise.get_future().share();
+    std::promise<void> release_prefetch_promise;
+    std::shared_future<void> release_prefetch =
+        release_prefetch_promise.get_future().share();
     specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.snapshot_loader =
-        [&decoder_calls](
+        [&decoder_calls,
+         &prefetch_entered_promise,
+         release_prefetch](
             const std::filesystem::path& source,
             std::size_t index,
-            const auto&) {
+            const auto& canceled) {
             ++decoder_calls.at(index);
+            if (index == 2) {
+                prefetch_entered_promise.set_value();
+                WaitForRelease(
+                    release_prefetch,
+                    canceled,
+                    "timed out waiting to release published prefetch");
+            }
             return MakeSnapshot(source, index);
         };
     dependencies.workflow_cache_loader =
@@ -2590,22 +2547,25 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
         std::this_thread::sleep_for(1ms);
     }
 
-    std::vector<specforge::SourceCollectionLoadCompletion>
-        published_prefetch;
-    const auto publish_deadline =
-        std::chrono::steady_clock::now() + 2s;
-    while (std::chrono::steady_clock::now() <
-           publish_deadline) {
-        published_prefetch =
-            Access::TakeCompleted(*shell);
-        if (!published_prefetch.empty()) {
-            break;
-        }
-        std::this_thread::sleep_for(1ms);
-    }
     Require(
-        published_prefetch.size() == 1 &&
-            published_prefetch.front().prepared,
+        prefetch_entered.wait_for(2s) ==
+            std::future_status::ready,
+        "prefetch worker should start before publication");
+    std::promise<void> prefetch_ready_promise;
+    std::shared_future<void> prefetch_ready =
+        prefetch_ready_promise.get_future().share();
+    std::atomic_bool prefetch_ready_signaled = false;
+    shell->RegisterSourceLoadCompletionReadyCallback(
+        [&prefetch_ready_promise,
+         &prefetch_ready_signaled]() {
+            if (!prefetch_ready_signaled.exchange(true)) {
+                prefetch_ready_promise.set_value();
+            }
+        });
+    release_prefetch_promise.set_value();
+    Require(
+        prefetch_ready.wait_for(2s) ==
+            std::future_status::ready,
         "prefetch fixture should hold one already-published completion");
 
     (void)Access::Submit(
@@ -2614,9 +2574,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
             UpdateSampleNavigation(
                 specforge::SampleNavigationIntent::
                     SetSampleNameQuery("gamma")));
-    Access::DrainCompleted(
-        *shell,
-        std::move(published_prefetch));
+    Access::Drain(*shell);
     const auto reports =
         Access::TakePrefetchReports(*shell);
 
