@@ -83,6 +83,8 @@ public:
     [[nodiscard]] SampleLabelingOperationResult CreateTask(
         std::string task_id,
         std::string task_name);
+    [[nodiscard]] SampleLabelingOperationResult
+        StartOrResumeTemporaryTask();
     [[nodiscard]] SampleLabelingOperationResult CreateTaskFromAnnotation(
         std::string task_id,
         std::string task_name,

@@ -1,6 +1,7 @@
 #include "ui/sample_labeling_controller.h"
 
 #include "domain/source_collection_manifest.h"
+#include "ui/sample_annotation_labeling_rules.h"
 
 #include <algorithm>
 #include <chrono>
@@ -337,6 +338,53 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
     }
     state->active_task_id = match->task_id;
     return CompleteMutation(&*match, PersistencePolicy::ScheduleStateSave);
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::StartOrResumeTemporaryTask()
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return RejectOperation();
+    }
+
+    const SampleLabelingTask* active_task = ActiveTask();
+    const SampleLabelingTask* temporary_task =
+        TemporaryTask();
+    if (active_task != nullptr &&
+        temporary_task != nullptr &&
+        active_task->task_id ==
+            temporary_task->task_id) {
+        SampleLabelingOperationResult result =
+            RejectOperation();
+        result.accepted = true;
+        return result;
+    }
+    if (active_task != nullptr &&
+        !CanDeleteTask(*active_task)) {
+        return RejectOperation();
+    }
+
+    std::string temporary_task_id;
+    if (temporary_task != nullptr) {
+        temporary_task_id = temporary_task->task_id;
+    } else {
+        temporary_task_id =
+            TaskIdForNewSampleLabelingTask(
+                kTemporarySampleLabelingTaskName,
+                &state->tasks);
+        state->tasks.push_back(
+            CreateSampleLabelingTask(
+                temporary_task_id,
+                std::string{
+                    kTemporarySampleLabelingTaskName},
+                state->sample_count));
+    }
+    state->active_task_id =
+        std::move(temporary_task_id);
+    return CompleteMutation(
+        nullptr,
+        PersistencePolicy::ScheduleStateSave);
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation(

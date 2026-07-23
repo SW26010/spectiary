@@ -823,6 +823,152 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
     Require(tasks != nullptr && tasks->size() == 2, "formal annotation and one temporary task should coexist");
 }
 
+void TestControllerAtomicallyStartsOrResumesTemporaryTask()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_sample_labeling_atomic_temporary_state.json";
+    const std::filesystem::path output_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_sample_labeling_atomic_temporary_result.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(output_path),
+        cleanup_error);
+
+    bool fail_output_save = false;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::
+                LoadSampleLabelingStateCache(path);
+        },
+        [&fail_output_save](
+            specforge::SampleLabelingTask& task,
+            const specforge::
+                SampleLabelResultMetadataSource* source) {
+            if (!fail_output_save) {
+                return specforge::
+                    PersistSampleLabelingTaskResult(
+                        task,
+                        source);
+            }
+            specforge::MarkSampleLabelTaskSaveFailed(
+                task,
+                "disk full");
+            return specforge::SampleLabelTaskPersistResult{
+                .output_path_selected =
+                    task.output_path.has_value(),
+                .output_saved = false,
+                .message = "disk full",
+            };
+        });
+    controller.ActivateSource("source-identity", 3);
+    Require(
+        controller.CreateTask("formal", "Formal").accepted,
+        "controller should create the formal task");
+    Require(
+        controller
+            .SaveActiveTemporaryTaskToOutput(
+                output_path,
+                "Formal")
+            .output_saved,
+        "controller should establish a clean formal task");
+    const specforge::SampleLabelingTask* formal_task =
+        ActiveTask(controller);
+    Require(
+        formal_task != nullptr,
+        "the clean formal task should remain active");
+    const std::string formal_task_id =
+        formal_task->task_id;
+
+    const specforge::SampleLabelingOperationResult
+        created =
+            controller.StartOrResumeTemporaryTask();
+    const specforge::SampleLabelingTask* temporary_task =
+        ActiveTask(controller);
+    Require(
+        created.accepted && created.changed &&
+            temporary_task != nullptr &&
+            !temporary_task->output_path,
+        "the controller should atomically pause the formal task and create a temporary task");
+    const std::string temporary_task_id =
+        temporary_task->task_id;
+
+    Require(
+        controller.DeactivateActiveTask().changed,
+        "the temporary task should be pausable");
+    Require(
+        controller.ActivateTask(formal_task_id).changed,
+        "the formal task should reactivate");
+    const specforge::SampleLabelingOperationResult
+        resumed =
+            controller.StartOrResumeTemporaryTask();
+    temporary_task = ActiveTask(controller);
+    Require(
+        resumed.accepted && resumed.changed &&
+            temporary_task != nullptr &&
+            temporary_task->task_id ==
+                temporary_task_id,
+        "the controller should resume the existing temporary task by stable identity");
+
+    Require(
+        controller.DeactivateActiveTask().changed,
+        "the resumed temporary task should be pausable");
+    Require(
+        controller.ActivateTask(formal_task_id).changed,
+        "the formal task should reactivate before the failed save");
+    Require(
+        controller
+            .UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    5,
+                    "review",
+                    'r'})
+            .changed,
+        "the formal task should accept a label");
+    fail_output_save = true;
+    const specforge::SampleLabelingWriteOperationResult
+        failed_write = controller.AssignLabel(1, 5);
+    Require(
+        failed_write.write.accepted &&
+            failed_write.operation.output_save_attempted &&
+            !failed_write.operation.output_saved,
+        "the formal task should enter a failed persistence state");
+
+    const std::uint64_t revision_before_rejection =
+        controller.View().revision;
+    const specforge::SampleLabelingOperationResult
+        rejected =
+            controller.StartOrResumeTemporaryTask();
+    const specforge::SampleLabelingTask* active_task =
+        ActiveTask(controller);
+    Require(
+        !rejected.accepted && !rejected.changed &&
+            rejected.revision ==
+                revision_before_rejection,
+        "an undeactivatable formal task should reject the atomic switch without mutation");
+    Require(
+        active_task != nullptr &&
+            active_task->task_id == formal_task_id,
+        "a rejected switch should retain the formal active task");
+    Require(
+        TemporaryTask(controller) != nullptr &&
+            TemporaryTask(controller)->task_id ==
+                temporary_task_id,
+        "a rejected switch should retain the resumable temporary task");
+
+    std::filesystem::remove(cache_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(output_path),
+        cleanup_error);
+}
+
 void TestExternalOutputIsResultSourceOfTruth()
 {
     const std::filesystem::path cache_path =
@@ -1337,6 +1483,7 @@ int main()
         TestTaskRecordFlushKeepsActiveTaskAddressStable();
         TestControllerRevisionTracksOwnedTaskChanges();
         TestControllerKeepsOneTemporaryTaskPerSource();
+        TestControllerAtomicallyStartsOrResumesTemporaryTask();
         TestExternalOutputIsResultSourceOfTruth();
         TestSampleLabelingStateCacheStoresPackageRelativeOutputPath();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();

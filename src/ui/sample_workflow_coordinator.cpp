@@ -687,27 +687,9 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
 SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
 {
     SourceCollectionSessionAction action;
-    const SampleLabelingControllerView labeling_view = labeling_.View();
-    const SampleLabelingTask* active_task = labeling_view.active_task;
-    const SampleLabelingTask* temporary_task = labeling_view.temporary_task;
-    if (active_task != nullptr && temporary_task != nullptr && active_task->task_id == temporary_task->task_id) {
-        return action;
-    }
-    if (active_task != nullptr &&
-        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask().changed)) {
-        return action;
-    }
-
-    bool started_or_resumed = false;
-    if (temporary_task != nullptr) {
-        started_or_resumed = labeling_.ActivateTask(temporary_task->task_id).accepted;
-    } else {
-        const std::vector<SampleLabelingTask>* tasks = labeling_view.active_source_tasks;
-        const std::string task_id = TaskIdForNewSampleLabelingTask(kTemporarySampleLabelingTaskName, tasks);
-        started_or_resumed =
-            labeling_.CreateTask(task_id, std::string{kTemporarySampleLabelingTaskName}).accepted;
-    }
-    if (started_or_resumed) {
+    const SampleLabelingOperationResult result =
+        labeling_.StartOrResumeTemporaryTask();
+    if (result.changed) {
         ClearLabelUndoHistory();
         workflow_sources_.InvalidateSortingSourceCache();
         ApplyNavigationInputEffects(
