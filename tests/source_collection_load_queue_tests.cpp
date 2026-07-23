@@ -475,6 +475,78 @@ void TestBatchPublishesInRequestOrder()
     std::filesystem::remove(second);
 }
 
+void TestCompletionReadyNotificationCoalescesUntilDrain()
+{
+    const std::filesystem::path first = UniqueTempPath("_notify_batch_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_notify_batch_b.csv");
+    const std::filesystem::path third = UniqueTempPath("_notify_after_drain.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    WriteFixture(third);
+    std::promise<void> second_decoder_entered_promise;
+    std::shared_future<void> second_decoder_entered =
+        second_decoder_entered_promise.get_future().share();
+    std::promise<void> release_first_promise;
+    std::shared_future<void> release_first = release_first_promise.get_future().share();
+    std::atomic_int notifications = 0;
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [&](const auto& path, std::size_t index, const auto& canceled) {
+            if (path == first) {
+                WaitForRelease(
+                    release_first,
+                    canceled,
+                    "timed out waiting to release the first notification decoder");
+            } else if (path == second) {
+                second_decoder_entered_promise.set_value();
+            }
+            return MakeSnapshot(path, index);
+        }));
+    queue.RegisterCompletionReadyCallback([&notifications]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
+    const std::vector<std::uint64_t> batch_ids = queue.EnqueueBatch({
+        {.path = first},
+        {.path = second},
+    });
+    const bool second_started =
+        second_decoder_entered.wait_for(2s) == std::future_status::ready;
+    if (second_started) {
+        std::this_thread::sleep_for(100ms);
+    }
+    release_first_promise.set_value();
+
+    std::vector<specforge::SourceCollectionLoadCompletion> batch_completions =
+        WaitForCompletions(queue, 2);
+    Require(second_started, "notification test should finish the later batch task first");
+    Require(
+        batch_completions.size() == 2 &&
+            batch_completions[0].task_id == batch_ids[0] &&
+            batch_completions[1].task_id == batch_ids[1],
+        "notification coalescing must preserve ordered completion publication");
+    Require(
+        WaitUntil([&notifications]() {
+            return notifications.load(std::memory_order_relaxed) == 1;
+        }),
+        "multiple completions published into a non-empty queue should coalesce to one notification");
+
+    const std::uint64_t third_id = queue.Enqueue({.path = third});
+    std::vector<specforge::SourceCollectionLoadCompletion> next_completion =
+        WaitForCompletions(queue, 1);
+    Require(
+        next_completion.size() == 1 && next_completion.front().task_id == third_id,
+        "a completion published after drain should remain activatable");
+    Require(
+        WaitUntil([&notifications]() {
+            return notifications.load(std::memory_order_relaxed) == 2;
+        }),
+        "draining the queue should allow the next publication to notify again");
+
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+    std::filesystem::remove(third);
+}
+
 void TestBufferedBatchCompletionCanBeCanceled()
 {
     const std::filesystem::path first = UniqueTempPath("_buffered_cancel_a.csv");
@@ -486,6 +558,7 @@ void TestBufferedBatchCompletionCanBeCanceled()
         second_decoder_entered_promise.get_future().share();
     std::promise<void> release_first_promise;
     std::shared_future<void> release_first = release_first_promise.get_future().share();
+    std::atomic_int notifications = 0;
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
         [&](const auto& path, std::size_t index, const auto& canceled) {
@@ -499,6 +572,9 @@ void TestBufferedBatchCompletionCanBeCanceled()
             second_decoder_entered_promise.set_value();
             throw std::runtime_error("buffered completion should be canceled");
         }));
+    queue.RegisterCompletionReadyCallback([&notifications]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
     const std::vector<std::uint64_t> ids = queue.EnqueueBatch({
         {.path = first},
         {.path = second},
@@ -517,6 +593,11 @@ void TestBufferedBatchCompletionCanBeCanceled()
     Require(
         completions.size() == 1 && completions.front().task_id == ids[0],
         "cancel should suppress a completion buffered behind an earlier batch source");
+    Require(
+        WaitUntil([&notifications]() {
+            return notifications.load(std::memory_order_relaxed) == 1;
+        }),
+        "retiring a canceled buffered result must not add an activatable notification");
     Require(!queue.NeedsService(), "a canceled buffered completion should leave no queued result");
     std::filesystem::remove(first);
     std::filesystem::remove(second);
@@ -1028,6 +1109,7 @@ void TestCancelSuppressesCompletion()
     std::promise<void> entered_promise;
     std::shared_future<void> entered = entered_promise.get_future().share();
     std::atomic_bool entered_once = false;
+    std::atomic_int notifications = 0;
 
     specforge::SourceCollectionLoadQueue queue(Dependencies(
         [&](const auto& source, std::size_t index, const auto& canceled) {
@@ -1039,6 +1121,9 @@ void TestCancelSuppressesCompletion()
             }
             return MakeSnapshot(source, index);
         }));
+    queue.RegisterCompletionReadyCallback([&notifications]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+    });
     const std::uint64_t task_id = queue.Enqueue({.path = path});
     Require(entered.wait_for(2s) == std::future_status::ready, "cancel test loader should start");
     queue.Cancel(task_id);
@@ -1046,7 +1131,88 @@ void TestCancelSuppressesCompletion()
         WaitUntil([&]() { return !queue.NeedsService(); }),
         "canceled worker should reach a terminal state");
     Require(queue.TakeCompleted().empty(), "canceled task should not publish a stale result");
+    Require(
+        notifications.load(std::memory_order_relaxed) == 0,
+        "a canceled task with no activatable completion must not notify");
     std::filesystem::remove(path);
+}
+
+void TestCompletionReadyCallbackIsReentrantAndUnregistersSafely()
+{
+    const std::filesystem::path first = UniqueTempPath("_notify_unregister_a.csv");
+    const std::filesystem::path second = UniqueTempPath("_notify_unregister_b.csv");
+    WriteFixture(first);
+    WriteFixture(second);
+    std::promise<void> callback_entered_promise;
+    std::future<void> callback_entered = callback_entered_promise.get_future();
+    std::promise<void> release_callback_promise;
+    std::shared_future<void> release_callback = release_callback_promise.get_future().share();
+    std::atomic_bool callback_entered_once = false;
+    std::atomic_bool reentrant_query_succeeded = false;
+    std::atomic_bool notification_target_alive = true;
+    std::atomic_int notifications = 0;
+    std::atomic_int invalid_target_accesses = 0;
+
+    specforge::SourceCollectionLoadQueue queue(Dependencies(
+        [](const auto& path, std::size_t index, const auto&) {
+            return MakeSnapshot(path, index);
+        }));
+    queue.RegisterCompletionReadyCallback([&]() {
+        notifications.fetch_add(1, std::memory_order_relaxed);
+        if (!notification_target_alive.load(std::memory_order_relaxed)) {
+            invalid_target_accesses.fetch_add(1, std::memory_order_relaxed);
+        }
+        reentrant_query_succeeded.store(queue.NeedsService(), std::memory_order_relaxed);
+        if (!callback_entered_once.exchange(true, std::memory_order_relaxed)) {
+            callback_entered_promise.set_value();
+        }
+        release_callback.wait();
+    });
+
+    (void)queue.Enqueue({.path = first});
+    const bool callback_started =
+        callback_entered.wait_for(2s) == std::future_status::ready;
+    std::promise<void> unregister_entered_promise;
+    std::future<void> unregister_entered = unregister_entered_promise.get_future();
+    std::future<void> unregister = std::async(std::launch::async, [&]() {
+        unregister_entered_promise.set_value();
+        queue.UnregisterCompletionReadyCallback();
+    });
+    const bool unregister_started =
+        unregister_entered.wait_for(2s) == std::future_status::ready;
+    const bool unregister_waited =
+        callback_started && unregister_started &&
+        unregister.wait_for(50ms) == std::future_status::timeout;
+    release_callback_promise.set_value();
+    const bool unregister_finished =
+        unregister.wait_for(2s) == std::future_status::ready;
+
+    Require(callback_started, "completion-ready callback should run for a published completion");
+    Require(
+        reentrant_query_succeeded.load(std::memory_order_relaxed),
+        "completion-ready callback should query the queue without running under its mutex");
+    Require(
+        unregister_waited,
+        "unregister should wait for an already running completion-ready callback");
+    Require(unregister_finished, "completion-ready callback unregister should finish after callback exit");
+
+    std::vector<specforge::SourceCollectionLoadCompletion> first_completion =
+        WaitForCompletions(queue, 1);
+    Require(first_completion.size() == 1, "the first notified completion should remain drainable");
+    notification_target_alive.store(false, std::memory_order_relaxed);
+    (void)queue.Enqueue({.path = second});
+    std::vector<specforge::SourceCollectionLoadCompletion> second_completion =
+        WaitForCompletions(queue, 1);
+    Require(second_completion.size() == 1, "late completion should remain available after unregister");
+    Require(
+        notifications.load(std::memory_order_relaxed) == 1,
+        "a completion published after unregister must not call the stale notification target");
+    Require(
+        invalid_target_accesses.load(std::memory_order_relaxed) == 0,
+        "unregister should prevent access to an invalidated notification target");
+
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
 }
 
 void TestCancelStopsOnlyItsSourceThread()
@@ -1187,6 +1353,7 @@ int main()
     TestSourcesUseIndependentThreads();
     TestIndividualLoadsPublishInRequestOrder();
     TestBatchPublishesInRequestOrder();
+    TestCompletionReadyNotificationCoalescesUntilDrain();
     TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
     TestStableFolderListingGenerationSurvivesLoadWorkerExit();
@@ -1199,6 +1366,7 @@ int main()
     TestChangedFileRetriesOneStableGeneration();
     TestChangedFolderRetriesOneStableGeneration();
     TestCancelSuppressesCompletion();
+    TestCompletionReadyCallbackIsReentrantAndUnregistersSafely();
     TestCancelStopsOnlyItsSourceThread();
     TestFailureIsReported();
     TestDestructionStopsEverySourceThread();

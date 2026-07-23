@@ -86,6 +86,8 @@ struct SourceCollectionLoadDependencies {
 
 class SourceCollectionLoadQueue {
 public:
+    using CompletionReadyCallback = std::function<void()>;
+
     SourceCollectionLoadQueue();
     explicit SourceCollectionLoadQueue(SourceCollectionLoadDependencies dependencies);
     ~SourceCollectionLoadQueue();
@@ -103,6 +105,14 @@ public:
     void Cancel(std::uint64_t task_id);
     [[nodiscard]] std::vector<SourceCollectionLoadCompletion> TakeCompleted();
     [[nodiscard]] bool NeedsService() const;
+
+    // The callback runs on the publishing thread after the queue mutex has
+    // been released. It is invoked only when the published completion queue
+    // transitions from empty to non-empty. Unregister waits for an already
+    // running callback so its captured notification target can be destroyed
+    // safely after this method returns.
+    void RegisterCompletionReadyCallback(CompletionReadyCallback callback);
+    void UnregisterCompletionReadyCallback();
 
     // Large immutable graphs replaced or rejected by the UI are released by
     // a dedicated background reclaimer, never by the UI caller.

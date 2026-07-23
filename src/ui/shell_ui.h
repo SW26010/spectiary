@@ -52,6 +52,9 @@ public:
     void Render(const ShellStatus& status);
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
+    void RegisterSourceLoadCompletionReadyCallback(
+        SourceCollectionLoadQueue::CompletionReadyCallback callback);
+    void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
     void RefreshSystemColors();
     void EnterImmersivePlotMode();

@@ -34,6 +34,7 @@ constexpr int kInitialWidth = 1280;
 constexpr int kInitialHeight = 820;
 constexpr UINT kCompositorClockTickMessage = WM_APP + 0x54U;
 constexpr UINT kProfileRecorderStateChangedMessage = WM_APP + 0x55U;
+constexpr UINT kSourceLoadCompletionReadyMessage = WM_APP + 0x56U;
 constexpr UINT_PTR kPresentationRefreshTimer = 0x5350U;
 constexpr UINT kPresentationRefreshDelayMs = 500U;
 constexpr float kDefaultWindowsDpi = 96.0f;
@@ -407,6 +408,9 @@ void SpecForgeApp::Initialize(
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {
         (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
     });
+    ui_.RegisterSourceLoadCompletionReadyCallback([completion_window = window_.hwnd()]() noexcept {
+        PostSourceLoadCompletionReady(completion_window);
+    });
     ApplyTitleBarTheme(window_.hwnd());
 
     const HRESULT renderer_result = renderer_.Initialize(window_.hwnd());
@@ -510,6 +514,7 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    ui_.UnregisterSourceLoadCompletionReadyCallback();
     if (window_.hwnd() != nullptr) {
         KillTimer(window_.hwnd(), kPresentationRefreshTimer);
     }
@@ -733,6 +738,13 @@ void SpecForgeApp::ObserveWin32Message(
         app->ui_.RecordNavigationKeyInput(NavigationLatencyInputKind::KeyboardPrevious);
     } else if (message.wparam == VK_RIGHT) {
         app->ui_.RecordNavigationKeyInput(NavigationLatencyInputKind::KeyboardNext);
+    }
+}
+
+void SpecForgeApp::PostSourceLoadCompletionReady(HWND hwnd) noexcept
+{
+    if (hwnd != nullptr) {
+        (void)PostMessageW(hwnd, kSourceLoadCompletionReadyMessage, 0, 0);
     }
 }
 
@@ -1583,6 +1595,11 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
 
 LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
+    if (message == kSourceLoadCompletionReadyMessage) {
+        render_wake_scheduler_.RequestFrame();
+        return 0;
+    }
+
     if (Win32MessageCanInvalidateRender(
             message,
             kCompositorClockTickMessage)) {

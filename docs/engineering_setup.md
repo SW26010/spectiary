@@ -76,6 +76,8 @@ render/present，因此接触未释放但静止时可等待，继续移动时又
 fallback cadence；若 compositor waiter 异常退出，其最后一个 tick 只请求一次过渡帧，由该帧建立 fallback deadline，
 正常 active tick 仍然只是 render permission；异常边沿另记录 `waiter_failure_fallback` 与 wait result。
 最小化或隐藏时仍执行到期维护，但不提交新的 render/present。
+后台 source load 只在已发布 completion queue 从空变为非空时合并投递一次专用 Win32 消息；主线程收到消息后请求帧，
+仍由 `ShellUi::Render()` drain completion。原有 16ms maintenance deadline 仅保留为消息投递失败等异常边沿的 fallback。
 
 `RenderWakeScheduler` 是唯一的 render/wake 策略边界：Win32 窗口处理器持久记录失效请求，不能用
 `PeekMessageW` 的返回值推断 UI 是否变化；调度器再取窗口失效、维护任务、触控板连续更新与 ImGui 时间行为的最早

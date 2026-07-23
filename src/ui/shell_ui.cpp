@@ -708,6 +708,17 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
     return deadline;
 }
 
+void ShellUi::RegisterSourceLoadCompletionReadyCallback(
+    SourceCollectionLoadQueue::CompletionReadyCallback callback)
+{
+    source_load_queue_.RegisterCompletionReadyCallback(std::move(callback));
+}
+
+void ShellUi::UnregisterSourceLoadCompletionReadyCallback()
+{
+    source_load_queue_.UnregisterCompletionReadyCallback();
+}
+
 void ShellUi::RefreshSystemColors()
 {
     spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotStyle(ReadSystemSpectrumPlotStyle()));

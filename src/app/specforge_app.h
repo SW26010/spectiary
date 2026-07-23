@@ -58,6 +58,7 @@ private:
     static void ObserveWin32Message(
         void* context,
         const Win32ObservedMessage& message) noexcept;
+    static void PostSourceLoadCompletionReady(HWND hwnd) noexcept;
     void RequestMessageRender() noexcept;
     void ApplyPendingResize();
     void ApplyUiScale(float dpi_scale);

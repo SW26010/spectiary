@@ -147,6 +147,7 @@ public:
 
     ~Impl()
     {
+        UnregisterCompletionReadyCallback();
         StopLoadWorkers();
         retirement_worker_.request_stop();
         retirement_condition_.notify_all();
@@ -208,44 +209,62 @@ public:
     std::uint64_t Enqueue(SourceCollectionLoadRequest request)
     {
         ReapFinishedWorkers();
-        std::lock_guard lock(mutex_);
-        auto completion = std::make_shared<BatchCompletionSlot>();
-        ordered_completions_.push_back(completion);
-        try {
-            return StartTaskLocked(std::move(request), nullptr, 0, std::move(completion));
-        } catch (...) {
-            ordered_completions_.pop_back();
-            throw;
+        std::uint64_t id = 0;
+        bool completion_became_ready = false;
+        {
+            std::lock_guard lock(mutex_);
+            const bool completed_was_empty = completed_.empty();
+            auto completion = std::make_shared<BatchCompletionSlot>();
+            ordered_completions_.push_back(completion);
+            try {
+                id = StartTaskLocked(std::move(request), nullptr, 0, std::move(completion));
+            } catch (...) {
+                ordered_completions_.pop_back();
+                throw;
+            }
+            completion_became_ready = completed_was_empty && !completed_.empty();
         }
+        if (completion_became_ready) {
+            NotifyCompletionReady();
+        }
+        return id;
     }
 
     std::vector<std::uint64_t> EnqueueBatch(std::vector<SourceCollectionLoadRequest> requests)
     {
         ReapFinishedWorkers();
-        std::lock_guard lock(mutex_);
         std::vector<std::uint64_t> ids;
         ids.reserve(requests.size());
         if (requests.empty()) {
             return ids;
         }
-        auto batch = std::make_shared<BatchState>();
-        batch->completions.resize(requests.size());
-        try {
-            for (std::size_t index = 0; index < requests.size(); ++index) {
-                ids.push_back(StartTaskLocked(std::move(requests[index]), batch, index));
-            }
-            batch->admitted = true;
-            PublishReadyBatchCompletions(*batch);
-        } catch (...) {
-            batch->abandoned = true;
-            for (const std::uint64_t id : ids) {
-                const auto match = cancellation_.find(id);
-                if (match != cancellation_.end()) {
-                    match->second->store(true, std::memory_order_relaxed);
-                    cancellation_.erase(match);
+        bool completion_became_ready = false;
+        {
+            std::lock_guard lock(mutex_);
+            const bool completed_was_empty = completed_.empty();
+            auto batch = std::make_shared<BatchState>();
+            batch->completions.resize(requests.size());
+            try {
+                for (std::size_t index = 0; index < requests.size(); ++index) {
+                    ids.push_back(StartTaskLocked(std::move(requests[index]), batch, index));
                 }
+                batch->admitted = true;
+                PublishReadyBatchCompletions(*batch);
+            } catch (...) {
+                batch->abandoned = true;
+                for (const std::uint64_t id : ids) {
+                    const auto match = cancellation_.find(id);
+                    if (match != cancellation_.end()) {
+                        match->second->store(true, std::memory_order_relaxed);
+                        cancellation_.erase(match);
+                    }
+                }
+                throw;
             }
-            throw;
+            completion_became_ready = completed_was_empty && !completed_.empty();
+        }
+        if (completion_became_ready) {
+            NotifyCompletionReady();
         }
         return ids;
     }
@@ -281,6 +300,30 @@ public:
         return active_task_count_ > 0 || !completed_.empty();
     }
 
+    void RegisterCompletionReadyCallback(CompletionReadyCallback callback)
+    {
+        if (!callback) {
+            throw std::invalid_argument("completion-ready callback must not be empty");
+        }
+        std::unique_lock lock(completion_callback_mutex_);
+        if (completion_ready_callback_) {
+            throw std::logic_error("completion-ready callback is already registered");
+        }
+        completion_callback_idle_.wait(lock, [this]() {
+            return completion_callbacks_in_flight_ == 0;
+        });
+        completion_ready_callback_ = std::move(callback);
+    }
+
+    void UnregisterCompletionReadyCallback()
+    {
+        std::unique_lock lock(completion_callback_mutex_);
+        completion_ready_callback_ = {};
+        completion_callback_idle_.wait(lock, [this]() {
+            return completion_callbacks_in_flight_ == 0;
+        });
+    }
+
     void RetirePrepared(PreparedSourceCollection prepared)
     {
         {
@@ -303,6 +346,32 @@ public:
     }
 
 private:
+    void NotifyCompletionReady() noexcept
+    {
+        CompletionReadyCallback callback;
+        try {
+            std::lock_guard lock(completion_callback_mutex_);
+            if (!completion_ready_callback_) {
+                return;
+            }
+            callback = completion_ready_callback_;
+            ++completion_callbacks_in_flight_;
+        } catch (...) {
+            return;
+        }
+
+        try {
+            callback();
+        } catch (...) {
+        }
+
+        {
+            std::lock_guard lock(completion_callback_mutex_);
+            --completion_callbacks_in_flight_;
+        }
+        completion_callback_idle_.notify_all();
+    }
+
     std::uint64_t StartTaskLocked(
         SourceCollectionLoadRequest request,
         std::shared_ptr<BatchState> batch,
@@ -830,34 +899,50 @@ private:
 
     void FinishTask(const Task& task, SourceCollectionLoadCompletion completion)
     {
-        std::lock_guard lock(mutex_);
-        if (active_task_count_ > 0) {
-            --active_task_count_;
+        bool completion_became_ready = false;
+        {
+            std::lock_guard lock(mutex_);
+            const bool completed_was_empty = completed_.empty();
+            if (active_task_count_ > 0) {
+                --active_task_count_;
+            }
+            if (task.batch) {
+                FinishBatchTask(
+                    task,
+                    task.canceled->load(std::memory_order_relaxed)
+                        ? std::nullopt
+                        : std::optional<SourceCollectionLoadCompletion>{std::move(completion)});
+            } else {
+                FinishOrderedTask(task, std::move(completion));
+            }
+            task.finished->store(true, std::memory_order_release);
+            completion_became_ready = completed_was_empty && !completed_.empty();
         }
-        if (task.batch) {
-            FinishBatchTask(
-                task,
-                task.canceled->load(std::memory_order_relaxed)
-                    ? std::nullopt
-                    : std::optional<SourceCollectionLoadCompletion>{std::move(completion)});
-        } else {
-            FinishOrderedTask(task, std::move(completion));
+        if (completion_became_ready) {
+            NotifyCompletionReady();
         }
-        task.finished->store(true, std::memory_order_release);
     }
 
     void FinishCanceledTask(const Task& task)
     {
-        std::lock_guard lock(mutex_);
-        if (active_task_count_ > 0) {
-            --active_task_count_;
+        bool completion_became_ready = false;
+        {
+            std::lock_guard lock(mutex_);
+            const bool completed_was_empty = completed_.empty();
+            if (active_task_count_ > 0) {
+                --active_task_count_;
+            }
+            if (task.batch) {
+                FinishBatchTask(task, std::nullopt);
+            } else {
+                FinishOrderedTask(task, std::nullopt);
+            }
+            task.finished->store(true, std::memory_order_release);
+            completion_became_ready = completed_was_empty && !completed_.empty();
         }
-        if (task.batch) {
-            FinishBatchTask(task, std::nullopt);
-        } else {
-            FinishOrderedTask(task, std::nullopt);
+        if (completion_became_ready) {
+            NotifyCompletionReady();
         }
-        task.finished->store(true, std::memory_order_release);
     }
 
     void DrainRetirementForShutdown(
@@ -946,6 +1031,10 @@ private:
     SourceCollectionLoadDependencies dependencies_;
     mutable std::mutex mutex_;
     std::condition_variable_any retirement_condition_;
+    std::mutex completion_callback_mutex_;
+    std::condition_variable completion_callback_idle_;
+    CompletionReadyCallback completion_ready_callback_;
+    std::size_t completion_callbacks_in_flight_ = 0;
     std::deque<SourceCollectionLoadCompletion> completed_;
     std::deque<std::shared_ptr<BatchCompletionSlot>> ordered_completions_;
     std::deque<PreparedSourceCollection> retired_prepared_;
@@ -998,6 +1087,17 @@ std::vector<SourceCollectionLoadCompletion> SourceCollectionLoadQueue::TakeCompl
 bool SourceCollectionLoadQueue::NeedsService() const
 {
     return impl_->NeedsService();
+}
+
+void SourceCollectionLoadQueue::RegisterCompletionReadyCallback(
+    CompletionReadyCallback callback)
+{
+    impl_->RegisterCompletionReadyCallback(std::move(callback));
+}
+
+void SourceCollectionLoadQueue::UnregisterCompletionReadyCallback()
+{
+    impl_->UnregisterCompletionReadyCallback();
 }
 
 void SourceCollectionLoadQueue::RetirePrepared(PreparedSourceCollection prepared)
