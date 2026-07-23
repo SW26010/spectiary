@@ -1,7 +1,6 @@
 #include "ui/shell_ui.h"
 
 #include "domain/spectrum_loader.h"
-#include "plot/spectrum_plot.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/top_bar_status_hover.h"
@@ -1101,21 +1100,20 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
 
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
-    const bool plot_submitted = RenderSpectrumPlot(
-        snapshot,
-        spectrum_view_session_.PlotStateForRender(),
-        SpectrumPlotProfileContext{status.profile, status.frame_index},
-        spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{
-            .spectral_lines = spectral_lines.visible_markers.data(),
-            .spectral_line_count = spectral_lines.visible_markers.size(),
-            .show_spectral_line_labels = spectral_lines.marker_labels_visible,
-            .layout_scope_id = spectral_lines.layout_scope_id,
-            .spectral_line_label_font = spectral_line_label_font_,
-        },
-        MakeImmersivePlotDisplayOptions(),
-        touchpad_gestures_);
-    if (plot_submitted) {
+    const SpectrumViewRenderFeedback plot_feedback =
+        spectrum_view_session_.Render(
+            snapshot,
+            SpectrumPlotProfileContext{status.profile, status.frame_index},
+            SpectrumPlotOverlays{
+                .spectral_lines = spectral_lines.visible_markers.data(),
+                .spectral_line_count = spectral_lines.visible_markers.size(),
+                .show_spectral_line_labels = spectral_lines.marker_labels_visible,
+                .layout_scope_id = spectral_lines.layout_scope_id,
+                .spectral_line_label_font = spectral_line_label_font_,
+            },
+            MakeImmersivePlotDisplayOptions(),
+            touchpad_gestures_);
+    if (plot_feedback.plot_submitted) {
         RecordSpectrumDrawSubmission(status.frame_index, viewport_id, snapshot);
     }
 
@@ -1477,21 +1475,20 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     const unsigned int viewport_id = ImGui::GetWindowViewport()->ID;
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
-    const bool plot_submitted = RenderSpectrumPlot(
-        snapshot,
-        spectrum_view_session_.PlotStateForRender(),
-        SpectrumPlotProfileContext{status.profile, status.frame_index},
-        spectrum_view_session_.PlotStyleForRender(),
-        SpectrumPlotOverlays{
-            .spectral_lines = spectral_lines.visible_markers.data(),
-            .spectral_line_count = spectral_lines.visible_markers.size(),
-            .show_spectral_line_labels = spectral_lines.marker_labels_visible,
-            .layout_scope_id = spectral_lines.layout_scope_id,
-            .spectral_line_label_font = spectral_line_label_font_,
-        },
-        {},
-        touchpad_gestures_);
-    if (plot_submitted) {
+    const SpectrumViewRenderFeedback plot_feedback =
+        spectrum_view_session_.Render(
+            snapshot,
+            SpectrumPlotProfileContext{status.profile, status.frame_index},
+            SpectrumPlotOverlays{
+                .spectral_lines = spectral_lines.visible_markers.data(),
+                .spectral_line_count = spectral_lines.visible_markers.size(),
+                .show_spectral_line_labels = spectral_lines.marker_labels_visible,
+                .layout_scope_id = spectral_lines.layout_scope_id,
+                .spectral_line_label_font = spectral_line_label_font_,
+            },
+            {},
+            touchpad_gestures_);
+    if (plot_feedback.plot_submitted) {
         RecordSpectrumDrawSubmission(status.frame_index, viewport_id, snapshot);
     }
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);

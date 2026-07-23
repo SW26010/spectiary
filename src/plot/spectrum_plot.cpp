@@ -1,7 +1,5 @@
-#include "plot/spectrum_plot.h"
+#include "plot/spectrum_plot_renderer.h"
 
-#include "plot/scientific_label.h"
-#include "plot/spectral_line_label_layout.h"
 #include "profile/profile_sink.h"
 
 #include <imgui.h>
@@ -848,7 +846,7 @@ bool IsPlotPanDragActive(
     return left_button_down && (was_active || (plot_hovered && left_button_dragging));
 }
 
-bool RenderSpectrumPlot(
+SpectrumPlotRenderResult RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile,
@@ -857,13 +855,14 @@ bool RenderSpectrumPlot(
     const SpectrumPlotDisplayOptions& display,
     PlotTouchpadGestureSource* touchpad_gestures)
 {
+    SpectrumPlotRenderResult result;
     if (!CanPlotSnapshot(snapshot)) {
         state.pan_drag_active = false;
         if (touchpad_gestures != nullptr) {
             touchpad_gestures->ClearTarget();
         }
         ImGui::TextDisabled("No plottable spectrum.");
-        return false;
+        return result;
     }
 
     const std::uintptr_t native_window = CurrentNativeWindow();
@@ -876,6 +875,9 @@ bool RenderSpectrumPlot(
     }
 
     const bool fit_requested = state.fit_next_frame;
+    const bool stored_limits_requested =
+        state.sync_last_limits_next_frame;
+    bool stored_limits_reused = false;
     PlotViewLimits requested_limits;
     bool has_requested_limits = false;
     if (state.fit_next_frame) {
@@ -889,6 +891,7 @@ bool RenderSpectrumPlot(
         if (LastLimitsAreUsable(state)) {
             requested_limits = StoredViewLimits(state);
             has_requested_limits = true;
+            stored_limits_reused = true;
         }
     } else if (!touchpad_batch.deltas.empty() && LastLimitsAreUsable(state)) {
         requested_limits = StoredViewLimits(state);
@@ -1041,6 +1044,11 @@ bool RenderSpectrumPlot(
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         StoreLastLimits(limits, state);
+        result.visible_limits = PlotViewLimits{
+            limits.X.Min,
+            limits.X.Max,
+            limits.Y.Min,
+            limits.Y.Max};
 
         if (ProfileSink* sink = ActiveProfileSink(profile)) {
             for (const PlotTouchpadGestureDelta& gesture : touchpad_batch.deltas) {
@@ -1112,6 +1120,11 @@ bool RenderSpectrumPlot(
             }
         }
         state.pan_drag_active = pan_drag_active;
+        result.fit_applied = fit_requested;
+        result.stored_limits_reused =
+            stored_limits_requested &&
+            stored_limits_reused;
+        result.pan_active = pan_drag_active;
 
         ImPlot::EndPlot();
     } else {
@@ -1120,7 +1133,8 @@ bool RenderSpectrumPlot(
             touchpad_gestures->ClearTarget();
         }
     }
-    return plot_submitted;
+    result.plot_submitted = plot_submitted;
+    return result;
 }
 
 }  // namespace specforge

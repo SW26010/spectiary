@@ -1,9 +1,12 @@
 #pragma once
 
 #include "domain/spectrum_smoothing.h"
+#include "domain/spectrum_snapshot.h"
 #include "plot/spectrum_plot.h"
 
 #include <cstddef>
+#include <memory>
+#include <optional>
 #include <vector>
 
 namespace specforge {
@@ -56,25 +59,46 @@ struct SpectrumViewSessionView {
     SpectrumSmoothingSettings smoothing;
 };
 
+struct SpectrumViewRenderFeedback {
+    bool plot_submitted = false;
+    bool fit_applied = false;
+    bool stored_limits_reused = false;
+    bool pan_active = false;
+    std::optional<PlotViewLimits> visible_limits;
+};
+
 class SpectrumViewSession {
 public:
+    SpectrumViewSession();
+    ~SpectrumViewSession();
+
+    SpectrumViewSession(const SpectrumViewSession&) = delete;
+    SpectrumViewSession& operator=(const SpectrumViewSession&) = delete;
+    SpectrumViewSession(SpectrumViewSession&&) noexcept;
+    SpectrumViewSession& operator=(SpectrumViewSession&&) noexcept;
+
     void Submit(SpectrumViewSessionCommand command);
 
     [[nodiscard]] SpectrumViewSessionView View() const;
     [[nodiscard]] int EffectiveMedianKernelSize(std::size_t point_count) const;
-    [[nodiscard]] SpectrumPlotState& PlotStateForRender();
-    [[nodiscard]] const SpectrumPlotStyle& PlotStyleForRender() const;
+    [[nodiscard]] SpectrumViewRenderFeedback Render(
+        const SpectrumSnapshotHandle& snapshot,
+        const SpectrumPlotProfileContext& profile = {},
+        const SpectrumPlotOverlays& overlays = {},
+        const SpectrumPlotDisplayOptions& display = {},
+        PlotTouchpadGestureSource* touchpad_gestures = nullptr);
     [[nodiscard]] bool PlotPanActive() const;
     [[nodiscard]] std::vector<SpectrumValueVector> RetainHeavySnapshotResources() const;
 
 private:
+    struct State;
+
     void ResetForSnapshotChange();
     void ResetSmoothing();
     void ClearSmoothingCache();
     [[nodiscard]] bool SmoothingActive() const;
 
-    SpectrumPlotState plot_state_;
-    SpectrumPlotStyle plot_style_;
+    std::unique_ptr<State> state_;
 };
 
 }  // namespace specforge

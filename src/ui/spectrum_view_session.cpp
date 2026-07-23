@@ -1,9 +1,18 @@
 #include "ui/spectrum_view_session.h"
 
+#include "plot/spectrum_plot_renderer.h"
+
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 namespace specforge {
+
+struct SpectrumViewSession::State {
+    SpectrumPlotState plot;
+    SpectrumPlotStyle style;
+    SpectrumViewRenderFeedback last_render;
+};
 
 SpectrumViewSessionCommand SpectrumViewSessionCommand::ResetForSnapshotChange()
 {
@@ -89,6 +98,17 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::SyncPlotLimitsOnNextRende
     return command;
 }
 
+SpectrumViewSession::SpectrumViewSession()
+    : state_(std::make_unique<State>())
+{
+}
+
+SpectrumViewSession::~SpectrumViewSession() = default;
+
+SpectrumViewSession::SpectrumViewSession(SpectrumViewSession&&) noexcept = default;
+
+SpectrumViewSession& SpectrumViewSession::operator=(SpectrumViewSession&&) noexcept = default;
+
 void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
 {
     switch (command.kind) {
@@ -96,48 +116,48 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
         ResetForSnapshotChange();
         break;
     case SpectrumViewSessionCommandKind::RequestFitView:
-        plot_state_.fit_next_frame = true;
+        state_->plot.fit_next_frame = true;
         break;
     case SpectrumViewSessionCommandKind::SetShowPoints:
-        plot_state_.show_points = command.enabled;
+        state_->plot.show_points = command.enabled;
         break;
     case SpectrumViewSessionCommandKind::SetShowSmoothed:
-        plot_state_.show_smoothed = command.enabled;
+        state_->plot.show_smoothed = command.enabled;
         break;
     case SpectrumViewSessionCommandKind::SetShowRawWhenSmoothed:
-        plot_state_.show_raw_when_smoothed = command.enabled;
+        state_->plot.show_raw_when_smoothed = command.enabled;
         break;
     case SpectrumViewSessionCommandKind::ResetSmoothing:
         ResetSmoothing();
         break;
     case SpectrumViewSessionCommandKind::SetSmoothingMethod:
-        if (plot_state_.smoothing.method != command.smoothing_method) {
-            plot_state_.smoothing.method = command.smoothing_method;
+        if (state_->plot.smoothing.method != command.smoothing_method) {
+            state_->plot.smoothing.method = command.smoothing_method;
             ClearSmoothingCache();
         }
         break;
     case SpectrumViewSessionCommandKind::SetGaussianSigma: {
         const double sigma = std::max(0.01, command.gaussian_sigma);
-        if (plot_state_.smoothing.gaussian_sigma != sigma) {
-            plot_state_.smoothing.gaussian_sigma = sigma;
+        if (state_->plot.smoothing.gaussian_sigma != sigma) {
+            state_->plot.smoothing.gaussian_sigma = sigma;
             ClearSmoothingCache();
         }
         break;
     }
     case SpectrumViewSessionCommandKind::SetMedianKernelSize: {
         const int kernel_size = NormalizeMedianKernelSize(command.median_kernel_size);
-        if (plot_state_.smoothing.median_kernel_size != kernel_size) {
-            plot_state_.smoothing.median_kernel_size = kernel_size;
+        if (state_->plot.smoothing.median_kernel_size != kernel_size) {
+            state_->plot.smoothing.median_kernel_size = kernel_size;
             ClearSmoothingCache();
         }
         break;
     }
     case SpectrumViewSessionCommandKind::SetPlotStyle:
-        plot_style_ = command.plot_style;
+        state_->style = command.plot_style;
         break;
     case SpectrumViewSessionCommandKind::SyncPlotLimitsOnNextRender:
-        if (plot_state_.has_last_limits) {
-            plot_state_.sync_last_limits_next_frame = true;
+        if (state_->plot.has_last_limits) {
+            state_->plot.sync_last_limits_next_frame = true;
         }
         break;
     }
@@ -146,78 +166,97 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
 SpectrumViewSessionView SpectrumViewSession::View() const
 {
     SpectrumViewSessionView view;
-    view.show_points = plot_state_.show_points;
-    view.show_smoothed = plot_state_.show_smoothed;
-    view.show_raw_when_smoothed = plot_state_.show_raw_when_smoothed;
+    view.show_points = state_->plot.show_points;
+    view.show_smoothed = state_->plot.show_smoothed;
+    view.show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
     view.smoothing_active = SmoothingActive();
-    view.smoothing = plot_state_.smoothing;
+    view.smoothing = state_->plot.smoothing;
     return view;
 }
 
 int SpectrumViewSession::EffectiveMedianKernelSize(std::size_t point_count) const
 {
-    return specforge::EffectiveMedianKernelSize(plot_state_.smoothing.median_kernel_size, point_count);
+    return specforge::EffectiveMedianKernelSize(
+        state_->plot.smoothing.median_kernel_size,
+        point_count);
 }
 
-SpectrumPlotState& SpectrumViewSession::PlotStateForRender()
+SpectrumViewRenderFeedback SpectrumViewSession::Render(
+    const SpectrumSnapshotHandle& snapshot,
+    const SpectrumPlotProfileContext& profile,
+    const SpectrumPlotOverlays& overlays,
+    const SpectrumPlotDisplayOptions& display,
+    PlotTouchpadGestureSource* touchpad_gestures)
 {
-    return plot_state_;
-}
-
-const SpectrumPlotStyle& SpectrumViewSession::PlotStyleForRender() const
-{
-    return plot_style_;
+    const SpectrumPlotRenderResult result = RenderSpectrumPlot(
+        snapshot,
+        state_->plot,
+        profile,
+        state_->style,
+        overlays,
+        display,
+        touchpad_gestures);
+    state_->last_render = {
+        .plot_submitted = result.plot_submitted,
+        .fit_applied = result.fit_applied,
+        .stored_limits_reused = result.stored_limits_reused,
+        .pan_active = result.pan_active,
+        .visible_limits = result.visible_limits,
+    };
+    return state_->last_render;
 }
 
 bool SpectrumViewSession::PlotPanActive() const
 {
-    return plot_state_.pan_drag_active;
+    return state_->last_render.pan_active;
 }
 
 std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResources() const
 {
     std::vector<SpectrumValueVector> resources;
     resources.reserve(2);
-    if (plot_state_.smoothing_cache_source) {
-        resources.push_back(plot_state_.smoothing_cache_source);
+    if (state_->plot.smoothing_cache_source) {
+        resources.push_back(state_->plot.smoothing_cache_source);
     }
-    if (plot_state_.smoothed_y_values) {
-        resources.push_back(plot_state_.smoothed_y_values);
+    if (state_->plot.smoothed_y_values) {
+        resources.push_back(state_->plot.smoothed_y_values);
     }
     return resources;
 }
 
 void SpectrumViewSession::ResetForSnapshotChange()
 {
-    const bool show_points = plot_state_.show_points;
-    const bool show_smoothed = plot_state_.show_smoothed;
-    const bool show_raw_when_smoothed = plot_state_.show_raw_when_smoothed;
-    const SpectrumSmoothingSettings smoothing = plot_state_.smoothing;
+    const bool show_points = state_->plot.show_points;
+    const bool show_smoothed = state_->plot.show_smoothed;
+    const bool show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
+    const SpectrumSmoothingSettings smoothing = state_->plot.smoothing;
 
-    plot_state_ = SpectrumPlotState{};
-    plot_state_.show_points = show_points;
-    plot_state_.show_smoothed = show_smoothed;
-    plot_state_.show_raw_when_smoothed = show_raw_when_smoothed;
-    plot_state_.smoothing = smoothing;
+    state_->plot = SpectrumPlotState{};
+    state_->plot.show_points = show_points;
+    state_->plot.show_smoothed = show_smoothed;
+    state_->plot.show_raw_when_smoothed = show_raw_when_smoothed;
+    state_->plot.smoothing = smoothing;
+    state_->last_render = {};
 }
 
 void SpectrumViewSession::ResetSmoothing()
 {
-    plot_state_.show_smoothed = false;
-    plot_state_.show_raw_when_smoothed = true;
-    plot_state_.smoothing = SpectrumSmoothingSettings{};
+    state_->plot.show_smoothed = false;
+    state_->plot.show_raw_when_smoothed = true;
+    state_->plot.smoothing = SpectrumSmoothingSettings{};
     ClearSmoothingCache();
 }
 
 void SpectrumViewSession::ClearSmoothingCache()
 {
-    plot_state_.smoothing_cache_source.reset();
-    plot_state_.smoothed_y_values.reset();
+    state_->plot.smoothing_cache_source.reset();
+    state_->plot.smoothed_y_values.reset();
 }
 
 bool SpectrumViewSession::SmoothingActive() const
 {
-    return plot_state_.show_smoothed && plot_state_.smoothing.method != SpectrumSmoothingMethod::None;
+    return state_->plot.show_smoothed &&
+           state_->plot.smoothing.method != SpectrumSmoothingMethod::None;
 }
 
 }  // namespace specforge
