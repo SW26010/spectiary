@@ -6,6 +6,7 @@
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
+#include <chrono>
 #include <string_view>
 #include <vector>
 
@@ -30,6 +31,11 @@ struct D3D11ViewportPresentationUpdate {
     D3D11CompositionFeedback feedback;
 };
 
+struct D3D11ViewportPresentCompletion {
+    unsigned int viewport_id = 0;
+    std::chrono::steady_clock::time_point completed_at;
+};
+
 class D3D11ImGuiViewportRenderer {
 public:
     D3D11ImGuiViewportRenderer() = default;
@@ -46,6 +52,8 @@ public:
     [[nodiscard]] D3D11RendererError TakeLastError() noexcept;
     [[nodiscard]] std::vector<D3D11ViewportPresentationUpdate>
     TakePresentationUpdates() noexcept;
+    [[nodiscard]] std::vector<D3D11ViewportPresentCompletion>
+    TakePresentCompletions() noexcept;
 
 private:
     static void CreateViewportWindow(ImGuiViewport* viewport);
@@ -66,6 +74,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context_;
     D3D11RendererError last_error_;
     std::vector<D3D11ViewportPresentationUpdate> presentation_updates_;
+    std::vector<D3D11ViewportPresentCompletion> present_completions_;
     bool compositor_clock_paced_ = false;
 };
 

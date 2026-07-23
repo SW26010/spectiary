@@ -67,6 +67,12 @@ bool IsFiniteJsonNumber(std::string_view value)
     return result.ec == std::errc() && result.ptr == end && std::isfinite(parsed);
 }
 
+enum class FrameAdmissionState : std::uint8_t {
+    Accepting,
+    Finalizing,
+    Closed,
+};
+
 }  // namespace
 
 struct ProfileSink::WriterState {
@@ -80,7 +86,8 @@ struct ProfileSink::WriterState {
     std::size_t queued_bytes = 0;
     std::uint64_t accepted_bytes = 0;
     std::atomic<std::uint64_t> dropped_events = 0;
-    std::atomic<bool> accepting = true;
+    std::atomic<FrameAdmissionState> frame_admission = FrameAdmissionState::Accepting;
+    bool frame_in_progress = false;  // Protected by queue_mutex.
     std::atomic<bool> stop_requested = false;
     std::atomic<StopReason> stop_reason = StopReason::None;
     std::atomic<bool> writer_done = false;
@@ -290,11 +297,85 @@ void ProfileSink::RequestStop()
         std::lock_guard lock(state->queue_mutex);
         StopReason expected = StopReason::None;
         (void)state->stop_reason.compare_exchange_strong(expected, StopReason::Explicit);
-        state->accepting.store(false, std::memory_order_release);
+        state->frame_in_progress = false;
+        state->frame_admission.store(FrameAdmissionState::Closed, std::memory_order_release);
         state->stop_requested.store(true, std::memory_order_release);
     }
     state->queue_ready.notify_one();
     NotifyStateChange(state);
+}
+
+void ProfileSink::BeginFrame()
+{
+    WriterState* state = state_.get();
+    if (state == nullptr) {
+        return;
+    }
+
+    std::lock_guard lock(state->queue_mutex);
+    if (state->frame_admission.load(std::memory_order_acquire) ==
+            FrameAdmissionState::Accepting &&
+        !state->stop_requested.load(std::memory_order_acquire)) {
+        state->frame_in_progress = true;
+    }
+}
+
+void ProfileSink::RequestStopAfterFrame()
+{
+    WriterState* state = state_.get();
+    if (state == nullptr) {
+        return;
+    }
+
+    bool changed = false;
+    {
+        std::lock_guard lock(state->queue_mutex);
+        StopReason expected = StopReason::None;
+        (void)state->stop_reason.compare_exchange_strong(expected, StopReason::Explicit);
+        if (!state->stop_requested.load(std::memory_order_acquire)) {
+            FrameAdmissionState admission = FrameAdmissionState::Accepting;
+            if (state->frame_admission.compare_exchange_strong(
+                    admission,
+                    state->frame_in_progress
+                        ? FrameAdmissionState::Finalizing
+                        : FrameAdmissionState::Closed,
+                    std::memory_order_acq_rel)) {
+                changed = true;
+                if (!state->frame_in_progress) {
+                    state->stop_requested.store(true, std::memory_order_release);
+                }
+            }
+        }
+    }
+    if (changed) {
+        state->queue_ready.notify_one();
+        NotifyStateChange(state);
+    }
+}
+
+void ProfileSink::CompleteFrameFinalization()
+{
+    WriterState* state = state_.get();
+    if (state == nullptr) {
+        return;
+    }
+
+    bool changed = false;
+    {
+        std::lock_guard lock(state->queue_mutex);
+        state->frame_in_progress = false;
+        FrameAdmissionState expected = FrameAdmissionState::Finalizing;
+        changed = state->frame_admission.compare_exchange_strong(
+            expected,
+            FrameAdmissionState::Closed,
+            std::memory_order_acq_rel);
+        if (changed) {
+            state->stop_requested.store(true, std::memory_order_release);
+        }
+    }
+    if (changed) {
+        state->queue_ready.notify_one();
+    }
 }
 
 bool ProfileSink::TryFinalizeStop()
@@ -332,12 +413,45 @@ void ProfileSink::FinalizeStoppedState()
 
 bool ProfileSink::is_open() const noexcept
 {
-    return state_ && state_->accepting.load(std::memory_order_acquire);
+    return state_ &&
+        state_->frame_admission.load(std::memory_order_acquire) ==
+            FrameAdmissionState::Accepting;
 }
 
 bool ProfileSink::is_stopping() const noexcept
 {
-    return state_ != nullptr && !state_->accepting.load(std::memory_order_acquire);
+    return state_ != nullptr &&
+        state_->frame_admission.load(std::memory_order_acquire) !=
+            FrameAdmissionState::Accepting;
+}
+
+bool ProfileSink::is_frame_finalization_pending() const noexcept
+{
+    return state_ != nullptr &&
+        state_->frame_admission.load(std::memory_order_acquire) ==
+            FrameAdmissionState::Finalizing;
+}
+
+bool ProfileSink::is_frame_recording_active() const noexcept
+{
+    return state_ != nullptr &&
+        state_->frame_admission.load(std::memory_order_acquire) !=
+            FrameAdmissionState::Closed;
+}
+
+ProfileSink::StateSnapshot ProfileSink::state_snapshot() const noexcept
+{
+    if (state_ == nullptr) {
+        return {};
+    }
+    const FrameAdmissionState admission =
+        state_->frame_admission.load(std::memory_order_acquire);
+    return {
+        .open = admission == FrameAdmissionState::Accepting,
+        .stopping = admission != FrameAdmissionState::Accepting,
+        .frame_finalization_pending = admission == FrameAdmissionState::Finalizing,
+        .frame_recording_active = admission != FrameAdmissionState::Closed,
+    };
 }
 
 ProfileSink::StopReason ProfileSink::stop_reason() const noexcept
@@ -358,15 +472,12 @@ std::uint64_t ProfileSink::dropped_event_count() const noexcept
 
 bool ProfileSink::WriteEvent(std::string_view event_name, std::initializer_list<Field> fields)
 {
-    if (!is_open()) {
-        return false;
-    }
     return Enqueue(BuildEventLine(event_name, fields));
 }
 
 void ProfileSink::WriteDuration(std::string_view event_name, std::uint64_t frame_index, double milliseconds)
 {
-    if (!is_open()) {
+    if (!is_frame_recording_active()) {
         return;
     }
 
@@ -390,45 +501,60 @@ void ProfileSink::WriteDuration(std::string_view event_name, std::uint64_t frame
 bool ProfileSink::Enqueue(std::string line)
 {
     WriterState* state = state_.get();
-    if (state == nullptr || !state->accepting.load(std::memory_order_acquire)) {
+    if (state == nullptr) {
         return false;
     }
 
     // This mutex only protects the bounded in-memory queue. The writer never holds it during
     // file I/O, so ordinary producer/writer scheduling contention must not discard evidence.
     std::unique_lock lock(state->queue_mutex);
-    if (!state->accepting.load(std::memory_order_acquire)) {
+    const FrameAdmissionState admission =
+        state->frame_admission.load(std::memory_order_acquire);
+    if (admission == FrameAdmissionState::Closed) {
         return false;
     }
-    const auto now = std::chrono::steady_clock::now();
-    if (state->limits.max_duration > std::chrono::steady_clock::duration::zero() &&
-        now - state->started_at >= state->limits.max_duration) {
-        StopReason expected = StopReason::None;
-        const bool changed = state->stop_reason.compare_exchange_strong(expected, StopReason::DurationLimit);
-        state->accepting.store(false, std::memory_order_release);
-        state->stop_requested.store(true, std::memory_order_release);
-        lock.unlock();
-        state->queue_ready.notify_one();
-        if (changed) {
-            NotifyStateChange(state);
+    bool state_changed = false;
+    if (admission == FrameAdmissionState::Accepting) {
+        const auto now = std::chrono::steady_clock::now();
+        if (state->limits.max_duration > std::chrono::steady_clock::duration::zero() &&
+            now - state->started_at >= state->limits.max_duration) {
+            StopReason expected = StopReason::None;
+            (void)state->stop_reason.compare_exchange_strong(
+                expected,
+                StopReason::DurationLimit);
+            state->frame_admission.store(
+                state->frame_in_progress
+                    ? FrameAdmissionState::Finalizing
+                    : FrameAdmissionState::Closed,
+                std::memory_order_release);
+            if (!state->frame_in_progress) {
+                state->stop_requested.store(true, std::memory_order_release);
+            }
+            state_changed = true;
+        } else if (state->accepted_bytes + line.size() > state->limits.max_file_bytes) {
+            StopReason expected = StopReason::None;
+            (void)state->stop_reason.compare_exchange_strong(
+                expected,
+                StopReason::FileSizeLimit);
+            state->frame_admission.store(
+                state->frame_in_progress
+                    ? FrameAdmissionState::Finalizing
+                    : FrameAdmissionState::Closed,
+                std::memory_order_release);
+            if (!state->frame_in_progress) {
+                state->stop_requested.store(true, std::memory_order_release);
+            }
+            state_changed = true;
         }
-        return false;
-    }
-    if (state->accepted_bytes + line.size() > state->limits.max_file_bytes) {
-        StopReason expected = StopReason::None;
-        const bool changed = state->stop_reason.compare_exchange_strong(expected, StopReason::FileSizeLimit);
-        state->accepting.store(false, std::memory_order_release);
-        state->stop_requested.store(true, std::memory_order_release);
-        lock.unlock();
-        state->queue_ready.notify_one();
-        if (changed) {
-            NotifyStateChange(state);
-        }
-        return false;
     }
     if (line.size() > state->limits.max_queue_bytes ||
         state->queued_bytes > state->limits.max_queue_bytes - line.size()) {
         state->dropped_events.fetch_add(1, std::memory_order_relaxed);
+        lock.unlock();
+        if (state_changed) {
+            state->queue_ready.notify_one();
+            NotifyStateChange(state);
+        }
         return false;
     }
 
@@ -437,6 +563,9 @@ bool ProfileSink::Enqueue(std::string line)
     state->queue.push_back(std::move(line));
     lock.unlock();
     state->queue_ready.notify_one();
+    if (state_changed) {
+        NotifyStateChange(state);
+    }
     return true;
 }
 
@@ -449,7 +578,7 @@ void ProfileSink::WriterMain(WriterState* state)
     const auto duration_deadline = state->started_at + state->limits.max_duration;
     const auto mark_write_failure = [state]() {
         state->stop_reason.store(StopReason::WriteFailure, std::memory_order_release);
-        state->accepting.store(false, std::memory_order_release);
+        state->frame_admission.store(FrameAdmissionState::Closed, std::memory_order_release);
         state->stop_requested.store(true, std::memory_order_release);
         NotifyStateChange(state);
     };
@@ -462,12 +591,20 @@ void ProfileSink::WriterMain(WriterState* state)
             const auto work_ready = [state]() {
                 return !state->queue.empty() || state->stop_requested.load(std::memory_order_acquire);
             };
-            if (has_duration_limit) {
+            if (has_duration_limit &&
+                state->frame_admission.load(std::memory_order_acquire) ==
+                    FrameAdmissionState::Accepting) {
                 if (!state->queue_ready.wait_until(lock, duration_deadline, work_ready)) {
                     StopReason expected = StopReason::None;
                     state_changed = state->stop_reason.compare_exchange_strong(expected, StopReason::DurationLimit);
-                    state->accepting.store(false, std::memory_order_release);
-                    state->stop_requested.store(true, std::memory_order_release);
+                    state->frame_admission.store(
+                        state->frame_in_progress
+                            ? FrameAdmissionState::Finalizing
+                            : FrameAdmissionState::Closed,
+                        std::memory_order_release);
+                    if (!state->frame_in_progress) {
+                        state->stop_requested.store(true, std::memory_order_release);
+                    }
                 }
             } else {
                 state->queue_ready.wait(lock, work_ready);
@@ -650,7 +787,7 @@ std::string ProfileSink::TimestampForFileName()
 
 ProfileTimer::ProfileTimer(ProfileSink& sink, std::string_view event_name, std::uint64_t frame_index) : sink_(sink)
 {
-    if (!sink_.is_open()) {
+    if (!sink_.is_frame_recording_active()) {
         return;
     }
 

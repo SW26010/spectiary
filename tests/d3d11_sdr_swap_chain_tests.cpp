@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -161,6 +162,7 @@ public:
                                ImGui_ImplDX11_Init(device, context);
         renderer_initialized_ = backend_initialized_ &&
                                 renderer_.Initialize(factory, device, context);
+        viewport_.ID = 73;
         viewport_.PlatformHandle = viewport_.PlatformHandleRaw = hwnd;
         viewport_.Size = ImVec2(320.0f, 240.0f);
         draw_data_.DisplaySize = ImVec2(0.0f, 0.0f);
@@ -212,6 +214,11 @@ public:
     [[nodiscard]] bool renderer_initialized() const noexcept { return renderer_initialized_; }
     [[nodiscard]] bool has_viewport_swap_chain() const noexcept { return viewport_.RendererUserData != nullptr; }
     [[nodiscard]] specforge::D3D11RendererError TakeLastError() noexcept { return renderer_.TakeLastError(); }
+    [[nodiscard]] std::vector<specforge::D3D11ViewportPresentCompletion>
+    TakePresentCompletions() noexcept
+    {
+        return renderer_.TakePresentCompletions();
+    }
 
     void CreateViewport()
     {
@@ -465,12 +472,21 @@ void TestImGuiViewportSwapChainLifecycle()
 
     fixture.PresentViewport();
     Require(SUCCEEDED(fixture.TakeLastError().result), "detached viewport present should succeed");
+    const std::vector<specforge::D3D11ViewportPresentCompletion> ordinary_presentations =
+        fixture.TakePresentCompletions();
+    Require(
+        ordinary_presentations.size() == 1 && ordinary_presentations[0].viewport_id == 73 &&
+            ordinary_presentations[0].completed_at.time_since_epoch().count() > 0,
+        "a real detached viewport Present should publish its viewport identity and completion time");
 
     fixture.SetCompositorClockPaced(true);
     fixture.PresentViewport();
     Require(
         SUCCEEDED(fixture.TakeLastError().result),
         "detached viewport compositor-clock present should use supported DXGI flags");
+    Require(
+        fixture.TakePresentCompletions().size() == 1,
+        "each successful detached viewport Present should publish exactly one completion");
 
     fixture.DestroyViewport();
     Require(!fixture.has_viewport_swap_chain(), "redocking should destroy the viewport swap chain");

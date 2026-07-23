@@ -70,7 +70,7 @@ struct SpectrumPlotDisplayOptions {
     bool left_button_down,
     bool left_button_dragging) noexcept;
 
-void RenderSpectrumPlot(
+[[nodiscard]] bool RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile = {},

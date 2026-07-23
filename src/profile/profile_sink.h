@@ -33,6 +33,13 @@ public:
         std::chrono::steady_clock::duration max_duration = std::chrono::minutes(5);
     };
 
+    struct StateSnapshot {
+        bool open = false;
+        bool stopping = false;
+        bool frame_finalization_pending = false;
+        bool frame_recording_active = false;
+    };
+
     enum class StopReason : std::uint8_t {
         None,
         Explicit,
@@ -60,8 +67,15 @@ public:
     [[nodiscard]] bool Start(std::filesystem::path path);
     [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
     void SetStateChangeCallback(StateChangeCallback callback);
+    // Marks a real render frame as in progress. Automatic limits retain a tail only while
+    // such a frame is active; idle/minimized sessions seal immediately.
+    void BeginFrame();
     // Stops accepting events and asks the writer to drain without joining it.
     void RequestStop();
+    // Stops the ordinary recording session while retaining this frame's final events.
+    // CompleteFrameFinalization seals that tail and lets the writer finish.
+    void RequestStopAfterFrame();
+    void CompleteFrameFinalization();
     // Finalizes a completed background stop without waiting for file I/O.
     [[nodiscard]] bool TryFinalizeStop();
     // Stops accepting events, drains the bounded queue, writes the summary, and joins the writer.
@@ -69,6 +83,9 @@ public:
 
     [[nodiscard]] bool is_open() const noexcept;
     [[nodiscard]] bool is_stopping() const noexcept;
+    [[nodiscard]] bool is_frame_finalization_pending() const noexcept;
+    [[nodiscard]] bool is_frame_recording_active() const noexcept;
+    [[nodiscard]] StateSnapshot state_snapshot() const noexcept;
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
     [[nodiscard]] StopReason stop_reason() const noexcept;
     [[nodiscard]] std::uint64_t dropped_event_count() const noexcept;

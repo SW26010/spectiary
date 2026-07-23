@@ -285,6 +285,8 @@ public:
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] SourceCollectionSessionView View() const;
+    // A deferred pending target is the origin for a subsequent navigation command.
+    [[nodiscard]] std::optional<std::size_t> EffectiveSampleNavigationIndex() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSourceSnapshot() const;
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSource(

@@ -25,6 +25,7 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
+        const SourceCollectionSessionIntentSubmitter& submit_auto_advance,
         const SourceCollectionSessionViewReader& read_view,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,

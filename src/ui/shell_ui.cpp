@@ -614,11 +614,23 @@ ShellUi::~ShellUi()
 
 void ShellUi::Render(const ShellStatus& status)
 {
+    current_frame_index_ = status.frame_index;
+    spectrum_draw_submission_.reset();
+    navigation_tracing_enabled_ = status.navigation_trace_recording_active;
+    if (!navigation_tracing_enabled_) {
+        pending_keyboard_previous_at_.reset();
+        pending_keyboard_next_at_.reset();
+        presentable_navigation_trace_.reset();
+        presentable_navigation_snapshot_.reset();
+        navigation_traces_.clear();
+    }
     DrainSourceLoads();
     sample_workflow_shortcut_ = {};
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
         HandleSampleWorkflowShortcut();
+        pending_keyboard_previous_at_.reset();
+        pending_keyboard_next_at_.reset();
         return;
     }
     const PanelVisibilityState previous_panel_visibility = panel_visibility_;
@@ -653,6 +665,8 @@ void ShellUi::Render(const ShellStatus& status)
     }
     RenderSettingsPanel();
     HandleSampleWorkflowShortcut();
+    pending_keyboard_previous_at_.reset();
+    pending_keyboard_next_at_.reset();
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
         panel_visibility_);
@@ -755,13 +769,18 @@ std::uint64_t ShellUi::QueueSourceLoad(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     std::vector<std::filesystem::path> annotation_paths,
-    PendingSourceLoadPurpose purpose)
+    PendingSourceLoadPurpose purpose,
+    NavigationLatencyTraceHandle navigation_trace)
 {
     const std::string path_key = SourcePathIdentityKey(path);
     for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
         if (pending->second.path_key != path_key) {
             ++pending;
             continue;
+        }
+        if (pending->second.navigation_trace) {
+            (void)pending->second.navigation_trace->MarkTerminal(
+                NavigationLatencyOutcome::Superseded);
         }
         source_load_queue_.Cancel(pending->first);
         deferred_restore_task_ids_.erase(pending->first);
@@ -770,6 +789,11 @@ std::uint64_t ShellUi::QueueSourceLoad(
 
     const std::uint64_t generation = ++source_load_generations_[path_key];
     const std::optional<SourceCollectionLoadHint> hint = session_.LoadHintForSource(path);
+    NavigationLatencyAttemptHandle navigation_attempt;
+    if (navigation_trace) {
+        navigation_trace->SetTargetIndex(spectrum_index);
+        navigation_attempt = navigation_trace->BeginLoadAttempt(spectrum_index);
+    }
     const std::uint64_t task_id = source_load_queue_.Enqueue(
         {
             .path = path,
@@ -779,6 +803,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .base_live_workflow_revision =
                 hint ? std::optional<std::uint64_t>{hint->live_workflow_revision}
                      : std::nullopt,
+            .navigation_attempt = std::move(navigation_attempt),
         });
     pending_source_loads_.emplace(
         task_id,
@@ -789,6 +814,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .generation = generation,
             .activation_epoch = source_activation_epoch_,
             .purpose = purpose,
+            .navigation_trace = std::move(navigation_trace),
         });
     if (purpose == PendingSourceLoadPurpose::DeferredRestore) {
         deferred_restore_task_ids_.insert(task_id);
@@ -826,6 +852,10 @@ void ShellUi::AdvanceSourceActivationIntent(
             ++pending;
             continue;
         }
+        if (ticket.navigation_trace) {
+            (void)ticket.navigation_trace->MarkTerminal(
+                NavigationLatencyOutcome::Superseded);
+        }
         cancel(pending->first);
         pending = pending_loads.erase(pending);
     }
@@ -860,12 +890,17 @@ std::optional<ShellUi::PendingSourceLoad> ShellUi::TakeCurrentPendingSourceLoad(
                          current_generation->second == ticket.generation &&
                          SourcePathIdentityKey(completion.path) == ticket.path_key &&
                          completion.spectrum_index == ticket.spectrum_index;
+    if (!current && ticket.navigation_trace) {
+        (void)ticket.navigation_trace->MarkTerminal(
+            NavigationLatencyOutcome::Superseded);
+    }
     return current ? std::optional<PendingSourceLoad>{std::move(ticket)} : std::nullopt;
 }
 
 void ShellUi::QueueSessionFollowUp(
     const SourceCollectionSessionResult& result,
-    bool deferred_restore)
+    bool deferred_restore,
+    NavigationLatencyTraceHandle navigation_trace)
 {
     CancelSourceFollowUps(result);
     if (!result.follow_up_spectrum_index) {
@@ -879,6 +914,9 @@ void ShellUi::QueueSessionFollowUp(
             snapshot->source.path,
             *result.follow_up_spectrum_index,
             pending_source_loads_)) {
+        if (navigation_trace) {
+            (void)navigation_trace->MarkTerminal(NavigationLatencyOutcome::Coalesced);
+        }
         return;
     }
     (void)QueueSourceLoad(
@@ -886,7 +924,8 @@ void ShellUi::QueueSessionFollowUp(
         *result.follow_up_spectrum_index,
         session_.AnnotationPathsForSource(snapshot->source.path),
         deferred_restore ? PendingSourceLoadPurpose::DeferredRestore
-                         : PendingSourceLoadPurpose::SessionFollowUp);
+                         : PendingSourceLoadPurpose::SessionFollowUp,
+        std::move(navigation_trace));
 }
 
 void ShellUi::CancelSourceFollowUps(const SourceCollectionSessionResult& result)
@@ -926,6 +965,10 @@ void ShellUi::CancelSourceFollowUpsForPathInState(
             pending->second.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
             ++pending;
             continue;
+        }
+        if (pending->second.navigation_trace) {
+            (void)pending->second.navigation_trace->MarkTerminal(
+                NavigationLatencyOutcome::Superseded);
         }
         cancel(pending->first);
         deferred_restore_task_ids.erase(pending->first);
@@ -983,12 +1026,19 @@ void ShellUi::DrainSourceLoadCompletions(
         }
 
         PendingSourceLoad ticket = std::move(*current_ticket);
+        if (completion.navigation_attempt) {
+            completion.navigation_attempt->MarkCompletionDrained();
+        }
         if (!completion.prepared) {
             source_load_error_ = completion.error_message.empty()
                 ? "Background source loading failed."
                 : std::move(completion.error_message);
             if (CancelFailedPendingSampleNavigation(session_, ticket)) {
                 session_view_cache_dirty_ = true;
+            }
+            if (ticket.navigation_trace) {
+                (void)ticket.navigation_trace->MarkTerminal(
+                    NavigationLatencyOutcome::Failed);
             }
             continue;
         }
@@ -1006,9 +1056,24 @@ void ShellUi::DrainSourceLoadCompletions(
             prepared.spectrum_index,
             std::move(prepared.snapshot),
             std::move(prepared.payload));
+        const bool completes_navigation_trace =
+            result.loaded && !result.follow_up_spectrum_index && ticket.navigation_trace;
+        if (completes_navigation_trace) {
+            if (presentable_navigation_trace_ &&
+                presentable_navigation_trace_ != ticket.navigation_trace) {
+                (void)presentable_navigation_trace_->MarkTerminal(
+                    NavigationLatencyOutcome::Superseded);
+            }
+            presentable_navigation_trace_ = ticket.navigation_trace;
+            presentable_navigation_snapshot_ = session_.CurrentSampleSnapshot();
+            ticket.navigation_trace->MarkSnapshotActivated(current_frame_index_);
+        }
         CancelSourceFollowUps(result);
         session_view_cache_dirty_ = true;
         HandleSessionAction(result.action);
+        if (completes_navigation_trace) {
+            ticket.navigation_trace->MarkUiUpdated();
+        }
         for (BackgroundRetirementHandle& resource : result.background_retirement) {
             source_load_queue_.RetireResource(std::move(resource));
         }
@@ -1022,6 +1087,10 @@ void ShellUi::DrainSourceLoadCompletions(
                 ? "The prepared source result was no longer applicable."
                 : std::move(result.message);
             (void)CancelFailedPendingSampleNavigation(session_, ticket);
+            if (ticket.navigation_trace) {
+                (void)ticket.navigation_trace->MarkTerminal(
+                    NavigationLatencyOutcome::Rejected);
+            }
         } else {
             source_load_error_.clear();
             if (starts_activation_intent) {
@@ -1032,13 +1101,17 @@ void ShellUi::DrainSourceLoadCompletions(
             }
         }
         if (result.follow_up_spectrum_index) {
+            if (ticket.navigation_trace) {
+                ticket.navigation_trace->SetTargetIndex(*result.follow_up_spectrum_index);
+            }
             (void)QueueSourceLoad(
                 ticket.path,
                 *result.follow_up_spectrum_index,
                 session_.AnnotationPathsForSource(ticket.path),
                 ticket.purpose == PendingSourceLoadPurpose::DeferredRestore
                     ? PendingSourceLoadPurpose::DeferredRestore
-                    : PendingSourceLoadPurpose::SessionFollowUp);
+                    : PendingSourceLoadPurpose::SessionFollowUp,
+                ticket.navigation_trace);
         }
         RestoreDeferredActiveSourceIfAvailable();
     }
@@ -1130,6 +1203,96 @@ SpectrumSnapshotHandle ShellUi::current_snapshot() const
     return session_.CurrentSampleSnapshot();
 }
 
+void ShellUi::RecordNavigationKeyInput(
+    NavigationLatencyInputKind kind,
+    NavigationLatencyTimePoint at)
+{
+    if (kind == NavigationLatencyInputKind::KeyboardPrevious) {
+        pending_keyboard_previous_at_ = at;
+    } else if (kind == NavigationLatencyInputKind::KeyboardNext) {
+        pending_keyboard_next_at_ = at;
+    }
+}
+
+std::optional<NavigationLatencyTimePoint> ShellUi::TakeNavigationKeyInput(
+    NavigationLatencyInputKind kind)
+{
+    if (kind == NavigationLatencyInputKind::KeyboardPrevious) {
+        return std::exchange(pending_keyboard_previous_at_, std::nullopt);
+    }
+    if (kind == NavigationLatencyInputKind::KeyboardNext) {
+        return std::exchange(pending_keyboard_next_at_, std::nullopt);
+    }
+    return std::nullopt;
+}
+
+void ShellUi::RecordSpectrumDrawSubmission(
+    std::uint64_t frame_index,
+    unsigned int viewport_id,
+    SpectrumSnapshotHandle snapshot)
+{
+    spectrum_draw_submission_ = SpectrumDrawSubmission{
+        frame_index,
+        viewport_id,
+        std::move(snapshot),
+    };
+    SupersedePresentableNavigationIfSnapshotChanged(
+        spectrum_draw_submission_->snapshot);
+}
+
+void ShellUi::SupersedePresentableNavigationIfSnapshotChanged(
+    const SpectrumSnapshotHandle& current_snapshot)
+{
+    if (!presentable_navigation_trace_ ||
+        presentable_navigation_snapshot_ == current_snapshot) {
+        return;
+    }
+    (void)presentable_navigation_trace_->MarkTerminal(
+        NavigationLatencyOutcome::Superseded);
+    presentable_navigation_trace_.reset();
+    presentable_navigation_snapshot_.reset();
+}
+
+std::vector<NavigationLatencyReport> ShellUi::CompleteFramePresentations(
+    std::uint64_t frame_index,
+    std::span<const NavigationLatencyPresentation> presentations)
+{
+    std::vector<NavigationLatencyReport> reports;
+    SupersedePresentableNavigationIfSnapshotChanged(
+        session_.CurrentSampleSnapshot());
+    for (auto trace = navigation_traces_.begin(); trace != navigation_traces_.end();) {
+        const bool matching_draw_submission =
+            trace->second == presentable_navigation_trace_ &&
+            spectrum_draw_submission_ &&
+            spectrum_draw_submission_->frame_index == frame_index &&
+            spectrum_draw_submission_->snapshot == presentable_navigation_snapshot_;
+        if (matching_draw_submission) {
+            for (const NavigationLatencyPresentation& presentation : presentations) {
+                if (presentation.viewport_id != spectrum_draw_submission_->viewport_id) {
+                    continue;
+                }
+                (void)trace->second->MarkPresentedForViewport(
+                    frame_index,
+                    presentation.viewport_id,
+                    presentation.completed_at);
+                break;
+            }
+        }
+        std::optional<NavigationLatencyReport> report = trace->second->TerminalReport();
+        if (!report) {
+            ++trace;
+            continue;
+        }
+        reports.push_back(std::move(*report));
+        if (trace->second == presentable_navigation_trace_) {
+            presentable_navigation_trace_.reset();
+            presentable_navigation_snapshot_.reset();
+        }
+        trace = navigation_traces_.erase(trace);
+    }
+    return reports;
+}
+
 void ShellUi::OpenSourceFromFilePicker()
 {
     if (std::optional<std::filesystem::path> path = ShowSourceFilePicker()) {
@@ -1170,38 +1333,112 @@ const SourceCollectionSessionView& ShellUi::SessionView()
     return *session_view_cache_;
 }
 
-SourceCollectionSessionResult ShellUi::SubmitSessionCommand(SourceCollectionSessionIntent command)
+NavigationLatencyTraceHandle ShellUi::StartNavigationTrace(
+    const SourceCollectionSessionResult& result,
+    std::optional<std::size_t> from_index,
+    NavigationLatencyTimePoint requested_at,
+    NavigationLatencyTimePoint target_resolved_at,
+    std::optional<NavigationTraceOrigin> navigation_origin)
 {
+    if (!navigation_tracing_enabled_ || !navigation_origin || !from_index ||
+        !result.follow_up_spectrum_index) {
+        return {};
+    }
+
+    const bool keyboard_origin =
+        navigation_origin->kind == NavigationLatencyInputKind::KeyboardPrevious ||
+        navigation_origin->kind == NavigationLatencyInputKind::KeyboardNext;
+    if (keyboard_origin && !navigation_origin->input_at) {
+        return {};
+    }
+    const std::uint64_t navigation_id = next_navigation_trace_id_++;
+    const NavigationLatencyTimePoint input_at = navigation_origin->input_at.value_or(requested_at);
+    auto trace = std::make_shared<NavigationLatencyTrace>(
+        navigation_id,
+        *from_index,
+        *result.follow_up_spectrum_index,
+        navigation_origin->kind,
+        input_at,
+        requested_at,
+        target_resolved_at);
+    navigation_traces_.emplace(navigation_id, trace);
+    return trace;
+}
+
+SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
+    SourceCollectionSessionIntent command,
+    std::optional<NavigationTraceOrigin> navigation_origin)
+{
+    const bool trace_requested = navigation_tracing_enabled_ && navigation_origin.has_value();
+    const NavigationLatencyTimePoint requested_at = trace_requested
+        ? NavigationLatencyTrace::Now()
+        : NavigationLatencyTimePoint{};
+    std::optional<std::size_t> from_index;
+    if (trace_requested) {
+        from_index = session_.EffectiveSampleNavigationIndex();
+    }
     if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    const NavigationLatencyTimePoint target_resolved_at = trace_requested
+        ? NavigationLatencyTrace::Now()
+        : NavigationLatencyTimePoint{};
+    NavigationLatencyTraceHandle navigation_trace = StartNavigationTrace(
+        result,
+        from_index,
+        requested_at,
+        target_resolved_at,
+        std::move(navigation_origin));
     if (deferred_restore_active_) {
         const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
         if (snapshot && !snapshot->source.path.empty()) {
             deferred_restore_active_path_ = snapshot->source.path;
         }
     }
-    QueueSessionFollowUp(result);
+    QueueSessionFollowUp(result, false, std::move(navigation_trace));
     RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     HandleSessionAction(result.action);
     return result;
 }
 
-SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(SourceCollectionSessionIntent command)
+SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
+    SourceCollectionSessionIntent command,
+    std::optional<NavigationLatencyInputKind> navigation_kind)
 {
+    const bool trace_requested = navigation_tracing_enabled_ && navigation_kind.has_value();
+    const NavigationLatencyTimePoint requested_at = trace_requested
+        ? NavigationLatencyTrace::Now()
+        : NavigationLatencyTimePoint{};
+    std::optional<std::size_t> from_index;
+    if (trace_requested) {
+        from_index = session_.EffectiveSampleNavigationIndex();
+    }
     if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
     SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    const NavigationLatencyTimePoint target_resolved_at = trace_requested
+        ? NavigationLatencyTrace::Now()
+        : NavigationLatencyTimePoint{};
+    NavigationLatencyTraceHandle navigation_trace = StartNavigationTrace(
+        result,
+        from_index,
+        requested_at,
+        target_resolved_at,
+        navigation_kind
+            ? std::optional<NavigationTraceOrigin>{NavigationTraceOrigin{
+                  *navigation_kind,
+                  requested_at}}
+            : std::nullopt);
     if (deferred_restore_active_) {
         const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
         if (snapshot && !snapshot->source.path.empty()) {
             deferred_restore_active_path_ = snapshot->source.path;
         }
     }
-    QueueSessionFollowUp(result);
+    QueueSessionFollowUp(result, false, std::move(navigation_trace));
     RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     return result;
@@ -1290,12 +1527,17 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::Begin(kImmersivePlotWindow, nullptr, flags);
+    const bool plot_visible = ImGui::Begin(kImmersivePlotWindow, nullptr, flags);
     ImGui::PopStyleVar(3);
+    if (!plot_visible) {
+        ImGui::End();
+        return;
+    }
+    const unsigned int viewport_id = ImGui::GetWindowViewport()->ID;
 
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
-    RenderSpectrumPlot(
+    const bool plot_submitted = RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
@@ -1307,6 +1549,9 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
             spectral_lines.layout_scope_id},
         MakeImmersivePlotDisplayOptions(),
         touchpad_gestures_);
+    if (plot_submitted) {
+        RecordSpectrumDrawSubmission(status.frame_index, viewport_id, snapshot);
+    }
 
     if (status.profile_open) {
         constexpr const char* kRecordingLabel = "REC  Performance";
@@ -1463,6 +1708,13 @@ void ShellUi::RenderNavigationPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
+        [this](SourceCollectionSessionIntent command, SampleNavigationRequestKind kind) {
+            const NavigationLatencyInputKind input_kind =
+                kind == SampleNavigationRequestKind::Previous
+                ? NavigationLatencyInputKind::UiPrevious
+                : NavigationLatencyInputKind::UiNext;
+            return SubmitSessionCommandForPanel(std::move(command), input_kind);
+        },
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
@@ -1493,6 +1745,11 @@ void ShellUi::RenderLabelingPanel()
         view,
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
+        },
+        [this](SourceCollectionSessionIntent command) {
+            return SubmitSessionCommandForPanel(
+                std::move(command),
+                NavigationLatencyInputKind::AutoAdvance);
         },
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
@@ -1673,10 +1930,14 @@ void ShellUi::RenderInfoTagsPanel()
 
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
-    ImGui::Begin(kMainPlotWindow);
+    if (!ImGui::Begin(kMainPlotWindow)) {
+        ImGui::End();
+        return;
+    }
+    const unsigned int viewport_id = ImGui::GetWindowViewport()->ID;
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     const SpectralLinePlotView spectral_lines = spectral_lines_panel_.PlotView(snapshot);
-    RenderSpectrumPlot(
+    const bool plot_submitted = RenderSpectrumPlot(
         snapshot,
         spectrum_view_session_.PlotStateForRender(),
         SpectrumPlotProfileContext{status.profile, status.frame_index},
@@ -1688,6 +1949,9 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
             spectral_lines.layout_scope_id},
         {},
         touchpad_gestures_);
+    if (plot_submitted) {
+        RecordSpectrumDrawSubmission(status.frame_index, viewport_id, snapshot);
+    }
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
     const SourceCollectionLabelingView& labeling = SessionView().labeling;
@@ -1721,21 +1985,31 @@ void ShellUi::HandleSampleWorkflowShortcut()
     case SampleWorkflowShortcutKind::None:
         return;
     case SampleWorkflowShortcutKind::PreviousSample:
-        (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
-            SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
+        (void)SubmitSessionCommand(
+            SourceCollectionSessionIntent::UpdateSampleNavigation(
+                SampleNavigationIntent::Move(SampleNavigationRequest::Previous())),
+            NavigationTraceOrigin{
+                NavigationLatencyInputKind::KeyboardPrevious,
+                TakeNavigationKeyInput(NavigationLatencyInputKind::KeyboardPrevious)});
         return;
     case SampleWorkflowShortcutKind::NextSample:
-        (void)SubmitSessionCommand(SourceCollectionSessionIntent::UpdateSampleNavigation(
-            SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
+        (void)SubmitSessionCommand(
+            SourceCollectionSessionIntent::UpdateSampleNavigation(
+                SampleNavigationIntent::Move(SampleNavigationRequest::Next())),
+            NavigationTraceOrigin{
+                NavigationLatencyInputKind::KeyboardNext,
+                TakeNavigationKeyInput(NavigationLatencyInputKind::KeyboardNext)});
         return;
     case SampleWorkflowShortcutKind::UndoLabelWrite:
         (void)SubmitSessionCommand(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
             ActiveSampleWorkflowIntent::UndoLastLabelWrite()));
         return;
     case SampleWorkflowShortcutKind::AssignLabel:
-        (void)SubmitSessionCommand(SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
-            ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(
-                sample_workflow_shortcut_.label_code)));
+        (void)SubmitSessionCommand(
+            SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+                ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(
+                    sample_workflow_shortcut_.label_code)),
+            NavigationTraceOrigin{NavigationLatencyInputKind::AutoAdvance});
         return;
     }
 }

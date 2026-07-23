@@ -75,10 +75,18 @@ High-frequency events enter a bounded in-memory queue and a background writer
 owns all steady-state file writes. The queue mutex is never held during file I/O;
 ordinary producer/writer lock contention waits for the short in-memory critical
 section instead of discarding evidence. Only actual queue-capacity pressure drops
-and counts records. Menu stop requests an asynchronous drain, and recorder state
+and counts records. Menu stop closes ordinary recording immediately but retains
+the current render frame's final duration, successful Present, and correlated
+navigation events; frame completion then seals that tail for asynchronous drain.
+The same frame-finalization rule applies at automatic limits only when a real render
+frame is already in progress. With no frame in flight, including while minimized or
+hidden, an automatic limit seals immediately and cannot wait for a future render.
+Ordinary, final-frame, and closed admission are published as one atomic state so the
+UI cannot observe a transient state that discards correlated traces. Recorder state
 changes wake the event-driven UI. Every completed file ends with a recorder
-summary. A session stops after five minutes or 100 MiB so an accidentally left
-enabled recorder cannot grow package-local state without bound.
+summary. A session stops after five minutes or 100 MiB, apart from the bounded
+final-frame tail, so an accidentally left enabled recorder cannot grow
+package-local state without bound.
 Dear ImGui layout state is also SpecForge-owned default state. Portable builds
 store the default ImGui ini file under `Data` instead of writing it beside the
 current working directory.

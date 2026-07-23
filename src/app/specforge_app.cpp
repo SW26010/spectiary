@@ -298,7 +298,11 @@ int SpecForgeApp::Run(
                     direct_manipulation_attached);
             if (touchpad_message_action ==
                 Win32TouchpadQueuedMessageAction::InvalidateRender) {
-                message_render_observer_.ObserveQueuedMessage(message.message);
+                message_render_observer_.ObserveQueuedMessage(Win32ObservedMessage{
+                    reinterpret_cast<std::uintptr_t>(message.hwnd),
+                    message.message,
+                    static_cast<std::uintptr_t>(message.wParam),
+                    static_cast<std::intptr_t>(message.lParam)});
             } else {
                 touchpad_update_pending_ = true;
             }
@@ -430,7 +434,8 @@ void SpecForgeApp::Initialize(
     if (!message_render_observer_.Start(
             &SpecForgeApp::InvalidateRenderFromWin32Message,
             this,
-            kCompositorClockTickMessage)) {
+            kCompositorClockTickMessage,
+            &SpecForgeApp::ObserveWin32Message)) {
         throw std::runtime_error("Failed to observe Win32 messages for render invalidation.");
     }
     window_.Show(show_command);
@@ -553,6 +558,12 @@ void SpecForgeApp::Shutdown()
 
 void SpecForgeApp::RenderFrame()
 {
+    profile_.BeginFrame();
+    struct ProfileFrameFinalizationGuard {
+        ProfileSink& sink;
+        ~ProfileFrameFinalizationGuard() { sink.CompleteFrameFinalization(); }
+    } profile_frame_finalization{profile_};
+
     ApplyPendingResize();
 
     ++frame_index_;
@@ -564,9 +575,11 @@ void SpecForgeApp::RenderFrame()
     {
         ProfileTimer timer(profile_, "view_update", frame_index_);
         RefreshProfileRecordingStatus();
+        const ProfileSink::StateSnapshot profile_state = profile_.state_snapshot();
         ShellStatus status;
-        status.profile_open = profile_.is_open();
-        status.profile_stopping = profile_.is_stopping();
+        status.profile_open = profile_state.open;
+        status.profile_stopping = profile_state.stopping;
+        status.navigation_trace_recording_active = profile_state.frame_recording_active;
         status.profile = &profile_;
         status.profile_path = profile_.path().empty() ? nullptr : &profile_.path();
         status.profile_status_message = profile_status_message_;
@@ -608,11 +621,20 @@ void SpecForgeApp::RenderFrame()
         }
     }
 
+    std::vector<NavigationLatencyPresentation> navigation_presentations;
+    for (const D3D11ViewportPresentCompletion& completion :
+         viewport_renderer_.TakePresentCompletions()) {
+        navigation_presentations.push_back({completion.viewport_id, completion.completed_at});
+    }
+
     const D3D11PresentMode present_mode = compositor_clock_.boost_active()
                                                  ? D3D11PresentMode::CompositorClock
                                                  : D3D11PresentMode::DisplayVSync;
     HRESULT present_result = S_OK;
-    if (profile_.is_open()) {
+    NavigationLatencyTimePoint present_completed_at;
+    const bool profile_frame_active_at_present =
+        profile_.state_snapshot().frame_recording_active;
+    if (profile_frame_active_at_present) {
         const auto present_start = std::chrono::steady_clock::now();
         present_result = renderer_.Present(present_mode);
         const auto present_elapsed = std::chrono::steady_clock::now() - present_start;
@@ -623,12 +645,21 @@ void SpecForgeApp::RenderFrame()
     } else {
         present_result = renderer_.Present(present_mode);
     }
+    present_completed_at = NavigationLatencyTrace::Now();
 
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), present_result));
     }
     if (present_result == S_FALSE) {
         render_wake_scheduler_.RequestFrame();
+    }
+    if (present_result == S_OK) {
+        navigation_presentations.push_back({ImGui::GetMainViewport()->ID, present_completed_at});
+    }
+    std::vector<NavigationLatencyReport> navigation_reports =
+        ui_.CompleteFramePresentations(frame_index_, navigation_presentations);
+    for (const NavigationLatencyReport& report : navigation_reports) {
+        (void)WriteNavigationLatencyProfileEvent(profile_, report);
     }
     LogPresentationUpdates();
 }
@@ -686,6 +717,23 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
 void SpecForgeApp::InvalidateRenderFromWin32Message(void* context) noexcept
 {
     static_cast<SpecForgeApp*>(context)->RequestMessageRender();
+}
+
+void SpecForgeApp::ObserveWin32Message(
+    void* context,
+    const Win32ObservedMessage& message) noexcept
+{
+    auto* app = static_cast<SpecForgeApp*>(context);
+    constexpr std::intptr_t kPreviousKeyStateMask = 1LL << 30;
+    if (!app->profile_.is_open() || message.message != WM_KEYDOWN ||
+        (message.lparam & kPreviousKeyStateMask) != 0) {
+        return;
+    }
+    if (message.wparam == VK_LEFT) {
+        app->ui_.RecordNavigationKeyInput(NavigationLatencyInputKind::KeyboardPrevious);
+    } else if (message.wparam == VK_RIGHT) {
+        app->ui_.RecordNavigationKeyInput(NavigationLatencyInputKind::KeyboardNext);
+    }
 }
 
 void SpecForgeApp::RequestMessageRender() noexcept
@@ -922,7 +970,7 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
                                                });
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     profile_status_message_ = "Finishing recording...";
-    profile_.RequestStop();
+    profile_.RequestStopAfterFrame();
 }
 
 void SpecForgeApp::LogProfileRecordingStarted(
@@ -1549,7 +1597,6 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
     if (profile_.is_open() && IsProfiledInputMessage(message)) {
         LogInputMessage(message, wparam, lparam);
     }
-
     if (message == kCompositorClockTickMessage) {
         const CompositorClockTickAction action = ClassifyCompositorClockTick(
             compositor_clock_.ConsumeTick(),

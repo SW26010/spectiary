@@ -93,6 +93,23 @@ void RequestFrame(void* context) noexcept
     static_cast<specforge::RenderWakeScheduler*>(context)->RequestFrame();
 }
 
+struct ObservedMessageState {
+    int count = 0;
+    specforge::Win32ObservedMessage message;
+};
+
+void RecordObservedMessage(
+    void* context,
+    const specforge::Win32ObservedMessage& message) noexcept
+{
+    if (message.message != WM_KEYDOWN) {
+        return;
+    }
+    auto* state = static_cast<ObservedMessageState*>(context);
+    ++state->count;
+    state->message = message;
+}
+
 void SettleScheduler(specforge::RenderWakeScheduler& scheduler)
 {
     const specforge::RenderWakeScheduler::TimePoint start{};
@@ -170,6 +187,44 @@ void TestQueuedWindowMessageRequestsFrame()
         scheduler.ShouldRender(std::chrono::steady_clock::now()),
         "retrieving queued input for a secondary window should request a frame");
 
+    observer.Stop();
+}
+
+void TestSecondaryWindowKeyMessagePreservesCorrelationPayload()
+{
+    TestWindow window;
+    DrainQueuedMessages();
+
+    ObservedMessageState observed;
+    specforge::Win32MessageRenderObserver observer;
+    Require(
+        observer.Start(
+            [](void*) noexcept {},
+            &observed,
+            std::nullopt,
+            RecordObservedMessage),
+        "message observer should expose secondary-window payloads");
+    Require(
+        PostMessageW(window.hwnd(), WM_KEYDOWN, VK_RIGHT, 1) != FALSE,
+        "secondary window key input should be queued");
+
+    MSG queued = {};
+    Require(
+        GetMessageW(&queued, window.hwnd(), WM_KEYDOWN, WM_KEYDOWN) > 0,
+        "secondary window key input should be retrieved");
+    observer.ObserveQueuedMessage(specforge::Win32ObservedMessage{
+        reinterpret_cast<std::uintptr_t>(queued.hwnd),
+        queued.message,
+        static_cast<std::uintptr_t>(queued.wParam),
+        static_cast<std::intptr_t>(queued.lParam)});
+    DispatchMessageW(&queued);
+
+    Require(observed.count == 1, "one dispatched key message should produce one correlation payload");
+    Require(
+        observed.message.hwnd == reinterpret_cast<std::uintptr_t>(window.hwnd()) &&
+            observed.message.message == WM_KEYDOWN && observed.message.wparam == VK_RIGHT &&
+            observed.message.lparam == 1,
+        "the observer should preserve detached HWND, key, and key-state payload");
     observer.Stop();
 }
 
@@ -379,6 +434,7 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
 int main()
 {
     TestQueuedWindowMessageRequestsFrame();
+    TestSecondaryWindowKeyMessagePreservesCorrelationPayload();
     TestQueuedHitTestDoesNotCreateRenderFeedback();
     TestDirectManipulationUpdateMessageIsOnlyNeutralForAttachedWindow();
     TestFailedTouchpadWakePostCanRetry();

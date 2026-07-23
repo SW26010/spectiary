@@ -101,8 +101,90 @@ portable 包内状态混在一起。
 运行时录制使用 4 MiB 有界队列和后台批量写入，不在输入/UI 热路径同步写磁盘。单次录制达到 5 分钟或
 100 MiB 时自动停止。producer/writer 的普通内存锁争用不会丢事件；只有队列确实达到 4 MiB 容量时才
 拒绝新事件，并在末尾的 `profile_recorder_summary` 中记录 `dropped_events`。菜单停止只请求后台 drain，
-不会在 UI 帧同步等待文件 flush；自动停止和 writer 完成都会唤醒事件驱动渲染以刷新 `REC` 状态。
+不会在 UI 帧同步等待文件 flush。显式停止以及时长/大小自动边界都会先关闭普通录制；若真实 render
+frame 已经在途，则只保留该帧的 duration、成功 Present 和 `navigation_latency` 尾部事件，等 Present
+处理完才封口并由后台 writer 写 summary，因此同帧完成的导航报告不会被 stop 丢弃。没有 render frame
+在途时（包括窗口 minimized/hidden），自动边界立即封口并 drain，不依赖未来恢复窗口。自动停止和 writer
+完成都会唤醒事件驱动 UI 以刷新 `REC` 状态。
 用于定量回归时必须由 analyzer 确认 summary 完整且 `dropped_events == 0`。
+
+## 上一条/下一条导航延迟
+
+运行时录制会为显式标记来源、并且真正触发异步 source load 的上一条/下一条操作写
+`navigation_latency` 事件。来源不是根据通用 `navigation.moved` 结果反推，而是由具体
+command call site 传入：左右键分别为 `keyboard_previous` / `keyboard_next`，上一条/下一条
+按钮分别为 `ui_previous` / `ui_next`，标签 workflow 自动推进为 `auto_advance`。`LocateRow`、
+名称搜索跳转和其他通用导航命令不会混入这些统计。没有移动、没有目标或不需要异步加载
+的命令也不会伪装成一次 spectrum switch。
+
+键盘起点是应用消息循环从任意 SpecForge HWND（包括 detached viewport）取出初次
+`WM_KEYDOWN` 的时间。只有 ImGui shortcut router 在同一帧实际接受对应的左右键后才消费
+该候选；同方向多次输入取最新边沿，未消费的按键在帧末清除。这样被文本框、popup、修饰键
+或其他路由拦截的方向键不会污染下一次导航。若缺少可关联的原始键盘边沿，本次键盘导航
+不会降级成较晚的 UI command 起点。
+
+UI 上一条/下一条的 `input_steady_ns` 定义为 `ImGui::Button()` 接受点击后、调用 session
+command 前的命令接受时间，不是原始鼠标硬件或 `WM_*BUTTON*` 消息时间。因此这两类样本的
+`input_to_request_ms` 预期接近 0，衡量的是“UI 命令接受到首次成功 Present”；不能据此宣称
+测得了鼠标按下到显示的端到端延迟。若后续需要真实鼠标口径，必须另行实现按钮 ID 与原始
+鼠标边沿的显式关联，不能把当前字段重新解释为设备输入时间。workflow `auto_advance` 同样以
+workflow 接受并提交推进命令的时刻为起点。
+
+`outcome=presented` 表示目标 snapshot 已激活、UI 已消费新状态，并且该精确 snapshot handle 已实际向
+某帧、某 viewport 提交 Spectrum plot draw，随后该 viewport 完成第一次成功 `Present`。折叠/裁剪导致
+`ImGui::Begin()` 或 `ImPlot::BeginPlot()` 不接受绘制时不会产生提交凭据。主窗口和 detached viewport
+renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 snapshot、未提交 Spectrum draw 的帧或
+失败的 Present 都不会完成 trace。
+同一个 Spectrum viewport 同一时刻只有当前已激活 snapshot 的 trace 可以消费成功 Present；
+新的 snapshot 激活会将仍未成功展示的前一条记为 `superseded`，不会让一次 Present 同时完成
+多个 trace。连续快速翻页时，被更新意图替代的请求会记录为 `superseded`；其余终态还包括 `failed`、
+`rejected` 和 `coalesced`。因此分析时应同时看 outcome 数量，不能只保留最快的成功样本。
+
+每次 load/retarget 会先写一条关联同一 `navigation_id` 的
+`navigation_latency_attempt`，保留该次 load 自己的 target、task ID、全部阶段时间和
+`attempt_total_ms`。同一 worker 因 source/companion TOCTOU 变化而内部重试时，每轮另写
+`navigation_latency_preparation_round`，包含该轮 inspection、decode、context、revalidation
+时间和最终是否通过 revalidation；attempt 与最终汇总的这四段时间均为各轮之和，不会用最后
+一轮覆盖前一轮。最终的 `navigation_latency` 汇总事件提供：
+
+- `total_ms`: 输入到首次成功 `Present`；非 presented 结果则到其终态。
+- `target_resolution_ms`、`enqueue_ms`、`queue_wait_ms`: 主线程求目标、入队和等待 worker。
+- `source_inspection_ms`、`decode_ms`、`context_prepare_ms`、`source_revalidation_ms`、
+  `workflow_prepare_ms`: 后台 source 检查、光谱解码、collection context、TOCTOU revalidation
+  和 workflow 准备。
+- `completion_ready_ms`、`ordered_publish_wait_ms`、`completion_service_wait_ms`: worker
+  准备完成后的收尾、等待有序发布，以及完成已发布到主线程真正 drain 的时间。
+- `retarget_gap_ms`: 多段 follow-up 之间的主线程间隔；其余 worker 阶段是所有 attempt 的
+  分段用时之和，不会用最后一跳覆盖前一跳。
+- `activation_ms`、`ui_update_ms`、`ui_to_present_ms`: 主线程激活 snapshot、更新 UI 和提交
+  首个可见代理帧。
+- 汇总事件的 `from_index`、最终 `target_index`、`input_kind`、`attempt_count`、
+  `presentation_viewport_id` 和 `cache_hit`，以及 attempt 事件的 `target_index`、
+  `source_task_id`、`source_kind`、`workflow_reused`：用于关联请求性质。当前尚未实现导航
+  缓存，所以 `cache_hit` 固定为 `false`；后续缓存实现可沿用同一口径做冷/热路径 A/B。
+
+采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
+下一条，等最后一条显示后再 `Stop Recording`。然后运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\analyze-navigation-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl
+```
+
+Portable build 的实际日志通常在 `Data\logs\`，也可以把对应完整路径传给脚本。分析器会
+校验唯一且位于末尾的 recorder summary、`dropped_events == 0`、至少一条导航事件和至少
+一次成功 presented。每条成功记录还必须具有完整 ID、有限非负 duration、连续 attempt、
+单调时间戳和与时间戳一致的阶段用时，否则即使存在 `outcome=presented` 也会 FAIL。
+有效样本按 `input_kind` 分组报告各阶段的 p50/p95/max，键盘输入起点不会和 UI command
+起点混算。percentile、JSONL 读取和 recorder summary 校验与通用 analyzer 共享同一实现，
+其中 `dropped_events` 必须是非负 JSON 整数，布尔值或小数即使可被 PowerShell 转换成 0
+也会 FAIL。p95 使用相同的线性插值。只查看、不让完整性问题返回非零时加 `-ReportOnly`；
+遇到非法或截断 JSONL 时，它会在首个坏记录处停止、报告此前完整样本与解析错误，并以 0
+退出。默认门禁模式仍立即以非零退出，不会把可解析前缀视为完整录制。
+
+这项插桩在热路径创建一个小型 trace 和每段 load attempt、写入原子时间点，并在终态向
+现有异步 profile 队列提交 attempt 与汇总 JSON；不会在输入、worker 或 UI 帧同步写磁盘。
+它仍有非零但预期很小的成本，严格评估时应在相同数据和操作下做 recorder on/off A/B。
+`Present` 完成是对应 Spectrum viewport 的应用提交完成代理，不是屏幕扫描或光子延迟。
 
 如果只想采集、不自动分析：
 

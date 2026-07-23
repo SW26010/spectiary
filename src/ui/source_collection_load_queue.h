@@ -2,6 +2,7 @@
 
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
+#include "profile/navigation_latency_trace.h"
 #include "ui/background_retirement.h"
 #include "ui/sample_workflow_preparation.h"
 
@@ -22,6 +23,7 @@ struct SourceCollectionLoadRequest {
     std::vector<std::filesystem::path> annotation_paths;
     std::optional<SourceCollectionIdentity> reuse_identity;
     std::optional<std::uint64_t> base_live_workflow_revision;
+    NavigationLatencyAttemptHandle navigation_attempt;
 };
 
 struct PreparedSourceCollection {
@@ -38,6 +40,7 @@ struct SourceCollectionLoadCompletion {
     std::size_t spectrum_index = 0;
     std::optional<PreparedSourceCollection> prepared;
     std::string error_message;
+    NavigationLatencyAttemptHandle navigation_attempt;
 };
 
 struct SourceCollectionLoadDependencies {

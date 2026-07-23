@@ -484,6 +484,16 @@ void TestChangedFileRetriesOneStableGeneration()
     const std::filesystem::path path = UniqueTempPath("_retry.csv");
     WriteFixture(path);
     std::atomic_int loader_calls = 0;
+    specforge::NavigationLatencyTrace trace(
+        1,
+        0,
+        1,
+        specforge::NavigationLatencyInputKind::UiNext,
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now());
+    const specforge::NavigationLatencyAttemptHandle navigation_attempt =
+        trace.BeginLoadAttempt(1);
     specforge::SourceCollectionLoadQueue queue(Dependencies(
         [&](const auto& source, std::size_t index, const auto&) {
             if (++loader_calls == 1) {
@@ -492,11 +502,64 @@ void TestChangedFileRetriesOneStableGeneration()
             }
             return MakeSnapshot(source, index);
         }));
-    (void)queue.Enqueue({.path = path});
+    (void)queue.Enqueue({.path = path, .navigation_attempt = navigation_attempt});
     auto completions = WaitForCompletions(queue, 1);
     Require(completions.front().prepared.has_value(), "changed file should settle on a stable retry");
     Require(loader_calls.load() == 2, "changed file should be decoded exactly one additional time");
+    const specforge::NavigationLatencyAttemptReport report = navigation_attempt->Report();
+    Require(
+        report.preparation_rounds.size() == 2,
+        "each TOCTOU preparation retry must retain its own timing round");
+    Require(
+        !report.preparation_rounds[0].revalidation_succeeded &&
+            report.preparation_rounds[1].revalidation_succeeded,
+        "the trace should distinguish the rejected generation from the accepted retry");
     std::filesystem::remove(path);
+}
+
+void TestChangedFolderRetriesOneStableGeneration()
+{
+    const std::filesystem::path folder = UniqueTempPath("_retry_folder");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample.csv");
+    std::atomic_int loader_calls = 0;
+    specforge::NavigationLatencyTrace trace(
+        1,
+        0,
+        1,
+        specforge::NavigationLatencyInputKind::UiNext,
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now(),
+        specforge::NavigationLatencyTrace::Now());
+    const specforge::NavigationLatencyAttemptHandle navigation_attempt =
+        trace.BeginLoadAttempt(1);
+    specforge::SourceCollectionLoadDependencies dependencies = Dependencies(
+        [](const auto&, std::size_t, const auto&) -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error("folder task must not use the file loader");
+        });
+    dependencies.folder_snapshot_loader =
+        [&](const auto& path, std::size_t index, const auto& listing, const auto&) {
+            if (++loader_calls == 1) {
+                WriteFixture(path / "added.csv");
+            }
+            return MakeSnapshot(path, index, listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
+    (void)queue.Enqueue({.path = folder, .navigation_attempt = navigation_attempt});
+    auto completions = WaitForCompletions(queue, 1);
+    Require(completions.front().prepared.has_value(), "changed folder should settle on a stable retry");
+    Require(loader_calls.load() == 2, "changed folder should be decoded exactly one additional time");
+    const specforge::NavigationLatencyAttemptReport report = navigation_attempt->Report();
+    Require(
+        report.preparation_rounds.size() == 2,
+        "each folder TOCTOU retry must retain its own timing round");
+    Require(
+        report.preparation_rounds[0].source_is_folder &&
+            report.preparation_rounds[1].source_is_folder &&
+            !report.preparation_rounds[0].revalidation_succeeded &&
+            report.preparation_rounds[1].revalidation_succeeded,
+        "the folder trace should distinguish the rejected generation from the accepted retry");
+    std::filesystem::remove_all(folder);
 }
 
 void TestCancelSuppressesCompletion()
@@ -668,6 +731,7 @@ int main()
     TestBufferedBatchCompletionCanBeCanceled();
     TestFolderUsesOnePreparedListing();
     TestChangedFileRetriesOneStableGeneration();
+    TestChangedFolderRetriesOneStableGeneration();
     TestCancelSuppressesCompletion();
     TestCancelStopsOnlyItsSourceThread();
     TestFailureIsReported();

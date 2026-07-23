@@ -775,6 +775,17 @@ SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
     return snapshot;
 }
 
+std::optional<std::size_t> SourceCollectionSession::EffectiveSampleNavigationIndex() const
+{
+    if (!workflow_) {
+        return std::nullopt;
+    }
+    if (const std::optional<std::size_t> pending = workflow_->pending_sample_index()) {
+        return pending;
+    }
+    return workflow_->current_index();
+}
+
 SpectrumSnapshotHandle SourceCollectionSession::CurrentSourceSnapshot() const
 {
     return roster_->snapshot();

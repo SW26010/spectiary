@@ -33,6 +33,7 @@ struct Win32MessageRenderObserver::Impl {
 
     HHOOK hook = nullptr;
     InvalidateCallback callback = nullptr;
+    MessageCallback message_callback = nullptr;
     void* context = nullptr;
     std::optional<std::uint32_t> permission_only_message;
 };
@@ -52,13 +53,15 @@ Win32MessageRenderObserver::~Win32MessageRenderObserver()
 bool Win32MessageRenderObserver::Start(
     InvalidateCallback callback,
     void* context,
-    std::optional<std::uint32_t> permission_only_message) noexcept
+    std::optional<std::uint32_t> permission_only_message,
+    MessageCallback message_callback) noexcept
 {
     if (callback == nullptr || impl_->hook != nullptr || Impl::active != nullptr) {
         return false;
     }
 
     impl_->callback = callback;
+    impl_->message_callback = message_callback;
     impl_->context = context;
     impl_->permission_only_message = permission_only_message;
     Impl::active = impl_.get();
@@ -73,6 +76,7 @@ bool Win32MessageRenderObserver::Start(
 
     Impl::active = nullptr;
     impl_->callback = nullptr;
+    impl_->message_callback = nullptr;
     impl_->context = nullptr;
     impl_->permission_only_message.reset();
     return false;
@@ -80,8 +84,17 @@ bool Win32MessageRenderObserver::Start(
 
 void Win32MessageRenderObserver::ObserveQueuedMessage(std::uint32_t message) noexcept
 {
+    ObserveQueuedMessage(Win32ObservedMessage{.message = message});
+}
+
+void Win32MessageRenderObserver::ObserveQueuedMessage(
+    const Win32ObservedMessage& message) noexcept
+{
+    if (impl_->message_callback != nullptr) {
+        impl_->message_callback(impl_->context, message);
+    }
     if (impl_->callback != nullptr &&
-        Win32MessageCanInvalidateRender(message, impl_->permission_only_message)) {
+        Win32MessageCanInvalidateRender(message.message, impl_->permission_only_message)) {
         impl_->callback(impl_->context);
     }
 }
@@ -95,6 +108,7 @@ void Win32MessageRenderObserver::Stop() noexcept
         Impl::active = nullptr;
     }
     impl_->callback = nullptr;
+    impl_->message_callback = nullptr;
     impl_->context = nullptr;
     impl_->permission_only_message.reset();
 }

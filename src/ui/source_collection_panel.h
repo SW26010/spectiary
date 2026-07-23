@@ -13,6 +13,9 @@ namespace specforge {
 
 using SourceCollectionPathPicker = std::function<std::optional<std::filesystem::path>()>;
 using SourceCollectionPathOpener = std::function<void(const std::filesystem::path&)>;
+using SourceCollectionStepSubmitter = std::function<SourceCollectionSessionResult(
+    SourceCollectionSessionIntent,
+    SampleNavigationRequestKind)>;
 
 class SourceCollectionPanelUi {
 public:
@@ -35,6 +38,7 @@ public:
     [[nodiscard]] SourceCollectionSessionAction RenderNavigation(
         const SourceCollectionSessionView& session_view,
         const SourceCollectionSessionIntentSubmitter& submit,
+        const SourceCollectionStepSubmitter& submit_step,
         const SourceCollectionSessionViewReader& read_view,
         bool* open,
         SampleWorkflowShortcut& shortcut);

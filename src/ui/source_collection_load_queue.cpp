@@ -284,10 +284,14 @@ private:
         std::shared_ptr<BatchCompletionSlot> ordered_completion = nullptr)
     {
         const std::uint64_t id = next_task_id_++;
+        if (request.navigation_attempt) {
+            request.navigation_attempt->MarkSourceTaskId(id);
+        }
         auto canceled = std::make_shared<std::atomic_bool>(false);
         auto finished = std::make_shared<std::atomic_bool>(false);
         const std::filesystem::path failure_path = request.path;
         const std::size_t failure_spectrum_index = request.spectrum_index;
+        NavigationLatencyAttemptHandle failure_navigation_attempt = request.navigation_attempt;
         std::shared_ptr<BatchState> failure_batch = batch;
         std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
         Task task{
@@ -305,13 +309,16 @@ private:
             workers_.emplace_back(std::move(finished), this, std::move(task));
         } catch (const std::system_error& error) {
             --active_task_count_;
-            SourceCollectionLoadCompletion completion{
-                id,
-                failure_path,
-                failure_spectrum_index,
-                std::nullopt,
-                std::string("Could not start the source loading thread: ") + error.what(),
-            };
+            SourceCollectionLoadCompletion completion;
+            completion.task_id = id;
+            completion.path = failure_path;
+            completion.spectrum_index = failure_spectrum_index;
+            completion.error_message =
+                std::string("Could not start the source loading thread: ") + error.what();
+            completion.navigation_attempt = std::move(failure_navigation_attempt);
+            if (completion.navigation_attempt) {
+                completion.navigation_attempt->MarkCompletionReady();
+            }
             if (failure_batch) {
                 FinishBatchTask(
                     *failure_batch,
@@ -444,6 +451,9 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         if (CanReusePreparedWorkflow(context.identity, task.request.reuse_identity)) {
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkWorkflowReused(true);
+            }
             SourceCollectionIdentity identity = context.identity;
             return PreparedSourceCollection{
                 task.id,
@@ -452,6 +462,9 @@ private:
                 std::move(snapshot),
                 PreparedSourceCollectionReuse{std::move(identity)},
             };
+        }
+        if (task.request.navigation_attempt) {
+            task.request.navigation_attempt->MarkWorkflowReused(false);
         }
         PreparedSampleWorkflowState workflow =
             PrepareWorkflow(task, *snapshot, context, checkpoint);
@@ -481,6 +494,9 @@ private:
                     checkpoint);
             const SourceCollectionFolderListing listing =
                 ScanSourceCollectionFolder(task.request.path, {}, checkpoint);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSnapshotLoadStarted(true);
+            }
             SpectrumSnapshotHandle snapshot = dependencies_.folder_snapshot_loader(
                 task.request.path,
                 task.request.spectrum_index,
@@ -495,11 +511,17 @@ private:
                 });
             checkpoint();
             ValidateDecodedSnapshot(snapshot);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSnapshotLoadFinished();
+            }
             SourceCollectionContext context = BuildFolderSourceCollectionContextCancelable(
                 *snapshot,
                 listing,
                 checkpoint);
             FinalizeContext(task, context, checkpoint);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkContextPrepared();
+            }
             const SourceCollectionFolderListing verified_listing =
                 ScanSourceCollectionFolder(task.request.path, {}, checkpoint);
             const SourceCollectionSingleFileState verified_state =
@@ -507,8 +529,14 @@ private:
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
-            if (SourceCollectionFolderListingsMatch(listing, verified_listing, checkpoint) &&
-                SourceCollectionSingleFileStatesMatch(initial_state, verified_state)) {
+            const bool revalidation_succeeded =
+                SourceCollectionFolderListingsMatch(listing, verified_listing, checkpoint) &&
+                SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSourceRevalidated(
+                    revalidation_succeeded);
+            }
+            if (revalidation_succeeded) {
                 return BuildPrepared(task, std::move(snapshot), std::move(context), checkpoint);
             }
         }
@@ -528,6 +556,9 @@ private:
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSnapshotLoadStarted(false);
+            }
             SpectrumSnapshotHandle snapshot = dependencies_.snapshot_loader(
                 task.request.path,
                 task.request.spectrum_index,
@@ -541,17 +572,29 @@ private:
                 });
             checkpoint();
             ValidateDecodedSnapshot(snapshot);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSnapshotLoadFinished();
+            }
             SourceCollectionContext context = LoadSourceCollectionContextCancelable(
                 *snapshot,
                 initial_state,
                 checkpoint);
             FinalizeContext(task, context, checkpoint);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkContextPrepared();
+            }
             const SourceCollectionSingleFileState verified_state =
                 CaptureSourceCollectionSingleFileState(
                     task.request.path,
                     task.request.annotation_paths,
                     checkpoint);
-            if (SourceCollectionSingleFileStatesMatch(initial_state, verified_state)) {
+            const bool revalidation_succeeded =
+                SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkSourceRevalidated(
+                    revalidation_succeeded);
+            }
+            if (revalidation_succeeded) {
                 return BuildPrepared(task, std::move(snapshot), std::move(context), checkpoint);
             }
         }
@@ -580,6 +623,9 @@ private:
             slot.canceled && slot.canceled->load(std::memory_order_relaxed);
         if (slot.completion) {
             if (!canceled) {
+                if (slot.completion->navigation_attempt) {
+                    slot.completion->navigation_attempt->MarkCompletionPublished();
+                }
                 completed_.push_back(std::move(*slot.completion));
             } else if (slot.completion->prepared) {
                 retired_prepared_.push_back(std::move(*slot.completion->prepared));
@@ -718,6 +764,9 @@ private:
 
     void RunTask(const Task& task, std::stop_token stop_token)
     {
+        if (task.request.navigation_attempt) {
+            task.request.navigation_attempt->MarkWorkerStarted();
+        }
         if (task.canceled->load(std::memory_order_relaxed)) {
             FinishCanceledTask(task);
             return;
@@ -727,8 +776,12 @@ private:
         completion.task_id = task.id;
         completion.path = task.request.path;
         completion.spectrum_index = task.request.spectrum_index;
+        completion.navigation_attempt = task.request.navigation_attempt;
         try {
             completion.prepared = Prepare(task, stop_token);
+            if (task.request.navigation_attempt) {
+                task.request.navigation_attempt->MarkWorkerPrepared();
+            }
         } catch (const SourceLoadCanceled&) {
             FinishCanceledTask(task);
             return;
@@ -736,6 +789,9 @@ private:
             completion.error_message = error.what();
         } catch (...) {
             completion.error_message = "Unknown source loading failure.";
+        }
+        if (task.request.navigation_attempt) {
+            task.request.navigation_attempt->MarkCompletionReady();
         }
         FinishTask(task, std::move(completion));
     }

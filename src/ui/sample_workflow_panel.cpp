@@ -683,6 +683,7 @@ void SampleWorkflowPanelUi::ResetLabelShortcutCapture()
 SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionSessionIntentSubmitter& submit_auto_advance,
     const SourceCollectionSessionViewReader& read_view,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
@@ -1496,13 +1497,17 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
     if (label_code_to_assign) {
         MergeSourceCollectionSessionAction(
             action,
-            submit(ChangeActiveSampleWorkflow(
-                       ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(*label_code_to_assign)))
+            submit_auto_advance(
+                ChangeActiveSampleWorkflow(
+                    ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(
+                        *label_code_to_assign)))
                 .action);
     } else if (clear_label_requested) {
         MergeSourceCollectionSessionAction(
             action,
-            submit(ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()))
+            submit_auto_advance(
+                ChangeActiveSampleWorkflow(
+                    ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()))
                 .action);
     }
 

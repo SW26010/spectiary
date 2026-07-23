@@ -215,11 +215,15 @@ void TestFileLimitStopsRecording()
     limits.max_file_bytes = 1;
     specforge::ProfileSink sink(temporary.path() / "size-limited.jsonl", limits);
 
+    bool boundary_event_retained = false;
     for (int attempt = 0; attempt < 100 && sink.is_open(); ++attempt) {
-        sink.WriteEvent("larger_than_session_budget");
+        boundary_event_retained = sink.WriteEvent("larger_than_session_budget");
         std::this_thread::yield();
     }
     Require(!sink.is_open(), "the session byte budget should stop further recording");
+    Require(
+        boundary_event_retained,
+        "the event that crosses the file limit should remain in the bounded final-frame tail");
     Require(
         sink.stop_reason() == specforge::ProfileSink::StopReason::FileSizeLimit,
         "the recorder should expose that its file limit was reached");
@@ -284,7 +288,51 @@ void TestBackgroundStopCanBeFinalizedWithoutBlockingTheRequest()
         "a background stop should still finish with a recorder summary");
 }
 
-void TestIdleDurationStopNotifiesStateChange()
+void TestFrameFinalizationKeepsSameFrameTailBeforeSummary()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path path = temporary.path() / "same-frame-tail.jsonl";
+    specforge::ProfileSink sink(path, GenerousLimits());
+    Require(sink.WriteEvent("before_stop"), "the recording should accept its initial event");
+
+    sink.BeginFrame();
+    sink.RequestStopAfterFrame();
+    Require(!sink.is_open(), "a frame-finalized stop should close the ordinary recording session");
+    Require(sink.is_stopping(), "the frame tail should remain observable as stopping");
+    Require(
+        sink.is_frame_finalization_pending(),
+        "the recorder should expose its same-frame finalization window");
+    Require(
+        sink.is_frame_recording_active(),
+        "one atomic admission snapshot should retain the final frame");
+    const specforge::ProfileSink::StateSnapshot finalizing = sink.state_snapshot();
+    Require(
+        !finalizing.open && finalizing.stopping &&
+            finalizing.frame_finalization_pending && finalizing.frame_recording_active,
+        "the finalizing state snapshot must come from one coherent atomic value");
+    Require(
+        sink.WriteEvent("same_frame_present"),
+        "the final Present evidence should remain writable until the frame is sealed");
+    sink.CompleteFrameFinalization();
+    Require(
+        !sink.is_frame_recording_active(),
+        "sealing the frame should atomically close final-frame admission");
+
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while (!sink.TryFinalizeStop() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    Require(!sink.is_stopping(), "the sealed frame tail should drain asynchronously");
+    const std::string text = ReadTextFile(path);
+    const std::size_t tail = text.find("\"event\":\"same_frame_present\"");
+    const std::size_t summary = text.find("\"event\":\"profile_recorder_summary\"");
+    Require(tail != std::string::npos, "the same-frame Present evidence should be retained");
+    Require(
+        summary != std::string::npos && tail < summary,
+        "the recorder summary must follow the complete final frame tail");
+}
+
+void TestInFlightDurationStopNotifiesStateChange()
 {
     TemporaryDirectory temporary;
     specforge::ProfileSink::Limits limits = GenerousLimits();
@@ -295,15 +343,58 @@ void TestIdleDurationStopNotifiesStateChange()
     Require(
         sink.Start(temporary.path() / "duration-callback.jsonl", limits),
         "the duration callback recording should start");
+    sink.BeginFrame();
 
-    const auto deadline = std::chrono::steady_clock::now() + 1s;
-    while (notifications.load(std::memory_order_relaxed) < 2 && std::chrono::steady_clock::now() < deadline) {
+    const auto transition_deadline = std::chrono::steady_clock::now() + 1s;
+    while (notifications.load(std::memory_order_relaxed) < 1 &&
+           std::chrono::steady_clock::now() < transition_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    const specforge::ProfileSink::StateSnapshot automatic_limit = sink.state_snapshot();
+    Require(
+        notifications.load(std::memory_order_relaxed) >= 1 &&
+            !automatic_limit.open && automatic_limit.stopping &&
+            automatic_limit.frame_finalization_pending &&
+            automatic_limit.frame_recording_active,
+        "an idle automatic stop should notify the frame-finalization transition");
+    Require(
+        sink.WriteEvent("duration_limit_final_frame"),
+        "an automatic duration stop should retain the next frame's final evidence");
+    sink.CompleteFrameFinalization();
+    const auto completion_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!sink.TryFinalizeStop() && std::chrono::steady_clock::now() < completion_deadline) {
         std::this_thread::sleep_for(1ms);
     }
     Require(
         notifications.load(std::memory_order_relaxed) >= 2,
-        "an idle automatic stop should notify both the stop transition and completed drain");
-    sink.Stop();
+        "the sealed automatic stop should also notify its completed drain");
+    Require(
+        ReadTextFile(sink.path()).find("duration_limit_final_frame") != std::string::npos,
+        "the automatic-stop final frame should be written before the summary");
+}
+
+void TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path path = temporary.path() / "idle-duration-seals.jsonl";
+    specforge::ProfileSink::Limits limits = GenerousLimits();
+    limits.max_duration = 20ms;
+    specforge::ProfileSink sink(path, limits);
+
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while (!sink.TryFinalizeStop() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    Require(
+        !sink.is_stopping(),
+        "an automatic duration limit with no render frame in progress must seal and drain itself");
+    Require(
+        sink.stop_reason() == specforge::ProfileSink::StopReason::DurationLimit,
+        "the self-sealed idle recording should retain the duration-limit reason");
+    Require(
+        ReadTextFile(path).find("profile_recorder_summary") != std::string::npos,
+        "an idle/minimized duration stop must write its recorder summary without a future RenderFrame");
 }
 
 void TestRequestStopDoesNotWaitForSlowFinalFlush()
@@ -387,7 +478,9 @@ int main()
         TestDurationLimitStopsAnIdleRecording();
         TestStoppedSinkCanStartASecondSession();
         TestBackgroundStopCanBeFinalizedWithoutBlockingTheRequest();
-        TestIdleDurationStopNotifiesStateChange();
+        TestFrameFinalizationKeepsSameFrameTailBeforeSummary();
+        TestInFlightDurationStopNotifiesStateChange();
+        TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame();
         TestRequestStopDoesNotWaitForSlowFinalFlush();
         TestWriteFailureStatusIsNeverReportedAsSaved();
         return 0;

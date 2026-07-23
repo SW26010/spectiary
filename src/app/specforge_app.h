@@ -55,6 +55,9 @@ private:
     void RenderFrame();
     void UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active);
     static void InvalidateRenderFromWin32Message(void* context) noexcept;
+    static void ObserveWin32Message(
+        void* context,
+        const Win32ObservedMessage& message) noexcept;
     void RequestMessageRender() noexcept;
     void ApplyPendingResize();
     void ApplyUiScale(float dpi_scale);

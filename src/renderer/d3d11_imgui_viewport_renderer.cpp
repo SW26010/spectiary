@@ -43,6 +43,7 @@ bool D3D11ImGuiViewportRenderer::Initialize(
     device_context_ = device_context;
     last_error_ = {};
     presentation_updates_.clear();
+    present_completions_.clear();
     active_instance_ = this;
 
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
@@ -64,6 +65,7 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     factory_.Reset();
     last_error_ = {};
     presentation_updates_.clear();
+    present_completions_.clear();
     compositor_clock_paced_ = false;
 }
 
@@ -78,6 +80,14 @@ D3D11ImGuiViewportRenderer::TakePresentationUpdates() noexcept
     return std::exchange(
         presentation_updates_,
         std::vector<D3D11ViewportPresentationUpdate>{});
+}
+
+std::vector<D3D11ViewportPresentCompletion>
+D3D11ImGuiViewportRenderer::TakePresentCompletions() noexcept
+{
+    return std::exchange(
+        present_completions_,
+        std::vector<D3D11ViewportPresentCompletion>{});
 }
 
 void D3D11ImGuiViewportRenderer::RefreshPresentationTargets()
@@ -222,6 +232,10 @@ void D3D11ImGuiViewportRenderer::SwapViewportBuffers(ImGuiViewport* viewport, vo
     data->frame_acquired = false;
     const HRESULT result = data->presentation.Present(
         instance->compositor_clock_paced_);
+    const auto completed_at = std::chrono::steady_clock::now();
+    if (result == S_OK) {
+        instance->present_completions_.push_back({viewport->ID, completed_at});
+    }
     instance->RecordFailure(result, data->presentation.last_error_operation());
     instance->CollectPresentationUpdate(*viewport, data->presentation);
 }

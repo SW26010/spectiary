@@ -816,7 +816,7 @@ bool IsPlotPanDragActive(
     return left_button_down && (was_active || (plot_hovered && left_button_dragging));
 }
 
-void RenderSpectrumPlot(
+bool RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
     const SpectrumPlotProfileContext& profile,
@@ -831,7 +831,7 @@ void RenderSpectrumPlot(
             touchpad_gestures->ClearTarget();
         }
         ImGui::TextDisabled("No plottable spectrum.");
-        return;
+        return false;
     }
 
     const std::uintptr_t native_window = CurrentNativeWindow();
@@ -901,6 +901,7 @@ void RenderSpectrumPlot(
         plot_flags |= ImPlotFlags_NoInputs;
     }
 
+    bool plot_submitted = false;
     if (ImPlot::BeginPlot("Spectrum##main_spectrum", plot_size, plot_flags)) {
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
@@ -933,6 +934,7 @@ void RenderSpectrumPlot(
                     y_values->data(),
                     static_cast<int>(x_values->size()),
                     raw_spec);
+                plot_submitted = true;
             }
 
             const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
@@ -952,6 +954,7 @@ void RenderSpectrumPlot(
                     smoothed_values->data(),
                     static_cast<int>(x_values->size()),
                     smoothed_spec);
+                plot_submitted = true;
             }
         } else {
             if (state.show_points) {
@@ -964,6 +967,7 @@ void RenderSpectrumPlot(
                 y_values->data(),
                 static_cast<int>(x_values->size()),
                 base_spec);
+            plot_submitted = true;
         }
 
         const bool hovered = ImPlot::IsPlotHovered();
@@ -1083,6 +1087,7 @@ void RenderSpectrumPlot(
             touchpad_gestures->ClearTarget();
         }
     }
+    return plot_submitted;
 }
 
 }  // namespace specforge

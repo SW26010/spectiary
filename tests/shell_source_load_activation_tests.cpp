@@ -47,6 +47,17 @@ struct ShellUiTestAccess {
         return shell.SubmitSessionCommand(std::move(intent));
     }
 
+    static SourceCollectionSessionResult SubmitNavigation(
+        ShellUi& shell,
+        SourceCollectionSessionIntent intent,
+        NavigationLatencyInputKind kind,
+        std::optional<NavigationLatencyTimePoint> input_at = std::nullopt)
+    {
+        return shell.SubmitSessionCommand(
+            std::move(intent),
+            ShellUi::NavigationTraceOrigin{kind, input_at});
+    }
+
     static void QueueFollowUp(
         ShellUi& shell,
         const SourceCollectionSessionResult& result,
@@ -80,6 +91,67 @@ struct ShellUiTestAccess {
     static std::string_view LoadError(const ShellUi& shell)
     {
         return shell.source_load_error_;
+    }
+
+    static void EnableNavigationTracing(ShellUi& shell, std::uint64_t frame_index)
+    {
+        shell.navigation_tracing_enabled_ = true;
+        shell.current_frame_index_ = frame_index;
+    }
+
+    static std::vector<NavigationLatencyReport> CompleteFramePresentation(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        unsigned int viewport_id = 7)
+    {
+        SubmitSpectrumDraw(shell, frame_index, shell.session_.CurrentSampleSnapshot());
+        const NavigationLatencyPresentation presentation{
+            viewport_id,
+            NavigationLatencyTrace::Now()};
+        return shell.CompleteFramePresentations(frame_index, std::span(&presentation, 1));
+    }
+
+    static void SubmitSpectrumDraw(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        SpectrumSnapshotHandle snapshot,
+        unsigned int viewport_id = 7)
+    {
+        shell.RecordSpectrumDrawSubmission(
+            frame_index,
+            viewport_id,
+            std::move(snapshot));
+    }
+
+    static std::vector<NavigationLatencyReport> CompleteFramePresentationWithoutSpectrumDraw(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        unsigned int viewport_id = 7)
+    {
+        const NavigationLatencyPresentation presentation{
+            viewport_id,
+            NavigationLatencyTrace::Now()};
+        return shell.CompleteFramePresentations(frame_index, std::span(&presentation, 1));
+    }
+
+    static std::size_t NavigationTraceCount(const ShellUi& shell)
+    {
+        return shell.navigation_traces_.size();
+    }
+
+    static void RecordNavigationKeyInput(
+        ShellUi& shell,
+        NavigationLatencyInputKind kind,
+        NavigationLatencyTimePoint at)
+    {
+        shell.RecordNavigationKeyInput(kind, at);
+    }
+
+    static std::optional<NavigationLatencyTimePoint> TakeNavigationKeyInput(
+        ShellUi& shell,
+        NavigationLatencyInputKind kind)
+    {
+        return shell.TakeNavigationKeyInput(kind);
     }
 
     static bool CompletionStartsActivation(Purpose purpose, bool loaded)
@@ -375,19 +447,23 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
         specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t presentation_frame = 77;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
 
-    const specforge::SourceCollectionSessionResult first = Access::Submit(
+    const specforge::SourceCollectionSessionResult first = Access::SubmitNavigation(
         *shell,
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+                specforge::SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
     const bool first_queued = first.follow_up_spectrum_index == 1;
     const bool row_one_started = row_one_entered.wait_for(2s) == std::future_status::ready;
-    const specforge::SourceCollectionSessionResult second = Access::Submit(
+    const specforge::SourceCollectionSessionResult second = Access::SubmitNavigation(
         *shell,
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
             specforge::SampleNavigationIntent::Move(
-                specforge::SampleNavigationRequest::Next())));
+                specforge::SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
     const bool second_queued = second.follow_up_spectrum_index == 2;
     const bool row_two_started = row_two_entered.wait_for(2s) == std::future_status::ready;
     release_decoders_promise.set_value();
@@ -406,6 +482,47 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         std::this_thread::sleep_for(2ms);
     }
     const bool no_load_error = Access::LoadError(*shell).empty();
+    std::vector<specforge::NavigationLatencyReport> navigation_reports =
+        Access::CompleteFramePresentation(*shell, presentation_frame, 99);
+    const bool detached_mismatch_retained_presented_trace =
+        Access::NavigationTraceCount(*shell) == 1;
+    std::vector<specforge::NavigationLatencyReport> presented_reports =
+        Access::CompleteFramePresentation(*shell, presentation_frame, 7);
+    navigation_reports.insert(
+        navigation_reports.end(),
+        presented_reports.begin(),
+        presented_reports.end());
+    const auto presented_report = std::find_if(
+        navigation_reports.begin(),
+        navigation_reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        });
+    const auto superseded_report = std::find_if(
+        navigation_reports.begin(),
+        navigation_reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        });
+    const bool terminal_outcomes_present =
+        presented_report != navigation_reports.end() &&
+        superseded_report != navigation_reports.end();
+    const bool trace_indices_correlated = terminal_outcomes_present &&
+        presented_report->from_index == 1 && presented_report->target_index == 2;
+    const bool trace_viewport_correlated = terminal_outcomes_present &&
+        presented_report->presentation_viewport_id == 7;
+    const bool trace_attempt_correlated = terminal_outcomes_present &&
+        presented_report->attempts.size() == 1 &&
+        presented_report->attempts[0].source_task_id != 0 &&
+        presented_report->attempts[0].worker_started_ns > 0 &&
+        presented_report->attempts[0].snapshot_load_finished_ns >=
+            presented_report->attempts[0].snapshot_load_started_ns &&
+        presented_report->attempts[0].completion_drained_ns >=
+            presented_report->attempts[0].completion_published_ns;
+    const bool trace_activation_correlated = trace_attempt_correlated &&
+        presented_report->snapshot_activated_ns >=
+            presented_report->attempts[0].completion_drained_ns &&
+        presented_report->first_present_ns >= presented_report->snapshot_activated_ns;
     shell.reset();
     std::filesystem::remove(path);
 
@@ -415,6 +532,379 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         latest_committed,
         "the production drain should admit and atomically publish only the latest row 2 completion");
     Require(no_load_error, "canceling the obsolete row 1 completion must not publish a load error");
+    Require(
+        detached_mismatch_retained_presented_trace,
+        "a Present from a viewport that does not host Spectrum must not complete the trace");
+    Require(terminal_outcomes_present, "rapid navigation should report presented and superseded traces");
+    Require(trace_indices_correlated, "rapid navigation should retain logical from/target indices");
+    Require(trace_viewport_correlated, "the presented trace should name the Spectrum viewport");
+    Require(trace_attempt_correlated, "the presented trace should retain its complete worker attempt");
+    Require(trace_activation_correlated, "activation and Present timestamps should follow worker drain");
+}
+
+void TestGenericRowLocationDoesNotStartPreviousNextTrace()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_locate_row_trace.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "row-location trace fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    Access::EnableNavigationTracing(*shell, 90);
+
+    const specforge::SourceCollectionSessionResult result = Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            specforge::SampleNavigationIntent::Move(
+                specforge::SampleNavigationRequest::LocateRow(2))));
+    const std::size_t trace_count = Access::NavigationTraceCount(*shell);
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(result.follow_up_spectrum_index == 2, "row location should still queue its real source load");
+    Require(trace_count == 0, "LocateRow must not be classified as previous/next navigation latency");
+}
+
+void TestAcceptedNavigationUsesLatestMatchingRawKeyInput()
+{
+    using Access = specforge::ShellUiTestAccess;
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        specforge::SourceCollectionSession([](const auto&, std::size_t) {
+            return specforge::SpectrumSnapshotHandle{};
+        }),
+        specforge::SourceCollectionLoadQueue());
+    const auto stale = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(10));
+    const auto accepted = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(20));
+    Access::RecordNavigationKeyInput(
+        *shell,
+        specforge::NavigationLatencyInputKind::KeyboardNext,
+        stale);
+    Access::RecordNavigationKeyInput(
+        *shell,
+        specforge::NavigationLatencyInputKind::KeyboardNext,
+        accepted);
+
+    const std::optional<specforge::NavigationLatencyTimePoint> correlated =
+        Access::TakeNavigationKeyInput(
+            *shell,
+            specforge::NavigationLatencyInputKind::KeyboardNext);
+    Require(correlated == accepted, "an accepted shortcut must correlate with the latest raw key edge");
+}
+
+void TestWorkflowAutoAdvanceStartsExplicitTrace()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_auto_advance_trace.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "auto-advance trace fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    Access::EnableNavigationTracing(*shell, 91);
+
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask()));
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(
+                specforge::SampleLabelDefinition{7, "accepted", 'a'})));
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
+
+    const specforge::SourceCollectionSessionResult result = Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)),
+        specforge::NavigationLatencyInputKind::AutoAdvance);
+    const std::size_t trace_count = Access::NavigationTraceCount(*shell);
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(result.follow_up_spectrum_index == 1, "label assignment should request auto-advance");
+    Require(trace_count == 1, "workflow auto-advance must start an explicit navigation trace");
+}
+
+void TestNewActivationSupersedesAnUnpresentedOlderTrace()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_activation_present_owner.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "activation ownership fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t presentation_frame = 101;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
+
+    const auto submit_next = [&shell]() {
+        return Access::SubmitNavigation(
+            *shell,
+            specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::Move(
+                    specforge::SampleNavigationRequest::Next())),
+            specforge::NavigationLatencyInputKind::UiNext);
+    };
+    const auto drain_to_index = [&shell](std::size_t target_index) {
+        const auto deadline = std::chrono::steady_clock::now() + 2s;
+        while (std::chrono::steady_clock::now() < deadline) {
+            Access::Drain(*shell);
+            const specforge::SpectrumSnapshotHandle snapshot =
+                Access::Session(*shell).CurrentSampleSnapshot();
+            if (snapshot && snapshot->collection.current_index == target_index &&
+                Access::PendingLoadCount(*shell) == 0) {
+                return true;
+            }
+            std::this_thread::sleep_for(2ms);
+        }
+        return false;
+    };
+
+    const bool first_requested = submit_next().follow_up_spectrum_index == 1;
+    const bool first_activated = drain_to_index(1);
+    const bool first_still_waiting_for_present = Access::NavigationTraceCount(*shell) == 1;
+    const bool second_requested = submit_next().follow_up_spectrum_index == 2;
+    const bool second_activated = drain_to_index(2);
+    const std::vector<specforge::NavigationLatencyReport> reports =
+        Access::CompleteFramePresentation(*shell, presentation_frame, 7);
+    const std::size_t presented_count = static_cast<std::size_t>(std::count_if(
+        reports.begin(),
+        reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        }));
+    const std::size_t superseded_count = static_cast<std::size_t>(std::count_if(
+        reports.begin(),
+        reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        }));
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(first_requested && first_activated, "the first navigation should activate row 1");
+    Require(first_still_waiting_for_present, "the first trace should wait after an unsuccessful Present");
+    Require(second_requested && second_activated, "the second navigation should activate row 2");
+    Require(
+        presented_count == 1 && superseded_count == 1,
+        "row 2 Present must present only row 2 and supersede the unpresented row 1 trace");
+}
+
+void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path_a = UniqueTempPath("_present_target_a.csv");
+    const std::filesystem::path path_b = UniqueTempPath("_present_target_b.csv");
+    {
+        std::ofstream stream_a(path_a, std::ios::binary | std::ios::trunc);
+        std::ofstream stream_b(path_b, std::ios::binary | std::ios::trunc);
+        Require(stream_a.good() && stream_b.good(), "source-switch fixtures should be created");
+        stream_a << "fixture-a";
+        stream_b << "fixture-b";
+    }
+
+    specforge::SourceCollectionSession session = MakePreparedDeferredSession(path_a);
+    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(path_b, 0);
+    specforge::SourceCollectionContext context_b;
+    context_b.identity = {"present-target-b", "b", "b-source", "b-context", 3};
+    context_b.manifest.sample_names = {"one", "two", "three"};
+    specforge::PreparedSampleWorkflowState workflow_b =
+        specforge::PrepareSampleWorkflowState(*snapshot_b, context_b, 0, {{}, {}});
+    Require(
+        session.OpenPreparedSource(
+                   path_b,
+                   0,
+                   snapshot_b,
+                   std::move(context_b),
+                   std::move(workflow_b))
+            .loaded,
+        "source B should be cached before the navigation fixture starts");
+    (void)session.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
+        specforge::SourceCollectionIntent::SwitchActive(0)));
+    Require(
+        session.CurrentSampleSnapshot() &&
+            session.CurrentSampleSnapshot()->source.path == path_a,
+        "source A should be active before navigation");
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        std::move(session),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t presentation_frame = 202;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
+
+    const specforge::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            specforge::SampleNavigationIntent::Move(
+                specforge::SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
+    const auto activation_deadline = std::chrono::steady_clock::now() + 2s;
+    bool target_activated = false;
+    while (std::chrono::steady_clock::now() < activation_deadline) {
+        Access::Drain(*shell);
+        const specforge::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+        target_activated = snapshot && snapshot->source.path == path_a &&
+            snapshot->collection.current_index == 1 && Access::PendingLoadCount(*shell) == 0;
+        if (target_activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    const specforge::SourceCollectionSessionResult switched = Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::EditSourceCollection(
+            specforge::SourceCollectionIntent::SwitchActive(1)));
+    const specforge::SpectrumSnapshotHandle active_snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+    Access::SubmitSpectrumDraw(*shell, presentation_frame, active_snapshot, 7);
+    const std::vector<specforge::NavigationLatencyReport> reports =
+        Access::CompleteFramePresentationWithoutSpectrumDraw(*shell, presentation_frame, 7);
+    const std::size_t presented_count = static_cast<std::size_t>(std::count_if(
+        reports.begin(),
+        reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Presented;
+        }));
+    const std::size_t superseded_count = static_cast<std::size_t>(std::count_if(
+        reports.begin(),
+        reports.end(),
+        [](const specforge::NavigationLatencyReport& report) {
+            return report.outcome == specforge::NavigationLatencyOutcome::Superseded;
+        }));
+    shell.reset();
+    std::filesystem::remove(path_a);
+    std::filesystem::remove(path_b);
+
+    Require(navigation.follow_up_spectrum_index == 1 && target_activated, "source A row 1 should activate");
+    Require(
+        switched.action.snapshot_changed && active_snapshot == snapshot_b,
+        "the cached source B snapshot should synchronously take over in the same frame");
+    Require(
+        presented_count == 0 && superseded_count == 1,
+        "a Present that draws source B must supersede, not present, source A's navigation trace");
+}
+
+void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path = UniqueTempPath("_hidden_spectrum.csv");
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "hidden Spectrum fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
+        return MakeSnapshot(source, index);
+    };
+    dependencies.workflow_cache_loader = [](const auto&, const std::function<void()>& checkpoint) {
+        checkpoint();
+        return specforge::SampleWorkflowPreparationCacheBundle{};
+    };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakePreparedDeferredSession(path),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    constexpr std::uint64_t presentation_frame = 203;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
+
+    const specforge::SourceCollectionSessionResult navigation = Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
+            specforge::SampleNavigationIntent::Move(
+                specforge::SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
+    const auto activation_deadline = std::chrono::steady_clock::now() + 2s;
+    bool target_activated = false;
+    while (std::chrono::steady_clock::now() < activation_deadline) {
+        Access::Drain(*shell);
+        const specforge::SpectrumSnapshotHandle snapshot = Access::Session(*shell).CurrentSampleSnapshot();
+        target_activated = snapshot && snapshot->collection.current_index == 1 &&
+            Access::PendingLoadCount(*shell) == 0;
+        if (target_activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    const std::vector<specforge::NavigationLatencyReport> reports =
+        Access::CompleteFramePresentationWithoutSpectrumDraw(*shell, presentation_frame, 7);
+    const std::size_t remaining_traces = Access::NavigationTraceCount(*shell);
+    Access::SubmitSpectrumDraw(
+        *shell,
+        presentation_frame + 1,
+        Access::Session(*shell).CurrentSampleSnapshot(),
+        7);
+    const std::vector<specforge::NavigationLatencyReport> visible_reports =
+        Access::CompleteFramePresentationWithoutSpectrumDraw(
+            *shell,
+            presentation_frame + 1,
+            7);
+    const bool presented_after_visible_draw =
+        visible_reports.size() == 1 &&
+        visible_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented;
+    shell.reset();
+    std::filesystem::remove(path);
+
+    Require(navigation.follow_up_spectrum_index == 1 && target_activated, "the hidden Spectrum target should activate");
+    Require(
+        reports.empty() && remaining_traces == 1,
+        "a successful viewport Present without a submitted Spectrum draw must not complete navigation");
+    Require(
+        presented_after_visible_draw,
+        "the retained navigation should complete after its exact snapshot is visibly submitted later");
 }
 
 void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
@@ -1031,6 +1521,12 @@ int main()
         TestLaterExplicitOpenCancelsEarlierFollowUp();
         TestRemovedSourceResultCancelsOnlyThatSourcesDerivedTickets();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();
+        TestAcceptedNavigationUsesLatestMatchingRawKeyInput();
+        TestGenericRowLocationDoesNotStartPreviousNextTrace();
+        TestWorkflowAutoAdvanceStartsExplicitTrace();
+        TestNewActivationSupersedesAnUnpresentedOlderTrace();
+        TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation();
+        TestSameFrameSourceSwitchSupersedesActivatedNavigation();
         TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation();
         TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits();
         TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread();

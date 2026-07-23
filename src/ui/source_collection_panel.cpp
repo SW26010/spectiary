@@ -391,6 +391,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
     const SourceCollectionSessionView& session_view,
     const SourceCollectionSessionIntentSubmitter& submit,
+    const SourceCollectionStepSubmitter& submit_step,
     const SourceCollectionSessionViewReader& read_view,
     bool* open,
     SampleWorkflowShortcut& shortcut)
@@ -462,8 +463,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("-##PreviousSample", sample_step_button_size)) {
-        SourceCollectionSessionResult result =
-            submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Previous())));
+        SourceCollectionSessionResult result = submit_step(
+            UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Previous())),
+            SampleNavigationRequestKind::Previous);
         MergeSourceCollectionSessionAction(action, result.action);
         view = read_view();
         navigation = view.navigation;
@@ -479,8 +481,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("+##NextSample", sample_step_button_size)) {
-        SourceCollectionSessionResult result =
-            submit(UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Next())));
+        SourceCollectionSessionResult result = submit_step(
+            UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Next())),
+            SampleNavigationRequestKind::Next);
         MergeSourceCollectionSessionAction(action, result.action);
         view = read_view();
         navigation = view.navigation;

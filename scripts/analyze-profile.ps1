@@ -15,20 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-
-function Get-EventValue {
-    param(
-        [Parameter(Mandatory = $true)] $Event,
-        [Parameter(Mandatory = $true)] [string]$Name,
-        $Default = $null
-    )
-
-    $property = $Event.PSObject.Properties[$Name]
-    if ($null -eq $property) {
-        return $Default
-    }
-    return $property.Value
-}
+. (Join-Path $PSScriptRoot 'profile-analysis-common.ps1')
 
 function Convert-ToDouble {
     param($Value)
@@ -49,53 +36,6 @@ function Convert-ToBool {
     return [System.Convert]::ToBoolean($Value)
 }
 
-function Get-Percentile {
-    param(
-        [Parameter(Mandatory = $true)] [double[]]$Values,
-        [Parameter(Mandatory = $true)] [double]$Percent
-    )
-
-    if ($Values.Count -eq 0) {
-        return [double]::NaN
-    }
-
-    $ordered = @($Values | Sort-Object)
-    if ($ordered.Count -eq 1) {
-        return [double]$ordered[0]
-    }
-
-    $rank = ($ordered.Count - 1) * $Percent / 100.0
-    $lower = [Math]::Floor($rank)
-    $upper = [Math]::Ceiling($rank)
-    if ($lower -eq $upper) {
-        return [double]$ordered[[int]$rank]
-    }
-
-    $weight = $rank - $lower
-    return ([double]$ordered[$lower] * (1.0 - $weight)) + ([double]$ordered[$upper] * $weight)
-}
-
-function Get-Stats {
-    param([double[]]$Values)
-
-    if ($Values.Count -eq 0) {
-        return [pscustomobject]@{
-            Count = 0
-            P50 = [double]::NaN
-            P95 = [double]::NaN
-            P99 = [double]::NaN
-            Max = [double]::NaN
-        }
-    }
-
-    return [pscustomobject]@{
-        Count = $Values.Count
-        P50 = Get-Percentile $Values 50.0
-        P95 = Get-Percentile $Values 95.0
-        P99 = Get-Percentile $Values 99.0
-        Max = ($Values | Measure-Object -Maximum).Maximum
-    }
-}
 
 function Format-Milliseconds {
     param([double]$Value)
@@ -374,32 +314,6 @@ function Write-DisplayEnvironment {
     }
 }
 
-function Read-ProfileEvents {
-    param([string]$Path)
-
-    $events = [System.Collections.Generic.List[object]]::new()
-    $lines = Get-Content -Path $Path -Encoding UTF8
-    for ($index = 0; $index -lt $lines.Count; $index++) {
-        $line = $lines[$index].Trim()
-        if (-not $line) {
-            continue
-        }
-
-        try {
-            $event = $line | ConvertFrom-Json
-        }
-        catch {
-            throw "${Path}:$($index + 1): invalid or truncated JSON: $($_.Exception.Message)"
-        }
-
-        if ($null -ne (Get-EventValue $event 'steady_ns') -and $null -ne (Get-EventValue $event 'event')) {
-            $events.Add($event)
-        }
-    }
-
-    return [object[]]$events.ToArray()
-}
-
 function Add-GateFailure {
     param(
         [System.Collections.Generic.List[string]]$Failures,
@@ -410,53 +324,23 @@ function Add-GateFailure {
 }
 
 $resolvedProfile = Resolve-Path -Path $Profile
-$rawEvents = @(Read-ProfileEvents $resolvedProfile.Path)
-if ($rawEvents.Count -eq 0) {
-    throw "$($resolvedProfile.Path): no profile events found"
-}
-
 $gateFailures = [System.Collections.Generic.List[string]]::new()
-$summaryEvents = @($rawEvents | Where-Object { (Get-EventValue $_ 'event') -eq 'profile_recorder_summary' })
-$recordingCompleteness = 'PASS'
-if ($summaryEvents.Count -eq 0) {
-    if ($AllowLegacyIncompleteRecording) {
-        $recordingCompleteness = 'LEGACY (summary unavailable)'
-        Write-Warning 'Legacy profile has no profile_recorder_summary; recording completeness cannot be verified.'
-    }
-    else {
-        $recordingCompleteness = 'FAIL (summary missing)'
-        Add-GateFailure $gateFailures 'profile_recorder_summary is missing; recording completeness cannot be verified.'
-    }
+$readResult = Read-ProfileEvents $resolvedProfile.Path -AllowPartial:$ReportOnly
+$rawEvents = @($readResult.Events)
+foreach ($failure in $readResult.Failures) {
+    Add-GateFailure $gateFailures $failure
 }
-elseif ($summaryEvents.Count -ne 1) {
-    $recordingCompleteness = 'FAIL (multiple summaries)'
-    Add-GateFailure $gateFailures "Expected exactly one profile_recorder_summary, found $($summaryEvents.Count)."
+if ($rawEvents.Count -eq 0) {
+    Add-GateFailure $gateFailures "$($resolvedProfile.Path): no profile events found"
 }
-else {
-    $summary = $summaryEvents[0]
-    if ((Get-EventValue $rawEvents[-1] 'event') -ne 'profile_recorder_summary') {
-        $recordingCompleteness = 'FAIL (summary is not final)'
-        Add-GateFailure $gateFailures 'profile_recorder_summary is not the final event.'
-    }
 
-    $droppedEventsValue = Get-EventValue $summary 'dropped_events'
-    if ($null -eq $droppedEventsValue) {
-        $recordingCompleteness = 'FAIL (dropped_events missing)'
-        Add-GateFailure $gateFailures 'profile_recorder_summary.dropped_events is missing.'
-    }
-    else {
-        $droppedEvents = [long]$droppedEventsValue
-        if ($droppedEvents -ne 0) {
-            $recordingCompleteness = "FAIL ($droppedEvents dropped events)"
-            Add-GateFailure $gateFailures "profile_recorder_summary.dropped_events is $droppedEvents; recording is incomplete."
-        }
-    }
-
-    $stopReason = [string](Get-EventValue $summary 'stop_reason' '')
-    if ($stopReason -notin @('explicit', 'duration_limit', 'file_size_limit')) {
-        $recordingCompleteness = "FAIL (invalid stop reason '$stopReason')"
-        Add-GateFailure $gateFailures "profile_recorder_summary.stop_reason '$stopReason' does not describe a completed recording."
-    }
+$summaryCheck = Test-ProfileRecorderSummary $rawEvents -AllowMissing:$AllowLegacyIncompleteRecording
+$recordingCompleteness = $summaryCheck.Status
+foreach ($failure in $summaryCheck.Failures) {
+    Add-GateFailure $gateFailures $failure
+}
+if ($recordingCompleteness -like 'LEGACY*') {
+    Write-Warning 'Legacy profile has no profile_recorder_summary; recording completeness cannot be verified.'
 }
 
 $events = @($rawEvents | Sort-Object { [int64](Get-EventValue $_ 'steady_ns') })
