@@ -1,5 +1,6 @@
 #include "plot/spectrum_plot.h"
 
+#include "plot/scientific_label.h"
 #include "plot/spectral_line_label_layout.h"
 #include "profile/profile_sink.h"
 
@@ -288,7 +289,8 @@ void RenderSpectralLineOverlays(
     float bottom_reserved_height,
     const SpectralLineLabelMetrics& metrics,
     SpectralLineLabelLayoutWorkspace& name_layout,
-    SpectralLineLabelLayoutWorkspace& wavelength_layout)
+    SpectralLineLabelLayoutWorkspace& wavelength_layout,
+    ScientificLabelCache& scientific_label_cache)
 {
     const ImPlotRect limits = ImPlot::GetPlotLimits();
     const double y_span = limits.Y.Max - limits.Y.Min;
@@ -304,6 +306,10 @@ void RenderSpectralLineOverlays(
     const ImVec2 plot_pos = ImPlot::GetPlotPos();
     const ImVec2 plot_size = ImPlot::GetPlotSize();
     const ImVec2 plot_max(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
+    ImFont& name_font = overlays.spectral_line_label_font != nullptr
+                            ? *overlays.spectral_line_label_font
+                            : *ImGui::GetFont();
+    const float name_font_size = ImGui::GetFontSize();
     const SpectralLineLabelLayoutContext layout_context{
         .scope_id = overlays.layout_scope_id,
         .x_span = limits.X.Max - limits.X.Min,
@@ -353,10 +359,20 @@ void RenderSpectralLineOverlays(
             const std::string& name = marker->label.empty() ? marker->id : marker->label;
             const std::string& wavelength =
                 marker->display_label.empty() ? marker->id : marker->display_label;
+            const ScientificLabel& scientific_name =
+                scientific_label_cache.Resolve(
+                    overlays.layout_scope_id,
+                    marker->id,
+                    name);
+            const ScientificLabelSize name_size =
+                MeasureScientificLabel(
+                    scientific_name,
+                    name_font,
+                    name_font_size);
             name_layout.inputs.push_back({
                 marker->id,
                 label_anchor_x,
-                ImGui::CalcTextSize(name.c_str()).x,
+                name_size.width,
             });
             wavelength_layout.inputs.push_back({
                 marker->id,
@@ -380,7 +396,11 @@ void RenderSpectralLineOverlays(
 
     if (!name_layout.inputs.empty()) {
         const float bottom_inset = metrics.bottom_gap + bottom_reserved_height;
-        const float lane_height = ImGui::GetTextLineHeight() + metrics.lane_gap;
+        const float lane_height =
+            std::max(
+                ImGui::GetTextLineHeight(),
+                ScientificLabelLineHeight(name_font, name_font_size)) +
+            metrics.lane_gap;
         const float plot_mid_y = plot_pos.y + plot_size.y * 0.5f;
         const SpectralLineVerticalLayoutContext vertical_context{
             .plot_top = plot_pos.y,
@@ -407,7 +427,16 @@ void RenderSpectralLineOverlays(
             const std::string& name = marker->label.empty() ? marker->id : marker->label;
             const std::string& wavelength =
                 marker->display_label.empty() ? marker->id : marker->display_label;
-            const ImVec2 name_size = ImGui::CalcTextSize(name.c_str());
+            const ScientificLabel& scientific_name =
+                scientific_label_cache.Resolve(
+                    overlays.layout_scope_id,
+                    marker->id,
+                    name);
+            const ScientificLabelSize name_size =
+                MeasureScientificLabel(
+                    scientific_name,
+                    name_font,
+                    name_font_size);
             const ImVec2 wavelength_size = ImGui::CalcTextSize(wavelength.c_str());
             const SpectralLineLabelLayoutResult& name_placement = name_placements[label_index];
             const SpectralLineLabelLayoutResult& wavelength_placement =
@@ -420,13 +449,16 @@ void RenderSpectralLineOverlays(
             const SpectralLineVerticalLabelPlacement name_vertical =
                 PlaceSpectralLineNameLabel(
                     vertical_context,
-                    name_size.y,
+                    name_size.height,
                     name_placement.lane);
             if (name_vertical.visible) {
-                draw_list->AddText(
+                DrawScientificLabel(
+                    *draw_list,
+                    scientific_name,
+                    name_font,
+                    name_font_size,
                     ImVec2(name_placement.left, name_vertical.y),
-                    text_color,
-                    name.c_str());
+                    text_color);
             }
 
             const SpectralLineVerticalLabelPlacement wavelength_vertical =
@@ -991,7 +1023,8 @@ bool RenderSpectrumPlot(
                 bottom_reserved_height,
                 plot_metrics.spectral_line_labels,
                 state.spectral_line_name_layout,
-                state.spectral_line_wavelength_layout);
+                state.spectral_line_wavelength_layout,
+                state.scientific_label_cache);
         }
         if (display.edge_axis_overlay) {
             RenderEdgeAxisOverlay(plot_metrics.edge_axis);

@@ -59,6 +59,7 @@ public:
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
     void RefreshSystemColors();
+    void SetSpectralLineLabelFont(ImFont* font);
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
@@ -261,6 +262,7 @@ private:
     SourceCollectionPanelUi source_collection_panel_ui_;
     SettingsPanelUi settings_panel_ui_;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
+    ImFont* spectral_line_label_font_ = nullptr;
     bool immersive_plot_mode_ = false;
     bool immersive_plot_toggle_requested_ = false;
     SampleWorkflowShortcut sample_workflow_shortcut_;

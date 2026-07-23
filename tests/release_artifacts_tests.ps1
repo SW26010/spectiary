@@ -223,7 +223,7 @@ foreach ($expected in @(
     Assert-Contains $dataSources $expected 'Data-source notice'
 }
 
-$catalogLines = Get-Content -LiteralPath $catalogPath |
+$catalogLines = Get-Content -LiteralPath $catalogPath -Encoding UTF8 |
     Where-Object { -not $_.StartsWith('#') }
 $catalog = @($catalogLines | ConvertFrom-Csv -Delimiter "`t")
 if ($catalog.Count -eq 0) {

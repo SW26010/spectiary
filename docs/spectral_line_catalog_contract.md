@@ -55,6 +55,21 @@ are valid.
 | `source_ref` | yes | Non-empty short public source handle or derivation handle. |
 | `notes` | no | Public source/precision note only. No classification criteria. |
 
+`label` is UTF-8 presentation text, not an ASCII transliteration or a markup
+language. Scientific notation should use the corresponding Unicode glyphs:
+Greek letters without an intervening space for named Balmer lines (`Hα`
+through `Hδ`), subscripts for molecular atom counts and transition indices
+(`C₂`, `Na I D₂`), and superscript mass numbers for isotopologues (`¹³C¹²C`,
+`¹³CN`). The native UI font atlas must therefore merge coverage for Greek and
+the Unicode superscript/subscript blocks in addition to its CJK fallback.
+
+Plot rendering interprets only Unicode superscript and subscript digits as
+semantic script runs. It draws those runs with scaled ordinary digits from one
+dedicated scientific font, while keeping Greek and baseline text in that same
+font. Measurement and drawing must share this run model so collision avoidance
+uses the rendered width. This is deliberately not a general markup or LaTeX
+contract.
+
 The built-in catalog's third-party attribution and transformation record lives
 in the repository at `legal/DATA_SOURCES.txt` and is shipped as
 `Legal/DATA_SOURCES.txt` under the executable directory. An approximate marker

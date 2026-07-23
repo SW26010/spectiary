@@ -4,6 +4,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "overlays/spectral_line_catalog.h"
 #include "plot/plot_touchpad_gesture.h"
+#include "plot/scientific_label.h"
 #include "plot/spectral_line_label_layout.h"
 
 #include <imgui.h>
@@ -39,6 +40,7 @@ struct SpectrumPlotState {
     bool sync_last_limits_next_frame = false;
     SpectralLineLabelLayoutWorkspace spectral_line_name_layout;
     SpectralLineLabelLayoutWorkspace spectral_line_wavelength_layout;
+    ScientificLabelCache scientific_label_cache;
 };
 
 struct SpectrumPlotProfileContext {
@@ -56,6 +58,7 @@ struct SpectrumPlotOverlays {
     std::size_t spectral_line_count = 0;
     bool show_spectral_line_labels = true;
     std::string_view layout_scope_id;
+    ImFont* spectral_line_label_font = nullptr;
 };
 
 struct SpectrumPlotDisplayOptions {

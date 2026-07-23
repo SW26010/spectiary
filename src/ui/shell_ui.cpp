@@ -821,6 +821,11 @@ void ShellUi::RefreshSystemColors()
     spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotStyle(ReadSystemSpectrumPlotStyle()));
 }
 
+void ShellUi::SetSpectralLineLabelFont(ImFont* font)
+{
+    spectral_line_label_font_ = font;
+}
+
 void ShellUi::EnterImmersivePlotMode()
 {
     spectrum_view_session_.Submit(SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender());
@@ -2144,10 +2149,12 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
         SpectrumPlotOverlays{
-            spectral_lines.visible_markers.data(),
-            spectral_lines.visible_markers.size(),
-            spectral_lines.marker_labels_visible,
-            spectral_lines.layout_scope_id},
+            .spectral_lines = spectral_lines.visible_markers.data(),
+            .spectral_line_count = spectral_lines.visible_markers.size(),
+            .show_spectral_line_labels = spectral_lines.marker_labels_visible,
+            .layout_scope_id = spectral_lines.layout_scope_id,
+            .spectral_line_label_font = spectral_line_label_font_,
+        },
         MakeImmersivePlotDisplayOptions(),
         touchpad_gestures_);
     if (plot_submitted) {
@@ -2515,10 +2522,12 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
         SpectrumPlotProfileContext{status.profile, status.frame_index},
         spectrum_view_session_.PlotStyleForRender(),
         SpectrumPlotOverlays{
-            spectral_lines.visible_markers.data(),
-            spectral_lines.visible_markers.size(),
-            spectral_lines.marker_labels_visible,
-            spectral_lines.layout_scope_id},
+            .spectral_lines = spectral_lines.visible_markers.data(),
+            .spectral_line_count = spectral_lines.visible_markers.size(),
+            .show_spectral_line_labels = spectral_lines.marker_labels_visible,
+            .layout_scope_id = spectral_lines.layout_scope_id,
+            .spectral_line_label_font = spectral_line_label_font_,
+        },
         {},
         touchpad_gestures_);
     if (plot_submitted) {

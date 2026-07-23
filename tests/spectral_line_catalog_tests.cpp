@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <filesystem>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -76,6 +77,39 @@ void TestLoadsPublicCatalog()
         first = false;
         previous_position = position;
     }
+}
+
+void RequireScientificLabelUtf8(const specforge::SpectralLineCatalog& catalog)
+{
+    Require(FindMarker(catalog, "h_alpha").label == "H\xCE\xB1", "H alpha should use compact Greek notation");
+    Require(FindMarker(catalog, "h_beta").label == "H\xCE\xB2", "H beta should use compact Greek notation");
+    Require(FindMarker(catalog, "h_gamma").label == "H\xCE\xB3", "H gamma should use compact Greek notation");
+    Require(FindMarker(catalog, "h_delta").label == "H\xCE\xB4", "H delta should use compact Greek notation");
+    Require(FindMarker(catalog, "c2_4383").label == "C\xE2\x82\x82", "C2 should use a subscript atom count");
+    Require(
+        FindMarker(catalog, "na_i_d2").label == "Na I D\xE2\x82\x82",
+        "Na I D2 should use a subscript transition index");
+    Require(
+        FindMarker(catalog, "c13_c12_6100").label ==
+            "\xC2\xB9\xC2\xB3"
+            "C"
+            "\xC2\xB9\xC2\xB2"
+            "C",
+        "the carbon isotopologue should use superscript mass numbers");
+    Require(
+        FindMarker(catalog, "c13_cn_6260").label ==
+            "\xC2\xB9\xC2\xB3"
+            "CN",
+        "13CN should use a superscript mass number");
+}
+
+void TestPublicCatalogUsesScientificLabelTypography()
+{
+    const std::filesystem::path path =
+        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    Require(catalog.load_error.empty(), catalog.load_error);
+    RequireScientificLabelUtf8(catalog);
 }
 
 void TestUsesVacuumWavelengthsForAtomicMarkers()
@@ -204,6 +238,12 @@ void TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers()
     Require(catalog.load_error.empty(), catalog.load_error);
     Require(!catalog.markers.empty(), "default catalog should load from executable directory when cwd differs");
     Require(catalog.path.filename() == "spectral_lines.public.tsv", "default catalog should report the loaded TSV path");
+    RequireScientificLabelUtf8(catalog);
+#ifdef SPECFORGE_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
+    Require(
+        catalog.path.is_relative(),
+        "static-release catalog test should load the embedded resource, not an external TSV");
+#endif
 }
 #endif
 
@@ -273,17 +313,23 @@ void TestRejectsNonPositiveWavelengths()
 
 int main()
 {
-    TestLoadsPublicCatalog();
-    TestUsesVacuumWavelengthsForAtomicMarkers();
-    TestPublicCatalogDoesNotContainPrivateOverlayConcepts();
-    TestLoadsCatalogWithoutOptionalNotesColumn();
-    TestGenericCatalogMayOmitGrouping();
-    TestPublicCatalogRequiresGrouping();
+    try {
+        TestLoadsPublicCatalog();
+        TestPublicCatalogUsesScientificLabelTypography();
+        TestUsesVacuumWavelengthsForAtomicMarkers();
+        TestPublicCatalogDoesNotContainPrivateOverlayConcepts();
+        TestLoadsCatalogWithoutOptionalNotesColumn();
+        TestGenericCatalogMayOmitGrouping();
+        TestPublicCatalogRequiresGrouping();
 #ifdef _WIN32
-    TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers();
+        TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers();
 #endif
-    TestRejectsDuplicateMarkerIds();
-    TestRejectsEmptySourceRef();
-    TestRejectsNonPositiveWavelengths();
-    return 0;
+        TestRejectsDuplicateMarkerIds();
+        TestRejectsEmptySourceRef();
+        TestRejectsNonPositiveWavelengths();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

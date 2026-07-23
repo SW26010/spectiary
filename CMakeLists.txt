@@ -124,7 +124,7 @@ endfunction()
 
 function(specforge_enable_warnings target_name)
     if(MSVC)
-        target_compile_options(${target_name} PRIVATE /EHsc /W4 /permissive-)
+        target_compile_options(${target_name} PRIVATE /EHsc /W4 /permissive- /utf-8)
     else()
         target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -206,6 +206,7 @@ target_link_libraries(specforge_sessions PUBLIC specforge_core)
 
 add_library(specforge_desktop_ui STATIC
     src/plot/plot_touchpad_gesture.cpp
+    src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
     src/ui/sample_workflow_shortcut.cpp
@@ -216,6 +217,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectral_lines_grouping_view.cpp
     src/ui/spectral_lines_panel.cpp
     src/ui/spectrum_view_session.cpp
+    src/ui/ui_font.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
 target_include_directories(specforge_desktop_ui PRIVATE "${CMAKE_BINARY_DIR}/generated")
@@ -503,6 +505,16 @@ specforge_add_test(
     specforge_desktop_ui
 )
 specforge_add_test(
+    specforge_scientific_label_tests
+    tests/scientific_label_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_ui_font_glyph_ranges_tests
+    tests/ui_font_glyph_ranges_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
     specforge_spectrum_view_session_tests
     tests/spectrum_view_session_tests.cpp
     specforge_desktop_ui
@@ -516,6 +528,12 @@ target_compile_definitions(
     specforge_spectral_line_catalog_tests
     PRIVATE SPECFORGE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
+    target_compile_definitions(
+        specforge_spectral_line_catalog_tests
+        PRIVATE SPECFORGE_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
+    )
+endif()
 
 if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET specforge_spectral_line_catalog_tests POST_BUILD
