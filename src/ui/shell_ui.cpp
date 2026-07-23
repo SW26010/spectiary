@@ -114,6 +114,19 @@ std::string NarrowPath(const std::filesystem::path& path)
     return PathToUtf8(path);
 }
 
+void MarkSourceLoadTicketSuperseded(
+    const SourceCollectionActivationTransaction::Ticket& ticket)
+{
+    if (ticket.navigation_trace) {
+        (void)ticket.navigation_trace->MarkTerminal(
+            NavigationLatencyOutcome::Superseded);
+    }
+    if (ticket.source_load_trace) {
+        (void)ticket.source_load_trace->MarkTerminal(
+            SourceLoadLatencyOutcome::Superseded);
+    }
+}
+
 void RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
@@ -877,7 +890,7 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
         path,
         spectrum_index,
         session_.AnnotationPathsForSource(path),
-        PendingSourceLoadPurpose::ExplicitOpen,
+        SourceCollectionActivationTransaction::Purpose::ExplicitOpen,
         {},
         std::move(source_load_trace));
 }
@@ -886,32 +899,12 @@ std::uint64_t ShellUi::QueueSourceLoad(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
     std::vector<std::filesystem::path> annotation_paths,
-    PendingSourceLoadPurpose purpose,
+    SourceCollectionActivationTransaction::Purpose purpose,
     NavigationLatencyTraceHandle navigation_trace,
     SourceLoadLatencyTraceHandle source_load_trace,
     std::optional<SampleNavigationDirection> prefetch_direction)
 {
     CancelSnapshotPrefetch();
-    const std::string path_key = SourcePathIdentityKey(path);
-    for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
-        if (pending->second.path_key != path_key) {
-            ++pending;
-            continue;
-        }
-        if (pending->second.navigation_trace) {
-            (void)pending->second.navigation_trace->MarkTerminal(
-                NavigationLatencyOutcome::Superseded);
-        }
-        if (pending->second.source_load_trace) {
-            (void)pending->second.source_load_trace->MarkTerminal(
-                SourceLoadLatencyOutcome::Superseded);
-        }
-        source_load_queue_.Cancel(pending->first);
-        deferred_restore_task_ids_.erase(pending->first);
-        pending = pending_source_loads_.erase(pending);
-    }
-
-    const std::uint64_t generation = ++source_load_generations_[path_key];
     std::optional<SourceCollectionLoadHint> hint =
         session_.LoadHintForSource(path, spectrum_index);
     NavigationLatencyAttemptHandle latency_attempt;
@@ -922,6 +915,14 @@ std::uint64_t ShellUi::QueueSourceLoad(
         source_load_trace->SetTargetIndex(spectrum_index);
         latency_attempt = source_load_trace->BeginLoadAttempt(spectrum_index);
     }
+    SourceCollectionActivationTransaction::Ticket ticket =
+        source_activation_.ReserveLoad(
+            path,
+            spectrum_index,
+            purpose,
+            std::move(navigation_trace),
+            std::move(source_load_trace),
+            prefetch_direction);
     const std::uint64_t task_id = source_load_queue_.Enqueue(
         {
             .path = path,
@@ -942,22 +943,10 @@ std::uint64_t ShellUi::QueueSourceLoad(
                      : std::optional<SourceCollectionResidentSnapshot>{},
             .latency_attempt = std::move(latency_attempt),
         });
-    pending_source_loads_.emplace(
-        task_id,
-        PendingSourceLoad{
-            .path = path,
-            .path_key = path_key,
-            .spectrum_index = spectrum_index,
-            .generation = generation,
-            .activation_epoch = source_activation_epoch_,
-            .purpose = purpose,
-            .navigation_trace = std::move(navigation_trace),
-            .source_load_trace = std::move(source_load_trace),
-            .prefetch_direction = prefetch_direction,
-        });
-    if (purpose == PendingSourceLoadPurpose::DeferredRestore) {
-        deferred_restore_task_ids_.insert(task_id);
-    }
+    CancelSupersededSourceLoads(
+        source_activation_.RegisterOrReplaceLoad(
+            task_id,
+            std::move(ticket)));
     source_load_error_.clear();
     source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
     return task_id;
@@ -966,83 +955,20 @@ std::uint64_t ShellUi::QueueSourceLoad(
 void ShellUi::BeginSourceActivationIntent(bool preserve_pending_explicit_opens)
 {
     CancelSnapshotPrefetch();
-    AdvanceSourceActivationIntent(
-        source_activation_epoch_,
-        pending_source_loads_,
-        preserve_pending_explicit_opens,
-        [this](std::uint64_t task_id) { source_load_queue_.Cancel(task_id); });
+    CancelSupersededSourceLoads(
+        source_activation_.AdvanceIntent(
+            preserve_pending_explicit_opens));
 }
 
-void ShellUi::AdvanceSourceActivationIntent(
-    std::uint64_t& activation_epoch,
-    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-    bool preserve_pending_explicit_opens,
-    const std::function<void(std::uint64_t)>& cancel)
+void ShellUi::CancelSupersededSourceLoads(
+    std::vector<SourceCollectionActivationTransaction::PendingTask>
+        pending_tasks)
 {
-    ++activation_epoch;
-    for (auto pending = pending_loads.begin(); pending != pending_loads.end();) {
-        PendingSourceLoad& ticket = pending->second;
-        if (ticket.purpose == PendingSourceLoadPurpose::DeferredRestore) {
-            ++pending;
-            continue;
-        }
-        if (preserve_pending_explicit_opens &&
-            ticket.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
-            ticket.activation_epoch = activation_epoch;
-            ++pending;
-            continue;
-        }
-        if (ticket.navigation_trace) {
-            (void)ticket.navigation_trace->MarkTerminal(
-                NavigationLatencyOutcome::Superseded);
-        }
-        if (ticket.source_load_trace) {
-            (void)ticket.source_load_trace->MarkTerminal(
-                SourceLoadLatencyOutcome::Superseded);
-        }
-        cancel(pending->first);
-        pending = pending_loads.erase(pending);
+    for (const SourceCollectionActivationTransaction::PendingTask&
+             pending : pending_tasks) {
+        MarkSourceLoadTicketSuperseded(pending.ticket);
+        source_load_queue_.Cancel(pending.task_id);
     }
-}
-
-bool ShellUi::CompletionStartsSourceActivationIntent(
-    PendingSourceLoadPurpose purpose,
-    bool loaded)
-{
-    return loaded && purpose == PendingSourceLoadPurpose::ExplicitOpen;
-}
-
-std::optional<ShellUi::PendingSourceLoad> ShellUi::TakeCurrentPendingSourceLoad(
-    const SourceCollectionLoadCompletion& completion,
-    std::uint64_t activation_epoch,
-    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-    const std::unordered_map<std::string, std::uint64_t>& source_load_generations)
-{
-    const auto pending = pending_loads.find(completion.task_id);
-    if (pending == pending_loads.end()) {
-        return std::nullopt;
-    }
-
-    PendingSourceLoad ticket = std::move(pending->second);
-    pending_loads.erase(pending);
-    const auto current_generation = source_load_generations.find(ticket.path_key);
-    const bool activation_current =
-        ticket.purpose == PendingSourceLoadPurpose::DeferredRestore ||
-        ticket.activation_epoch == activation_epoch;
-    const bool current = activation_current &&
-                         current_generation != source_load_generations.end() &&
-                         current_generation->second == ticket.generation &&
-                         SourcePathIdentityKey(completion.path) == ticket.path_key &&
-                         completion.spectrum_index == ticket.spectrum_index;
-    if (!current && ticket.navigation_trace) {
-        (void)ticket.navigation_trace->MarkTerminal(
-            NavigationLatencyOutcome::Superseded);
-    }
-    if (!current && ticket.source_load_trace) {
-        (void)ticket.source_load_trace->MarkTerminal(
-            SourceLoadLatencyOutcome::Superseded);
-    }
-    return current ? std::optional<PendingSourceLoad>{std::move(ticket)} : std::nullopt;
 }
 
 void ShellUi::QueueSessionFollowUp(
@@ -1059,10 +985,9 @@ void ShellUi::QueueSessionFollowUp(
     if (!snapshot || snapshot->source.path.empty()) {
         return;
     }
-    if (HasMatchingSourceFollowUp(
+    if (source_activation_.HasMatchingFollowUp(
             snapshot->source.path,
-            *result.follow_up_spectrum_index,
-            pending_source_loads_)) {
+            *result.follow_up_spectrum_index)) {
         if (navigation_trace) {
             (void)navigation_trace->MarkTerminal(NavigationLatencyOutcome::Coalesced);
         }
@@ -1072,8 +997,9 @@ void ShellUi::QueueSessionFollowUp(
         snapshot->source.path,
         *result.follow_up_spectrum_index,
         session_.AnnotationPathsForSource(snapshot->source.path),
-        deferred_restore ? PendingSourceLoadPurpose::DeferredRestore
-                         : PendingSourceLoadPurpose::SessionFollowUp,
+        deferred_restore
+            ? SourceCollectionActivationTransaction::Purpose::DeferredRestore
+            : SourceCollectionActivationTransaction::Purpose::SessionFollowUp,
         std::move(navigation_trace),
         {},
         prefetch_direction);
@@ -1081,78 +1007,20 @@ void ShellUi::QueueSessionFollowUp(
 
 void ShellUi::CancelSourceFollowUps(const SourceCollectionSessionResult& result)
 {
-    CancelSourceFollowUpsForResultInState(
-        result,
-        pending_source_loads_,
-        deferred_restore_task_ids_,
-        [this](std::uint64_t task_id) { source_load_queue_.Cancel(task_id); });
-}
-
-void ShellUi::CancelSourceFollowUpsForResultInState(
-    const SourceCollectionSessionResult& result,
-    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-    std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
-    const std::function<void(std::uint64_t)>& cancel)
-{
     if (!result.canceled_source_follow_up_path) {
         return;
     }
-    CancelSourceFollowUpsForPathInState(
-        *result.canceled_source_follow_up_path,
-        pending_loads,
-        deferred_restore_task_ids,
-        cancel);
-}
-
-void ShellUi::CancelSourceFollowUpsForPathInState(
-    const std::filesystem::path& path,
-    std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-    std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
-    const std::function<void(std::uint64_t)>& cancel)
-{
-    const std::string path_key = SourcePathIdentityKey(path);
-    for (auto pending = pending_loads.begin(); pending != pending_loads.end();) {
-        if (pending->second.path_key != path_key ||
-            pending->second.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
-            ++pending;
-            continue;
-        }
-        if (pending->second.navigation_trace) {
-            (void)pending->second.navigation_trace->MarkTerminal(
-                NavigationLatencyOutcome::Superseded);
-        }
-        if (pending->second.source_load_trace) {
-            (void)pending->second.source_load_trace->MarkTerminal(
-                SourceLoadLatencyOutcome::Superseded);
-        }
-        cancel(pending->first);
-        deferred_restore_task_ids.erase(pending->first);
-        pending = pending_loads.erase(pending);
-    }
-}
-
-bool ShellUi::HasMatchingSourceFollowUp(
-    const std::filesystem::path& path,
-    std::size_t spectrum_index,
-    const std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads)
-{
-    const std::string path_key = SourcePathIdentityKey(path);
-    return std::any_of(
-        pending_loads.begin(),
-        pending_loads.end(),
-        [&path_key, spectrum_index](const auto& entry) {
-            const PendingSourceLoad& pending = entry.second;
-            return pending.path_key == path_key &&
-                   pending.spectrum_index == spectrum_index &&
-                   pending.purpose != PendingSourceLoadPurpose::ExplicitOpen;
-        });
+    CancelSupersededSourceLoads(
+        source_activation_.CancelNonExplicitFollowUps(
+            *result.canceled_source_follow_up_path));
 }
 
 bool ShellUi::CancelFailedPendingSampleNavigation(
     SourceCollectionSession& session,
-    const PendingSourceLoad& ticket)
+    const SourceCollectionActivationTransaction::Ticket& ticket)
 {
-    if (ticket.purpose == PendingSourceLoadPurpose::ExplicitOpen) {
+    if (ticket.purpose ==
+        SourceCollectionActivationTransaction::Purpose::ExplicitOpen) {
         return false;
     }
     return session.CancelPendingSampleNavigation(ticket.path, ticket.spectrum_index);
@@ -1174,7 +1042,7 @@ void ShellUi::ServiceSnapshotPrefetch()
 {
     if (!pending_snapshot_prefetch_direction_ ||
         active_snapshot_prefetch_ ||
-        !pending_source_loads_.empty() ||
+        source_activation_.HasPendingLoads() ||
         deferred_restore_active_ ||
         latency_sensitive_plot_interaction_active()) {
         return;
@@ -1195,13 +1063,9 @@ void ShellUi::ServiceSnapshotPrefetch()
         NavigationLatencyTrace::Now();
     const std::uint64_t prefetch_id =
         next_snapshot_prefetch_id_++;
-    const std::string path_key =
-        SourcePathIdentityKey(plan->path);
-    const auto generation = source_load_generations_.find(path_key);
+    const std::string path_key = SourcePathIdentityKey(plan->path);
     const std::uint64_t expected_generation =
-        generation == source_load_generations_.end()
-        ? 0
-        : generation->second;
+        source_activation_.GenerationForPath(plan->path).value_or(0);
     SourceCollectionLoadHint hint =
         std::move(plan->load_hint);
     const std::uint64_t task_id =
@@ -1232,7 +1096,7 @@ void ShellUi::ServiceSnapshotPrefetch()
         .path_key = path_key,
         .spectrum_index = plan->spectrum_index,
         .generation = expected_generation,
-        .activation_epoch = source_activation_epoch_,
+        .activation_epoch = source_activation_.ActivationEpoch(),
         .direction = direction,
         .scheduled_at = scheduled_at,
     };
@@ -1281,13 +1145,14 @@ void ShellUi::DrainSnapshotPrefetchCompletion(
             ticket.cancel_requested_at);
         return;
     }
-    const auto generation =
-        source_load_generations_.find(ticket.path_key);
+    const std::optional<std::uint64_t> generation =
+        source_activation_.GenerationForPath(ticket.path);
     const bool current =
         !ticket.invalidated &&
-        ticket.activation_epoch == source_activation_epoch_ &&
-        generation != source_load_generations_.end() &&
-        generation->second == ticket.generation &&
+        ticket.activation_epoch ==
+            source_activation_.ActivationEpoch() &&
+        generation &&
+        *generation == ticket.generation &&
         SourcePathIdentityKey(completion.path) ==
             ticket.path_key &&
         completion.spectrum_index == ticket.spectrum_index;
@@ -1426,20 +1291,25 @@ void ShellUi::DrainSourceLoadCompletions(
                 std::move(completion));
             continue;
         }
-        deferred_restore_task_ids_.erase(completion.task_id);
-        std::optional<PendingSourceLoad> current_ticket = TakeCurrentPendingSourceLoad(
-            completion,
-            source_activation_epoch_,
-            pending_source_loads_,
-            source_load_generations_);
-        if (!current_ticket) {
+        std::optional<
+            SourceCollectionActivationTransaction::CompletionAdmission>
+            admission = source_activation_.TakeCompletion(
+                completion.task_id,
+                completion.path,
+                completion.spectrum_index);
+        if (!admission || !admission->accepted) {
+            if (admission) {
+                MarkSourceLoadTicketSuperseded(
+                    admission->ticket);
+            }
             if (completion.prepared) {
                 source_load_queue_.RetirePrepared(std::move(*completion.prepared));
             }
             continue;
         }
 
-        PendingSourceLoad ticket = std::move(*current_ticket);
+        SourceCollectionActivationTransaction::Ticket ticket =
+            std::move(admission->ticket);
         if (completion.latency_attempt) {
             completion.latency_attempt->MarkCompletionDrained();
         }
@@ -1530,7 +1400,10 @@ void ShellUi::DrainSourceLoadCompletions(
             source_load_queue_.RetireResource(std::move(resource));
         }
         const bool starts_activation_intent =
-            CompletionStartsSourceActivationIntent(ticket.purpose, result.loaded);
+            SourceCollectionActivationTransaction::
+                CompletionStartsActivationIntent(
+                    ticket.purpose,
+                    result.loaded);
         if (!result.loaded) {
             source_load_error_ = result.message.empty()
                 ? "The prepared source result was no longer applicable."
@@ -1582,9 +1455,13 @@ void ShellUi::DrainSourceLoadCompletions(
                 ticket.path,
                 *result.follow_up_spectrum_index,
                 session_.AnnotationPathsForSource(ticket.path),
-                ticket.purpose == PendingSourceLoadPurpose::DeferredRestore
-                    ? PendingSourceLoadPurpose::DeferredRestore
-                    : PendingSourceLoadPurpose::SessionFollowUp,
+                ticket.purpose ==
+                        SourceCollectionActivationTransaction::
+                            Purpose::DeferredRestore
+                    ? SourceCollectionActivationTransaction::
+                          Purpose::DeferredRestore
+                    : SourceCollectionActivationTransaction::
+                          Purpose::SessionFollowUp,
                 ticket.navigation_trace,
                 ticket.source_load_trace,
                 ticket.prefetch_direction);
@@ -1611,20 +1488,17 @@ void ShellUi::BeginDeferredSourceRestore()
     }
 
     std::vector<SourceCollectionLoadRequest> requests;
-    std::vector<PendingSourceLoad> tickets;
+    std::vector<SourceCollectionActivationTransaction::Ticket>
+        tickets;
     requests.reserve(plan->sources.size());
     tickets.reserve(plan->sources.size());
     for (SourceCollectionSavedSource& source : plan->sources) {
-        const std::string path_key = SourcePathIdentityKey(source.path);
-        const std::uint64_t generation = ++source_load_generations_[path_key];
-        tickets.push_back(PendingSourceLoad{
-            .path = source.path,
-            .path_key = path_key,
-            .spectrum_index = source.last_spectrum_index,
-            .generation = generation,
-            .activation_epoch = source_activation_epoch_,
-            .purpose = PendingSourceLoadPurpose::DeferredRestore,
-        });
+        tickets.push_back(
+            source_activation_.ReserveLoad(
+                source.path,
+                source.last_spectrum_index,
+                SourceCollectionActivationTransaction::
+                    Purpose::DeferredRestore));
         requests.push_back(SourceCollectionLoadRequest{
             .path = std::move(source.path),
             .spectrum_index = source.last_spectrum_index,
@@ -1634,15 +1508,17 @@ void ShellUi::BeginDeferredSourceRestore()
     const std::vector<std::uint64_t> task_ids =
         source_load_queue_.EnqueueBatch(std::move(requests));
     for (std::size_t index = 0; index < task_ids.size(); ++index) {
-        pending_source_loads_.emplace(task_ids[index], std::move(tickets[index]));
-        deferred_restore_task_ids_.insert(task_ids[index]);
+        source_activation_.RegisterLoad(
+            task_ids[index],
+            std::move(tickets[index]));
     }
     source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
 }
 
 void ShellUi::FinishDeferredSourceRestoreIfReady()
 {
-    if (!deferred_restore_active_ || !deferred_restore_task_ids_.empty()) {
+    if (!deferred_restore_active_ ||
+        source_activation_.HasPendingDeferredRestore()) {
         return;
     }
     RestoreDeferredActiveSourceIfAvailable();

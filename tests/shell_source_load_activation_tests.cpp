@@ -19,16 +19,11 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace specforge {
 
 struct ShellUiTestAccess {
-    using Purpose = ShellUi::PendingSourceLoadPurpose;
-    using PendingLoad = ShellUi::PendingSourceLoad;
-
     static std::unique_ptr<ShellUi> Create(
         SourceCollectionSession session,
         SourceCollectionLoadQueue source_load_queue)
@@ -92,7 +87,7 @@ struct ShellUiTestAccess {
 
     static std::size_t PendingLoadCount(const ShellUi& shell)
     {
-        return shell.pending_source_loads_.size();
+        return shell.source_activation_.PendingLoadCount();
     }
 
     static bool PrefetchActive(const ShellUi& shell)
@@ -196,57 +191,6 @@ struct ShellUiTestAccess {
         return shell.TakeNavigationKeyInput(kind);
     }
 
-    static bool CompletionStartsActivation(Purpose purpose, bool loaded)
-    {
-        return ShellUi::CompletionStartsSourceActivationIntent(purpose, loaded);
-    }
-
-    static void AdvanceActivation(
-        std::uint64_t& activation_epoch,
-        std::unordered_map<std::uint64_t, PendingLoad>& pending_loads,
-        bool preserve_pending_explicit_opens,
-        std::vector<std::uint64_t>& canceled)
-    {
-        ShellUi::AdvanceSourceActivationIntent(
-            activation_epoch,
-            pending_loads,
-            preserve_pending_explicit_opens,
-            [&canceled](std::uint64_t task_id) { canceled.push_back(task_id); });
-    }
-
-    static void CancelSourceFollowUps(
-        const SourceCollectionSessionResult& result,
-        std::unordered_map<std::uint64_t, PendingLoad>& pending_loads,
-        std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
-        const std::function<void(std::uint64_t)>& cancel)
-    {
-        ShellUi::CancelSourceFollowUpsForResultInState(
-            result,
-            pending_loads,
-            deferred_restore_task_ids,
-            cancel);
-    }
-
-    static std::optional<PendingLoad> TakeCurrent(
-        const SourceCollectionLoadCompletion& completion,
-        std::uint64_t activation_epoch,
-        std::unordered_map<std::uint64_t, PendingLoad>& pending_loads,
-        const std::unordered_map<std::string, std::uint64_t>& generations)
-    {
-        return ShellUi::TakeCurrentPendingSourceLoad(
-            completion,
-            activation_epoch,
-            pending_loads,
-            generations);
-    }
-
-    static bool HasMatchingFollowUp(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index,
-        const std::unordered_map<std::uint64_t, PendingLoad>& pending_loads)
-    {
-        return ShellUi::HasMatchingSourceFollowUp(path, spectrum_index, pending_loads);
-    }
 };
 
 }  // namespace specforge
@@ -277,20 +221,6 @@ void WaitForRelease(
             throw std::runtime_error(std::string(timeout_message));
         }
     }
-}
-
-specforge::ShellUiTestAccess::PendingLoad Pending(
-    std::string_view name,
-    std::uint64_t activation_epoch,
-    specforge::ShellUiTestAccess::Purpose purpose)
-{
-    const std::filesystem::path path(name);
-    return {
-        .path = path,
-        .path_key = specforge::SourcePathIdentityKey(path),
-        .activation_epoch = activation_epoch,
-        .purpose = purpose,
-    };
 }
 
 std::filesystem::path UniqueTempPath(std::string_view suffix)
@@ -728,78 +658,6 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
         reports.front().attempts.front().completion_drained_ns > 0 &&
             load_error_visible,
         "the failed report should include completion drain and preserve the UI error");
-}
-
-void TestLaterExplicitOpenCancelsEarlierFollowUp()
-{
-    using Access = specforge::ShellUiTestAccess;
-    std::uint64_t activation_epoch = 10;
-    std::unordered_map<std::uint64_t, Access::PendingLoad> pending_loads;
-    pending_loads.emplace(2, Pending("B.csv", activation_epoch, Access::Purpose::ExplicitOpen));
-    pending_loads.emplace(3, Pending("C.csv", activation_epoch, Access::Purpose::ExplicitOpen));
-    pending_loads.emplace(4, Pending("restore.csv", activation_epoch, Access::Purpose::DeferredRestore));
-    std::vector<std::uint64_t> canceled;
-
-    Require(
-        Access::CompletionStartsActivation(Access::Purpose::ExplicitOpen, true),
-        "a successful explicit completion should advance source activation");
-    Access::AdvanceActivation(activation_epoch, pending_loads, true, canceled);
-    Require(activation_epoch == 11, "the first successful explicit completion should advance the epoch");
-    Require(canceled.empty(), "later explicit opens and deferred restore must remain pending");
-    Require(
-        pending_loads.at(2).activation_epoch == 11 &&
-            pending_loads.at(3).activation_epoch == 11,
-        "later explicit opens should remain current");
-
-    pending_loads.emplace(5, Pending("A.csv", activation_epoch, Access::Purpose::SessionFollowUp));
-    pending_loads.erase(2);  // B is the explicit completion currently being applied.
-    Access::AdvanceActivation(activation_epoch, pending_loads, true, canceled);
-
-    Require(activation_epoch == 12, "the later explicit completion should advance the epoch again");
-    Require(
-        canceled == std::vector<std::uint64_t>{5},
-        "the later explicit completion should cancel the earlier source follow-up");
-    Require(!pending_loads.contains(5), "the canceled earlier follow-up should leave pending state");
-    Require(
-        pending_loads.contains(3) && pending_loads.at(3).activation_epoch == 12,
-        "an even later explicit open should remain pending and current");
-    Require(pending_loads.contains(4), "deferred restore should remain independent");
-    Require(
-        !Access::CompletionStartsActivation(Access::Purpose::ExplicitOpen, false) &&
-            !Access::CompletionStartsActivation(Access::Purpose::SessionFollowUp, true),
-        "failed or non-explicit completions must not supersede source activation");
-}
-
-void TestRemovedSourceResultCancelsOnlyThatSourcesDerivedTickets()
-{
-    using Access = specforge::ShellUiTestAccess;
-    std::unordered_map<std::uint64_t, Access::PendingLoad> pending_loads;
-    pending_loads.emplace(1, Pending("A.csv", 4, Access::Purpose::SessionFollowUp));
-    pending_loads.emplace(2, Pending("B.csv", 4, Access::Purpose::SessionFollowUp));
-    pending_loads.emplace(3, Pending("B.csv", 4, Access::Purpose::DeferredRestore));
-    pending_loads.emplace(4, Pending("B.csv", 4, Access::Purpose::ExplicitOpen));
-    std::unordered_set<std::uint64_t> deferred_restore_task_ids{3};
-    std::vector<std::uint64_t> canceled;
-    specforge::SourceCollectionSessionResult removed;
-    removed.canceled_source_follow_up_path = "B.csv";
-
-    Access::CancelSourceFollowUps(
-        removed,
-        pending_loads,
-        deferred_restore_task_ids,
-        [&canceled](std::uint64_t task_id) { canceled.push_back(task_id); });
-    std::sort(canceled.begin(), canceled.end());
-
-    Require(
-        canceled == std::vector<std::uint64_t>{2, 3},
-        "removing B should cancel B's session and deferred-restore tickets");
-    Require(
-        pending_loads.contains(1) && pending_loads.contains(4) &&
-            !pending_loads.contains(2) && !pending_loads.contains(3),
-        "removing B must retain A's navigation and B's explicit user-open intent");
-    Require(
-        deferred_restore_task_ids.empty(),
-        "canceling B's deferred restore should remove its restore bookkeeping");
 }
 
 void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
@@ -2087,27 +1945,19 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         dependencies.workflow_cache_paths = {{}, {}};
         specforge::SourceCollectionLoadQueue queue(std::move(dependencies));
 
-        constexpr std::uint64_t generation = 4;
-        std::uint64_t activation_epoch = 20;
+        specforge::SourceCollectionActivationTransaction activation;
         const std::uint64_t task_id = queue.Enqueue({
             .path = path,
             .spectrum_index = 1,
             .reuse_identity = initial_identity,
         });
-        const std::string path_key = specforge::SourcePathIdentityKey(path);
-        std::unordered_map<std::uint64_t, Access::PendingLoad> pending_loads;
-        pending_loads.emplace(
+        activation.RegisterLoad(
             task_id,
-            Access::PendingLoad{
-                .path = path,
-                .path_key = path_key,
-                .spectrum_index = 1,
-                .generation = generation,
-                .activation_epoch = activation_epoch,
-                .purpose = Access::Purpose::SessionFollowUp,
-            });
-        std::unordered_set<std::uint64_t> deferred_restore_task_ids;
-        const std::unordered_map<std::string, std::uint64_t> generations{{path_key, generation}};
+            activation.ReserveLoad(
+                path,
+                1,
+                specforge::SourceCollectionActivationTransaction::
+                    Purpose::SessionFollowUp));
         std::vector<specforge::SourceCollectionLoadCompletion> completions = WaitForCompletions(queue);
         Require(
             completions.size() == 1 && completions.front().prepared.has_value(),
@@ -2122,17 +1972,21 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         session_navigation_preserved =
             switched_to_b.loaded && !switched_to_b.canceled_source_follow_up_path;
 
-        std::vector<std::uint64_t> canceled;
-        Access::CancelSourceFollowUps(
-            switched_to_b,
-            pending_loads,
-            deferred_restore_task_ids,
-            [&queue, &canceled](std::uint64_t canceled_id) {
-                canceled.push_back(canceled_id);
-                queue.Cancel(canceled_id);
-            });
+        std::vector<
+            specforge::SourceCollectionActivationTransaction::
+                PendingTask>
+            canceled;
+        if (switched_to_b.canceled_source_follow_up_path) {
+            canceled = activation.CancelNonExplicitFollowUps(
+                *switched_to_b.canceled_source_follow_up_path);
+            for (const auto& pending : canceled) {
+                queue.Cancel(pending.task_id);
+            }
+        }
         shell_ticket_preserved =
-            canceled.empty() && pending_loads.contains(task_id) && deferred_restore_task_ids.empty();
+            canceled.empty() &&
+            activation.PendingLoadCount() == 1 &&
+            !activation.HasPendingDeferredRestore();
         const specforge::SourceCollectionSessionResult switched_back_to_a =
             session.Submit(specforge::SourceCollectionSessionIntent::EditSourceCollection(
                 specforge::SourceCollectionIntent::SwitchActive(0)));
@@ -2140,15 +1994,15 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             switched_back_to_a.follow_up_spectrum_index == 1 &&
             session.CurrentSampleSnapshot() == initial_snapshot;
         existing_ticket_reused = switched_back_to_a.follow_up_spectrum_index &&
-            Access::HasMatchingFollowUp(
+            activation.HasMatchingFollowUp(
                 path,
-                *switched_back_to_a.follow_up_spectrum_index,
-                pending_loads);
-        completion_admitted = Access::TakeCurrent(
-            completions.front(),
-            activation_epoch,
-            pending_loads,
-            generations).has_value();
+                *switched_back_to_a.follow_up_spectrum_index);
+        const auto admission = activation.TakeCompletion(
+            completions.front().task_id,
+            completions.front().path,
+            completions.front().spectrum_index);
+        completion_admitted =
+            admission && admission->accepted;
         if (completion_admitted) {
             specforge::PreparedSourceCollection prepared = std::move(*completions.front().prepared);
             row_one_committed = session.OpenPreparedSource(
@@ -2960,8 +2814,6 @@ int main()
     try {
         TestExplicitOpenTracesAcceptedPathThroughFirstPresent();
         TestFailedExplicitOpenProducesTerminalSourceLoadReport();
-        TestLaterExplicitOpenCancelsEarlierFollowUp();
-        TestRemovedSourceResultCancelsOnlyThatSourcesDerivedTickets();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();
         TestAcceptedNavigationUsesLatestMatchingRawKeyInput();
         TestGenericRowLocationDoesNotStartPreviousNextTrace();

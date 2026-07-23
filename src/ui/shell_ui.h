@@ -11,6 +11,7 @@
 #include "ui/settings_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
+#include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_load_queue.h"
 #include "ui/spectrum_view_session.h"
@@ -26,7 +27,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -136,22 +136,19 @@ private:
         std::size_t target_index,
         NavigationLatencyTimePoint accepted_at);
 
-    enum class PendingSourceLoadPurpose {
-        ExplicitOpen,
-        SessionFollowUp,
-        DeferredRestore,
-    };
-
     [[nodiscard]] std::uint64_t QueueSourceLoad(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
         std::vector<std::filesystem::path> annotation_paths,
-        PendingSourceLoadPurpose purpose,
+        SourceCollectionActivationTransaction::Purpose purpose,
         NavigationLatencyTraceHandle navigation_trace = {},
         SourceLoadLatencyTraceHandle source_load_trace = {},
         std::optional<SampleNavigationDirection> prefetch_direction =
             std::nullopt);
     void BeginSourceActivationIntent(bool preserve_pending_explicit_opens);
+    void CancelSupersededSourceLoads(
+        std::vector<SourceCollectionActivationTransaction::PendingTask>
+            pending_tasks);
     void QueueSessionFollowUp(
         const SourceCollectionSessionResult& result,
         bool deferred_restore = false,
@@ -185,19 +182,6 @@ private:
     void RestoreDeferredActiveSourceIfAvailable();
     void FinishDeferredSourceRestoreIfReady();
 
-    struct PendingSourceLoad {
-        std::filesystem::path path;
-        std::string path_key;
-        std::size_t spectrum_index = 0;
-        std::uint64_t generation = 0;
-        std::uint64_t activation_epoch = 0;
-        PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
-        NavigationLatencyTraceHandle navigation_trace;
-        SourceLoadLatencyTraceHandle source_load_trace;
-        std::optional<SampleNavigationDirection>
-            prefetch_direction;
-    };
-
     struct PendingSnapshotPrefetch {
         std::uint64_t prefetch_id = 0;
         std::uint64_t task_id = 0;
@@ -213,36 +197,9 @@ private:
         bool invalidated = false;
     };
 
-    [[nodiscard]] static std::optional<PendingSourceLoad> TakeCurrentPendingSourceLoad(
-        const SourceCollectionLoadCompletion& completion,
-        std::uint64_t activation_epoch,
-        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-        const std::unordered_map<std::string, std::uint64_t>& source_load_generations);
-    static void AdvanceSourceActivationIntent(
-        std::uint64_t& activation_epoch,
-        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-        bool preserve_pending_explicit_opens,
-        const std::function<void(std::uint64_t)>& cancel);
-    static void CancelSourceFollowUpsForPathInState(
-        const std::filesystem::path& path,
-        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-        std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
-        const std::function<void(std::uint64_t)>& cancel);
-    static void CancelSourceFollowUpsForResultInState(
-        const SourceCollectionSessionResult& result,
-        std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads,
-        std::unordered_set<std::uint64_t>& deferred_restore_task_ids,
-        const std::function<void(std::uint64_t)>& cancel);
-    [[nodiscard]] static bool HasMatchingSourceFollowUp(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index,
-        const std::unordered_map<std::uint64_t, PendingSourceLoad>& pending_loads);
     [[nodiscard]] static bool CancelFailedPendingSampleNavigation(
         SourceCollectionSession& session,
-        const PendingSourceLoad& ticket);
-    [[nodiscard]] static bool CompletionStartsSourceActivationIntent(
-        PendingSourceLoadPurpose purpose,
-        bool loaded);
+        const SourceCollectionActivationTransaction::Ticket& ticket);
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,
@@ -274,9 +231,7 @@ private:
     // SessionView() can derive state across every sample; retain it until a session mutation.
     std::optional<SourceCollectionSessionView> session_view_cache_;
     bool session_view_cache_dirty_ = false;
-    std::unordered_map<std::uint64_t, PendingSourceLoad> pending_source_loads_;
-    std::unordered_map<std::string, std::uint64_t> source_load_generations_;
-    std::unordered_set<std::uint64_t> deferred_restore_task_ids_;
+    SourceCollectionActivationTransaction source_activation_;
     std::optional<SampleNavigationDirection>
         pending_snapshot_prefetch_direction_;
     std::optional<PendingSnapshotPrefetch>
@@ -288,7 +243,6 @@ private:
     std::optional<std::filesystem::path> deferred_restore_active_path_;
     mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
     std::string source_load_error_;
-    std::uint64_t source_activation_epoch_ = 0;
     bool deferred_restore_active_ = false;
     bool latency_tracing_enabled_ = false;
     std::uint64_t current_frame_index_ = 0;
