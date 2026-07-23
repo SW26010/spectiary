@@ -35,6 +35,14 @@ constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 constexpr float kStatusBarSeparatorThickness = 1.0f;
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
+std::int64_t ElapsedNavigationResolutionNanoseconds(
+    NavigationLatencyTimePoint started_at)
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               NavigationLatencyTrace::Now() - started_at)
+        .count();
+}
+
 enum class ImmersivePlotAxisImplementation {
     NativeImPlot,
     CustomEdgeOverlay,
@@ -1357,6 +1365,7 @@ NavigationLatencyTraceHandle ShellUi::StartNavigationTrace(
     std::optional<std::size_t> from_index,
     NavigationLatencyTimePoint requested_at,
     NavigationLatencyTimePoint target_resolved_at,
+    NavigationTargetResolutionReport target_resolution,
     std::optional<NavigationTraceOrigin> navigation_origin)
 {
     if (!navigation_tracing_enabled_ || !navigation_origin || !from_index ||
@@ -1379,7 +1388,8 @@ NavigationLatencyTraceHandle ShellUi::StartNavigationTrace(
         navigation_origin->kind,
         input_at,
         requested_at,
-        target_resolved_at);
+        target_resolved_at,
+        std::move(target_resolution));
     navigation_traces_.emplace(navigation_id, trace);
     return trace;
 }
@@ -1392,14 +1402,27 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
     const NavigationLatencyTimePoint requested_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};
+    NavigationTargetResolutionReport target_resolution;
     std::optional<std::size_t> from_index;
     if (trace_requested) {
         from_index = session_.EffectiveSampleNavigationIndex();
+        target_resolution.effective_index_ns =
+            ElapsedNavigationResolutionNanoseconds(requested_at);
     }
+    const NavigationLatencyTimePoint pending_activation_started_at =
+        trace_requested ? NavigationLatencyTrace::Now()
+                        : NavigationLatencyTimePoint{};
     if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
-    SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    if (trace_requested) {
+        target_resolution.pending_activation_supersede_ns +=
+            ElapsedNavigationResolutionNanoseconds(
+                pending_activation_started_at);
+    }
+    SourceCollectionSessionResult result = session_.Submit(
+        std::move(command),
+        trace_requested ? &target_resolution : nullptr);
     const NavigationLatencyTimePoint target_resolved_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};
@@ -1408,6 +1431,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
         from_index,
         requested_at,
         target_resolved_at,
+        std::move(target_resolution),
         std::move(navigation_origin));
     if (deferred_restore_active_) {
         const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
@@ -1430,14 +1454,27 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
     const NavigationLatencyTimePoint requested_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};
+    NavigationTargetResolutionReport target_resolution;
     std::optional<std::size_t> from_index;
     if (trace_requested) {
         from_index = session_.EffectiveSampleNavigationIndex();
+        target_resolution.effective_index_ns =
+            ElapsedNavigationResolutionNanoseconds(requested_at);
     }
+    const NavigationLatencyTimePoint pending_activation_started_at =
+        trace_requested ? NavigationLatencyTrace::Now()
+                        : NavigationLatencyTimePoint{};
     if (session_.SupersedesPendingSourceActivation(command)) {
         BeginSourceActivationIntent(false);
     }
-    SourceCollectionSessionResult result = session_.Submit(std::move(command));
+    if (trace_requested) {
+        target_resolution.pending_activation_supersede_ns +=
+            ElapsedNavigationResolutionNanoseconds(
+                pending_activation_started_at);
+    }
+    SourceCollectionSessionResult result = session_.Submit(
+        std::move(command),
+        trace_requested ? &target_resolution : nullptr);
     const NavigationLatencyTimePoint target_resolved_at = trace_requested
         ? NavigationLatencyTrace::Now()
         : NavigationLatencyTimePoint{};
@@ -1446,6 +1483,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
         from_index,
         requested_at,
         target_resolved_at,
+        std::move(target_resolution),
         navigation_kind
             ? std::optional<NavigationTraceOrigin>{NavigationTraceOrigin{
                   *navigation_kind,

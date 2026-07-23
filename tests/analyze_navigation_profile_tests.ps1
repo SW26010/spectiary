@@ -85,6 +85,13 @@ function New-ValidNavigationEvents {
         from_index = 0
         target_index = 1
         cache_hit = $false
+        row_count = 3
+        filter_active = $false
+        sort_active = $false
+        query_active = $false
+        pending_present = $false
+        sequence_cache_hit = $false
+        sequence_build_count = 2
         attempt_count = 1
         input_steady_ns = $BaseNs + 1 * $ms
         requested_steady_ns = $BaseNs + 2 * $ms
@@ -94,6 +101,12 @@ function New-ValidNavigationEvents {
         first_present_steady_ns = $BaseNs + 17 * $ms
         input_to_request_ms = 1.0
         target_resolution_ms = 1.0
+        effective_index_ms = 0.05
+        pending_activation_supersede_ms = 0.05
+        base_sequence_ms = 0.2
+        target_lookup_ms = 0.1
+        target_sequence_ms = 0.2
+        navigation_state_result_ms = 0.4
         enqueue_ms = 1.0
         queue_wait_ms = 1.0
         source_inspection_ms = 1.0
@@ -149,6 +162,107 @@ try {
     Assert-True ($complete.Output -match '29.300') "Navigation p95 should use the shared linear interpolation:`n$($complete.Output)"
     Assert-True ($complete.Output -match 'Input kind: keyboard_next; count: 2') "Keyboard timings must be reported separately:`n$($complete.Output)"
     Assert-True ($complete.Output -match 'Input kind: ui_next; count: 1') "UI timings must be reported separately:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'base_sequence_ms') "The target-resolution breakdown should be reported:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'Target resolution diagnostics:') "Target-resolution diagnostics should be grouped:`n$($complete.Output)"
+
+    $autoAdvancePath = Join-Path $temporaryDirectory 'auto-advance-target-resolution.jsonl'
+    $autoAdvanceEvents = @(New-ValidNavigationEvents 12 'auto_advance' 0)
+    $autoAdvanceEvents += [pscustomobject]@{
+        steady_ns = 20000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture $autoAdvancePath $autoAdvanceEvents
+    $autoAdvance = Invoke-Analyzer $autoAdvancePath
+    Assert-True (
+        $autoAdvance.ExitCode -eq 0 -and
+        $autoAdvance.Output -match 'Input kind: auto_advance; count: 1') `
+        "A complete auto-advance target-resolution report should pass:`n$($autoAdvance.Output)"
+
+    $legacyPath = Join-Path $temporaryDirectory 'legacy-target-resolution.jsonl'
+    $legacyEvents = @(New-ValidNavigationEvents 9 'ui_next' 0)
+    foreach ($field in @(
+            'row_count',
+            'filter_active',
+            'sort_active',
+            'query_active',
+            'pending_present',
+            'sequence_cache_hit',
+            'sequence_build_count',
+            'effective_index_ms',
+            'pending_activation_supersede_ms',
+            'base_sequence_ms',
+            'target_lookup_ms',
+            'target_sequence_ms',
+            'navigation_state_result_ms')) {
+        $legacyEvents[1].PSObject.Properties.Remove($field)
+    }
+    $legacyEvents += [pscustomobject]@{
+        steady_ns = 20000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture $legacyPath $legacyEvents
+    $legacy = Invoke-Analyzer $legacyPath
+    Assert-True ($legacy.ExitCode -eq 0) "A complete legacy navigation log should remain readable:`n$($legacy.Output)"
+    Assert-True (
+        $legacy.Output -notmatch 'Target resolution diagnostics:') `
+        "Legacy logs should not fabricate target-resolution diagnostics:`n$($legacy.Output)"
+
+    $partialTargetResolutionPath = Join-Path $temporaryDirectory 'partial-target-resolution.jsonl'
+    $partialTargetResolutionEvents = @(New-ValidNavigationEvents 10 'ui_next' 0)
+    $partialTargetResolutionEvents[1].PSObject.Properties.Remove('target_sequence_ms')
+    $partialTargetResolutionEvents += [pscustomobject]@{
+        steady_ns = 20000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture $partialTargetResolutionPath $partialTargetResolutionEvents
+    $partialTargetResolution = Invoke-Analyzer $partialTargetResolutionPath
+    Assert-True (
+        $partialTargetResolution.ExitCode -ne 0) `
+        "A partial target-resolution schema should fail:`n$($partialTargetResolution.Output)"
+
+    foreach ($integerField in @('row_count', 'sequence_build_count')) {
+        $stringIntegerPath = Join-Path $temporaryDirectory "string-$integerField.jsonl"
+        $stringIntegerEvents = @(New-ValidNavigationEvents 13 'ui_next' 0)
+        $stringIntegerEvents[1].$integerField =
+            [string]$stringIntegerEvents[1].$integerField
+        $stringIntegerEvents += [pscustomobject]@{
+            steady_ns = 20000000
+            event = 'profile_recorder_summary'
+            stop_reason = 'explicit'
+            accepted_bytes = 1024
+            dropped_events = 0
+        }
+        Write-ProfileFixture $stringIntegerPath $stringIntegerEvents
+        $stringInteger = Invoke-Analyzer $stringIntegerPath
+        Assert-True (
+            $stringInteger.ExitCode -ne 0) `
+            "$integerField as a JSON string must fail strict integer validation:`n$($stringInteger.Output)"
+    }
+
+    $invalidTargetResolutionSumPath = Join-Path $temporaryDirectory 'invalid-target-resolution-sum.jsonl'
+    $invalidTargetResolutionSumEvents = @(New-ValidNavigationEvents 11 'keyboard_next' 0)
+    $invalidTargetResolutionSumEvents[1].navigation_state_result_ms = 1.4
+    $invalidTargetResolutionSumEvents += [pscustomobject]@{
+        steady_ns = 20000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture $invalidTargetResolutionSumPath $invalidTargetResolutionSumEvents
+    $invalidTargetResolutionSum = Invoke-Analyzer $invalidTargetResolutionSumPath
+    Assert-True (
+        $invalidTargetResolutionSum.ExitCode -ne 0) `
+        "A target-resolution breakdown that does not sum to the aggregate should fail:`n$($invalidTargetResolutionSum.Output)"
 
     $multiRoundPath = Join-Path $temporaryDirectory 'multi-round.jsonl'
     $multiRoundBase = @(New-ValidNavigationEvents 8 'ui_next' 0)

@@ -104,7 +104,8 @@ public:
     [[nodiscard]] SampleWorkflowCommandResult RequestSampleNavigation(
         const SampleNavigationRequest& request,
         const SpectrumSnapshotHandle& snapshot,
-        std::optional<std::size_t> deferred_base_index = std::nullopt);
+        std::optional<std::size_t> deferred_base_index = std::nullopt,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
         bool* loaded = nullptr,
@@ -146,9 +147,11 @@ public:
     [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
     [[nodiscard]] SampleWorkflowCommandResult AssignActiveLabelToCurrentSample(
         const SpectrumSnapshotHandle& snapshot,
-        int code);
+        int code,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] SampleWorkflowCommandResult ClearActiveLabelForCurrentSample(
-        const SpectrumSnapshotHandle& snapshot);
+        const SpectrumSnapshotHandle& snapshot,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] SampleWorkflowCommandResult UndoLastLabelWrite(
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSessionAction ClearFilters(const SpectrumSnapshotHandle& snapshot);
@@ -252,6 +255,7 @@ private:
     [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
         const SampleLabelWriteResult& result,
+        NavigationTargetResolutionReport* target_resolution = nullptr,
         bool record_undo = true,
         std::optional<std::size_t> restore_sample_index = std::nullopt);
     void RecordLabelUndo(const SampleLabelWriteResult& result);

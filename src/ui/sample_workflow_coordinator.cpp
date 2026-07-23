@@ -528,7 +528,8 @@ std::optional<PendingSampleNavigation> SampleWorkflowCoordinator::pending_sample
 SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
     const SampleNavigationRequest& request,
     const SpectrumSnapshotHandle& snapshot,
-    std::optional<std::size_t> deferred_base_index)
+    std::optional<std::size_t> deferred_base_index,
+    NavigationTargetResolutionReport* target_resolution)
 {
     SampleWorkflowCommandResult result;
     const std::optional<std::size_t> pending_index_before = navigation_.pending_index();
@@ -536,7 +537,8 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
         ? navigation_.NavigateDeferred(
               request,
               ShouldRememberLabelingPosition(request.kind),
-              deferred_base_index)
+              deferred_base_index,
+              target_resolution)
         : navigation_.Navigate(request);
     if (result.navigation.has_active_source && result.navigation.target_found) {
         if (!deferred_sample_navigation_ && ShouldRememberLabelingPosition(request.kind)) {
@@ -993,23 +995,31 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelin
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::AssignActiveLabelToCurrentSample(
     const SpectrumSnapshotHandle& snapshot,
-    int code)
+    int code,
+    NavigationTargetResolutionReport* target_resolution)
 {
     const std::optional<std::size_t> sample_index = ActiveSampleIndex(snapshot);
     if (!sample_index) {
         return {};
     }
-    return ApplyLabelWriteResult(snapshot, labeling_.AssignLabel(*sample_index, code));
+    return ApplyLabelWriteResult(
+        snapshot,
+        labeling_.AssignLabel(*sample_index, code),
+        target_resolution);
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ClearActiveLabelForCurrentSample(
-    const SpectrumSnapshotHandle& snapshot)
+    const SpectrumSnapshotHandle& snapshot,
+    NavigationTargetResolutionReport* target_resolution)
 {
     const std::optional<std::size_t> sample_index = ActiveSampleIndex(snapshot);
     if (!sample_index) {
         return {};
     }
-    return ApplyLabelWriteResult(snapshot, labeling_.ClearLabel(*sample_index));
+    return ApplyLabelWriteResult(
+        snapshot,
+        labeling_.ClearLabel(*sample_index),
+        target_resolution);
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
@@ -1037,7 +1047,12 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
 
     write_result.advance_requested = false;
     label_undo_history_->entries.pop_back();
-    return ApplyLabelWriteResult(snapshot, write_result, false, entry.sample_index);
+    return ApplyLabelWriteResult(
+        snapshot,
+        write_result,
+        nullptr,
+        false,
+        entry.sample_index);
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::ClearFilters(const SpectrumSnapshotHandle& snapshot)
@@ -1641,6 +1656,7 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
 SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
     const SpectrumSnapshotHandle& snapshot,
     const SampleLabelWriteResult& result,
+    NavigationTargetResolutionReport* target_resolution,
     bool record_undo,
     std::optional<std::size_t> restore_sample_index)
 {
@@ -1675,7 +1691,8 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
         const SampleWorkflowCommandResult navigation_result = RequestSampleNavigation(
             BuildAutoAdvanceRequest(*task),
             snapshot,
-            result.sample_index);
+            result.sample_index,
+            target_resolution);
         MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
         command_result.navigation = navigation_result.navigation;
         command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;

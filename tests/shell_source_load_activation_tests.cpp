@@ -549,6 +549,26 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
         presented_report->snapshot_activated_ns >=
             presented_report->attempts[0].completion_drained_ns &&
         presented_report->first_present_ns >= presented_report->snapshot_activated_ns;
+    const auto target_resolution_sum = [](const specforge::NavigationLatencyReport& report) {
+        const specforge::NavigationTargetResolutionReport& resolution =
+            report.target_resolution;
+        return resolution.effective_index_ns +
+            resolution.pending_activation_supersede_ns +
+            resolution.base_sequence_ns +
+            resolution.target_lookup_ns +
+            resolution.target_sequence_ns +
+            resolution.navigation_state_result_ns;
+    };
+    const bool target_resolution_correlated = terminal_outcomes_present &&
+        superseded_report->target_resolution.row_count == 3 &&
+        !superseded_report->target_resolution.pending_present &&
+        presented_report->target_resolution.row_count == 3 &&
+        presented_report->target_resolution.pending_present &&
+        !presented_report->target_resolution.sequence_cache_hit &&
+        presented_report->target_resolution.sequence_build_count == 2 &&
+        target_resolution_sum(*presented_report) ==
+            presented_report->target_resolved_ns -
+                presented_report->requested_ns;
     shell.reset();
     std::filesystem::remove(path);
 
@@ -566,6 +586,9 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     Require(trace_viewport_correlated, "the presented trace should name the Spectrum viewport");
     Require(trace_attempt_correlated, "the presented trace should retain its complete worker attempt");
     Require(trace_activation_correlated, "activation and Present timestamps should follow worker drain");
+    Require(
+        target_resolution_correlated,
+        "rapid navigation should retain an exact target-resolution breakdown and pending state");
 }
 
 void TestGenericRowLocationDoesNotStartPreviousNextTrace()
@@ -669,17 +692,100 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
         specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
             specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
 
-    const specforge::SourceCollectionSessionResult result = Access::SubmitNavigation(
+    const auto drain_and_present =
+        [&shell](std::size_t target_index, std::uint64_t presentation_frame) {
+            const auto deadline = std::chrono::steady_clock::now() + 2s;
+            while (std::chrono::steady_clock::now() < deadline) {
+                Access::Drain(*shell);
+                const specforge::SpectrumSnapshotHandle snapshot =
+                    Access::Session(*shell).CurrentSampleSnapshot();
+                if (snapshot && snapshot->collection.current_index == target_index &&
+                    Access::PendingLoadCount(*shell) == 0) {
+                    break;
+                }
+                std::this_thread::sleep_for(2ms);
+            }
+            return Access::CompleteFramePresentation(*shell, presentation_frame, 7);
+        };
+    const auto has_complete_target_resolution =
+        [](const specforge::NavigationLatencyReport& report) {
+            const specforge::NavigationTargetResolutionReport& resolution =
+                report.target_resolution;
+            const std::int64_t stage_sum =
+                resolution.effective_index_ns +
+                resolution.pending_activation_supersede_ns +
+                resolution.base_sequence_ns +
+                resolution.target_lookup_ns +
+                resolution.target_sequence_ns +
+                resolution.navigation_state_result_ns;
+            return resolution.row_count >= 1 &&
+                !resolution.pending_present &&
+                !resolution.sequence_cache_hit &&
+                resolution.sequence_build_count == 2 &&
+                resolution.effective_index_ns >= 0 &&
+                resolution.pending_activation_supersede_ns >= 0 &&
+                resolution.base_sequence_ns >= 0 &&
+                resolution.target_lookup_ns >= 0 &&
+                resolution.target_sequence_ns >= 0 &&
+                resolution.navigation_state_result_ns >= 0 &&
+                stage_sum ==
+                    report.target_resolved_ns - report.requested_ns;
+        };
+
+    const specforge::SourceCollectionSessionResult assign_result = Access::SubmitNavigation(
         *shell,
         specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
             specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)),
         specforge::NavigationLatencyInputKind::AutoAdvance);
-    const std::size_t trace_count = Access::NavigationTraceCount(*shell);
+    const std::vector<specforge::NavigationLatencyReport> assign_reports =
+        drain_and_present(1, 91);
+
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(false)));
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7)));
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::SetActiveLabelingAutoAdvance(true)));
+    Access::EnableNavigationTracing(*shell, 92);
+    const specforge::SourceCollectionSessionResult clear_result = Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::ClearActiveLabelForCurrentSample()),
+        specforge::NavigationLatencyInputKind::AutoAdvance);
+    const std::vector<specforge::NavigationLatencyReport> clear_reports =
+        drain_and_present(2, 92);
+
+    const bool assign_report_complete =
+        assign_reports.size() == 1 &&
+        assign_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented &&
+        assign_reports.front().input_kind == specforge::NavigationLatencyInputKind::AutoAdvance &&
+        assign_reports.front().from_index == 0 &&
+        assign_reports.front().target_index == 1 &&
+        has_complete_target_resolution(assign_reports.front());
+    const bool clear_report_complete =
+        clear_reports.size() == 1 &&
+        clear_reports.front().outcome == specforge::NavigationLatencyOutcome::Presented &&
+        clear_reports.front().input_kind == specforge::NavigationLatencyInputKind::AutoAdvance &&
+        clear_reports.front().from_index == 1 &&
+        clear_reports.front().target_index == 2 &&
+        has_complete_target_resolution(clear_reports.front());
     shell.reset();
     std::filesystem::remove(path);
 
-    Require(result.follow_up_spectrum_index == 1, "label assignment should request auto-advance");
-    Require(trace_count == 1, "workflow auto-advance must start an explicit navigation trace");
+    Require(assign_result.follow_up_spectrum_index == 1, "label assignment should request auto-advance");
+    Require(clear_result.follow_up_spectrum_index == 2, "label clearing should request auto-advance");
+    Require(
+        assign_report_complete,
+        "label assignment auto-advance should emit an analyzer-compatible target-resolution report");
+    Require(
+        clear_report_complete,
+        "label clearing auto-advance should emit an analyzer-compatible target-resolution report");
 }
 
 void TestNewActivationSupersedesAnUnpresentedOlderTrace()

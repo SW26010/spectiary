@@ -121,6 +121,7 @@ private:
         std::optional<std::size_t> from_index,
         NavigationLatencyTimePoint requested_at,
         NavigationLatencyTimePoint target_resolved_at,
+        NavigationTargetResolutionReport target_resolution,
         std::optional<NavigationTraceOrigin> navigation_origin);
 
     enum class PendingSourceLoadPurpose {

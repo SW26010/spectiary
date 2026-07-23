@@ -284,7 +284,9 @@ public:
     SourceCollectionSession(const SourceCollectionSession&) = delete;
     SourceCollectionSession& operator=(const SourceCollectionSession&) = delete;
 
-    [[nodiscard]] SourceCollectionSessionResult Submit(SourceCollectionSessionIntent intent);
+    [[nodiscard]] SourceCollectionSessionResult Submit(
+        SourceCollectionSessionIntent intent,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] SourceCollectionSessionView View() const;
@@ -335,7 +337,8 @@ private:
         std::optional<std::filesystem::path>* canceled_source_follow_up_path);
     [[nodiscard]] SourceCollectionSessionAction RequestSampleNavigation(
         const SampleNavigationRequest& request,
-        SampleNavigationResult* navigation_result = nullptr);
+        SampleNavigationResult* navigation_result = nullptr,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
         bool* loaded = nullptr,
@@ -370,8 +373,11 @@ private:
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
     [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(int code);
-    [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample();
+    [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(
+        int code,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample(
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] SourceCollectionSessionAction UndoLastLabelWrite();
     [[nodiscard]] SourceCollectionSessionAction ClearFilters();
     [[nodiscard]] SourceCollectionSessionAction AddFilterSource(std::string source_id);

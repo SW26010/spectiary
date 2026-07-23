@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "domain/source_path_identity.h"
+#include "profile/navigation_latency_trace.h"
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_roster.h"
@@ -24,6 +25,14 @@ using namespace std::chrono_literals;
 
 constexpr auto kSourceSessionSaveDebounce = 500ms;
 constexpr auto kSourceSessionSaveRetry = 2s;
+
+std::int64_t ElapsedNavigationResolutionNanoseconds(
+    NavigationLatencyTimePoint started_at)
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               NavigationLatencyTrace::Now() - started_at)
+        .count();
+}
 
 bool IsRestorableSourcePath(const std::filesystem::path& path)
 {
@@ -569,10 +578,19 @@ bool SourceCollectionSession::SupersedesPendingSourceActivation(
     return false;
 }
 
-SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSessionIntent intent)
+SourceCollectionSessionResult SourceCollectionSession::Submit(
+    SourceCollectionSessionIntent intent,
+    NavigationTargetResolutionReport* target_resolution)
 {
+    const NavigationLatencyTimePoint pending_activation_started_at =
+        target_resolution != nullptr ? NavigationLatencyTrace::Now()
+                                     : NavigationLatencyTimePoint{};
     const std::optional<std::size_t> pending_sample_index_before =
         workflow_->pending_sample_index();
+    if (target_resolution != nullptr) {
+        target_resolution->pending_present =
+            pending_sample_index_before.has_value();
+    }
     const std::optional<std::filesystem::path> pending_source_path_before =
         pending_sample_index_before && roster_->snapshot()
         ? std::optional<std::filesystem::path>{roster_->snapshot()->source.path}
@@ -580,6 +598,11 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
     pending_background_spectrum_index_.reset();
     if (SupersedesPendingSourceActivation(intent)) {
         workflow_->CancelDeferredSampleNavigation();
+    }
+    if (target_resolution != nullptr) {
+        target_resolution->pending_activation_supersede_ns +=
+            ElapsedNavigationResolutionNanoseconds(
+                pending_activation_started_at);
     }
     if (intent.kind != SourceCollectionSessionIntentKind::SampleNavigation) {
         workflow_->DiscardPreparedViewCaches();
@@ -620,7 +643,10 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
     case SourceCollectionSessionIntentKind::SampleNavigation:
         switch (intent.sample_navigation.kind) {
         case SampleNavigationIntentKind::Move:
-            result.action = RequestSampleNavigation(intent.sample_navigation.request, &result.navigation);
+            result.action = RequestSampleNavigation(
+                intent.sample_navigation.request,
+                &result.navigation,
+                target_resolution);
             break;
         case SampleNavigationIntentKind::SetSampleNameQuery:
             result.action = SetSampleNameQuery(std::move(intent.sample_navigation.query));
@@ -670,10 +696,12 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
             result.action = DeactivateActiveLabelingTask();
             break;
         case ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample:
-            result.action = AssignActiveLabelToCurrentSample(intent.active_sample_workflow.label_code);
+            result.action = AssignActiveLabelToCurrentSample(
+                intent.active_sample_workflow.label_code,
+                target_resolution);
             break;
         case ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample:
-            result.action = ClearActiveLabelForCurrentSample();
+            result.action = ClearActiveLabelForCurrentSample(target_resolution);
             break;
         case ActiveSampleWorkflowIntentKind::UndoLastLabelWrite:
             result.action = UndoLastLabelWrite();
@@ -720,6 +748,9 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
         break;
     }
     PreserveRequiredBackgroundSnapshotLoad();
+    const NavigationLatencyTimePoint pending_follow_up_started_at =
+        target_resolution != nullptr ? NavigationLatencyTrace::Now()
+                                     : NavigationLatencyTimePoint{};
     const std::optional<std::size_t> pending_sample_index_after =
         workflow_->pending_sample_index();
     if (pending_sample_index_after == pending_sample_index_before &&
@@ -736,6 +767,11 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(SourceCollectionSe
             SourcePathIdentityKey(active_snapshot_after->source.path);
     if (pending_sample_index_before && !previous_source_follow_up_retained) {
         result.canceled_source_follow_up_path = pending_source_path_before;
+    }
+    if (target_resolution != nullptr) {
+        target_resolution->pending_activation_supersede_ns +=
+            ElapsedNavigationResolutionNanoseconds(
+                pending_follow_up_started_at);
     }
     if (const std::optional<SourceCollectionIdentity> active_identity =
             workflow_->ActiveSourceIdentity();
@@ -875,12 +911,17 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
 
 SourceCollectionSessionAction SourceCollectionSession::RequestSampleNavigation(
     const SampleNavigationRequest& request,
-    SampleNavigationResult* navigation_result)
+    SampleNavigationResult* navigation_result,
+    NavigationTargetResolutionReport* target_resolution)
 {
     SourceCollectionSessionAction action;
     ApplyWorkflowCommandResult(
         action,
-        workflow_->RequestSampleNavigation(request, roster_->snapshot()),
+        workflow_->RequestSampleNavigation(
+            request,
+            roster_->snapshot(),
+            std::nullopt,
+            target_resolution),
         navigation_result);
     return action;
 }
@@ -1274,17 +1315,29 @@ SourceCollectionSessionAction SourceCollectionSession::DeactivateActiveLabelingT
     return action;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::AssignActiveLabelToCurrentSample(int code)
+SourceCollectionSessionAction SourceCollectionSession::AssignActiveLabelToCurrentSample(
+    int code,
+    NavigationTargetResolutionReport* target_resolution)
 {
     SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(action, workflow_->AssignActiveLabelToCurrentSample(roster_->snapshot(), code));
+    ApplyWorkflowCommandResult(
+        action,
+        workflow_->AssignActiveLabelToCurrentSample(
+            roster_->snapshot(),
+            code,
+            target_resolution));
     return action;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::ClearActiveLabelForCurrentSample()
+SourceCollectionSessionAction SourceCollectionSession::ClearActiveLabelForCurrentSample(
+    NavigationTargetResolutionReport* target_resolution)
 {
     SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(action, workflow_->ClearActiveLabelForCurrentSample(roster_->snapshot()));
+    ApplyWorkflowCommandResult(
+        action,
+        workflow_->ClearActiveLabelForCurrentSample(
+            roster_->snapshot(),
+            target_resolution));
     return action;
 }
 

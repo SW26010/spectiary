@@ -16,6 +16,7 @@
 
 namespace specforge {
 
+struct NavigationTargetResolutionReport;
 struct PreparedSampleWorkflowState;
 
 enum class SampleNavigationRequestKind {
@@ -108,7 +109,8 @@ public:
     [[nodiscard]] SampleNavigationResult NavigateDeferred(
         const SampleNavigationRequest& request,
         bool remember_labeling_position,
-        std::optional<std::size_t> base_index = std::nullopt);
+        std::optional<std::size_t> base_index = std::nullopt,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] bool RetargetDeferredNavigation(std::size_t spectrum_index);
     [[nodiscard]] bool CommitDeferredNavigation(std::size_t spectrum_index);
     void CancelDeferredNavigation();

@@ -149,6 +149,15 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
 
 - `total_ms`: 输入到首次成功 `Present`；非 presented 结果则到其终态。
 - `target_resolution_ms`、`enqueue_ms`、`queue_wait_ms`: 主线程求目标、入队和等待 worker。
+  `target_resolution_ms` 进一步严格拆成六项，且六项之和必须等于 aggregate：
+  `effective_index_ms`（读取 committed/pending effective index）、
+  `pending_activation_supersede_ms`（检查和更新既有 pending activation/follow-up 的
+  supersede/cancel bookkeeping）、`base_sequence_ms`（构造导航起点 sequence）、
+  `target_lookup_ms`（按 previous/next/label/locate 规则求目标）、
+  `target_sequence_ms`（以目标 source row 构造结果 sequence）和
+  `navigation_state_result_ms`（其余 navigation state mutation、result propagation 与
+  owner-boundary orchestration）。最后一项是从完整 `target_resolution_ms` 扣除前五项所得，
+  因而保留边界调用、轻量 bookkeeping 和插桩本身的残余，不应解释成某个隐藏 cache。
 - `source_inspection_ms`、`decode_ms`、`context_prepare_ms`、`source_revalidation_ms`、
   `workflow_prepare_ms`: 后台 source 检查、光谱解码、collection context、TOCTOU revalidation
   和 workflow 准备。
@@ -164,6 +173,14 @@ renderer 都提供带 viewport ID 的成功时间；其他 viewport、其他 sna
   每个 preparation round 也有自己的 `context_reused`，因此 TOCTOU retry 不会覆盖前一轮。
   当前尚未实现导航
   缓存，所以 `cache_hit` 固定为 `false`；后续缓存实现可沿用同一口径做冷/热路径 A/B。
+- target-resolution 诊断还记录 `row_count`、`filter_active`、`sort_active`、
+  `query_active`、`pending_present`、`sequence_cache_hit` 和
+  `sequence_build_count`。这里 `pending_present` 是 command 进入 Navigation 时是否已有
+  deferred sample target；`sequence_cache_hit` 只表示本次 target resolution 是否真的读取
+  已 materialize 的 sequence cache，不能从“owner 存在 cache”推断为 `true`；
+  `sequence_build_count` 是本次实际构造次数。当前 `NavigateDeferred` 的 base/target 两条路径
+  都调用 `BuildSequence`，典型成功 previous/next 因而应记录 `false / 2`，这是诊断事实，不是
+  缓存优化。
 
 Folder source 的 warm navigation 会复用上一次验证通过的 immutable listing generation。
 `source_inspection_ms` 正常只包含窄的目标文件/依赖检查；若目录 generation 未失效，
@@ -194,12 +211,24 @@ JSON boolean。
 旧 profile 没有 `context_reused` 时仍可分析；新 profile 中 attempt 与 preparation round
 必须提供合法 JSON boolean，且 attempt 值必须等于最终 preparation round。
 
+旧 navigation profile 没有 target-resolution 子阶段和上述诊断字段时仍按原 aggregate
+schema 分析。一旦同一 profile 的任一 `navigation_latency` 事件出现任一新字段，所有
+`navigation_latency` 事件都必须提供完整字段集、合法的 JSON boolean/integer/non-negative
+duration，且六项 duration 之和必须与 `target_resolution_ms` 在 0.001ms 容差内一致。这样旧证据
+可继续读取，同时不允许部分升级的新日志被当成完整采集。
+
 采集时先在 `Performance > Start Recording` 开始录制，用真实数据连续执行若干次上一条/
 下一条，等最后一条显示后再 `Stop Recording`。然后运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\analyze-navigation-profile.ps1 logs\specforge-profile-YYYYMMDD-HHMMSS-mmm.jsonl
 ```
+
+比较 UI 与键盘 target resolution 时必须固定同一 source、同一 filter/sort/query 状态和同一
+source-row 区间，分开录制纯 UI 与纯键盘各至少 100 次成功 presented navigation。每次输入要等
+目标显示后再继续，除非实验明确要比较 rapid-navigation pending path；普通输入对比要求
+`pending_present=false`。记录 source、起止 index、方向、样本数和 profile 路径，不能把不同
+目录、不同 index window 或 Previous/Next 混成输入设备差异。
 
 Portable build 的实际日志通常在 `Data\logs\`，也可以把对应完整路径传给脚本。分析器会
 校验唯一且位于末尾的 recorder summary、`dropped_events == 0`、至少一条导航事件和至少

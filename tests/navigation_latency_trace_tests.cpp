@@ -47,7 +47,17 @@ void TestPresentedTraceCapturesCorrelatedPhases()
         specforge::NavigationLatencyInputKind::UiNext,
         AtMilliseconds(1),
         AtMilliseconds(2),
-        AtMilliseconds(3));
+        AtMilliseconds(3),
+        {
+            .effective_index_ns = 100'000,
+            .pending_activation_supersede_ns = 100'000,
+            .base_sequence_ns = 200'000,
+            .target_lookup_ns = 100'000,
+            .target_sequence_ns = 200'000,
+            .row_count = 3,
+            .pending_present = true,
+            .sequence_build_count = 2,
+        });
     const specforge::NavigationLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(11, AtMilliseconds(4));
     attempt->MarkSourceTaskId(99);
@@ -122,6 +132,16 @@ void TestPresentedTraceCapturesCorrelatedPhases()
         text.find("\"context_reused\":true") != std::string::npos,
         "context reuse diagnostics should serialize");
     Require(text.find("\"input_kind\":\"ui_next\"") != std::string::npos, "input kind should serialize");
+    Require(text.find("\"row_count\":3") != std::string::npos, "navigation row count should serialize");
+    Require(text.find("\"pending_present\":true") != std::string::npos, "pending state should serialize");
+    Require(
+        text.find("\"sequence_build_count\":2") != std::string::npos,
+        "sequence build count should serialize");
+    Require(
+        text.find("\"base_sequence_ms\":0.2000") != std::string::npos &&
+            text.find("\"navigation_state_result_ms\":0.3000") !=
+                std::string::npos,
+        "target-resolution phases should serialize and preserve the aggregate");
     Require(text.find("\"presentation_viewport_id\":7") != std::string::npos, "viewport id should serialize");
     Require(text.find("\"decode_ms\":2.0000") != std::string::npos, "decode duration should be calculated");
     Require(text.find("\"completion_service_wait_ms\":1.0000") != std::string::npos, "service wait should be calculated");

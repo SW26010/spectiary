@@ -143,6 +143,23 @@ struct NavigationLatencyPresentation {
     NavigationLatencyTimePoint completed_at;
 };
 
+struct NavigationTargetResolutionReport {
+    std::int64_t effective_index_ns = 0;
+    std::int64_t pending_activation_supersede_ns = 0;
+    std::int64_t base_sequence_ns = 0;
+    std::int64_t target_lookup_ns = 0;
+    std::int64_t target_sequence_ns = 0;
+    std::int64_t navigation_state_result_ns = 0;
+
+    std::size_t row_count = 0;
+    bool filter_active = false;
+    bool sort_active = false;
+    bool query_active = false;
+    bool pending_present = false;
+    bool sequence_cache_hit = false;
+    std::size_t sequence_build_count = 0;
+};
+
 struct NavigationLatencyReport {
     std::uint64_t navigation_id = 0;
     std::uint64_t activation_frame = 0;
@@ -152,6 +169,7 @@ struct NavigationLatencyReport {
     NavigationLatencyInputKind input_kind = NavigationLatencyInputKind::UiNext;
     NavigationLatencyOutcome outcome = NavigationLatencyOutcome::Pending;
     bool cache_hit = false;
+    NavigationTargetResolutionReport target_resolution;
     std::vector<NavigationLatencyAttemptReport> attempts;
 
     std::int64_t input_ns = 0;
@@ -172,7 +190,8 @@ public:
         NavigationLatencyInputKind input_kind,
         NavigationLatencyTimePoint input_at,
         NavigationLatencyTimePoint requested_at,
-        NavigationLatencyTimePoint target_resolved_at);
+        NavigationLatencyTimePoint target_resolved_at,
+        NavigationTargetResolutionReport target_resolution = {});
 
     [[nodiscard]] static NavigationLatencyTimePoint Now() noexcept;
 
@@ -201,6 +220,7 @@ private:
     std::size_t from_index_ = 0;
     NavigationLatencyInputKind input_kind_ = NavigationLatencyInputKind::UiNext;
     bool cache_hit_ = false;
+    NavigationTargetResolutionReport target_resolution_;
     std::int64_t input_ns_ = 0;
     std::int64_t requested_ns_ = 0;
     std::int64_t target_resolved_ns_ = 0;

@@ -1,9 +1,11 @@
 #include "ui/sample_navigation_controller.h"
 
 #include "domain/source_path_identity.h"
+#include "profile/navigation_latency_trace.h"
 #include "ui/sample_workflow_preparation.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -14,6 +16,15 @@
 
 namespace specforge {
 namespace {
+
+using TargetResolutionClock = std::chrono::steady_clock;
+
+std::int64_t ElapsedNanoseconds(TargetResolutionClock::time_point started_at)
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               TargetResolutionClock::now() - started_at)
+        .count();
+}
 
 std::string PathToUtf8(const std::filesystem::path& path)
 {
@@ -524,13 +535,24 @@ SampleNavigationResult SampleNavigationController::Navigate(const SampleNavigati
 SampleNavigationResult SampleNavigationController::NavigateDeferred(
     const SampleNavigationRequest& request,
     bool remember_labeling_position,
-    std::optional<std::size_t> base_index)
+    std::optional<std::size_t> base_index,
+    NavigationTargetResolutionReport* target_resolution)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr) {
         return {};
     }
 
+    if (target_resolution != nullptr) {
+        target_resolution->row_count = session->spectrum_count;
+        target_resolution->filter_active = session->filter_active;
+        target_resolution->sort_active =
+            session->sort_choice.active &&
+            session->sort_choice.values.size() == session->spectrum_count;
+        target_resolution->query_active = !session->sample_name_query.empty();
+        target_resolution->pending_present = session->pending_index.has_value();
+        target_resolution->sequence_cache_hit = false;
+    }
     if (!base_index) {
         base_index = session->pending_index ? session->pending_index : session->current_index;
     }
@@ -538,12 +560,23 @@ SampleNavigationResult SampleNavigationController::NavigateDeferred(
     result.has_active_source = true;
     result.previous_index = base_index.value_or(0);
     result.current_index = base_index.value_or(0);
+    const TargetResolutionClock::time_point base_sequence_started_at =
+        target_resolution != nullptr ? TargetResolutionClock::now()
+                                     : TargetResolutionClock::time_point{};
     const SampleNavigationSequence sequence = BuildSequence(*session, base_index);
+    if (target_resolution != nullptr) {
+        target_resolution->base_sequence_ns +=
+            ElapsedNanoseconds(base_sequence_started_at);
+        ++target_resolution->sequence_build_count;
+    }
     PopulateResultFromSequence(result, *session, sequence);
     if (session->spectrum_count == 0) {
         return result;
     }
 
+    const TargetResolutionClock::time_point target_lookup_started_at =
+        target_resolution != nullptr ? TargetResolutionClock::now()
+                                     : TargetResolutionClock::time_point{};
     std::optional<std::size_t> target_index = ResolveNavigationTarget(
         request,
         sequence,
@@ -558,6 +591,10 @@ SampleNavigationResult SampleNavigationController::NavigateDeferred(
          (*session->pending_index < request.eligible_samples.size() &&
           request.eligible_samples[*session->pending_index]))) {
         target_index = session->pending_index;
+    }
+    if (target_resolution != nullptr) {
+        target_resolution->target_lookup_ns +=
+            ElapsedNanoseconds(target_lookup_started_at);
     }
     if (!target_index) {
         return result;
@@ -575,7 +612,15 @@ SampleNavigationResult SampleNavigationController::NavigateDeferred(
         session->pending_navigation_remembers_labeling_position =
             session->pending_navigation_remembers_labeling_position || remember_labeling_position;
     }
+    const TargetResolutionClock::time_point target_sequence_started_at =
+        target_resolution != nullptr ? TargetResolutionClock::now()
+                                     : TargetResolutionClock::time_point{};
     const SampleNavigationSequence target_sequence = BuildSequence(*session, *target_index);
+    if (target_resolution != nullptr) {
+        target_resolution->target_sequence_ns +=
+            ElapsedNanoseconds(target_sequence_started_at);
+        ++target_resolution->sequence_build_count;
+    }
     PopulateResultFromSequence(result, *session, target_sequence);
     result.current_index = *target_index;
     return result;

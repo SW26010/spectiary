@@ -36,6 +36,23 @@ function Get-RequiredInt64 {
     return $parsed
 }
 
+function Get-RequiredJsonInt64 {
+    param(
+        [object]$Event,
+        [string]$Field,
+        [long]$Minimum,
+        [string]$Context,
+        [System.Collections.Generic.List[string]]$Failures
+    )
+
+    $value = Get-EventValue $Event $Field
+    if (-not (Test-JsonNonNegativeInteger $value)) {
+        Add-Failure $Failures "$Context.$Field must be a non-negative JSON integer."
+        return $null
+    }
+    return Get-RequiredInt64 $Event $Field $Minimum $Context $Failures
+}
+
 function Get-RequiredDuration {
     param(
         [object]$Event,
@@ -142,6 +159,33 @@ function Test-AggregateDurationSum {
     }
 }
 
+function Test-TargetResolutionBreakdown {
+    param(
+        [object]$Event,
+        [string[]]$Fields,
+        [string]$Context,
+        [System.Collections.Generic.List[string]]$Failures
+    )
+
+    $targetResolution = Get-RequiredDuration $Event 'target_resolution_ms' $Context $Failures
+    if ($null -eq $targetResolution) {
+        return
+    }
+    $breakdown = 0.0
+    foreach ($field in $Fields) {
+        $value = Get-RequiredDuration $Event $field $Context $Failures
+        if ($null -eq $value) {
+            return
+        }
+        $breakdown += $value
+    }
+    if ([Math]::Abs($targetResolution - $breakdown) -gt 0.001) {
+        Add-Failure $Failures (
+            "$Context target-resolution breakdown does not sum to target_resolution_ms " +
+            "({0:F4} vs {1:F4} ms)." -f $breakdown, $targetResolution)
+    }
+}
+
 function Get-MetricValues {
     param(
         [object[]]$Events,
@@ -205,6 +249,33 @@ $hasContextReuseDiagnostics = @(
         Where-Object {
             $null -ne $_.PSObject.Properties['context_reused']
         }).Count -gt 0
+$targetResolutionDurationFields = @(
+    'effective_index_ms',
+    'pending_activation_supersede_ms',
+    'base_sequence_ms',
+    'target_lookup_ms',
+    'target_sequence_ms',
+    'navigation_state_result_ms'
+)
+$targetResolutionDiagnosticFields = @(
+    'row_count',
+    'filter_active',
+    'sort_active',
+    'query_active',
+    'pending_present',
+    'sequence_cache_hit',
+    'sequence_build_count'
+)
+$hasTargetResolutionDiagnostics = @(
+    $navigationEvents |
+        Where-Object {
+            foreach ($field in @($targetResolutionDurationFields) + @($targetResolutionDiagnosticFields)) {
+                if ($null -ne $_.PSObject.Properties[$field]) {
+                    return $true
+                }
+            }
+            return $false
+        }).Count -gt 0
 if ($navigationEvents.Count -eq 0) {
     Add-Failure $failures 'No navigation_latency events were found.'
 }
@@ -228,6 +299,23 @@ foreach ($event in $navigationEvents) {
     [void](Get-RequiredInt64 $event 'attempt_count' 0 $context $failures)
     [void](Get-RequiredDuration $event 'total_ms' $context $failures)
     Test-RequiredBoolean $event 'cache_hit' $context $failures
+    if ($hasTargetResolutionDiagnostics) {
+        foreach ($field in $targetResolutionDurationFields) {
+            [void](Get-RequiredDuration $event $field $context $failures)
+        }
+        [void](Get-RequiredJsonInt64 $event 'row_count' 1 $context $failures)
+        Test-RequiredBoolean $event 'filter_active' $context $failures
+        Test-RequiredBoolean $event 'sort_active' $context $failures
+        Test-RequiredBoolean $event 'query_active' $context $failures
+        Test-RequiredBoolean $event 'pending_present' $context $failures
+        Test-RequiredBoolean $event 'sequence_cache_hit' $context $failures
+        [void](Get-RequiredJsonInt64 $event 'sequence_build_count' 0 $context $failures)
+        Test-TargetResolutionBreakdown `
+            $event `
+            $targetResolutionDurationFields `
+            $context `
+            $failures
+    }
     if ($null -ne $navigationId) {
         $key = [string]$navigationId
         if ($navigationById.ContainsKey($key)) {
@@ -559,7 +647,12 @@ if ($navigationEvents.Count -gt 0) {
 $metricFields = @(
     'total_ms',
     'input_to_request_ms',
-    'target_resolution_ms',
+    'target_resolution_ms'
+)
+if ($hasTargetResolutionDiagnostics) {
+    $metricFields += $targetResolutionDurationFields
+}
+$metricFields += @(
     'enqueue_ms',
     'queue_wait_ms',
     'source_inspection_ms',
@@ -579,6 +672,40 @@ foreach ($group in @($validPresentedEvents | Group-Object { [string](Get-EventVa
     Write-Host ''
     Write-Host "Input kind: $($group.Name); count: $($group.Count)"
     @($metricFields | ForEach-Object { Format-Metric ([object[]]$group.Group) $_ }) |
+        Format-Table -AutoSize
+}
+
+if ($hasTargetResolutionDiagnostics -and $validPresentedEvents.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Target resolution diagnostics:'
+    @(
+        $validPresentedEvents |
+            Group-Object {
+                '{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f
+                    [string](Get-EventValue $_ 'input_kind'),
+                    [long](Get-EventValue $_ 'row_count'),
+                    [bool](Get-EventValue $_ 'filter_active'),
+                    [bool](Get-EventValue $_ 'sort_active'),
+                    [bool](Get-EventValue $_ 'query_active'),
+                    [bool](Get-EventValue $_ 'pending_present'),
+                    [bool](Get-EventValue $_ 'sequence_cache_hit'),
+                    [long](Get-EventValue $_ 'sequence_build_count')
+            } |
+            Sort-Object Name |
+            ForEach-Object {
+                $parts = $_.Name -split '\|'
+                [pscustomobject]@{
+                    InputKind = $parts[0]
+                    RowCount = [long]$parts[1]
+                    FilterActive = [bool]::Parse($parts[2])
+                    SortActive = [bool]::Parse($parts[3])
+                    QueryActive = [bool]::Parse($parts[4])
+                    PendingPresent = [bool]::Parse($parts[5])
+                    SequenceCacheHit = [bool]::Parse($parts[6])
+                    SequenceBuildCount = [long]$parts[7]
+                    Count = $_.Count
+                }
+            }) |
         Format-Table -AutoSize
 }
 

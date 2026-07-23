@@ -4,6 +4,7 @@
 
 #include <charconv>
 #include <string>
+#include <utility>
 
 namespace specforge {
 namespace {
@@ -31,6 +32,13 @@ std::string DurationMilliseconds(std::int64_t begin_ns, std::int64_t end_ns)
         return "null";
     }
     return Milliseconds(static_cast<double>(end_ns - begin_ns) / 1'000'000.0);
+}
+
+std::string NanosecondsAsMilliseconds(std::int64_t duration_ns)
+{
+    return duration_ns >= 0
+        ? Milliseconds(static_cast<double>(duration_ns) / 1'000'000.0)
+        : "null";
 }
 
 template <typename TimestampGetter>
@@ -379,15 +387,26 @@ NavigationLatencyTrace::NavigationLatencyTrace(
     NavigationLatencyInputKind input_kind,
     NavigationLatencyTimePoint input_at,
     NavigationLatencyTimePoint requested_at,
-    NavigationLatencyTimePoint target_resolved_at)
+    NavigationLatencyTimePoint target_resolved_at,
+    NavigationTargetResolutionReport target_resolution)
     : navigation_id_(navigation_id),
       from_index_(from_index),
       input_kind_(input_kind),
       input_ns_(ToNanoseconds(input_at)),
       requested_ns_(ToNanoseconds(requested_at)),
       target_resolved_ns_(ToNanoseconds(target_resolved_at)),
+      target_resolution_(std::move(target_resolution)),
       target_index_(target_index)
 {
+    const std::int64_t measured_ns = target_resolved_ns_ - requested_ns_;
+    const std::int64_t attributed_ns =
+        target_resolution_.effective_index_ns +
+        target_resolution_.pending_activation_supersede_ns +
+        target_resolution_.base_sequence_ns +
+        target_resolution_.target_lookup_ns +
+        target_resolution_.target_sequence_ns;
+    target_resolution_.navigation_state_result_ns =
+        measured_ns >= attributed_ns ? measured_ns - attributed_ns : 0;
 }
 
 NavigationLatencyTimePoint NavigationLatencyTrace::Now() noexcept
@@ -483,6 +502,7 @@ std::optional<NavigationLatencyReport> NavigationLatencyTrace::TerminalReport() 
     report.target_index = target_index_.load(std::memory_order_relaxed);
     report.input_kind = input_kind_;
     report.cache_hit = cache_hit_;
+    report.target_resolution = target_resolution_;
     report.input_ns = input_ns_;
     report.requested_ns = requested_ns_;
     report.target_resolved_ns = target_resolved_ns_;
@@ -567,6 +587,27 @@ bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLaten
         ProfileSink::Field::Number("from_index", std::to_string(report.from_index)),
         ProfileSink::Field::Number("target_index", std::to_string(report.target_index)),
         ProfileSink::Field::Bool("cache_hit", report.cache_hit),
+        ProfileSink::Field::Number(
+            "row_count",
+            std::to_string(report.target_resolution.row_count)),
+        ProfileSink::Field::Bool(
+            "filter_active",
+            report.target_resolution.filter_active),
+        ProfileSink::Field::Bool(
+            "sort_active",
+            report.target_resolution.sort_active),
+        ProfileSink::Field::Bool(
+            "query_active",
+            report.target_resolution.query_active),
+        ProfileSink::Field::Bool(
+            "pending_present",
+            report.target_resolution.pending_present),
+        ProfileSink::Field::Bool(
+            "sequence_cache_hit",
+            report.target_resolution.sequence_cache_hit),
+        ProfileSink::Field::Number(
+            "sequence_build_count",
+            std::to_string(report.target_resolution.sequence_build_count)),
         ProfileSink::Field::Number("attempt_count", std::to_string(report.attempts.size())),
         ProfileSink::Field::Number("input_steady_ns", NumberOrNull(report.input_ns)),
         ProfileSink::Field::Number("requested_steady_ns", NumberOrNull(report.requested_ns)),
@@ -576,6 +617,26 @@ bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLaten
         ProfileSink::Field::Number("first_present_steady_ns", NumberOrNull(report.first_present_ns)),
         ProfileSink::Field::Number("input_to_request_ms", DurationMilliseconds(report.input_ns, report.requested_ns)),
         ProfileSink::Field::Number("target_resolution_ms", DurationMilliseconds(report.requested_ns, report.target_resolved_ns)),
+        ProfileSink::Field::Number(
+            "effective_index_ms",
+            NanosecondsAsMilliseconds(report.target_resolution.effective_index_ns)),
+        ProfileSink::Field::Number(
+            "pending_activation_supersede_ms",
+            NanosecondsAsMilliseconds(
+                report.target_resolution.pending_activation_supersede_ns)),
+        ProfileSink::Field::Number(
+            "base_sequence_ms",
+            NanosecondsAsMilliseconds(report.target_resolution.base_sequence_ns)),
+        ProfileSink::Field::Number(
+            "target_lookup_ms",
+            NanosecondsAsMilliseconds(report.target_resolution.target_lookup_ns)),
+        ProfileSink::Field::Number(
+            "target_sequence_ms",
+            NanosecondsAsMilliseconds(report.target_resolution.target_sequence_ns)),
+        ProfileSink::Field::Number(
+            "navigation_state_result_ms",
+            NanosecondsAsMilliseconds(
+                report.target_resolution.navigation_state_result_ns)),
         ProfileSink::Field::Number("enqueue_ms", DurationMilliseconds(report.target_resolved_ns, first_enqueued_ns)),
         ProfileSink::Field::Number("queue_wait_ms", sum(
             [](const auto& attempt) { return attempt.load_enqueued_ns; },
