@@ -68,7 +68,7 @@
 先 build：
 
 ```powershell
-cmd.exe /d /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" && cmake --build --preset ninja-msvc-portable-debug"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -TimeoutSec 180
 ```
 
 运行 130Hz 验收采集：

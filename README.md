@@ -75,6 +75,14 @@ Open a new terminal after setting it.
 
 ## Configure Check
 
+> [!IMPORTANT]
+> For Ninja/MSVC configure and build operations, use
+> `scripts/build-ninja-msvc-debug.ps1`. Do not run `ninja` or
+> `cmake --build --preset ninja-msvc-portable-debug` directly from an ordinary
+> PowerShell or a restricted agent shell. Restricted agents must run the wrapper
+> with tool escalation. See
+> [Ninja/MSVC troubleshooting](docs/engineering_setup.md#ninjamsvc-卡住排查).
+
 Use the Ninja preset from a terminal with the MSVC environment loaded:
 
 ```powershell
@@ -97,8 +105,7 @@ Use the Ninja preset from a terminal with the MSVC environment loaded:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
 ```
 
-In restricted agent shells such as Codex, run this script with tool escalation.
-It performs a process-kill preflight and refuses to start CMake if the current
+The wrapper performs a process-kill preflight and refuses to start CMake if the current
 shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
 
 The executable is written under

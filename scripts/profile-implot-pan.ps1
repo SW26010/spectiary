@@ -28,7 +28,9 @@ if (-not $Executable) {
 
 $resolvedExecutable = Resolve-Path -Path $Executable -ErrorAction SilentlyContinue
 if ($null -eq $resolvedExecutable) {
-    throw "Executable not found: $Executable. Build with cmake --build --preset ninja-msvc-portable-debug first."
+    $buildCommand =
+        'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1'
+    throw "Executable not found: $Executable. Build from the repository root with: $buildCommand"
 }
 
 $logDir = Join-Path $repoRoot 'logs'
