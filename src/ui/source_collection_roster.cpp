@@ -208,6 +208,8 @@ SourceCollectionRosterPreparedOpenResult SourceCollectionRoster::OpenPreparedSou
         std::move(validated_folder_listing));
     current_source_index_ = update.source_index;
     result.replaced_cached_snapshot = std::move(update.replaced_cached_snapshot);
+    result.replaced_validated_folder_listing =
+        std::move(update.replaced_validated_folder_listing);
     SetSnapshot(std::move(snapshot), result.action);
     return result;
 }
@@ -316,6 +318,8 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
         match->state_label = SnapshotStateLabelText(snapshot);
         result.replaced_cached_snapshot = std::move(match->cached_snapshot);
         match->cached_snapshot = std::move(snapshot);
+        result.replaced_validated_folder_listing =
+            std::move(match->validated_folder_listing);
         match->validated_folder_listing = std::move(validated_folder_listing);
         match->last_spectrum_index = spectrum_index;
         result.source_index = static_cast<std::size_t>(std::distance(sources_.begin(), match));

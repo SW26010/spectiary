@@ -25,6 +25,7 @@ struct SourceCollectionRosterRemoveResult {
 struct SourceCollectionRosterPreparedOpenResult {
     SourceCollectionSessionAction action;
     SpectrumSnapshotHandle replaced_cached_snapshot;
+    SourceCollectionFolderListingHandle replaced_validated_folder_listing;
 };
 
 class SourceCollectionRoster {
@@ -61,6 +62,7 @@ private:
     struct AddOrUpdateSourceResult {
         std::size_t source_index = 0;
         SpectrumSnapshotHandle replaced_cached_snapshot;
+        SourceCollectionFolderListingHandle replaced_validated_folder_listing;
     };
 
     struct SourceListEntry {

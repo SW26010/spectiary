@@ -8,6 +8,7 @@
 #include "ui/sample_workflow_state_cache_io.h"
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
+#include "ui/source_collection_load_queue.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
@@ -24,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -4529,15 +4532,26 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
         "context-fingerprint",
         2,
     };
+    const specforge::SourceCollectionIdentity identity = context.identity;
     context.manifest.sample_names = {"a.csv", "b.csv"};
     specforge::PreparedSampleWorkflowState workflow =
         PrepareWorkflow(snapshot, context, 0, {}, {});
-    auto mutable_listing = std::make_shared<specforge::SourceCollectionFolderListing>();
-    mutable_listing->spectra = {
+    auto* listing_value = new specforge::SourceCollectionFolderListing();
+    listing_value->spectra = {
         {source_path / "a.csv", "csv", "a-stat"},
         {source_path / "b.csv", "csv", "b-stat"},
     };
-    const specforge::SourceCollectionFolderListingHandle verified_listing = mutable_listing;
+    auto listing_destroyed_promise =
+        std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> listing_destroyed =
+        listing_destroyed_promise->get_future();
+    specforge::SourceCollectionFolderListingHandle verified_listing(
+        listing_value,
+        [listing_destroyed_promise](
+            const specforge::SourceCollectionFolderListing* value) {
+            delete value;
+            listing_destroyed_promise->set_value(std::this_thread::get_id());
+        });
 
     const specforge::SourceCollectionSessionResult result = session.OpenPreparedSource(
         source_path,
@@ -4548,12 +4562,49 @@ void TestVerifiedFolderListingFlowsIntoSubsequentLoadHint()
             std::move(workflow)},
         verified_listing);
     Require(result.loaded, "prepared folder generation should load");
-    const std::optional<specforge::SourceCollectionLoadHint> hint =
+    std::optional<specforge::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint.has_value(), "known folder source should expose a subsequent load hint");
     Require(
         hint->folder_listing_hint == verified_listing,
         "subsequent navigation should reuse the exact immutable verified listing");
+
+    const std::weak_ptr<const specforge::SourceCollectionFolderListing> retired_listing =
+        verified_listing;
+    hint.reset();
+    verified_listing.reset();
+    Require(!retired_listing.expired(), "the roster should own the active verified listing");
+    Require(
+        Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
+                .follow_up_spectrum_index == 1,
+        "the listing retirement fixture should prepare a row replacement");
+
+    specforge::SourceCollectionSessionResult replacement = session.OpenPreparedSource(
+        source_path,
+        1,
+        MakeSnapshot(source_path, 2, 1),
+        specforge::PreparedSourceCollectionReuse{identity},
+        std::make_shared<const specforge::SourceCollectionFolderListing>());
+    Require(replacement.loaded, "the replacement folder generation should load");
+    Require(
+        !retired_listing.expired(),
+        "the replaced listing should remain owned until background retirement");
+    const std::thread::id caller_thread = std::this_thread::get_id();
+    specforge::SourceCollectionLoadQueue retirement_queue;
+    for (specforge::BackgroundRetirementHandle& resource :
+         replacement.background_retirement) {
+        retirement_queue.RetireResource(std::move(resource));
+    }
+    Require(
+        listing_destroyed.wait_for(std::chrono::seconds(2)) ==
+            std::future_status::ready,
+        "the replaced listing should be reclaimed promptly");
+    Require(
+        retired_listing.expired(),
+        "background retirement should release the replaced listing");
+    Require(
+        listing_destroyed.get() != caller_thread,
+        "the replaced listing should be reclaimed off the UI caller thread");
 }
 
 void TestSourceSessionFlushFailureKeepsDirtyState()

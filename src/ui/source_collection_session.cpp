@@ -1060,6 +1060,10 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
     if (previous_snapshot && previous_snapshot != roster_->snapshot()) {
         result.background_retirement.push_back(std::move(previous_snapshot));
     }
+    if (roster_result.replaced_validated_folder_listing) {
+        result.background_retirement.push_back(
+            std::move(roster_result.replaced_validated_folder_listing));
+    }
     if (auto* plan = std::get_if<PreparedSourceCollectionPlan>(&payload)) {
         PreparedSampleWorkflowActivationResult activation =
             workflow_->SyncPreparedActiveSource(

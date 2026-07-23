@@ -157,11 +157,24 @@ folder attempt 的 `source_inspection_ms` p50/p95 为 31.964/133.228ms，
   完整扫描、stale target 为 refresh + revalidation 两次扫描、并发目录变化为每个 decoded
   generation 一次扫描。
 
-验证边界：focused load-queue/session tests 证明调用次数、stale target refresh、目录变化
-重试和 immutable listing 在 worker-session-worker 之间的闭环；新的真实大目录 profile
-仍应确认 warm folder navigation 的 `source_inspection_ms` 不再包含完整枚举，且
-`source_revalidation_ms` 仍保留一次扫描。这里的 listing reuse 不是 adjacent spectrum
-snapshot cache，`navigation_latency.cache_hit` 仍保持原语义。
+真实复测：完整且 `dropped_events=0` 的
+`specforge-profile-20260723-115613-134.jsonl` 包含 371 次 folder load attempt。
+`source_inspection_ms` p50/p95 已降为 0.266/1.082ms，证明 warm path 不再执行完整
+pre-decode 枚举；`source_revalidation_ms` p50/p95 为 18.103/137.226ms，证明一次完整
+post-decode scan 仍在。437 次 presented navigation 的总体 input-to-Present p95 为
+198.130ms，尾部仍主要来自 revalidation，而不是被误移到 inspection。
+
+复测也暴露了一个较小但真实的 UI-thread ownership 尾部：以 revalidation 80ms 为界，
+小/大目录的 activation p95/max 分别为 5.42/7.81ms 和 7.28/9.22ms；revalidation
+成本与 activation 的相关系数约为 0.73。代码检查确认 roster 替换 listing 时，旧
+listing 的最后一个引用可能在 UI thread 同步析构。修复沿用现有 background reclaimer：
+roster 把被替换的 listing 随 prepared-open result 交回 session，session 将原
+`shared_ptr<const SourceCollectionFolderListing>` 直接作为 opaque retirement token
+返回 Shell；不新增线程、队列或 source-of-truth。回归测试锁定旧 listing 在
+`background_retirement` drain 前保持存活，现有 reclaimer test 继续保证实际析构不在
+调用线程。这里的 listing reuse 不是 adjacent spectrum snapshot cache，
+`navigation_latency.cache_hit` 仍保持原语义。reclaimer 后的真实 profile 只需复核
+activation 尾部，不需要重新证明 inspection/revalidation 的扫描次数合同。
 
 ## 设计规则
 
