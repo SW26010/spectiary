@@ -1956,7 +1956,9 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
     const NavigationLatencyTimePoint pending_activation_started_at =
         trace_requested ? NavigationLatencyTrace::Now()
                         : NavigationLatencyTimePoint{};
-    if (session_.SupersedesPendingSourceActivation(command)) {
+    const bool supersedes_source_activation =
+        session_.SupersedesPendingSourceActivation(command);
+    if (supersedes_source_activation) {
         BeginSourceActivationIntent(false);
     }
     if (trace_requested) {
@@ -1977,7 +1979,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
         target_resolved_at,
         std::move(target_resolution),
         std::move(navigation_origin));
-    if (deferred_restore_active_) {
+    if (deferred_restore_active_ && supersedes_source_activation) {
         const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
         if (snapshot && !snapshot->source.path.empty()) {
             deferred_restore_active_path_ = snapshot->source.path;
@@ -2018,7 +2020,9 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
     const NavigationLatencyTimePoint pending_activation_started_at =
         trace_requested ? NavigationLatencyTrace::Now()
                         : NavigationLatencyTimePoint{};
-    if (session_.SupersedesPendingSourceActivation(command)) {
+    const bool supersedes_source_activation =
+        session_.SupersedesPendingSourceActivation(command);
+    if (supersedes_source_activation) {
         BeginSourceActivationIntent(false);
     }
     if (trace_requested) {
@@ -2043,7 +2047,7 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
                   *navigation_kind,
                   requested_at}}
             : std::nullopt);
-    if (deferred_restore_active_) {
+    if (deferred_restore_active_ && supersedes_source_activation) {
         const SpectrumSnapshotHandle snapshot = session_.CurrentSourceSnapshot();
         if (snapshot && !snapshot->source.path.empty()) {
             deferred_restore_active_path_ = snapshot->source.path;

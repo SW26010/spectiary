@@ -2,6 +2,7 @@
 
 #include "domain/source_path_identity.h"
 #include "domain/sample_labeling.h"
+#include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
 #include <array>
@@ -70,6 +71,11 @@ struct ShellUiTestAccess {
     static void Drain(ShellUi& shell)
     {
         shell.DrainSourceLoads();
+    }
+
+    static void BeginDeferredRestore(ShellUi& shell)
+    {
+        shell.BeginDeferredSourceRestore();
     }
 
     static std::vector<SourceCollectionLoadCompletion> TakeCompleted(ShellUi& shell)
@@ -388,6 +394,143 @@ specforge::SourceCollectionSession MakePreparedDeferredSession(
             .loaded,
         "Shell drain fixture should commit its initial source");
     return session;
+}
+
+void OpenPreparedFixtureSource(
+    specforge::SourceCollectionSession& session,
+    const std::filesystem::path& path,
+    std::size_t spectrum_index = 0)
+{
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(path, spectrum_index);
+    specforge::SourceCollectionContext context;
+    context.identity = specforge::BuildSourceCollectionIdentity(
+        *snapshot,
+        specforge::CaptureSourceCollectionSingleFileState(path));
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState workflow =
+        specforge::PrepareSampleWorkflowState(
+            *snapshot,
+            context,
+            spectrum_index,
+            {{}, {}});
+    Require(
+        session.OpenPreparedSource(
+                   path,
+                   spectrum_index,
+                   snapshot,
+                   std::move(context),
+                   std::move(workflow))
+            .loaded,
+        "fixture source should enter the session");
+}
+
+struct SourceSessionCachePaths {
+    std::filesystem::path source_session;
+    std::filesystem::path navigation;
+    std::filesystem::path labeling;
+    std::filesystem::path workflow;
+};
+
+specforge::SpectrumSnapshotHandle RejectSynchronousSourceLoad(
+    const std::filesystem::path&,
+    std::size_t)
+{
+    throw std::runtime_error(
+        "deferred restore regression must not use synchronous source loading");
+}
+
+specforge::SourceCollectionSession MakeCachedSession(
+    const SourceSessionCachePaths& cache_paths,
+    specforge::SourceCollectionSessionRestoreMode restore_mode)
+{
+    return specforge::SourceCollectionSession(
+        RejectSynchronousSourceLoad,
+        cache_paths.source_session,
+        cache_paths.navigation,
+        cache_paths.labeling,
+        cache_paths.workflow,
+        restore_mode);
+}
+
+specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
+    const SourceSessionCachePaths& cache_paths)
+{
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&, const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.file_context_builder =
+        [](const specforge::SpectrumSnapshot& snapshot,
+           const specforge::SourceCollectionSingleFileState& file_state,
+           const specforge::SourceCollectionCancellationCheckpoint& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionContext context;
+            context.identity =
+                specforge::BuildSourceCollectionIdentity(snapshot, file_state);
+            context.manifest.sample_names = {"alpha", "beta", "gamma"};
+            return context;
+        };
+    dependencies.workflow_cache_paths = {
+        cache_paths.labeling,
+        cache_paths.workflow,
+    };
+    return dependencies;
+}
+
+std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
+    const SourceSessionCachePaths& cache_paths,
+    specforge::SourceCollectionLoadDependencies dependencies)
+{
+    using Access = specforge::ShellUiTestAccess;
+    std::unique_ptr<specforge::ShellUi> shell = Access::Create(
+        MakeCachedSession(
+            cache_paths,
+            specforge::SourceCollectionSessionRestoreMode::Deferred),
+        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+    Access::BeginDeferredRestore(*shell);
+    return shell;
+}
+
+bool DrainAllSourceLoads(specforge::ShellUi& shell)
+{
+    using Access = specforge::ShellUiTestAccess;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        Access::Drain(shell);
+        if (Access::PendingLoadCount(shell) == 0) {
+            return true;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    return false;
+}
+
+bool CurrentSourceMatches(
+    specforge::SourceCollectionSession& session,
+    const std::filesystem::path& expected_path)
+{
+    const specforge::SourceCollectionSessionView view = session.View();
+    if (!view.current_source_index ||
+        *view.current_source_index >= view.sources.size()) {
+        return false;
+    }
+    const specforge::SpectrumSnapshotHandle snapshot =
+        session.CurrentSampleSnapshot();
+    const std::string expected_key =
+        specforge::SourcePathIdentityKey(expected_path);
+    return snapshot &&
+        specforge::SourcePathIdentityKey(
+            view.sources[*view.current_source_index].path) == expected_key &&
+        specforge::SourcePathIdentityKey(snapshot->source.path) == expected_key;
 }
 
 void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
@@ -2104,6 +2247,254 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         "retrying the failed row must create a new worker follow-up instead of being deduplicated");
 }
 
+void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::array<std::filesystem::path, 3> source_paths{
+        UniqueTempPath("_restore_a.csv"),
+        UniqueTempPath("_restore_b.csv"),
+        UniqueTempPath("_restore_c.csv"),
+    };
+    const SourceSessionCachePaths cache_paths{
+        UniqueTempPath("_source_session.json"),
+        UniqueTempPath("_navigation.json"),
+        UniqueTempPath("_labeling.json"),
+        UniqueTempPath("_workflow.json"),
+    };
+    const std::filesystem::path explicit_source_path =
+        UniqueTempPath("_restore_explicit.csv");
+    std::filesystem::remove(cache_paths.source_session);
+    std::filesystem::remove(cache_paths.navigation);
+    std::filesystem::remove(cache_paths.labeling);
+    std::filesystem::remove(cache_paths.workflow);
+    for (const std::filesystem::path& path : source_paths) {
+        std::filesystem::remove(path);
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "deferred restore source fixture should be created");
+        stream << "fixture";
+    }
+    {
+        std::ofstream stream(
+            explicit_source_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            stream.good(),
+            "explicit source fixture should be created");
+        stream << "fixture";
+    }
+
+    {
+        specforge::SourceCollectionSession saved_session = MakeCachedSession(
+            cache_paths,
+            specforge::SourceCollectionSessionRestoreMode::Immediate);
+        for (const std::filesystem::path& path : source_paths) {
+            OpenPreparedFixtureSource(saved_session, path);
+        }
+        (void)saved_session.Submit(
+            specforge::SourceCollectionSessionIntent::EditSourceCollection(
+                specforge::SourceCollectionIntent::SwitchActive(1)));
+        const specforge::SourceCollectionSessionView saved_view =
+            saved_session.View();
+        Require(
+            saved_view.current_source_index &&
+                *saved_view.current_source_index == 1 &&
+                specforge::SourcePathIdentityKey(
+                    saved_view.sources[*saved_view.current_source_index].path) ==
+                    specforge::SourcePathIdentityKey(source_paths[1]),
+            "fixture should activate source B before saving");
+        Require(
+            saved_session.FlushStateCaches(),
+            "source-session fixture should flush successfully");
+    }
+
+    const specforge::SourceCollectionSessionStateCache saved_cache =
+        specforge::LoadSourceCollectionSessionStateCache(
+            cache_paths.source_session);
+    Require(
+        saved_cache.sources.size() == 3 &&
+            saved_cache.active_source_index &&
+            *saved_cache.active_source_index == 1 &&
+            specforge::SourcePathIdentityKey(
+                saved_cache.sources[*saved_cache.active_source_index].path) ==
+                specforge::SourcePathIdentityKey(source_paths[1]),
+        "save phase should persist source B as the active source");
+
+    std::promise<void> release_a_promise;
+    std::shared_future<void> release_a =
+        release_a_promise.get_future().share();
+    std::promise<void> release_c_promise;
+    std::shared_future<void> release_c =
+        release_c_promise.get_future().share();
+    std::array<std::promise<void>, 3> decoder_entered_promises;
+    std::array<std::shared_future<void>, 3> decoder_entered{
+        decoder_entered_promises[0].get_future().share(),
+        decoder_entered_promises[1].get_future().share(),
+        decoder_entered_promises[2].get_future().share(),
+    };
+    std::array<std::atomic_bool, 3> decoder_entered_once{};
+    std::promise<void> source_b_decoded_promise;
+    std::shared_future<void> source_b_decoded =
+        source_b_decoded_promise.get_future().share();
+    std::atomic_bool source_b_decoded_once = false;
+
+    specforge::SourceCollectionLoadDependencies dependencies =
+        MakeFixtureLoadDependencies(cache_paths);
+    dependencies.snapshot_loader =
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
+            const auto match = std::find_if(
+                source_paths.begin(),
+                source_paths.end(),
+                [&source](const std::filesystem::path& candidate) {
+                    return specforge::SourcePathIdentityKey(candidate) ==
+                           specforge::SourcePathIdentityKey(source);
+                });
+            Require(
+                match != source_paths.end(),
+                "deferred restore should only load isolated fixture sources");
+            const std::size_t source_index =
+                static_cast<std::size_t>(
+                    std::distance(source_paths.begin(), match));
+            if (!decoder_entered_once[source_index].exchange(
+                    true,
+                    std::memory_order_relaxed)) {
+                decoder_entered_promises[source_index].set_value();
+            }
+            if (source_index == 0) {
+                WaitForRelease(
+                    release_a,
+                    canceled,
+                    "source A decoder should be released after source B");
+            } else if (source_index == 2) {
+                WaitForRelease(
+                    release_c,
+                    canceled,
+                    "source C decoder should be released last");
+            }
+            specforge::SpectrumSnapshotHandle snapshot =
+                MakeSnapshot(source, index);
+            if (source_index == 1 &&
+                !source_b_decoded_once.exchange(
+                    true,
+                    std::memory_order_relaxed)) {
+                source_b_decoded_promise.set_value();
+            }
+            return snapshot;
+        };
+    std::unique_ptr<specforge::ShellUi> shell =
+        MakeDeferredShell(cache_paths, std::move(dependencies));
+
+    const bool source_b_finished_first =
+        decoder_entered[0].wait_for(2s) == std::future_status::ready &&
+        decoder_entered[2].wait_for(2s) == std::future_status::ready &&
+        source_b_decoded.wait_for(2s) == std::future_status::ready;
+    if (!source_b_finished_first) {
+        release_a_promise.set_value();
+        release_c_promise.set_value();
+    }
+    Require(
+        source_b_finished_first,
+        "source B should decode while source A and C remain blocked");
+
+    release_a_promise.set_value();
+    const auto source_b_activation_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    bool source_b_activated = false;
+    while (std::chrono::steady_clock::now() <
+           source_b_activation_deadline) {
+        Access::Drain(*shell);
+        const specforge::SourceCollectionSessionView view =
+            Access::Session(*shell).View();
+        source_b_activated =
+            view.sources.size() == 2 &&
+            view.current_source_index &&
+            specforge::SourcePathIdentityKey(
+                view.sources[*view.current_source_index].path) ==
+                specforge::SourcePathIdentityKey(source_paths[1]);
+        if (source_b_activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    release_c_promise.set_value();
+    Require(
+        source_b_activated,
+        "source B should be active before the later source C completion");
+
+    const auto restore_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() < restore_deadline) {
+        Access::Drain(*shell);
+        if (Access::PendingLoadCount(*shell) == 0) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    const specforge::SourceCollectionSessionView restored_view =
+        Access::Session(*shell).View();
+    Require(
+        restored_view.sources.size() == 3 &&
+            CurrentSourceMatches(
+                Access::Session(*shell),
+                source_paths[1]),
+        "deferred restore should reactivate saved source B after source C completes");
+
+    Require(
+        Access::Session(*shell).FlushStateCaches(),
+        "restored source-session cache should flush successfully");
+    const specforge::SourceCollectionSessionStateCache flushed_cache =
+        specforge::LoadSourceCollectionSessionStateCache(
+            cache_paths.source_session);
+    Require(
+        flushed_cache.active_source_index &&
+            *flushed_cache.active_source_index < flushed_cache.sources.size() &&
+            specforge::SourcePathIdentityKey(
+                flushed_cache.sources[*flushed_cache.active_source_index].path) ==
+                specforge::SourcePathIdentityKey(source_paths[1]),
+        "flush after deferred restore should retain source B as active");
+
+    shell.reset();
+    shell = MakeDeferredShell(
+        cache_paths,
+        MakeFixtureLoadDependencies(cache_paths));
+    Require(
+        DrainAllSourceLoads(*shell),
+        "second deferred restore should finish");
+    const specforge::SourceCollectionSessionView second_restored_view =
+        Access::Session(*shell).View();
+    Require(
+        second_restored_view.sources.size() == 3 &&
+            CurrentSourceMatches(
+                Access::Session(*shell),
+                source_paths[1]),
+        "a second deferred Shell should restore source B from the flushed cache");
+    shell.reset();
+
+    shell = MakeDeferredShell(
+        cache_paths,
+        MakeFixtureLoadDependencies(cache_paths));
+    shell->OpenSource(explicit_source_path);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "deferred restore with an explicit open should finish");
+    Require(
+        CurrentSourceMatches(
+            Access::Session(*shell),
+            explicit_source_path),
+        "an explicit open during restore should override the saved source B intent");
+    shell.reset();
+
+    for (const std::filesystem::path& path : source_paths) {
+        std::filesystem::remove(path);
+    }
+    std::filesystem::remove(explicit_source_path);
+    std::filesystem::remove(cache_paths.source_session);
+    std::filesystem::remove(cache_paths.navigation);
+    std::filesystem::remove(cache_paths.labeling);
+    std::filesystem::remove(cache_paths.workflow);
+}
+
 void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
 {
     using Access = specforge::ShellUiTestAccess;
@@ -2578,6 +2969,7 @@ int main()
         TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread();
         TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket();
         TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry();
+        TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion();
         TestIdlePrefetchIsConsumedBySecondForwardNavigation();
         TestPublishedPrefetchBecomesStaleAfterQueryInput();
         TestCanceledPrefetchReportsOnlyAfterWorkerExit();
