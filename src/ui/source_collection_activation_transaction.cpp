@@ -26,6 +26,12 @@ std::int64_t NavigationSteadyNanoseconds(
         .count();
 }
 
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 }  // namespace
 
 SourceCollectionActivationTransaction::
@@ -446,7 +452,6 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     });
     CancelPendingTasks(
         RegisterOrReplaceLoad(task_id, std::move(ticket)));
-    error_message_.clear();
     return task_id;
 }
 
@@ -565,11 +570,25 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             completion.latency_attempt->
                 MarkCompletionDrained();
         }
+        if (completion.stale || completion.canceled) {
+            if (completion.prepared) {
+                load_queue_.RetirePrepared(
+                    std::move(*completion.prepared));
+            }
+            if (CancelFailedPendingSampleNavigation(
+                    session_,
+                    ticket)) {
+                service_result.session_changed = true;
+            }
+            MarkTicketSuperseded(ticket);
+            continue;
+        }
         if (!completion.prepared) {
-            error_message_ =
+            RecordTerminalOutcome(
+                ticket,
                 completion.error_message.empty()
-                ? "Background source loading failed."
-                : std::move(completion.error_message);
+                    ? "Background source loading failed."
+                    : std::move(completion.error_message));
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
@@ -685,9 +704,11 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             result.loaded &&
             ticket.purpose == Purpose::ExplicitOpen;
         if (!result.loaded) {
-            error_message_ = result.message.empty()
-                ? "The prepared source result was no longer applicable."
-                : std::move(result.message);
+            RecordTerminalOutcome(
+                ticket,
+                result.message.empty()
+                    ? "The prepared source result was no longer applicable."
+                    : std::move(result.message));
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
@@ -701,11 +722,13 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 (void)ticket.source_load_trace->MarkTerminal(
                     SourceLoadLatencyOutcome::Rejected);
             }
-        } else {
-            error_message_.clear();
+        } else if (!result.follow_up_spectrum_index) {
+            RecordTerminalOutcome(ticket, std::nullopt);
             if (starts_activation_intent) {
                 BeginActivationIntent(true);
             }
+        } else if (starts_activation_intent) {
+            BeginActivationIntent(true);
         }
 
         if (result.loaded &&
@@ -1387,6 +1410,61 @@ void SourceCollectionActivationTransaction::
     EraseDeferredRestoreTask(std::uint64_t task_id)
 {
     deferred_restore_task_ids_.erase(task_id);
+}
+
+void SourceCollectionActivationTransaction::
+    RecordTerminalOutcome(
+        const Ticket& ticket,
+        std::optional<std::string> error_message)
+{
+    const auto existing =
+        terminal_outcomes_.find(ticket.path_key);
+    if (existing != terminal_outcomes_.end() &&
+        existing->second.generation > ticket.generation) {
+        return;
+    }
+    terminal_outcomes_.insert_or_assign(
+        ticket.path_key,
+        TerminalOutcome{
+            .path = ticket.path,
+            .generation = ticket.generation,
+            .error_message = std::move(error_message),
+        });
+    RebuildErrorMessage();
+}
+
+void SourceCollectionActivationTransaction::
+    RebuildErrorMessage()
+{
+    std::size_t failure_count = 0;
+    for (const auto& [path_key, outcome] :
+         terminal_outcomes_) {
+        (void)path_key;
+        if (outcome.error_message) {
+            ++failure_count;
+        }
+    }
+
+    error_message_.clear();
+    for (const auto& [path_key, outcome] :
+         terminal_outcomes_) {
+        (void)path_key;
+        if (!outcome.error_message) {
+            continue;
+        }
+        if (!error_message_.empty()) {
+            error_message_ += '\n';
+        }
+        if (failure_count > 1) {
+            const std::string source_name =
+                PathToUtf8(outcome.path);
+            if (!source_name.empty()) {
+                error_message_ += source_name;
+                error_message_ += ": ";
+            }
+        }
+        error_message_ += *outcome.error_message;
+    }
 }
 
 void SourceCollectionActivationTransaction::

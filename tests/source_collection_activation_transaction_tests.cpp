@@ -294,6 +294,277 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         "failed explicit open should emit one terminal trace");
 }
 
+void TestSuccessfulSourceDoesNotHideConcurrentFailure()
+{
+    const std::filesystem::path failed_path =
+        UniqueTempPath("_failed_a.csv");
+    const std::filesystem::path loaded_path =
+        UniqueTempPath("_loaded_b.csv");
+    WriteFixture(failed_path);
+    WriteFixture(loaded_path);
+    auto dependencies = MakeDependencies(
+        [failed_path](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            if (source == failed_path) {
+                throw std::runtime_error(
+                    "source A failed");
+            }
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&,
+           std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "activation test must remain asynchronous");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::
+            Deferred);
+    Activation activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+
+    (void)activation.OpenSource(failed_path, 0);
+    (void)activation.OpenSource(loaded_path, 0);
+    const bool drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.HasPendingLoads();
+        });
+    const std::string error(
+        activation.ErrorMessage());
+
+    std::filesystem::remove(failed_path);
+    std::filesystem::remove(loaded_path);
+    Require(
+        drained,
+        "concurrent source loads should drain");
+    Require(
+        error.find("source A failed") !=
+            std::string::npos,
+        "a successful source must not hide another source's failure");
+}
+
+void TestConcurrentFailuresRemainVisible()
+{
+    const std::filesystem::path first_path =
+        UniqueTempPath("_failed_first.csv");
+    const std::filesystem::path second_path =
+        UniqueTempPath("_failed_second.csv");
+    WriteFixture(first_path);
+    WriteFixture(second_path);
+    auto dependencies = MakeDependencies(
+        [first_path](
+            const std::filesystem::path& source,
+            std::size_t,
+            const auto&)
+            -> specforge::SpectrumSnapshotHandle {
+            if (source == first_path) {
+                throw std::runtime_error(
+                    "first source failed");
+            }
+            throw std::runtime_error(
+                "second source failed");
+        });
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&,
+           std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "activation test must remain asynchronous");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::
+            Deferred);
+    Activation activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+
+    (void)activation.OpenSource(first_path, 0);
+    (void)activation.OpenSource(second_path, 0);
+    const bool drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.HasPendingLoads();
+        });
+    const std::string error(
+        activation.ErrorMessage());
+
+    std::filesystem::remove(first_path);
+    std::filesystem::remove(second_path);
+    Require(
+        drained,
+        "concurrent failed source loads should drain");
+    Require(
+        error.find("first source failed") !=
+                std::string::npos &&
+            error.find("second source failed") !=
+                std::string::npos,
+        "all current source failures should remain visible");
+}
+
+void TestSuccessfulRetryClearsOnlyItsSourceFailure()
+{
+    const std::filesystem::path retry_path =
+        UniqueTempPath("_retry.csv");
+    const std::filesystem::path other_path =
+        UniqueTempPath("_other_failed.csv");
+    WriteFixture(retry_path);
+    WriteFixture(other_path);
+    std::atomic_uint32_t attempts = 0;
+    auto dependencies = MakeDependencies(
+        [&attempts, retry_path](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            if (source != retry_path) {
+                throw std::runtime_error(
+                    "other source failure");
+            }
+            if (attempts.fetch_add(1) == 0) {
+                throw std::runtime_error(
+                    "retryable source failure");
+            }
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&,
+           std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "activation test must remain asynchronous");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::
+            Deferred);
+    Activation activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+
+    (void)activation.OpenSource(retry_path, 0);
+    (void)activation.OpenSource(other_path, 0);
+    const bool failure_drained = DrainUntil(
+        activation,
+        [&]() {
+            const std::string_view error =
+                activation.ErrorMessage();
+            return error.find(
+                       "retryable source failure") !=
+                    std::string_view::npos &&
+                error.find("other source failure") !=
+                    std::string_view::npos &&
+                !activation.HasPendingLoads();
+        });
+    (void)activation.OpenSource(retry_path, 0);
+    const bool failure_retained_while_pending =
+        !activation.ErrorMessage().empty();
+    const bool retry_drained = DrainUntil(
+        activation,
+        [&]() {
+            const std::string_view error =
+                activation.ErrorMessage();
+            return error.find(
+                       "retryable source failure") ==
+                    std::string_view::npos &&
+                error.find("other source failure") !=
+                    std::string_view::npos &&
+                !activation.HasPendingLoads();
+        });
+
+    std::filesystem::remove(retry_path);
+    std::filesystem::remove(other_path);
+    Require(
+        failure_drained,
+        "the first source attempt should publish its failure");
+    Require(
+        failure_retained_while_pending,
+        "starting a retry must not clear its source failure prematurely");
+    Require(
+        retry_drained,
+        "a successful retry should clear only its source failure");
+}
+
+void TestCanceledGenerationDoesNotPublishFailure()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_canceled.csv");
+    WriteFixture(path);
+    std::promise<void> first_started_promise;
+    std::shared_future<void> first_started =
+        first_started_promise.get_future().share();
+    std::atomic_uint32_t attempts = 0;
+    auto dependencies = MakeDependencies(
+        [&attempts, &first_started_promise](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
+            if (attempts.fetch_add(1) == 0) {
+                first_started_promise.set_value();
+                while (!canceled()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                throw std::runtime_error(
+                    "canceled source failure");
+            }
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&,
+           std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "activation test must remain asynchronous");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::
+            Deferred);
+    Activation activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+
+    (void)activation.OpenSource(path, 0);
+    Require(
+        first_started.wait_for(2s) ==
+            std::future_status::ready,
+        "the canceled source generation should start");
+    (void)activation.OpenSource(path, 0);
+    const bool retry_drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.HasPendingLoads();
+        });
+    const std::string error(
+        activation.ErrorMessage());
+
+    std::filesystem::remove(path);
+    Require(
+        retry_drained,
+        "the replacement source generation should drain");
+    Require(
+        error.find("canceled source failure") ==
+            std::string::npos,
+        "a canceled source generation must not publish a user error");
+}
+
 void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
 {
     const std::filesystem::path path =
@@ -418,6 +689,10 @@ int main()
     try {
         TestRapidNavigationPublishesOnlyLatestIntent();
         TestFailedExplicitOpenProducesTerminalLifecycleResult();
+        TestSuccessfulSourceDoesNotHideConcurrentFailure();
+        TestConcurrentFailuresRemainVisible();
+        TestSuccessfulRetryClearsOnlyItsSourceFailure();
+        TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
         TestIdlePrefetchReportsLifecycleCompletion();
         return 0;

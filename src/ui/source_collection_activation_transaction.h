@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -132,6 +133,12 @@ private:
     struct CompletionAdmission {
         Ticket ticket;
         bool accepted = false;
+    };
+
+    struct TerminalOutcome {
+        std::filesystem::path path;
+        std::uint64_t generation = 0;
+        std::optional<std::string> error_message;
     };
 
     struct PendingSnapshotPrefetch {
@@ -257,6 +264,10 @@ private:
         std::string_view path_key,
         bool retain_explicit_opens);
     void EraseDeferredRestoreTask(std::uint64_t task_id);
+    void RecordTerminalOutcome(
+        const Ticket& ticket,
+        std::optional<std::string> error_message);
+    void RebuildErrorMessage();
     static void MarkTicketSuperseded(const Ticket& ticket);
 
     SourceCollectionSession& session_;
@@ -278,6 +289,8 @@ private:
     std::optional<std::filesystem::path>
         deferred_restore_active_path_;
     bool deferred_restore_active_ = false;
+    std::map<std::string, TerminalOutcome>
+        terminal_outcomes_;
     std::string error_message_;
 
     bool latency_tracing_enabled_ = false;

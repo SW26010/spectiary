@@ -1733,6 +1733,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         std::make_shared<std::promise<std::thread::id>>();
     std::future<std::thread::id> intermediate_destroyed =
         intermediate_destroyed_promise->get_future();
+    std::atomic_bool initial_open_failed = false;
     std::atomic_int row_one_decode_count = 0;
     specforge::SourceCollectionLoadDependencies dependencies;
     dependencies.snapshot_loader =
@@ -1741,10 +1742,16 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
          &row_two_entered_promise,
          release_row_two,
          intermediate_destroyed_promise,
+         &initial_open_failed,
          &row_one_decode_count](
             const std::filesystem::path& source,
             std::size_t index,
             const auto& canceled) {
+            if (index == 0 &&
+                !initial_open_failed.exchange(true)) {
+                throw std::runtime_error(
+                    "previous source load failure");
+            }
             if (index == 1) {
                 if (row_one_decode_count.fetch_add(1) == 0) {
                     first_decode_entered_promise.set_value();
@@ -1777,6 +1784,24 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         std::move(session),
         specforge::SourceCollectionLoadQueue(std::move(dependencies)));
 
+    shell->OpenSource(path);
+    const auto initial_failure_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    bool initial_failure_visible = false;
+    while (std::chrono::steady_clock::now() <
+           initial_failure_deadline) {
+        Access::Drain(*shell);
+        initial_failure_visible =
+            Access::LoadError(*shell).find(
+                "previous source load failure") !=
+                std::string_view::npos &&
+            Access::PendingLoadCount(*shell) == 0;
+        if (initial_failure_visible) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+
     const specforge::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
         specforge::SourceCollectionSessionIntent::UpdateSampleNavigation(
@@ -1805,6 +1830,10 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         Access::Session(*shell).CurrentSampleSnapshot();
     const specforge::SourceCollectionSessionView view_while_requeued =
         Access::Session(*shell).View();
+    const bool failure_retained_while_requeued =
+        Access::LoadError(*shell).find(
+            "previous source load failure") !=
+        std::string_view::npos;
     const std::thread::id caller_thread = std::this_thread::get_id();
     const bool intermediate_retired =
         intermediate_destroyed.wait_for(2s) == std::future_status::ready;
@@ -1832,9 +1861,15 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
     std::filesystem::remove(*annotation_path);
     std::filesystem::remove(path);
 
+    Require(
+        initial_failure_visible,
+        "the retry fixture should retain its previous source failure");
     Require(navigation_queued && first_decode_started, "row 1 should enter the real drain worker");
     Require(annotation_changed, "the annotation context should change while row 1 is decoded");
     Require(row_two_requeued, "draining row 1 should enqueue the reconciled row 2 follow-up");
+    Require(
+        failure_retained_while_requeued,
+        "an intermediate loaded result must not clear the source failure before its follow-up succeeds");
     Require(
         snapshot_while_requeued && snapshot_while_requeued->collection.current_index == 0,
         "the reentrant row 2 load must keep the complete row 0 snapshot visible");
