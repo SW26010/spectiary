@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/sample_navigation_direction.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/background_retirement.h"
@@ -65,6 +66,11 @@ struct SampleNavigationResult {
     std::optional<std::size_t> current_sequence_position;
     std::optional<std::size_t> current_source_row;
     bool row_location_available = true;
+};
+
+struct SampleNavigationPrefetchPolicy {
+    std::size_t ahead = 1;
+    std::size_t behind = 0;
 };
 
 class SampleNavigationController {
@@ -133,6 +139,9 @@ public:
     std::optional<std::size_t> ClearSampleSorting(bool defer_navigation = false);
     [[nodiscard]] bool sorting_active() const;
     [[nodiscard]] const SampleNavigationSequence& current_sequence() const;
+    [[nodiscard]] std::vector<std::size_t> AdjacentRows(
+        SampleNavigationDirection direction,
+        SampleNavigationPrefetchPolicy policy = {}) const;
     void SetSampleNameQuery(std::string query);
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;

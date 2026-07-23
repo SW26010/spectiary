@@ -1367,6 +1367,13 @@ std::optional<std::size_t> SampleWorkflowCoordinator::current_index() const
     return navigation_.current_index();
 }
 
+std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
+    SampleNavigationDirection direction,
+    SampleNavigationPrefetchPolicy policy) const
+{
+    return navigation_.AdjacentRows(direction, policy);
+}
+
 void SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     labeling_.RunMaintenance(now);

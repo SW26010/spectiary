@@ -186,6 +186,9 @@ public:
     [[nodiscard]] SourceCollectionSampleSortingView SortingView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
+    [[nodiscard]] std::vector<std::size_t> AdjacentNavigationRows(
+        SampleNavigationDirection direction,
+        SampleNavigationPrefetchPolicy policy = {}) const;
 
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;

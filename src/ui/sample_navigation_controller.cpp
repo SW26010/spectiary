@@ -906,6 +906,67 @@ const SampleNavigationSequence& SampleNavigationController::current_sequence() c
     return CachedSequence(*session);
 }
 
+std::vector<std::size_t> SampleNavigationController::AdjacentRows(
+    SampleNavigationDirection direction,
+    SampleNavigationPrefetchPolicy policy) const
+{
+    const SourceSession* session = ActiveSession();
+    if (session == nullptr || !session->current_index) {
+        return {};
+    }
+
+    const SampleNavigationSequence& sequence = CachedSequence(*session);
+    const SampleNavigationSequenceProjection projection =
+        ProjectSampleNavigationSequence(sequence, session->current_index);
+    if (!projection.current_sequence_position) {
+        return {};
+    }
+
+    const bool implicit_source_order =
+        !sequence.active && sequence.ordered_rows.empty();
+    const std::size_t sequence_count = implicit_source_order
+        ? sequence.source_row_count
+        : sequence.ordered_rows.size();
+    if (sequence_count == 0 ||
+        *projection.current_sequence_position >= sequence_count) {
+        return {};
+    }
+    const auto row_at = [&sequence, implicit_source_order](
+                            std::size_t position) {
+        return implicit_source_order ? position
+                                     : sequence.ordered_rows[position];
+    };
+    const auto append = [&row_at,
+                         sequence_count,
+                         current_position =
+                             *projection.current_sequence_position](
+                            std::vector<std::size_t>& rows,
+                            bool forward,
+                            std::size_t count) {
+        for (std::size_t offset = 1; offset <= count; ++offset) {
+            if (forward) {
+                if (offset > sequence_count - current_position - 1) {
+                    break;
+                }
+                rows.push_back(row_at(current_position + offset));
+            } else {
+                if (offset > current_position) {
+                    break;
+                }
+                rows.push_back(row_at(current_position - offset));
+            }
+        }
+    };
+
+    std::vector<std::size_t> rows;
+    rows.reserve(policy.ahead + policy.behind);
+    const bool ahead_is_forward =
+        direction == SampleNavigationDirection::Next;
+    append(rows, ahead_is_forward, policy.ahead);
+    append(rows, !ahead_is_forward, policy.behind);
+    return rows;
+}
+
 void SampleNavigationController::SetSampleNameQuery(std::string query)
 {
     SourceSession* session = ActiveSession();

@@ -255,6 +255,7 @@ SourceCollectionRoster::ResidentSnapshot(
             source->cached_snapshot,
             *source->context_reuse_proof,
             source->folder_listing_generation,
+            SourceCollectionResidentSnapshotOrigin::History,
         };
     }
 
@@ -274,7 +275,81 @@ SourceCollectionRoster::ResidentSnapshot(
         resident->snapshot,
         resident->context_reuse_proof,
         resident->folder_listing_generation,
+        resident->origin,
+        resident->prefetch_id,
+        resident->prefetch_task_id,
+        resident->prefetch_scheduled_ns,
+        resident->prefetch_direction,
     };
+}
+
+SourceCollectionRosterResidentRetainResult
+SourceCollectionRoster::RetainPrefetchedSnapshot(
+    const std::filesystem::path& path,
+    SourceCollectionResidentSnapshot resident)
+{
+    SourceCollectionRosterResidentRetainResult result;
+    if (!resident.snapshot ||
+        resident.origin != SourceCollectionResidentSnapshotOrigin::Prefetch ||
+        resident.prefetch_id == 0 || resident.prefetch_task_id == 0 ||
+        resident.snapshot->collection.current_index !=
+            resident.spectrum_index ||
+        SourcePathIdentityKey(resident.snapshot->source.path) !=
+            SourcePathIdentityKey(path)) {
+        if (resident.snapshot) {
+            result.retired_snapshots.push_back(
+                std::move(resident.snapshot));
+        }
+        return result;
+    }
+
+    const std::string key = SourcePathIdentityKey(path);
+    const auto source = std::find_if(
+        sources_.begin(),
+        sources_.end(),
+        [&key](const SourceListEntry& entry) {
+            return entry.key == key;
+        });
+    if (source == sources_.end() || !current_source_index_ ||
+        *current_source_index_ !=
+            static_cast<std::size_t>(
+                std::distance(sources_.begin(), source)) ||
+        !ResidencyBoundariesMatch(
+            source->context_reuse_proof,
+            source->folder_listing_generation,
+            resident.context_reuse_proof,
+            resident.folder_listing_generation) ||
+        (source->cached_snapshot &&
+         source->last_spectrum_index == resident.spectrum_index)) {
+        result.retired_snapshots.push_back(
+            std::move(resident.snapshot));
+        return result;
+    }
+
+    const std::size_t spectrum_index = resident.spectrum_index;
+    const std::uint64_t prefetch_id = resident.prefetch_id;
+    RetainPreviousSnapshot(
+        *source,
+        std::move(resident.snapshot),
+        resident.spectrum_index,
+        resident.context_reuse_proof,
+        resident.folder_listing_generation,
+        resident.origin,
+        resident.prefetch_id,
+        resident.prefetch_task_id,
+        resident.prefetch_scheduled_ns,
+        resident.prefetch_direction,
+        result.retired_snapshots);
+    EvictResidentSnapshots(result.retired_snapshots);
+    result.retained = std::any_of(
+        source->resident_snapshots.begin(),
+        source->resident_snapshots.end(),
+        [spectrum_index, prefetch_id](
+            const ResidentSnapshotEntry& entry) {
+            return entry.spectrum_index == spectrum_index &&
+                   entry.prefetch_id == prefetch_id;
+        });
+    return result;
 }
 
 SourceCollectionRosterOpenResult SourceCollectionRoster::OpenSource(
@@ -460,6 +535,11 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
                     match->last_spectrum_index,
                     match->context_reuse_proof,
                     match->folder_listing_generation,
+                    SourceCollectionResidentSnapshotOrigin::History,
+                    0,
+                    0,
+                    0,
+                    SampleNavigationDirection::Next,
                     result.retired_snapshots);
             }
         }
@@ -500,6 +580,11 @@ void SourceCollectionRoster::RetainPreviousSnapshot(
     const std::optional<SourceCollectionContextReuseProof>& context_reuse_proof,
     const SourceCollectionFolderListingGenerationHandle&
         folder_listing_generation,
+    SourceCollectionResidentSnapshotOrigin origin,
+    std::uint64_t prefetch_id,
+    std::uint64_t prefetch_task_id,
+    std::int64_t prefetch_scheduled_ns,
+    SampleNavigationDirection prefetch_direction,
     std::vector<SpectrumSnapshotHandle>& retired_snapshots)
 {
     if (!snapshot || !context_reuse_proof) {
@@ -532,6 +617,11 @@ void SourceCollectionRoster::RetainPreviousSnapshot(
     resident.snapshot = std::move(snapshot);
     resident.context_reuse_proof = *context_reuse_proof;
     resident.folder_listing_generation = folder_listing_generation;
+    resident.origin = origin;
+    resident.prefetch_id = prefetch_id;
+    resident.prefetch_task_id = prefetch_task_id;
+    resident.prefetch_scheduled_ns = prefetch_scheduled_ns;
+    resident.prefetch_direction = prefetch_direction;
     resident.access_epoch = ++resident_access_epoch_;
     resident_snapshot_payload_bytes_ +=
         resident.estimated_payload_bytes;

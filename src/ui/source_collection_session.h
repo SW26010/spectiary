@@ -42,6 +42,18 @@ struct SourceCollectionLoadHint {
     std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
 };
 
+struct SourceCollectionSnapshotPrefetchPlan {
+    std::filesystem::path path;
+    std::size_t spectrum_index = 0;
+    std::vector<std::filesystem::path> annotation_paths;
+    SourceCollectionLoadHint load_hint;
+};
+
+struct SourceCollectionSnapshotPrefetchStoreResult {
+    bool stored = false;
+    std::vector<BackgroundRetirementHandle> background_retirement;
+};
+
 enum class SourceCollectionSessionIntentKind {
     SourceCollection,
     SampleNavigation,
@@ -302,6 +314,14 @@ public:
     [[nodiscard]] std::optional<SourceCollectionLoadHint> LoadHintForSource(
         const std::filesystem::path& path,
         std::optional<std::size_t> spectrum_index = std::nullopt);
+    [[nodiscard]] std::optional<SourceCollectionSnapshotPrefetchPlan>
+        PlanSnapshotPrefetch(
+            SampleNavigationDirection direction,
+            SampleNavigationPrefetchPolicy policy = {});
+    [[nodiscard]] SourceCollectionSnapshotPrefetchStoreResult
+        StorePrefetchedSnapshot(
+            const std::filesystem::path& path,
+            SourceCollectionResidentSnapshot resident);
     [[nodiscard]] SourceCollectionSessionResult OpenPreparedSource(
         std::filesystem::path path,
         std::size_t spectrum_index,

@@ -170,6 +170,7 @@ add_library(specforge_core STATIC
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
     src/profile/navigation_latency_trace.cpp
+    src/profile/navigation_prefetch_trace.cpp
     src/profile/profile_recording_status.cpp
     src/profile/profile_sink.cpp
     src/profile/source_load_latency_trace.cpp

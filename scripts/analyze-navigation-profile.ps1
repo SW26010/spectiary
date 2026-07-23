@@ -229,6 +229,19 @@ $navigationEvents = @($events | Where-Object { (Get-EventValue $_ 'event') -eq '
 $attemptEvents = @($events | Where-Object { (Get-EventValue $_ 'event') -eq 'navigation_latency_attempt' })
 $preparationRoundEvents = @(
     $events | Where-Object { (Get-EventValue $_ 'event') -eq 'navigation_latency_preparation_round' })
+$prefetchEvents = @(
+    $events | Where-Object { (Get-EventValue $_ 'event') -eq 'navigation_prefetch' })
+$hasPrefetchCancellationDiagnostics = @(
+    $prefetchEvents |
+        Where-Object {
+            $null -ne $_.PSObject.Properties[
+                'cancel_requested_steady_ns']
+        }).Count -gt 0
+$hasCacheKindDiagnostics = @(
+    $navigationEvents |
+        Where-Object {
+            $null -ne $_.PSObject.Properties['cache_kind']
+        }).Count -gt 0
 $folderDiagnosticFields = @(
     'hint_present',
     'generation_current_at_start',
@@ -299,6 +312,16 @@ foreach ($event in $navigationEvents) {
     [void](Get-RequiredInt64 $event 'attempt_count' 0 $context $failures)
     [void](Get-RequiredDuration $event 'total_ms' $context $failures)
     Test-RequiredBoolean $event 'cache_hit' $context $failures
+    if ($hasCacheKindDiagnostics) {
+        $cacheKind = [string](Get-EventValue $event 'cache_kind' '')
+        if ($cacheKind -notin @('none', 'history', 'prefetch')) {
+            Add-Failure $failures "$context.cache_kind '$cacheKind' is unsupported."
+        }
+        $cacheHit = Get-EventValue $event 'cache_hit'
+        if (($cacheKind -eq 'none') -ne ($cacheHit -eq $false)) {
+            Add-Failure $failures "$context.cache_hit does not match cache_kind '$cacheKind'."
+        }
+    }
     if ($hasTargetResolutionDiagnostics) {
         foreach ($field in $targetResolutionDurationFields) {
             [void](Get-RequiredDuration $event $field $context $failures)
@@ -322,6 +345,123 @@ foreach ($event in $navigationEvents) {
             Add-Failure $failures "navigation_id $navigationId is duplicated."
         } else {
             $navigationById[$key] = $event
+        }
+    }
+}
+
+$allowedPrefetchOutcomes = @(
+    'completed',
+    'canceled',
+    'stale',
+    'failed',
+    'consumed'
+)
+$prefetchById = @{}
+foreach ($event in $prefetchEvents) {
+    $context = 'navigation_prefetch'
+    $prefetchId = Get-RequiredInt64 $event 'prefetch_id' 1 $context $failures
+    [void](Get-RequiredInt64 $event 'source_task_id' 1 $context $failures)
+    [void](Get-RequiredInt64 $event 'target_index' 0 $context $failures)
+    $direction = [string](Get-EventValue $event 'direction' '')
+    if ($direction -notin @('previous', 'next')) {
+        Add-Failure $failures "$context.direction '$direction' is unsupported."
+    }
+    $prefetchOutcome = [string](Get-EventValue $event 'outcome' '')
+    if ($prefetchOutcome -notin $allowedPrefetchOutcomes) {
+        Add-Failure $failures "$context.outcome '$prefetchOutcome' is unsupported."
+    }
+    $scheduledNs = Get-RequiredInt64 $event 'scheduled_steady_ns' 1 $context $failures
+    $terminalNs = Get-RequiredInt64 $event 'terminal_steady_ns' 1 $context $failures
+    if ($null -ne $scheduledNs -and $null -ne $terminalNs -and
+        $terminalNs -lt $scheduledNs) {
+        Add-Failure $failures "$context terminal timestamp precedes scheduling."
+    }
+    Test-DurationMatches `
+        $event `
+        'duration_ms' `
+        $scheduledNs `
+        $terminalNs `
+        $context `
+        $failures
+    if ($hasPrefetchCancellationDiagnostics) {
+        $cancelRequestedNs = Get-RequiredInt64 `
+            $event `
+            'cancel_requested_steady_ns' `
+            0 `
+            $context `
+            $failures
+        if ($prefetchOutcome -eq 'canceled') {
+            if ($null -ne $cancelRequestedNs -and
+                $cancelRequestedNs -eq 0) {
+                Add-Failure $failures "$context canceled outcome requires a cancellation-request timestamp."
+            }
+            if ($null -ne $scheduledNs -and
+                $null -ne $cancelRequestedNs -and
+                $cancelRequestedNs -lt $scheduledNs) {
+                Add-Failure $failures "$context cancellation request precedes scheduling."
+            }
+            if ($null -ne $terminalNs -and
+                $null -ne $cancelRequestedNs -and
+                $terminalNs -lt $cancelRequestedNs) {
+                Add-Failure $failures "$context terminal timestamp precedes the cancellation request."
+            }
+        } elseif ($null -ne $cancelRequestedNs -and
+                  $cancelRequestedNs -ne 0) {
+            Add-Failure $failures "$context non-canceled outcome must not carry a cancellation-request timestamp."
+        }
+    }
+    if ($null -ne $prefetchId) {
+        $key = [string]$prefetchId
+        if (-not $prefetchById.ContainsKey($key)) {
+            $prefetchById[$key] = [System.Collections.Generic.List[object]]::new()
+        }
+        [void]$prefetchById[$key].Add($event)
+    }
+}
+
+foreach ($entry in $prefetchById.GetEnumerator()) {
+    $primary = @(
+        $entry.Value |
+            Where-Object {
+                [string](Get-EventValue $_ 'outcome') -ne 'consumed'
+            })
+    $consumed = @(
+        $entry.Value |
+            Where-Object {
+                [string](Get-EventValue $_ 'outcome') -eq 'consumed'
+            })
+    if ($primary.Count -gt 1 -or
+        ($primary.Count -eq 0 -and $consumed.Count -eq 0)) {
+        Add-Failure $failures "prefetch_id $($entry.Key) has an invalid primary outcome count."
+    }
+    if ($consumed.Count -gt 1) {
+        Add-Failure $failures "prefetch_id $($entry.Key) has duplicate consumed outcomes."
+    }
+    if ($consumed.Count -eq 1 -and
+        $primary.Count -eq 1 -and
+        [string](Get-EventValue $primary[0] 'outcome') -ne 'completed') {
+        Add-Failure $failures "prefetch_id $($entry.Key) was consumed after a non-completed outcome."
+    }
+    if ($consumed.Count -eq 1 -and
+        $primary.Count -eq 1 -and
+        [string](Get-EventValue $primary[0] 'outcome') -eq 'completed') {
+        foreach ($field in @(
+                'source_task_id',
+                'target_index',
+                'direction',
+                'scheduled_steady_ns')) {
+            $primaryValue = Get-EventValue $primary[0] $field
+            $consumedValue = Get-EventValue $consumed[0] $field
+            if ($primaryValue -ne $consumedValue) {
+                Add-Failure $failures "prefetch_id $($entry.Key) completed/consumed $field values do not match."
+            }
+        }
+        $completedTerminalNs =
+            [long](Get-EventValue $primary[0] 'terminal_steady_ns')
+        $consumedTerminalNs =
+            [long](Get-EventValue $consumed[0] 'terminal_steady_ns')
+        if ($consumedTerminalNs -lt $completedTerminalNs) {
+            Add-Failure $failures "prefetch_id $($entry.Key) was consumed before it completed."
         }
     }
 }
@@ -642,6 +782,48 @@ if ($navigationEvents.Count -gt 0) {
         Group-Object { [string](Get-EventValue $_ 'outcome' 'unknown') } |
         Sort-Object Name |
         ForEach-Object { Write-Host ('  {0}: {1}' -f $_.Name, $_.Count) }
+}
+if ($hasCacheKindDiagnostics -and $validPresentedEvents.Count -gt 0) {
+    Write-Host 'Snapshot cache kinds:'
+    $validPresentedEvents |
+        Group-Object {
+            [string](Get-EventValue $_ 'cache_kind' 'none')
+        } |
+        Sort-Object Name |
+        ForEach-Object {
+            Write-Host ('  {0}: {1}' -f $_.Name, $_.Count)
+        }
+    $snapshotHitCount = @(
+        $validPresentedEvents |
+            Where-Object {
+                [string](Get-EventValue $_ 'cache_kind' 'none') -ne 'none'
+            }).Count
+    $prefetchHitCount = @(
+        $validPresentedEvents |
+            Where-Object {
+                [string](Get-EventValue $_ 'cache_kind' 'none') -eq 'prefetch'
+            }).Count
+    $historyHitCount = $snapshotHitCount - $prefetchHitCount
+    Write-Host (
+        'Snapshot hit rate: {0:P2} ({1}/{2}); prefetch: {3:P2} ({4}/{2}); history: {5:P2} ({6}/{2})' -f
+            ($snapshotHitCount / $validPresentedEvents.Count),
+            $snapshotHitCount,
+            $validPresentedEvents.Count,
+            ($prefetchHitCount / $validPresentedEvents.Count),
+            $prefetchHitCount,
+            ($historyHitCount / $validPresentedEvents.Count),
+            $historyHitCount)
+}
+if ($prefetchEvents.Count -gt 0) {
+    Write-Host 'Prefetch outcomes:'
+    $prefetchEvents |
+        Group-Object {
+            [string](Get-EventValue $_ 'outcome' 'unknown')
+        } |
+        Sort-Object Name |
+        ForEach-Object {
+            Write-Host ('  {0}: {1}' -f $_.Name, $_.Count)
+        }
 }
 
 $metricFields = @(

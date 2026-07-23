@@ -863,6 +863,71 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
         std::move(resident_snapshot)};
 }
 
+std::optional<SourceCollectionSnapshotPrefetchPlan>
+SourceCollectionSession::PlanSnapshotPrefetch(
+    SampleNavigationDirection direction,
+    SampleNavigationPrefetchPolicy policy)
+{
+    const SpectrumSnapshotHandle snapshot = CurrentSampleSnapshot();
+    if (!snapshot || snapshot->source.path.empty() ||
+        workflow_->pending_sample_index()) {
+        return std::nullopt;
+    }
+
+    const std::vector<std::size_t> rows =
+        workflow_->AdjacentNavigationRows(direction, policy);
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    const std::size_t spectrum_index = rows.front();
+    std::optional<SourceCollectionLoadHint> hint =
+        LoadHintForSource(snapshot->source.path, spectrum_index);
+    if (!hint || !hint->context_reuse_proof ||
+        hint->resident_snapshot) {
+        return std::nullopt;
+    }
+    return SourceCollectionSnapshotPrefetchPlan{
+        snapshot->source.path,
+        spectrum_index,
+        AnnotationPathsForSource(snapshot->source.path),
+        std::move(*hint),
+    };
+}
+
+SourceCollectionSnapshotPrefetchStoreResult
+SourceCollectionSession::StorePrefetchedSnapshot(
+    const std::filesystem::path& path,
+    SourceCollectionResidentSnapshot resident)
+{
+    SourceCollectionSnapshotPrefetchStoreResult result;
+    const std::optional<SourceCollectionIdentity> active_identity =
+        workflow_->ActiveSourceIdentity();
+    const SpectrumSnapshotHandle active_snapshot = CurrentSampleSnapshot();
+    if (!active_identity || !active_snapshot ||
+        SourcePathIdentityKey(active_snapshot->source.path) !=
+            SourcePathIdentityKey(path) ||
+        *active_identity != resident.context_reuse_proof.identity) {
+        if (resident.snapshot) {
+            result.background_retirement.push_back(
+                std::move(resident.snapshot));
+        }
+        return result;
+    }
+
+    SourceCollectionRosterResidentRetainResult retain =
+        roster_->RetainPrefetchedSnapshot(
+            path,
+            std::move(resident));
+    result.stored = retain.retained;
+    if (!retain.retired_snapshots.empty()) {
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(
+                std::move(retain.retired_snapshots)));
+    }
+    return result;
+}
+
 SourceCollectionSessionAction SourceCollectionSession::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)

@@ -89,6 +89,17 @@ struct ShellUiTestAccess {
         return shell.pending_source_loads_.size();
     }
 
+    static bool PrefetchActive(const ShellUi& shell)
+    {
+        return shell.active_snapshot_prefetch_.has_value();
+    }
+
+    static std::vector<NavigationPrefetchReport>
+    TakePrefetchReports(ShellUi& shell)
+    {
+        return shell.TakeNavigationPrefetchReports();
+    }
+
     static std::string_view LoadError(const ShellUi& shell)
     {
         return shell.source_load_error_;
@@ -2093,6 +2104,458 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         "retrying the failed row must create a new worker follow-up instead of being deduplicated");
 }
 
+void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path =
+        UniqueTempPath("_prefetch_consumed.csv");
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        stream << "fixture";
+    }
+    std::array<std::atomic_int, 3> decoder_calls{};
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [&decoder_calls](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            ++decoder_calls.at(index);
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            MakePreparedDeferredSession(path),
+            specforge::SourceCollectionLoadQueue(
+                std::move(dependencies)));
+    Access::EnableNavigationTracing(*shell, 300);
+
+    const specforge::SourceCollectionSessionResult first =
+        Access::SubmitNavigation(
+            *shell,
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::Move(
+                        specforge::
+                            SampleNavigationRequest::Next())),
+            specforge::NavigationLatencyInputKind::UiNext);
+    Require(
+        first.follow_up_spectrum_index == 1,
+        "first next should queue raw row 1");
+    const auto first_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           first_deadline) {
+        Access::Drain(*shell);
+        const auto snapshot =
+            Access::Session(*shell)
+                .CurrentSampleSnapshot();
+        if (snapshot &&
+            snapshot->collection.current_index == 1) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    const auto first_reports =
+        Access::CompleteFramePresentation(
+            *shell,
+            300);
+    Require(
+        first_reports.size() == 1 &&
+            first_reports.front().cache_kind ==
+                specforge::
+                    NavigationSnapshotCacheKind::None,
+        "first next should remain a foreground decode");
+
+    std::vector<specforge::NavigationPrefetchReport>
+        prefetch_reports;
+    const auto prefetch_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           prefetch_deadline) {
+        Access::Drain(*shell);
+        auto reports =
+            Access::TakePrefetchReports(*shell);
+        prefetch_reports.insert(
+            prefetch_reports.end(),
+            reports.begin(),
+            reports.end());
+        if (std::any_of(
+                prefetch_reports.begin(),
+                prefetch_reports.end(),
+                [](const auto& report) {
+                    return report.outcome ==
+                        specforge::
+                            NavigationPrefetchOutcome::
+                                Completed;
+                })) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+
+    Access::EnableNavigationTracing(*shell, 301);
+    const specforge::SourceCollectionSessionResult second =
+        Access::SubmitNavigation(
+            *shell,
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::Move(
+                        specforge::
+                            SampleNavigationRequest::Next())),
+            specforge::NavigationLatencyInputKind::UiNext);
+    Require(
+        second.follow_up_spectrum_index == 2,
+        "second next should queue raw row 2");
+    const auto second_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           second_deadline) {
+        Access::Drain(*shell);
+        const auto snapshot =
+            Access::Session(*shell)
+                .CurrentSampleSnapshot();
+        if (snapshot &&
+            snapshot->collection.current_index == 2 &&
+            Access::PendingLoadCount(*shell) == 0) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    const auto second_reports =
+        Access::CompleteFramePresentation(
+            *shell,
+            301);
+    auto consumed_reports =
+        Access::TakePrefetchReports(*shell);
+    prefetch_reports.insert(
+        prefetch_reports.end(),
+        consumed_reports.begin(),
+        consumed_reports.end());
+
+    Require(
+        second_reports.size() == 1 &&
+            second_reports.front().cache_hit &&
+            second_reports.front().cache_kind ==
+                specforge::
+                    NavigationSnapshotCacheKind::
+                        Prefetch,
+        "second same-direction navigation should identify a prefetch cache hit");
+    Require(
+        second_reports.front().attempts.size() == 1 &&
+            second_reports.front().attempts[0]
+                    .snapshot_load_finished_ns -
+                second_reports.front().attempts[0]
+                    .snapshot_load_started_ns <
+                5'000'000,
+        "prefetch consumption should keep demand-side decode near zero");
+    Require(
+        decoder_calls[1].load() == 1 &&
+            decoder_calls[2].load() == 1,
+        "demand must consume row 2 without invoking its decoder again");
+    Require(
+        std::any_of(
+            prefetch_reports.begin(),
+            prefetch_reports.end(),
+            [](const auto& report) {
+                return report.outcome ==
+                    specforge::
+                        NavigationPrefetchOutcome::Completed;
+            }) &&
+            std::any_of(
+                prefetch_reports.begin(),
+                prefetch_reports.end(),
+                [](const auto& report) {
+                    return report.outcome ==
+                        specforge::
+                            NavigationPrefetchOutcome::Consumed;
+                }),
+        "prefetch observability should record completed and consumed");
+    shell.reset();
+    std::filesystem::remove(path);
+}
+
+void TestPublishedPrefetchBecomesStaleAfterQueryInput()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path =
+        UniqueTempPath("_prefetch_stale.csv");
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        stream << "fixture";
+    }
+    std::array<std::atomic_int, 3> decoder_calls{};
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [&decoder_calls](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            ++decoder_calls.at(index);
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            MakePreparedDeferredSession(path),
+            specforge::SourceCollectionLoadQueue(
+                std::move(dependencies)));
+
+    (void)Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::Move(
+                    specforge::
+                        SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
+    const auto activation_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           activation_deadline) {
+        Access::Drain(*shell);
+        if (Access::PrefetchActive(*shell)) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+
+    std::vector<specforge::SourceCollectionLoadCompletion>
+        published_prefetch;
+    const auto publish_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           publish_deadline) {
+        published_prefetch =
+            Access::TakeCompleted(*shell);
+        if (!published_prefetch.empty()) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    Require(
+        published_prefetch.size() == 1 &&
+            published_prefetch.front().prepared,
+        "prefetch fixture should hold one already-published completion");
+
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::
+                    SetSampleNameQuery("gamma")));
+    Access::DrainCompleted(
+        *shell,
+        std::move(published_prefetch));
+    const auto reports =
+        Access::TakePrefetchReports(*shell);
+
+    Require(
+        std::any_of(
+            reports.begin(),
+            reports.end(),
+            [](const auto& report) {
+                return report.outcome ==
+                    specforge::
+                        NavigationPrefetchOutcome::Stale;
+            }),
+        "query input should invalidate an already-published old prefetch");
+    Require(
+        Access::Session(*shell)
+                .CurrentSampleSnapshot()
+                ->collection.current_index == 1,
+        "stale prefetch must not activate or move the committed index");
+    shell.reset();
+    std::filesystem::remove(path);
+}
+
+void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path =
+        UniqueTempPath("_prefetch_canceled.csv");
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        stream << "fixture";
+    }
+    std::promise<void> prefetch_entered_promise;
+    std::shared_future<void> prefetch_entered =
+        prefetch_entered_promise.get_future().share();
+    std::promise<void> cancellation_observed_promise;
+    std::shared_future<void> cancellation_observed =
+        cancellation_observed_promise.get_future().share();
+    std::promise<void> release_canceled_worker_promise;
+    std::shared_future<void> release_canceled_worker =
+        release_canceled_worker_promise.get_future().share();
+    std::atomic_bool entered_once = false;
+    std::atomic_int64_t decoder_returned_ns = 0;
+    specforge::SourceCollectionLoadDependencies dependencies;
+    dependencies.snapshot_loader =
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
+            if (index == 2) {
+                if (!entered_once.exchange(
+                        true,
+                        std::memory_order_relaxed)) {
+                    prefetch_entered_promise.set_value();
+                }
+                while (!canceled()) {
+                    std::this_thread::sleep_for(1ms);
+                }
+                cancellation_observed_promise.set_value();
+                release_canceled_worker.wait();
+                decoder_returned_ns.store(
+                    std::chrono::duration_cast<
+                        std::chrono::nanoseconds>(
+                        specforge::
+                            NavigationLatencyTrace::Now()
+                                .time_since_epoch())
+                        .count(),
+                    std::memory_order_relaxed);
+            }
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            MakePreparedDeferredSession(path),
+            specforge::SourceCollectionLoadQueue(
+                std::move(dependencies)));
+
+    (void)Access::SubmitNavigation(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::Move(
+                    specforge::
+                        SampleNavigationRequest::Next())),
+        specforge::NavigationLatencyInputKind::UiNext);
+    const auto activation_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           activation_deadline) {
+        Access::Drain(*shell);
+        if (prefetch_entered.wait_for(0ms) ==
+            std::future_status::ready) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+
+    (void)Access::Submit(
+        *shell,
+        specforge::SourceCollectionSessionIntent::
+            UpdateSampleNavigation(
+                specforge::SampleNavigationIntent::
+                    SetSampleNameQuery("gamma")));
+    const bool cancel_seen =
+        cancellation_observed.wait_for(2s) ==
+        std::future_status::ready;
+    std::vector<specforge::NavigationPrefetchReport>
+        reports = Access::TakePrefetchReports(*shell);
+    const bool canceled_reported_before_exit =
+        std::any_of(
+            reports.begin(),
+            reports.end(),
+            [](const auto& report) {
+                return report.outcome ==
+                    specforge::
+                        NavigationPrefetchOutcome::
+                            Canceled;
+            });
+
+    release_canceled_worker_promise.set_value();
+    const auto terminal_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           terminal_deadline) {
+        Access::Drain(*shell);
+        auto drained =
+            Access::TakePrefetchReports(*shell);
+        reports.insert(
+            reports.end(),
+            drained.begin(),
+            drained.end());
+        if (std::any_of(
+                reports.begin(),
+                reports.end(),
+                [](const auto& report) {
+                    return report.outcome ==
+                        specforge::
+                            NavigationPrefetchOutcome::
+                                Canceled;
+                })) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    const auto canceled_report = std::find_if(
+        reports.begin(),
+        reports.end(),
+        [](const auto& report) {
+            return report.outcome ==
+                specforge::
+                    NavigationPrefetchOutcome::Canceled;
+        });
+    const bool terminal_after_decoder =
+        canceled_report != reports.end() &&
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds>(
+            canceled_report->terminal_at
+                .time_since_epoch())
+                .count() >=
+            decoder_returned_ns.load(
+                std::memory_order_relaxed);
+    const bool cancellation_timestamps_ordered =
+        canceled_report != reports.end() &&
+        canceled_report->scheduled_at <=
+            canceled_report->cancel_requested_at &&
+        canceled_report->cancel_requested_at <=
+            canceled_report->terminal_at;
+
+    Require(
+        cancel_seen,
+        "the blocked prefetch worker should observe cancellation");
+    Require(
+        !canceled_reported_before_exit,
+        "canceled must not be recorded at request time while the worker is still unwinding");
+    Require(
+        terminal_after_decoder &&
+            cancellation_timestamps_ordered,
+        "canceled should preserve schedule, request, and worker-terminal order");
+    shell.reset();
+    std::filesystem::remove(path);
+}
+
 }  // namespace
 
 int main()
@@ -2115,6 +2578,9 @@ int main()
         TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread();
         TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket();
         TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry();
+        TestIdlePrefetchIsConsumedBySecondForwardNavigation();
+        TestPublishedPrefetchBecomesStaleAfterQueryInput();
+        TestCanceledPrefetchReportsOnlyAfterWorkerExit();
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

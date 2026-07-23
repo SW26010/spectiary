@@ -914,6 +914,67 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
         "the next same-source navigation should use the newly warmed state");
 }
 
+void TestAdjacentRowsFollowFilteredSortedRawSequence()
+{
+    specforge::SampleNavigationController controller(
+        std::filesystem::path{});
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {
+        "zero",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+    };
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/prefetch-sequence.npy",
+            "prefetch-sequence",
+            6,
+            2),
+        specforge::SourceCollectionIdentity{
+            .id = "prefetch-sequence-identity",
+            .source_name = "prefetch-sequence",
+            .source_fingerprint = "prefetch-source",
+            .context_fingerprint = "prefetch-context",
+            .spectrum_count = 6,
+        },
+        std::move(manifest));
+    (void)controller.SetSampleFilter(
+        {false, true, true, false, true, true});
+    specforge::SampleNavigationSortChoice sort;
+    sort.active = true;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(50.0),
+        specforge::MakeSampleNavigationSortValue(40.0),
+        specforge::MakeSampleNavigationSortValue(20.0),
+        specforge::MakeSampleNavigationSortValue(60.0),
+        specforge::MakeSampleNavigationSortValue(10.0),
+        specforge::MakeSampleNavigationSortValue(30.0),
+    };
+    (void)controller.SetSampleSorting(std::move(sort));
+
+    const std::vector<std::size_t> next_rows =
+        controller.AdjacentRows(
+            specforge::SampleNavigationDirection::Next,
+            {.ahead = 2, .behind = 1});
+    const std::vector<std::size_t> previous_rows =
+        controller.AdjacentRows(
+            specforge::SampleNavigationDirection::Previous,
+            {.ahead = 2, .behind = 1});
+
+    Require(
+        next_rows ==
+            std::vector<std::size_t>({5, 1, 4}),
+        "next prefetch policy must return raw rows from the filtered and sorted sequence");
+    Require(
+        previous_rows ==
+            std::vector<std::size_t>({4, 5}),
+        "previous prefetch policy must reverse direction without leaving the active sequence");
+}
+
 }  // namespace
 
 int main()
@@ -934,5 +995,6 @@ int main()
     TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
     TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions();
     TestSequenceStateInvalidatesWithNavigationInputsAndContext();
+    TestAdjacentRowsFollowFilteredSortedRawSequence();
     return 0;
 }

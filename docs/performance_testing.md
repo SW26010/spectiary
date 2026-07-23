@@ -262,7 +262,24 @@ snapshot 以维持 source reactivation 语义，额外的非当前 snapshot 使�
 键包含 source identity/fingerprint、context/dependency proof、folder generation handle
 （若适用）和 raw row index。query/filter/sort 只改变访问顺序，不复制 snapshot；source、
 文件内容、annotation/context 或 directory generation 变化会 miss 并在新结果提交时清空旧
-边界。本阶段不主动预取，只有实际成功激活过的 snapshot 会进入 history。
+边界。前台 Previous/Next/auto-advance 成功激活后，会按同一 filtered/sorted sequence 和当前
+方向只选择下一条 raw row 做低优先级预取。预取使用一个可取消的 unordered publication
+任务，不经过 `EnqueueBatch`，也不会阻塞之后的前台有序完成；任何新输入、反向、source/query/
+filter/sort/context 变化都会取消或使旧结果失效。worker 仍执行 source/context/generation
+pre/post 验证，只允许在已知 context 可复用时发布 immutable snapshot；UI drain 只把它加入同一
+roster residency，不激活 snapshot、不移动 committed/pending index，也不提交 workflow。
+
+`navigation_latency.cache_kind` 区分 `none`、`history` 和 `prefetch`；`cache_hit` 保留为兼容
+布尔字段，并且必须与 `cache_kind` 一致。每个 speculative task 另写 `navigation_prefetch`
+事件，包含 `prefetch_id`、`source_task_id`、raw `target_index`、`direction`、开始/终止时间和
+`completed`、`canceled`、`stale`、`failed` 或 `consumed` outcome。同一录制内，`consumed`
+只允许跟在同一 prefetch 的 `completed` 之后，且 task/raw row/direction/scheduled time 必须
+逐字段一致，消费时间不得早于完成时间；若录制开始前预取已经完成，也允许仅出现一个
+`consumed` carry-in。`canceled` 的 `cancel_requested_steady_ns` 是 UI 发出取消的时间，
+`terminal_steady_ns` 是 worker 结束 speculative work、在 queue publication boundary 发布
+terminal marker 的时间。分析器会按 cache kind
+和 prefetch outcome 汇总；第二次连续同方向
+导航若消费成功，应看到 `cache_kind=prefetch` 且 demand attempt 的 `decode_ms` 接近 0。
 
 每条新的 folder `navigation_latency_preparation_round` 还提供三项失效诊断：
 
@@ -303,6 +320,13 @@ source-row 区间，分开录制纯 UI 与纯键盘各至少 100 次成功 prese
 cache/build 计数、load/activation/Present 行为和投影成本；它不模拟物理点击/按键，也不替代真实
 Portable source 的 JSONL A/B。真实 IO/decode/context/renderer phase 是否无回退，仍以随后实际
 数据采集为准。
+
+预取 A/B 必须在同一 active source、同一 query/filter/sort/context 和同一 index window 下，
+将连续 Next 与反向 Previous 分开各录制至少 100 次。最终并列记录 snapshot hit rate、
+`total_ms` p95、`decode_ms` p95、`activation_ms` p95，以及 `queue_wait_ms`/
+`completion_service_wait_ms` p95；同时确认
+`sequence_cache_hit=true/false` 两组仍可解释、稳定 folder 为 `listing_scan_performed=false`
+且 `context_reused=true`。这些数字只能来自对应的完整 JSONL，不能用 synthetic test 时间估算。
 
 Portable build 的实际日志通常在 `Data\logs\`，也可以把对应完整路径传给脚本。分析器会
 校验唯一且位于末尾的 recorder summary、`dropped_events == 0`、至少一条导航事件和至少

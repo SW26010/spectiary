@@ -34,6 +34,12 @@ enum class NavigationLatencyOutcome : std::uint8_t {
     Coalesced,
 };
 
+enum class NavigationSnapshotCacheKind : std::uint8_t {
+    None,
+    History,
+    Prefetch,
+};
+
 struct NavigationLatencyFolderListingObservation {
     bool hint_present = false;
     bool generation_current_at_start = false;
@@ -171,6 +177,8 @@ struct NavigationLatencyReport {
     NavigationLatencyInputKind input_kind = NavigationLatencyInputKind::UiNext;
     NavigationLatencyOutcome outcome = NavigationLatencyOutcome::Pending;
     bool cache_hit = false;
+    NavigationSnapshotCacheKind cache_kind =
+        NavigationSnapshotCacheKind::None;
     NavigationTargetResolutionReport target_resolution;
     std::vector<NavigationLatencyAttemptReport> attempts;
 
@@ -199,6 +207,7 @@ public:
 
     void SetTargetIndex(std::size_t target_index) noexcept;
     void SetCacheHit(bool cache_hit) noexcept;
+    void SetCacheKind(NavigationSnapshotCacheKind cache_kind) noexcept;
     [[nodiscard]] NavigationLatencyAttemptHandle BeginLoadAttempt(
         std::size_t target_index,
         NavigationLatencyTimePoint at = Now());
@@ -222,7 +231,8 @@ private:
     std::uint64_t navigation_id_ = 0;
     std::size_t from_index_ = 0;
     NavigationLatencyInputKind input_kind_ = NavigationLatencyInputKind::UiNext;
-    std::atomic_bool cache_hit_ = false;
+    std::atomic<NavigationSnapshotCacheKind> cache_kind_ =
+        NavigationSnapshotCacheKind::None;
     NavigationTargetResolutionReport target_resolution_;
     std::int64_t input_ns_ = 0;
     std::int64_t requested_ns_ = 0;
@@ -247,6 +257,8 @@ using NavigationLatencyTraceHandle = std::shared_ptr<NavigationLatencyTrace>;
 
 [[nodiscard]] const char* NavigationLatencyInputKindName(NavigationLatencyInputKind kind) noexcept;
 [[nodiscard]] const char* NavigationLatencyOutcomeName(NavigationLatencyOutcome outcome) noexcept;
+[[nodiscard]] const char* NavigationSnapshotCacheKindName(
+    NavigationSnapshotCacheKind kind) noexcept;
 bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLatencyReport& report);
 
 }  // namespace specforge

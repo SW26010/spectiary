@@ -293,6 +293,7 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 13. Folder navigation 可以复用上一次 post-decode 验证通过、且仍 current 的 immutable listing generation；notification 不可用时才保留 fresh post-decode full scan fallback。cache hint 不能升级为 source-of-truth。
 14. Known-source context 只能在已提交 identity、source/companion/annotation dependency proof 和 folder generation（若适用）均通过两阶段检查时复用；单独的 identity 或 generation hint 不能跳过 manifest materialization。
 15. Resident snapshot 由 roster 按 raw row 和完整 source/context/generation 边界管理；session 只选择候选，load worker 在后台完成 currentness/TOCTOU 验证后才能跳过 decode。命中、淘汰、取消和 stale completion 都不能绕过原 pending/commit/supersede 事务。
+16. Adjacent prefetch 只能在前台导航成功激活后，从同一 filtered/sorted sequence 按当前方向选择 raw row；同一时刻最多一个 below-normal worker，必须可被任何新前台意图取消，并使用不阻塞 foreground ordered publication 的独立完成通道。prefetch drain 只写 roster residency，不能激活、移动 index 或提交 workflow。
 
 ## 推荐实现形态
 
@@ -303,6 +304,7 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 - invalidation-driven view cache；状态未变化时跨帧复用，command 和 maintenance 后显式 dirty。
 - owner-owned cache，例如 navigation sequence cache、filter view cache、sorting view cache。
 - roster-owned bounded resident snapshot LRU；淘汰项继续交给 background reclaimer，不在 UI thread 释放大 payload。
+- 单任务、可取消、unordered publication 的 low-priority snapshot prefetch lane；foreground miss 永远不等待 speculative completion。
 - 在 load/mutation 路径规范化 owned state，让 read view 保持纯投影。
 - context fingerprint 驱动失效，而不是每次 sample index 变化都重算。
 - source-order implicit representation，避免 `[0..N)` 常规场景分配和复制。

@@ -673,6 +673,12 @@ void SpecForgeApp::RenderFrame()
     for (const SourceLoadLatencyReport& report : source_load_reports) {
         (void)WriteSourceLoadLatencyProfileEvent(profile_, report);
     }
+    for (const NavigationPrefetchReport& report :
+         ui_.TakeNavigationPrefetchReports()) {
+        (void)WriteNavigationPrefetchProfileEvent(
+            profile_,
+            report);
+    }
     LogPresentationUpdates();
 }
 

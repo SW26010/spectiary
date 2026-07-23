@@ -32,6 +32,11 @@ struct SourceCollectionRosterOpenResult {
     SourceCollectionFolderListingGenerationHandle replaced_folder_listing_generation;
 };
 
+struct SourceCollectionRosterResidentRetainResult {
+    bool retained = false;
+    std::vector<SpectrumSnapshotHandle> retired_snapshots;
+};
+
 class SourceCollectionRoster {
 public:
     using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
@@ -55,6 +60,10 @@ public:
             const std::filesystem::path& path,
             std::size_t spectrum_index,
             const SourceCollectionIdentity& identity);
+    [[nodiscard]] SourceCollectionRosterResidentRetainResult
+        RetainPrefetchedSnapshot(
+            const std::filesystem::path& path,
+            SourceCollectionResidentSnapshot resident);
 
     [[nodiscard]] SourceCollectionRosterOpenResult OpenSource(
         const std::filesystem::path& path,
@@ -84,6 +93,13 @@ private:
         SpectrumSnapshotHandle snapshot;
         SourceCollectionContextReuseProof context_reuse_proof;
         SourceCollectionFolderListingGenerationHandle folder_listing_generation;
+        SourceCollectionResidentSnapshotOrigin origin =
+            SourceCollectionResidentSnapshotOrigin::History;
+        std::uint64_t prefetch_id = 0;
+        std::uint64_t prefetch_task_id = 0;
+        std::int64_t prefetch_scheduled_ns = 0;
+        SampleNavigationDirection prefetch_direction =
+            SampleNavigationDirection::Next;
         std::size_t estimated_payload_bytes = 0;
         std::uint64_t access_epoch = 0;
     };
@@ -123,6 +139,11 @@ private:
         std::size_t spectrum_index,
         const std::optional<SourceCollectionContextReuseProof>& context_reuse_proof,
         const SourceCollectionFolderListingGenerationHandle& folder_listing_generation,
+        SourceCollectionResidentSnapshotOrigin origin,
+        std::uint64_t prefetch_id,
+        std::uint64_t prefetch_task_id,
+        std::int64_t prefetch_scheduled_ns,
+        SampleNavigationDirection prefetch_direction,
         std::vector<SpectrumSnapshotHandle>& retired_snapshots);
     void InvalidateResidentSnapshots(
         SourceListEntry& source,

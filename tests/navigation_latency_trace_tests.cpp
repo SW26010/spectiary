@@ -1,4 +1,5 @@
 #include "profile/navigation_latency_trace.h"
+#include "profile/navigation_prefetch_trace.h"
 
 #include "profile/profile_sink.h"
 
@@ -96,7 +97,11 @@ void TestPresentedTraceCapturesCorrelatedPhases()
     Require(report->activation_frame == 42, "activation frame should survive the trace");
     Require(report->presentation_viewport_id == 7, "presenting viewport should survive the trace");
     Require(report->outcome == specforge::NavigationLatencyOutcome::Presented, "outcome should be presented");
-    Require(report->cache_hit, "verified decode reuse should survive the trace");
+    Require(
+        report->cache_hit &&
+            report->cache_kind ==
+                specforge::NavigationSnapshotCacheKind::History,
+        "verified history reuse should survive the trace");
     Require(report->attempts[0].workflow_reused, "workflow reuse should be recorded");
     Require(report->attempts[0].context_reused, "context reuse should be recorded");
     Require(report->first_present_ns == 17'000'000, "first Present timestamp should be recorded");
@@ -146,6 +151,10 @@ void TestPresentedTraceCapturesCorrelatedPhases()
         "target-resolution phases should serialize and preserve the aggregate");
     Require(text.find("\"presentation_viewport_id\":7") != std::string::npos, "viewport id should serialize");
     Require(text.find("\"cache_hit\":true") != std::string::npos, "decode reuse should serialize");
+    Require(
+        text.find("\"cache_kind\":\"history\"") !=
+            std::string::npos,
+        "history cache origin should serialize");
     Require(text.find("\"decode_ms\":2.0000") != std::string::npos, "decode duration should be calculated");
     Require(text.find("\"completion_service_wait_ms\":1.0000") != std::string::npos, "service wait should be calculated");
     Require(text.find("\"total_ms\":16.0000") != std::string::npos, "input-to-Present total should be calculated");
@@ -315,6 +324,49 @@ void TestRepeatedPreparationKeepsDistinctRounds()
         "each round should retain context reuse and the attempt should report its final round");
 }
 
+void TestPrefetchCancellationSerializesRequestAndTerminalTimes()
+{
+    const std::filesystem::path path = UniqueTempPath();
+    {
+        specforge::ProfileSink sink(path);
+        Require(
+            sink.is_open(),
+            "profile sink should open for the prefetch fixture");
+        Require(
+            specforge::WriteNavigationPrefetchProfileEvent(
+                sink,
+                {
+                    .prefetch_id = 12,
+                    .source_task_id = 120,
+                    .target_index = 4,
+                    .direction =
+                        specforge::
+                            SampleNavigationDirection::Next,
+                    .outcome =
+                        specforge::
+                            NavigationPrefetchOutcome::Canceled,
+                    .scheduled_at = AtMilliseconds(1),
+                    .cancel_requested_at =
+                        AtMilliseconds(2),
+                    .terminal_at = AtMilliseconds(4),
+                }),
+            "prefetch cancellation event should be accepted");
+        sink.Stop();
+    }
+    const std::string text = ReadText(path);
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
+
+    Require(
+        text.find(
+            "\"cancel_requested_steady_ns\":2000000") !=
+            std::string::npos &&
+            text.find(
+                "\"terminal_steady_ns\":4000000") !=
+                std::string::npos,
+        "prefetch cancellation should serialize distinct request and worker-terminal timestamps");
+}
+
 }  // namespace
 
 int main()
@@ -325,6 +377,7 @@ int main()
         TestSameFrameStopRetainsPresentedNavigationReport();
         TestRetargetedLoadsKeepSeparateAttempts();
         TestRepeatedPreparationKeepsDistinctRounds();
+        TestPrefetchCancellationSerializesRequestAndTerminalTimes();
     } catch (const std::exception&) {
         return 1;
     }

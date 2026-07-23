@@ -18,6 +18,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <windows.h>
+
 namespace specforge {
 namespace {
 
@@ -25,6 +27,15 @@ class SourceLoadCanceled : public std::runtime_error {
 public:
     SourceLoadCanceled()
         : std::runtime_error("source loading was canceled")
+    {
+    }
+};
+
+class SourceLoadStale : public std::runtime_error {
+public:
+    SourceLoadStale()
+        : std::runtime_error(
+              "The speculative snapshot no longer matches the active verified context.")
     {
     }
 };
@@ -227,6 +238,7 @@ public:
         std::shared_ptr<BatchState> batch;
         std::size_t batch_index = 0;
         std::shared_ptr<BatchCompletionSlot> ordered_completion;
+        bool prefetch = false;
     };
 
     struct Worker {
@@ -238,6 +250,11 @@ public:
               thread([owner,
                       task = std::move(task),
                       finished_flag = finished](std::stop_token stop_token) mutable {
+                  if (task.prefetch) {
+                      (void)::SetThreadPriority(
+                          ::GetCurrentThread(),
+                          THREAD_PRIORITY_BELOW_NORMAL);
+                  }
                   owner->RunTask(task, stop_token);
                   finished_flag->store(true, std::memory_order_release);
               })
@@ -270,6 +287,33 @@ public:
                 throw;
             }
             completion_became_ready = completed_was_empty && !completed_.empty();
+        }
+        if (completion_became_ready) {
+            NotifyCompletionReady();
+        }
+        return id;
+    }
+
+    std::uint64_t EnqueuePrefetch(SourceCollectionLoadRequest request)
+    {
+        ReapFinishedWorkers();
+        request.snapshot_only = true;
+        std::uint64_t id = 0;
+        bool completion_became_ready = false;
+        {
+            std::lock_guard lock(mutex_);
+            if (active_prefetch_task_count_ > 0) {
+                return 0;
+            }
+            const bool completed_was_empty = completed_.empty();
+            id = StartTaskLocked(
+                std::move(request),
+                nullptr,
+                0,
+                nullptr,
+                true);
+            completion_became_ready =
+                completed_was_empty && !completed_.empty();
         }
         if (completion_became_ready) {
             NotifyCompletionReady();
@@ -316,13 +360,15 @@ public:
         return ids;
     }
 
-    void Cancel(std::uint64_t task_id)
+    bool Cancel(std::uint64_t task_id)
     {
         std::lock_guard lock(mutex_);
         const auto match = cancellation_.find(task_id);
-        if (match != cancellation_.end()) {
-            match->second->store(true, std::memory_order_relaxed);
+        if (match == cancellation_.end()) {
+            return false;
         }
+        match->second->store(true, std::memory_order_relaxed);
+        return true;
     }
 
     std::vector<SourceCollectionLoadCompletion> TakeCompleted()
@@ -423,7 +469,8 @@ private:
         SourceCollectionLoadRequest request,
         std::shared_ptr<BatchState> batch,
         std::size_t batch_index = 0,
-        std::shared_ptr<BatchCompletionSlot> ordered_completion = nullptr)
+        std::shared_ptr<BatchCompletionSlot> ordered_completion = nullptr,
+        bool prefetch = false)
     {
         const std::uint64_t id = next_task_id_++;
         if (request.latency_attempt) {
@@ -444,13 +491,20 @@ private:
             std::move(batch),
             batch_index,
             std::move(ordered_completion),
+            prefetch,
         };
         cancellation_.emplace(id, canceled);
         ++active_task_count_;
+        if (prefetch) {
+            ++active_prefetch_task_count_;
+        }
         try {
             workers_.emplace_back(std::move(finished), this, std::move(task));
         } catch (const std::system_error& error) {
             --active_task_count_;
+            if (prefetch) {
+                --active_prefetch_task_count_;
+            }
             SourceCollectionLoadCompletion completion;
             completion.task_id = id;
             completion.path = failure_path;
@@ -468,9 +522,14 @@ private:
                     id,
                     canceled,
                     std::move(completion));
-            } else {
+            } else if (failure_ordered_completion) {
                 FinishOrderedTask(
                     *failure_ordered_completion,
+                    id,
+                    canceled,
+                    std::move(completion));
+            } else {
+                FinishUnorderedTask(
                     id,
                     canceled,
                     std::move(completion));
@@ -479,6 +538,9 @@ private:
         } catch (...) {
             cancellation_.erase(id);
             --active_task_count_;
+            if (prefetch) {
+                --active_prefetch_task_count_;
+            }
             throw;
         }
         return id;
@@ -657,7 +719,13 @@ private:
         const SourceCollectionSingleFileState& verified_state,
         SourceCollectionFolderListingGenerationHandle
             folder_listing_generation = {},
-        bool snapshot_cache_hit = false)
+        std::optional<SourceCollectionResidentSnapshotOrigin>
+            snapshot_cache_origin = std::nullopt,
+        std::uint64_t snapshot_prefetch_id = 0,
+        std::uint64_t snapshot_prefetch_task_id = 0,
+        std::int64_t snapshot_prefetch_scheduled_ns = 0,
+        SampleNavigationDirection snapshot_prefetch_direction =
+            SampleNavigationDirection::Next)
     {
         const SourceCollectionIdentity identity =
             task.request.context_reuse_proof->identity;
@@ -675,7 +743,16 @@ private:
             SourceCollectionContextReuseProof{identity, verified_state};
         prepared.folder_listing_generation =
             std::move(folder_listing_generation);
-        prepared.snapshot_cache_hit = snapshot_cache_hit;
+        prepared.snapshot_cache_hit =
+            snapshot_cache_origin.has_value();
+        prepared.snapshot_cache_origin = snapshot_cache_origin;
+        prepared.snapshot_prefetch_id = snapshot_prefetch_id;
+        prepared.snapshot_prefetch_task_id =
+            snapshot_prefetch_task_id;
+        prepared.snapshot_prefetch_scheduled_ns =
+            snapshot_prefetch_scheduled_ns;
+        prepared.snapshot_prefetch_direction =
+            snapshot_prefetch_direction;
         return prepared;
     }
 
@@ -771,8 +848,13 @@ private:
                      listing_generation->listing.spectra.size() ||
                  !SourceCollectionFolderSpectrumFileMatchesCurrentState(
                      listing_generation
-                         ->listing.spectra[task.request.spectrum_index]))) {
+                          ->listing.spectra[task.request.spectrum_index]))) {
                 listing_generation.reset();
+            }
+            if (task.request.snapshot_only &&
+                (!listing_generation ||
+                 !generation_current_at_start)) {
+                throw SourceLoadStale();
             }
             if (!listing_generation) {
                 listing_generation =
@@ -842,7 +924,11 @@ private:
                             std::move(snapshot),
                             verified_state,
                             std::move(listing_generation),
-                            true);
+                            resident.origin,
+                            resident.prefetch_id,
+                            resident.prefetch_task_id,
+                            resident.prefetch_scheduled_ns,
+                            resident.prefetch_direction);
                     }
                     if (!listing_generation_is_current) {
                         listing_generation.reset();
@@ -887,6 +973,9 @@ private:
                                 .folder_listing_generation_hint);
             std::optional<SourceCollectionContext> context;
             if (!can_reuse_context) {
+                if (task.request.snapshot_only) {
+                    throw SourceLoadStale();
+                }
                 context.emplace(
                     dependencies_.folder_context_builder(
                         *snapshot,
@@ -1026,7 +1115,11 @@ private:
                             std::move(snapshot),
                             verified_state,
                             {},
-                            true);
+                            resident.origin,
+                            resident.prefetch_id,
+                            resident.prefetch_task_id,
+                            resident.prefetch_scheduled_ns,
+                            resident.prefetch_direction);
                     }
                     continue;
                 }
@@ -1058,6 +1151,9 @@ private:
                     false);
             std::optional<SourceCollectionContext> context;
             if (!can_reuse_context) {
+                if (task.request.snapshot_only) {
+                    throw SourceLoadStale();
+                }
                 context.emplace(
                     dependencies_.file_context_builder(
                         *snapshot,
@@ -1105,6 +1201,11 @@ private:
         const SourceCollectionCancellationCheckpoint checkpoint =
             CheckpointFor(task, stop_token);
         checkpoint();
+        if (task.request.snapshot_only &&
+            (!task.request.reuse_identity ||
+             !task.request.context_reuse_proof)) {
+            throw SourceLoadStale();
+        }
         std::error_code directory_error;
         const bool is_directory =
             std::filesystem::is_directory(task.request.path, directory_error);
@@ -1207,6 +1308,63 @@ private:
             std::move(completion));
     }
 
+    void FinishUnorderedTask(
+        std::uint64_t task_id,
+        const std::shared_ptr<std::atomic_bool>& canceled,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        const bool task_canceled =
+            canceled && canceled->load(std::memory_order_relaxed);
+        if (completion) {
+            if (!task_canceled || completion->canceled) {
+                if (completion->latency_attempt) {
+                    completion->latency_attempt
+                        ->MarkCompletionPublished();
+                }
+                completed_.push_back(std::move(*completion));
+            } else if (completion->prepared) {
+                retired_prepared_.push_back(
+                    std::move(*completion->prepared));
+                retirement_condition_.notify_one();
+            }
+        }
+        cancellation_.erase(task_id);
+    }
+
+    void FinishUnorderedTask(
+        const Task& task,
+        std::optional<SourceCollectionLoadCompletion> completion)
+    {
+        const bool task_canceled =
+            task.canceled &&
+            task.canceled->load(
+                std::memory_order_relaxed);
+        if (task.prefetch && task_canceled &&
+            (!completion || !completion->canceled)) {
+            if (completion && completion->prepared) {
+                retired_prepared_.push_back(
+                    std::move(*completion->prepared));
+                retirement_condition_.notify_one();
+            }
+            SourceCollectionLoadCompletion
+                canceled_completion;
+            canceled_completion.task_id = task.id;
+            canceled_completion.path =
+                task.request.path;
+            canceled_completion.spectrum_index =
+                task.request.spectrum_index;
+            canceled_completion.canceled = true;
+            canceled_completion.worker_terminal_at =
+                NavigationLatencyTrace::Now();
+            completion =
+                std::move(canceled_completion);
+        }
+        FinishUnorderedTask(
+            task.id,
+            task.canceled,
+            std::move(completion));
+    }
+
     void FinishTask(const Task& task, SourceCollectionLoadCompletion completion)
     {
         bool completion_became_ready = false;
@@ -1216,14 +1374,21 @@ private:
             if (active_task_count_ > 0) {
                 --active_task_count_;
             }
+            if (task.prefetch && active_prefetch_task_count_ > 0) {
+                --active_prefetch_task_count_;
+            }
             if (task.batch) {
                 FinishBatchTask(
                     task,
                     task.canceled->load(std::memory_order_relaxed)
                         ? std::nullopt
                         : std::optional<SourceCollectionLoadCompletion>{std::move(completion)});
-            } else {
+            } else if (task.ordered_completion) {
                 FinishOrderedTask(task, std::move(completion));
+            } else {
+                FinishUnorderedTask(
+                    task,
+                    std::move(completion));
             }
             task.finished->store(true, std::memory_order_release);
             completion_became_ready = completed_was_empty && !completed_.empty();
@@ -1242,10 +1407,17 @@ private:
             if (active_task_count_ > 0) {
                 --active_task_count_;
             }
+            if (task.prefetch && active_prefetch_task_count_ > 0) {
+                --active_prefetch_task_count_;
+            }
             if (task.batch) {
                 FinishBatchTask(task, std::nullopt);
-            } else {
+            } else if (task.ordered_completion) {
                 FinishOrderedTask(task, std::nullopt);
+            } else {
+                FinishUnorderedTask(
+                    task,
+                    std::nullopt);
             }
             task.finished->store(true, std::memory_order_release);
             completion_became_ready = completed_was_empty && !completed_.empty();
@@ -1273,6 +1445,7 @@ private:
         resources.swap(retired_resources_);
         cancellation_.clear();
         active_task_count_ = 0;
+        active_prefetch_task_count_ = 0;
     }
 
     void RunTask(const Task& task, std::stop_token stop_token)
@@ -1298,6 +1471,9 @@ private:
         } catch (const SourceLoadCanceled&) {
             FinishCanceledTask(task);
             return;
+        } catch (const SourceLoadStale& error) {
+            completion.stale = true;
+            completion.error_message = error.what();
         } catch (const std::exception& error) {
             completion.error_message = error.what();
         } catch (...) {
@@ -1352,6 +1528,7 @@ private:
     std::unordered_map<std::uint64_t, std::shared_ptr<std::atomic_bool>> cancellation_;
     std::uint64_t next_task_id_ = 1;
     std::size_t active_task_count_ = 0;
+    std::size_t active_prefetch_task_count_ = 0;
     std::vector<Worker> workers_;
     std::jthread retirement_worker_;
 };
@@ -1378,15 +1555,21 @@ std::uint64_t SourceCollectionLoadQueue::Enqueue(SourceCollectionLoadRequest req
     return impl_->Enqueue(std::move(request));
 }
 
+std::uint64_t SourceCollectionLoadQueue::EnqueuePrefetch(
+    SourceCollectionLoadRequest request)
+{
+    return impl_->EnqueuePrefetch(std::move(request));
+}
+
 std::vector<std::uint64_t> SourceCollectionLoadQueue::EnqueueBatch(
     std::vector<SourceCollectionLoadRequest> requests)
 {
     return impl_->EnqueueBatch(std::move(requests));
 }
 
-void SourceCollectionLoadQueue::Cancel(std::uint64_t task_id)
+bool SourceCollectionLoadQueue::Cancel(std::uint64_t task_id)
 {
-    impl_->Cancel(task_id);
+    return impl_->Cancel(task_id);
 }
 
 std::vector<SourceCollectionLoadCompletion> SourceCollectionLoadQueue::TakeCompleted()

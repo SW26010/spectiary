@@ -34,6 +34,9 @@ struct SourceCollectionLoadRequest {
     // residency. The worker must prove this boundary is still current before
     // it may skip decode.
     std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
+    // Prefetch requests may only publish a snapshot under an already-proven
+    // context. They never materialize or publish workflow state.
+    bool snapshot_only = false;
     NavigationLatencyAttemptHandle latency_attempt;
 };
 
@@ -52,6 +55,13 @@ struct PreparedSourceCollection {
     // True only when the worker reused a resident snapshot and did not invoke
     // either snapshot decoder.
     bool snapshot_cache_hit = false;
+    std::optional<SourceCollectionResidentSnapshotOrigin>
+        snapshot_cache_origin;
+    std::uint64_t snapshot_prefetch_id = 0;
+    std::uint64_t snapshot_prefetch_task_id = 0;
+    std::int64_t snapshot_prefetch_scheduled_ns = 0;
+    SampleNavigationDirection snapshot_prefetch_direction =
+        SampleNavigationDirection::Next;
 };
 
 struct SourceCollectionLoadCompletion {
@@ -60,6 +70,11 @@ struct SourceCollectionLoadCompletion {
     std::size_t spectrum_index = 0;
     std::optional<PreparedSourceCollection> prepared;
     std::string error_message;
+    bool stale = false;
+    // Only speculative requests publish a cancellation marker. Foreground
+    // cancellation continues to suppress completion entirely.
+    bool canceled = false;
+    NavigationLatencyTimePoint worker_terminal_at;
     NavigationLatencyAttemptHandle latency_attempt;
 };
 
@@ -123,9 +138,15 @@ public:
     // Every request runs on its own jthread. Injected dependencies therefore
     // need to support concurrent calls from independent source loads.
     [[nodiscard]] std::uint64_t Enqueue(SourceCollectionLoadRequest request);
+    // A single speculative request may use this unordered, below-normal
+    // priority lane. It can never hold a later foreground completion behind
+    // the queue's ordered publication boundary. Returns zero while an earlier
+    // prefetch worker is still unwinding after cancellation.
+    [[nodiscard]] std::uint64_t EnqueuePrefetch(
+        SourceCollectionLoadRequest request);
     [[nodiscard]] std::vector<std::uint64_t> EnqueueBatch(
         std::vector<SourceCollectionLoadRequest> requests);
-    void Cancel(std::uint64_t task_id);
+    bool Cancel(std::uint64_t task_id);
     [[nodiscard]] std::vector<SourceCollectionLoadCompletion> TakeCompleted();
     [[nodiscard]] bool NeedsService() const;
 

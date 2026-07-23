@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include <windows.h>
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -989,6 +991,152 @@ void TestIndividualLoadsPublishInRequestOrder()
     std::filesystem::remove(second);
 }
 
+void TestPrefetchNeverBlocksForegroundPublication()
+{
+    const std::filesystem::path prefetch_path =
+        UniqueTempPath("_prefetch_priority.csv");
+    const std::filesystem::path foreground_path =
+        UniqueTempPath("_prefetch_foreground.csv");
+    WriteFixture(prefetch_path);
+    WriteFixture(foreground_path);
+    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        MakeSnapshot(prefetch_path, 0);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*initial_snapshot);
+    std::promise<void> prefetch_entered_promise;
+    std::shared_future<void> prefetch_entered =
+        prefetch_entered_promise.get_future().share();
+    std::promise<void> release_prefetch_promise;
+    std::shared_future<void> release_prefetch =
+        release_prefetch_promise.get_future().share();
+    std::atomic_int prefetch_priority =
+        THREAD_PRIORITY_ERROR_RETURN;
+    std::atomic_int foreground_priority =
+        THREAD_PRIORITY_ERROR_RETURN;
+    std::atomic_bool prefetch_entered_once = false;
+
+    specforge::SourceCollectionLoadQueue queue(
+        Dependencies(
+            [&](const auto& path,
+                std::size_t index,
+                const auto& canceled) {
+                if (path == prefetch_path) {
+                    prefetch_priority.store(
+                        ::GetThreadPriority(
+                            ::GetCurrentThread()),
+                        std::memory_order_relaxed);
+                    if (!prefetch_entered_once.exchange(
+                            true,
+                            std::memory_order_relaxed)) {
+                        prefetch_entered_promise.set_value();
+                    }
+                    WaitForRelease(
+                        release_prefetch,
+                        canceled,
+                        "timed out waiting to release prefetch");
+                } else {
+                    foreground_priority.store(
+                        ::GetThreadPriority(
+                            ::GetCurrentThread()),
+                        std::memory_order_relaxed);
+                }
+                return MakeSnapshot(path, index);
+            }));
+    const std::uint64_t prefetch_id =
+        queue.EnqueuePrefetch({
+            .path = prefetch_path,
+            .spectrum_index = 1,
+            .reuse_identity = proof.identity,
+            .context_reuse_proof = proof,
+        });
+    Require(
+        prefetch_entered.wait_for(2s) ==
+            std::future_status::ready,
+        "prefetch worker should start");
+    const std::uint64_t overlapping_prefetch_id =
+        queue.EnqueuePrefetch({
+            .path = prefetch_path,
+            .spectrum_index = 1,
+            .reuse_identity = proof.identity,
+            .context_reuse_proof = proof,
+        });
+    const std::uint64_t foreground_id =
+        queue.Enqueue({.path = foreground_path});
+
+    std::vector<specforge::SourceCollectionLoadCompletion>
+        foreground = WaitForCompletions(queue, 1);
+    const bool cancel_requested =
+        queue.Cancel(prefetch_id);
+    release_prefetch_promise.set_value();
+    std::vector<specforge::SourceCollectionLoadCompletion>
+        canceled_prefetch;
+    const bool canceled_terminal_published =
+        WaitUntil([&]() {
+            std::vector<specforge::SourceCollectionLoadCompletion>
+                ready = queue.TakeCompleted();
+            canceled_prefetch.insert(
+                canceled_prefetch.end(),
+                std::make_move_iterator(ready.begin()),
+                std::make_move_iterator(ready.end()));
+            return !canceled_prefetch.empty();
+        });
+    Require(
+        WaitUntil([&queue]() {
+            return !queue.NeedsService();
+        }),
+        "canceled prefetch should reach a terminal state");
+
+    Require(
+        foreground.size() == 1 &&
+            foreground.front().task_id == foreground_id,
+        "an unfinished prefetch must not hold a later foreground completion behind ordered publication");
+    Require(
+        cancel_requested,
+        "the still-running prefetch should remain cancelable");
+    Require(
+        overlapping_prefetch_id == 0,
+        "the queue should admit at most one live prefetch worker");
+    Require(
+        canceled_terminal_published &&
+            canceled_prefetch.size() == 1 &&
+            canceled_prefetch.front().task_id ==
+                prefetch_id &&
+            canceled_prefetch.front().canceled &&
+            canceled_prefetch.front()
+                    .worker_terminal_at !=
+                specforge::
+                    NavigationLatencyTimePoint{},
+        "a canceled prefetch should publish one worker-terminal marker");
+    Require(
+        prefetch_priority.load(
+            std::memory_order_relaxed) ==
+            THREAD_PRIORITY_BELOW_NORMAL,
+        "prefetch worker should run below normal priority");
+    Require(
+        foreground_priority.load(
+            std::memory_order_relaxed) ==
+            THREAD_PRIORITY_NORMAL,
+        "foreground worker should retain normal priority");
+    const std::uint64_t retry_prefetch_id =
+        queue.EnqueuePrefetch({
+            .path = prefetch_path,
+            .spectrum_index = 1,
+            .reuse_identity = proof.identity,
+            .context_reuse_proof = proof,
+        });
+    Require(
+        retry_prefetch_id != 0,
+        "a replacement prefetch should be admitted after the canceled worker exits");
+    std::vector<specforge::SourceCollectionLoadCompletion> retried =
+        WaitForCompletions(queue, 1);
+    Require(
+        retried.size() == 1 &&
+            retried.front().task_id == retry_prefetch_id,
+        "only the replacement prefetch should publish a completion");
+    std::filesystem::remove(prefetch_path);
+    std::filesystem::remove(foreground_path);
+}
+
 void TestBatchPublishesInRequestOrder()
 {
     const std::filesystem::path first = UniqueTempPath("_ordered_a.csv");
@@ -1410,6 +1558,99 @@ void TestCurrentFolderListingGenerationAvoidsFullRescan()
             report.preparation_rounds[0].generation_current_at_start &&
             !report.preparation_rounds[0].listing_scan_performed,
         "a stable warm folder round should report a current hint and no full scan");
+    std::filesystem::remove_all(folder);
+}
+
+void TestPrefetchRequiresCurrentFolderGenerationWithoutScanning()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_prefetch_folder_listing_hint");
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "sample-a.csv");
+    WriteFixture(folder / "sample-b.csv");
+    const auto change_generation =
+        std::make_shared<MutableDirectoryChangeGeneration>();
+    const specforge::SourceCollectionFolderListingGenerationHandle
+        listing_generation_hint =
+            MakeFolderListingGeneration(folder, change_generation);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(
+            folder,
+            1,
+            listing_generation_hint->listing.spectra.size());
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFolderReuseProof(
+            *snapshot,
+            listing_generation_hint->listing);
+    std::atomic_int folder_scan_calls = 0;
+    std::atomic_int folder_loader_calls = 0;
+    specforge::SourceCollectionLoadDependencies dependencies =
+        Dependencies(
+            [](const auto&, std::size_t, const auto&)
+                -> specforge::SpectrumSnapshotHandle {
+                throw std::runtime_error(
+                    "folder prefetch must not use the file loader");
+            });
+    dependencies.folder_scanner =
+        [&](const auto& path, const auto& checkpoint) {
+            ++folder_scan_calls;
+            return specforge::ScanSourceCollectionFolder(
+                path,
+                {},
+                checkpoint);
+        };
+    dependencies.folder_snapshot_loader =
+        [&](const auto& path,
+            std::size_t index,
+            const auto& listing,
+            const auto&) {
+            ++folder_loader_calls;
+            return MakeSnapshot(
+                path,
+                index,
+                listing.spectra.size());
+        };
+    specforge::SourceCollectionLoadQueue queue(
+        std::move(dependencies));
+
+    (void)queue.EnqueuePrefetch({
+        .path = folder,
+        .spectrum_index = 1,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint =
+            listing_generation_hint,
+    });
+    auto current = WaitForCompletions(queue, 1);
+    Require(
+        current.front().prepared.has_value() &&
+            std::holds_alternative<
+                specforge::PreparedSourceCollectionReuse>(
+                current.front().prepared->payload),
+        "a current folder generation should allow snapshot-only context reuse");
+    Require(
+        folder_scan_calls.load() == 0 &&
+            folder_loader_calls.load() == 1,
+        "a current folder prefetch should decode without a listing scan");
+
+    change_generation->Invalidate();
+    (void)queue.EnqueuePrefetch({
+        .path = folder,
+        .spectrum_index = 1,
+        .reuse_identity = proof.identity,
+        .context_reuse_proof = proof,
+        .folder_listing_generation_hint =
+            listing_generation_hint,
+    });
+    auto stale = WaitForCompletions(queue, 1);
+    Require(
+        !stale.front().prepared &&
+            stale.front().stale,
+        "an invalidated folder generation should make prefetch stale");
+    Require(
+        folder_scan_calls.load() == 0 &&
+            folder_loader_calls.load() == 1,
+        "stale prefetch should not scan or decode a changed folder");
     std::filesystem::remove_all(folder);
 }
 
@@ -2000,6 +2241,7 @@ int main()
     TestBatchLoadsWorkflowCachesOnce();
     TestSourcesUseIndependentThreads();
     TestIndividualLoadsPublishInRequestOrder();
+    TestPrefetchNeverBlocksForegroundPublication();
     TestBatchPublishesInRequestOrder();
     TestCompletionReadyNotificationCoalescesUntilDrain();
     TestBufferedBatchCompletionCanBeCanceled();
@@ -2008,6 +2250,7 @@ int main()
     TestFolderListingGenerationInvalidatesSafelyAfterQueueDestruction();
     TestCanceledBlockedRegistrationStopsBeforeQueueDestruction();
     TestCurrentFolderListingGenerationAvoidsFullRescan();
+    TestPrefetchRequiresCurrentFolderGenerationWithoutScanning();
     TestDirectoryChangeGenerationInvalidatesAfterMutation();
     TestUnavailableFolderGenerationKeepsFullRevalidationFallback();
     TestStaleFolderListingGenerationRefreshesBeforeDecode();

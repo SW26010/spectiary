@@ -426,7 +426,15 @@ void NavigationLatencyTrace::SetTargetIndex(std::size_t target_index) noexcept
 
 void NavigationLatencyTrace::SetCacheHit(bool cache_hit) noexcept
 {
-    cache_hit_.store(cache_hit, std::memory_order_relaxed);
+    SetCacheKind(
+        cache_hit ? NavigationSnapshotCacheKind::History
+                  : NavigationSnapshotCacheKind::None);
+}
+
+void NavigationLatencyTrace::SetCacheKind(
+    NavigationSnapshotCacheKind cache_kind) noexcept
+{
+    cache_kind_.store(cache_kind, std::memory_order_relaxed);
 }
 
 NavigationLatencyAttemptHandle NavigationLatencyTrace::BeginLoadAttempt(
@@ -506,7 +514,10 @@ std::optional<NavigationLatencyReport> NavigationLatencyTrace::TerminalReport() 
     report.from_index = from_index_;
     report.target_index = target_index_.load(std::memory_order_relaxed);
     report.input_kind = input_kind_;
-    report.cache_hit = cache_hit_.load(std::memory_order_relaxed);
+    report.cache_kind =
+        cache_kind_.load(std::memory_order_relaxed);
+    report.cache_hit =
+        report.cache_kind != NavigationSnapshotCacheKind::None;
     report.target_resolution = target_resolution_;
     report.input_ns = input_ns_;
     report.requested_ns = requested_ns_;
@@ -558,6 +569,20 @@ const char* NavigationLatencyOutcomeName(NavigationLatencyOutcome outcome) noexc
     return "unknown";
 }
 
+const char* NavigationSnapshotCacheKindName(
+    NavigationSnapshotCacheKind kind) noexcept
+{
+    switch (kind) {
+    case NavigationSnapshotCacheKind::None:
+        return "none";
+    case NavigationSnapshotCacheKind::History:
+        return "history";
+    case NavigationSnapshotCacheKind::Prefetch:
+        return "prefetch";
+    }
+    return "none";
+}
+
 bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLatencyReport& report)
 {
     bool accepted = true;
@@ -592,6 +617,9 @@ bool WriteNavigationLatencyProfileEvent(ProfileSink& sink, const NavigationLaten
         ProfileSink::Field::Number("from_index", std::to_string(report.from_index)),
         ProfileSink::Field::Number("target_index", std::to_string(report.target_index)),
         ProfileSink::Field::Bool("cache_hit", report.cache_hit),
+        ProfileSink::Field::String(
+            "cache_kind",
+            NavigationSnapshotCacheKindName(report.cache_kind)),
         ProfileSink::Field::Number(
             "row_count",
             std::to_string(report.target_resolution.row_count)),

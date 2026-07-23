@@ -2,6 +2,7 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "profile/navigation_latency_trace.h"
+#include "profile/navigation_prefetch_trace.h"
 #include "profile/source_load_latency_trace.h"
 #include "ui/source_collection_panel.h"
 #include "ui/panel_visibility_state_cache_io.h"
@@ -75,6 +76,8 @@ public:
     CompleteSourceLoadFramePresentations(
         std::uint64_t frame_index,
         std::span<const NavigationLatencyPresentation> presentations);
+    [[nodiscard]] std::vector<NavigationPrefetchReport>
+        TakeNavigationPrefetchReports();
 
 private:
     ShellUi(
@@ -144,17 +147,39 @@ private:
         std::vector<std::filesystem::path> annotation_paths,
         PendingSourceLoadPurpose purpose,
         NavigationLatencyTraceHandle navigation_trace = {},
-        SourceLoadLatencyTraceHandle source_load_trace = {});
+        SourceLoadLatencyTraceHandle source_load_trace = {},
+        std::optional<SampleNavigationDirection> prefetch_direction =
+            std::nullopt);
     void BeginSourceActivationIntent(bool preserve_pending_explicit_opens);
     void QueueSessionFollowUp(
         const SourceCollectionSessionResult& result,
         bool deferred_restore = false,
-        NavigationLatencyTraceHandle navigation_trace = {});
+        NavigationLatencyTraceHandle navigation_trace = {},
+        std::optional<SampleNavigationDirection> prefetch_direction =
+            std::nullopt);
     void CancelSourceFollowUps(const SourceCollectionSessionResult& result);
     void RetireSessionResources(SourceCollectionSessionResult& result);
     void DrainSourceLoads();
     void DrainSourceLoadCompletions(
         std::vector<SourceCollectionLoadCompletion> completions);
+    void ScheduleSnapshotPrefetch(
+        SampleNavigationDirection direction);
+    void ServiceSnapshotPrefetch();
+    void CancelSnapshotPrefetch();
+    void DrainSnapshotPrefetchCompletion(
+        SourceCollectionLoadCompletion completion);
+    void RecordSnapshotPrefetchOutcome(
+        std::uint64_t prefetch_id,
+        std::uint64_t source_task_id,
+        std::size_t target_index,
+        SampleNavigationDirection direction,
+        NavigationPrefetchOutcome outcome,
+        NavigationLatencyTimePoint scheduled_at,
+        NavigationLatencyTimePoint terminal_at = {},
+        NavigationLatencyTimePoint cancel_requested_at = {});
+    [[nodiscard]] static std::optional<SampleNavigationDirection>
+        PrefetchDirectionForInputKind(
+            NavigationLatencyInputKind kind);
     void BeginDeferredSourceRestore();
     void RestoreDeferredActiveSourceIfAvailable();
     void FinishDeferredSourceRestoreIfReady();
@@ -168,6 +193,23 @@ private:
         PendingSourceLoadPurpose purpose = PendingSourceLoadPurpose::ExplicitOpen;
         NavigationLatencyTraceHandle navigation_trace;
         SourceLoadLatencyTraceHandle source_load_trace;
+        std::optional<SampleNavigationDirection>
+            prefetch_direction;
+    };
+
+    struct PendingSnapshotPrefetch {
+        std::uint64_t prefetch_id = 0;
+        std::uint64_t task_id = 0;
+        std::filesystem::path path;
+        std::string path_key;
+        std::size_t spectrum_index = 0;
+        std::uint64_t generation = 0;
+        std::uint64_t activation_epoch = 0;
+        SampleNavigationDirection direction =
+            SampleNavigationDirection::Next;
+        NavigationLatencyTimePoint scheduled_at;
+        NavigationLatencyTimePoint cancel_requested_at;
+        bool invalidated = false;
     };
 
     [[nodiscard]] static std::optional<PendingSourceLoad> TakeCurrentPendingSourceLoad(
@@ -234,6 +276,14 @@ private:
     std::unordered_map<std::uint64_t, PendingSourceLoad> pending_source_loads_;
     std::unordered_map<std::string, std::uint64_t> source_load_generations_;
     std::unordered_set<std::uint64_t> deferred_restore_task_ids_;
+    std::optional<SampleNavigationDirection>
+        pending_snapshot_prefetch_direction_;
+    std::optional<PendingSnapshotPrefetch>
+        active_snapshot_prefetch_;
+    SampleNavigationPrefetchPolicy snapshot_prefetch_policy_;
+    std::uint64_t next_snapshot_prefetch_id_ = 1;
+    std::vector<NavigationPrefetchReport>
+        navigation_prefetch_reports_;
     std::optional<std::filesystem::path> deferred_restore_active_path_;
     mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
     std::string source_load_error_;

@@ -44,6 +44,14 @@ std::int64_t ElapsedNavigationResolutionNanoseconds(
         .count();
 }
 
+std::int64_t NavigationSteadyNanoseconds(
+    NavigationLatencyTimePoint at)
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               at.time_since_epoch())
+        .count();
+}
+
 enum class ImmersivePlotAxisImplementation {
     NativeImPlot,
     CustomEdgeOverlay,
@@ -846,6 +854,7 @@ bool ShellUi::latency_sensitive_plot_interaction_active() const
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
+    CancelSnapshotPrefetch();
     SourceLoadLatencyTraceHandle source_load_trace = StartSourceLoadTrace(
         spectrum_index,
         NavigationLatencyTrace::Now());
@@ -871,8 +880,10 @@ std::uint64_t ShellUi::QueueSourceLoad(
     std::vector<std::filesystem::path> annotation_paths,
     PendingSourceLoadPurpose purpose,
     NavigationLatencyTraceHandle navigation_trace,
-    SourceLoadLatencyTraceHandle source_load_trace)
+    SourceLoadLatencyTraceHandle source_load_trace,
+    std::optional<SampleNavigationDirection> prefetch_direction)
 {
+    CancelSnapshotPrefetch();
     const std::string path_key = SourcePathIdentityKey(path);
     for (auto pending = pending_source_loads_.begin(); pending != pending_source_loads_.end();) {
         if (pending->second.path_key != path_key) {
@@ -934,6 +945,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
             .purpose = purpose,
             .navigation_trace = std::move(navigation_trace),
             .source_load_trace = std::move(source_load_trace),
+            .prefetch_direction = prefetch_direction,
         });
     if (purpose == PendingSourceLoadPurpose::DeferredRestore) {
         deferred_restore_task_ids_.insert(task_id);
@@ -945,6 +957,7 @@ std::uint64_t ShellUi::QueueSourceLoad(
 
 void ShellUi::BeginSourceActivationIntent(bool preserve_pending_explicit_opens)
 {
+    CancelSnapshotPrefetch();
     AdvanceSourceActivationIntent(
         source_activation_epoch_,
         pending_source_loads_,
@@ -1027,7 +1040,8 @@ std::optional<ShellUi::PendingSourceLoad> ShellUi::TakeCurrentPendingSourceLoad(
 void ShellUi::QueueSessionFollowUp(
     const SourceCollectionSessionResult& result,
     bool deferred_restore,
-    NavigationLatencyTraceHandle navigation_trace)
+    NavigationLatencyTraceHandle navigation_trace,
+    std::optional<SampleNavigationDirection> prefetch_direction)
 {
     CancelSourceFollowUps(result);
     if (!result.follow_up_spectrum_index) {
@@ -1052,7 +1066,9 @@ void ShellUi::QueueSessionFollowUp(
         session_.AnnotationPathsForSource(snapshot->source.path),
         deferred_restore ? PendingSourceLoadPurpose::DeferredRestore
                          : PendingSourceLoadPurpose::SessionFollowUp,
-        std::move(navigation_trace));
+        std::move(navigation_trace),
+        {},
+        prefetch_direction);
 }
 
 void ShellUi::CancelSourceFollowUps(const SourceCollectionSessionResult& result)
@@ -1137,12 +1153,271 @@ bool ShellUi::CancelFailedPendingSampleNavigation(
 void ShellUi::DrainSourceLoads()
 {
     DrainSourceLoadCompletions(source_load_queue_.TakeCompleted());
+    ServiceSnapshotPrefetch();
+}
+
+void ShellUi::ScheduleSnapshotPrefetch(
+    SampleNavigationDirection direction)
+{
+    pending_snapshot_prefetch_direction_ = direction;
+}
+
+void ShellUi::ServiceSnapshotPrefetch()
+{
+    if (!pending_snapshot_prefetch_direction_ ||
+        active_snapshot_prefetch_ ||
+        !pending_source_loads_.empty() ||
+        deferred_restore_active_ ||
+        latency_sensitive_plot_interaction_active()) {
+        return;
+    }
+
+    const SampleNavigationDirection direction =
+        *pending_snapshot_prefetch_direction_;
+    pending_snapshot_prefetch_direction_.reset();
+    std::optional<SourceCollectionSnapshotPrefetchPlan> plan =
+        session_.PlanSnapshotPrefetch(
+            direction,
+            snapshot_prefetch_policy_);
+    if (!plan) {
+        return;
+    }
+
+    const NavigationLatencyTimePoint scheduled_at =
+        NavigationLatencyTrace::Now();
+    const std::uint64_t prefetch_id =
+        next_snapshot_prefetch_id_++;
+    const std::string path_key =
+        SourcePathIdentityKey(plan->path);
+    const auto generation = source_load_generations_.find(path_key);
+    const std::uint64_t expected_generation =
+        generation == source_load_generations_.end()
+        ? 0
+        : generation->second;
+    SourceCollectionLoadHint hint =
+        std::move(plan->load_hint);
+    const std::uint64_t task_id =
+        source_load_queue_.EnqueuePrefetch({
+            .path = plan->path,
+            .spectrum_index = plan->spectrum_index,
+            .annotation_paths =
+                std::move(plan->annotation_paths),
+            .reuse_identity = hint.identity,
+            .context_reuse_proof =
+                std::move(hint.context_reuse_proof),
+            .base_live_workflow_revision =
+                hint.live_workflow_revision,
+            .folder_listing_generation_hint =
+                std::move(
+                    hint
+                        .folder_listing_generation_hint),
+            .snapshot_only = true,
+        });
+    if (task_id == 0) {
+        pending_snapshot_prefetch_direction_ = direction;
+        return;
+    }
+    active_snapshot_prefetch_ = PendingSnapshotPrefetch{
+        .prefetch_id = prefetch_id,
+        .task_id = task_id,
+        .path = std::move(plan->path),
+        .path_key = path_key,
+        .spectrum_index = plan->spectrum_index,
+        .generation = expected_generation,
+        .activation_epoch = source_activation_epoch_,
+        .direction = direction,
+        .scheduled_at = scheduled_at,
+    };
+    source_load_service_deadline_ =
+        LocalUserStateSaveScheduler::Clock::now();
+}
+
+void ShellUi::CancelSnapshotPrefetch()
+{
+    pending_snapshot_prefetch_direction_.reset();
+    if (!active_snapshot_prefetch_) {
+        return;
+    }
+    if (active_snapshot_prefetch_->invalidated) {
+        return;
+    }
+
+    if (source_load_queue_.Cancel(
+            active_snapshot_prefetch_->task_id)) {
+        active_snapshot_prefetch_->
+            cancel_requested_at =
+                NavigationLatencyTrace::Now();
+        active_snapshot_prefetch_->invalidated = true;
+        return;
+    }
+    // The worker already published. Keep the ticket until the UI drains that
+    // immutable result, then classify it as stale without accepting it.
+    active_snapshot_prefetch_->invalidated = true;
+}
+
+void ShellUi::DrainSnapshotPrefetchCompletion(
+    SourceCollectionLoadCompletion completion)
+{
+    PendingSnapshotPrefetch ticket =
+        std::move(*active_snapshot_prefetch_);
+    active_snapshot_prefetch_.reset();
+    if (completion.canceled) {
+        RecordSnapshotPrefetchOutcome(
+            ticket.prefetch_id,
+            ticket.task_id,
+            ticket.spectrum_index,
+            ticket.direction,
+            NavigationPrefetchOutcome::Canceled,
+            ticket.scheduled_at,
+            completion.worker_terminal_at,
+            ticket.cancel_requested_at);
+        return;
+    }
+    const auto generation =
+        source_load_generations_.find(ticket.path_key);
+    const bool current =
+        !ticket.invalidated &&
+        ticket.activation_epoch == source_activation_epoch_ &&
+        generation != source_load_generations_.end() &&
+        generation->second == ticket.generation &&
+        SourcePathIdentityKey(completion.path) ==
+            ticket.path_key &&
+        completion.spectrum_index == ticket.spectrum_index;
+    if (!current) {
+        if (completion.prepared) {
+            source_load_queue_.RetirePrepared(
+                std::move(*completion.prepared));
+        }
+        RecordSnapshotPrefetchOutcome(
+            ticket.prefetch_id,
+            ticket.task_id,
+            ticket.spectrum_index,
+            ticket.direction,
+            NavigationPrefetchOutcome::Stale,
+            ticket.scheduled_at);
+        return;
+    }
+
+    if (!completion.prepared) {
+        RecordSnapshotPrefetchOutcome(
+            ticket.prefetch_id,
+            ticket.task_id,
+            ticket.spectrum_index,
+            ticket.direction,
+            completion.stale
+                ? NavigationPrefetchOutcome::Stale
+                : NavigationPrefetchOutcome::Failed,
+            ticket.scheduled_at);
+        return;
+    }
+
+    PreparedSourceCollection prepared =
+        std::move(*completion.prepared);
+    if (!std::holds_alternative<
+            PreparedSourceCollectionReuse>(
+            prepared.payload) ||
+        !prepared.context_reuse_proof) {
+        source_load_queue_.RetirePrepared(
+            std::move(prepared));
+        RecordSnapshotPrefetchOutcome(
+            ticket.prefetch_id,
+            ticket.task_id,
+            ticket.spectrum_index,
+            ticket.direction,
+            NavigationPrefetchOutcome::Stale,
+            ticket.scheduled_at);
+        return;
+    }
+
+    SourceCollectionSnapshotPrefetchStoreResult stored =
+        session_.StorePrefetchedSnapshot(
+            prepared.path,
+            SourceCollectionResidentSnapshot{
+                prepared.spectrum_index,
+                std::move(prepared.snapshot),
+                std::move(
+                    *prepared.context_reuse_proof),
+                std::move(
+                    prepared
+                        .folder_listing_generation),
+                SourceCollectionResidentSnapshotOrigin::
+                    Prefetch,
+                ticket.prefetch_id,
+                ticket.task_id,
+                NavigationSteadyNanoseconds(
+                    ticket.scheduled_at),
+                ticket.direction,
+            });
+    for (BackgroundRetirementHandle& resource :
+         stored.background_retirement) {
+        source_load_queue_.RetireResource(
+            std::move(resource));
+    }
+    RecordSnapshotPrefetchOutcome(
+        ticket.prefetch_id,
+        ticket.task_id,
+        ticket.spectrum_index,
+        ticket.direction,
+        stored.stored
+            ? NavigationPrefetchOutcome::Completed
+            : NavigationPrefetchOutcome::Stale,
+        ticket.scheduled_at);
+}
+
+void ShellUi::RecordSnapshotPrefetchOutcome(
+    std::uint64_t prefetch_id,
+    std::uint64_t source_task_id,
+    std::size_t target_index,
+    SampleNavigationDirection direction,
+    NavigationPrefetchOutcome outcome,
+    NavigationLatencyTimePoint scheduled_at,
+    NavigationLatencyTimePoint terminal_at,
+    NavigationLatencyTimePoint cancel_requested_at)
+{
+    if (terminal_at ==
+        NavigationLatencyTimePoint{}) {
+        terminal_at = NavigationLatencyTrace::Now();
+    }
+    navigation_prefetch_reports_.push_back({
+        .prefetch_id = prefetch_id,
+        .source_task_id = source_task_id,
+        .target_index = target_index,
+        .direction = direction,
+        .outcome = outcome,
+        .scheduled_at = scheduled_at,
+        .cancel_requested_at =
+            cancel_requested_at,
+        .terminal_at = terminal_at,
+    });
+}
+
+std::optional<SampleNavigationDirection>
+ShellUi::PrefetchDirectionForInputKind(
+    NavigationLatencyInputKind kind)
+{
+    switch (kind) {
+    case NavigationLatencyInputKind::KeyboardPrevious:
+    case NavigationLatencyInputKind::UiPrevious:
+        return SampleNavigationDirection::Previous;
+    case NavigationLatencyInputKind::KeyboardNext:
+    case NavigationLatencyInputKind::UiNext:
+    case NavigationLatencyInputKind::AutoAdvance:
+        return SampleNavigationDirection::Next;
+    }
+    return std::nullopt;
 }
 
 void ShellUi::DrainSourceLoadCompletions(
     std::vector<SourceCollectionLoadCompletion> completions)
 {
     for (SourceCollectionLoadCompletion& completion : completions) {
+        if (active_snapshot_prefetch_ &&
+            completion.task_id ==
+                active_snapshot_prefetch_->task_id) {
+            DrainSnapshotPrefetchCompletion(
+                std::move(completion));
+            continue;
+        }
         deferred_restore_task_ids_.erase(completion.task_id);
         std::optional<PendingSourceLoad> current_ticket = TakeCurrentPendingSourceLoad(
             completion,
@@ -1180,8 +1455,17 @@ void ShellUi::DrainSourceLoadCompletions(
 
         PreparedSourceCollection prepared = std::move(*completion.prepared);
         if (ticket.navigation_trace) {
-            ticket.navigation_trace->SetCacheHit(
-                prepared.snapshot_cache_hit);
+            NavigationSnapshotCacheKind cache_kind =
+                NavigationSnapshotCacheKind::None;
+            if (prepared.snapshot_cache_origin ==
+                SourceCollectionResidentSnapshotOrigin::History) {
+                cache_kind = NavigationSnapshotCacheKind::History;
+            } else if (
+                prepared.snapshot_cache_origin ==
+                SourceCollectionResidentSnapshotOrigin::Prefetch) {
+                cache_kind = NavigationSnapshotCacheKind::Prefetch;
+            }
+            ticket.navigation_trace->SetCacheKind(cache_kind);
         }
         if (session_view_cache_) {
             source_load_queue_.RetireResource(
@@ -1261,6 +1545,23 @@ void ShellUi::DrainSourceLoadCompletions(
                 BeginSourceActivationIntent(true);
             }
         }
+        if (result.loaded && !result.follow_up_spectrum_index &&
+            prepared.snapshot_cache_origin ==
+                SourceCollectionResidentSnapshotOrigin::Prefetch &&
+            prepared.snapshot_prefetch_id != 0 &&
+            prepared.snapshot_prefetch_task_id != 0 &&
+            prepared.snapshot_prefetch_scheduled_ns > 0) {
+            RecordSnapshotPrefetchOutcome(
+                prepared.snapshot_prefetch_id,
+                prepared.snapshot_prefetch_task_id,
+                prepared.spectrum_index,
+                prepared.snapshot_prefetch_direction,
+                NavigationPrefetchOutcome::Consumed,
+                NavigationLatencyTimePoint{
+                    std::chrono::nanoseconds{
+                        prepared
+                            .snapshot_prefetch_scheduled_ns}});
+        }
         if (result.follow_up_spectrum_index) {
             if (ticket.navigation_trace) {
                 ticket.navigation_trace->SetTargetIndex(*result.follow_up_spectrum_index);
@@ -1277,7 +1578,11 @@ void ShellUi::DrainSourceLoadCompletions(
                     ? PendingSourceLoadPurpose::DeferredRestore
                     : PendingSourceLoadPurpose::SessionFollowUp,
                 ticket.navigation_trace,
-                ticket.source_load_trace);
+                ticket.source_load_trace,
+                ticket.prefetch_direction);
+        } else if (result.loaded && ticket.prefetch_direction) {
+            ScheduleSnapshotPrefetch(
+                *ticket.prefetch_direction);
         }
         RestoreDeferredActiveSourceIfAvailable();
     }
@@ -1367,6 +1672,14 @@ void ShellUi::RestoreDeferredActiveSourceIfAvailable()
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
     return session_.CurrentSampleSnapshot();
+}
+
+std::vector<NavigationPrefetchReport>
+ShellUi::TakeNavigationPrefetchReports()
+{
+    return std::exchange(
+        navigation_prefetch_reports_,
+        {});
 }
 
 void ShellUi::RecordNavigationKeyInput(
@@ -1615,6 +1928,11 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
     SourceCollectionSessionIntent command,
     std::optional<NavigationTraceOrigin> navigation_origin)
 {
+    const std::optional<SampleNavigationDirection>
+        prefetch_direction = navigation_origin
+        ? PrefetchDirectionForInputKind(navigation_origin->kind)
+        : std::nullopt;
+    CancelSnapshotPrefetch();
     const bool trace_requested =
         latency_tracing_enabled_ && navigation_origin.has_value();
     const NavigationLatencyTimePoint requested_at = trace_requested
@@ -1657,7 +1975,11 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
             deferred_restore_active_path_ = snapshot->source.path;
         }
     }
-    QueueSessionFollowUp(result, false, std::move(navigation_trace));
+    QueueSessionFollowUp(
+        result,
+        false,
+        std::move(navigation_trace),
+        prefetch_direction);
     RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     HandleSessionAction(result.action);
@@ -1668,6 +1990,11 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
     SourceCollectionSessionIntent command,
     std::optional<NavigationLatencyInputKind> navigation_kind)
 {
+    const std::optional<SampleNavigationDirection>
+        prefetch_direction = navigation_kind
+        ? PrefetchDirectionForInputKind(*navigation_kind)
+        : std::nullopt;
+    CancelSnapshotPrefetch();
     const bool trace_requested =
         latency_tracing_enabled_ && navigation_kind.has_value();
     const NavigationLatencyTimePoint requested_at = trace_requested
@@ -1714,7 +2041,11 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
             deferred_restore_active_path_ = snapshot->source.path;
         }
     }
-    QueueSessionFollowUp(result, false, std::move(navigation_trace));
+    QueueSessionFollowUp(
+        result,
+        false,
+        std::move(navigation_trace),
+        prefetch_direction);
     RetireSessionResources(result);
     session_view_cache_dirty_ = true;
     return result;

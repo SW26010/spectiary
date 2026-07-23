@@ -85,6 +85,7 @@ function New-ValidNavigationEvents {
         from_index = 0
         target_index = 1
         cache_hit = $false
+        cache_kind = 'none'
         row_count = 3
         filter_active = $false
         sort_active = $false
@@ -148,6 +149,32 @@ try {
     $interpolationEvents[1].total_ms = 30.0
     $completeEvents += $interpolationEvents
     $completeEvents += [pscustomobject]@{
+        steady_ns = 72000000
+        event = 'navigation_prefetch'
+        prefetch_id = 1
+        source_task_id = 101
+        target_index = 2
+        direction = 'next'
+        outcome = 'completed'
+        scheduled_steady_ns = 70000000
+        cancel_requested_steady_ns = 0
+        terminal_steady_ns = 72000000
+        duration_ms = 2.0
+    }
+    $completeEvents += [pscustomobject]@{
+        steady_ns = 80000000
+        event = 'navigation_prefetch'
+        prefetch_id = 1
+        source_task_id = 101
+        target_index = 2
+        direction = 'next'
+        outcome = 'consumed'
+        scheduled_steady_ns = 70000000
+        cancel_requested_steady_ns = 0
+        terminal_steady_ns = 80000000
+        duration_ms = 10.0
+    }
+    $completeEvents += [pscustomobject]@{
         steady_ns = 100000000
         event = 'profile_recorder_summary'
         stop_reason = 'explicit'
@@ -164,6 +191,186 @@ try {
     Assert-True ($complete.Output -match 'Input kind: ui_next; count: 1') "UI timings must be reported separately:`n$($complete.Output)"
     Assert-True ($complete.Output -match 'base_sequence_ms') "The target-resolution breakdown should be reported:`n$($complete.Output)"
     Assert-True ($complete.Output -match 'Target resolution diagnostics:') "Target-resolution diagnostics should be grouped:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'Snapshot cache kinds:') "Cache origins should be summarized:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'Snapshot hit rate:') "Snapshot hit rate should be reported:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'Prefetch outcomes:') "Prefetch lifecycle outcomes should be summarized:`n$($complete.Output)"
+    Assert-True ($complete.Output -match 'consumed: 1') "Prefetch consumption should be visible:`n$($complete.Output)"
+
+    $carryInPath = Join-Path $temporaryDirectory 'prefetch-carry-in.jsonl'
+    $carryInEvents = @(New-ValidNavigationEvents 6 'keyboard_next' 0)
+    $carryInEvents += [pscustomobject]@{
+        steady_ns = 25000000
+        event = 'navigation_prefetch'
+        prefetch_id = 9
+        source_task_id = 109
+        target_index = 3
+        direction = 'next'
+        outcome = 'consumed'
+        scheduled_steady_ns = 10000000
+        cancel_requested_steady_ns = 0
+        terminal_steady_ns = 25000000
+        duration_ms = 15.0
+    }
+    $carryInEvents += [pscustomobject]@{
+        steady_ns = 30000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture $carryInPath $carryInEvents
+    $carryIn = Invoke-Analyzer $carryInPath
+    Assert-True (
+        $carryIn.ExitCode -eq 0 -and
+        $carryIn.Output -match 'consumed: 1') `
+        "A prefetch completed before recording may appear as consumed-only carry-in:`n$($carryIn.Output)"
+
+    $invalidPrefetchAssociations = @(
+        [pscustomobject]@{
+            Name = 'source-task'
+            Mutate = {
+                param([object[]]$Events)
+                $Events[3].source_task_id = 202
+            }
+        },
+        [pscustomobject]@{
+            Name = 'target-index'
+            Mutate = {
+                param([object[]]$Events)
+                $Events[3].target_index = 7
+            }
+        },
+        [pscustomobject]@{
+            Name = 'direction'
+            Mutate = {
+                param([object[]]$Events)
+                $Events[3].direction = 'previous'
+            }
+        },
+        [pscustomobject]@{
+            Name = 'scheduled-time'
+            Mutate = {
+                param([object[]]$Events)
+                $Events[3].scheduled_steady_ns = 9000000
+                $Events[3].duration_ms = 21.0
+            }
+        },
+        [pscustomobject]@{
+            Name = 'terminal-order'
+            Mutate = {
+                param([object[]]$Events)
+                $Events[3].steady_ns = 11000000
+                $Events[3].terminal_steady_ns = 11000000
+                $Events[3].duration_ms = 1.0
+            }
+        })
+    foreach ($case in $invalidPrefetchAssociations) {
+        $invalidPath = Join-Path $temporaryDirectory "prefetch-$($case.Name).jsonl"
+        $invalidEvents = @(New-ValidNavigationEvents 20 'keyboard_next' 0)
+        $invalidEvents += [pscustomobject]@{
+            steady_ns = 12000000
+            event = 'navigation_prefetch'
+            prefetch_id = 20
+            source_task_id = 201
+            target_index = 2
+            direction = 'next'
+            outcome = 'completed'
+            scheduled_steady_ns = 10000000
+            terminal_steady_ns = 12000000
+            duration_ms = 2.0
+        }
+        $invalidEvents += [pscustomobject]@{
+            steady_ns = 30000000
+            event = 'navigation_prefetch'
+            prefetch_id = 20
+            source_task_id = 201
+            target_index = 2
+            direction = 'next'
+            outcome = 'consumed'
+            scheduled_steady_ns = 10000000
+            terminal_steady_ns = 30000000
+            duration_ms = 20.0
+        }
+        & $case.Mutate $invalidEvents
+        $invalidEvents += [pscustomobject]@{
+            steady_ns = 40000000
+            event = 'profile_recorder_summary'
+            stop_reason = 'explicit'
+            accepted_bytes = 1024
+            dropped_events = 0
+        }
+        Write-ProfileFixture $invalidPath $invalidEvents
+        $invalidAssociation = Invoke-Analyzer $invalidPath
+        Assert-True (
+            $invalidAssociation.ExitCode -ne 0) `
+        "A mismatched prefetch $($case.Name) association must fail:`n$($invalidAssociation.Output)"
+    }
+
+    $canceledPrefetchPath =
+        Join-Path $temporaryDirectory 'prefetch-canceled-terminal.jsonl'
+    $canceledPrefetchEvents =
+        @(New-ValidNavigationEvents 21 'keyboard_next' 0)
+    $canceledPrefetchEvents += [pscustomobject]@{
+        steady_ns = 30000000
+        event = 'navigation_prefetch'
+        prefetch_id = 21
+        source_task_id = 221
+        target_index = 2
+        direction = 'next'
+        outcome = 'canceled'
+        scheduled_steady_ns = 10000000
+        cancel_requested_steady_ns = 15000000
+        terminal_steady_ns = 30000000
+        duration_ms = 20.0
+    }
+    $canceledPrefetchEvents += [pscustomobject]@{
+        steady_ns = 40000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture `
+        $canceledPrefetchPath `
+        $canceledPrefetchEvents
+    $canceledPrefetch =
+        Invoke-Analyzer $canceledPrefetchPath
+    Assert-True (
+        $canceledPrefetch.ExitCode -eq 0) `
+        "A canceled prefetch should preserve request-to-terminal order:`n$($canceledPrefetch.Output)"
+
+    $invalidCancelOrderPath =
+        Join-Path $temporaryDirectory 'prefetch-invalid-cancel-order.jsonl'
+    $invalidCancelOrderEvents =
+        @(New-ValidNavigationEvents 22 'keyboard_next' 0)
+    $invalidCancelOrderEvents += [pscustomobject]@{
+        steady_ns = 14000000
+        event = 'navigation_prefetch'
+        prefetch_id = 22
+        source_task_id = 222
+        target_index = 2
+        direction = 'next'
+        outcome = 'canceled'
+        scheduled_steady_ns = 10000000
+        cancel_requested_steady_ns = 15000000
+        terminal_steady_ns = 14000000
+        duration_ms = 4.0
+    }
+    $invalidCancelOrderEvents += [pscustomobject]@{
+        steady_ns = 40000000
+        event = 'profile_recorder_summary'
+        stop_reason = 'explicit'
+        accepted_bytes = 1024
+        dropped_events = 0
+    }
+    Write-ProfileFixture `
+        $invalidCancelOrderPath `
+        $invalidCancelOrderEvents
+    $invalidCancelOrder =
+        Invoke-Analyzer $invalidCancelOrderPath
+    Assert-True (
+        $invalidCancelOrder.ExitCode -ne 0) `
+        "A canceled prefetch terminal before its request must fail:`n$($invalidCancelOrder.Output)"
 
     $autoAdvancePath = Join-Path $temporaryDirectory 'auto-advance-target-resolution.jsonl'
     $autoAdvanceEvents = @(New-ValidNavigationEvents 12 'auto_advance' 0)
