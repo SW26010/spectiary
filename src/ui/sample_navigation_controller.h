@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/local_user_state.h"
 #include "domain/sample_navigation_direction.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
@@ -146,6 +147,9 @@ public:
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
     [[nodiscard]] const SourceCollectionManifest* active_context() const;
+    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
+    [[nodiscard]] bool FlushStateCache();
 
 private:
     struct SourceSession {
@@ -203,6 +207,7 @@ private:
     std::unordered_map<std::string, std::string> source_key_to_session_key_;
     SampleNavigationStateCache state_cache_;
     std::filesystem::path state_cache_path_;
+    LocalUserStateSaveScheduler state_cache_save_scheduler_;
     std::optional<std::string> active_source_key_;
     bool state_cache_loaded_ = false;
 };

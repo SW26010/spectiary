@@ -1376,6 +1376,7 @@ std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
 
 void SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
+    navigation_.RunMaintenance(now);
     labeling_.RunMaintenance(now);
     if (!workflow_state_save_scheduler_.ShouldAttemptSave(now)) {
         return;
@@ -1389,7 +1390,13 @@ void SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::Time
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator::NextMaintenanceDeadline() const
 {
-    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline = labeling_.NextMaintenanceDeadline();
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline =
+        navigation_.NextMaintenanceDeadline();
+    const std::optional<LocalUserStateSaveScheduler::TimePoint> labeling_deadline =
+        labeling_.NextMaintenanceDeadline();
+    if (labeling_deadline && (!deadline || *labeling_deadline < *deadline)) {
+        deadline = labeling_deadline;
+    }
     const std::optional<LocalUserStateSaveScheduler::TimePoint> workflow_deadline =
         workflow_state_save_scheduler_.next_attempt_time();
     if (workflow_deadline && (!deadline || *workflow_deadline < *deadline)) {
@@ -1400,9 +1407,10 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator:
 
 bool SampleWorkflowCoordinator::FlushStateCaches()
 {
+    const bool navigation_saved = navigation_.FlushStateCache();
     const bool labeling_saved = labeling_.FlushStateCache();
     const bool workflow_saved = FlushWorkflowStateCache();
-    return labeling_saved && workflow_saved;
+    return navigation_saved && labeling_saved && workflow_saved;
 }
 
 void SampleWorkflowCoordinator::SyncSampleWorkflowSession(

@@ -17,7 +17,11 @@
 namespace specforge {
 namespace {
 
+using namespace std::chrono_literals;
 using TargetResolutionClock = std::chrono::steady_clock;
+
+constexpr auto kStateCacheSaveDebounce = 500ms;
+constexpr auto kStateCacheSaveRetry = 2s;
 
 std::int64_t ElapsedNanoseconds(TargetResolutionClock::time_point started_at)
 {
@@ -184,7 +188,8 @@ SampleNavigationController::SampleNavigationController()
 }
 
 SampleNavigationController::SampleNavigationController(std::filesystem::path state_cache_path)
-    : state_cache_path_(std::move(state_cache_path))
+    : state_cache_path_(std::move(state_cache_path)),
+      state_cache_save_scheduler_(kStateCacheSaveDebounce, kStateCacheSaveRetry)
 {
 }
 
@@ -997,6 +1002,37 @@ const SourceCollectionManifest* SampleNavigationController::active_context() con
     return session == nullptr ? nullptr : &session->manifest;
 }
 
+void SampleNavigationController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+{
+    if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
+        return;
+    }
+    if (SaveStateCache()) {
+        state_cache_save_scheduler_.MarkSaveSucceeded();
+    } else {
+        state_cache_save_scheduler_.MarkSaveFailedAt(now);
+    }
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint>
+SampleNavigationController::NextMaintenanceDeadline() const
+{
+    return state_cache_save_scheduler_.next_attempt_time();
+}
+
+bool SampleNavigationController::FlushStateCache()
+{
+    if (!state_cache_save_scheduler_.dirty()) {
+        return true;
+    }
+    if (SaveStateCache()) {
+        state_cache_save_scheduler_.MarkSaveSucceeded();
+        return true;
+    }
+    state_cache_save_scheduler_.MarkSaveFailed();
+    return false;
+}
+
 std::unordered_map<std::string, std::vector<std::filesystem::path>>
 SampleNavigationController::AnnotationPathsBySourceKey() const
 {
@@ -1204,7 +1240,9 @@ void SampleNavigationController::PersistActiveIndex()
         return;
     }
     state_cache_.last_indices_by_source_identity[session->source_collection_identity] = *session->current_index;
-    SaveStateCache();
+    if (!state_cache_path_.empty()) {
+        state_cache_save_scheduler_.MarkDirty();
+    }
 }
 
 bool SampleNavigationController::SaveStateCache()

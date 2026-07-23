@@ -2,6 +2,7 @@
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
+#include "ui/sample_workflow_coordinator.h"
 
 #include <chrono>
 #include <cstdint>
@@ -457,6 +458,7 @@ void TestControllerPersistsLastIndexBySourceIdentity()
         const specforge::SampleNavigationResult result =
             controller.Navigate(specforge::SampleNavigationRequest::LocateRow(2));
         Require(result.current_index == 2, "first controller should navigate to row 2");
+        Require(controller.FlushStateCache(), "normal shutdown flush should persist the final row");
     }
 
     {
@@ -467,6 +469,197 @@ void TestControllerPersistsLastIndexBySourceIdentity()
 
     const std::string cache_text = ReadTextFile(cache_path);
     Require(cache_text.find(PathToUtf8(path.parent_path())) == std::string::npos, "cache should not key state by absolute directory path");
+}
+
+void TestControllerDebouncesNavigationStatePersistence()
+{
+    using namespace std::chrono_literals;
+
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_debounce_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    constexpr std::string_view kIdentity = "navigation-debounce-identity";
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot("C:/synthetic/navigation-debounce.npy", "navigation-debounce", 3, 0),
+        specforge::SourceCollectionIdentity{
+            .id = std::string{kIdentity},
+            .source_name = "navigation-debounce",
+            .source_fingerprint = "source-v1",
+            .context_fingerprint = "context-v1",
+            .spectrum_count = 3,
+        },
+        {});
+
+    Require(
+        !std::filesystem::exists(cache_path),
+        "activating a source should only dirty the navigation cache");
+    const auto activation_deadline = controller.NextMaintenanceDeadline();
+    Require(activation_deadline.has_value(), "dirty navigation state should expose a maintenance deadline");
+    controller.RunMaintenance(*activation_deadline);
+    Require(
+        specforge::LoadSampleNavigationStateCache(cache_path)
+                .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
+        "maintenance should persist the activated row");
+
+    const specforge::SampleNavigationResult result =
+        controller.Navigate(specforge::SampleNavigationRequest::LocateRow(1));
+    Require(result.current_index == 1, "fixture should navigate to row 1");
+    Require(
+        specforge::LoadSampleNavigationStateCache(cache_path)
+                .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
+        "navigation should not synchronously rewrite the cache");
+
+    const auto navigation_deadline = controller.NextMaintenanceDeadline();
+    Require(navigation_deadline.has_value(), "navigation should schedule debounced persistence");
+    controller.RunMaintenance(*navigation_deadline - 1ms);
+    Require(
+        specforge::LoadSampleNavigationStateCache(cache_path)
+                .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
+        "maintenance before the debounce deadline should not save");
+    controller.RunMaintenance(*navigation_deadline);
+    Require(
+        specforge::LoadSampleNavigationStateCache(cache_path)
+                .last_indices_by_source_identity.at(std::string{kIdentity}) == 1,
+        "maintenance at the debounce deadline should save the latest row");
+}
+
+void TestControllerCoalescesNavigationStateAndRetriesFailure()
+{
+    using namespace std::chrono_literals;
+
+    const std::filesystem::path blocker =
+        std::filesystem::temp_directory_path() / "specforge_nav_retry_blocker";
+    const std::filesystem::path cache_path = blocker / "navigation-state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(blocker, cleanup_error);
+    WriteTextFile(blocker, "block parent directory creation");
+
+    constexpr std::string_view kIdentity = "navigation-retry-identity";
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot("C:/synthetic/navigation-retry.npy", "navigation-retry", 4, 0),
+        specforge::SourceCollectionIdentity{
+            .id = std::string{kIdentity},
+            .source_name = "navigation-retry",
+            .source_fingerprint = "source-v1",
+            .context_fingerprint = "context-v1",
+            .spectrum_count = 4,
+        },
+        {});
+    (void)controller.Navigate(specforge::SampleNavigationRequest::LocateRow(1));
+    (void)controller.Navigate(specforge::SampleNavigationRequest::LocateRow(3));
+
+    Require(
+        !std::filesystem::exists(cache_path),
+        "continuous navigation should not write an intermediate row");
+    const auto debounce_deadline = controller.NextMaintenanceDeadline();
+    Require(debounce_deadline.has_value(), "coalesced navigation should retain one save deadline");
+    controller.RunMaintenance(*debounce_deadline);
+
+    const auto retry_deadline = controller.NextMaintenanceDeadline();
+    Require(
+        retry_deadline && *retry_deadline >= *debounce_deadline + 2s,
+        "a failed save should remain dirty and schedule the existing retry backoff");
+
+    std::filesystem::remove(blocker, cleanup_error);
+    std::filesystem::create_directories(blocker);
+    controller.RunMaintenance(*retry_deadline - 1ms);
+    Require(
+        !std::filesystem::exists(cache_path),
+        "maintenance before the retry deadline should not save");
+    controller.RunMaintenance(*retry_deadline);
+    Require(
+        specforge::LoadSampleNavigationStateCache(cache_path)
+                .last_indices_by_source_identity.at(std::string{kIdentity}) == 3,
+        "retry should persist only the final coalesced row");
+}
+
+void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
+{
+    const std::filesystem::path source_path =
+        std::filesystem::temp_directory_path() / "specforge_nav_coordinator.npy";
+    const std::filesystem::path navigation_cache =
+        std::filesystem::temp_directory_path() / "specforge_nav_coordinator_state.json";
+    const std::filesystem::path labeling_cache =
+        std::filesystem::temp_directory_path() / "specforge_nav_coordinator_labeling.json";
+    const std::filesystem::path workflow_cache =
+        std::filesystem::temp_directory_path() / "specforge_nav_coordinator_workflow.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(navigation_cache, cleanup_error);
+    std::filesystem::remove(labeling_cache, cleanup_error);
+    std::filesystem::remove(workflow_cache, cleanup_error);
+    WriteNpy(
+        source_path,
+        "<f8",
+        {3, 2},
+        BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+
+    std::string source_identity;
+    {
+        specforge::SampleWorkflowCoordinator coordinator(
+            navigation_cache,
+            labeling_cache,
+            workflow_cache);
+        const specforge::SpectrumSnapshotHandle snapshot =
+            MakeSnapshot(source_path, "navigation-coordinator", 3, 0);
+        (void)coordinator.SyncActiveSource("source", snapshot);
+        source_identity = coordinator.ActiveSourceIdentity()->id;
+        coordinator.SetDeferredSampleNavigation(true);
+
+        specforge::SampleWorkflowCommandResult navigation =
+            coordinator.RequestSampleNavigation(
+                specforge::SampleNavigationRequest::LocateRow(1),
+                snapshot);
+        Require(
+            navigation.snapshot_index_to_load == 1 &&
+                coordinator.CommitDeferredSampleNavigation(1),
+            "coordinator should commit the first deferred row");
+        Require(
+            !std::filesystem::exists(navigation_cache),
+            "deferred activation should not synchronously persist navigation state");
+
+        for (int attempt = 0; attempt < 4 && !std::filesystem::exists(navigation_cache); ++attempt) {
+            const auto deadline = coordinator.NextMaintenanceDeadline();
+            Require(deadline.has_value(), "coordinator should expose navigation maintenance");
+            coordinator.RunMaintenance(*deadline);
+        }
+        Require(
+            std::filesystem::exists(navigation_cache),
+            "coordinator maintenance should reach the navigation deadline");
+        Require(
+            specforge::LoadSampleNavigationStateCache(navigation_cache)
+                    .last_indices_by_source_identity.at(source_identity) == 1,
+            "coordinator maintenance should persist the committed row");
+
+        navigation = coordinator.RequestSampleNavigation(
+            specforge::SampleNavigationRequest::LocateRow(2),
+            snapshot);
+        Require(
+            navigation.snapshot_index_to_load == 2 &&
+                coordinator.CommitDeferredSampleNavigation(2),
+            "coordinator should commit the final deferred row");
+        Require(
+            specforge::LoadSampleNavigationStateCache(navigation_cache)
+                    .last_indices_by_source_identity.at(source_identity) == 1,
+            "the final row should remain memory-only until flush");
+        Require(coordinator.FlushStateCaches(), "normal shutdown flush should save navigation state");
+    }
+
+    specforge::SampleWorkflowCoordinator restored(
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    (void)restored.SyncActiveSource(
+        "source",
+        MakeSnapshot(source_path, "navigation-coordinator", 3, 0));
+    Require(
+        restored.current_index() && *restored.current_index() == 2,
+        "restart should restore the final flushed navigation row");
 }
 
 void TestControllerLoadsLongFolderIdentityState()
@@ -988,6 +1181,9 @@ int main()
     TestControllerRestoresAndRemovesProvidedAnnotations();
     TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity();
     TestControllerPersistsLastIndexBySourceIdentity();
+    TestControllerDebouncesNavigationStatePersistence();
+    TestControllerCoalescesNavigationStateAndRetriesFailure();
+    TestCoordinatorMaintainsFlushesAndRestoresNavigationState();
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();
     TestFilterConstrainsSequentialNavigation();
