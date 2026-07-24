@@ -22,6 +22,9 @@
 
 namespace specforge {
 
+class ProfileSink;
+class SpectrumViewSession;
+
 // Owns the complete asynchronous source-activation protocol. Callers submit
 // source/session intent and consume the resulting session action; task IDs,
 // generations, cancellation, deferred restore, speculative prefetch, and trace
@@ -34,15 +37,10 @@ public:
         std::optional<NavigationLatencyTimePoint> input_at;
     };
 
-    struct ServiceResult {
-        SourceCollectionSessionAction action;
-        bool session_changed = false;
+    struct Status {
+        bool loading = false;
+        std::string_view error_message;
     };
-
-    using BeforeSourceActivation =
-        std::function<std::vector<BackgroundRetirementHandle>()>;
-    using ConsumeSessionAction =
-        std::function<void(const SourceCollectionSessionAction&)>;
 
     SourceCollectionActivationTransaction(
         SourceCollectionSession& session,
@@ -69,44 +67,26 @@ public:
         std::optional<NavigationIntent> navigation = std::nullopt);
 
     void BeginDeferredRestore();
-    [[nodiscard]] ServiceResult Drain(
-        bool allow_snapshot_prefetch,
-        BeforeSourceActivation before_source_activation = {},
-        ConsumeSessionAction consume_session_action = {});
+    [[nodiscard]] SourceCollectionSessionAction Drain(
+        bool allow_snapshot_prefetch);
 
-    void SetPresentationContext(
+    void BeginFrame(
         bool latency_tracing_enabled,
-        std::uint64_t frame_index);
+        std::uint64_t frame_index,
+        ProfileSink* profile);
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,
         SpectrumSnapshotHandle snapshot);
-    [[nodiscard]] std::vector<NavigationLatencyReport>
-        CompleteFramePresentations(
-            std::uint64_t frame_index,
-            std::span<const NavigationLatencyPresentation>
-                presentations);
-    [[nodiscard]] std::vector<SourceLoadLatencyReport>
-        CompleteSourceLoadFramePresentations(
-            std::uint64_t frame_index,
-            std::span<const NavigationLatencyPresentation>
-                presentations);
-    [[nodiscard]] std::vector<NavigationPrefetchReport>
-        TakeNavigationPrefetchReports();
+    void PresentFrame(
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations);
 
-    void RegisterCompletionReadyCallback(
-        SourceCollectionLoadQueue::CompletionReadyCallback callback);
-    void UnregisterCompletionReadyCallback();
-    [[nodiscard]] bool NeedsService() const;
-    [[nodiscard]] bool HasPendingLoads() const;
-    [[nodiscard]] std::size_t PendingLoadCount() const;
-    [[nodiscard]] bool PrefetchActive() const;
-    [[nodiscard]] std::string_view ErrorMessage() const;
+    [[nodiscard]] Status status() const;
     // Hides the currently failed generations from the UI projection while
     // retaining their terminal outcomes.
     void AcknowledgeLoadFailures();
-
-    void RetireResource(BackgroundRetirementHandle resource);
 
 private:
     enum class Purpose {
@@ -188,9 +168,28 @@ private:
     void RetireSessionResources(SourceCollectionSessionResult& result);
     void DrainCompletions(
         std::vector<SourceCollectionLoadCompletion> completions,
-        const BeforeSourceActivation& before_source_activation,
-        const ConsumeSessionAction& consume_session_action,
-        ServiceResult& service_result);
+        SourceCollectionSessionAction& action);
+    void ApplyPresentationAction(
+        const SourceCollectionSessionAction& action);
+    void BindPresentationLifecycle(
+        std::function<
+            std::vector<BackgroundRetirementHandle>()>
+            retain_resources,
+        std::function<void()> reset_for_snapshot_change);
+    void RetirePendingSessionViews();
+    void RetireResources(
+        std::vector<BackgroundRetirementHandle> resources);
+    void RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::optional<
+        LocalUserStateSaveScheduler::TimePoint>
+        NextMaintenanceDeadline() const;
+    void ScheduleServiceNow();
+    void RefreshServiceDeadline(
+        LocalUserStateSaveScheduler::TimePoint now);
+    void RegisterCompletionReadyCallback(
+        SourceCollectionLoadQueue::CompletionReadyCallback callback);
+    void UnregisterCompletionReadyCallback();
 
     void ScheduleSnapshotPrefetch(
         SampleNavigationDirection direction);
@@ -212,11 +211,27 @@ private:
             NavigationLatencyInputKind kind);
 
     void RestoreDeferredActiveSourceIfAvailable(
-        const ConsumeSessionAction& consume_session_action,
-        ServiceResult& service_result);
+        SourceCollectionSessionAction& action);
     void FinishDeferredRestoreIfReady(
-        const ConsumeSessionAction& consume_session_action,
-        ServiceResult& service_result);
+        SourceCollectionSessionAction& action);
+
+    [[nodiscard]] std::vector<NavigationLatencyReport>
+        CompleteNavigationFramePresentations(
+            std::uint64_t frame_index,
+            std::span<const NavigationLatencyPresentation>
+                presentations);
+    [[nodiscard]] std::vector<SourceLoadLatencyReport>
+        CompleteSourceLoadFramePresentations(
+            std::uint64_t frame_index,
+            std::span<const NavigationLatencyPresentation>
+                presentations);
+    [[nodiscard]] std::vector<NavigationPrefetchReport>
+        TakeNavigationPrefetchReports();
+    [[nodiscard]] bool NeedsService() const;
+    [[nodiscard]] bool HasPendingLoads() const;
+    [[nodiscard]] std::size_t PendingLoadCount() const;
+    [[nodiscard]] bool PrefetchActive() const;
+    [[nodiscard]] std::string_view ErrorMessage() const;
 
     [[nodiscard]] NavigationLatencyTraceHandle StartNavigationTrace(
         const SourceCollectionSessionResult& result,
@@ -276,6 +291,11 @@ private:
 
     SourceCollectionSession& session_;
     SourceCollectionLoadQueue load_queue_;
+    std::function<
+        std::vector<BackgroundRetirementHandle>()>
+        retain_presentation_resources_;
+    std::function<void()>
+        reset_presentation_for_snapshot_change_;
     std::unordered_map<std::uint64_t, Ticket> pending_loads_;
     std::unordered_map<std::string, std::uint64_t> generations_;
     std::unordered_set<std::uint64_t>
@@ -296,9 +316,13 @@ private:
     std::map<std::string, TerminalOutcome>
         terminal_outcomes_;
     std::string error_message_;
+    mutable std::optional<
+        LocalUserStateSaveScheduler::TimePoint>
+        service_deadline_;
 
     bool latency_tracing_enabled_ = false;
     std::uint64_t current_frame_index_ = 0;
+    ProfileSink* profile_ = nullptr;
     std::uint64_t next_navigation_trace_id_ = 1;
     std::uint64_t next_source_load_trace_id_ = 1;
     std::optional<SpectrumDrawSubmission>
@@ -319,6 +343,13 @@ private:
         std::uint64_t,
         SourceLoadLatencyTraceHandle>
         source_load_traces_;
+
+    friend struct ShellUiTestAccess;
+    friend struct SourceCollectionActivationTransactionTestAccess;
+    friend class ShellUi;
+    friend void BindSourceCollectionActivationPresentationLifecycle(
+        SourceCollectionActivationTransaction& activation,
+        SpectrumViewSession& presentation);
 };
 
 }  // namespace specforge

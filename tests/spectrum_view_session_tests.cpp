@@ -1,16 +1,29 @@
 #include "ui/spectrum_view_session.h"
 
+#include "ui/sample_workflow_preparation.h"
+#include "ui/source_collection_activation_transaction.h"
+#include "ui/source_collection_load_queue_internal.h"
+
 #include <imgui.h>
 #include <implot.h>
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
+
+using namespace std::chrono_literals;
 
 void Require(bool condition, const std::string& message)
 {
@@ -29,18 +42,57 @@ void RequireNear(double actual, double expected, const std::string& message)
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
     std::vector<double> x_values,
-    std::vector<double> y_values)
+    specforge::SpectrumValueVector y_values)
 {
     auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
     snapshot->current_spectrum.name = "test spectrum";
     snapshot->current_spectrum.x_values =
         std::make_shared<const std::vector<double>>(std::move(x_values));
-    snapshot->current_spectrum.y_values =
-        std::make_shared<const std::vector<double>>(std::move(y_values));
+    snapshot->current_spectrum.y_values = std::move(y_values);
     snapshot->current_spectrum.point_count = snapshot->current_spectrum.x_values->size();
     snapshot->axis.x_label = "wavelength";
     snapshot->axis.y_label = "flux";
     snapshot->capabilities.can_plot_current_spectrum = true;
+    return snapshot;
+}
+
+specforge::SpectrumSnapshotHandle MakeSnapshot(
+    std::vector<double> x_values,
+    std::vector<double> y_values)
+{
+    return MakeSnapshot(
+        std::move(x_values),
+        std::make_shared<const std::vector<double>>(
+            std::move(y_values)));
+}
+
+std::filesystem::path UniqueTempPath()
+{
+    static std::atomic_uint64_t next_id = 1;
+    return std::filesystem::temp_directory_path() /
+        ("specforge_activation_presentation_binding_" +
+         std::to_string(next_id.fetch_add(1)) +
+         ".csv");
+}
+
+specforge::SpectrumSnapshotHandle MakeActivationSnapshot(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index)
+{
+    const specforge::SpectrumSnapshotHandle source =
+        MakeSnapshot(
+            {1.0, 2.0, 3.0},
+            {3.0, 2.0, 1.0});
+    auto snapshot =
+        std::make_shared<specforge::SpectrumSnapshot>(
+            *source);
+    snapshot->source.id = "binding-fixture";
+    snapshot->source.display_name = "binding-fixture";
+    snapshot->source.path = path;
+    snapshot->collection.spectrum_count = 1;
+    snapshot->collection.current_index =
+        spectrum_index;
+    snapshot->capabilities.can_switch_spectrum = false;
     return snapshot;
 }
 
@@ -265,6 +317,134 @@ void TestRenderFeedbackTracksPanLifecycle()
         "mouse release should clear plot pan feedback");
 }
 
+void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
+{
+    const std::filesystem::path path =
+        UniqueTempPath();
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            stream.good(),
+            "activation binding fixture should be created");
+        stream << "fixture";
+    }
+
+    ScopedPlotUi ui;
+    specforge::SourceCollectionSession source_session(
+        {},
+        {},
+        {},
+        {});
+    specforge::SpectrumViewSession presentation;
+    ConfigureGaussianSmoothing(presentation);
+
+    auto destroyed_promise =
+        std::make_shared<
+            std::promise<std::thread::id>>();
+    std::future<std::thread::id> destroyed =
+        destroyed_promise->get_future();
+    specforge::SpectrumValueVector old_y_values(
+        new const std::vector<double>{
+            2.0,
+            4.0,
+            3.0},
+        [destroyed_promise](
+            const std::vector<double>* values) {
+            delete values;
+            destroyed_promise->set_value(
+                std::this_thread::get_id());
+        });
+    specforge::SpectrumSnapshotHandle old_snapshot =
+        MakeSnapshot(
+            {1.0, 2.0, 3.0},
+            old_y_values);
+    Require(
+        ui.RenderFrame(
+              presentation,
+              old_snapshot)
+            .plot_submitted,
+        "old snapshot should populate the presentation cache");
+    Require(
+        presentation.
+                RetainHeavySnapshotResources()
+            .size() == 2,
+        "binding regression requires both heavy smoothing resources");
+    old_snapshot.reset();
+    old_y_values.reset();
+
+    specforge::SourceCollectionPreparationAdapters
+        dependencies;
+    dependencies.snapshot_loader =
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeActivationSnapshot(
+                source,
+                index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    specforge::SourceCollectionActivationTransaction
+        activation(
+            source_session,
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting(
+                    std::move(dependencies)));
+    specforge::
+        BindSourceCollectionActivationPresentationLifecycle(
+            activation,
+            presentation);
+
+    const std::thread::id caller_thread =
+        std::this_thread::get_id();
+    (void)activation.OpenSource(path, 0);
+    const auto deadline =
+        std::chrono::steady_clock::now() + 2s;
+    bool activated = false;
+    while (std::chrono::steady_clock::now() <
+           deadline) {
+        (void)activation.Drain(false);
+        const specforge::SpectrumSnapshotHandle current =
+            source_session.CurrentSampleSnapshot();
+        activated =
+            current && current->source.path == path &&
+            !activation.status().loading;
+        if (activated) {
+            break;
+        }
+        std::this_thread::sleep_for(2ms);
+    }
+    const bool retired =
+        destroyed.wait_for(2s) ==
+        std::future_status::ready;
+    const std::thread::id retirement_thread =
+        retired ? destroyed.get() : std::thread::id{};
+
+    std::filesystem::remove(path);
+    Require(
+        activated,
+        "prepared source activation should commit through the bound transaction");
+    Require(
+        presentation.
+            RetainHeavySnapshotResources()
+            .empty(),
+        "snapshot activation should reset the bound presentation view");
+    Require(
+        retired,
+        "old presentation resources should reach the background reclaimer");
+    Require(
+        retirement_thread != caller_thread,
+        "old presentation resources must not be destroyed on the activation caller");
+}
+
 }  // namespace
 
 int main()
@@ -273,5 +453,6 @@ int main()
     TestFitAndStoredLimitReuseAreObservable();
     TestSmoothingCommandsOwnCacheInvalidation();
     TestRenderFeedbackTracksPanLifecycle();
+    TestActivationPresentationBindingResetsAndRetiresHeavyViewResources();
     return 0;
 }

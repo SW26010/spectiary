@@ -76,6 +76,22 @@ struct ShellUiTestAccess {
             PendingLoadCount();
     }
 
+    static std::size_t PendingLoadCount(
+        const SourceCollectionActivationTransaction&
+            activation)
+    {
+        return activation.PendingLoadCount();
+    }
+
+    static void RegisterCompletionReadyCallback(
+        SourceCollectionActivationTransaction& activation,
+        SourceCollectionLoadQueue::
+            CompletionReadyCallback callback)
+    {
+        activation.RegisterCompletionReadyCallback(
+            std::move(callback));
+    }
+
     static bool PrefetchActive(const ShellUi& shell)
     {
         return shell.source_activation_.PrefetchActive();
@@ -84,7 +100,8 @@ struct ShellUiTestAccess {
     static std::vector<NavigationPrefetchReport>
     TakePrefetchReports(ShellUi& shell)
     {
-        return shell.TakeNavigationPrefetchReports();
+        return shell.source_activation_.
+            TakeNavigationPrefetchReports();
     }
 
     static std::string_view LoadError(const ShellUi& shell)
@@ -94,9 +111,10 @@ struct ShellUiTestAccess {
 
     static void EnableNavigationTracing(ShellUi& shell, std::uint64_t frame_index)
     {
-        shell.source_activation_.SetPresentationContext(
+        shell.source_activation_.BeginFrame(
             true,
-            frame_index);
+            frame_index,
+            nullptr);
     }
 
     static std::vector<NavigationLatencyReport> CompleteFramePresentation(
@@ -108,7 +126,10 @@ struct ShellUiTestAccess {
         const NavigationLatencyPresentation presentation{
             viewport_id,
             NavigationLatencyTrace::Now()};
-        return shell.CompleteFramePresentations(frame_index, std::span(&presentation, 1));
+        return shell.source_activation_.
+            CompleteNavigationFramePresentations(
+                frame_index,
+                std::span(&presentation, 1));
     }
 
     static void SubmitSpectrumDraw(
@@ -131,7 +152,10 @@ struct ShellUiTestAccess {
         const NavigationLatencyPresentation presentation{
             viewport_id,
             NavigationLatencyTrace::Now()};
-        return shell.CompleteFramePresentations(frame_index, std::span(&presentation, 1));
+        return shell.source_activation_.
+            CompleteNavigationFramePresentations(
+                frame_index,
+                std::span(&presentation, 1));
     }
 
     static std::vector<SourceLoadLatencyReport>
@@ -148,9 +172,23 @@ struct ShellUiTestAccess {
         const NavigationLatencyPresentation presentation{
             viewport_id,
             NavigationLatencyTrace::Now()};
-        return shell.CompleteSourceLoadFramePresentations(
+        return shell.source_activation_.
+            CompleteSourceLoadFramePresentations(
+                frame_index,
+                std::span(&presentation, 1));
+    }
+
+    static std::vector<SourceLoadLatencyReport>
+    CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations = {})
+    {
+        return shell.source_activation_.
+            CompleteSourceLoadFramePresentations(
             frame_index,
-            std::span(&presentation, 1));
+            presentations);
     }
 
     static void RecordNavigationKeyInput(
@@ -457,9 +495,14 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         8,
         specforge::NavigationLatencyTrace::Now()};
     const std::vector<specforge::SourceLoadLatencyReport>
-        wrong_viewport_reports = shell->CompleteSourceLoadFramePresentations(
-            presentation_frame,
-            std::span(&wrong_viewport_presentation, 1));
+        wrong_viewport_reports =
+            Access::
+                CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
+                    *shell,
+                    presentation_frame,
+                    std::span(
+                        &wrong_viewport_presentation,
+                        1));
     const bool waits_for_matching_viewport =
         wrong_viewport_reports.empty();
     const std::vector<specforge::SourceLoadLatencyReport> reports =
@@ -489,9 +532,14 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         7,
         specforge::NavigationLatencyTrace::Now()};
     const std::vector<specforge::SourceLoadLatencyReport>
-        wrong_snapshot_reports = shell->CompleteSourceLoadFramePresentations(
-            presentation_frame + 2,
-            std::span(&replacement_presentation, 1));
+        wrong_snapshot_reports =
+            Access::
+                CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
+                    *shell,
+                    presentation_frame + 2,
+                    std::span(
+                        &replacement_presentation,
+                        1));
     shell.reset();
     std::filesystem::remove(path);
 
@@ -559,9 +607,10 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
     }
     Access::Drain(*shell);
     const std::vector<specforge::SourceLoadLatencyReport> reports =
-        shell->CompleteSourceLoadFramePresentations(
-            frame_index,
-            std::span<const specforge::NavigationLatencyPresentation>{});
+        Access::
+            CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
+                *shell,
+                frame_index);
     const bool load_error_visible = !Access::LoadError(*shell).empty();
     shell.reset();
     std::filesystem::remove(path);
@@ -1895,10 +1944,12 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
     std::promise<void> completion_ready_promise;
     std::shared_future<void> completion_ready =
         completion_ready_promise.get_future().share();
-    activation.RegisterCompletionReadyCallback(
-        [&completion_ready_promise]() {
-            completion_ready_promise.set_value();
-        });
+    specforge::ShellUiTestAccess::
+        RegisterCompletionReadyCallback(
+            activation,
+            [&completion_ready_promise]() {
+                completion_ready_promise.set_value();
+            });
 
     const specforge::SourceCollectionSessionResult
         navigation = activation.Submit(
@@ -1923,7 +1974,8 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         switched_to_b.loaded &&
         !switched_to_b.canceled_source_follow_up_path;
     const bool lifecycle_ticket_preserved =
-        activation.PendingLoadCount() == 1;
+        specforge::ShellUiTestAccess::
+            PendingLoadCount(activation) == 1;
 
     const specforge::SourceCollectionSessionResult
         switched_back_to_a = activation.Submit(
@@ -1936,7 +1988,8 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         session.CurrentSampleSnapshot() ==
             initial_snapshot;
     const bool existing_ticket_reused =
-        activation.PendingLoadCount() == 1;
+        specforge::ShellUiTestAccess::
+            PendingLoadCount(activation) == 1;
     bool row_one_committed = false;
     const auto deadline =
         std::chrono::steady_clock::now() + 2s;
@@ -1947,7 +2000,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
         row_one_committed =
             snapshot &&
             snapshot->collection.current_index == 1 &&
-            !activation.HasPendingLoads();
+            !activation.status().loading;
         if (row_one_committed) {
             break;
         }

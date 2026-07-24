@@ -67,15 +67,9 @@ public:
     void RecordNavigationKeyInput(
         NavigationLatencyInputKind kind,
         NavigationLatencyTimePoint at = NavigationLatencyTrace::Now());
-    [[nodiscard]] std::vector<NavigationLatencyReport> CompleteFramePresentations(
+    void PresentFrame(
         std::uint64_t frame_index,
         std::span<const NavigationLatencyPresentation> presentations);
-    [[nodiscard]] std::vector<SourceLoadLatencyReport>
-    CompleteSourceLoadFramePresentations(
-        std::uint64_t frame_index,
-        std::span<const NavigationLatencyPresentation> presentations);
-    [[nodiscard]] std::vector<NavigationPrefetchReport>
-        TakeNavigationPrefetchReports();
 
 private:
     ShellUi(
@@ -120,7 +114,6 @@ private:
         NavigationLatencyInputKind kind);
     void DrainSourceLoads(
         bool allow_snapshot_prefetch = true);
-    void RetireSessionViews();
     void BeginDeferredSourceRestore();
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
@@ -130,8 +123,8 @@ private:
     friend struct ShellUiTestAccess;
 
     SourceCollectionSession session_;
-    SourceCollectionActivationTransaction source_activation_;
     SpectrumViewSession spectrum_view_session_;
+    SourceCollectionActivationTransaction source_activation_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
@@ -145,7 +138,6 @@ private:
     bool persist_local_state_ = true;
     bool layout_seeded_ = false;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
-    mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
 };

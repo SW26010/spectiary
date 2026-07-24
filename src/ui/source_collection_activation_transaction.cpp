@@ -44,7 +44,11 @@ SourceCollectionActivationTransaction::
 }
 
 SourceCollectionActivationTransaction::
-    ~SourceCollectionActivationTransaction() = default;
+    ~SourceCollectionActivationTransaction()
+{
+    RetireResources(
+        session_.ReleaseBackgroundResourcesForShutdown());
+}
 
 bool SourceCollectionActivationTransaction::OpenSource(
     const std::filesystem::path& path,
@@ -112,6 +116,7 @@ SourceCollectionActivationTransaction::Submit(
     SourceCollectionSessionResult result = session_.Submit(
         std::move(intent),
         trace_requested ? &target_resolution : nullptr);
+    ApplyPresentationAction(result.action);
     const NavigationLatencyTimePoint target_resolved_at =
         trace_requested ? NavigationLatencyTrace::Now()
                         : NavigationLatencyTimePoint{};
@@ -180,32 +185,82 @@ void SourceCollectionActivationTransaction::BeginDeferredRestore()
             task_ids[index],
             std::move(tickets[index]));
     }
+    ScheduleServiceNow();
 }
 
-SourceCollectionActivationTransaction::ServiceResult
+SourceCollectionSessionAction
 SourceCollectionActivationTransaction::Drain(
-    bool allow_snapshot_prefetch,
-    BeforeSourceActivation before_source_activation,
-    ConsumeSessionAction consume_session_action)
+    bool allow_snapshot_prefetch)
 {
-    ServiceResult result;
+    RetirePendingSessionViews();
+    SourceCollectionSessionAction action;
     DrainCompletions(
         load_queue_.TakeCompleted(),
-        before_source_activation,
-        consume_session_action,
-        result);
+        action);
     ServiceSnapshotPrefetch(allow_snapshot_prefetch);
-    return result;
+    RefreshServiceDeadline(
+        LocalUserStateSaveScheduler::Clock::now());
+    return action;
 }
 
 void SourceCollectionActivationTransaction::
-    SetPresentationContext(
+    RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now)
+{
+    RetireResources(session_.RunMaintenance(now));
+    RetirePendingSessionViews();
+}
+
+std::optional<LocalUserStateSaveScheduler::TimePoint>
+SourceCollectionActivationTransaction::
+    NextMaintenanceDeadline() const
+{
+    std::optional<LocalUserStateSaveScheduler::TimePoint>
+        deadline = session_.NextMaintenanceDeadline();
+    if (NeedsService()) {
+        if (!service_deadline_) {
+            service_deadline_ =
+                LocalUserStateSaveScheduler::Clock::now() +
+                std::chrono::milliseconds(16);
+        }
+        if (!deadline ||
+            *service_deadline_ < *deadline) {
+            deadline = service_deadline_;
+        }
+    } else {
+        service_deadline_.reset();
+    }
+    return deadline;
+}
+
+void SourceCollectionActivationTransaction::
+    ScheduleServiceNow()
+{
+    service_deadline_ =
+        LocalUserStateSaveScheduler::Clock::now();
+}
+
+void SourceCollectionActivationTransaction::
+    RefreshServiceDeadline(
+        LocalUserStateSaveScheduler::TimePoint now)
+{
+    service_deadline_ = NeedsService()
+        ? std::optional<
+              LocalUserStateSaveScheduler::TimePoint>{
+              now + std::chrono::milliseconds(16)}
+        : std::nullopt;
+}
+
+void SourceCollectionActivationTransaction::
+    BeginFrame(
         bool latency_tracing_enabled,
-        std::uint64_t frame_index)
+        std::uint64_t frame_index,
+        ProfileSink* profile)
 {
     current_frame_index_ = frame_index;
     spectrum_draw_submission_.reset();
     latency_tracing_enabled_ = latency_tracing_enabled;
+    profile_ = profile;
     if (latency_tracing_enabled_) {
         return;
     }
@@ -236,7 +291,7 @@ void SourceCollectionActivationTransaction::
 
 std::vector<NavigationLatencyReport>
 SourceCollectionActivationTransaction::
-    CompleteFramePresentations(
+    CompleteNavigationFramePresentations(
         std::uint64_t frame_index,
         std::span<const NavigationLatencyPresentation>
             presentations)
@@ -282,6 +337,41 @@ SourceCollectionActivationTransaction::
         trace = navigation_traces_.erase(trace);
     }
     return reports;
+}
+
+void SourceCollectionActivationTransaction::PresentFrame(
+    std::uint64_t frame_index,
+    std::span<const NavigationLatencyPresentation>
+        presentations)
+{
+    for (const NavigationLatencyReport& report :
+         CompleteNavigationFramePresentations(
+             frame_index,
+             presentations)) {
+        if (profile_) {
+            (void)WriteNavigationLatencyProfileEvent(
+                *profile_,
+                report);
+        }
+    }
+    for (const SourceLoadLatencyReport& report :
+         CompleteSourceLoadFramePresentations(
+             frame_index,
+             presentations)) {
+        if (profile_) {
+            (void)WriteSourceLoadLatencyProfileEvent(
+                *profile_,
+                report);
+        }
+    }
+    for (const NavigationPrefetchReport& report :
+         TakeNavigationPrefetchReports()) {
+        if (profile_) {
+            (void)WriteNavigationPrefetchProfileEvent(
+                *profile_,
+                report);
+        }
+    }
 }
 
 std::vector<SourceLoadLatencyReport>
@@ -358,6 +448,15 @@ void SourceCollectionActivationTransaction::
     load_queue_.UnregisterCompletionReadyCallback();
 }
 
+SourceCollectionActivationTransaction::Status
+SourceCollectionActivationTransaction::status() const
+{
+    return {
+        .loading = NeedsService(),
+        .error_message = ErrorMessage(),
+    };
+}
+
 bool SourceCollectionActivationTransaction::NeedsService() const
 {
     return load_queue_.NeedsService();
@@ -398,10 +497,18 @@ void SourceCollectionActivationTransaction::
     RebuildErrorMessage();
 }
 
-void SourceCollectionActivationTransaction::RetireResource(
-    BackgroundRetirementHandle resource)
+void SourceCollectionActivationTransaction::RetireResources(
+    std::vector<BackgroundRetirementHandle> resources)
 {
-    load_queue_.RetireResource(std::move(resource));
+    for (BackgroundRetirementHandle& resource : resources) {
+        load_queue_.RetireResource(std::move(resource));
+    }
+}
+
+void SourceCollectionActivationTransaction::
+    RetirePendingSessionViews()
+{
+    RetireResources(session_.TakeViewRetirement());
 }
 
 std::uint64_t
@@ -450,6 +557,7 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     });
     CancelPendingTasks(
         RegisterOrReplaceLoad(task_id, std::move(ticket)));
+    ScheduleServiceNow();
     return task_id;
 }
 
@@ -533,9 +641,7 @@ void SourceCollectionActivationTransaction::
 
 void SourceCollectionActivationTransaction::DrainCompletions(
     std::vector<SourceCollectionLoadCompletion> completions,
-    const BeforeSourceActivation& before_source_activation,
-    const ConsumeSessionAction& consume_session_action,
-    ServiceResult& service_result)
+    SourceCollectionSessionAction& action)
 {
     for (SourceCollectionLoadCompletion& completion :
          completions) {
@@ -576,7 +682,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
-                service_result.session_changed = true;
+                action.navigation_inputs_changed = true;
             }
             MarkTicketSuperseded(ticket);
             continue;
@@ -590,7 +696,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
-                service_result.session_changed = true;
+                action.navigation_inputs_changed = true;
             }
             if (ticket.navigation_trace) {
                 (void)ticket.navigation_trace->MarkTerminal(
@@ -623,12 +729,11 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             ticket.navigation_trace->SetCacheKind(
                 cache_kind);
         }
-        if (before_source_activation) {
-            for (BackgroundRetirementHandle& resource :
-                 before_source_activation()) {
-                load_queue_.RetireResource(
-                    std::move(resource));
-            }
+        std::vector<BackgroundRetirementHandle>
+            retained_presentation_resources;
+        if (retain_presentation_resources_) {
+            retained_presentation_resources =
+                retain_presentation_resources_();
         }
 
         SourceCollectionSessionResult result =
@@ -641,10 +746,12 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                     prepared.folder_listing_generation),
                 std::move(
                     prepared.context_reuse_proof));
-        service_result.session_changed = true;
         MergeSourceCollectionSessionAction(
-            service_result.action,
+            action,
             result.action);
+        ApplyPresentationAction(result.action);
+        RetireResources(
+            std::move(retained_presentation_resources));
 
         const bool completes_navigation_trace =
             result.loaded &&
@@ -687,9 +794,6 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 current_frame_index_);
         }
         CancelSourceFollowUps(result);
-        if (consume_session_action) {
-            consume_session_action(result.action);
-        }
         if (completes_navigation_trace) {
             ticket.navigation_trace->MarkUiUpdated();
         }
@@ -710,7 +814,7 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
-                service_result.session_changed = true;
+                action.navigation_inputs_changed = true;
             }
             if (ticket.navigation_trace) {
                 (void)ticket.navigation_trace->MarkTerminal(
@@ -775,12 +879,32 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                 *ticket.prefetch_direction);
         }
         RestoreDeferredActiveSourceIfAvailable(
-            consume_session_action,
-            service_result);
+            action);
     }
-    FinishDeferredRestoreIfReady(
-        consume_session_action,
-        service_result);
+    FinishDeferredRestoreIfReady(action);
+}
+
+void SourceCollectionActivationTransaction::
+    ApplyPresentationAction(
+        const SourceCollectionSessionAction& action)
+{
+    if (action.snapshot_changed &&
+        reset_presentation_for_snapshot_change_) {
+        reset_presentation_for_snapshot_change_();
+    }
+}
+
+void SourceCollectionActivationTransaction::
+    BindPresentationLifecycle(
+        std::function<
+            std::vector<BackgroundRetirementHandle>()>
+            retain_resources,
+        std::function<void()> reset_for_snapshot_change)
+{
+    retain_presentation_resources_ =
+        std::move(retain_resources);
+    reset_presentation_for_snapshot_change_ =
+        std::move(reset_for_snapshot_change);
 }
 
 void SourceCollectionActivationTransaction::
@@ -1026,8 +1150,7 @@ SourceCollectionActivationTransaction::
 
 void SourceCollectionActivationTransaction::
     RestoreDeferredActiveSourceIfAvailable(
-        const ConsumeSessionAction& consume_session_action,
-        ServiceResult& service_result)
+        SourceCollectionSessionAction& action)
 {
     if (!deferred_restore_active_ ||
         !deferred_restore_active_path_) {
@@ -1055,13 +1178,10 @@ void SourceCollectionActivationTransaction::
                         SourceCollectionIntent::
                             SwitchActive(index)));
         MergeSourceCollectionSessionAction(
-            service_result.action,
+            action,
             result.action);
-        service_result.session_changed = true;
+        ApplyPresentationAction(result.action);
         RetireSessionResources(result);
-        if (consume_session_action) {
-            consume_session_action(result.action);
-        }
         QueueSessionFollowUp(result, true);
         return;
     }
@@ -1069,16 +1189,13 @@ void SourceCollectionActivationTransaction::
 
 void SourceCollectionActivationTransaction::
     FinishDeferredRestoreIfReady(
-        const ConsumeSessionAction& consume_session_action,
-        ServiceResult& service_result)
+        SourceCollectionSessionAction& action)
 {
     if (!deferred_restore_active_ ||
         HasPendingDeferredRestore()) {
         return;
     }
-    RestoreDeferredActiveSourceIfAvailable(
-        consume_session_action,
-        service_result);
+    RestoreDeferredActiveSourceIfAvailable(action);
     session_.FinishDeferredRestore();
     deferred_restore_active_ = false;
     deferred_restore_active_path_.reset();

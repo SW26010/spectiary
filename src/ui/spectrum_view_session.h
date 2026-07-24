@@ -11,6 +11,8 @@
 
 namespace specforge {
 
+class SourceCollectionActivationTransaction;
+
 enum class SpectrumViewSessionCommandKind {
     ResetForSnapshotChange,
     RequestFitView,
@@ -100,5 +102,11 @@ private:
 
     std::unique_ptr<State> state_;
 };
+
+// Connects source activation to the presentation resources that must survive
+// UI-thread snapshot replacement and to the view reset caused by that change.
+void BindSourceCollectionActivationPresentationLifecycle(
+    SourceCollectionActivationTransaction& activation,
+    SpectrumViewSession& presentation);
 
 }  // namespace specforge

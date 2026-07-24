@@ -664,6 +664,9 @@ ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
           DefaultRuntimePaths().public_spectral_line_catalog_path),
       touchpad_gestures_(touchpad_gestures)
 {
+    BindSourceCollectionActivationPresentationLifecycle(
+        source_activation_,
+        spectrum_view_session_);
     RefreshSystemColors();
     BeginDeferredSourceRestore();
 }
@@ -681,6 +684,9 @@ ShellUi::ShellUi(
           ApplicationSettingsStorage{.persistent = false}),
       persist_local_state_(false)
 {
+    BindSourceCollectionActivationPresentationLifecycle(
+        source_activation_,
+        spectrum_view_session_);
 }
 
 ShellUi::~ShellUi()
@@ -690,16 +696,14 @@ ShellUi::~ShellUi()
         (void)session_.FlushStateCaches();
         (void)spectral_lines_panel_.Flush();
     }
-    for (BackgroundRetirementHandle& resource : session_.ReleaseBackgroundResourcesForShutdown()) {
-        source_activation_.RetireResource(std::move(resource));
-    }
 }
 
 void ShellUi::Render(const ShellStatus& status)
 {
-    source_activation_.SetPresentationContext(
+    source_activation_.BeginFrame(
         status.latency_trace_recording_active,
-        status.frame_index);
+        status.frame_index,
+        status.profile);
     if (!status.latency_trace_recording_active) {
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
@@ -711,7 +715,6 @@ void ShellUi::Render(const ShellStatus& status)
         HandleSampleWorkflowShortcut();
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
-        RetireSessionViews();
         return;
     }
     RenderDockHost(status);
@@ -761,22 +764,13 @@ void ShellUi::Render(const ShellStatus& status)
     HandleSampleWorkflowShortcut();
     pending_keyboard_previous_at_.reset();
     pending_keyboard_next_at_.reset();
-    RetireSessionViews();
 }
 
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     DrainSourceLoads();
-    source_load_service_deadline_ = source_activation_.NeedsService()
-        ? std::optional<LocalUserStateSaveScheduler::TimePoint>{now + std::chrono::milliseconds(16)}
-        : std::nullopt;
     application_settings_.RunMaintenance(now);
-    for (BackgroundRetirementHandle& resource :
-         session_.RunMaintenance(now)) {
-        source_activation_.RetireResource(
-            std::move(resource));
-    }
-    RetireSessionViews();
+    source_activation_.RunMaintenance(now);
     spectral_lines_panel_.RunMaintenance(now);
 }
 
@@ -789,17 +783,10 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
             deadline = candidate;
         }
     };
-    consider(session_.NextMaintenanceDeadline());
+    consider(
+        source_activation_.
+            NextMaintenanceDeadline());
     consider(spectral_lines_panel_.NextMaintenanceDeadline());
-    if (source_activation_.NeedsService()) {
-        if (!source_load_service_deadline_) {
-            source_load_service_deadline_ =
-                LocalUserStateSaveScheduler::Clock::now() + std::chrono::milliseconds(16);
-        }
-        consider(source_load_service_deadline_);
-    } else {
-        source_load_service_deadline_.reset();
-    }
     return deadline;
 }
 
@@ -869,57 +856,24 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
     (void)source_activation_.OpenSource(
         path,
         spectrum_index);
-    source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
 }
 
 void ShellUi::DrainSourceLoads(
     bool allow_snapshot_prefetch)
 {
-    auto before_source_activation = [this]() {
-        std::vector<BackgroundRetirementHandle> resources;
-        for (SpectrumValueVector& resource :
-             spectrum_view_session_.RetainHeavySnapshotResources()) {
-            resources.push_back(std::move(resource));
-        }
-        return resources;
-    };
-    SourceCollectionActivationTransaction::ServiceResult result =
-        source_activation_.Drain(
-            allow_snapshot_prefetch &&
-                !latency_sensitive_plot_interaction_active(),
-            std::move(before_source_activation),
-            [this](
-                const SourceCollectionSessionAction& action) {
-                HandleSessionAction(action);
-            });
-    (void)result;
+    HandleSessionAction(source_activation_.Drain(
+        allow_snapshot_prefetch &&
+            !latency_sensitive_plot_interaction_active()));
 }
 
 void ShellUi::BeginDeferredSourceRestore()
 {
     source_activation_.BeginDeferredRestore();
-    source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
-}
-
-void ShellUi::RetireSessionViews()
-{
-    for (BackgroundRetirementHandle& resource :
-         session_.TakeViewRetirement()) {
-        source_activation_.RetireResource(
-            std::move(resource));
-    }
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
     return session_.CurrentSampleSnapshot();
-}
-
-std::vector<NavigationPrefetchReport>
-ShellUi::TakeNavigationPrefetchReports()
-{
-    return source_activation_.
-        TakeNavigationPrefetchReports();
 }
 
 void ShellUi::RecordNavigationKeyInput(
@@ -956,24 +910,13 @@ void ShellUi::RecordSpectrumDrawSubmission(
         std::move(snapshot));
 }
 
-std::vector<NavigationLatencyReport> ShellUi::CompleteFramePresentations(
+void ShellUi::PresentFrame(
     std::uint64_t frame_index,
     std::span<const NavigationLatencyPresentation> presentations)
 {
-    return source_activation_.CompleteFramePresentations(
+    source_activation_.PresentFrame(
         frame_index,
         presentations);
-}
-
-std::vector<SourceLoadLatencyReport>
-ShellUi::CompleteSourceLoadFramePresentations(
-    std::uint64_t frame_index,
-    std::span<const NavigationLatencyPresentation> presentations)
-{
-    return source_activation_.
-        CompleteSourceLoadFramePresentations(
-            frame_index,
-            presentations);
 }
 
 void ShellUi::OpenSourceFromFilePicker()
@@ -1020,8 +963,6 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
             std::move(command),
             std::move(navigation));
     HandleSessionAction(result.action);
-    source_load_service_deadline_ =
-        LocalUserStateSaveScheduler::Clock::now();
     return result;
 }
 
@@ -1044,9 +985,6 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommandForPanel(
 
 void ShellUi::HandleSessionAction(const SourceCollectionSessionAction& action)
 {
-    if (action.snapshot_changed) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::ResetForSnapshotChange());
-    }
     if (action.workflow_changed) {
         sample_workflow_panel_ui_.ResetForSampleWorkflow();
     }
@@ -1260,10 +1198,12 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         settings_panel_ui_.Open();
     }
 
+    const SourceCollectionActivationTransaction::Status
+        activation_status = source_activation_.status();
     if (RenderTopBarStatus(
             status,
-            source_activation_.NeedsService(),
-            source_activation_.ErrorMessage())) {
+            activation_status.loading,
+            activation_status.error_message)) {
         source_activation_.AcknowledgeLoadFailures();
     }
 

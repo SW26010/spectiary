@@ -1,5 +1,6 @@
 #include "domain/source_collection_manifest.h"
 #include "profile/navigation_latency_trace.h"
+#include "profile/profile_sink.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_load_queue_internal.h"
@@ -19,11 +20,62 @@
 #include <thread>
 #include <utility>
 
+namespace specforge {
+
+struct SourceCollectionActivationTransactionTestAccess {
+    static std::vector<NavigationLatencyReport>
+    CompleteNavigationFrame(
+        SourceCollectionActivationTransaction& activation,
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations)
+    {
+        return activation.
+            CompleteNavigationFramePresentations(
+                frame_index,
+                presentations);
+    }
+
+    static std::vector<SourceLoadLatencyReport>
+    CompleteSourceLoadFrame(
+        SourceCollectionActivationTransaction& activation,
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations)
+    {
+        return activation.
+            CompleteSourceLoadFramePresentations(
+                frame_index,
+                presentations);
+    }
+
+    static std::vector<NavigationPrefetchReport>
+    TakePrefetchReports(
+        SourceCollectionActivationTransaction& activation)
+    {
+        return activation.TakeNavigationPrefetchReports();
+    }
+
+    static std::optional<
+        LocalUserStateSaveScheduler::TimePoint>
+    NextMaintenanceDeadline(
+        const SourceCollectionActivationTransaction&
+            activation)
+    {
+        return activation.NextMaintenanceDeadline();
+    }
+};
+
+}  // namespace specforge
+
 namespace {
 
 using namespace std::chrono_literals;
 using Activation =
     specforge::SourceCollectionActivationTransaction;
+using ActivationAccess =
+    specforge::
+        SourceCollectionActivationTransactionTestAccess;
 
 void Require(bool condition, std::string_view message)
 {
@@ -51,6 +103,14 @@ void WriteFixture(const std::filesystem::path& path)
         stream.good(),
         "activation lifecycle fixture should be created");
     stream << "fixture";
+}
+
+std::string ReadText(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return {
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>()};
 }
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
@@ -217,7 +277,7 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
                 session.CurrentSampleSnapshot();
             return snapshot &&
                 snapshot->collection.current_index == 2 &&
-                !activation.HasPendingLoads();
+                !activation.status().loading;
         });
 
     std::filesystem::remove(path);
@@ -233,6 +293,8 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
 {
     const std::filesystem::path path =
         UniqueTempPath("_failed.csv");
+    const std::filesystem::path profile_path =
+        UniqueTempPath("_failed.jsonl");
     WriteFixture(path);
     specforge::SourceCollectionSession session({}, {}, {}, {});
     auto dependencies = MakeDependencies(
@@ -247,23 +309,26 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    activation.SetPresentationContext(true, 11);
+    specforge::ProfileSink profile(profile_path);
+    profile.BeginFrame();
+    activation.BeginFrame(true, 11, &profile);
     (void)activation.OpenSource(path, 0);
 
     const bool failure_drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.ErrorMessage().empty() &&
-                !activation.HasPendingLoads();
+            return !activation.status().error_message.empty() &&
+                !activation.status().loading;
         });
     const std::string error(
-        activation.ErrorMessage());
-    const auto reports =
-        activation.CompleteSourceLoadFramePresentations(
-            11,
-            {});
+        activation.status().error_message);
+    activation.PresentFrame(11, {});
+    profile.Stop();
+    const std::string profile_text =
+        ReadText(profile_path);
 
     std::filesystem::remove(path);
+    std::filesystem::remove(profile_path);
     Require(
         failure_drained,
         "failed load should become a visible lifecycle result");
@@ -272,10 +337,66 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
             std::string::npos,
         "a single failed load should identify its source path");
     Require(
-        reports.size() == 1 &&
-            reports.front().outcome ==
-                specforge::SourceLoadLatencyOutcome::Failed,
-        "failed explicit open should emit one terminal trace");
+        profile_text.find(
+            "\"event\":\"source_load_latency\"") !=
+                std::string::npos &&
+            profile_text.find(
+                "\"outcome\":\"failed\"") !=
+                std::string::npos,
+        "open -> prepare -> fail should publish its terminal trace through PresentFrame");
+}
+
+void TestActivationOwnsQueueServiceDeadline()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_service_deadline.csv");
+    WriteFixture(path);
+    auto dependencies = MakeDependencies(
+        [](const std::filesystem::path&,
+           std::size_t,
+           const auto&)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "synthetic service deadline failure");
+        });
+    specforge::SourceCollectionSession session(
+        {},
+        {},
+        {},
+        {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+
+    const auto before_open =
+        specforge::LocalUserStateSaveScheduler::
+            Clock::now();
+    (void)activation.OpenSource(path, 0);
+    const auto scheduled =
+        ActivationAccess::NextMaintenanceDeadline(
+            activation);
+    const auto after_open =
+        specforge::LocalUserStateSaveScheduler::
+            Clock::now();
+    const bool failure_drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.status().loading;
+        });
+    const auto after_drain =
+        ActivationAccess::NextMaintenanceDeadline(
+            activation);
+
+    std::filesystem::remove(path);
+    Require(
+        scheduled &&
+            *scheduled >= before_open &&
+            *scheduled <= after_open,
+        "enqueue should publish an immediate activation-owned service deadline");
+    Require(
+        failure_drained && !after_drain,
+        "draining the terminal completion should clear the queue service deadline");
 }
 
 void TestSuccessfulSourceDoesNotHideConcurrentFailure()
@@ -308,10 +429,10 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
     const bool drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.HasPendingLoads();
+            return !activation.status().loading;
         });
     const std::string error(
-        activation.ErrorMessage());
+        activation.status().error_message);
 
     std::filesystem::remove(failed_path);
     std::filesystem::remove(loaded_path);
@@ -356,10 +477,10 @@ void TestConcurrentFailuresRemainVisible()
     const bool drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.HasPendingLoads();
+            return !activation.status().loading;
         });
     const std::string error(
-        activation.ErrorMessage());
+        activation.status().error_message);
 
     std::filesystem::remove(first_path);
     std::filesystem::remove(second_path);
@@ -405,20 +526,21 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    activation.SetPresentationContext(true, 13);
+    activation.BeginFrame(true, 13, nullptr);
 
     (void)activation.OpenSource(first_path, 0);
     (void)activation.OpenSource(second_path, 0);
     const bool failures_drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.HasPendingLoads();
+            return !activation.status().loading;
         });
     activation.AcknowledgeLoadFailures();
     const bool failures_hidden =
-        activation.ErrorMessage().empty();
+        activation.status().error_message.empty();
     const auto terminal_reports =
-        activation.CompleteSourceLoadFramePresentations(
+        ActivationAccess::CompleteSourceLoadFrame(
+            activation,
             13,
             {});
 
@@ -426,10 +548,10 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
     const bool new_failure_drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.HasPendingLoads();
+            return !activation.status().loading;
         });
     const std::string new_error(
-        activation.ErrorMessage());
+        activation.status().error_message);
 
     std::filesystem::remove(first_path);
     std::filesystem::remove(second_path);
@@ -496,28 +618,28 @@ void TestSuccessfulRetryClearsOnlyItsSourceFailure()
         activation,
         [&]() {
             const std::string_view error =
-                activation.ErrorMessage();
+                activation.status().error_message;
             return error.find(
                        "retryable source failure") !=
                     std::string_view::npos &&
                 error.find("other source failure") !=
                     std::string_view::npos &&
-                !activation.HasPendingLoads();
+                !activation.status().loading;
         });
     (void)activation.OpenSource(retry_path, 0);
     const bool failure_retained_while_pending =
-        !activation.ErrorMessage().empty();
+        !activation.status().error_message.empty();
     const bool retry_drained = DrainUntil(
         activation,
         [&]() {
             const std::string_view error =
-                activation.ErrorMessage();
+                activation.status().error_message;
             return error.find(
                        "retryable source failure") ==
                     std::string_view::npos &&
                 error.find("other source failure") !=
                     std::string_view::npos &&
-                !activation.HasPendingLoads();
+                !activation.status().loading;
         });
 
     std::filesystem::remove(retry_path);
@@ -572,10 +694,10 @@ void TestCanceledGenerationDoesNotPublishFailure()
     const bool retry_drained = DrainUntil(
         activation,
         [&]() {
-            return !activation.HasPendingLoads();
+            return !activation.status().loading;
         });
     const std::string error(
-        activation.ErrorMessage());
+        activation.status().error_message);
 
     std::filesystem::remove(path);
     Require(
@@ -604,7 +726,7 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
-    activation.SetPresentationContext(true, 17);
+    activation.BeginFrame(true, 17, nullptr);
     const auto navigation = activation.Submit(
         specforge::SourceCollectionSessionIntent::
             UpdateSampleNavigation(
@@ -621,14 +743,15 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
                 session.CurrentSampleSnapshot();
             return snapshot &&
                 snapshot->collection.current_index == 1 &&
-                !activation.HasPendingLoads();
+                !activation.status().loading;
         });
     const specforge::NavigationLatencyPresentation
         presentation{
             9,
             specforge::NavigationLatencyTrace::Now()};
     const auto before_draw =
-        activation.CompleteFramePresentations(
+        ActivationAccess::CompleteNavigationFrame(
+            activation,
             17,
             std::span(&presentation, 1));
     activation.RecordSpectrumDrawSubmission(
@@ -636,7 +759,8 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
         9,
         session.CurrentSampleSnapshot());
     const auto after_draw =
-        activation.CompleteFramePresentations(
+        ActivationAccess::CompleteNavigationFrame(
+            activation,
             17,
             std::span(&presentation, 1));
 
@@ -653,6 +777,72 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
             after_draw.front().outcome ==
                 specforge::NavigationLatencyOutcome::Presented,
         "the exact drawn snapshot should finish the trace");
+}
+
+void TestPublicInterfacePublishesPresentedOpenLifecycle()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_public_present.csv");
+    const std::filesystem::path profile_path =
+        UniqueTempPath("_public_present.jsonl");
+    WriteFixture(path);
+    auto dependencies = MakeDependencies(
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        {},
+        {},
+        {},
+        {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+    specforge::ProfileSink profile(profile_path);
+    profile.BeginFrame();
+    activation.BeginFrame(true, 23, &profile);
+
+    (void)activation.OpenSource(path, 0);
+    const bool activated = DrainUntil(
+        activation,
+        [&]() {
+            const auto snapshot =
+                session.CurrentSampleSnapshot();
+            return snapshot &&
+                snapshot->source.path == path &&
+                !activation.status().loading;
+        });
+    activation.RecordSpectrumDrawSubmission(
+        23,
+        7,
+        session.CurrentSampleSnapshot());
+    const specforge::NavigationLatencyPresentation
+        presentation{
+            7,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        23,
+        std::span(&presentation, 1));
+    profile.Stop();
+    const std::string profile_text =
+        ReadText(profile_path);
+
+    std::filesystem::remove(path);
+    std::filesystem::remove(profile_path);
+    Require(
+        activated,
+        "open -> prepare -> commit should publish the source snapshot");
+    Require(
+        profile_text.find(
+            "\"event\":\"source_load_latency\"") !=
+                std::string::npos &&
+            profile_text.find(
+                "\"outcome\":\"presented\"") !=
+                std::string::npos,
+        "the frame fact should complete and publish the presented activation lifecycle");
 }
 
 void TestIdlePrefetchReportsLifecycleCompletion()
@@ -686,7 +876,8 @@ void TestIdlePrefetchReportsLifecycleCompletion()
         activation,
         [&]() {
             const auto reports =
-                activation.TakeNavigationPrefetchReports();
+                ActivationAccess::TakePrefetchReports(
+                    activation);
             for (const auto& report : reports) {
                 if (report.outcome ==
                     specforge::NavigationPrefetchOutcome::
@@ -711,12 +902,14 @@ int main()
     try {
         TestRapidNavigationPublishesOnlyLatestIntent();
         TestFailedExplicitOpenProducesTerminalLifecycleResult();
+        TestActivationOwnsQueueServiceDeadline();
         TestSuccessfulSourceDoesNotHideConcurrentFailure();
         TestConcurrentFailuresRemainVisible();
         TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();
         TestSuccessfulRetryClearsOnlyItsSourceFailure();
         TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
+        TestPublicInterfacePublishesPresentedOpenLifecycle();
         TestIdlePrefetchReportsLifecycleCompletion();
         return 0;
     } catch (const std::exception& error) {

@@ -588,24 +588,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     if (present_result == S_OK) {
         latency_presentations.push_back({ImGui::GetMainViewport()->ID, present_completed_at});
     }
-    std::vector<NavigationLatencyReport> navigation_reports =
-        ui_.CompleteFramePresentations(frame_index_, latency_presentations);
-    for (const NavigationLatencyReport& report : navigation_reports) {
-        (void)WriteNavigationLatencyProfileEvent(profile_, report);
-    }
-    std::vector<SourceLoadLatencyReport> source_load_reports =
-        ui_.CompleteSourceLoadFramePresentations(
-            frame_index_,
-            latency_presentations);
-    for (const SourceLoadLatencyReport& report : source_load_reports) {
-        (void)WriteSourceLoadLatencyProfileEvent(profile_, report);
-    }
-    for (const NavigationPrefetchReport& report :
-         ui_.TakeNavigationPrefetchReports()) {
-        (void)WriteNavigationPrefetchProfileEvent(
-            profile_,
-            report);
-    }
+    ui_.PresentFrame(
+        frame_index_,
+        latency_presentations);
     LogPresentationUpdates();
     return present_result == S_FALSE
                ? RenderFrameOutcome::PresentRetry

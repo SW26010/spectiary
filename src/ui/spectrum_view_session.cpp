@@ -1,6 +1,7 @@
 #include "ui/spectrum_view_session.h"
 
 #include "plot/spectrum_plot_renderer.h"
+#include "ui/source_collection_activation_transaction.h"
 
 #include <algorithm>
 #include <memory>
@@ -257,6 +258,29 @@ bool SpectrumViewSession::SmoothingActive() const
 {
     return state_->plot.show_smoothed &&
            state_->plot.smoothing.method != SpectrumSmoothingMethod::None;
+}
+
+void BindSourceCollectionActivationPresentationLifecycle(
+    SourceCollectionActivationTransaction& activation,
+    SpectrumViewSession& presentation)
+{
+    activation.BindPresentationLifecycle(
+        [&presentation]() {
+            std::vector<BackgroundRetirementHandle>
+                resources;
+            for (SpectrumValueVector& resource :
+                 presentation.
+                     RetainHeavySnapshotResources()) {
+                resources.push_back(
+                    std::move(resource));
+            }
+            return resources;
+        },
+        [&presentation]() {
+            presentation.Submit(
+                SpectrumViewSessionCommand::
+                    ResetForSnapshotChange());
+        });
 }
 
 }  // namespace specforge
