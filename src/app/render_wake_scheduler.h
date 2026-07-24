@@ -7,28 +7,27 @@ namespace specforge {
 
 struct RenderFrameActivity {
     bool touchpad_active = false;
-    bool compositor_clock_paced = false;
     bool text_input_active = false;
     bool popup_open = false;
 };
 
-enum class CompositorClockTickAction {
-    None,
-    GrantFramePermission,
-    RequestFallbackFrame,
+enum class RenderFrameOutcome {
+    Presented,
+    AcquireRetry,
+    PresentRetry,
 };
 
-[[nodiscard]] constexpr CompositorClockTickAction ClassifyCompositorClockTick(
-    bool tick_consumed,
-    bool compositor_clock_active) noexcept
-{
-    if (!tick_consumed) {
-        return CompositorClockTickAction::None;
-    }
-    return compositor_clock_active
-               ? CompositorClockTickAction::GrantFramePermission
-               : CompositorClockTickAction::RequestFallbackFrame;
-}
+enum class RenderWakeAction {
+    Wait,
+    RenderFrame,
+    PumpTouchpadUpdates,
+};
+
+enum class CompositorClockTickOutcome {
+    Ignored,
+    PermissionGranted,
+    FallbackFrameRequested,
+};
 
 class RenderWakeScheduler {
 public:
@@ -42,18 +41,35 @@ public:
     inline static constexpr Duration kTextCursorFrameInterval = std::chrono::milliseconds(400);
 
     void RequestFrame(std::optional<Duration> settings_save_delay = std::nullopt);
-    [[nodiscard]] bool ShouldRender(TimePoint now, bool render_permitted = true) const;
-    void BeginFrame(TimePoint now);
-    void EndFrame(TimePoint now, const RenderFrameActivity& activity);
+    void SetCompositorClockPaced(bool paced) noexcept;
+    void RequestTouchpadUpdate() noexcept;
+    void CancelTouchpadUpdate() noexcept;
+    [[nodiscard]] CompositorClockTickOutcome OnCompositorClockTick(
+        bool tick_consumed,
+        bool compositor_clock_active);
+    [[nodiscard]] RenderWakeAction TakeAction(
+        TimePoint now,
+        bool window_renderable);
+    void CompleteFrame(
+        TimePoint now,
+        const RenderFrameActivity& activity,
+        RenderFrameOutcome outcome);
 
     [[nodiscard]] std::optional<TimePoint> NextWakeDeadline(
         bool window_renderable,
-        std::optional<TimePoint> maintenance_deadline,
-        bool render_permitted = true) const;
+        std::optional<TimePoint> maintenance_deadline) const;
 
 private:
+    [[nodiscard]] bool RenderPermitted() const noexcept;
+    [[nodiscard]] bool HasRenderWork(TimePoint now) const noexcept;
+    void BeginFrame(TimePoint now);
+
     bool render_requested_ = true;
     bool schedule_follow_up_ = false;
+    bool compositor_clock_paced_ = false;
+    bool compositor_frame_permitted_ = false;
+    bool touchpad_update_pending_ = false;
+    bool touchpad_update_permitted_ = false;
     bool popup_open_ = false;
     std::optional<Duration> pending_settings_save_delay_;
     std::optional<Duration> frame_settings_save_delay_;

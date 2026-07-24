@@ -237,7 +237,7 @@ int SpecForgeApp::Run(
                     static_cast<std::uintptr_t>(message.wParam),
                     static_cast<std::intptr_t>(message.lParam)});
             } else {
-                touchpad_update_pending_ = true;
+                render_wake_scheduler_.RequestTouchpadUpdate();
             }
             TranslateMessage(&message);
             DispatchMessageW(&message);
@@ -258,48 +258,38 @@ int SpecForgeApp::Run(
         const bool window_renderable = !minimized_ && window_visible_;
         bool touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
         UpdateCompositorClockBoost(window_renderable, touchpad_active);
-        const bool compositor_clock_paced = compositor_clock_.boost_active();
-        const bool render_permitted = !compositor_clock_paced || compositor_clock_tick_ready_;
-        const bool should_render =
-            window_renderable && render_wake_scheduler_.ShouldRender(now, render_permitted);
-        if (should_render) {
-            if (compositor_clock_paced) {
-                compositor_clock_tick_ready_ = false;
-                touchpad_update_tick_ready_ = false;
-            }
-            touchpad_update_pending_ = false;
-            render_wake_scheduler_.BeginFrame(now);
-            RenderFrame();
+
+        switch (render_wake_scheduler_.TakeAction(now, window_renderable)) {
+        case RenderWakeAction::RenderFrame: {
+            const RenderFrameOutcome outcome = RenderFrame();
             const ImGuiIO& io = ImGui::GetIO();
             const bool popup_open = ImGui::IsPopupOpen(
                 nullptr,
                 ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
             touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
             UpdateCompositorClockBoost(window_renderable, touchpad_active);
-            render_wake_scheduler_.EndFrame(
+            render_wake_scheduler_.CompleteFrame(
                 RenderWakeScheduler::Clock::now(),
                 {
                     .touchpad_active = touchpad_active,
-                    .compositor_clock_paced = compositor_clock_.boost_active(),
                     .text_input_active = io.WantTextInput && io.ConfigInputTextCursorBlink,
                     .popup_open = popup_open,
-                });
-        } else if (
-            window_renderable && compositor_clock_paced && touchpad_update_pending_ &&
-            touchpad_update_tick_ready_) {
-            touchpad_update_pending_ = false;
-            touchpad_update_tick_ready_ = false;
+                },
+                outcome);
+            break;
+        }
+        case RenderWakeAction::PumpTouchpadUpdates:
             touchpad_gestures_.PumpUpdates();
             touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
             UpdateCompositorClockBoost(window_renderable, touchpad_active);
+            break;
+        case RenderWakeAction::Wait:
+            break;
         }
 
-        const bool wait_render_permitted =
-            !compositor_clock_.boost_active() || compositor_clock_tick_ready_;
         (void)WaitForWin32MessageOrDeadline(render_wake_scheduler_.NextWakeDeadline(
             window_renderable,
-            ui_.NextMaintenanceDeadline(),
-            wait_render_permitted));
+            ui_.NextMaintenanceDeadline()));
     }
 
     Shutdown();
@@ -497,7 +487,7 @@ void SpecForgeApp::Shutdown()
     window_.Destroy();
 }
 
-void SpecForgeApp::RenderFrame()
+RenderFrameOutcome SpecForgeApp::RenderFrame()
 {
     profile_.BeginFrame();
     struct ProfileFrameFinalizationGuard {
@@ -544,16 +534,13 @@ void SpecForgeApp::RenderFrame()
     {
         ProfileTimer timer(profile_, "render_pass", frame_index_);
         const HRESULT begin_result = renderer_.BeginFrame(kClearColor);
-        switch (ClassifyD3D11FrameAcquireResult(begin_result)) {
-        case D3D11FrameAcquireAction::RetryLater:
-            render_wake_scheduler_.RequestFrame();
+        if (begin_result == DXGI_ERROR_WAS_STILL_DRAWING) {
             LogPresentationUpdates();
-            return;
-        case D3D11FrameAcquireAction::FatalError:
+            return RenderFrameOutcome::AcquireRetry;
+        }
+        if (FAILED(begin_result)) {
             throw std::runtime_error(
                 HResultMessage(renderer_.last_error_operation(), begin_result));
-        case D3D11FrameAcquireAction::RenderAndPresent:
-            break;
         }
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
@@ -598,9 +585,6 @@ void SpecForgeApp::RenderFrame()
     if (FAILED(present_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), present_result));
     }
-    if (present_result == S_FALSE) {
-        render_wake_scheduler_.RequestFrame();
-    }
     if (present_result == S_OK) {
         latency_presentations.push_back({ImGui::GetMainViewport()->ID, present_completed_at});
     }
@@ -623,6 +607,9 @@ void SpecForgeApp::RenderFrame()
             report);
     }
     LogPresentationUpdates();
+    return present_result == S_FALSE
+               ? RenderFrameOutcome::PresentRetry
+               : RenderFrameOutcome::Presented;
 }
 
 void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
@@ -630,15 +617,17 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
     const bool plot_interaction_active = ui_.latency_sensitive_plot_interaction_active();
     const bool requested = window_renderable && (plot_interaction_active || touchpad_active);
     if (requested == compositor_clock_.boost_requested()) {
+        render_wake_scheduler_.SetCompositorClockPaced(
+            compositor_clock_.boost_active());
         return;
     }
 
-    compositor_clock_tick_ready_ = false;
-    touchpad_update_tick_ready_ = false;
     if (!requested) {
-        touchpad_update_pending_ = false;
+        render_wake_scheduler_.CancelTouchpadUpdate();
     }
     (void)compositor_clock_.SetBoostRequested(requested);
+    render_wake_scheduler_.SetCompositorClockPaced(
+        compositor_clock_.boost_active());
     profile_.WriteEvent("compositor_clock", {
                                                   ProfileSink::Field::String("action", "boost_request"),
                                                   ProfileSink::Field::Bool("available", compositor_clock_.available()),
@@ -1572,16 +1561,11 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         LogInputMessage(message, wparam, lparam);
     }
     if (message == kCompositorClockTickMessage) {
-        const CompositorClockTickAction action = ClassifyCompositorClockTick(
-            compositor_clock_.ConsumeTick(),
-            compositor_clock_.boost_active());
-        if (action == CompositorClockTickAction::GrantFramePermission) {
-            compositor_clock_tick_ready_ = true;
-            touchpad_update_tick_ready_ = true;
-        } else if (action == CompositorClockTickAction::RequestFallbackFrame) {
-            compositor_clock_tick_ready_ = false;
-            touchpad_update_tick_ready_ = false;
-            render_wake_scheduler_.RequestFrame();
+        const CompositorClockTickOutcome outcome =
+            render_wake_scheduler_.OnCompositorClockTick(
+                compositor_clock_.ConsumeTick(),
+                compositor_clock_.boost_active());
+        if (outcome == CompositorClockTickOutcome::FallbackFrameRequested) {
             profile_.WriteEvent("compositor_clock", {
                                                           ProfileSink::Field::String(
                                                               "action",

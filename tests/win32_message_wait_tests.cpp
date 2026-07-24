@@ -114,11 +114,26 @@ void SettleScheduler(specforge::RenderWakeScheduler& scheduler)
 {
     const specforge::RenderWakeScheduler::TimePoint start{};
     const auto follow_up = start + specforge::RenderWakeScheduler::kInteractiveFrameInterval;
-    scheduler.BeginFrame(start);
-    scheduler.EndFrame(start, {});
-    scheduler.BeginFrame(follow_up);
-    scheduler.EndFrame(follow_up, {});
-    Require(!scheduler.ShouldRender(follow_up), "render should leave the scheduler idle");
+    Require(
+        scheduler.TakeAction(start, true) ==
+            specforge::RenderWakeAction::RenderFrame,
+        "render scheduler should begin its initial frame");
+    scheduler.CompleteFrame(
+        start,
+        {},
+        specforge::RenderFrameOutcome::Presented);
+    Require(
+        scheduler.TakeAction(follow_up, true) ==
+            specforge::RenderWakeAction::RenderFrame,
+        "render scheduler should run its settling frame");
+    scheduler.CompleteFrame(
+        follow_up,
+        {},
+        specforge::RenderFrameOutcome::Presented);
+    Require(
+        scheduler.TakeAction(follow_up, true) ==
+            specforge::RenderWakeAction::Wait,
+        "render should leave the scheduler idle");
 }
 
 void DrainQueuedMessages()
@@ -184,7 +199,8 @@ void TestQueuedWindowMessageRequestsFrame()
     DispatchMessageW(&queued_message);
 
     Require(
-        scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            (specforge::RenderWakeScheduler::TimePoint::min)(),
         "retrieving queued input for a secondary window should request a frame");
 
     observer.Stop();
@@ -254,7 +270,7 @@ void TestQueuedHitTestDoesNotCreateRenderFeedback()
     observer.ObserveQueuedMessage(queued_message.message);
 
     Require(
-        !scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        !scheduler.NextWakeDeadline(true, std::nullopt),
         "a queued hit-test message must not create render feedback");
 
     observer.Stop();
@@ -349,7 +365,7 @@ void TestIgnoredQueuedClockMessageOnlyGrantsPermission()
     DispatchMessageW(&queued_message);
 
     Require(
-        !scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        !scheduler.NextWakeDeadline(true, std::nullopt),
         "a clock permission message must not invalidate static content");
     observer.Stop();
 }
@@ -373,7 +389,8 @@ void TestSentMessageWakeRemainsRenderableWhenPeekReturnsFalse()
     Require(g_sent_message_handled, "PeekMessage should dispatch the nonqueued sent message");
     Require(queued == FALSE, "a dispatched sent message should not appear as a queued message");
     Require(
-        scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            (specforge::RenderWakeScheduler::TimePoint::min)(),
         "dispatching the sent message should request a frame even when PeekMessage returns false");
 
     observer.Stop();
@@ -398,7 +415,7 @@ void TestHitTestSentMessageDoesNotCreateRenderFeedback()
     Require(g_hit_test_handled, "PeekMessage should dispatch the hit-test message");
     Require(queued == FALSE, "a dispatched hit-test message should not appear queued");
     Require(
-        !scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        !scheduler.NextWakeDeadline(true, std::nullopt),
         "a render-produced hit-test query must not request another frame");
 
     observer.Stop();
@@ -424,7 +441,7 @@ void TestIgnoredSentClockMessageDoesNotCreateRenderFeedback()
 
     Require(queued == FALSE, "a sent clock message should not appear queued");
     Require(
-        !scheduler.ShouldRender(std::chrono::steady_clock::now()),
+        !scheduler.NextWakeDeadline(true, std::nullopt),
         "a sent clock permission message must not invalidate static content");
     observer.Stop();
 }

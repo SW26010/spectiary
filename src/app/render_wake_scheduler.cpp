@@ -28,12 +28,81 @@ void RenderWakeScheduler::RequestFrame(std::optional<Duration> settings_save_del
     }
 }
 
-bool RenderWakeScheduler::ShouldRender(TimePoint now, bool render_permitted) const
+void RenderWakeScheduler::SetCompositorClockPaced(bool paced) noexcept
 {
-    return render_permitted &&
-           (render_requested_ ||
+    if (paced == compositor_clock_paced_) {
+        return;
+    }
+    compositor_clock_paced_ = paced;
+    compositor_frame_permitted_ = false;
+    touchpad_update_permitted_ = false;
+}
+
+void RenderWakeScheduler::RequestTouchpadUpdate() noexcept
+{
+    touchpad_update_pending_ = true;
+}
+
+void RenderWakeScheduler::CancelTouchpadUpdate() noexcept
+{
+    touchpad_update_pending_ = false;
+}
+
+CompositorClockTickOutcome RenderWakeScheduler::OnCompositorClockTick(
+    bool tick_consumed,
+    bool compositor_clock_active)
+{
+    if (!tick_consumed) {
+        return CompositorClockTickOutcome::Ignored;
+    }
+
+    SetCompositorClockPaced(compositor_clock_active);
+    if (compositor_clock_active) {
+        compositor_frame_permitted_ = true;
+        touchpad_update_permitted_ = true;
+        return CompositorClockTickOutcome::PermissionGranted;
+    }
+
+    RequestFrame();
+    return CompositorClockTickOutcome::FallbackFrameRequested;
+}
+
+bool RenderWakeScheduler::RenderPermitted() const noexcept
+{
+    return !compositor_clock_paced_ || compositor_frame_permitted_;
+}
+
+bool RenderWakeScheduler::HasRenderWork(TimePoint now) const noexcept
+{
+    return render_requested_ ||
            (next_frame_deadline_ && now >= *next_frame_deadline_) ||
-           (settings_save_deadline_ && now >= *settings_save_deadline_));
+           (settings_save_deadline_ && now >= *settings_save_deadline_);
+}
+
+RenderWakeAction RenderWakeScheduler::TakeAction(
+    TimePoint now,
+    bool window_renderable)
+{
+    if (!window_renderable) {
+        return RenderWakeAction::Wait;
+    }
+    if (RenderPermitted() && HasRenderWork(now)) {
+        if (compositor_clock_paced_) {
+            compositor_frame_permitted_ = false;
+            touchpad_update_permitted_ = false;
+        }
+        touchpad_update_pending_ = false;
+        BeginFrame(now);
+        return RenderWakeAction::RenderFrame;
+    }
+    if (compositor_clock_paced_ &&
+        touchpad_update_pending_ &&
+        touchpad_update_permitted_) {
+        touchpad_update_pending_ = false;
+        touchpad_update_permitted_ = false;
+        return RenderWakeAction::PumpTouchpadUpdates;
+    }
+    return RenderWakeAction::Wait;
 }
 
 void RenderWakeScheduler::BeginFrame(TimePoint now)
@@ -51,8 +120,15 @@ void RenderWakeScheduler::BeginFrame(TimePoint now)
     }
 }
 
-void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& activity)
+void RenderWakeScheduler::CompleteFrame(
+    TimePoint now,
+    const RenderFrameActivity& activity,
+    RenderFrameOutcome outcome)
 {
+    if (outcome != RenderFrameOutcome::Presented) {
+        RequestFrame();
+    }
+
     if (frame_settings_save_delay_) {
         const TimePoint candidate = now + *frame_settings_save_delay_;
         if (!settings_save_deadline_ || candidate > *settings_save_deadline_) {
@@ -62,7 +138,7 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
     }
 
     std::optional<TimePoint> next_frame;
-    if (schedule_follow_up_ && !activity.compositor_clock_paced) {
+    if (schedule_follow_up_ && !compositor_clock_paced_) {
         ConsiderEarlier(next_frame, now + kInteractiveFrameInterval);
     }
     schedule_follow_up_ = false;
@@ -84,7 +160,7 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
     if (activity.text_input_active) {
         ConsiderEarlier(next_frame, now + kTextCursorFrameInterval);
     }
-    if (activity.touchpad_active && !activity.compositor_clock_paced) {
+    if (activity.touchpad_active && !compositor_clock_paced_) {
         ConsiderEarlier(next_frame, now + kTouchpadFrameInterval);
     }
     next_frame_deadline_ = next_frame;
@@ -92,22 +168,28 @@ void RenderWakeScheduler::EndFrame(TimePoint now, const RenderFrameActivity& act
 
 std::optional<RenderWakeScheduler::TimePoint> RenderWakeScheduler::NextWakeDeadline(
     bool window_renderable,
-    std::optional<TimePoint> maintenance_deadline,
-    bool render_permitted) const
+    std::optional<TimePoint> maintenance_deadline) const
 {
     std::optional<TimePoint> deadline = maintenance_deadline;
-    if (!window_renderable || !render_permitted) {
+    if (!window_renderable) {
         return deadline;
     }
 
-    if (render_requested_) {
+    if (RenderPermitted()) {
+        if (render_requested_) {
+            ConsiderEarlier(deadline, TimePoint::min());
+        }
+        if (next_frame_deadline_) {
+            ConsiderEarlier(deadline, *next_frame_deadline_);
+        }
+        if (settings_save_deadline_) {
+            ConsiderEarlier(deadline, *settings_save_deadline_);
+        }
+    }
+    if (compositor_clock_paced_ &&
+        touchpad_update_pending_ &&
+        touchpad_update_permitted_) {
         ConsiderEarlier(deadline, TimePoint::min());
-    }
-    if (next_frame_deadline_) {
-        ConsiderEarlier(deadline, *next_frame_deadline_);
-    }
-    if (settings_save_deadline_) {
-        ConsiderEarlier(deadline, *settings_save_deadline_);
     }
     return deadline;
 }

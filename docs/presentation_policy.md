@@ -657,7 +657,7 @@ Present flags、DRR boost 或自定义 duration。
   静止—恢复移动—松手惯性”复验，确认未发现异常；这闭环了静止零空提交、同接触恢复响应和
   约 120Hz 惯性三项本机 DRR 验收。外接/混合刷新率与 clock 不可用 fallback 仍需后续硬件验证。
 - 自动回归另覆盖两个失效边沿：compositor waiter 异常退出后，最后一个 tick 在 inactive clock
-  状态下请求且只请求过渡帧，由 `EndFrame()` 建立 9ms 触控板 fallback deadline；正常 active tick
+  状态下请求且只请求过渡帧，由 `CompleteFrame()` 建立 9ms 触控板 fallback deadline；正常 active tick
   仍不主动 invalidation；该边沿写入 `waiter_failure_fallback` 及 wait result。专用 gesture wake 的
   `PostMessageW` 若失败，会在持锁状态回滚
   `wake_pending`，后续增量可重试，避免 coalescing 永久锁死。

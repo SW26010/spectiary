@@ -12,6 +12,9 @@ namespace {
 
 using namespace std::chrono_literals;
 using Scheduler = specforge::RenderWakeScheduler;
+using Action = specforge::RenderWakeAction;
+using FrameOutcome = specforge::RenderFrameOutcome;
+using TickOutcome = specforge::CompositorClockTickOutcome;
 
 void Require(bool condition, std::string_view message)
 {
@@ -23,14 +26,19 @@ void Require(bool condition, std::string_view message)
 
 void SettleInitialFrame(Scheduler& scheduler, Scheduler::TimePoint start)
 {
-    Require(scheduler.ShouldRender(start), "scheduler should request the initial frame");
-    scheduler.BeginFrame(start);
-    scheduler.EndFrame(start, {});
+    Require(
+        scheduler.TakeAction(start, true) == Action::RenderFrame,
+        "scheduler should request the initial frame");
+    scheduler.CompleteFrame(start, {}, FrameOutcome::Presented);
 
     const auto follow_up = start + Scheduler::kInteractiveFrameInterval;
-    Require(scheduler.ShouldRender(follow_up), "initial frame should receive one state-settling follow-up");
-    scheduler.BeginFrame(follow_up);
-    scheduler.EndFrame(follow_up, {});
+    Require(
+        scheduler.TakeAction(follow_up, true) == Action::RenderFrame,
+        "initial frame should receive one state-settling follow-up");
+    scheduler.CompleteFrame(follow_up, {}, FrameOutcome::Presented);
+    Require(
+        scheduler.TakeAction(follow_up, true) == Action::Wait,
+        "settled scheduler should have no immediate action");
     Require(!scheduler.NextWakeDeadline(true, std::nullopt), "settled scheduler should become fully idle");
 }
 
@@ -41,11 +49,18 @@ void TestWindowInvalidationPersistsUntilRendered()
     SettleInitialFrame(scheduler, start);
 
     scheduler.RequestFrame();
-    Require(scheduler.ShouldRender(start + 1s), "window invalidation should request a frame");
-    Require(scheduler.ShouldRender(start + 2s), "unconsumed window invalidation should remain pending");
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            Scheduler::TimePoint::min(),
+        "unconsumed window invalidation should remain pending");
 
-    scheduler.BeginFrame(start + 2s);
-    scheduler.EndFrame(start + 2s, {});
+    Require(
+        scheduler.TakeAction(start + 2s, true) == Action::RenderFrame,
+        "window invalidation should select a render action");
+    scheduler.CompleteFrame(
+        start + 2s,
+        {},
+        FrameOutcome::Presented);
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
             start + 2s + Scheduler::kInteractiveFrameInterval,
@@ -58,31 +73,78 @@ void TestClockPacingDefersInvalidationUntilPermitted()
     Scheduler scheduler;
     SettleInitialFrame(scheduler, start);
 
+    scheduler.SetCompositorClockPaced(true);
     scheduler.RequestFrame();
     const auto input_time = start + 1s;
     Require(
-        !scheduler.ShouldRender(input_time, false),
+        scheduler.TakeAction(input_time, true) == Action::Wait,
         "input invalidation should wait for compositor-clock permission");
     Require(
-        !scheduler.NextWakeDeadline(true, std::nullopt, false),
+        !scheduler.NextWakeDeadline(true, std::nullopt),
         "a deferred invalidation should not create a zero-time busy-loop deadline");
 
     const auto maintenance = input_time + 5s;
     Require(
-        scheduler.NextWakeDeadline(true, maintenance, false) == maintenance,
+        scheduler.NextWakeDeadline(true, maintenance) == maintenance,
         "clock pacing should preserve independent maintenance deadlines");
     Require(
-        scheduler.ShouldRender(input_time, true),
+        scheduler.OnCompositorClockTick(true, true) ==
+            TickOutcome::PermissionGranted,
+        "an active compositor tick should grant scheduler permission");
+    Require(
+        scheduler.TakeAction(input_time, true) == Action::RenderFrame,
         "the pending invalidation should render as soon as a compositor tick permits it");
 
-    scheduler.BeginFrame(input_time);
-    scheduler.EndFrame(input_time, {.compositor_clock_paced = true});
+    scheduler.CompleteFrame(
+        input_time,
+        {},
+        FrameOutcome::Presented);
     Require(
         !scheduler.NextWakeDeadline(true, std::nullopt),
         "a compositor-paced frame should not schedule a competing timer frame");
 }
 
-void TestRetryRequestedDuringFrameSurvivesClockPacedEndFrame()
+void TestBusyAcquireWaitsForTheNextCompositorTick()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    const auto busy_frame = start + 1s;
+    scheduler.SetCompositorClockPaced(true);
+    scheduler.RequestFrame();
+    (void)scheduler.OnCompositorClockTick(true, true);
+    Require(
+        scheduler.TakeAction(busy_frame, true) ==
+            Action::RenderFrame,
+        "the first tick should start the requested frame");
+    scheduler.CompleteFrame(
+        busy_frame,
+        {},
+        FrameOutcome::AcquireRetry);
+
+    Require(
+        scheduler.TakeAction(busy_frame, true) ==
+            Action::Wait,
+        "a busy acquire should retain work without reusing the consumed tick");
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt),
+        "a clock-paced retry without a tick must not create a zero-time busy-loop deadline");
+    Require(
+        scheduler.OnCompositorClockTick(true, true) ==
+            TickOutcome::PermissionGranted,
+        "the next compositor tick should grant retry permission");
+    Require(
+        scheduler.TakeAction(busy_frame, true) ==
+            Action::RenderFrame,
+        "the retained acquire retry should run on the next compositor tick");
+    scheduler.CompleteFrame(
+        busy_frame,
+        {},
+        FrameOutcome::Presented);
+}
+
+void TestBusyAcquireRetriesImmediatelyUnderOrdinaryPacing()
 {
     const Scheduler::TimePoint start{};
     Scheduler scheduler;
@@ -90,21 +152,57 @@ void TestRetryRequestedDuringFrameSurvivesClockPacedEndFrame()
 
     const auto busy_frame = start + 1s;
     scheduler.RequestFrame();
-    scheduler.BeginFrame(busy_frame);
-    scheduler.RequestFrame();
-    scheduler.EndFrame(
+    Require(
+        scheduler.TakeAction(busy_frame, true) ==
+            Action::RenderFrame,
+        "ordinary pacing should begin requested work immediately");
+    scheduler.CompleteFrame(
         busy_frame,
-        {.compositor_clock_paced = true});
+        {},
+        FrameOutcome::AcquireRetry);
+    Require(
+        scheduler.TakeAction(busy_frame, true) ==
+            Action::RenderFrame,
+        "ordinary pacing should retain a busy acquire as immediate retry work");
+    scheduler.CompleteFrame(
+        busy_frame,
+        {},
+        FrameOutcome::Presented);
+}
 
+void TestBoostTransitionsPreservePendingRenderDemand()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    const auto transition_time = start + 1s;
+    scheduler.RequestFrame();
+    scheduler.SetCompositorClockPaced(true);
     Require(
-        !scheduler.ShouldRender(busy_frame, false),
-        "a busy-frame retry should continue waiting without compositor permission");
+        scheduler.TakeAction(transition_time, true) ==
+            Action::Wait,
+        "entering compositor pacing should revoke ordinary render permission");
+    (void)scheduler.OnCompositorClockTick(true, true);
     Require(
-        !scheduler.NextWakeDeadline(true, std::nullopt, false),
-        "a clock-paced retry without a tick must not create a zero-time busy-loop deadline");
+        scheduler.TakeAction(transition_time, true) ==
+            Action::RenderFrame,
+        "a paced render should begin after its tick");
+    scheduler.CompleteFrame(
+        transition_time,
+        {},
+        FrameOutcome::Presented);
+
+    scheduler.RequestFrame();
+    scheduler.SetCompositorClockPaced(false);
     Require(
-        scheduler.ShouldRender(busy_frame, true),
-        "the retry requested during rendering must survive EndFrame and the next compositor tick");
+        scheduler.TakeAction(transition_time, true) ==
+            Action::RenderFrame,
+        "leaving compositor pacing should release pending work without another tick");
+    scheduler.CompleteFrame(
+        transition_time,
+        {},
+        FrameOutcome::Presented);
 }
 
 void TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence()
@@ -114,30 +212,46 @@ void TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence()
     SettleInitialFrame(scheduler, start);
 
     const auto failure_time = start + 1s;
-    const auto action = specforge::ClassifyCompositorClockTick(true, false);
+    scheduler.SetCompositorClockPaced(true);
     Require(
-        action == specforge::CompositorClockTickAction::RequestFallbackFrame,
-        "a consumed tick from an inactive clock must select fallback transition work");
-    scheduler.RequestFrame();
-
+        scheduler.OnCompositorClockTick(true, false) ==
+            TickOutcome::FallbackFrameRequested,
+        "a final tick from an inactive waiter should request fallback work");
     Require(
-        scheduler.ShouldRender(failure_time),
-        "the final tick from a failed compositor waiter must request a transition frame");
-    scheduler.BeginFrame(failure_time);
-    scheduler.EndFrame(failure_time, {.touchpad_active = true});
+        scheduler.TakeAction(failure_time, true) ==
+            Action::RenderFrame,
+        "waiter failure should request one transition frame");
+    scheduler.CompleteFrame(
+        failure_time,
+        {.touchpad_active = true},
+        FrameOutcome::Presented);
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
             failure_time + Scheduler::kTouchpadFrameInterval,
-        "the transition frame must establish bounded touchpad fallback pacing");
+        "the transition frame should establish bounded touchpad fallback pacing");
+    Require(
+        scheduler.OnCompositorClockTick(false, false) ==
+            TickOutcome::Ignored,
+        "a stale tick message must not create fallback work");
+}
 
+void TestTouchpadUpdateCanRunWithoutRendering()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    scheduler.SetCompositorClockPaced(true);
+    scheduler.RequestTouchpadUpdate();
+    (void)scheduler.OnCompositorClockTick(true, true);
     Require(
-        specforge::ClassifyCompositorClockTick(false, false) ==
-            specforge::CompositorClockTickAction::None,
-        "a stale tick message must not create a fallback transition frame");
+        scheduler.TakeAction(start + 1s, true) ==
+            Action::PumpTouchpadUpdates,
+        "a paced touchpad tick should pump updates without inventing render demand");
     Require(
-        specforge::ClassifyCompositorClockTick(true, true) ==
-            specforge::CompositorClockTickAction::GrantFramePermission,
-        "a normal active-clock tick must remain permission-only");
+        scheduler.TakeAction(start + 1s, true) ==
+            Action::Wait,
+        "one tick should authorize at most one touchpad update pump");
 }
 
 void TestSettingsSaveWakeIsDebounced()
@@ -147,19 +261,45 @@ void TestSettingsSaveWakeIsDebounced()
     SettleInitialFrame(scheduler, start);
 
     scheduler.RequestFrame(5s);
-    scheduler.BeginFrame(start + 1s);
-    scheduler.EndFrame(start + 1s, {});
+    Require(
+        scheduler.TakeAction(start + 1s, true) == Action::RenderFrame,
+        "the first settings invalidation should render");
+    scheduler.CompleteFrame(
+        start + 1s,
+        {},
+        FrameOutcome::Presented);
     scheduler.RequestFrame(5s);
-    scheduler.BeginFrame(start + 2s);
-    scheduler.EndFrame(start + 2s, {});
+    Require(
+        scheduler.TakeAction(start + 2s, true) == Action::RenderFrame,
+        "the second settings invalidation should render");
+    scheduler.CompleteFrame(
+        start + 2s,
+        {},
+        FrameOutcome::Presented);
 
-    scheduler.BeginFrame(start + 2s + Scheduler::kInteractiveFrameInterval);
-    scheduler.EndFrame(start + 2s + Scheduler::kInteractiveFrameInterval, {});
-    Require(!scheduler.ShouldRender(start + 6999ms), "settings save wake should wait for the last invalidation");
-    Require(scheduler.ShouldRender(start + 7s), "settings save wake should fire after the debounce");
+    const auto follow_up =
+        start + 2s + Scheduler::kInteractiveFrameInterval;
+    Require(
+        scheduler.TakeAction(follow_up, true) ==
+            Action::RenderFrame,
+        "settings invalidation should retain its settling frame");
+    scheduler.CompleteFrame(
+        follow_up,
+        {},
+        FrameOutcome::Presented);
+    Require(
+        scheduler.TakeAction(start + 6999ms, true) ==
+            Action::Wait,
+        "settings save wake should wait for the last invalidation");
+    Require(
+        scheduler.TakeAction(start + 7s, true) ==
+            Action::RenderFrame,
+        "settings save wake should fire after the debounce");
 
-    scheduler.BeginFrame(start + 7s);
-    scheduler.EndFrame(start + 7s, {});
+    scheduler.CompleteFrame(
+        start + 7s,
+        {},
+        FrameOutcome::Presented);
     Require(!scheduler.NextWakeDeadline(true, std::nullopt), "settings save wake should be consumed by a frame");
 }
 
@@ -202,21 +342,39 @@ void TestSettingsSaveWakeStartsAfterTheDirtyFrame()
     const auto dirty_frame_start = message_time + 1ms;
     const auto dirty_frame_end = message_time + 10ms;
     scheduler.RequestFrame(1s);
-    scheduler.BeginFrame(dirty_frame_start);
+    Require(
+        scheduler.TakeAction(dirty_frame_start, true) ==
+            Action::RenderFrame,
+        "dirty settings frame should be scheduled");
     RenderImGuiSettingsFrame(1.0f / 60.0f, true);
-    scheduler.EndFrame(dirty_frame_end, {});
+    scheduler.CompleteFrame(
+        dirty_frame_end,
+        {},
+        FrameOutcome::Presented);
 
     const auto follow_up = dirty_frame_end + Scheduler::kInteractiveFrameInterval;
-    scheduler.BeginFrame(follow_up);
+    Require(
+        scheduler.TakeAction(follow_up, true) ==
+            Action::RenderFrame,
+        "dirty settings frame should receive a settling frame");
     RenderImGuiSettingsFrame(0.025f, false);
-    scheduler.EndFrame(follow_up, {});
+    scheduler.CompleteFrame(
+        follow_up,
+        {},
+        FrameOutcome::Presented);
 
     const auto save_wake = scheduler.NextWakeDeadline(true, std::nullopt);
     Require(save_wake.has_value(), "dirty ImGui settings should retain a save wake");
-    scheduler.BeginFrame(*save_wake);
+    Require(
+        scheduler.TakeAction(*save_wake, true) ==
+            Action::RenderFrame,
+        "the ImGui save deadline should select a render action");
     const float final_delta = std::chrono::duration<float>(*save_wake - follow_up).count();
     RenderImGuiSettingsFrame(final_delta, false);
-    scheduler.EndFrame(*save_wake, {});
+    scheduler.CompleteFrame(
+        *save_wake,
+        {},
+        FrameOutcome::Presented);
 
     Require(
         io.WantSaveIniSettings,
@@ -231,16 +389,28 @@ void TestPopupTransitionAnimatesForABoundedInterval()
     SettleInitialFrame(scheduler, start);
 
     scheduler.RequestFrame();
-    scheduler.BeginFrame(start + 1s);
-    scheduler.EndFrame(start + 1s, {.popup_open = true});
+    Require(
+        scheduler.TakeAction(start + 1s, true) ==
+            Action::RenderFrame,
+        "popup transition should render its invalidation");
+    scheduler.CompleteFrame(
+        start + 1s,
+        {.popup_open = true},
+        FrameOutcome::Presented);
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
             start + 1s + Scheduler::kInteractiveFrameInterval,
         "opening a popup should schedule animation frames");
 
     const auto animation_end = start + 1s + Scheduler::kPopupAnimationDuration;
-    scheduler.BeginFrame(animation_end);
-    scheduler.EndFrame(animation_end, {.popup_open = true});
+    Require(
+        scheduler.TakeAction(animation_end, true) ==
+            Action::RenderFrame,
+        "popup animation deadline should select a render action");
+    scheduler.CompleteFrame(
+        animation_end,
+        {.popup_open = true},
+        FrameOutcome::Presented);
     Require(!scheduler.NextWakeDeadline(true, std::nullopt), "popup animation should stop after settling");
 }
 
@@ -251,23 +421,46 @@ void TestTextInputAndTouchpadExposeTimeDrivenDemand()
     SettleInitialFrame(scheduler, start);
 
     scheduler.RequestFrame();
-    scheduler.BeginFrame(start + 1s);
-    scheduler.EndFrame(start + 1s, {.text_input_active = true});
-    scheduler.BeginFrame(start + 1s + Scheduler::kInteractiveFrameInterval);
-    scheduler.EndFrame(start + 1s + Scheduler::kInteractiveFrameInterval, {.text_input_active = true});
+    Require(
+        scheduler.TakeAction(start + 1s, true) ==
+            Action::RenderFrame,
+        "text input invalidation should render");
+    scheduler.CompleteFrame(
+        start + 1s,
+        {.text_input_active = true},
+        FrameOutcome::Presented);
+    const auto text_follow_up =
+        start + 1s + Scheduler::kInteractiveFrameInterval;
+    Require(
+        scheduler.TakeAction(text_follow_up, true) ==
+            Action::RenderFrame,
+        "text input should receive a settling frame");
+    scheduler.CompleteFrame(
+        text_follow_up,
+        {.text_input_active = true},
+        FrameOutcome::Presented);
     Require(
         scheduler.NextWakeDeadline(true, std::nullopt) ==
-            start + 1s + Scheduler::kInteractiveFrameInterval + Scheduler::kTextCursorFrameInterval,
+            text_follow_up + Scheduler::kTextCursorFrameInterval,
         "active text input should keep the cursor clock moving at a bounded cadence");
 
     Scheduler clock_paced_touchpad;
     SettleInitialFrame(clock_paced_touchpad, start);
     const auto touchpad_frame = start + 2s;
+    clock_paced_touchpad.SetCompositorClockPaced(true);
     clock_paced_touchpad.RequestFrame();
-    clock_paced_touchpad.BeginFrame(touchpad_frame);
-    clock_paced_touchpad.EndFrame(
+    (void)clock_paced_touchpad.OnCompositorClockTick(
+        true,
+        true);
+    Require(
+        clock_paced_touchpad.TakeAction(
+            touchpad_frame,
+            true) == Action::RenderFrame,
+        "clock-paced touchpad activity should render on its tick");
+    clock_paced_touchpad.CompleteFrame(
         touchpad_frame,
-        {.touchpad_active = true, .compositor_clock_paced = true});
+        {.touchpad_active = true},
+        FrameOutcome::Presented);
     Require(
         !clock_paced_touchpad.NextWakeDeadline(true, std::nullopt),
         "a clock-paced touchpad should pump input without forcing an unchanged render");
@@ -276,8 +469,15 @@ void TestTextInputAndTouchpadExposeTimeDrivenDemand()
     SettleInitialFrame(fallback_touchpad, start);
     const auto fallback_frame = start + 3s;
     fallback_touchpad.RequestFrame();
-    fallback_touchpad.BeginFrame(fallback_frame);
-    fallback_touchpad.EndFrame(fallback_frame, {.touchpad_active = true});
+    Require(
+        fallback_touchpad.TakeAction(
+            fallback_frame,
+            true) == Action::RenderFrame,
+        "fallback touchpad activity should render immediately");
+    fallback_touchpad.CompleteFrame(
+        fallback_frame,
+        {.touchpad_active = true},
+        FrameOutcome::Presented);
     Require(
         fallback_touchpad.NextWakeDeadline(true, std::nullopt) ==
             fallback_frame + Scheduler::kTouchpadFrameInterval,
@@ -295,7 +495,14 @@ void TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance()
     Require(
         scheduler.NextWakeDeadline(false, maintenance) == maintenance,
         "hidden windows should wait only for maintenance work");
-    Require(scheduler.ShouldRender(start + 10s), "hidden-window invalidation should remain pending for restore");
+    Require(
+        scheduler.TakeAction(start + 10s, false) ==
+            Action::Wait,
+        "hidden windows should not consume render demand");
+    Require(
+        scheduler.TakeAction(start + 10s, true) ==
+            Action::RenderFrame,
+        "hidden-window invalidation should remain pending for restore");
 }
 
 }  // namespace
@@ -304,8 +511,11 @@ int main()
 {
     TestWindowInvalidationPersistsUntilRendered();
     TestClockPacingDefersInvalidationUntilPermitted();
-    TestRetryRequestedDuringFrameSurvivesClockPacedEndFrame();
+    TestBusyAcquireWaitsForTheNextCompositorTick();
+    TestBusyAcquireRetriesImmediatelyUnderOrdinaryPacing();
+    TestBoostTransitionsPreservePendingRenderDemand();
     TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence();
+    TestTouchpadUpdateCanRunWithoutRendering();
     TestSettingsSaveWakeIsDebounced();
     TestSettingsSaveWakeStartsAfterTheDirtyFrame();
     TestPopupTransitionAnimatesForABoundedInterval();
