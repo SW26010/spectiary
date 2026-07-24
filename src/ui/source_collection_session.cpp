@@ -875,13 +875,27 @@ std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSour
         resident_snapshot =
             roster_->ResidentSnapshot(path, *spectrum_index, *identity);
     }
+    const std::uint64_t live_workflow_revision =
+        revision == live_workflow_revisions_.end() ? 0 : revision->second;
+    SourceCollectionFolderListingGenerationHandle folder_generation =
+        roster_->FolderListingGeneration(path);
+    const std::optional<SourceCollectionContextReuseProof> proof =
+        roster_->ContextReuseProof(path);
+    SourceCollectionReuseCandidate reuse =
+        proof
+        ? SourceCollectionReuseCandidate::Verified(
+              *proof,
+              live_workflow_revision,
+              std::move(folder_generation),
+              std::move(resident_snapshot))
+        : SourceCollectionReuseCandidate::Known(
+              *identity,
+              live_workflow_revision,
+              std::move(folder_generation));
     return SourceCollectionLoadHint{
-        *identity,
+        std::move(reuse),
         *current_index,
-        revision == live_workflow_revisions_.end() ? 0 : revision->second,
-        roster_->FolderListingGeneration(path),
-        roster_->ContextReuseProof(path),
-        std::move(resident_snapshot)};
+    };
 }
 
 std::optional<SourceCollectionSnapshotPrefetchPlan>
@@ -904,8 +918,8 @@ SourceCollectionSession::PlanSnapshotPrefetch(
     const std::size_t spectrum_index = rows.front();
     std::optional<SourceCollectionLoadHint> hint =
         LoadHintForSource(snapshot->source.path, spectrum_index);
-    if (!hint || !hint->context_reuse_proof ||
-        hint->resident_snapshot) {
+    if (!hint || !hint->reuse.context_reuse_proof() ||
+        hint->reuse.resident_snapshot()) {
         return std::nullopt;
     }
     return SourceCollectionSnapshotPrefetchPlan{

@@ -5,8 +5,7 @@
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_preparation.h"
-#include "ui/source_collection_folder_listing_generation.h"
-#include "ui/source_collection_resident_snapshot.h"
+#include "ui/source_collection_preparation.h"
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
@@ -34,12 +33,8 @@ enum class SourceCollectionSessionRestoreMode {
 };
 
 struct SourceCollectionLoadHint {
-    SourceCollectionIdentity identity;
+    SourceCollectionReuseCandidate reuse;
     std::size_t spectrum_index = 0;
-    std::uint64_t live_workflow_revision = 0;
-    SourceCollectionFolderListingGenerationHandle folder_listing_generation_hint;
-    std::optional<SourceCollectionContextReuseProof> context_reuse_proof;
-    std::optional<SourceCollectionResidentSnapshot> resident_snapshot;
 };
 
 struct SourceCollectionSnapshotPrefetchPlan {

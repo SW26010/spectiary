@@ -198,6 +198,7 @@ add_library(specforge_sessions STATIC
     src/ui/source_collection_activation_transaction.cpp
     src/ui/source_collection_roster.cpp
     src/ui/source_collection_load_queue.cpp
+    src/ui/source_collection_preparation.cpp
     src/ui/source_collection_session_state_cache_io.cpp
     src/ui/source_collection_session.cpp
     src/ui/spectral_lines_panel_controller.cpp
@@ -486,6 +487,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_source_collection_load_queue_tests
     tests/source_collection_load_queue_tests.cpp
+    specforge_sessions
+)
+specforge_add_test(
+    specforge_source_collection_preparation_tests
+    tests/source_collection_preparation_tests.cpp
     specforge_sessions
 )
 specforge_add_test(

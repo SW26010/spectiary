@@ -442,25 +442,10 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
         .path = path,
         .spectrum_index = spectrum_index,
         .annotation_paths = std::move(annotation_paths),
-        .reuse_identity =
-            hint ? std::optional<SourceCollectionIdentity>{
-                       hint->identity}
+        .reuse =
+            hint ? std::optional<SourceCollectionReuseCandidate>{
+                       std::move(hint->reuse)}
                  : std::nullopt,
-        .context_reuse_proof =
-            hint ? hint->context_reuse_proof
-                 : std::optional<
-                       SourceCollectionContextReuseProof>{},
-        .base_live_workflow_revision =
-            hint ? std::optional<std::uint64_t>{
-                       hint->live_workflow_revision}
-                 : std::nullopt,
-        .folder_listing_generation_hint =
-            hint ? hint->folder_listing_generation_hint
-                 : SourceCollectionFolderListingGenerationHandle{},
-        .resident_snapshot =
-            hint ? std::move(hint->resident_snapshot)
-                 : std::optional<
-                       SourceCollectionResidentSnapshot>{},
         .latency_attempt = std::move(latency_attempt),
     });
     CancelPendingTasks(
@@ -843,14 +828,7 @@ void SourceCollectionActivationTransaction::
             .spectrum_index = plan->spectrum_index,
             .annotation_paths =
                 std::move(plan->annotation_paths),
-            .reuse_identity = hint.identity,
-            .context_reuse_proof =
-                std::move(hint.context_reuse_proof),
-            .base_live_workflow_revision =
-                hint.live_workflow_revision,
-            .folder_listing_generation_hint =
-                std::move(
-                    hint.folder_listing_generation_hint),
+            .reuse = std::move(hint.reuse),
             .snapshot_only = true,
         });
     if (task_id == 0) {

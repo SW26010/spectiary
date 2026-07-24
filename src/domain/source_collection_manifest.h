@@ -65,6 +65,9 @@ struct SourceCollectionSingleFileState {
 struct SourceCollectionContextReuseProof {
     SourceCollectionIdentity identity;
     SourceCollectionSingleFileState dependency_state;
+
+    [[nodiscard]] bool operator==(
+        const SourceCollectionContextReuseProof&) const = default;
 };
 
 struct SourceCollectionManifest {

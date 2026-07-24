@@ -2,6 +2,7 @@
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
+#include "ui/source_collection_load_queue_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -123,12 +124,12 @@ specforge::SourceCollectionSession MakePreparedSession(
     return session;
 }
 
-specforge::SourceCollectionLoadDependencies
+specforge::SourceCollectionPreparationAdapters
 MakeDependencies(
-    specforge::SourceCollectionLoadDependencies::
+    specforge::SourceCollectionPreparationAdapters::
         SnapshotLoader snapshot_loader)
 {
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         std::move(snapshot_loader);
     dependencies.workflow_cache_loader =
@@ -197,7 +198,7 @@ void TestRapidNavigationPublishesOnlyLatestIntent()
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     const auto first = activation.Submit(
@@ -268,7 +269,7 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         });
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.SetPresentationContext(true, 11);
     (void)activation.OpenSource(path, 0);
@@ -335,7 +336,7 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
             Deferred);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(failed_path, 0);
@@ -395,7 +396,7 @@ void TestConcurrentFailuresRemainVisible()
             Deferred);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(first_path, 0);
@@ -462,7 +463,7 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
             Deferred);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.SetPresentationContext(true, 13);
 
@@ -558,7 +559,7 @@ void TestSuccessfulRetryClearsOnlyItsSourceFailure()
             Deferred);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(retry_path, 0);
@@ -643,7 +644,7 @@ void TestCanceledGenerationDoesNotPublishFailure()
             Deferred);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
     (void)activation.OpenSource(path, 0);
@@ -685,7 +686,7 @@ void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     activation.SetPresentationContext(true, 17);
     const auto navigation = activation.Submit(
@@ -753,7 +754,7 @@ void TestIdlePrefetchReportsLifecycleCompletion()
         MakePreparedSession(path);
     Activation activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     (void)activation.Submit(
         specforge::SourceCollectionSessionIntent::

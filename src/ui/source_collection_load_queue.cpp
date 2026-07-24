@@ -1,9 +1,6 @@
 #include "ui/source_collection_load_queue.h"
 
-#include "domain/source_path_identity.h"
-#include "domain/spectrum_loader.h"
-#include "ui/sample_labeling_state_cache_io.h"
-#include "ui/sample_workflow_state_cache_io.h"
+#include "ui/source_collection_preparation_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -21,186 +18,15 @@
 #include <windows.h>
 
 namespace specforge {
-namespace {
-
-class SourceLoadCanceled : public std::runtime_error {
-public:
-    SourceLoadCanceled()
-        : std::runtime_error("source loading was canceled")
-    {
-    }
-};
-
-class SourceLoadStale : public std::runtime_error {
-public:
-    SourceLoadStale()
-        : std::runtime_error(
-              "The speculative snapshot no longer matches the active verified context.")
-    {
-    }
-};
-
-void ValidateDecodedSnapshot(const SpectrumSnapshotHandle& snapshot)
-{
-    if (!snapshot) {
-        throw std::runtime_error("The source decoder returned no result.");
-    }
-    const auto error = std::find_if(
-        snapshot->diagnostics.begin(),
-        snapshot->diagnostics.end(),
-        [](const SpectrumDiagnostic& diagnostic) {
-            return diagnostic.severity == SpectrumDiagnosticSeverity::Error;
-        });
-    if (error != snapshot->diagnostics.end()) {
-        throw std::runtime_error(
-            error->message.empty() ? "The source decoder rejected this input." : error->message);
-    }
-}
-
-void LoadRestoredAnnotations(
-    SourceCollectionContext& context,
-    const std::vector<std::filesystem::path>& annotation_paths,
-    const SourceCollectionCancellationCheckpoint& checkpoint)
-{
-    for (const std::filesystem::path& annotation_path : annotation_paths) {
-        checkpoint();
-        if (SourceCollectionManifestContainsAnnotation(context.manifest, annotation_path)) {
-            continue;
-        }
-        (void)IngestReadOnlySampleAnnotationCancelable(
-            context.manifest,
-            annotation_path,
-            context.identity.spectrum_count,
-            checkpoint);
-    }
-}
-
-bool CanReusePreparedWorkflow(
-    const SourceCollectionIdentity& actual,
-    const std::optional<SourceCollectionIdentity>& expected)
-{
-    return expected && actual.id == expected->id &&
-           actual.context_fingerprint == expected->context_fingerprint &&
-           actual.spectrum_count == expected->spectrum_count;
-}
-
-bool SourceCollectionIdentitiesMatchExactly(
-    const SourceCollectionIdentity& left,
-    const SourceCollectionIdentity& right)
-{
-    return left.id == right.id &&
-           left.source_name == right.source_name &&
-           left.source_fingerprint == right.source_fingerprint &&
-           left.context_fingerprint == right.context_fingerprint &&
-           left.spectrum_count == right.spectrum_count;
-}
-
-bool SourceCollectionBaseIdentitiesMatch(
-    const SourceCollectionIdentity& left,
-    const SourceCollectionIdentity& right)
-{
-    return left.id == right.id &&
-           left.source_name == right.source_name &&
-           left.source_fingerprint == right.source_fingerprint &&
-           left.spectrum_count == right.spectrum_count;
-}
-
-SourceCollectionLoadDependencies DefaultDependencies()
-{
-    SourceCollectionLoadDependencies dependencies;
-    dependencies.snapshot_loader = LoadSpectrumSnapshotFromPathCancelable;
-    dependencies.folder_snapshot_loader = LoadFolderSpectrumSnapshotFromListingCancelable;
-    dependencies.folder_scanner =
-        [](const std::filesystem::path& path,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return ScanSourceCollectionFolder(path, {}, checkpoint);
-        };
-    dependencies.workflow_cache_loader = LoadSampleWorkflowPreparationCacheBundle;
-    dependencies.file_context_builder =
-        [](const SpectrumSnapshot& snapshot,
-           const SourceCollectionSingleFileState& file_state,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return LoadSourceCollectionContextCancelable(
-                snapshot,
-                file_state,
-                checkpoint);
-        };
-    dependencies.folder_context_builder =
-        [](const SpectrumSnapshot& snapshot,
-           const SourceCollectionFolderListing& listing,
-           const SourceCollectionCancellationCheckpoint& checkpoint) {
-            return BuildFolderSourceCollectionContextCancelable(
-                snapshot,
-                listing,
-                checkpoint);
-        };
-    dependencies.workflow_cache_paths = {
-        DefaultSampleLabelingStateCachePath(),
-        DefaultSampleWorkflowStateCachePath(),
-    };
-    return dependencies;
-}
-
-void FillMissingDependencies(SourceCollectionLoadDependencies& dependencies)
-{
-    SourceCollectionLoadDependencies defaults = DefaultDependencies();
-    if (!dependencies.snapshot_loader) {
-        dependencies.snapshot_loader = std::move(defaults.snapshot_loader);
-    }
-    if (!dependencies.folder_snapshot_loader) {
-        dependencies.folder_snapshot_loader = std::move(defaults.folder_snapshot_loader);
-    }
-    if (!dependencies.folder_scanner) {
-        dependencies.folder_scanner = std::move(defaults.folder_scanner);
-    }
-    if (!dependencies.workflow_cache_loader) {
-        dependencies.workflow_cache_loader = std::move(defaults.workflow_cache_loader);
-    }
-    if (!dependencies.file_context_builder) {
-        dependencies.file_context_builder = std::move(defaults.file_context_builder);
-    }
-    if (!dependencies.folder_context_builder) {
-        dependencies.folder_context_builder =
-            std::move(defaults.folder_context_builder);
-    }
-    if (dependencies.workflow_cache_paths.labeling_state_cache_path.empty()) {
-        dependencies.workflow_cache_paths.labeling_state_cache_path =
-            std::move(defaults.workflow_cache_paths.labeling_state_cache_path);
-    }
-    if (dependencies.workflow_cache_paths.workflow_state_cache_path.empty()) {
-        dependencies.workflow_cache_paths.workflow_state_cache_path =
-            std::move(defaults.workflow_cache_paths.workflow_state_cache_path);
-    }
-}
-
-}  // namespace
 
 class SourceCollectionLoadQueue::Impl {
 public:
-    explicit Impl(SourceCollectionLoadDependencies dependencies)
-        : dependencies_(std::move(dependencies)),
+    explicit Impl(SourceCollectionPreparationAdapters adapters)
+        : preparation_(std::move(adapters)),
           retirement_worker_([this](std::stop_token stop_token) {
               RetirementLoop(stop_token);
           })
     {
-        if (!dependencies_.folder_change_generation_factory) {
-            if (dependencies_.folder_change_generation_registration_factory) {
-                directory_change_generation_monitor_ =
-                    std::make_unique<DirectoryChangeGenerationMonitor>(
-                        std::move(
-                            dependencies_
-                                .folder_change_generation_registration_factory));
-            } else {
-                directory_change_generation_monitor_ =
-                    std::make_unique<DirectoryChangeGenerationMonitor>();
-            }
-            dependencies_.folder_change_generation_factory =
-                [monitor = directory_change_generation_monitor_.get()](
-                    const std::filesystem::path& path,
-                    const SourceCollectionCancellationCheckpoint& checkpoint) {
-                    return monitor->Begin(path, checkpoint);
-                };
-        }
     }
 
     ~Impl()
@@ -591,7 +417,7 @@ private:
     {
         return [canceled = task.canceled, stop_token]() {
             if (stop_token.stop_requested() || canceled->load(std::memory_order_relaxed)) {
-                throw SourceLoadCanceled();
+                throw SourceCollectionPreparationCanceled();
             }
         };
     }
@@ -601,618 +427,33 @@ private:
         const SourceCollectionCancellationCheckpoint& checkpoint)
     {
         if (!task.batch) {
-            return std::make_shared<SampleWorkflowPreparationCacheBundle>(
-                dependencies_.workflow_cache_loader(
-                    dependencies_.workflow_cache_paths,
-                    checkpoint));
+            return preparation_.LoadWorkflowCache(checkpoint);
         }
-        std::call_once(task.batch->load_once, [this, &task, &checkpoint]() {
-            task.batch->value = std::make_shared<SampleWorkflowPreparationCacheBundle>(
-                dependencies_.workflow_cache_loader(
-                    dependencies_.workflow_cache_paths,
-                    checkpoint));
-        });
+        std::call_once(
+            task.batch->load_once,
+            [this, &task, &checkpoint]() {
+                task.batch->value =
+                    preparation_.LoadWorkflowCache(checkpoint);
+            });
         checkpoint();
         return task.batch->value;
     }
 
-    PreparedSampleWorkflowState PrepareWorkflow(
+    PreparedSourceCollection Prepare(
         const Task& task,
-        const SpectrumSnapshot& snapshot,
-        const SourceCollectionContext& context,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
-    {
-        const std::shared_ptr<const SampleWorkflowPreparationCacheBundle> cache =
-            WorkflowCache(task, checkpoint);
-        PreparedSampleWorkflowState prepared = PrepareSampleWorkflowStateFromCache(
-            snapshot,
-            context,
-            task.request.spectrum_index,
-            *cache,
-            nullptr,
-            nullptr,
-            checkpoint);
-        prepared.preparation_cache = cache;
-        return prepared;
-    }
-
-    void FinalizeContext(
-        const Task& task,
-        SourceCollectionContext& context,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
-    {
-        LoadRestoredAnnotations(context, task.request.annotation_paths, checkpoint);
-        FinalizeSourceCollectionAnnotationContextFingerprint(
-            context,
-            task.request.annotation_paths,
-            checkpoint);
-    }
-
-    bool CanReuseKnownContext(
-        const Task& task,
-        const SpectrumSnapshot& snapshot,
-        const SourceCollectionSingleFileState& initial_state,
-        bool folder_generation_proven) const
-    {
-        const std::optional<SourceCollectionContextReuseProof>& proof =
-            task.request.context_reuse_proof;
-        if (!proof || !task.request.reuse_identity ||
-            !SourceCollectionIdentitiesMatchExactly(
-                proof->identity,
-                *task.request.reuse_identity) ||
-            !SourceCollectionSingleFileStatesMatch(
-                proof->dependency_state,
-                initial_state) ||
-            snapshot.collection.spectrum_count !=
-                proof->identity.spectrum_count ||
-            SourcePathIdentityKey(snapshot.source.path) !=
-                SourcePathIdentityKey(task.request.path)) {
-            return false;
-        }
-
-        if (folder_generation_proven) {
-            return true;
-        }
-
-        std::error_code directory_error;
-        const bool snapshot_is_directory =
-            std::filesystem::is_directory(
-                snapshot.source.path,
-                directory_error);
-        if (directory_error || snapshot_is_directory) {
-            return false;
-        }
-        const SourceCollectionIdentity actual_base =
-            BuildSourceCollectionIdentity(snapshot, initial_state);
-        return SourceCollectionBaseIdentitiesMatch(
-            actual_base,
-            proof->identity);
-    }
-
-    bool CanReuseResidentSnapshot(
-        const Task& task,
-        const SourceCollectionResidentSnapshot& resident,
-        const SourceCollectionSingleFileState& initial_state,
-        bool folder_generation_proven) const
-    {
-        return resident.snapshot &&
-               resident.spectrum_index == task.request.spectrum_index &&
-               resident.snapshot->collection.current_index ==
-                   task.request.spectrum_index &&
-               task.request.context_reuse_proof &&
-               resident.context_reuse_proof.identity ==
-                   task.request.context_reuse_proof->identity &&
-               resident.context_reuse_proof.dependency_state ==
-                   task.request.context_reuse_proof->dependency_state &&
-               resident.folder_listing_generation ==
-                   task.request.folder_listing_generation_hint &&
-               CanReuseKnownContext(
-                   task,
-                   *resident.snapshot,
-                   initial_state,
-                   folder_generation_proven);
-    }
-
-    PreparedSourceCollection BuildReusedPrepared(
-        const Task& task,
-        SpectrumSnapshotHandle snapshot,
-        const SourceCollectionSingleFileState& verified_state,
-        SourceCollectionFolderListingGenerationHandle
-            folder_listing_generation = {},
-        std::optional<SourceCollectionResidentSnapshotOrigin>
-            snapshot_cache_origin = std::nullopt,
-        std::uint64_t snapshot_prefetch_id = 0,
-        std::uint64_t snapshot_prefetch_task_id = 0,
-        std::int64_t snapshot_prefetch_scheduled_ns = 0,
-        SampleNavigationDirection snapshot_prefetch_direction =
-            SampleNavigationDirection::Next)
-    {
-        const SourceCollectionIdentity identity =
-            task.request.context_reuse_proof->identity;
-        if (task.request.latency_attempt) {
-            task.request.latency_attempt->MarkWorkflowReused(true);
-        }
-        PreparedSourceCollection prepared{
-            task.id,
-            task.request.path,
-            task.request.spectrum_index,
-            std::move(snapshot),
-            PreparedSourceCollectionReuse{identity},
-        };
-        prepared.context_reuse_proof =
-            SourceCollectionContextReuseProof{identity, verified_state};
-        prepared.folder_listing_generation =
-            std::move(folder_listing_generation);
-        prepared.snapshot_cache_hit =
-            snapshot_cache_origin.has_value();
-        prepared.snapshot_cache_origin = snapshot_cache_origin;
-        prepared.snapshot_prefetch_id = snapshot_prefetch_id;
-        prepared.snapshot_prefetch_task_id =
-            snapshot_prefetch_task_id;
-        prepared.snapshot_prefetch_scheduled_ns =
-            snapshot_prefetch_scheduled_ns;
-        prepared.snapshot_prefetch_direction =
-            snapshot_prefetch_direction;
-        return prepared;
-    }
-
-    PreparedSourceCollection BuildPrepared(
-        const Task& task,
-        SpectrumSnapshotHandle snapshot,
-        SourceCollectionContext context,
-        const SourceCollectionSingleFileState& verified_state,
-        const SourceCollectionCancellationCheckpoint& checkpoint,
-        SourceCollectionFolderListingGenerationHandle folder_listing_generation = {})
-    {
-        if (CanReusePreparedWorkflow(context.identity, task.request.reuse_identity)) {
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkWorkflowReused(true);
-            }
-            SourceCollectionContextReuseProof reuse_proof{
-                context.identity,
-                verified_state};
-            PreparedSourceCollection prepared{
-                task.id,
-                task.request.path,
-                task.request.spectrum_index,
-                std::move(snapshot),
-                PreparedSourceCollectionReuse{reuse_proof.identity},
-            };
-            prepared.context_reuse_proof = std::move(reuse_proof);
-            prepared.folder_listing_generation = std::move(folder_listing_generation);
-            return prepared;
-        }
-        if (task.request.latency_attempt) {
-            task.request.latency_attempt->MarkWorkflowReused(false);
-        }
-        PreparedSampleWorkflowState workflow =
-            PrepareWorkflow(task, *snapshot, context, checkpoint);
-        SourceCollectionContextReuseProof reuse_proof{
-            context.identity,
-            verified_state};
-        PreparedSourceCollection prepared{
-            task.id,
-            task.request.path,
-            task.request.spectrum_index,
-            std::move(snapshot),
-            PreparedSourceCollectionPlan{
-                std::move(context),
-                std::move(workflow),
-                task.request.base_live_workflow_revision},
-        };
-        prepared.context_reuse_proof = std::move(reuse_proof);
-        prepared.folder_listing_generation = std::move(folder_listing_generation);
-        return prepared;
-    }
-
-    SourceCollectionFolderListingGenerationHandle ScanFolderListingGeneration(
-        const std::filesystem::path& path,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
-    {
-        DirectoryChangeGenerationHandle change_generation =
-            dependencies_.folder_change_generation_factory(path, checkpoint);
-        SourceCollectionFolderListing listing =
-            dependencies_.folder_scanner(path, checkpoint);
-        return std::make_shared<const SourceCollectionFolderListingGeneration>(
-            SourceCollectionFolderListingGeneration{
-                std::move(listing),
-                std::move(change_generation),
-            });
-    }
-
-    PreparedSourceCollection PrepareFolder(
-        const Task& task,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
-    {
-        constexpr std::size_t kMaximumAttempts = 2;
-        SourceCollectionFolderListingGenerationHandle listing_generation =
-            task.request.folder_listing_generation_hint;
-        bool resident_candidate_available =
-            task.request.resident_snapshot.has_value();
-        for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
-            checkpoint();
-            const bool hint_present = listing_generation != nullptr;
-            const bool generation_current_at_start =
-                listing_generation &&
-                listing_generation->change_generation &&
-                listing_generation->IsCurrent();
-            bool listing_scan_performed = false;
-            // A retained generation may be stale. Poll its invalidation token
-            // and validate the requested file cheaply before decoding so
-            // deletion or replacement refreshes the full listing instead of
-            // surfacing a stale-path decode error.
-            if (listing_generation &&
-                ((listing_generation->change_generation &&
-                  !generation_current_at_start) ||
-                 task.request.spectrum_index >=
-                     listing_generation->listing.spectra.size() ||
-                 !SourceCollectionFolderSpectrumFileMatchesCurrentState(
-                     listing_generation
-                          ->listing.spectra[task.request.spectrum_index]))) {
-                listing_generation.reset();
-            }
-            if (task.request.snapshot_only &&
-                (!listing_generation ||
-                 !generation_current_at_start)) {
-                throw SourceLoadStale();
-            }
-            if (!listing_generation) {
-                listing_generation =
-                    ScanFolderListingGeneration(task.request.path, checkpoint);
-                listing_scan_performed = true;
-            }
-            const SourceCollectionFolderListing& listing =
-                listing_generation->listing;
-            const SourceCollectionSingleFileState initial_state =
-                CaptureSourceCollectionSingleFileState(
-                    task.request.path,
-                    task.request.annotation_paths,
-                    checkpoint);
-            if (resident_candidate_available) {
-                const SourceCollectionResidentSnapshot& resident =
-                    *task.request.resident_snapshot;
-                const bool resident_current =
-                    !listing_scan_performed &&
-                    generation_current_at_start &&
-                    listing_generation ==
-                        resident.folder_listing_generation &&
-                    CanReuseResidentSnapshot(
-                        task,
-                        resident,
-                        initial_state,
-                        true);
-                resident_candidate_available = false;
-                if (resident_current) {
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkFolderSnapshotLoadStarted({
-                                .hint_present = hint_present,
-                                .generation_current_at_start =
-                                    generation_current_at_start,
-                                .listing_scan_performed = false,
-                            });
-                    }
-                    SpectrumSnapshotHandle snapshot = resident.snapshot;
-                    checkpoint();
-                    ValidateDecodedSnapshot(snapshot);
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkSnapshotLoadFinished();
-                        task.request.latency_attempt
-                            ->MarkContextPrepared(true);
-                    }
-                    const SourceCollectionSingleFileState verified_state =
-                        CaptureSourceCollectionSingleFileState(
-                            task.request.path,
-                            task.request.annotation_paths,
-                            checkpoint);
-                    const bool listing_generation_is_current =
-                        listing_generation->IsCurrent();
-                    const bool revalidation_succeeded =
-                        SourceCollectionSingleFileStatesMatch(
-                            initial_state,
-                            verified_state) &&
-                        listing_generation_is_current;
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkSourceRevalidated(
-                                revalidation_succeeded);
-                    }
-                    if (revalidation_succeeded) {
-                        return BuildReusedPrepared(
-                            task,
-                            std::move(snapshot),
-                            verified_state,
-                            std::move(listing_generation),
-                            resident.origin,
-                            resident.prefetch_id,
-                            resident.prefetch_task_id,
-                            resident.prefetch_scheduled_ns,
-                            resident.prefetch_direction);
-                    }
-                    if (!listing_generation_is_current) {
-                        listing_generation.reset();
-                    }
-                    continue;
-                }
-            }
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkFolderSnapshotLoadStarted({
-                    .hint_present = hint_present,
-                    .generation_current_at_start =
-                        generation_current_at_start,
-                    .listing_scan_performed = listing_scan_performed,
-                });
-            }
-            SpectrumSnapshotHandle snapshot = dependencies_.folder_snapshot_loader(
-                task.request.path,
-                task.request.spectrum_index,
-                listing,
-                [checkpoint]() {
-                    try {
-                        checkpoint();
-                        return false;
-                    } catch (const SourceLoadCanceled&) {
-                        return true;
-                    }
-                });
-            checkpoint();
-            ValidateDecodedSnapshot(snapshot);
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkSnapshotLoadFinished();
-            }
-            const bool can_reuse_context =
-                CanReuseKnownContext(
-                    task,
-                    *snapshot,
-                    initial_state,
-                    generation_current_at_start &&
-                        !listing_scan_performed &&
-                        listing_generation ==
-                            task.request
-                                .folder_listing_generation_hint);
-            std::optional<SourceCollectionContext> context;
-            if (!can_reuse_context) {
-                if (task.request.snapshot_only) {
-                    throw SourceLoadStale();
-                }
-                context.emplace(
-                    dependencies_.folder_context_builder(
-                        *snapshot,
-                        listing,
-                        checkpoint));
-                FinalizeContext(task, *context, checkpoint);
-            }
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkContextPrepared(
-                    can_reuse_context);
-            }
-            const SourceCollectionSingleFileState verified_state =
-                CaptureSourceCollectionSingleFileState(
-                    task.request.path,
-                    task.request.annotation_paths,
-                    checkpoint);
-            SourceCollectionFolderListingGenerationHandle verified_generation =
-                listing_generation;
-            bool listing_generation_is_current = false;
-            if (listing_generation->change_generation) {
-                listing_generation_is_current = listing_generation->IsCurrent();
-            } else {
-                // Change notifications are an optimization. If the platform
-                // cannot provide a generation boundary, preserve the previous
-                // full post-decode comparison as the correctness fallback.
-                verified_generation =
-                    ScanFolderListingGeneration(task.request.path, checkpoint);
-                if (task.request.latency_attempt) {
-                    task.request.latency_attempt
-                        ->MarkFolderListingScanPerformed();
-                }
-                listing_generation_is_current =
-                    SourceCollectionFolderListingsMatch(
-                        listing,
-                        verified_generation->listing,
-                        checkpoint) &&
-                    (!verified_generation->change_generation ||
-                     verified_generation->IsCurrent());
-            }
-            const bool revalidation_succeeded =
-                SourceCollectionSingleFileStatesMatch(initial_state, verified_state) &&
-                listing_generation_is_current;
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkSourceRevalidated(
-                    revalidation_succeeded);
-            }
-            if (revalidation_succeeded) {
-                if (can_reuse_context) {
-                    return BuildReusedPrepared(
-                        task,
-                        std::move(snapshot),
-                        verified_state,
-                        std::move(verified_generation));
-                }
-                return BuildPrepared(
-                    task,
-                    std::move(snapshot),
-                    std::move(*context),
-                    verified_state,
-                    checkpoint,
-                    std::move(verified_generation));
-            }
-            if (listing_generation_is_current) {
-                // The folder generation is still reusable when only an
-                // annotation dependency changed during preparation.
-                listing_generation = std::move(verified_generation);
-            } else if (!listing_generation->change_generation &&
-                       verified_generation &&
-                       (!verified_generation->change_generation ||
-                        verified_generation->IsCurrent())) {
-                // In fallback mode, promote the fresh observation to the next
-                // attempt just as the previous scan-and-compare path did.
-                listing_generation = std::move(verified_generation);
-            } else {
-                listing_generation.reset();
-            }
-        }
-        throw std::runtime_error(
-            "The source folder kept changing while it was loaded; try again after synchronization settles.");
-    }
-
-    PreparedSourceCollection PrepareFile(
-        const Task& task,
-        const SourceCollectionCancellationCheckpoint& checkpoint)
-    {
-        constexpr std::size_t kMaximumAttempts = 2;
-        bool resident_candidate_available =
-            task.request.resident_snapshot.has_value();
-        for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
-            checkpoint();
-            const SourceCollectionSingleFileState initial_state =
-                CaptureSourceCollectionSingleFileState(
-                    task.request.path,
-                    task.request.annotation_paths,
-                    checkpoint);
-            if (resident_candidate_available) {
-                const SourceCollectionResidentSnapshot& resident =
-                    *task.request.resident_snapshot;
-                const bool resident_current =
-                    CanReuseResidentSnapshot(
-                        task,
-                        resident,
-                        initial_state,
-                        false);
-                resident_candidate_available = false;
-                if (resident_current) {
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkSnapshotLoadStarted(false);
-                    }
-                    SpectrumSnapshotHandle snapshot = resident.snapshot;
-                    checkpoint();
-                    ValidateDecodedSnapshot(snapshot);
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkSnapshotLoadFinished();
-                        task.request.latency_attempt
-                            ->MarkContextPrepared(true);
-                    }
-                    const SourceCollectionSingleFileState verified_state =
-                        CaptureSourceCollectionSingleFileState(
-                            task.request.path,
-                            task.request.annotation_paths,
-                            checkpoint);
-                    const bool revalidation_succeeded =
-                        SourceCollectionSingleFileStatesMatch(
-                            initial_state,
-                            verified_state);
-                    if (task.request.latency_attempt) {
-                        task.request.latency_attempt
-                            ->MarkSourceRevalidated(
-                                revalidation_succeeded);
-                    }
-                    if (revalidation_succeeded) {
-                        return BuildReusedPrepared(
-                            task,
-                            std::move(snapshot),
-                            verified_state,
-                            {},
-                            resident.origin,
-                            resident.prefetch_id,
-                            resident.prefetch_task_id,
-                            resident.prefetch_scheduled_ns,
-                            resident.prefetch_direction);
-                    }
-                    continue;
-                }
-            }
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkSnapshotLoadStarted(false);
-            }
-            SpectrumSnapshotHandle snapshot = dependencies_.snapshot_loader(
-                task.request.path,
-                task.request.spectrum_index,
-                [checkpoint]() {
-                    try {
-                        checkpoint();
-                        return false;
-                    } catch (const SourceLoadCanceled&) {
-                        return true;
-                    }
-                });
-            checkpoint();
-            ValidateDecodedSnapshot(snapshot);
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkSnapshotLoadFinished();
-            }
-            const bool can_reuse_context =
-                CanReuseKnownContext(
-                    task,
-                    *snapshot,
-                    initial_state,
-                    false);
-            std::optional<SourceCollectionContext> context;
-            if (!can_reuse_context) {
-                if (task.request.snapshot_only) {
-                    throw SourceLoadStale();
-                }
-                context.emplace(
-                    dependencies_.file_context_builder(
-                        *snapshot,
-                        initial_state,
-                        checkpoint));
-                FinalizeContext(task, *context, checkpoint);
-            }
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkContextPrepared(
-                    can_reuse_context);
-            }
-            const SourceCollectionSingleFileState verified_state =
-                CaptureSourceCollectionSingleFileState(
-                    task.request.path,
-                    task.request.annotation_paths,
-                    checkpoint);
-            const bool revalidation_succeeded =
-                SourceCollectionSingleFileStatesMatch(initial_state, verified_state);
-            if (task.request.latency_attempt) {
-                task.request.latency_attempt->MarkSourceRevalidated(
-                    revalidation_succeeded);
-            }
-            if (revalidation_succeeded) {
-                if (can_reuse_context) {
-                    return BuildReusedPrepared(
-                        task,
-                        std::move(snapshot),
-                        verified_state);
-                }
-                return BuildPrepared(
-                    task,
-                    std::move(snapshot),
-                    std::move(*context),
-                    verified_state,
-                    checkpoint);
-            }
-        }
-        throw std::runtime_error(
-            "The source file or one of its companions kept changing while it was loaded; "
-            "try again after synchronization settles.");
-    }
-
-    PreparedSourceCollection Prepare(const Task& task, std::stop_token stop_token)
+        std::stop_token stop_token)
     {
         const SourceCollectionCancellationCheckpoint checkpoint =
             CheckpointFor(task, stop_token);
-        checkpoint();
-        if (task.request.snapshot_only &&
-            (!task.request.reuse_identity ||
-             !task.request.context_reuse_proof)) {
-            throw SourceLoadStale();
-        }
-        std::error_code directory_error;
-        const bool is_directory =
-            std::filesystem::is_directory(task.request.path, directory_error);
-        if (!directory_error && is_directory) {
-            return PrepareFolder(task, checkpoint);
-        }
-        return PrepareFile(task, checkpoint);
+        return preparation_.Prepare(
+            task.id,
+            task.request,
+            checkpoint,
+            [this, &task](
+                const SourceCollectionCancellationCheckpoint&
+                    cache_checkpoint) {
+                return WorkflowCache(task, cache_checkpoint);
+            });
     }
 
     void PublishCompletion(BatchCompletionSlot& slot)
@@ -1468,10 +709,10 @@ private:
             if (task.request.latency_attempt) {
                 task.request.latency_attempt->MarkWorkerPrepared();
             }
-        } catch (const SourceLoadCanceled&) {
+        } catch (const SourceCollectionPreparationCanceled&) {
             FinishCanceledTask(task);
             return;
-        } catch (const SourceLoadStale& error) {
+        } catch (const SourceCollectionPreparationStale& error) {
             completion.stale = true;
             completion.error_message = error.what();
         } catch (const std::exception& error) {
@@ -1512,9 +753,7 @@ private:
         }
     }
 
-    std::unique_ptr<DirectoryChangeGenerationMonitor>
-        directory_change_generation_monitor_;
-    SourceCollectionLoadDependencies dependencies_;
+    SourceCollectionPreparation preparation_;
     mutable std::mutex mutex_;
     std::condition_variable_any retirement_condition_;
     std::mutex completion_callback_mutex_;
@@ -1534,15 +773,14 @@ private:
 };
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue()
-    : SourceCollectionLoadQueue(DefaultDependencies())
+    : SourceCollectionLoadQueue(SourceCollectionPreparationAdapters{})
 {
 }
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue(
-    SourceCollectionLoadDependencies dependencies)
+    SourceCollectionPreparationAdapters adapters)
+    : impl_(std::make_unique<Impl>(std::move(adapters)))
 {
-    FillMissingDependencies(dependencies);
-    impl_ = std::make_unique<Impl>(std::move(dependencies));
 }
 
 SourceCollectionLoadQueue::~SourceCollectionLoadQueue() = default;

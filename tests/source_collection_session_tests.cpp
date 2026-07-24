@@ -3754,7 +3754,7 @@ void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
         specforge::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
-            load_hint->live_workflow_revision});
+            load_hint->reuse.live_workflow_revision()});
     const specforge::SourceCollectionSessionView view = session.View();
     Require(committed.loaded && !committed.follow_up_spectrum_index, "row 1 should commit once");
     Require(
@@ -3865,7 +3865,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
         specforge::PreparedSourceCollectionPlan{
             std::move(changed_context),
             std::move(stale_workflow),
-            load_hint->live_workflow_revision});
+            load_hint->reuse.live_workflow_revision()});
     Require(
         reconciled.loaded && reconciled.follow_up_spectrum_index == 2,
         "the live filter should retarget the changed context to row 2");
@@ -3899,7 +3899,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
                    specforge::PreparedSourceCollectionPlan{
                        std::move(final_context),
                        std::move(final_workflow),
-                       load_hint->live_workflow_revision})
+                       load_hint->reuse.live_workflow_revision()})
             .loaded,
         "the reconciled final row should atomically commit its full context plan");
     Require(
@@ -4151,7 +4151,9 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
     const std::optional<specforge::SourceCollectionLoadHint> hint =
         session.LoadHintForSource(source_path);
     Require(hint && hint->spectrum_index == 1, "non-active source reload should capture its live row");
-    Require(hint->identity.id == identity.id, "non-active source reload should expose its stable generation");
+    Require(
+        hint->reuse.identity().id == identity.id,
+        "non-active source reload should expose its stable generation");
 
     const specforge::SpectrumSnapshotHandle reloaded_snapshot = MakeSnapshot(source_path, 3, 1);
     const specforge::SourceCollectionSessionResult reload_result = session.OpenPreparedSource(
@@ -4616,7 +4618,7 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         specforge::PreparedSourceCollectionPlan{
             std::move(stale_context),
             std::move(stale_workflow),
-            stale_plan_hint->live_workflow_revision});
+            stale_plan_hint->reuse.live_workflow_revision()});
     Require(!rejected_plan.loaded, "a late full plan for a removed source must be rejected");
     Require(
         rejected_plan.background_retirement.size() >= 2,
@@ -4900,8 +4902,10 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session.LoadHintForSource(source_path, 7);
     Require(
         row_seven_before_view_changes &&
-            row_seven_before_view_changes->resident_snapshot &&
-            row_seven_before_view_changes->resident_snapshot
+            row_seven_before_view_changes
+                ->reuse.resident_snapshot() &&
+            row_seven_before_view_changes
+                ->reuse.resident_snapshot()
                 ->snapshot,
         "the eight-entry history should retain raw row 7");
 
@@ -4919,11 +4923,13 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session.LoadHintForSource(source_path, 7);
     Require(
         row_seven_after_view_changes &&
-            row_seven_after_view_changes->resident_snapshot &&
-            row_seven_after_view_changes->resident_snapshot
+            row_seven_after_view_changes
+                ->reuse.resident_snapshot() &&
+            row_seven_after_view_changes
+                ->reuse.resident_snapshot()
                     ->snapshot ==
                 row_seven_before_view_changes
-                    ->resident_snapshot
+                    ->reuse.resident_snapshot()
                     ->snapshot,
         "query and sorting should only change access order, not copy or invalidate resident snapshots");
 
@@ -4948,7 +4954,8 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session.LoadHintForSource(source_path, 0);
     Require(
         row_zero_after_eviction &&
-            !row_zero_after_eviction->resident_snapshot,
+            !row_zero_after_eviction
+                 ->reuse.resident_snapshot(),
         "the ninth non-current row should evict untouched raw row 0");
     for (specforge::BackgroundRetirementHandle& resource :
          eviction.background_retirement) {
@@ -5004,7 +5011,8 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
             session.LoadHintForSource(source_path, 8);
     Require(
         invalidated_old_row &&
-            !invalidated_old_row->resident_snapshot,
+            !invalidated_old_row
+                 ->reuse.resident_snapshot(),
         "context generation changes must invalidate old resident rows");
     for (specforge::BackgroundRetirementHandle& resource :
          changed.background_retirement) {
@@ -5296,10 +5304,12 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
     const auto row_one =
         session.LoadHintForSource(source_path, 1);
     Require(
-        row_zero && !row_zero->resident_snapshot,
+        row_zero &&
+            !row_zero->reuse.resident_snapshot(),
         "two 65 MiB residents should evict the older row at the 128 MiB byte cap");
     Require(
-        row_one && row_one->resident_snapshot,
+        row_one &&
+            row_one->reuse.resident_snapshot(),
         "byte-cap eviction should retain the newer row while below the eight-entry count cap");
 }
 
@@ -5368,12 +5378,15 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
         session.LoadHintForSource(source_path);
     Require(hint.has_value(), "known folder source should expose a subsequent load hint");
     Require(
-        hint->folder_listing_generation_hint == verified_generation,
+        hint->reuse.folder_listing_generation() ==
+            verified_generation,
         "subsequent navigation should reuse the exact immutable listing generation");
     Require(
-        hint->context_reuse_proof.has_value() &&
-            hint->context_reuse_proof->identity.id == identity.id &&
-            hint->context_reuse_proof->dependency_state ==
+        hint->reuse.context_reuse_proof().has_value() &&
+            hint->reuse.context_reuse_proof()->identity.id ==
+                identity.id &&
+            hint->reuse.context_reuse_proof()
+                    ->dependency_state ==
                 reuse_proof.dependency_state,
         "subsequent navigation should carry the proof accepted with that generation");
 

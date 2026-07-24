@@ -3,6 +3,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "domain/source_path_identity.h"
+#include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
 #include <algorithm>
@@ -345,10 +346,10 @@ specforge::SourceCollectionSession MakeCachedSession(
         restore_mode);
 }
 
-specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
+specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
     const SourceSessionCachePaths& cache_paths)
 {
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
@@ -380,14 +381,14 @@ specforge::SourceCollectionLoadDependencies MakeFixtureLoadDependencies(
 
 std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
     const SourceSessionCachePaths& cache_paths,
-    specforge::SourceCollectionLoadDependencies dependencies)
+    specforge::SourceCollectionPreparationAdapters dependencies)
 {
     using Access = specforge::ShellUiTestAccess;
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakeCachedSession(
             cache_paths,
             specforge::SourceCollectionSessionRestoreMode::Deferred),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::BeginDeferredRestore(*shell);
     return shell;
 }
@@ -446,7 +447,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         std::filesystem::path{},
         std::filesystem::path{},
         specforge::SourceCollectionSessionRestoreMode::Deferred);
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source, std::size_t index, const auto&) {
             return MakeSnapshot(source, index);
@@ -459,7 +460,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 300;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -577,7 +578,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
         std::filesystem::path{},
         std::filesystem::path{},
         specforge::SourceCollectionSessionRestoreMode::Deferred);
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path&, std::size_t, const auto&)
             -> specforge::SpectrumSnapshotHandle {
@@ -586,7 +587,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t frame_index = 301;
     Access::EnableNavigationTracing(*shell, frame_index);
 
@@ -635,7 +636,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     std::shared_future<void> row_two_entered = row_two_entered_promise.get_future().share();
     std::promise<void> release_decoders_promise;
     std::shared_future<void> release_decoders = release_decoders_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&row_one_entered_promise,
          &row_two_entered_promise,
@@ -665,7 +666,7 @@ void TestRealDrainCommitsOnlyTheLatestRapidNavigation()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 77;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -801,7 +802,7 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
@@ -812,7 +813,7 @@ void TestGenericRowLocationDoesNotStartPreviousNextTrace()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 90);
 
     const specforge::SourceCollectionSessionResult result = Access::Submit(
@@ -848,7 +849,7 @@ void TestAcceptedNavigationUsesLatestMatchingRawKeyInput()
         specforge::SourceCollectionSession([](const auto&, std::size_t) {
             return specforge::SpectrumSnapshotHandle{};
         }),
-        specforge::SourceCollectionLoadQueue());
+        specforge::MakeSourceCollectionLoadQueueForTesting());
     const auto stale = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(10));
     const auto accepted = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(20));
     Access::RecordNavigationKeyInput(
@@ -877,7 +878,7 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
@@ -888,7 +889,7 @@ void TestWorkflowAutoAdvanceStartsExplicitTrace()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 91);
 
     (void)Access::Submit(
@@ -1012,7 +1013,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
     }
 
     std::atomic_int decoder_calls = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [&decoder_calls](
                                        const std::filesystem::path& source,
                                        std::size_t index,
@@ -1028,7 +1029,7 @@ void TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 200);
 
     struct ProjectionTimings {
@@ -1227,7 +1228,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
@@ -1238,7 +1239,7 @@ void TestNewActivationSupersedesAnUnpresentedOlderTrace()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 101;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -1336,7 +1337,7 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
             session.CurrentSampleSnapshot()->source.path == path_a,
         "source A should be active before navigation");
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
@@ -1347,7 +1348,7 @@ void TestSameFrameSourceSwitchSupersedesActivatedNavigation()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 202;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -1412,7 +1413,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader = [](const std::filesystem::path& source, std::size_t index, const auto&) {
         return MakeSnapshot(source, index);
     };
@@ -1423,7 +1424,7 @@ void TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     constexpr std::uint64_t presentation_frame = 203;
     Access::EnableNavigationTracing(*shell, presentation_frame);
 
@@ -1492,7 +1493,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     std::promise<void> release_row_two_promise;
     std::shared_future<void> release_row_two = release_row_two_promise.get_future().share();
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [stale_snapshot_destroyed_promise,
          &row_two_entered_promise,
@@ -1522,7 +1523,7 @@ void TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     const specforge::SpectrumSnapshotHandle initial_snapshot =
         Access::Session(*shell).CurrentSampleSnapshot();
     std::promise<void> completion_ready_promise;
@@ -1606,7 +1607,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     std::shared_future<void> decoder_entered = decoder_entered_promise.get_future().share();
     std::promise<void> release_decoder_promise;
     std::shared_future<void> release_decoder = release_decoder_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&decoder_entered_promise,
          release_decoder](
@@ -1627,7 +1628,7 @@ void TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path, "older-context"),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
     const specforge::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
@@ -1735,7 +1736,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
         intermediate_destroyed_promise->get_future();
     std::atomic_bool initial_open_failed = false;
     std::atomic_int row_one_decode_count = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&first_decode_entered_promise,
          release_first_decode,
@@ -1782,7 +1783,7 @@ void TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThrea
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         std::move(session),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
     shell->OpenSource(path);
     const auto initial_failure_deadline =
@@ -1915,7 +1916,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
             other_context,
             0,
             {{}, {}});
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source,
            std::size_t index,
@@ -1932,7 +1933,7 @@ void TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket()
     dependencies.workflow_cache_paths = {{}, {}};
     specforge::SourceCollectionActivationTransaction activation(
         session,
-        specforge::SourceCollectionLoadQueue(
+        specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
     std::promise<void> completion_ready_promise;
     std::shared_future<void> completion_ready =
@@ -2025,7 +2026,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path&,
            std::size_t,
@@ -2039,7 +2040,7 @@ void TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry()
     dependencies.workflow_cache_paths = {{}, {}};
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
         MakePreparedDeferredSession(path),
-        specforge::SourceCollectionLoadQueue(std::move(dependencies)));
+        specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
 
     const specforge::SourceCollectionSessionResult navigation = Access::Submit(
         *shell,
@@ -2175,7 +2176,7 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         source_b_decoded_promise.get_future().share();
     std::atomic_bool source_b_decoded_once = false;
 
-    specforge::SourceCollectionLoadDependencies dependencies =
+    specforge::SourceCollectionPreparationAdapters dependencies =
         MakeFixtureLoadDependencies(cache_paths);
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
@@ -2345,7 +2346,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
         stream << "fixture";
     }
     std::array<std::atomic_int, 3> decoder_calls{};
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&decoder_calls](
             const std::filesystem::path& source,
@@ -2365,7 +2366,7 @@ void TestIdlePrefetchIsConsumedBySecondForwardNavigation()
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::SourceCollectionLoadQueue(
+            specforge::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
     Access::EnableNavigationTracing(*shell, 300);
 
@@ -2532,7 +2533,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
     std::promise<void> release_prefetch_promise;
     std::shared_future<void> release_prefetch =
         release_prefetch_promise.get_future().share();
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&decoder_calls,
          &prefetch_entered_promise,
@@ -2561,7 +2562,7 @@ void TestPublishedPrefetchBecomesStaleAfterQueryInput()
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::SourceCollectionLoadQueue(
+            specforge::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     (void)Access::SubmitNavigation(
@@ -2655,7 +2656,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
         release_canceled_worker_promise.get_future().share();
     std::atomic_bool entered_once = false;
     std::atomic_int64_t decoder_returned_ns = 0;
-    specforge::SourceCollectionLoadDependencies dependencies;
+    specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [&](const std::filesystem::path& source,
             std::size_t index,
@@ -2693,7 +2694,7 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
     std::unique_ptr<specforge::ShellUi> shell =
         Access::Create(
             MakePreparedDeferredSession(path),
-            specforge::SourceCollectionLoadQueue(
+            specforge::MakeSourceCollectionLoadQueueForTesting(
                 std::move(dependencies)));
 
     (void)Access::SubmitNavigation(
