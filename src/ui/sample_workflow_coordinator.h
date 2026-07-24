@@ -182,15 +182,18 @@ public:
 
     [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] SourceCollectionFilterView FilterView(const SpectrumSnapshotHandle& snapshot) const;
-    [[nodiscard]] SourceCollectionSampleSortingView SortingView(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] SourceCollectionFilterView BuildFilterView(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
+        const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
+    [[nodiscard]] std::uint64_t presentation_revision() const;
     [[nodiscard]] std::vector<std::size_t> AdjacentNavigationRows(
         SampleNavigationDirection direction,
         SampleNavigationPrefetchPolicy policy = {}) const;
 
-    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] bool RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
 

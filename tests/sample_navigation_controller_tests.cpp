@@ -848,7 +848,7 @@ void TestFilterConstrainsSequentialNavigation()
     Require(result.target_found && !result.moved, "eligible label advance should ignore excluded rows");
     Require(result.current_index == 1, "label advance with no eligible filtered target should keep the current row");
 
-    controller.SetSampleNameQuery("a");
+    (void)controller.SetSampleNameQuery("a");
     const std::vector<std::size_t>& matches = controller.sample_name_matches();
     Require(matches.size() == 2, "sample-name matches should be filtered to included rows");
     Require(matches[0] == 1 && matches[1] == 3, "filtered sample-name matches should preserve source order");
@@ -1069,7 +1069,7 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
     };
     activate("source-v1", "context-v1", std::move(manifest));
 
-    controller.SetSampleNameQuery("ta");
+    (void)controller.SetSampleNameQuery("ta");
     Require(
         controller.sample_name_matches() == std::vector<std::size_t>({1, 3}),
         "query change should build matches from the current context");
@@ -1122,7 +1122,7 @@ void TestSequenceStateInvalidatesWithNavigationInputsAndContext()
     Require(
         controller.sample_name_matches().empty(),
         "source/context change must not retain query matches from the old manifest");
-    controller.SetSampleNameQuery("thr");
+    (void)controller.SetSampleNameQuery("thr");
     Require(
         controller.sample_name_matches() == std::vector<std::size_t>({3}),
         "query matches should rebuild from the replacement context");

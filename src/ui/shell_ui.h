@@ -116,6 +116,7 @@ private:
         NavigationLatencyInputKind kind);
     void DrainSourceLoads(
         bool allow_snapshot_prefetch = true);
+    void RetireSessionViews();
     void BeginDeferredSourceRestore();
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
@@ -143,9 +144,6 @@ private:
     PanelVisibilityStatePersistence panel_visibility_state_;
     PanelVisibilityState panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
-    // SessionView() can derive state across every sample; retain it until a session mutation.
-    std::optional<SourceCollectionSessionView> session_view_cache_;
-    bool session_view_cache_dirty_ = false;
     mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;

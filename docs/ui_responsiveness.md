@@ -121,13 +121,22 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 
 修复方式：
 
-- 状态未变化时跨帧保留 `session_view_cache_`；所有 Shell session command 继续显式标脏。
-- `RunMaintenance()` 后也标脏，因为维护可能改变 labeling save status 等 view 字段；下一次读取时按需重建。
+- `SourceCollectionSession` 统一拥有 projection revision、跨帧 cache 和旧 generation
+  retirement；Shell/panel 只读取稳定 projection、提交 intent。
+- 只有 roster、snapshot、workflow、navigation 或 labeling presentation revision
+  确认变化时才提升 revision；no-op intent 和无变化 maintenance 不重建。
+- 旧 projection 保留到当前 UI frame 结束，再交给后台 reclaimer，避免 panel
+  持有借用引用时并发析构。
 - 不绕过 `SourceCollectionSession`，不把 filter/sorting/labeling 内部状态泄漏给 UI，也不改变沉浸模式或 presentation contract。
 
 验证：同一份 11,550 条数据、同一份 Portable 本地状态和同一普通窗口 mouse-pan 流程中，1,464 个普通帧只有启动/维护边沿的 2 帧重建 view，其余 1,462 帧重建次数为 0。`view_update` p50/p95 降为 4.155/5.335ms，present interval p50/p95 降为 8.339/9.368ms；用户主观确认恢复流畅。严格 8.3333ms p95 gate 仍受 120Hz 帧节奏尾部影响，本次结论是消除普通窗口相对沉浸模式的 CPU 退化，不是宣称完整 120Hz gate 已通过。
 
-剩余边界：发生 session mutation 或维护后，完整 view 仍会一次性重建；若 future profile 显示 previous/next、labeling 或 filter/sort command 的单次延迟受此影响，应继续缩窄或 owner-cache 对应子 view，而不是恢复 per-frame 重建。当前没有不启动 ImGui/Win32 Shell 即可验证 Render 调用次数的自动化接缝，因此本回归以同数据 Release A/B profile 锁定；session command/view 的业务正确性仍由现有 focused tests 覆盖。
+剩余边界：发生可见 session mutation 或 maintenance 状态变化后，完整 view
+仍会一次性重建；若 future profile 显示 previous/next、labeling 或 filter/sort
+command 的单次延迟受此影响，应继续缩窄或 owner-cache 对应子 view，而不是恢复
+per-frame 重建。当前 headless session regression 会验证稳定读取、no-op command、
+load completion、maintenance、roster mutation 与 pending cancellation 的精确失效；
+上述 Release A/B profile 继续锁定真实数据下的 steady-state 性能基线。
 
 ## 复盘：2026-07-23 folder navigation 重复扫描
 

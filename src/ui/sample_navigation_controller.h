@@ -144,7 +144,7 @@ public:
     [[nodiscard]] std::vector<std::size_t> AdjacentRows(
         SampleNavigationDirection direction,
         SampleNavigationPrefetchPolicy policy = {}) const;
-    void SetSampleNameQuery(std::string query);
+    [[nodiscard]] bool SetSampleNameQuery(std::string query);
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
     [[nodiscard]] const SourceCollectionManifest* active_context() const;

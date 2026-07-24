@@ -304,7 +304,7 @@ public:
         NavigationTargetResolutionReport* target_resolution = nullptr);
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
-    [[nodiscard]] SourceCollectionSessionView View() const;
+    [[nodiscard]] const SourceCollectionSessionView& View();
     // A deferred pending target is the origin for a subsequent navigation command.
     [[nodiscard]] std::optional<std::size_t> EffectiveSampleNavigationIndex() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
@@ -345,9 +345,12 @@ public:
         std::size_t spectrum_index);
     [[nodiscard]] bool CancelActivePendingSampleNavigation();
 
-    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] std::vector<BackgroundRetirementHandle> RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] std::vector<BackgroundRetirementHandle>
+        TakeViewRetirement();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
 private:
@@ -424,6 +427,9 @@ private:
     void RestoreSourceSessionCache();
     void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
+    void InvalidateView();
+    void AppendPendingBackgroundRetirement(
+        std::vector<BackgroundRetirementHandle>& retirement);
     void ApplyWorkflowCommandResult(
         SourceCollectionSessionAction& action,
         const SampleWorkflowCommandResult& command_result,
@@ -441,6 +447,11 @@ private:
     std::optional<std::size_t> pending_background_spectrum_index_;
     std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;
+    std::shared_ptr<SourceCollectionSessionView> session_view_cache_;
+    std::vector<BackgroundRetirementHandle>
+        pending_session_view_retirement_;
+    std::uint64_t session_view_revision_ = 0;
+    std::uint64_t cached_session_view_revision_ = 0;
 };
 
 }  // namespace specforge

@@ -17,6 +17,7 @@
 namespace specforge {
 
 struct SourceCollectionSessionAction {
+    bool source_roster_changed = false;
     bool snapshot_changed = false;
     bool workflow_changed = false;
     bool navigation_inputs_changed = false;
@@ -26,6 +27,9 @@ inline void MergeSourceCollectionSessionAction(
     SourceCollectionSessionAction& target,
     const SourceCollectionSessionAction& source)
 {
+    target.source_roster_changed =
+        target.source_roster_changed ||
+        source.source_roster_changed;
     target.snapshot_changed = target.snapshot_changed || source.snapshot_changed;
     target.workflow_changed = target.workflow_changed || source.workflow_changed;
     target.navigation_inputs_changed = target.navigation_inputs_changed || source.navigation_inputs_changed;

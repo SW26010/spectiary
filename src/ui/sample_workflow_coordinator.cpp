@@ -660,8 +660,11 @@ std::vector<std::filesystem::path> SampleWorkflowCoordinator::AnnotationPathsFor
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleNameQuery(std::string query)
 {
-    navigation_.SetSampleNameQuery(std::move(query));
-    return {};
+    SourceCollectionSessionAction action;
+    action.navigation_inputs_changed =
+        navigation_.SetSampleNameQuery(
+            std::move(query));
+    return action;
 }
 
 SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection(
@@ -669,11 +672,20 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
     std::string matched_name,
     const SpectrumSnapshotHandle& snapshot)
 {
-    navigation_.SetSampleNameQuery(std::move(matched_name));
+    const bool query_changed =
+        navigation_.SetSampleNameQuery(
+            std::move(matched_name));
     std::string query{navigation_.sample_name_query()};
-    return RequestSampleNavigation(
-        SampleNavigationRequest::LocateSampleNameMatch(target_row, std::move(query)),
-        snapshot);
+    SampleWorkflowCommandResult result =
+        RequestSampleNavigation(
+            SampleNavigationRequest::LocateSampleNameMatch(
+                target_row,
+                std::move(query)),
+            snapshot);
+    result.action.navigation_inputs_changed =
+        result.action.navigation_inputs_changed ||
+        query_changed;
+    return result;
 }
 
 SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
@@ -1291,7 +1303,8 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
     return view;
 }
 
-SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumSnapshotHandle& snapshot) const
+SourceCollectionFilterView SampleWorkflowCoordinator::BuildFilterView(
+    const SpectrumSnapshotHandle& snapshot)
 {
     SourceCollectionFilterView view;
     if (prepared_filter_view_) {
@@ -1306,8 +1319,8 @@ SourceCollectionFilterView SampleWorkflowCoordinator::FilterView(const SpectrumS
     return view;
 }
 
-SourceCollectionSampleSortingView SampleWorkflowCoordinator::SortingView(
-    const SpectrumSnapshotHandle& snapshot) const
+SourceCollectionSampleSortingView SampleWorkflowCoordinator::BuildSortingView(
+    const SpectrumSnapshotHandle& snapshot)
 {
     SourceCollectionSampleSortingView view;
     if (prepared_sorting_view_) {
@@ -1330,6 +1343,12 @@ std::optional<std::size_t> SampleWorkflowCoordinator::current_index() const
     return navigation_.current_index();
 }
 
+std::uint64_t
+SampleWorkflowCoordinator::presentation_revision() const
+{
+    return labeling_.View().revision;
+}
+
 std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
     SampleNavigationDirection direction,
     SampleNavigationPrefetchPolicy policy) const
@@ -1337,18 +1356,23 @@ std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
     return navigation_.AdjacentRows(direction, policy);
 }
 
-void SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+bool SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
+    const std::uint64_t labeling_revision_before =
+        labeling_.View().revision;
     navigation_.RunMaintenance(now);
     labeling_.RunMaintenance(now);
     if (!workflow_state_save_scheduler_.ShouldAttemptSave(now)) {
-        return;
+        return labeling_.View().revision !=
+               labeling_revision_before;
     }
     if (SaveWorkflowStateCache()) {
         workflow_state_save_scheduler_.MarkSaveSucceeded();
     } else {
         workflow_state_save_scheduler_.MarkSaveFailed();
     }
+    return labeling_.View().revision !=
+           labeling_revision_before;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator::NextMaintenanceDeadline() const

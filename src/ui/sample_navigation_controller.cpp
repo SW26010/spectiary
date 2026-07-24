@@ -984,14 +984,16 @@ std::vector<std::size_t> SampleNavigationController::AdjacentRows(
     return rows;
 }
 
-void SampleNavigationController::SetSampleNameQuery(std::string query)
+bool SampleNavigationController::SetSampleNameQuery(
+    std::string query)
 {
     SourceSession* session = ActiveSession();
     if (session == nullptr || session->sample_name_query == query) {
-        return;
+        return false;
     }
     session->sample_name_query = std::move(query);
     RecomputeMatches(*session);
+    return true;
 }
 
 std::string_view SampleNavigationController::sample_name_query() const

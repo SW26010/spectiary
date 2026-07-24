@@ -582,6 +582,8 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     SourceCollectionSessionIntent intent,
     NavigationTargetResolutionReport* target_resolution)
 {
+    const std::uint64_t presentation_revision_before =
+        workflow_->presentation_revision();
     const NavigationLatencyTimePoint pending_activation_started_at =
         target_resolution != nullptr ? NavigationLatencyTrace::Now()
                                      : NavigationLatencyTimePoint{};
@@ -778,16 +780,30 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         active_identity && !active_identity->id.empty()) {
         ++live_workflow_revisions_[active_identity->id];
     }
-    for (BackgroundRetirementHandle& resource :
-         pending_background_retirement_) {
-        result.background_retirement.push_back(std::move(resource));
+    if (result.action.source_roster_changed ||
+        result.action.snapshot_changed ||
+        result.action.workflow_changed ||
+        result.action.navigation_inputs_changed ||
+        workflow_->presentation_revision() !=
+            presentation_revision_before) {
+        InvalidateView();
     }
-    pending_background_retirement_.clear();
+    AppendPendingBackgroundRetirement(
+        result.background_retirement);
     return result;
 }
 
-SourceCollectionSessionView SourceCollectionSession::View() const
+const SourceCollectionSessionView& SourceCollectionSession::View()
 {
+    if (session_view_cache_ &&
+        cached_session_view_revision_ ==
+            session_view_revision_) {
+        return *session_view_cache_;
+    }
+    if (session_view_cache_) {
+        pending_session_view_retirement_.push_back(
+            std::move(session_view_cache_));
+    }
     const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
     SourceCollectionSessionView view;
     view.snapshot = snapshot;
@@ -800,9 +816,14 @@ SourceCollectionSessionView SourceCollectionSession::View() const
         snapshot->collection.current_index == *view.navigation.current_index;
     view.current_sample_snapshot = snapshot_matches_navigation ? snapshot : nullptr;
     view.labeling = workflow_->LabelingView(view.current_sample_snapshot);
-    view.filter = workflow_->FilterView(snapshot);
-    view.sorting = workflow_->SortingView(snapshot);
-    return view;
+    view.filter = workflow_->BuildFilterView(snapshot);
+    view.sorting = workflow_->BuildSortingView(snapshot);
+    session_view_cache_ =
+        std::make_shared<SourceCollectionSessionView>(
+            std::move(view));
+    cached_session_view_revision_ =
+        session_view_revision_;
+    return *session_view_cache_;
 }
 
 SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
@@ -962,6 +983,7 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
     if (!remove_result.removed) {
         return action;
     }
+    action.source_roster_changed = true;
 
     if (canceled_source_follow_up_path != nullptr) {
         *canceled_source_follow_up_path = remove_result.removed_path;
@@ -1171,6 +1193,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             result.canceled_source_follow_up_path = previous_snapshot->source.path;
             result.message = "Prepared navigation no longer has a selectable final spectrum.";
         }
+        InvalidateView();
         retire_folder_listing_generation();
         return result;
     }
@@ -1241,6 +1264,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             return SourcePathIdentityKey(source.path) == prepared_path_key;
         });
     MarkSourceSessionCacheDirty();
+    InvalidateView();
+    AppendPendingBackgroundRetirement(
+        result.background_retirement);
     return result;
 }
 
@@ -1311,6 +1337,7 @@ bool SourceCollectionSession::CancelPendingSampleNavigation(
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    InvalidateView();
     return true;
 }
 
@@ -1321,6 +1348,7 @@ bool SourceCollectionSession::CancelActivePendingSampleNavigation()
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    InvalidateView();
     return true;
 }
 
@@ -1501,10 +1529,17 @@ SourceCollectionSessionAction SourceCollectionSession::SetSampleSortDirection(
     return action;
 }
 
-void SourceCollectionSession::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+std::vector<BackgroundRetirementHandle>
+SourceCollectionSession::RunMaintenance(
+    LocalUserStateSaveScheduler::TimePoint now)
 {
     source_session_state_->RunMaintenance(now, SavedSourcesWithAnnotations(), roster_->current_source_index());
-    workflow_->RunMaintenance(now);
+    if (workflow_->RunMaintenance(now)) {
+        InvalidateView();
+    }
+    std::vector<BackgroundRetirementHandle> retirement;
+    AppendPendingBackgroundRetirement(retirement);
+    return retirement;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SourceCollectionSession::NextMaintenanceDeadline() const
@@ -1598,12 +1633,25 @@ std::vector<BackgroundRetirementHandle> SourceCollectionSession::ReleaseBackgrou
 {
     std::vector<BackgroundRetirementHandle> resources =
         workflow_->ReleaseBackgroundResourcesForShutdown();
+    if (session_view_cache_) {
+        resources.push_back(
+            std::move(session_view_cache_));
+    }
     for (BackgroundRetirementHandle& resource :
-         pending_background_retirement_) {
+         pending_session_view_retirement_) {
         resources.push_back(std::move(resource));
     }
-    pending_background_retirement_.clear();
+    pending_session_view_retirement_.clear();
+    AppendPendingBackgroundRetirement(resources);
     return resources;
+}
+
+std::vector<BackgroundRetirementHandle>
+SourceCollectionSession::TakeViewRetirement()
+{
+    return std::exchange(
+        pending_session_view_retirement_,
+        {});
 }
 
 void SourceCollectionSession::PreserveRequiredBackgroundSnapshotLoad()
@@ -1692,6 +1740,23 @@ void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
 void SourceCollectionSession::MarkSourceSessionCacheDirty()
 {
     source_session_state_->MarkDirty();
+}
+
+void SourceCollectionSession::InvalidateView()
+{
+    ++session_view_revision_;
+}
+
+void SourceCollectionSession::AppendPendingBackgroundRetirement(
+    std::vector<BackgroundRetirementHandle>& retirement)
+{
+    retirement.insert(
+        retirement.end(),
+        std::make_move_iterator(
+            pending_background_retirement_.begin()),
+        std::make_move_iterator(
+            pending_background_retirement_.end()));
+    pending_background_retirement_.clear();
 }
 
 void SourceCollectionSession::ApplyWorkflowCommandResult(

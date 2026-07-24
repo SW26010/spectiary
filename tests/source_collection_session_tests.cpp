@@ -3259,11 +3259,13 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
         Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 2,
         "a repeated next should advance from the pending target instead of the presented row");
-    const specforge::SourceCollectionSessionView row_two_pending_view = session.View();
+    const specforge::SourceCollectionSessionView&
+        row_two_pending_view = session.View();
     Require(
         row_two_pending_view.navigation.can_move_previous &&
             !row_two_pending_view.navigation.can_move_next,
         "navigation buttons should use pending row 2 while the visible presentation remains on row 0");
+    (void)session.TakeViewRetirement();
     Require(
         !Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
              .follow_up_spectrum_index,
@@ -3275,10 +3277,22 @@ void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
     Require(
         session.CancelPendingSampleNavigation(source_path, 2),
         "a failed latest background load should cancel its matching pending navigation");
+    const specforge::SourceCollectionSessionView&
+        canceled_pending_view = session.View();
     Require(
-        session.View().navigation.current_index == 0 &&
-            session.CurrentSampleSnapshot() == initial_snapshot,
+        &canceled_pending_view !=
+                &row_two_pending_view &&
+            canceled_pending_view.navigation.current_index ==
+                0 &&
+            !canceled_pending_view.navigation.can_move_previous &&
+            canceled_pending_view.navigation.can_move_next &&
+            session.CurrentSampleSnapshot() ==
+                initial_snapshot,
         "a failed background load should retain the last complete presentation");
+    Require(
+        session.TakeViewRetirement().size() == 1 &&
+            &session.View() == &canceled_pending_view,
+        "pending cancellation should retire exactly one old projection");
     Require(
         Submit(session, MoveSampleNavigation(specforge::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
@@ -4240,13 +4254,258 @@ void TestPreparedProjectionsMoveIntoTheSessionView()
         std::move(context),
         std::move(prepared));
     Require(result.loaded, "prepared projection fixture should load");
-    const specforge::SourceCollectionSessionView view = session.View();
+    const specforge::SourceCollectionSessionView& view = session.View();
     Require(
         view.filter.sources.data() == prepared_filter_storage,
         "prepared filter projection should move into the UI session view");
     Require(
         view.sorting.sources.data() == prepared_sorting_storage,
         "prepared sorting projection should move into the UI session view");
+    const specforge::SourceCollectionSessionView& repeated_view =
+        session.View();
+    Require(
+        &repeated_view == &view &&
+            repeated_view.filter.sources.data() ==
+                prepared_filter_storage &&
+            repeated_view.sorting.sources.data() ==
+                prepared_sorting_storage,
+        "repeated reads should retain the stable prepared projection");
+}
+
+void TestSessionOwnsStableViewInvalidationAndRetirement()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_session_view_revision.npy");
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&, std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "session view revision test must not load synchronously");
+        },
+        UniqueTempPath("_session_view_sources.json"),
+        UniqueTempPath("_session_view_navigation.json"),
+        UniqueTempPath("_session_view_labeling.json"),
+        UniqueTempPath("_session_view_workflow.json"),
+        specforge::SourceCollectionSessionRestoreMode::Deferred);
+
+    const specforge::SourceCollectionSessionView& empty_view =
+        session.View();
+    Require(
+        &session.View() == &empty_view,
+        "unchanged session reads should reuse one projection");
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "session-view-revision",
+        "revision",
+        "source",
+        "context",
+        3};
+    context.manifest.sample_names = {"a", "b", "c"};
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(snapshot, context, 0, {}, {});
+    const specforge::SourceCollectionSessionResult load_result =
+        session.OpenPreparedSource(
+            source_path,
+            0,
+            snapshot,
+            std::move(context),
+            std::move(prepared));
+    Require(
+        load_result.loaded,
+        "load completion fixture should load");
+    Require(
+        empty_view.sources.empty(),
+        "session should retain the stale projection until its reader frame ends");
+    const specforge::SourceCollectionSessionView& loaded_view =
+        session.View();
+    Require(
+        &loaded_view != &empty_view,
+        "load completion should invalidate the projection exactly once");
+    Require(
+        &session.View() == &loaded_view,
+        "repeated loaded-session reads should not rebuild");
+    std::vector<specforge::BackgroundRetirementHandle>
+        retained_view_generations =
+            session.TakeViewRetirement();
+    Require(
+        retained_view_generations.size() == 1,
+        "load completion should expose one stale projection for end-of-frame retirement");
+
+    const specforge::SourceCollectionSessionResult command_result =
+        session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::
+                        SetSampleNameQuery("b")));
+    Require(
+        command_result.action.navigation_inputs_changed,
+        "sample-name query should report a projection mutation");
+    Require(
+        loaded_view.navigation.exact_sample_name.empty(),
+        "session should retain the prior command projection until the frame ends");
+    const specforge::SourceCollectionSessionView& command_view =
+        session.View();
+    Require(
+        &command_view != &loaded_view &&
+            command_view.navigation.exact_sample_name_match &&
+            *command_view.navigation.exact_sample_name_match == 1,
+        "session command should invalidate once and expose its new state");
+    Require(
+        &session.View() == &command_view,
+        "repeated command projection reads should not rebuild");
+    std::vector<specforge::BackgroundRetirementHandle>
+        command_retirement =
+            session.TakeViewRetirement();
+    Require(
+        command_retirement.size() == 1,
+        "one mutating command should retire one projection generation");
+    retained_view_generations.insert(
+        retained_view_generations.end(),
+        std::make_move_iterator(
+            command_retirement.begin()),
+        std::make_move_iterator(
+            command_retirement.end()));
+
+    const specforge::SourceCollectionSessionResult
+        repeated_query_result = session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::
+                        SetSampleNameQuery("b")));
+    Require(
+        !repeated_query_result.action.snapshot_changed &&
+            !repeated_query_result.action.workflow_changed &&
+            !repeated_query_result.action.navigation_inputs_changed &&
+            &session.View() == &command_view &&
+            session.TakeViewRetirement().empty(),
+        "a repeated query must not invalidate or rebuild the projection");
+
+    const specforge::SourceCollectionSessionResult
+        boundary_navigation_result = session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::Move(
+                        specforge::SampleNavigationRequest::
+                            Previous())));
+    Require(
+        !boundary_navigation_result.navigation.moved &&
+            &session.View() == &command_view &&
+            session.TakeViewRetirement().empty(),
+        "boundary navigation must not invalidate or rebuild the projection");
+
+    const specforge::SourceCollectionSessionResult workflow_result =
+        session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                ChangeActiveSampleWorkflow(
+                    specforge::ActiveSampleWorkflowIntent::
+                        StartOrResumeTemporaryLabelingTask()));
+    Require(
+        workflow_result.action.workflow_changed,
+        "maintenance fixture should create a temporary task");
+    const specforge::SourceCollectionSessionView*
+        maintenance_view_before = &session.View();
+    std::vector<specforge::BackgroundRetirementHandle>
+        workflow_retirement =
+            session.TakeViewRetirement();
+    Require(
+        workflow_retirement.size() == 1,
+        "workflow mutation should retire one projection generation");
+    retained_view_generations.insert(
+        retained_view_generations.end(),
+        std::make_move_iterator(
+            workflow_retirement.begin()),
+        std::make_move_iterator(
+            workflow_retirement.end()));
+    bool maintenance_changed_projection = false;
+    std::vector<specforge::BackgroundRetirementHandle>
+        maintenance_retirement;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const std::optional<
+            specforge::LocalUserStateSaveScheduler::TimePoint>
+            deadline = session.NextMaintenanceDeadline();
+        Require(
+            deadline.has_value(),
+            "scheduled labeling state should expose a maintenance deadline");
+        std::vector<specforge::BackgroundRetirementHandle>
+            retired = session.RunMaintenance(*deadline);
+        maintenance_retirement.insert(
+            maintenance_retirement.end(),
+            std::make_move_iterator(retired.begin()),
+            std::make_move_iterator(retired.end()));
+        if (&session.View() !=
+            maintenance_view_before) {
+            maintenance_changed_projection = true;
+            break;
+        }
+    }
+    std::vector<specforge::BackgroundRetirementHandle>
+        view_retirement =
+            session.TakeViewRetirement();
+    Require(
+        maintenance_changed_projection &&
+            view_retirement.size() == 1,
+        "view-visible maintenance should invalidate and retire exactly once");
+    retained_view_generations.insert(
+        retained_view_generations.end(),
+        std::make_move_iterator(
+            view_retirement.begin()),
+        std::make_move_iterator(
+            view_retirement.end()));
+    const specforge::SourceCollectionSessionView*
+        maintenance_view = &session.View();
+    Require(
+        &session.View() == maintenance_view,
+        "unchanged reads after maintenance should reuse one projection");
+}
+
+void TestRemovingInactiveSourceInvalidatesTheSessionView()
+{
+    const std::filesystem::path source_a =
+        UniqueTempPath("_view_roster_a.npy");
+    const std::filesystem::path source_b =
+        UniqueTempPath("_view_roster_b.npy");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    specforge::SourceCollectionSession session =
+        MakeMultiSourceSession(
+            loaded_snapshots,
+            source_a,
+            3,
+            source_b,
+            3);
+    (void)session.Submit(
+        OpenSourceCollection(source_a));
+    (void)session.Submit(
+        OpenSourceCollection(source_b));
+
+    const specforge::SourceCollectionSessionView& before =
+        session.View();
+    Require(
+        before.sources.size() == 2 &&
+            before.current_source_index &&
+            *before.current_source_index == 1,
+        "inactive-source removal fixture should present source B");
+
+    const specforge::SourceCollectionSessionResult result =
+        session.Submit(RemoveSourceCollection(0));
+    Require(
+        result.action.source_roster_changed,
+        "removing an inactive source should report a roster mutation");
+    const specforge::SourceCollectionSessionView& after =
+        session.View();
+    Require(
+        &after != &before &&
+            after.sources.size() == 1 &&
+            after.sources.front().path == source_b &&
+            after.current_source_index &&
+            *after.current_source_index == 0,
+        "removing an inactive source should rebuild the roster projection");
+    Require(
+        session.TakeViewRetirement().size() == 1 &&
+            &session.View() == &after,
+        "inactive-source removal should retire exactly one generation");
 }
 
 void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
@@ -5266,6 +5525,8 @@ void RunAllTests()
     TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow();
     TestPreparedCacheSnapshotPreventsUiCacheReload();
     TestPreparedProjectionsMoveIntoTheSessionView();
+    TestSessionOwnsStableViewInvalidationAndRetirement();
+    TestRemovingInactiveSourceInvalidatesTheSessionView();
     TestSourceSelectionSupersessionRequiresAnActualActivationChange();
     TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession();
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();

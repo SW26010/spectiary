@@ -689,11 +689,6 @@ ShellUi::~ShellUi()
         (void)session_.FlushStateCaches();
         (void)spectral_lines_panel_.Flush();
     }
-    if (session_view_cache_) {
-        source_activation_.RetireResource(
-            std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
-        session_view_cache_.reset();
-    }
     for (BackgroundRetirementHandle& resource : session_.ReleaseBackgroundResourcesForShutdown()) {
         source_activation_.RetireResource(std::move(resource));
     }
@@ -715,6 +710,7 @@ void ShellUi::Render(const ShellStatus& status)
         HandleSampleWorkflowShortcut();
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
+        RetireSessionViews();
         return;
     }
     const PanelVisibilityState previous_panel_visibility = panel_visibility_;
@@ -754,6 +750,7 @@ void ShellUi::Render(const ShellStatus& status)
     panel_visibility_state_.MarkDirtyIfChanged(
         previous_panel_visibility,
         panel_visibility_);
+    RetireSessionViews();
 }
 
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
@@ -763,9 +760,12 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
         ? std::optional<LocalUserStateSaveScheduler::TimePoint>{now + std::chrono::milliseconds(16)}
         : std::nullopt;
     panel_visibility_state_.RunMaintenance(panel_visibility_, now);
-    session_.RunMaintenance(now);
-    // Maintenance can change save-status fields exposed by the derived session view.
-    session_view_cache_dirty_ = true;
+    for (BackgroundRetirementHandle& resource :
+         session_.RunMaintenance(now)) {
+        source_activation_.RetireResource(
+            std::move(resource));
+    }
+    RetireSessionViews();
     spectral_lines_panel_.RunMaintenance(now);
 }
 
@@ -850,9 +850,9 @@ bool ShellUi::latency_sensitive_plot_interaction_active() const
 
 void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum_index)
 {
-    if (source_activation_.OpenSource(path, spectrum_index)) {
-        session_view_cache_dirty_ = true;
-    }
+    (void)source_activation_.OpenSource(
+        path,
+        spectrum_index);
     source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
 }
 
@@ -861,12 +861,6 @@ void ShellUi::DrainSourceLoads(
 {
     auto before_source_activation = [this]() {
         std::vector<BackgroundRetirementHandle> resources;
-        if (session_view_cache_) {
-            resources.push_back(
-                std::make_shared<SourceCollectionSessionView>(
-                    std::move(*session_view_cache_)));
-            session_view_cache_.reset();
-        }
         for (SpectrumValueVector& resource :
              spectrum_view_session_.RetainHeavySnapshotResources()) {
             resources.push_back(std::move(resource));
@@ -880,18 +874,24 @@ void ShellUi::DrainSourceLoads(
             std::move(before_source_activation),
             [this](
                 const SourceCollectionSessionAction& action) {
-                session_view_cache_dirty_ = true;
                 HandleSessionAction(action);
             });
-    if (result.session_changed) {
-        session_view_cache_dirty_ = true;
-    }
+    (void)result;
 }
 
 void ShellUi::BeginDeferredSourceRestore()
 {
     source_activation_.BeginDeferredRestore();
     source_load_service_deadline_ = LocalUserStateSaveScheduler::Clock::now();
+}
+
+void ShellUi::RetireSessionViews()
+{
+    for (BackgroundRetirementHandle& resource :
+         session_.TakeViewRetirement()) {
+        source_activation_.RetireResource(
+            std::move(resource));
+    }
 }
 
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
@@ -988,16 +988,7 @@ void ShellUi::OpenAnnotationFromFilePicker()
 
 const SourceCollectionSessionView& ShellUi::SessionView()
 {
-    if (!session_view_cache_ || session_view_cache_dirty_) {
-        if (session_view_cache_) {
-            source_activation_.RetireResource(
-                std::make_shared<SourceCollectionSessionView>(std::move(*session_view_cache_)));
-            session_view_cache_.reset();
-        }
-        session_view_cache_ = session_.View();
-        session_view_cache_dirty_ = false;
-    }
-    return *session_view_cache_;
+    return session_.View();
 }
 
 SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
@@ -1010,7 +1001,6 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
         source_activation_.Submit(
             std::move(command),
             std::move(navigation));
-    session_view_cache_dirty_ = true;
     HandleSessionAction(result.action);
     source_load_service_deadline_ =
         LocalUserStateSaveScheduler::Clock::now();
