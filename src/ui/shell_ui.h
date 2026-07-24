@@ -1,9 +1,9 @@
 #pragma once
 
+#include "app/application_settings.h"
 #include "domain/spectrum_snapshot.h"
 #include "profile/navigation_latency_trace.h"
 #include "ui/source_collection_panel.h"
-#include "ui/panel_visibility_state_cache_io.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/settings_panel.h"
@@ -60,6 +60,7 @@ public:
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
     [[nodiscard]] bool TakeProfileRecordingToggleRequest();
+    [[nodiscard]] std::filesystem::path profile_output_directory() const;
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
@@ -97,8 +98,6 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSettingsPanel(const ShellStatus& status);
     void RenderSpectralLinesPanel();
-    void LoadCurrentUiLanguage();
-    void ApplyUiLanguageChange(UiLanguage requested_language);
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
     void HandleSampleWorkflowShortcut();
@@ -132,8 +131,7 @@ private:
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
     SettingsPanelUi settings_panel_ui_;
-    std::filesystem::path ui_language_settings_path_;
-    UiLanguage ui_language_ = UiLanguage::English;
+    ApplicationSettings application_settings_;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     ImFont* spectral_line_label_font_ = nullptr;
     bool immersive_plot_mode_ = false;
@@ -141,8 +139,6 @@ private:
     SampleWorkflowShortcut sample_workflow_shortcut_;
     bool persist_local_state_ = true;
     bool layout_seeded_ = false;
-    PanelVisibilityStatePersistence panel_visibility_state_;
-    PanelVisibilityState panel_visibility_;
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
     mutable std::optional<LocalUserStateSaveScheduler::TimePoint> source_load_service_deadline_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;

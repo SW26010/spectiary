@@ -21,6 +21,9 @@ enum class ProfileOutputDirectorySource {
 struct ProfileOutputDirectoryResolution {
     std::filesystem::path directory;
     ProfileOutputDirectorySource source = ProfileOutputDirectorySource::Default;
+
+    [[nodiscard]] bool operator==(
+        const ProfileOutputDirectoryResolution&) const = default;
 };
 
 [[nodiscard]] std::filesystem::path DefaultProfileSettingsPath();
@@ -34,6 +37,5 @@ struct ProfileOutputDirectoryResolution {
     const ProfileSettings& settings,
     const std::filesystem::path& default_directory,
     const std::optional<std::filesystem::path>& environment_override);
-[[nodiscard]] ProfileOutputDirectoryResolution EffectiveProfileOutputDirectory();
 
 }  // namespace specforge

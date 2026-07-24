@@ -95,7 +95,6 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     view.relationship = local_task == nullptr
         ? annotation.relationship
         : SampleAnnotationWorkflowRelationship::LocalLabelingTask;
-    view.relationship_label = std::string{SampleAnnotationWorkflowRelationshipLabel(view.relationship)};
     view.message = annotation.metadata_warning;
     if (local_task != nullptr && current_index < local_task->values.size()) {
         view.display_text = FormatSampleLabelValue(local_task->label_set, local_task->values[current_index]);
@@ -128,7 +127,6 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.name = std::move(display_name);
     view.path = task.output_path.value_or(std::filesystem::path{});
     view.relationship = SampleAnnotationWorkflowRelationship::LocalLabelingTask;
-    view.relationship_label = std::string{SampleAnnotationWorkflowRelationshipLabel(view.relationship)};
     if (current_index < task.values.size()) {
         view.display_text = FormatSampleLabelValue(task.label_set, task.values[current_index]);
     } else {

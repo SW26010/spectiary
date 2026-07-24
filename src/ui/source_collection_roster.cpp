@@ -58,18 +58,21 @@ bool HasDiagnosticAtLeast(const SpectrumSnapshotHandle& snapshot, SpectrumDiagno
     });
 }
 
-std::string_view SourceStateLabel(const SpectrumSnapshotHandle& snapshot)
+SourceCollectionSourceState SourceState(
+    const SpectrumSnapshotHandle& snapshot)
 {
     if (!snapshot) {
-        return "none";
+        return SourceCollectionSourceState::Unavailable;
     }
     if (HasDiagnosticAtLeast(snapshot, SpectrumDiagnosticSeverity::Error)) {
-        return "error";
+        return SourceCollectionSourceState::Error;
     }
     if (snapshot->capabilities.can_plot_current_spectrum) {
-        return snapshot->diagnostics.empty() ? "loaded" : "loaded with diagnostics";
+        return snapshot->diagnostics.empty()
+            ? SourceCollectionSourceState::Loaded
+            : SourceCollectionSourceState::LoadedWithDiagnostics;
     }
-    return "not plottable";
+    return SourceCollectionSourceState::NotPlottable;
 }
 
 std::string SnapshotDisplayNameText(const SpectrumSnapshotHandle& snapshot, const std::filesystem::path& path)
@@ -80,10 +83,11 @@ std::string SnapshotDisplayNameText(const SpectrumSnapshotHandle& snapshot, cons
     return FileNameToUtf8(path);
 }
 
-std::string SnapshotTypeLabelText(const SpectrumSnapshotHandle& snapshot)
+std::optional<std::string> SnapshotType(
+    const SpectrumSnapshotHandle& snapshot)
 {
     if (!snapshot) {
-        return "unknown";
+        return std::nullopt;
     }
 
     const std::string_view format = MetadataValue(snapshot->source.metadata, "format");
@@ -92,12 +96,9 @@ std::string SnapshotTypeLabelText(const SpectrumSnapshotHandle& snapshot)
     }
 
     const std::string_view source_type = MetadataValue(snapshot->source.metadata, "source_type");
-    return source_type.empty() ? std::string{"unknown"} : std::string{source_type};
-}
-
-std::string SnapshotStateLabelText(const SpectrumSnapshotHandle& snapshot)
-{
-    return std::string{SourceStateLabel(snapshot)};
+    return source_type.empty()
+        ? std::nullopt
+        : std::optional<std::string>{source_type};
 }
 
 std::size_t EstimatedSnapshotPayloadBytes(const SpectrumSnapshotHandle& snapshot)
@@ -174,8 +175,8 @@ std::vector<SourceCollectionSourceView> SourceCollectionRoster::SourceViews() co
         SourceCollectionSourceView source_view;
         source_view.path = entry.path;
         source_view.display_name = entry.display_name;
-        source_view.type_label = entry.type_label;
-        source_view.state_label = entry.state_label;
+        source_view.type = entry.type;
+        source_view.state = entry.state;
         views.push_back(std::move(source_view));
     }
     return views;
@@ -499,8 +500,8 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     if (match != sources_.end()) {
         match->path = path;
         match->display_name = SnapshotDisplayNameText(snapshot, path);
-        match->type_label = SnapshotTypeLabelText(snapshot);
-        match->state_label = SnapshotStateLabelText(snapshot);
+        match->type = SnapshotType(snapshot);
+        match->state = SourceState(snapshot);
         const bool same_residency_boundary = ResidencyBoundariesMatch(
             match->context_reuse_proof,
             match->folder_listing_generation,
@@ -562,8 +563,8 @@ SourceCollectionRoster::AddOrUpdateSourceResult SourceCollectionRoster::AddOrUpd
     entry.path = path;
     entry.key = key;
     entry.display_name = SnapshotDisplayNameText(snapshot, path);
-    entry.type_label = SnapshotTypeLabelText(snapshot);
-    entry.state_label = SnapshotStateLabelText(snapshot);
+    entry.type = SnapshotType(snapshot);
+    entry.state = SourceState(snapshot);
     entry.cached_snapshot = std::move(snapshot);
     entry.folder_listing_generation = std::move(folder_listing_generation);
     entry.context_reuse_proof = std::move(context_reuse_proof);

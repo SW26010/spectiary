@@ -45,7 +45,6 @@ struct SourceCollectionAnnotationValueView {
     std::filesystem::path path;
     SampleAnnotationWorkflowRelationship relationship =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
-    std::string relationship_label;
     std::string display_text;
     std::string message;
     bool missing = false;
@@ -159,11 +158,20 @@ struct SourceCollectionSampleSortingView {
     std::vector<SourceCollectionSampleSortSourceView> available_sources;
 };
 
+enum class SourceCollectionSourceState {
+    Unavailable,
+    Error,
+    Loaded,
+    LoadedWithDiagnostics,
+    NotPlottable,
+};
+
 struct SourceCollectionSourceView {
     std::filesystem::path path;
     std::string display_name;
-    std::string type_label;
-    std::string state_label;
+    std::optional<std::string> type;
+    SourceCollectionSourceState state =
+        SourceCollectionSourceState::Unavailable;
 };
 
 struct SourceCollectionSavedSource {

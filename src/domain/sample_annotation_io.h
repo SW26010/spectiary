@@ -104,7 +104,5 @@ public:
 [[nodiscard]] std::string SampleAnnotationValueKey(const SampleAnnotationValue& value);
 [[nodiscard]] std::optional<int> SampleAnnotationValueAsInt(const SampleAnnotationValue& value);
 [[nodiscard]] std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind);
-[[nodiscard]] std::string_view SampleAnnotationWorkflowRelationshipLabel(
-    SampleAnnotationWorkflowRelationship relationship);
 
 }  // namespace specforge

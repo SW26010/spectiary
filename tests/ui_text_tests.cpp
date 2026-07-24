@@ -1,3 +1,5 @@
+#include "domain/sample_annotation_io.h"
+#include "ui/source_collection_session_types.h"
 #include "ui/ui_text.h"
 
 #include <array>
@@ -68,6 +70,33 @@ void TestRepresentativeMappingsAreExact()
         "Chinese save failure should be exact");
 }
 
+void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
+{
+    using specforge::SampleAnnotationWorkflowRelationship;
+    using specforge::SourceCollectionSourceState;
+    using specforge::UiLanguage;
+    using specforge::UiText;
+
+    Require(
+        UiText(
+            UiLanguage::English,
+            SourceCollectionSourceState::LoadedWithDiagnostics) ==
+            "loaded with diagnostics",
+        "English source state should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            SourceCollectionSourceState::LoadedWithDiagnostics) ==
+            "已加载（含诊断）",
+        "Chinese source state should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            SampleAnnotationWorkflowRelationship::
+                ExternalLabelResult) == "外部",
+        "Chinese annotation relationship should be exact");
+}
+
 void TestInvalidLanguageFallsBackToEnglish()
 {
     constexpr std::array kInvalidLanguages = {
@@ -108,6 +137,7 @@ int main()
     try {
         TestEveryDisplayTextIsPresent();
         TestRepresentativeMappingsAreExact();
+        TestSessionSemanticsAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();
         TestCountSentinelIsNotDisplayable();
         return 0;

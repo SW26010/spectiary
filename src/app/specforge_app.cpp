@@ -315,7 +315,8 @@ void SpecForgeApp::Initialize(
         ui_.OpenSource(*initial_source);
     }
 
-    profile_ = ProfileSink::CreateDefault();
+    profile_ = ProfileSink::CreateDefault(
+        ui_.profile_output_directory());
     if (profile_.is_open()) {
         profile_status_message_ = "Recording started by SPECFORGE_PROFILE.";
         LogProfileRecordingStarted("environment", "startup");
@@ -890,7 +891,8 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
     if (profile_.is_open() || profile_.is_stopping()) {
         return;
     }
-    if (!profile_.StartDefault()) {
+    if (!profile_.StartDefault(
+            ui_.profile_output_directory())) {
         profile_status_message_ = "Could not start recording: " + profile_.error_message();
         displayed_profile_stop_reason_ = ProfileSink::StopReason::WriteFailure;
         return;

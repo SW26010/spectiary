@@ -206,6 +206,7 @@ specforge_configure_production_target(specforge_sessions)
 target_link_libraries(specforge_sessions PUBLIC specforge_core)
 
 add_library(specforge_desktop_ui STATIC
+    src/app/application_settings.cpp
     src/plot/plot_touchpad_gesture.cpp
     src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
@@ -516,6 +517,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_scientific_label_tests
     tests/scientific_label_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_application_settings_tests
+    tests/application_settings_tests.cpp
     specforge_desktop_ui
 )
 specforge_add_test(

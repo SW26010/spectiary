@@ -2,6 +2,7 @@
 
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/source_collection_session.h"
+#include "ui/ui_text.h"
 
 #include <array>
 #include <filesystem>
@@ -27,6 +28,7 @@ public:
 
     [[nodiscard]] SourceCollectionSessionAction RenderFiles(
         const SourceCollectionSessionView& session_view,
+        UiLanguage language,
         const SourceCollectionSessionIntentSubmitter& submit,
         bool* open,
         const SourceCollectionPathPicker& choose_source_file,
@@ -43,6 +45,7 @@ public:
 
     [[nodiscard]] SourceCollectionSessionAction RenderAnnotations(
         const SourceCollectionSessionView& session_view,
+        UiLanguage language,
         const SourceCollectionSessionIntentSubmitter& submit,
         bool* open,
         const SourceCollectionPathPicker& choose_annotation_file);

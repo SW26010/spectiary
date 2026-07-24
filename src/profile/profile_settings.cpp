@@ -2,7 +2,6 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
-#include "app/runtime_paths.h"
 
 #include <cstdlib>
 #include <memory>
@@ -95,15 +94,6 @@ ProfileOutputDirectoryResolution ResolveProfileOutputDirectory(
         return {*settings.output_directory, ProfileOutputDirectorySource::UserSetting};
     }
     return {default_directory, ProfileOutputDirectorySource::Default};
-}
-
-ProfileOutputDirectoryResolution EffectiveProfileOutputDirectory()
-{
-    const RuntimePaths paths = DefaultRuntimePaths();
-    return ResolveProfileOutputDirectory(
-        LoadProfileSettings(DefaultProfileSettingsPath()),
-        paths.profile_log_directory,
-        ProfileOutputDirectoryEnvironmentOverride());
 }
 
 }  // namespace specforge

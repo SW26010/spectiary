@@ -4,6 +4,9 @@
 
 namespace specforge {
 
+enum class SampleAnnotationWorkflowRelationship;
+enum class SourceCollectionSourceState;
+
 enum class UiLanguage {
     English,
     SimplifiedChinese,
@@ -20,9 +23,24 @@ enum class UiTextId {
     LocalizationInProgress,
     LanguageLoadWarning,
     LanguageSaveError,
+    UnknownSourceType,
+    SourceStateUnavailable,
+    SourceStateError,
+    SourceStateLoaded,
+    SourceStateLoadedWithDiagnostics,
+    SourceStateNotPlottable,
+    AnnotationRelationshipPlain,
+    AnnotationRelationshipExternal,
+    AnnotationRelationshipLocal,
     Count,  // Non-display sentinel.
 };
 
 [[nodiscard]] std::string_view UiText(UiLanguage language, UiTextId text_id) noexcept;
+[[nodiscard]] std::string_view UiText(
+    UiLanguage language,
+    SourceCollectionSourceState state) noexcept;
+[[nodiscard]] std::string_view UiText(
+    UiLanguage language,
+    SampleAnnotationWorkflowRelationship relationship) noexcept;
 
 }  // namespace specforge

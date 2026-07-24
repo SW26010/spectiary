@@ -599,6 +599,15 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(open_action.workflow_changed, "opening a source should activate a workflow identity");
     Require(open_action.navigation_inputs_changed, "opening a source should refresh navigation inputs");
     Require(session.View().sources.size() == 1, "opening a source should add one source entry");
+    const specforge::SourceCollectionSourceView& source =
+        session.View().sources.front();
+    Require(
+        source.type && *source.type == "test",
+        "session projection should preserve the source type semantic value");
+    Require(
+        source.state ==
+            specforge::SourceCollectionSourceState::Loaded,
+        "session projection should expose a typed source state");
     Require(session.View().snapshot->collection.current_index == 0, "opened snapshot should start at requested index");
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());

@@ -98,18 +98,19 @@ void PanelVisibilityStatePersistence::MarkDirtyIfChanged(
     }
 }
 
-void PanelVisibilityStatePersistence::RunMaintenance(
+std::optional<bool> PanelVisibilityStatePersistence::RunMaintenance(
     const PanelVisibilityState& state,
     LocalUserStateSaveScheduler::TimePoint now)
 {
     if (!save_scheduler_.ShouldAttemptSave(now)) {
-        return;
+        return std::nullopt;
     }
     if (SavePanelVisibilityStateCache(cache_path_, state)) {
         save_scheduler_.MarkSaveSucceeded();
-        return;
+        return true;
     }
     save_scheduler_.MarkSaveFailed();
+    return false;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint>

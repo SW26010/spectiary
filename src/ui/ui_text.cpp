@@ -1,5 +1,8 @@
 #include "ui/ui_text.h"
 
+#include "domain/sample_annotation_io.h"
+#include "ui/source_collection_session_types.h"
+
 #include <array>
 #include <cstddef>
 
@@ -23,6 +26,15 @@ constexpr std::array kTextByLanguage = {
             "The saved application language could not be loaded. English is being used."},
         std::string_view{
             "The application language could not be saved. The previous language is still in use."},
+        std::string_view{"unknown"},
+        std::string_view{"none"},
+        std::string_view{"error"},
+        std::string_view{"loaded"},
+        std::string_view{"loaded with diagnostics"},
+        std::string_view{"not plottable"},
+        std::string_view{"plain"},
+        std::string_view{"external"},
+        std::string_view{"local"},
     },
     std::array{
         std::string_view{"设置"},
@@ -34,6 +46,15 @@ constexpr std::array kTextByLanguage = {
         std::string_view{"本地化仍在逐步进行；SpecForge 的其它界面目前仍保持英文。"},
         std::string_view{"无法加载已保存的应用语言，当前使用英语。"},
         std::string_view{"无法保存应用语言，仍继续使用此前的语言。"},
+        std::string_view{"未知"},
+        std::string_view{"无"},
+        std::string_view{"错误"},
+        std::string_view{"已加载"},
+        std::string_view{"已加载（含诊断）"},
+        std::string_view{"无法绘图"},
+        std::string_view{"普通"},
+        std::string_view{"外部"},
+        std::string_view{"本地"},
     },
 };
 
@@ -59,6 +80,48 @@ std::string_view UiText(UiLanguage language, UiTextId text_id) noexcept
 
     const std::string_view translated = kTextByLanguage[language_index][text_index];
     return translated.empty() ? english_text : translated;
+}
+
+std::string_view UiText(
+    UiLanguage language,
+    SourceCollectionSourceState state) noexcept
+{
+    switch (state) {
+    case SourceCollectionSourceState::Unavailable:
+        return UiText(language, UiTextId::SourceStateUnavailable);
+    case SourceCollectionSourceState::Error:
+        return UiText(language, UiTextId::SourceStateError);
+    case SourceCollectionSourceState::Loaded:
+        return UiText(language, UiTextId::SourceStateLoaded);
+    case SourceCollectionSourceState::LoadedWithDiagnostics:
+        return UiText(
+            language,
+            UiTextId::SourceStateLoadedWithDiagnostics);
+    case SourceCollectionSourceState::NotPlottable:
+        return UiText(language, UiTextId::SourceStateNotPlottable);
+    }
+    return UiText(language, UiTextId::SourceStateUnavailable);
+}
+
+std::string_view UiText(
+    UiLanguage language,
+    SampleAnnotationWorkflowRelationship relationship) noexcept
+{
+    switch (relationship) {
+    case SampleAnnotationWorkflowRelationship::PlainAnnotation:
+        return UiText(
+            language,
+            UiTextId::AnnotationRelationshipPlain);
+    case SampleAnnotationWorkflowRelationship::ExternalLabelResult:
+        return UiText(
+            language,
+            UiTextId::AnnotationRelationshipExternal);
+    case SampleAnnotationWorkflowRelationship::LocalLabelingTask:
+        return UiText(
+            language,
+            UiTextId::AnnotationRelationshipLocal);
+    }
+    return UiText(language, UiTextId::AnnotationRelationshipPlain);
 }
 
 }  // namespace specforge

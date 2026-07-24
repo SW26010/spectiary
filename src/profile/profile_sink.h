@@ -59,11 +59,12 @@ public:
     ProfileSink(const ProfileSink&) = delete;
     ProfileSink& operator=(const ProfileSink&) = delete;
 
-    static ProfileSink CreateDefault();
+    static ProfileSink CreateDefault(
+        const std::filesystem::path& output_directory);
     static const char* StopReasonName(StopReason reason) noexcept;
-    [[nodiscard]] static std::filesystem::path EffectiveOutputDirectory();
 
-    [[nodiscard]] bool StartDefault();
+    [[nodiscard]] bool StartDefault(
+        const std::filesystem::path& output_directory);
     [[nodiscard]] bool Start(std::filesystem::path path);
     [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
     void SetStateChangeCallback(StateChangeCallback callback);

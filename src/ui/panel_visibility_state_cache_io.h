@@ -41,7 +41,7 @@ public:
     void MarkDirtyIfChanged(
         const PanelVisibilityState& previous,
         const PanelVisibilityState& current);
-    void RunMaintenance(
+    [[nodiscard]] std::optional<bool> RunMaintenance(
         const PanelVisibilityState& state,
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;

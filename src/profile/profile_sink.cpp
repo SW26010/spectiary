@@ -1,7 +1,5 @@
 #include "profile/profile_sink.h"
 
-#include "profile/profile_settings.h"
-
 #include <algorithm>
 #include <atomic>
 #include <charconv>
@@ -155,11 +153,12 @@ ProfileSink& ProfileSink::operator=(ProfileSink&& other) noexcept
     return *this;
 }
 
-ProfileSink ProfileSink::CreateDefault()
+ProfileSink ProfileSink::CreateDefault(
+    const std::filesystem::path& output_directory)
 {
     ProfileSink sink;
     if (IsProfileEnabled()) {
-        (void)sink.StartDefault();
+        (void)sink.StartDefault(output_directory);
     }
     return sink;
 }
@@ -181,21 +180,18 @@ const char* ProfileSink::StopReasonName(StopReason reason) noexcept
     return "unknown";
 }
 
-std::filesystem::path ProfileSink::EffectiveOutputDirectory()
-{
-    return EffectiveProfileOutputDirectory().directory;
-}
-
-bool ProfileSink::StartDefault()
+bool ProfileSink::StartDefault(
+    const std::filesystem::path& output_directory)
 {
     Stop();
     error_message_.clear();
-    const std::filesystem::path directory = EffectiveOutputDirectory();
     const std::string stem = "specforge-profile-" + TimestampForFileName();
-    std::filesystem::path path = directory / (stem + ".jsonl");
+    std::filesystem::path path =
+        output_directory / (stem + ".jsonl");
     std::error_code exists_error;
     for (unsigned int suffix = 2; std::filesystem::exists(path, exists_error) && !exists_error; ++suffix) {
-        path = directory / (stem + "-" + std::to_string(suffix) + ".jsonl");
+        path = output_directory /
+               (stem + "-" + std::to_string(suffix) + ".jsonl");
     }
     if (exists_error) {
         error_message_ = "Could not inspect the profile output directory: " + exists_error.message();

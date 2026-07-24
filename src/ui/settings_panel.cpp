@@ -138,16 +138,10 @@ void RenderReadOnlyValue(const char* label, const char* value)
 SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
 {
     const RuntimePaths paths = DefaultRuntimePaths();
-    const ProfileOutputDirectoryResolution profile_directory =
-        EffectiveProfileOutputDirectory();
     return {
         .version = SPECFORGE_VERSION,
         .release_profile = ReleaseProfileName(paths.release_profile),
         .data_directory = paths.local_user_state_root,
-        .log_directory = profile_directory.directory,
-        .default_profile_output_directory = paths.profile_log_directory,
-        .profile_settings_path = DefaultProfileSettingsPath(),
-        .profile_output_directory_source = profile_directory.source,
     };
 }
 
@@ -159,12 +153,6 @@ SettingsPanelUi::SettingsPanelUi()
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
     : environment_(std::move(environment))
 {
-    if (environment_.default_profile_output_directory.empty()) {
-        environment_.default_profile_output_directory = environment_.log_directory;
-    }
-    if (environment_.profile_settings_path.empty()) {
-        environment_.profile_settings_path = DefaultProfileSettingsPath();
-    }
 }
 
 void SettingsPanelUi::Open()
@@ -178,7 +166,7 @@ void SettingsPanelUi::Open()
 }
 
 void SettingsPanelUi::Render(
-    UiLanguage language,
+    const ApplicationSettingsView& settings,
     const SettingsPanelStatus& status)
 {
     if (!open_) {
@@ -199,7 +187,8 @@ void SettingsPanelUi::Render(
         focus_requested_ = false;
     }
 
-    const std::string settings_window = SettingsWindowLabel(language);
+    const std::string settings_window =
+        SettingsWindowLabel(settings.language);
     if (!ImGui::Begin(
             settings_window.c_str(),
             &open_,
@@ -209,13 +198,15 @@ void SettingsPanelUi::Render(
     }
 
     const std::string widest_navigation_label =
-        SectionLabel(SettingsSection::DataAndRecovery, language);
+        SectionLabel(
+            SettingsSection::DataAndRecovery,
+            settings.language);
     const float navigation_width = std::max(
         kMinimumNavigationWidth,
         ImGui::CalcTextSize(widest_navigation_label.c_str()).x +
             ImGui::GetStyle().WindowPadding.x * 2.0f);
     if (ImGui::BeginChild("##SettingsNavigation", ImVec2(navigation_width, 0.0f), true)) {
-        RenderNavigation(language);
+        RenderNavigation(settings.language);
     }
     ImGui::EndChild();
 
@@ -225,7 +216,7 @@ void SettingsPanelUi::Render(
             ImGui::SetScrollY(0.0f);
             content_scroll_reset_requested_ = false;
         }
-        RenderSelectedSection(language, status);
+        RenderSelectedSection(settings, status);
     }
     ImGui::EndChild();
     ImGui::End();
@@ -250,57 +241,12 @@ bool SettingsPanelUi::TakeProfileOutputDirectorySelectionRequest()
     return requested;
 }
 
-std::optional<UiLanguage> SettingsPanelUi::TakeLanguageChangeRequest()
+std::optional<ApplicationSettingsIntent>
+SettingsPanelUi::TakeApplicationSettingsIntent()
 {
-    std::optional<UiLanguage> requested =
-        std::exchange(language_change_requested_, std::nullopt);
+    std::optional<ApplicationSettingsIntent> requested =
+        std::exchange(application_settings_intent_, std::nullopt);
     return requested;
-}
-
-void SettingsPanelUi::SetLanguageFeedback(
-    SettingsPanelLanguageFeedbackKind kind,
-    std::string detail)
-{
-    language_feedback_kind_ = kind;
-    language_feedback_detail_ =
-        kind == SettingsPanelLanguageFeedbackKind::None
-        ? std::string{}
-        : std::move(detail);
-}
-
-void SettingsPanelUi::ApplyProfileOutputDirectorySelection(std::filesystem::path directory)
-{
-    if (environment_.profile_output_directory_source ==
-        ProfileOutputDirectorySource::Environment) {
-        action_failed_ = true;
-        action_status_ =
-            "The output directory is controlled by SPECFORGE_PROFILE_DIR.";
-        return;
-    }
-    if (directory.empty()) {
-        action_failed_ = true;
-        action_status_ = "The profile output directory cannot be empty.";
-        return;
-    }
-
-    std::string error;
-    if (!SaveProfileSettings(
-            environment_.profile_settings_path,
-            {.output_directory = directory},
-            &error)) {
-        action_failed_ = true;
-        action_status_ = error.empty()
-            ? "Could not save the profile output directory."
-            : "Could not save the profile output directory: " + error;
-        return;
-    }
-
-    environment_.log_directory = std::move(directory);
-    environment_.profile_output_directory_source =
-        ProfileOutputDirectorySource::UserSetting;
-    action_failed_ = false;
-    action_status_ =
-        "Profile output directory updated. It will be used for the next recording.";
 }
 
 void SettingsPanelUi::RenderNavigation(UiLanguage language)
@@ -319,7 +265,7 @@ void SettingsPanelUi::RenderNavigation(UiLanguage language)
 }
 
 void SettingsPanelUi::RenderSelectedSection(
-    UiLanguage language,
+    const ApplicationSettingsView& settings,
     const SettingsPanelStatus& status)
 {
     switch (selected_section_) {
@@ -330,7 +276,7 @@ void SettingsPanelUi::RenderSelectedSection(
         RenderAppearance();
         return;
     case SettingsSection::Language:
-        RenderLanguage(language);
+        RenderLanguage(settings);
         return;
     case SettingsSection::Input:
         RenderInput();
@@ -339,10 +285,10 @@ void SettingsPanelUi::RenderSelectedSection(
         RenderDataAndRecovery();
         return;
     case SettingsSection::Diagnostics:
-        RenderDiagnostics(status);
+        RenderDiagnostics(settings, status);
         return;
     case SettingsSection::About:
-        RenderAbout();
+        RenderAbout(settings);
         return;
     }
 }
@@ -373,8 +319,10 @@ void SettingsPanelUi::RenderAppearance()
     RenderUnavailableNote("The current UI uses the built-in dark style.");
 }
 
-void SettingsPanelUi::RenderLanguage(UiLanguage language)
+void SettingsPanelUi::RenderLanguage(
+    const ApplicationSettingsView& settings)
 {
+    const UiLanguage language = settings.language;
     RenderSectionHeading(
         UiText(language, UiTextId::Language),
         UiText(language, UiTextId::LanguagePageDescription));
@@ -400,7 +348,9 @@ void SettingsPanelUi::RenderLanguage(UiLanguage language)
                     : "SpecForgeUiLanguageSimplifiedChinese");
             if (ImGui::Selectable(option_label.c_str(), selected) &&
                 !selected) {
-                language_change_requested_ = candidate;
+                application_settings_intent_ =
+                    ApplicationSettingsIntent::SetLanguage(
+                        candidate);
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
@@ -419,15 +369,16 @@ void SettingsPanelUi::RenderLanguage(UiLanguage language)
         coverage.data());
     ImGui::PopTextWrapPos();
 
-    if (language_feedback_kind_ ==
-        SettingsPanelLanguageFeedbackKind::None) {
+    if (settings.status.setting != ApplicationSetting::Language ||
+        settings.status.kind ==
+            ApplicationSettingsStatusKind::Ready) {
         return;
     }
 
     ImGui::Spacing();
     const bool failed =
-        language_feedback_kind_ ==
-        SettingsPanelLanguageFeedbackKind::SaveError;
+        settings.status.kind !=
+        ApplicationSettingsStatusKind::LoadWarning;
     const UiTextId feedback_text_id = failed
         ? UiTextId::LanguageSaveError
         : UiTextId::LanguageLoadWarning;
@@ -442,10 +393,10 @@ void SettingsPanelUi::RenderLanguage(UiLanguage language)
         "%.*s",
         static_cast<int>(feedback.size()),
         feedback.data());
-    if (!language_feedback_detail_.empty()) {
+    if (!settings.status.detail.empty()) {
         ImGui::TextDisabled(
             "%s",
-            language_feedback_detail_.c_str());
+            settings.status.detail.c_str());
     }
     ImGui::PopTextWrapPos();
 }
@@ -513,7 +464,9 @@ void SettingsPanelUi::RenderDataAndRecovery()
     }
 }
 
-void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
+void SettingsPanelUi::RenderDiagnostics(
+    const ApplicationSettingsView& settings,
+    const SettingsPanelStatus& status)
 {
     RenderSectionHeading(
         "Diagnostics",
@@ -561,12 +514,13 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
 
     ImGui::Spacing();
     ImGui::SeparatorText("Profile output directory");
-    const std::string output_path = PathToUtf8(environment_.log_directory);
+    const std::string output_path =
+        PathToUtf8(settings.profile_output_directory);
     ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(output_path.c_str());
     ImGui::PopTextWrapPos();
 
-    switch (environment_.profile_output_directory_source) {
+    switch (settings.profile_output_directory_source) {
     case ProfileOutputDirectorySource::Default:
         ImGui::TextDisabled("Source: release-profile default");
         break;
@@ -581,7 +535,7 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
     const bool directory_editing_disabled =
         status.profile_open ||
         status.profile_stopping ||
-        environment_.profile_output_directory_source ==
+        settings.profile_output_directory_source ==
             ProfileOutputDirectorySource::Environment;
     if (directory_editing_disabled) {
         ImGui::BeginDisabled();
@@ -596,7 +550,7 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
     ImGui::SameLine();
     const bool reset_disabled =
         directory_editing_disabled ||
-        environment_.profile_output_directory_source !=
+        settings.profile_output_directory_source !=
             ProfileOutputDirectorySource::UserSetting;
     if (reset_disabled) {
         ImGui::BeginDisabled();
@@ -610,14 +564,18 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
 
     ImGui::SameLine();
     if (ImGui::Button("Open Output Folder")) {
-        OpenDirectory(environment_.log_directory, "profile output folder");
+        OpenDirectory(
+            settings.profile_output_directory,
+            "profile output folder");
     }
     ImGui::SameLine();
     if (ImGui::Button("Copy Path##ProfileOutput")) {
-        CopyPath(environment_.log_directory, "Profile output path copied.");
+        CopyPath(
+            settings.profile_output_directory,
+            "Profile output path copied.");
     }
 
-    if (environment_.profile_output_directory_source ==
+    if (settings.profile_output_directory_source ==
         ProfileOutputDirectorySource::Environment) {
         ImGui::PushTextWrapPos();
         ImGui::TextDisabled(
@@ -628,6 +586,21 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
         ImGui::TextDisabled(
             "Stop the current recording before changing its output directory.");
         ImGui::PopTextWrapPos();
+    }
+
+    if (settings.status.setting ==
+            ApplicationSetting::ProfileOutputDirectory &&
+        settings.status.kind !=
+            ApplicationSettingsStatusKind::Ready) {
+        ImGui::Spacing();
+        ImGui::TextColored(
+            ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+            "Could not update the profile output directory.");
+        if (!settings.status.detail.empty()) {
+            ImGui::TextDisabled(
+                "%s",
+                settings.status.detail.c_str());
+        }
     }
 
     if (!action_status_.empty()) {
@@ -643,7 +616,8 @@ void SettingsPanelUi::RenderDiagnostics(const SettingsPanelStatus& status)
     }
 }
 
-void SettingsPanelUi::RenderAbout()
+void SettingsPanelUi::RenderAbout(
+    const ApplicationSettingsView& settings)
 {
     RenderSectionHeading("About", "Version, licensing, and diagnostic information for this build.");
 
@@ -673,17 +647,21 @@ void SettingsPanelUi::RenderAbout()
 
     ImGui::Spacing();
     ImGui::SeparatorText("Diagnostics");
-    const std::string log_path = PathToUtf8(environment_.log_directory);
+    const std::string log_path =
+        PathToUtf8(settings.profile_output_directory);
     ImGui::TextDisabled("Performance logs");
     ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(log_path.c_str());
     ImGui::PopTextWrapPos();
     if (ImGui::Button("Open Log Folder")) {
-        OpenDirectory(environment_.log_directory, "log folder");
+        OpenDirectory(
+            settings.profile_output_directory,
+            "log folder");
     }
     ImGui::SameLine();
     if (ImGui::Button("Copy Diagnostic Information")) {
-        CopyDiagnosticInformation();
+        CopyDiagnosticInformation(
+            settings.profile_output_directory);
     }
 
     if (!action_status_.empty()) {
@@ -698,30 +676,9 @@ void SettingsPanelUi::RenderAbout()
 
 void SettingsPanelUi::ResetProfileOutputDirectory()
 {
-    if (environment_.profile_output_directory_source ==
-        ProfileOutputDirectorySource::Environment) {
-        action_failed_ = true;
-        action_status_ =
-            "The output directory is controlled by SPECFORGE_PROFILE_DIR.";
-        return;
-    }
-
-    std::string error;
-    if (!SaveProfileSettings(environment_.profile_settings_path, {}, &error)) {
-        action_failed_ = true;
-        action_status_ = error.empty()
-            ? "Could not restore the default profile output directory."
-            : "Could not restore the default profile output directory: " + error;
-        return;
-    }
-
-    environment_.log_directory =
-        environment_.default_profile_output_directory;
-    environment_.profile_output_directory_source =
-        ProfileOutputDirectorySource::Default;
-    action_failed_ = false;
-    action_status_ =
-        "Default profile output directory restored for the next recording.";
+    application_settings_intent_ =
+        ApplicationSettingsIntent::
+            RestoreDefaultProfileOutputDirectory();
 }
 
 void SettingsPanelUi::OpenDirectory(const std::filesystem::path& path, const char* label)
@@ -753,7 +710,8 @@ void SettingsPanelUi::CopyPath(const std::filesystem::path& path, const char* la
     action_status_ = label;
 }
 
-void SettingsPanelUi::CopyDiagnosticInformation()
+void SettingsPanelUi::CopyDiagnosticInformation(
+    const std::filesystem::path& profile_output_directory)
 {
     std::string diagnostics;
     diagnostics.reserve(256);
@@ -765,7 +723,7 @@ void SettingsPanelUi::CopyDiagnosticInformation()
     diagnostics += "\nData directory: ";
     diagnostics += PathToUtf8(environment_.data_directory);
     diagnostics += "\nLog directory: ";
-    diagnostics += PathToUtf8(environment_.log_directory);
+    diagnostics += PathToUtf8(profile_output_directory);
     ImGui::SetClipboardText(diagnostics.c_str());
     action_failed_ = false;
     action_status_ = "Diagnostic information copied.";

@@ -804,18 +804,4 @@ std::string_view SampleAnnotationKindLabel(SampleAnnotationKind kind)
     }
 }
 
-std::string_view SampleAnnotationWorkflowRelationshipLabel(SampleAnnotationWorkflowRelationship relationship)
-{
-    switch (relationship) {
-    case SampleAnnotationWorkflowRelationship::PlainAnnotation:
-        return "plain";
-    case SampleAnnotationWorkflowRelationship::ExternalLabelResult:
-        return "external";
-    case SampleAnnotationWorkflowRelationship::LocalLabelingTask:
-        return "local";
-    default:
-        return "unknown";
-    }
-}
-
 }  // namespace specforge

@@ -277,6 +277,7 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionSessionView& session_view,
+    UiLanguage language,
     const SourceCollectionSessionIntentSubmitter& submit,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
@@ -352,7 +353,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             }
 
             ImGui::TableSetColumnIndex(1);
-            if (TableCellTextButton("type", entry.type_label, ImGui::GetColorU32(ImGuiCol_Text))) {
+            const std::string_view type = entry.type
+                ? std::string_view{*entry.type}
+                : UiText(language, UiTextId::UnknownSourceType);
+            if (TableCellTextButton("type", type, ImGui::GetColorU32(ImGuiCol_Text))) {
                 SourceCollectionSessionResult result =
                     submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
                 MergeSourceCollectionSessionAction(action, result.action);
@@ -360,7 +364,10 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
 
             ImGui::TableSetColumnIndex(2);
             ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-            if (TableCellTextButton("state", entry.state_label, state_color)) {
+            if (TableCellTextButton(
+                    "state",
+                    UiText(language, entry.state),
+                    state_color)) {
                 SourceCollectionSessionResult result =
                     submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
                 MergeSourceCollectionSessionAction(action, result.action);
@@ -624,6 +631,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
 
 SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
     const SourceCollectionSessionView& session_view,
+    UiLanguage language,
     const SourceCollectionSessionIntentSubmitter& submit,
     bool* open,
     const SourceCollectionPathPicker& choose_annotation_file)
@@ -741,7 +749,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
             ImGui::TableSetColumnIndex(1);
             (void)TableCellTextButton(
                 "annotation_type",
-                annotation.relationship_label,
+                UiText(language, annotation.relationship),
                 ImGui::GetColorU32(ImGuiCol_Text));
 
             ImGui::TableSetColumnIndex(2);

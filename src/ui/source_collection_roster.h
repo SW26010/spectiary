@@ -108,8 +108,9 @@ private:
         std::filesystem::path path;
         std::string key;
         std::string display_name;
-        std::string type_label;
-        std::string state_label;
+        std::optional<std::string> type;
+        SourceCollectionSourceState state =
+            SourceCollectionSourceState::Unavailable;
         // Stores the last domain snapshot for this source so reactivation can use
         // an explicit cache instead of reloading. Do not remove as a summary-only
         // optimization without retesting CSV/folder error snapshots: that change

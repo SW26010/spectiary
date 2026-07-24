@@ -542,9 +542,11 @@ void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
 
     const auto deadline = persistence.NextMaintenanceDeadline();
     Require(deadline.has_value(), "dirty panel visibility should expose a maintenance deadline");
-    persistence.RunMaintenance(current, *deadline - 1ms);
+    (void)persistence.RunMaintenance(
+        current,
+        *deadline - 1ms);
     Require(!std::filesystem::exists(path), "panel visibility should not save before its deadline");
-    persistence.RunMaintenance(current, *deadline);
+    (void)persistence.RunMaintenance(current, *deadline);
     Require(std::filesystem::exists(path), "panel visibility should save exactly at its deadline");
     Require(!persistence.NextMaintenanceDeadline(), "successful maintenance should clear the deadline");
 
