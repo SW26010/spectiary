@@ -82,6 +82,31 @@ void TestClockPacingDefersInvalidationUntilPermitted()
         "a compositor-paced frame should not schedule a competing timer frame");
 }
 
+void TestRetryRequestedDuringFrameSurvivesClockPacedEndFrame()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    const auto busy_frame = start + 1s;
+    scheduler.RequestFrame();
+    scheduler.BeginFrame(busy_frame);
+    scheduler.RequestFrame();
+    scheduler.EndFrame(
+        busy_frame,
+        {.compositor_clock_paced = true});
+
+    Require(
+        !scheduler.ShouldRender(busy_frame, false),
+        "a busy-frame retry should continue waiting without compositor permission");
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt, false),
+        "a clock-paced retry without a tick must not create a zero-time busy-loop deadline");
+    Require(
+        scheduler.ShouldRender(busy_frame, true),
+        "the retry requested during rendering must survive EndFrame and the next compositor tick");
+}
+
 void TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence()
 {
     const Scheduler::TimePoint start{};
@@ -279,6 +304,7 @@ int main()
 {
     TestWindowInvalidationPersistsUntilRendered();
     TestClockPacingDefersInvalidationUntilPermitted();
+    TestRetryRequestedDuringFrameSurvivesClockPacedEndFrame();
     TestFailedCompositorClockTickEstablishesFallbackTouchpadCadence();
     TestSettingsSaveWakeIsDebounced();
     TestSettingsSaveWakeStartsAfterTheDirtyFrame();

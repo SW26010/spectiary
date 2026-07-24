@@ -83,6 +83,28 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+void TestFrameAcquireResultClassification()
+{
+    using Action = specforge::D3D11FrameAcquireAction;
+
+    Require(
+        specforge::ClassifyD3D11FrameAcquireResult(S_OK) ==
+            Action::RenderAndPresent,
+        "S_OK should continue rendering and presentation");
+    Require(
+        specforge::ClassifyD3D11FrameAcquireResult(S_FALSE) ==
+            Action::RenderAndPresent,
+        "S_FALSE should continue after a successful presentation fallback");
+    Require(
+        specforge::ClassifyD3D11FrameAcquireResult(
+            DXGI_ERROR_WAS_STILL_DRAWING) == Action::RetryLater,
+        "a busy composition buffer should skip the frame and retry later");
+    Require(
+        specforge::ClassifyD3D11FrameAcquireResult(E_FAIL) ==
+            Action::FatalError,
+        "other failures should retain the fatal renderer path");
+}
+
 HRESULT CreateTestDevice(ComPtr<ID3D11Device>& device, ComPtr<ID3D11DeviceContext>& context)
 {
     constexpr std::array feature_levels = {
@@ -531,6 +553,7 @@ void TestImGuiViewportFixtureCleansUpDuringExceptionUnwind()
 
 int main()
 {
+    TestFrameAcquireResultClassification();
     TestSdrSwapChainUsesModernSrgbPresentationContract();
     TestDisplayRefreshDurationPolicy();
     TestInvalidArgumentsPreserveDiagnosticStage();

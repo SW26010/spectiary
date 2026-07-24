@@ -28,6 +28,23 @@ enum class D3D11CompositionPolicy {
     Disabled,
 };
 
+enum class D3D11FrameAcquireAction {
+    RenderAndPresent,
+    RetryLater,
+    FatalError,
+};
+
+[[nodiscard]] constexpr D3D11FrameAcquireAction
+ClassifyD3D11FrameAcquireResult(HRESULT result) noexcept
+{
+    if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
+        return D3D11FrameAcquireAction::RetryLater;
+    }
+    return SUCCEEDED(result)
+               ? D3D11FrameAcquireAction::RenderAndPresent
+               : D3D11FrameAcquireAction::FatalError;
+}
+
 struct D3D11PresentationTransition {
     D3D11PresentationBackend previous_backend = D3D11PresentationBackend::None;
     D3D11PresentationBackend current_backend = D3D11PresentationBackend::None;

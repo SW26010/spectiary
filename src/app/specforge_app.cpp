@@ -543,9 +543,16 @@ void SpecForgeApp::RenderFrame()
     {
         ProfileTimer timer(profile_, "render_pass", frame_index_);
         const HRESULT begin_result = renderer_.BeginFrame(kClearColor);
-        if (FAILED(begin_result)) {
+        switch (ClassifyD3D11FrameAcquireResult(begin_result)) {
+        case D3D11FrameAcquireAction::RetryLater:
+            render_wake_scheduler_.RequestFrame();
+            LogPresentationUpdates();
+            return;
+        case D3D11FrameAcquireAction::FatalError:
             throw std::runtime_error(
                 HResultMessage(renderer_.last_error_operation(), begin_result));
+        case D3D11FrameAcquireAction::RenderAndPresent:
+            break;
         }
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 

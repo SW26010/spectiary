@@ -695,12 +695,16 @@ IndependentFlip statistics 观测实际显示时长。
    `system_refresh_constraint`，不伪装成应用降级。
 4. `WM_DISPLAYCHANGE` 使用 500ms 合并更新，窗口退出 move/size 或 viewport 换屏也会重新查询
    各自目标；不修改 Windows 全局显示模式。
-5. detached viewport 使用非阻塞 buffer acquire；缓冲暂不可写时只跳过该 viewport 当前帧并
+5. 主窗口的 buffer acquire 最多等待 1 秒；缓冲仍不可写时只跳过整个当前应用帧并请求后续帧，
+   不执行 draw、detached viewport render、Present 或 presentation completion。已累计的
+   `buffer_acquire_skipped` 保留在聚合 feedback 中；compositor-clock 模式继续等待下一次 tick
+   许可，非 clock-paced 模式的连续重试仍由每次 buffer acquire 的有界等待节流。
+6. detached viewport 使用非阻塞 buffer acquire；缓冲暂不可写时只跳过该 viewport 当前帧并
    累计 `buffer_acquire_skipped`，避免慢显示目标在 UI 线程上阻塞其他窗口。
 
-呈现状态只在策略转换时记录；实际 feedback 在首次 IndependentFlip、异常或每 120 次提交时
-聚合记录，避免逐帧日志。原有 custom-duration 和 vblank-virtualization 实验保留为历史证据，
-不再进入生产策略分支。
+呈现状态只在策略转换时记录；实际 feedback 在首次 IndependentFlip、异常、每累计 120 次提交
+或 120 次 buffer acquire 跳过时聚合记录，避免逐帧日志。原有 custom-duration 和
+vblank-virtualization 实验保留为历史证据，不再进入生产策略分支。
 
 ## 验证矩阵
 
