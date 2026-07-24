@@ -1,10 +1,14 @@
 #include "ui/settings_panel.h"
+#include "ui/shell_ui.h"
+#include "ui/ui_language_settings.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -34,6 +38,61 @@ struct SettingsPanelUiTestAccess {
     static void ResetProfileOutputDirectory(SettingsPanelUi& panel)
     {
         panel.ResetProfileOutputDirectory();
+    }
+    static SettingsPanelLanguageFeedbackKind LanguageFeedbackKind(
+        const SettingsPanelUi& panel)
+    {
+        return panel.language_feedback_kind_;
+    }
+    static const std::string& LanguageFeedbackDetail(
+        const SettingsPanelUi& panel)
+    {
+        return panel.language_feedback_detail_;
+    }
+};
+
+struct ShellUiTestAccess {
+    static std::unique_ptr<ShellUi> Create()
+    {
+        SourceCollectionSession session(
+            [](const std::filesystem::path&, std::size_t)
+                -> SpectrumSnapshotHandle {
+                return {};
+            },
+            std::filesystem::path{},
+            std::filesystem::path{},
+            std::filesystem::path{},
+            std::filesystem::path{},
+            SourceCollectionSessionRestoreMode::Immediate);
+        return std::unique_ptr<ShellUi>(
+            new ShellUi(
+                std::move(session),
+                SourceCollectionLoadQueue{}));
+    }
+
+    static void LoadLanguageFrom(
+        ShellUi& shell,
+        std::filesystem::path path)
+    {
+        shell.ui_language_settings_path_ = std::move(path);
+        shell.LoadCurrentUiLanguage();
+    }
+
+    static void ApplyLanguageChange(
+        ShellUi& shell,
+        UiLanguage language)
+    {
+        shell.ApplyUiLanguageChange(language);
+    }
+
+    static UiLanguage CurrentLanguage(const ShellUi& shell)
+    {
+        return shell.ui_language_;
+    }
+
+    static SettingsPanelUi& SettingsPanel(ShellUi& shell)
+    {
+        return shell.settings_panel_ui_;
     }
 };
 
@@ -99,6 +158,78 @@ public:
     ScopedImGuiContext(const ScopedImGuiContext&) = delete;
     ScopedImGuiContext& operator=(const ScopedImGuiContext&) = delete;
 };
+
+class TemporaryDirectory {
+public:
+    TemporaryDirectory()
+    {
+        const auto suffix = std::chrono::steady_clock::now()
+                                .time_since_epoch()
+                                .count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("specforge-settings-panel-tests-" +
+                 std::to_string(suffix));
+        std::filesystem::create_directories(path_);
+    }
+
+    ~TemporaryDirectory()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(path_, ignored);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const
+    {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+struct LanguageRenderObservation {
+    bool selector_hovered = false;
+    bool simplified_chinese_hovered = false;
+    bool popup_open = false;
+    ImVec2 popup_content_start;
+};
+
+LanguageRenderObservation RenderLanguageFrame(
+    specforge::SettingsPanelUi& panel,
+    specforge::UiLanguage language)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    ImGui::NewFrame();
+    panel.Render(language);
+
+    LanguageRenderObservation observation;
+    const ImGuiID hovered_id = GImGui->HoveredId;
+    for (ImGuiWindow* window : GImGui->Windows) {
+        observation.selector_hovered =
+            observation.selector_hovered ||
+            hovered_id == window->GetID(
+                "Application language###SpecForgeApplicationLanguage");
+    }
+    observation.popup_open = ImGui::IsPopupOpen(
+        nullptr,
+        ImGuiPopupFlags_AnyPopupId |
+            ImGuiPopupFlags_AnyPopupLevel);
+    if (!GImGui->OpenPopupStack.empty()) {
+        if (ImGuiWindow* popup_window =
+                GImGui->OpenPopupStack.back().Window) {
+            observation.popup_content_start =
+                popup_window->DC.CursorStartPos;
+            observation.simplified_chinese_hovered =
+                hovered_id ==
+                popup_window->GetID(
+                    "Simplified Chinese###SpecForgeUiLanguageSimplifiedChinese");
+        }
+    }
+    ImGui::EndFrame();
+    return observation;
+}
 
 void TestDefaultEnvironmentDescribesThisBuild()
 {
@@ -217,6 +348,272 @@ void TestClosedToOpenClearsTransientFeedback()
         "reopening a closed panel should clear stale failure state");
 }
 
+void TestLanguageSelectorEmitsOneShotIntent()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .release_profile = "Portable",
+        .data_directory = "Data",
+        .log_directory = "Data/logs",
+    });
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::Language);
+    panel.Open();
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    LanguageRenderObservation observation =
+        RenderLanguageFrame(
+            panel,
+            specforge::UiLanguage::English);
+
+    ImVec2 selector_position;
+    for (float y = 100.0f;
+         y <= 280.0f && !observation.selector_hovered;
+         y += 2.0f) {
+        selector_position = ImVec2(500.0f, y);
+        ImGui::GetIO().AddMousePosEvent(
+            selector_position.x,
+            selector_position.y);
+        observation = RenderLanguageFrame(
+            panel,
+            specforge::UiLanguage::English);
+    }
+    Require(
+        observation.selector_hovered,
+        "integration fixture should locate the application language selector");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    observation = RenderLanguageFrame(
+        panel,
+        specforge::UiLanguage::English);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    observation = RenderLanguageFrame(
+        panel,
+        specforge::UiLanguage::English);
+    Require(
+        observation.popup_open,
+        "the application language selector should open");
+
+    ImVec2 simplified_chinese_position;
+    const float option_x =
+        observation.popup_content_start.x + 50.0f;
+    for (float y = observation.popup_content_start.y - 10.0f;
+         y <= observation.popup_content_start.y + 100.0f &&
+         !observation.simplified_chinese_hovered;
+         y += 2.0f) {
+        simplified_chinese_position = ImVec2(option_x, y);
+        ImGui::GetIO().AddMousePosEvent(
+            simplified_chinese_position.x,
+            simplified_chinese_position.y);
+        observation = RenderLanguageFrame(
+            panel,
+            specforge::UiLanguage::English);
+    }
+    Require(
+        observation.simplified_chinese_hovered,
+        "integration fixture should locate the Simplified Chinese option");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLanguageFrame(
+        panel,
+        specforge::UiLanguage::English);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderLanguageFrame(
+        panel,
+        specforge::UiLanguage::English);
+    Require(
+        panel.TakeLanguageChangeRequest() ==
+            specforge::UiLanguage::SimplifiedChinese,
+        "selecting Simplified Chinese should emit that intent");
+    Require(
+        !panel.TakeLanguageChangeRequest(),
+        "the selected language intent should be consumed once");
+}
+
+void TestLanguageRenderKeepsStableImGuiIds()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .release_profile = "Portable",
+        .data_directory = "Data",
+        .log_directory = "Data/logs",
+    });
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::Language);
+    panel.Open();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    ImGui::NewFrame();
+    panel.Render(specforge::UiLanguage::English);
+    ImGuiWindow* english_window =
+        ImGui::FindWindowByName(
+            "Settings###SpecForgeSettingsV1");
+    Require(
+        english_window != nullptr,
+        "English settings render should create the settings window");
+    const ImGuiID english_window_id = english_window->ID;
+    ImGui::EndFrame();
+
+    ImGui::NewFrame();
+    panel.Render(specforge::UiLanguage::SimplifiedChinese);
+    ImGuiWindow* chinese_window =
+        ImGui::FindWindowByName(
+            "设置###SpecForgeSettingsV1");
+    Require(
+        chinese_window != nullptr,
+        "Chinese settings render should reuse the settings window");
+    Require(
+        chinese_window->ID == english_window_id,
+        "English and Chinese settings titles should resolve to the same ImGui window ID");
+    ImGui::EndFrame();
+
+    Require(
+        ImHashStr(
+            "Language###SpecForgeSettingsLanguage") ==
+            ImHashStr(
+                "语言###SpecForgeSettingsLanguage"),
+        "localized Language navigation labels should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "Application language###SpecForgeApplicationLanguage") ==
+            ImHashStr(
+                "应用语言###SpecForgeApplicationLanguage"),
+        "localized application language labels should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "English###SpecForgeUiLanguageEnglish") ==
+            ImHashStr(
+                "英语###SpecForgeUiLanguageEnglish"),
+        "localized English options should retain one ImGui ID");
+}
+
+void TestShellLanguageChangePersistsAndReloads()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path settings_path =
+        temporary.path() / "ui-language.json";
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        specforge::ShellUiTestAccess::Create();
+    specforge::ShellUiTestAccess::LoadLanguageFrom(
+        *shell,
+        settings_path);
+    Require(
+        specforge::ShellUiTestAccess::CurrentLanguage(*shell) ==
+            specforge::UiLanguage::English,
+        "a shell with no language file should start in English");
+
+    specforge::ShellUiTestAccess::ApplyLanguageChange(
+        *shell,
+        specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        specforge::ShellUiTestAccess::CurrentLanguage(*shell) ==
+            specforge::UiLanguage::SimplifiedChinese,
+        "the shell should update its language after a successful save");
+    Require(
+        specforge::LoadUiLanguageSettings(settings_path).language ==
+            specforge::UiLanguage::SimplifiedChinese,
+        "the shell language change should be persisted");
+
+    std::unique_ptr<specforge::ShellUi> restarted_shell =
+        specforge::ShellUiTestAccess::Create();
+    specforge::ShellUiTestAccess::LoadLanguageFrom(
+        *restarted_shell,
+        settings_path);
+    Require(
+        specforge::ShellUiTestAccess::CurrentLanguage(
+            *restarted_shell) ==
+            specforge::UiLanguage::SimplifiedChinese,
+        "a restarted shell should restore the saved language");
+}
+
+void TestShellSaveFailureRetainsLanguageAndShowsFeedback()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block language settings directory creation";
+    }
+    const std::filesystem::path settings_path =
+        blocker / "ui-language.json";
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        specforge::ShellUiTestAccess::Create();
+    specforge::ShellUiTestAccess::LoadLanguageFrom(
+        *shell,
+        settings_path);
+    specforge::ShellUiTestAccess::ApplyLanguageChange(
+        *shell,
+        specforge::UiLanguage::SimplifiedChinese);
+
+    Require(
+        specforge::ShellUiTestAccess::CurrentLanguage(*shell) ==
+            specforge::UiLanguage::English,
+        "a failed save should retain the shell's previous language");
+    specforge::SettingsPanelUi& panel =
+        specforge::ShellUiTestAccess::SettingsPanel(*shell);
+    Require(
+        specforge::SettingsPanelUiTestAccess::LanguageFeedbackKind(
+            panel) ==
+            specforge::SettingsPanelLanguageFeedbackKind::SaveError,
+        "a failed save should be exposed as settings feedback");
+    Require(
+        !specforge::SettingsPanelUiTestAccess::LanguageFeedbackDetail(
+             panel)
+             .empty(),
+        "a failed save should retain a non-empty error detail");
+}
+
+void TestShellLoadWarningFallsBackToEnglish()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path settings_path =
+        temporary.path() / "ui-language.json";
+    {
+        std::ofstream stream(settings_path);
+        stream << R"({"format_kind":)";
+    }
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        specforge::ShellUiTestAccess::Create();
+    specforge::ShellUiTestAccess::LoadLanguageFrom(
+        *shell,
+        settings_path);
+
+    Require(
+        specforge::ShellUiTestAccess::CurrentLanguage(*shell) ==
+            specforge::UiLanguage::English,
+        "a damaged language file should leave the shell in English");
+    specforge::SettingsPanelUi& panel =
+        specforge::ShellUiTestAccess::SettingsPanel(*shell);
+    Require(
+        specforge::SettingsPanelUiTestAccess::LanguageFeedbackKind(
+            panel) ==
+            specforge::SettingsPanelLanguageFeedbackKind::LoadWarning,
+        "a language load warning should be available to the settings page");
+    Require(
+        !specforge::SettingsPanelUiTestAccess::LanguageFeedbackDetail(
+             panel)
+             .empty(),
+        "a language load warning should retain non-empty detail");
+}
+
 void TestRenderSmoke()
 {
     ScopedImGuiContext imgui;
@@ -243,7 +640,7 @@ void TestRenderSmoke()
         io.DeltaTime = 1.0f / 60.0f;
         io.DisplaySize = ImVec2(1280.0f, 720.0f);
         ImGui::NewFrame();
-        panel.Render();
+        panel.Render(specforge::UiLanguage::English);
         Require(
             ImGui::FindWindowByName("Settings###SpecForgeSettingsV1") != nullptr,
             "rendering an open settings panel should create its ImGui window");
@@ -261,6 +658,11 @@ int main()
     TestProfileOutputDirectorySelectionPersistsAndResets();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
+    TestLanguageSelectorEmitsOneShotIntent();
+    TestLanguageRenderKeepsStableImGuiIds();
+    TestShellLanguageChangePersistsAndReloads();
+    TestShellSaveFailureRetainsLanguageAndShowsFeedback();
+    TestShellLoadWarningFallsBackToEnglish();
     TestRenderSmoke();
     std::cout << "settings panel tests passed\n";
     return 0;

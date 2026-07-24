@@ -97,6 +97,8 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSettingsPanel(const ShellStatus& status);
     void RenderSpectralLinesPanel();
+    void LoadCurrentUiLanguage();
+    void ApplyUiLanguageChange(UiLanguage requested_language);
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
     void HandleSampleWorkflowShortcut();
@@ -129,6 +131,8 @@ private:
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
     SettingsPanelUi settings_panel_ui_;
+    std::filesystem::path ui_language_settings_path_;
+    UiLanguage ui_language_ = UiLanguage::English;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     ImFont* spectral_line_label_font_ = nullptr;
     bool immersive_plot_mode_ = false;

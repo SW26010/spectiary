@@ -219,6 +219,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectral_lines_panel.cpp
     src/ui/spectrum_view_session.cpp
     src/ui/ui_font.cpp
+    src/ui/ui_language_settings.cpp
     src/ui/ui_text.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
@@ -398,6 +399,7 @@ specforge_add_test(
 target_compile_definitions(specforge_settings_panel_tests PRIVATE
     SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
 )
+target_link_libraries(specforge_settings_panel_tests PRIVATE dwmapi)
 add_test(
     NAME specforge_analyze_profile_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
@@ -524,6 +526,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_ui_text_tests
     tests/ui_text_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_ui_language_settings_tests
+    tests/ui_language_settings_tests.cpp
     specforge_desktop_ui
 )
 specforge_add_test(

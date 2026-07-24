@@ -1,8 +1,10 @@
 #pragma once
 
 #include "profile/profile_settings.h"
+#include "ui/ui_text.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -36,6 +38,12 @@ struct SettingsPanelStatus {
     std::string_view profile_status_message;
 };
 
+enum class SettingsPanelLanguageFeedbackKind {
+    None,
+    LoadWarning,
+    SaveError,
+};
+
 [[nodiscard]] SettingsPanelEnvironment DefaultSettingsPanelEnvironment();
 
 class SettingsPanelUi {
@@ -44,19 +52,27 @@ public:
     explicit SettingsPanelUi(SettingsPanelEnvironment environment);
 
     void Open();
-    void Render(const SettingsPanelStatus& status = {});
+    void Render(
+        UiLanguage language,
+        const SettingsPanelStatus& status = {});
     [[nodiscard]] bool TakeProfileRecordingToggleRequest();
     [[nodiscard]] bool TakeProfileOutputDirectorySelectionRequest();
+    [[nodiscard]] std::optional<UiLanguage> TakeLanguageChangeRequest();
     void ApplyProfileOutputDirectorySelection(std::filesystem::path directory);
+    void SetLanguageFeedback(
+        SettingsPanelLanguageFeedbackKind kind,
+        std::string detail = {});
 
     [[nodiscard]] bool open() const;
 
 private:
-    void RenderNavigation();
-    void RenderSelectedSection(const SettingsPanelStatus& status);
+    void RenderNavigation(UiLanguage language);
+    void RenderSelectedSection(
+        UiLanguage language,
+        const SettingsPanelStatus& status);
     void RenderGeneral();
     void RenderAppearance();
-    void RenderLanguage();
+    void RenderLanguage(UiLanguage language);
     void RenderInput();
     void RenderDataAndRecovery();
     void RenderDiagnostics(const SettingsPanelStatus& status);
@@ -76,6 +92,10 @@ private:
     bool profile_recording_toggle_requested_ = false;
     bool profile_output_directory_selection_requested_ = false;
     std::string action_status_;
+    std::optional<UiLanguage> language_change_requested_;
+    SettingsPanelLanguageFeedbackKind language_feedback_kind_ =
+        SettingsPanelLanguageFeedbackKind::None;
+    std::string language_feedback_detail_;
 
     friend struct SettingsPanelUiTestAccess;
 };

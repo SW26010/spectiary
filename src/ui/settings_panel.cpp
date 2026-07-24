@@ -23,7 +23,6 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kSettingsWindow = "Settings###SpecForgeSettingsV1";
 constexpr float kMinimumNavigationWidth = 190.0f;
 constexpr float kInitialSettingsWidth = 860.0f;
 constexpr float kInitialSettingsHeight = 560.0f;
@@ -38,7 +37,28 @@ constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::About,
 };
 
-const char* SectionLabel(SettingsSection section)
+std::string StableUiLabel(
+    UiLanguage language,
+    UiTextId text_id,
+    std::string_view stable_id)
+{
+    std::string label(UiText(language, text_id));
+    label += "###";
+    label += stable_id;
+    return label;
+}
+
+std::string SettingsWindowLabel(UiLanguage language)
+{
+    return StableUiLabel(
+        language,
+        UiTextId::Settings,
+        "SpecForgeSettingsV1");
+}
+
+std::string SectionLabel(
+    SettingsSection section,
+    UiLanguage language)
 {
     switch (section) {
     case SettingsSection::General:
@@ -46,7 +66,10 @@ const char* SectionLabel(SettingsSection section)
     case SettingsSection::Appearance:
         return "Appearance";
     case SettingsSection::Language:
-        return "Language";
+        return StableUiLabel(
+            language,
+            UiTextId::Language,
+            "SpecForgeSettingsLanguage");
     case SettingsSection::Input:
         return "Input";
     case SettingsSection::DataAndRecovery:
@@ -59,18 +82,38 @@ const char* SectionLabel(SettingsSection section)
     return "Settings";
 }
 
+UiTextId LanguageNameTextId(UiLanguage language)
+{
+    switch (language) {
+    case UiLanguage::English:
+        return UiTextId::EnglishLanguageName;
+    case UiLanguage::SimplifiedChinese:
+        return UiTextId::SimplifiedChineseLanguageName;
+    case UiLanguage::Count:
+        return UiTextId::EnglishLanguageName;
+    }
+    return UiTextId::EnglishLanguageName;
+}
+
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
 }
 
-void RenderSectionHeading(const char* title, const char* description)
+void RenderSectionHeading(
+    std::string_view title,
+    std::string_view description)
 {
-    ImGui::TextUnformatted(title);
+    ImGui::TextUnformatted(
+        title.data(),
+        title.data() + title.size());
     ImGui::Separator();
     ImGui::PushTextWrapPos();
-    ImGui::TextDisabled("%s", description);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(description.size()),
+        description.data());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
 }
@@ -134,7 +177,9 @@ void SettingsPanelUi::Open()
     focus_requested_ = true;
 }
 
-void SettingsPanelUi::Render(const SettingsPanelStatus& status)
+void SettingsPanelUi::Render(
+    UiLanguage language,
+    const SettingsPanelStatus& status)
 {
     if (!open_) {
         return;
@@ -154,17 +199,23 @@ void SettingsPanelUi::Render(const SettingsPanelStatus& status)
         focus_requested_ = false;
     }
 
-    if (!ImGui::Begin(kSettingsWindow, &open_, ImGuiWindowFlags_NoCollapse)) {
+    const std::string settings_window = SettingsWindowLabel(language);
+    if (!ImGui::Begin(
+            settings_window.c_str(),
+            &open_,
+            ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
 
+    const std::string widest_navigation_label =
+        SectionLabel(SettingsSection::DataAndRecovery, language);
     const float navigation_width = std::max(
         kMinimumNavigationWidth,
-        ImGui::CalcTextSize(SectionLabel(SettingsSection::DataAndRecovery)).x +
+        ImGui::CalcTextSize(widest_navigation_label.c_str()).x +
             ImGui::GetStyle().WindowPadding.x * 2.0f);
     if (ImGui::BeginChild("##SettingsNavigation", ImVec2(navigation_width, 0.0f), true)) {
-        RenderNavigation();
+        RenderNavigation(language);
     }
     ImGui::EndChild();
 
@@ -174,7 +225,7 @@ void SettingsPanelUi::Render(const SettingsPanelStatus& status)
             ImGui::SetScrollY(0.0f);
             content_scroll_reset_requested_ = false;
         }
-        RenderSelectedSection(status);
+        RenderSelectedSection(language, status);
     }
     ImGui::EndChild();
     ImGui::End();
@@ -197,6 +248,24 @@ bool SettingsPanelUi::TakeProfileOutputDirectorySelectionRequest()
     const bool requested = profile_output_directory_selection_requested_;
     profile_output_directory_selection_requested_ = false;
     return requested;
+}
+
+std::optional<UiLanguage> SettingsPanelUi::TakeLanguageChangeRequest()
+{
+    std::optional<UiLanguage> requested =
+        std::exchange(language_change_requested_, std::nullopt);
+    return requested;
+}
+
+void SettingsPanelUi::SetLanguageFeedback(
+    SettingsPanelLanguageFeedbackKind kind,
+    std::string detail)
+{
+    language_feedback_kind_ = kind;
+    language_feedback_detail_ =
+        kind == SettingsPanelLanguageFeedbackKind::None
+        ? std::string{}
+        : std::move(detail);
 }
 
 void SettingsPanelUi::ApplyProfileOutputDirectorySelection(std::filesystem::path directory)
@@ -234,13 +303,14 @@ void SettingsPanelUi::ApplyProfileOutputDirectorySelection(std::filesystem::path
         "Profile output directory updated. It will be used for the next recording.";
 }
 
-void SettingsPanelUi::RenderNavigation()
+void SettingsPanelUi::RenderNavigation(UiLanguage language)
 {
     ImGui::TextDisabled("SPECFORGE");
     ImGui::Spacing();
     for (const SettingsSection section : kSettingsSections) {
         const bool selected = selected_section_ == section;
-        if (ImGui::Selectable(SectionLabel(section), selected)) {
+        const std::string label = SectionLabel(section, language);
+        if (ImGui::Selectable(label.c_str(), selected)) {
             selected_section_ = section;
             content_scroll_reset_requested_ = true;
             action_status_.clear();
@@ -248,7 +318,9 @@ void SettingsPanelUi::RenderNavigation()
     }
 }
 
-void SettingsPanelUi::RenderSelectedSection(const SettingsPanelStatus& status)
+void SettingsPanelUi::RenderSelectedSection(
+    UiLanguage language,
+    const SettingsPanelStatus& status)
 {
     switch (selected_section_) {
     case SettingsSection::General:
@@ -258,7 +330,7 @@ void SettingsPanelUi::RenderSelectedSection(const SettingsPanelStatus& status)
         RenderAppearance();
         return;
     case SettingsSection::Language:
-        RenderLanguage();
+        RenderLanguage(language);
         return;
     case SettingsSection::Input:
         RenderInput();
@@ -301,15 +373,81 @@ void SettingsPanelUi::RenderAppearance()
     RenderUnavailableNote("The current UI uses the built-in dark style.");
 }
 
-void SettingsPanelUi::RenderLanguage()
+void SettingsPanelUi::RenderLanguage(UiLanguage language)
 {
-    RenderSectionHeading("Language", "Select the language used by menus, panels, messages, and diagnostics.");
+    RenderSectionHeading(
+        UiText(language, UiTextId::Language),
+        UiText(language, UiTextId::LanguagePageDescription));
 
-    int language = 0;
-    ImGui::BeginDisabled();
-    ImGui::Combo("Application language", &language, "English\0Simplified Chinese\0");
-    ImGui::EndDisabled();
-    RenderUnavailableNote("The interface is not localized yet.");
+    const std::string selector_label = StableUiLabel(
+        language,
+        UiTextId::ApplicationLanguage,
+        "SpecForgeApplicationLanguage");
+    const char* preview =
+        UiText(language, LanguageNameTextId(language)).data();
+    if (ImGui::BeginCombo(selector_label.c_str(), preview)) {
+        constexpr std::array kLanguages = {
+            UiLanguage::English,
+            UiLanguage::SimplifiedChinese,
+        };
+        for (const UiLanguage candidate : kLanguages) {
+            const bool selected = language == candidate;
+            const std::string option_label = StableUiLabel(
+                language,
+                LanguageNameTextId(candidate),
+                candidate == UiLanguage::English
+                    ? "SpecForgeUiLanguageEnglish"
+                    : "SpecForgeUiLanguageSimplifiedChinese");
+            if (ImGui::Selectable(option_label.c_str(), selected) &&
+                !selected) {
+                language_change_requested_ = candidate;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    const std::string_view coverage =
+        UiText(language, UiTextId::LocalizationInProgress);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(coverage.size()),
+        coverage.data());
+    ImGui::PopTextWrapPos();
+
+    if (language_feedback_kind_ ==
+        SettingsPanelLanguageFeedbackKind::None) {
+        return;
+    }
+
+    ImGui::Spacing();
+    const bool failed =
+        language_feedback_kind_ ==
+        SettingsPanelLanguageFeedbackKind::SaveError;
+    const UiTextId feedback_text_id = failed
+        ? UiTextId::LanguageSaveError
+        : UiTextId::LanguageLoadWarning;
+    const std::string_view feedback =
+        UiText(language, feedback_text_id);
+    const ImVec4 feedback_color = failed
+        ? ImVec4(0.95f, 0.35f, 0.30f, 1.0f)
+        : ImVec4(0.95f, 0.75f, 0.30f, 1.0f);
+    ImGui::PushTextWrapPos();
+    ImGui::TextColored(
+        feedback_color,
+        "%.*s",
+        static_cast<int>(feedback.size()),
+        feedback.data());
+    if (!language_feedback_detail_.empty()) {
+        ImGui::TextDisabled(
+            "%s",
+            language_feedback_detail_.c_str());
+    }
+    ImGui::PopTextWrapPos();
 }
 
 void SettingsPanelUi::RenderInput()

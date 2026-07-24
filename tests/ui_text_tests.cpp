@@ -54,6 +54,18 @@ void TestRepresentativeMappingsAreExact()
         UiText(UiLanguage::SimplifiedChinese, UiTextId::SimplifiedChineseLanguageName) ==
             "简体中文",
         "Chinese name in Chinese");
+    Require(
+        UiText(UiLanguage::English, UiTextId::LocalizationInProgress) ==
+            "Localization is still in progress. Other parts of SpecForge currently remain in English.",
+        "English scope notice should be exact");
+    Require(
+        UiText(UiLanguage::SimplifiedChinese, UiTextId::LocalizationInProgress) ==
+            "本地化仍在逐步进行；SpecForge 的其它界面目前仍保持英文。",
+        "Chinese scope notice should be exact");
+    Require(
+        UiText(UiLanguage::SimplifiedChinese, UiTextId::LanguageSaveError) ==
+            "无法保存应用语言，仍继续使用此前的语言。",
+        "Chinese save failure should be exact");
 }
 
 void TestInvalidLanguageFallsBackToEnglish()

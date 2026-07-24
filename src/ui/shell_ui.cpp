@@ -5,6 +5,7 @@
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/top_bar_status_hover.h"
 #include "ui/top_bar_status_layout.h"
+#include "ui/ui_language_settings.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -662,6 +663,9 @@ ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
       source_activation_(session_),
       touchpad_gestures_(touchpad_gestures)
 {
+    ui_language_settings_path_ =
+        DefaultUiLanguageSettingsPath();
+    LoadCurrentUiLanguage();
     panel_visibility_ = panel_visibility_state_.Load();
     RefreshSystemColors();
     BeginDeferredSourceRestore();
@@ -1514,12 +1518,18 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
 
 void ShellUi::RenderSettingsPanel(const ShellStatus& status)
 {
-    settings_panel_ui_.Render({
-        .profile_open = status.profile_open,
-        .profile_stopping = status.profile_stopping,
-        .profile_path = status.profile_path,
-        .profile_status_message = status.profile_status_message,
-    });
+    settings_panel_ui_.Render(
+        ui_language_,
+        {
+            .profile_open = status.profile_open,
+            .profile_stopping = status.profile_stopping,
+            .profile_path = status.profile_path,
+            .profile_status_message = status.profile_status_message,
+        });
+    if (const std::optional<UiLanguage> language =
+            settings_panel_ui_.TakeLanguageChangeRequest()) {
+        ApplyUiLanguageChange(*language);
+    }
     if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
         if (std::optional<std::filesystem::path> directory =
                 ShowFolderPicker(L"Choose performance profile output folder")) {
@@ -1527,6 +1537,44 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
                 std::move(*directory));
         }
     }
+}
+
+void ShellUi::LoadCurrentUiLanguage()
+{
+    UiLanguageSettingsLoadResult settings =
+        LoadUiLanguageSettings(ui_language_settings_path_);
+    ui_language_ = settings.language;
+    if (settings.warning.empty()) {
+        settings_panel_ui_.SetLanguageFeedback(
+            SettingsPanelLanguageFeedbackKind::None);
+        return;
+    }
+    settings_panel_ui_.SetLanguageFeedback(
+        SettingsPanelLanguageFeedbackKind::LoadWarning,
+        std::move(settings.warning));
+}
+
+void ShellUi::ApplyUiLanguageChange(
+    UiLanguage requested_language)
+{
+    if (requested_language == ui_language_) {
+        return;
+    }
+
+    std::string error;
+    if (!SaveUiLanguageSettings(
+            ui_language_settings_path_,
+            requested_language,
+            &error)) {
+        settings_panel_ui_.SetLanguageFeedback(
+            SettingsPanelLanguageFeedbackKind::SaveError,
+            std::move(error));
+        return;
+    }
+
+    ui_language_ = requested_language;
+    settings_panel_ui_.SetLanguageFeedback(
+        SettingsPanelLanguageFeedbackKind::None);
 }
 
 void ShellUi::QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut)

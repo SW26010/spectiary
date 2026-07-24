@@ -13,16 +13,27 @@ constexpr std::array kTextByLanguage = {
     std::array{
         std::string_view{"Settings"},
         std::string_view{"Language"},
+        std::string_view{"Choose the language used by the Settings language page."},
         std::string_view{"Application language"},
         std::string_view{"English"},
         std::string_view{"Simplified Chinese"},
+        std::string_view{
+            "Localization is still in progress. Other parts of SpecForge currently remain in English."},
+        std::string_view{
+            "The saved application language could not be loaded. English is being used."},
+        std::string_view{
+            "The application language could not be saved. The previous language is still in use."},
     },
     std::array{
         std::string_view{"设置"},
         std::string_view{"语言"},
+        std::string_view{"选择“设置”中语言页面使用的语言。"},
         std::string_view{"应用语言"},
         std::string_view{"英语"},
         std::string_view{"简体中文"},
+        std::string_view{"本地化仍在逐步进行；SpecForge 的其它界面目前仍保持英文。"},
+        std::string_view{"无法加载已保存的应用语言，当前使用英语。"},
+        std::string_view{"无法保存应用语言，仍继续使用此前的语言。"},
     },
 };
 

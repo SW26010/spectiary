@@ -13,9 +13,13 @@ enum class UiLanguage {
 enum class UiTextId {
     Settings,
     Language,
+    LanguagePageDescription,
     ApplicationLanguage,
     EnglishLanguageName,
     SimplifiedChineseLanguageName,
+    LocalizationInProgress,
+    LanguageLoadWarning,
+    LanguageSaveError,
     Count,  // Non-display sentinel.
 };
 
