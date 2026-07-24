@@ -79,19 +79,7 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
 specforge::SourceCollectionSession MakePreparedSession(
     const std::filesystem::path& path)
 {
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation tests must not load synchronously");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     const specforge::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(path, 0);
     specforge::SourceCollectionContext context;
@@ -246,19 +234,7 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     const std::filesystem::path path =
         UniqueTempPath("_failed.csv");
     WriteFixture(path);
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     auto dependencies = MakeDependencies(
         [](const std::filesystem::path&,
            std::size_t,
@@ -321,19 +297,7 @@ void TestSuccessfulSourceDoesNotHideConcurrentFailure()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
@@ -381,19 +345,7 @@ void TestConcurrentFailuresRemainVisible()
             throw std::runtime_error(
                 "second source failed");
         });
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
@@ -448,19 +400,7 @@ void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
             throw std::runtime_error(
                 "second acknowledged failure");
         });
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
@@ -544,19 +484,7 @@ void TestSuccessfulRetryClearsOnlyItsSourceFailure()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(
@@ -629,19 +557,7 @@ void TestCanceledGenerationDoesNotPublishFailure()
             }
             return MakeSnapshot(source, index);
         });
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&,
-           std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "activation test must remain asynchronous");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::
-            Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     Activation activation(
         session,
         specforge::MakeSourceCollectionLoadQueueForTesting(

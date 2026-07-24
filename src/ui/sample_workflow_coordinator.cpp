@@ -345,9 +345,9 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncKnownActiveSource(
     const std::optional<SourceCollectionIdentity> identity =
         navigation_.ActivateKnownSource(*source_key);
     if (!identity) {
-        // A source first opened through the synchronous compatibility path has
-        // no prepared context yet. Build it once, then reuse it thereafter.
-        return SyncActiveSource(std::move(source_key), snapshot);
+        navigation_.ClearActiveSource();
+        ClearSampleWorkflow(action);
+        return action;
     }
 
     const bool workflow_identity_changed =

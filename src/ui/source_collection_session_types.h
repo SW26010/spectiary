@@ -69,7 +69,6 @@ struct SourceCollectionNavigationView {
     bool sequence_active = false;
     bool sequence_empty = false;
     std::size_t sequence_count = 0;
-    std::vector<std::size_t> sequence_rows;
     std::optional<std::size_t> current_sequence_position;
     std::optional<std::size_t> current_source_row;
     bool row_location_available = true;

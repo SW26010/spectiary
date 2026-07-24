@@ -27,11 +27,6 @@ class SourceCollectionRoster;
 struct SourceCollectionRosterOpenResult;
 class SourceCollectionSessionStatePersistence;
 
-enum class SourceCollectionSessionRestoreMode {
-    Immediate,
-    Deferred,
-};
-
 struct SourceCollectionLoadHint {
     SourceCollectionReuseCandidate reuse;
     std::size_t spectrum_index = 0;
@@ -58,7 +53,6 @@ enum class SourceCollectionSessionIntentKind {
 };
 
 enum class SourceCollectionIntentKind {
-    OpenSynchronously,
     SwitchActive,
     Remove,
     AddReadOnlyAnnotationResult,
@@ -104,11 +98,6 @@ enum class SampleSortingIntentKind {
 };
 
 struct SourceCollectionIntent {
-    // Compatibility path for headless/session callers. Interactive UI code
-    // must enqueue a PreparedSourceCollection instead.
-    [[nodiscard]] static SourceCollectionIntent OpenSynchronously(
-        std::filesystem::path path,
-        std::size_t spectrum_index = 0);
     [[nodiscard]] static SourceCollectionIntent SwitchActive(std::size_t source_index);
     [[nodiscard]] static SourceCollectionIntent Remove(std::size_t source_index);
     [[nodiscard]] static SourceCollectionIntent AddReadOnlyAnnotationResult(std::filesystem::path path);
@@ -123,10 +112,9 @@ private:
 
     SourceCollectionIntent() = default;
 
-    SourceCollectionIntentKind kind = SourceCollectionIntentKind::OpenSynchronously;
+    SourceCollectionIntentKind kind = SourceCollectionIntentKind::SwitchActive;
     std::filesystem::path path;
     std::string display_name;
-    std::size_t spectrum_index = 0;
     std::size_t source_index = 0;
 };
 
@@ -259,34 +247,12 @@ using SourceCollectionSessionViewReader = std::function<const SourceCollectionSe
 
 class SourceCollectionSession {
 public:
-    using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
-
-    explicit SourceCollectionSession(SnapshotLoader snapshot_loader);
+    SourceCollectionSession();
     SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
-        SourceCollectionSessionRestoreMode restore_mode);
-    SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
-        std::filesystem::path navigation_state_cache_path,
-        std::filesystem::path labeling_state_cache_path);
-    SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
-        std::filesystem::path source_session_state_cache_path,
-        std::filesystem::path navigation_state_cache_path,
-        std::filesystem::path labeling_state_cache_path);
-    SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
         std::filesystem::path workflow_state_cache_path);
-    SourceCollectionSession(
-        SnapshotLoader snapshot_loader,
-        std::filesystem::path source_session_state_cache_path,
-        std::filesystem::path navigation_state_cache_path,
-        std::filesystem::path labeling_state_cache_path,
-        std::filesystem::path workflow_state_cache_path,
-        SourceCollectionSessionRestoreMode restore_mode);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
@@ -349,9 +315,6 @@ public:
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
 private:
-    [[nodiscard]] SourceCollectionSessionAction OpenSource(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index = 0);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionSessionAction RemoveSource(
         std::size_t source_index,
@@ -414,12 +377,10 @@ private:
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
     [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);
 
-    [[nodiscard]] SourceCollectionSessionAction EnsureSnapshotMatchesNavigation(
-        bool refresh_source_context = false);
+    [[nodiscard]] SourceCollectionSessionAction
+        EnsureSnapshotMatchesNavigation();
     void PreserveRequiredBackgroundSnapshotLoad();
-    [[nodiscard]] SourceCollectionSessionAction LoadActiveSourceAt(std::size_t spectrum_index);
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
-    void RestoreSourceSessionCache();
     void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
     void InvalidateView();
@@ -438,7 +399,6 @@ private:
     std::optional<SourceCollectionDeferredRestorePlan> deferred_restore_plan_;
     std::vector<SourceCollectionSavedSource> unresolved_deferred_restore_sources_;
     bool deferred_restore_active_ = false;
-    bool background_loads_required_ = false;
     std::optional<std::size_t> pending_background_spectrum_index_;
     std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;

@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -39,9 +38,7 @@ struct SourceCollectionRosterResidentRetainResult {
 
 class SourceCollectionRoster {
 public:
-    using SnapshotLoader = std::function<SpectrumSnapshotHandle(const std::filesystem::path&, std::size_t)>;
-
-    explicit SourceCollectionRoster(SnapshotLoader snapshot_loader);
+    SourceCollectionRoster();
 
     [[nodiscard]] const SpectrumSnapshotHandle& snapshot() const;
     [[nodiscard]] std::optional<std::size_t> current_source_index() const;
@@ -65,9 +62,6 @@ public:
             const std::filesystem::path& path,
             SourceCollectionResidentSnapshot resident);
 
-    [[nodiscard]] SourceCollectionRosterOpenResult OpenSource(
-        const std::filesystem::path& path,
-        std::size_t spectrum_index);
     [[nodiscard]] SourceCollectionRosterOpenResult OpenPreparedSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index,
@@ -77,8 +71,6 @@ public:
             std::nullopt);
     [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
     [[nodiscard]] SourceCollectionRosterRemoveResult RemoveSource(std::size_t source_index);
-    [[nodiscard]] SourceCollectionRosterOpenResult LoadActiveSourceAt(
-        std::size_t spectrum_index);
     void RememberActiveSourceIndex(std::size_t spectrum_index);
 
 private:
@@ -152,7 +144,6 @@ private:
     void EvictResidentSnapshots(std::vector<SpectrumSnapshotHandle>& retired_snapshots);
     void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
 
-    SnapshotLoader snapshot_loader_;
     SpectrumSnapshotHandle snapshot_;
     std::vector<SourceListEntry> sources_;
     std::optional<std::size_t> current_source_index_;

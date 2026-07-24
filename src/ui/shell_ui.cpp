@@ -1,7 +1,6 @@
 #include "ui/shell_ui.h"
 
 #include "app/runtime_paths.h"
-#include "domain/spectrum_loader.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/top_bar_status_hover.h"
@@ -659,7 +658,7 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 }  // namespace
 
 ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
-    : session_(LoadSpectrumSnapshotFromPath, SourceCollectionSessionRestoreMode::Deferred),
+    : session_(),
       source_activation_(session_),
       spectral_lines_panel_(
           DefaultRuntimePaths().public_spectral_line_catalog_path),

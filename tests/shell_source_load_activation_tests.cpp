@@ -257,15 +257,7 @@ specforge::SourceCollectionSession MakePreparedDeferredSession(
     const std::filesystem::path& path,
     std::optional<std::string> context_fingerprint_override = std::nullopt)
 {
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("Shell drain tests must not use synchronous source loading");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(path, 0);
     specforge::SourceCollectionContext context;
     context.identity = specforge::BuildSourceCollectionIdentity(
@@ -325,25 +317,14 @@ struct SourceSessionCachePaths {
     std::filesystem::path workflow;
 };
 
-specforge::SpectrumSnapshotHandle RejectSynchronousSourceLoad(
-    const std::filesystem::path&,
-    std::size_t)
-{
-    throw std::runtime_error(
-        "deferred restore regression must not use synchronous source loading");
-}
-
 specforge::SourceCollectionSession MakeCachedSession(
-    const SourceSessionCachePaths& cache_paths,
-    specforge::SourceCollectionSessionRestoreMode restore_mode)
+    const SourceSessionCachePaths& cache_paths)
 {
     return specforge::SourceCollectionSession(
-        RejectSynchronousSourceLoad,
         cache_paths.source_session,
         cache_paths.navigation,
         cache_paths.labeling,
-        cache_paths.workflow,
-        restore_mode);
+        cache_paths.workflow);
 }
 
 specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
@@ -385,9 +366,7 @@ std::unique_ptr<specforge::ShellUi> MakeDeferredShell(
 {
     using Access = specforge::ShellUiTestAccess;
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
-        MakeCachedSession(
-            cache_paths,
-            specforge::SourceCollectionSessionRestoreMode::Deferred),
+        MakeCachedSession(cache_paths),
         specforge::MakeSourceCollectionLoadQueueForTesting(std::move(dependencies)));
     Access::BeginDeferredRestore(*shell);
     return shell;
@@ -436,17 +415,7 @@ void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "the Shell async source open must not use synchronous loading");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path& source, std::size_t index, const auto&) {
@@ -567,17 +536,7 @@ void TestFailedExplicitOpenProducesTerminalSourceLoadReport()
         stream << "fixture";
     }
 
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "the Shell async source open must not use synchronous loading");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     specforge::SourceCollectionPreparationAdapters dependencies;
     dependencies.snapshot_loader =
         [](const std::filesystem::path&, std::size_t, const auto&)
@@ -846,9 +805,7 @@ void TestAcceptedNavigationUsesLatestMatchingRawKeyInput()
 {
     using Access = specforge::ShellUiTestAccess;
     std::unique_ptr<specforge::ShellUi> shell = Access::Create(
-        specforge::SourceCollectionSession([](const auto&, std::size_t) {
-            return specforge::SpectrumSnapshotHandle{};
-        }),
+        specforge::SourceCollectionSession({}, {}, {}, {}),
         specforge::MakeSourceCollectionLoadQueueForTesting());
     const auto stale = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(10));
     const auto accepted = specforge::NavigationLatencyTimePoint(std::chrono::milliseconds(20));
@@ -2123,9 +2080,8 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     }
 
     {
-        specforge::SourceCollectionSession saved_session = MakeCachedSession(
-            cache_paths,
-            specforge::SourceCollectionSessionRestoreMode::Immediate);
+        specforge::SourceCollectionSession saved_session =
+            MakeCachedSession(cache_paths);
         for (const std::filesystem::path& path : source_paths) {
             OpenPreparedFixtureSource(saved_session, path);
         }

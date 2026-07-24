@@ -3,8 +3,11 @@
 #include "app/local_user_state.h"
 #include "domain/source_path_identity.h"
 #include "profile/navigation_latency_trace.h"
+#include "ui/sample_labeling_state_cache_io.h"
+#include "ui/sample_navigation_state_cache_io.h"
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
+#include "ui/sample_workflow_state_cache_io.h"
 #include "ui/source_collection_roster.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -13,7 +16,6 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,15 +34,6 @@ std::int64_t ElapsedNavigationResolutionNanoseconds(
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                NavigationLatencyTrace::Now() - started_at)
         .count();
-}
-
-bool IsRestorableSourcePath(const std::filesystem::path& path)
-{
-    if (path.empty()) {
-        return false;
-    }
-    std::error_code error;
-    return std::filesystem::exists(path, error) && !error;
 }
 
 }  // namespace
@@ -151,17 +144,6 @@ private:
     bool restoring_ = false;
     bool dirty_after_restore_ = false;
 };
-
-SourceCollectionIntent SourceCollectionIntent::OpenSynchronously(
-    std::filesystem::path path,
-    std::size_t spectrum_index)
-{
-    SourceCollectionIntent intent;
-    intent.kind = SourceCollectionIntentKind::OpenSynchronously;
-    intent.path = std::move(path);
-    intent.spectrum_index = spectrum_index;
-    return intent;
-}
 
 SourceCollectionIntent SourceCollectionIntent::SwitchActive(std::size_t source_index)
 {
@@ -455,95 +437,30 @@ SourceCollectionSessionIntent SourceCollectionSessionIntent::ApplySampleSorting(
     return session_intent;
 }
 
-SourceCollectionSession::SourceCollectionSession(SnapshotLoader snapshot_loader)
+SourceCollectionSession::SourceCollectionSession()
     : SourceCollectionSession(
-          std::move(snapshot_loader),
-          SourceCollectionSessionRestoreMode::Immediate)
+          DefaultSourceCollectionSessionStateCachePath(),
+          DefaultSampleNavigationStateCachePath(),
+          DefaultSampleLabelingStateCachePath(),
+          DefaultSampleWorkflowStateCachePath())
 {
 }
 
 SourceCollectionSession::SourceCollectionSession(
-    SnapshotLoader snapshot_loader,
-    SourceCollectionSessionRestoreMode restore_mode)
-    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
-      workflow_(std::make_unique<SampleWorkflowCoordinator>()),
-      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
-          DefaultSourceCollectionSessionStateCachePath())),
-      background_loads_required_(restore_mode == SourceCollectionSessionRestoreMode::Deferred)
-{
-    workflow_->SetDeferredSampleNavigation(background_loads_required_);
-    if (restore_mode == SourceCollectionSessionRestoreMode::Deferred) {
-        PrepareDeferredSourceSessionRestore();
-    } else {
-        RestoreSourceSessionCache();
-    }
-}
-
-SourceCollectionSession::SourceCollectionSession(
-    SnapshotLoader snapshot_loader,
-    std::filesystem::path navigation_state_cache_path,
-    std::filesystem::path labeling_state_cache_path)
-    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
-      workflow_(std::make_unique<SampleWorkflowCoordinator>(
-          std::move(navigation_state_cache_path),
-          std::move(labeling_state_cache_path))),
-      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(std::filesystem::path{}))
-{
-}
-
-SourceCollectionSession::SourceCollectionSession(
-    SnapshotLoader snapshot_loader,
-    std::filesystem::path source_session_state_cache_path,
-    std::filesystem::path navigation_state_cache_path,
-    std::filesystem::path labeling_state_cache_path)
-    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
-      workflow_(std::make_unique<SampleWorkflowCoordinator>(
-          std::move(navigation_state_cache_path),
-          std::move(labeling_state_cache_path))),
-      source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
-          std::move(source_session_state_cache_path)))
-{
-    RestoreSourceSessionCache();
-}
-
-SourceCollectionSession::SourceCollectionSession(
-    SnapshotLoader snapshot_loader,
     std::filesystem::path source_session_state_cache_path,
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path,
     std::filesystem::path workflow_state_cache_path)
-    : SourceCollectionSession(
-          std::move(snapshot_loader),
-          std::move(source_session_state_cache_path),
-          std::move(navigation_state_cache_path),
-          std::move(labeling_state_cache_path),
-          std::move(workflow_state_cache_path),
-          SourceCollectionSessionRestoreMode::Immediate)
-{
-}
-
-SourceCollectionSession::SourceCollectionSession(
-    SnapshotLoader snapshot_loader,
-    std::filesystem::path source_session_state_cache_path,
-    std::filesystem::path navigation_state_cache_path,
-    std::filesystem::path labeling_state_cache_path,
-    std::filesystem::path workflow_state_cache_path,
-    SourceCollectionSessionRestoreMode restore_mode)
-    : roster_(std::make_unique<SourceCollectionRoster>(std::move(snapshot_loader))),
+    : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path))),
       source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
-          std::move(source_session_state_cache_path))),
-      background_loads_required_(restore_mode == SourceCollectionSessionRestoreMode::Deferred)
+          std::move(source_session_state_cache_path)))
 {
-    workflow_->SetDeferredSampleNavigation(background_loads_required_);
-    if (restore_mode == SourceCollectionSessionRestoreMode::Deferred) {
-        PrepareDeferredSourceSessionRestore();
-    } else {
-        RestoreSourceSessionCache();
-    }
+    workflow_->SetDeferredSampleNavigation(true);
+    PrepareDeferredSourceSessionRestore();
 }
 
 SourceCollectionSession::~SourceCollectionSession() = default;
@@ -560,8 +477,6 @@ bool SourceCollectionSession::SupersedesPendingSourceActivation(
     }
 
     switch (intent.source_collection.kind) {
-    case SourceCollectionIntentKind::OpenSynchronously:
-        return true;
     case SourceCollectionIntentKind::SwitchActive: {
         const std::size_t target_index = intent.source_collection.source_index;
         const std::optional<std::size_t> current_index = roster_->current_source_index();
@@ -613,10 +528,6 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     switch (intent.kind) {
     case SourceCollectionSessionIntentKind::SourceCollection:
         switch (intent.source_collection.kind) {
-        case SourceCollectionIntentKind::OpenSynchronously:
-            result.action =
-                OpenSource(intent.source_collection.path, intent.source_collection.spectrum_index);
-            break;
         case SourceCollectionIntentKind::SwitchActive:
             result.action = ActivateSource(intent.source_collection.source_index);
             break;
@@ -961,17 +872,6 @@ SourceCollectionSession::StorePrefetchedSnapshot(
                 std::move(retain.retired_snapshots)));
     }
     return result;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::OpenSource(
-    const std::filesystem::path& path,
-    std::size_t spectrum_index)
-{
-    SourceCollectionSessionAction action =
-        AdoptRosterOpenResult(roster_->OpenSource(path, spectrum_index));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation(true));
-    MarkSourceSessionCacheDirty();
-    return action;
 }
 
 SourceCollectionSessionAction SourceCollectionSession::ActivateSource(std::size_t source_index)
@@ -1576,12 +1476,13 @@ bool SourceCollectionSession::FlushStateCaches()
     return source_session_saved && workflow_saved;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::EnsureSnapshotMatchesNavigation(
-    bool refresh_source_context)
+SourceCollectionSessionAction
+SourceCollectionSession::EnsureSnapshotMatchesNavigation()
 {
-    SourceCollectionSessionAction action = refresh_source_context
-        ? workflow_->SyncActiveSource(roster_->current_source_key(), roster_->snapshot())
-        : workflow_->SyncKnownActiveSource(roster_->current_source_key(), roster_->snapshot());
+    SourceCollectionSessionAction action =
+        workflow_->SyncKnownActiveSource(
+            roster_->current_source_key(),
+            roster_->snapshot());
     const std::optional<std::size_t> pending_index = workflow_->pending_sample_index();
     const std::optional<std::size_t> navigation_index = pending_index
         ? pending_index
@@ -1589,29 +1490,11 @@ SourceCollectionSessionAction SourceCollectionSession::EnsureSnapshotMatchesNavi
     const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
     if (navigation_index && snapshot && snapshot->collection.spectrum_count > 0 &&
         snapshot->collection.current_index != *navigation_index) {
-        if (background_loads_required_) {
-            pending_background_spectrum_index_ = *navigation_index;
-            action.navigation_inputs_changed = true;
-            return action;
-        }
-        MergeSourceCollectionSessionAction(action, LoadActiveSourceAt(*navigation_index));
+        pending_background_spectrum_index_ = *navigation_index;
+        action.navigation_inputs_changed = true;
         return action;
     }
     action.navigation_inputs_changed = true;
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::LoadActiveSourceAt(std::size_t spectrum_index)
-{
-    if (!roster_->current_source_key()) {
-        return {};
-    }
-
-    SourceCollectionSessionAction action =
-        AdoptRosterOpenResult(
-            roster_->LoadActiveSourceAt(spectrum_index));
-    action.navigation_inputs_changed = true;
-    MarkSourceSessionCacheDirty();
     return action;
 }
 
@@ -1670,9 +1553,6 @@ SourceCollectionSession::TakeViewRetirement()
 
 void SourceCollectionSession::PreserveRequiredBackgroundSnapshotLoad()
 {
-    if (!background_loads_required_) {
-        return;
-    }
     if (const std::optional<std::size_t> pending_index = workflow_->pending_sample_index()) {
         pending_background_spectrum_index_ = *pending_index;
         return;
@@ -1683,36 +1563,6 @@ void SourceCollectionSession::PreserveRequiredBackgroundSnapshotLoad()
         snapshot->collection.current_index != *navigation_index) {
         pending_background_spectrum_index_ = *navigation_index;
     }
-}
-
-void SourceCollectionSession::RestoreSourceSessionCache()
-{
-    const SourceCollectionSessionStateCache state = source_session_state_->Load();
-    if (state.sources.empty()) {
-        return;
-    }
-
-    source_session_state_->BeginRestore();
-    workflow_->BeginRestoringSourceSession();
-    std::optional<std::size_t> restored_active_source_index;
-    for (std::size_t source_index = 0; source_index < state.sources.size(); ++source_index) {
-        const SourceCollectionSavedSource& source = state.sources[source_index];
-        if (!IsRestorableSourcePath(source.path)) {
-            continue;
-        }
-
-        (void)OpenSource(source.path, source.last_spectrum_index);
-        (void)workflow_->RestoreReadOnlyAnnotationsForActiveSource(source.annotation_paths);
-        if (state.active_source_index && *state.active_source_index == source_index) {
-            restored_active_source_index = roster_->current_source_index();
-        }
-    }
-
-    if (restored_active_source_index && roster_->has_source(*restored_active_source_index)) {
-        (void)ActivateSource(*restored_active_source_index);
-    }
-    workflow_->EndRestoringSourceSession();
-    source_session_state_->EndRestore();
 }
 
 void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
@@ -1783,12 +1633,9 @@ void SourceCollectionSession::ApplyWorkflowCommandResult(
     }
     MergeSourceCollectionSessionAction(action, command_result.action);
     if (command_result.snapshot_index_to_load) {
-        if (background_loads_required_) {
-            pending_background_spectrum_index_ = *command_result.snapshot_index_to_load;
-            action.navigation_inputs_changed = true;
-        } else {
-            MergeSourceCollectionSessionAction(action, LoadActiveSourceAt(*command_result.snapshot_index_to_load));
-        }
+        pending_background_spectrum_index_ =
+            *command_result.snapshot_index_to_load;
+        action.navigation_inputs_changed = true;
     }
 }
 

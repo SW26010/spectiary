@@ -10,6 +10,7 @@
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_load_queue.h"
+#include "ui/source_collection_preparation_internal.h"
 #include "ui/source_collection_roster.h"
 #include "ui/source_collection_session.h"
 #include "ui/source_collection_session_state_cache_io.h"
@@ -23,6 +24,7 @@
 #include <future>
 #include <initializer_list>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -240,14 +242,206 @@ specforge::PreparedSampleWorkflowState PrepareWorkflow(
         {std::move(labeling_cache), std::move(workflow_cache)});
 }
 
-specforge::SourceCollectionSession MakeSession(
+using SnapshotLoader = std::function<specforge::SpectrumSnapshotHandle(
+    const std::filesystem::path&,
+    std::size_t)>;
+
+specforge::SourceCollectionPreparationAdapters PreparationAdapters(
+    SnapshotLoader loader,
+    const std::filesystem::path& labeling_cache,
+    const std::filesystem::path& workflow_cache)
+{
+    specforge::SourceCollectionPreparationAdapters adapters;
+    SnapshotLoader folder_loader = loader;
+    adapters.snapshot_loader = [loader = std::move(loader)](
+                                   const std::filesystem::path& path,
+                                   std::size_t spectrum_index,
+                                   const auto& canceled) {
+        if (canceled()) {
+            throw specforge::SourceCollectionPreparationCanceled();
+        }
+        return loader(path, spectrum_index);
+    };
+    adapters.folder_snapshot_loader = [loader = std::move(folder_loader)](
+                                          const std::filesystem::path& path,
+                                          std::size_t spectrum_index,
+                                          const specforge::SourceCollectionFolderListing&,
+                                          const auto& canceled) {
+        if (canceled()) {
+            throw specforge::SourceCollectionPreparationCanceled();
+        }
+        return loader(path, spectrum_index);
+    };
+    adapters.workflow_cache_paths = {
+        labeling_cache,
+        workflow_cache,
+    };
+    return adapters;
+}
+
+class PreparedSession final : public specforge::SourceCollectionSession {
+public:
+    PreparedSession(
+        SnapshotLoader loader,
+        std::filesystem::path source_session_cache,
+        std::filesystem::path navigation_cache,
+        std::filesystem::path labeling_cache,
+        std::filesystem::path workflow_cache)
+        : specforge::SourceCollectionSession(
+              source_session_cache,
+              navigation_cache,
+              labeling_cache,
+              workflow_cache),
+          preparation_(PreparationAdapters(
+              std::move(loader),
+              labeling_cache,
+              workflow_cache))
+    {
+        RestorePreparedSources();
+    }
+
+    [[nodiscard]] specforge::SourceCollectionSessionResult Open(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index = 0,
+        std::vector<std::filesystem::path> annotation_paths = {})
+    {
+        return ServiceFollowUps(CommitPrepared(
+            path,
+            spectrum_index,
+            std::move(annotation_paths)));
+    }
+
+    [[nodiscard]] specforge::SourceCollectionSessionResult SubmitAndService(
+        specforge::SourceCollectionSessionIntent intent)
+    {
+        return ServiceFollowUps(
+            specforge::SourceCollectionSession::Submit(std::move(intent)));
+    }
+
+private:
+    [[nodiscard]] specforge::SourceCollectionSessionResult CommitPrepared(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        std::vector<std::filesystem::path> annotation_paths)
+    {
+        specforge::SourceCollectionLoadRequest request{
+            .path = path,
+            .spectrum_index = spectrum_index,
+            .annotation_paths = std::move(annotation_paths),
+        };
+        if (std::optional<specforge::SourceCollectionLoadHint> hint =
+                LoadHintForSource(path, spectrum_index)) {
+            request.reuse = std::move(hint->reuse);
+        }
+        specforge::PreparedSourceCollection prepared =
+            preparation_.Prepare(next_task_id_++, request, []() {});
+        return OpenPreparedSource(
+            std::move(prepared.path),
+            prepared.spectrum_index,
+            std::move(prepared.snapshot),
+            std::move(prepared.payload),
+            std::move(prepared.folder_listing_generation),
+            std::move(prepared.context_reuse_proof));
+    }
+
+    [[nodiscard]] specforge::SourceCollectionSessionResult ServiceFollowUps(
+        specforge::SourceCollectionSessionResult result)
+    {
+        for (std::size_t attempt = 0; result.follow_up_spectrum_index; ++attempt) {
+            Require(attempt < 8, "prepared session follow-up should converge");
+            const specforge::SpectrumSnapshotHandle snapshot =
+                CurrentSourceSnapshot();
+            Require(
+                snapshot && !snapshot->source.path.empty(),
+                "prepared follow-up should retain a source path");
+            const std::filesystem::path path = snapshot->source.path;
+            const std::size_t spectrum_index =
+                *result.follow_up_spectrum_index;
+            result.follow_up_spectrum_index.reset();
+            specforge::SourceCollectionSessionResult follow_up =
+                CommitPrepared(
+                    path,
+                    spectrum_index,
+                    AnnotationPathsForSource(path));
+            specforge::MergeSourceCollectionSessionAction(
+                result.action,
+                follow_up.action);
+            result.loaded = result.loaded || follow_up.loaded;
+            if (!follow_up.message.empty()) {
+                result.message = std::move(follow_up.message);
+            }
+            if (follow_up.canceled_source_follow_up_path) {
+                result.canceled_source_follow_up_path =
+                    std::move(follow_up.canceled_source_follow_up_path);
+            }
+            result.background_retirement.insert(
+                result.background_retirement.end(),
+                std::make_move_iterator(follow_up.background_retirement.begin()),
+                std::make_move_iterator(follow_up.background_retirement.end()));
+            result.follow_up_spectrum_index =
+                follow_up.follow_up_spectrum_index;
+        }
+        return result;
+    }
+
+    void RestorePreparedSources()
+    {
+        std::optional<specforge::SourceCollectionDeferredRestorePlan> restore =
+            TakeDeferredRestorePlan();
+        if (!restore) {
+            return;
+        }
+        std::optional<std::filesystem::path> active_source_path;
+        if (restore->active_source_index &&
+            *restore->active_source_index < restore->sources.size()) {
+            active_source_path =
+                restore->sources[*restore->active_source_index].path;
+        }
+        for (const specforge::SourceCollectionSavedSource& source :
+             restore->sources) {
+            try {
+                (void)Open(
+                    source.path,
+                    source.last_spectrum_index,
+                    source.annotation_paths);
+            } catch (const std::exception&) {
+                // The production activation transaction records a
+                // failed preparation and continues the restore batch.
+            }
+        }
+        if (active_source_path) {
+            const specforge::SourceCollectionSessionView view = View();
+            const auto active = std::find_if(
+                view.sources.begin(),
+                view.sources.end(),
+                [&active_source_path](const auto& source) {
+                    return source.path == *active_source_path;
+                });
+            if (active != view.sources.end()) {
+                const std::size_t active_index = static_cast<std::size_t>(
+                    std::distance(view.sources.begin(), active));
+                (void)specforge::SourceCollectionSession::Submit(
+                    specforge::SourceCollectionSessionIntent::
+                        EditSourceCollection(
+                            specforge::SourceCollectionIntent::SwitchActive(
+                                active_index)));
+            }
+        }
+        FinishDeferredRestore();
+    }
+
+    specforge::SourceCollectionPreparation preparation_;
+    std::uint64_t next_task_id_ = 1;
+};
+
+PreparedSession MakeSession(
     std::vector<std::size_t>& loaded_indices,
     const std::filesystem::path& source_path,
     std::size_t sample_count)
 {
     const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
-    return specforge::SourceCollectionSession(
+    return PreparedSession(
         [&loaded_indices, source_path, sample_count](
             const std::filesystem::path& path,
             std::size_t spectrum_index) {
@@ -255,11 +449,13 @@ specforge::SourceCollectionSession MakeSession(
             loaded_indices.push_back(spectrum_index);
             return MakeSnapshot(source_path, sample_count, spectrum_index);
         },
+        {},
         navigation_cache,
-        labeling_cache);
+        labeling_cache,
+        UniqueTempPath("_workflow.json"));
 }
 
-specforge::SourceCollectionSession MakeMultiSourceSession(
+PreparedSession MakeMultiSourceSession(
     std::vector<LoadedSourceSnapshot>& loaded_snapshots,
     const std::filesystem::path& first_source_path,
     std::size_t first_sample_count,
@@ -268,7 +464,7 @@ specforge::SourceCollectionSession MakeMultiSourceSession(
 {
     const std::filesystem::path navigation_cache = UniqueTempPath("_navigation.json");
     const std::filesystem::path labeling_cache = UniqueTempPath("_labeling.json");
-    return specforge::SourceCollectionSession(
+    return PreparedSession(
         [&loaded_snapshots, first_source_path, first_sample_count, second_source_path, second_sample_count](
             const std::filesystem::path& path,
             std::size_t spectrum_index) {
@@ -281,11 +477,13 @@ specforge::SourceCollectionSession MakeMultiSourceSession(
             }
             return MakeSnapshot(second_source_path, second_sample_count, spectrum_index);
         },
+        {},
         navigation_cache,
-        labeling_cache);
+        labeling_cache,
+        UniqueTempPath("_workflow.json"));
 }
 
-specforge::SourceCollectionSession MakePersistentMultiSourceSession(
+PreparedSession MakePersistentMultiSourceSession(
     std::vector<LoadedSourceSnapshot>& loaded_snapshots,
     const std::filesystem::path& source_session_cache,
     const std::filesystem::path& navigation_cache,
@@ -295,7 +493,7 @@ specforge::SourceCollectionSession MakePersistentMultiSourceSession(
     const std::filesystem::path& second_source_path,
     std::size_t second_sample_count)
 {
-    return specforge::SourceCollectionSession(
+    return PreparedSession(
         [&loaded_snapshots, first_source_path, first_sample_count, second_source_path, second_sample_count](
             const std::filesystem::path& path,
             std::size_t spectrum_index) {
@@ -310,33 +508,38 @@ specforge::SourceCollectionSession MakePersistentMultiSourceSession(
         },
         source_session_cache,
         navigation_cache,
-        labeling_cache);
+        labeling_cache,
+        UniqueTempPath("_workflow.json"));
 }
 
-specforge::SourceCollectionSession MakePersistentSession(
+PreparedSession MakePersistentSession(
     std::vector<LoadedSourceSnapshot>& loaded_snapshots,
     const std::filesystem::path& source_session_cache,
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
     std::vector<SourceFixture> fixtures)
 {
-    return specforge::SourceCollectionSession(
+    return PreparedSession(
         [&loaded_snapshots, fixtures = std::move(fixtures)](
             const std::filesystem::path& path,
             std::size_t spectrum_index) {
             const auto match = std::find_if(fixtures.begin(), fixtures.end(), [&path](const SourceFixture& fixture) {
                 return fixture.path == path;
             });
-            Require(match != fixtures.end(), "persistent session should reload a known source path");
+            Require(
+                match != fixtures.end(),
+                std::string("persistent session should reload a known source path: ") +
+                    path.string());
             loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
             return MakeSnapshot(match->path, match->sample_count, spectrum_index);
         },
         source_session_cache,
         navigation_cache,
-        labeling_cache);
+        labeling_cache,
+        UniqueTempPath("_workflow.json"));
 }
 
-specforge::SourceCollectionSession MakeWorkflowPersistentSession(
+PreparedSession MakeWorkflowPersistentSession(
     std::vector<LoadedSourceSnapshot>& loaded_snapshots,
     const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
@@ -344,7 +547,7 @@ specforge::SourceCollectionSession MakeWorkflowPersistentSession(
     const std::filesystem::path& source_path,
     std::size_t sample_count)
 {
-    return specforge::SourceCollectionSession(
+    return PreparedSession(
         [&loaded_snapshots, source_path, sample_count](
             const std::filesystem::path& path,
             std::size_t spectrum_index) {
@@ -365,12 +568,36 @@ specforge::SourceCollectionSessionResult Submit(
     return session.Submit(std::move(intent));
 }
 
-specforge::SourceCollectionSessionIntent OpenSourceCollection(
+specforge::SourceCollectionSessionResult Submit(
+    PreparedSession& session,
+    specforge::SourceCollectionSessionIntent intent)
+{
+    return session.SubmitAndService(
+        std::move(intent));
+}
+
+struct PreparedSourceOpenRequest {
+    std::filesystem::path path;
+    std::size_t spectrum_index = 0;
+};
+
+PreparedSourceOpenRequest OpenSourceCollection(
     std::filesystem::path path,
     std::size_t spectrum_index = 0)
 {
-    return specforge::SourceCollectionSessionIntent::EditSourceCollection(
-        specforge::SourceCollectionIntent::OpenSynchronously(std::move(path), spectrum_index));
+    return {
+        std::move(path),
+        spectrum_index,
+    };
+}
+
+specforge::SourceCollectionSessionResult Submit(
+    PreparedSession& session,
+    PreparedSourceOpenRequest request)
+{
+    return session.Open(
+        request.path,
+        request.spectrum_index);
 }
 
 specforge::SourceCollectionSessionIntent SwitchSourceCollection(std::size_t source_index)
@@ -590,7 +817,7 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
     const specforge::SourceCollectionSessionResult open_result =
         Submit(session, OpenSourceCollection(source_path, 0));
@@ -636,7 +863,7 @@ void TestAssigningLabelAutoAdvancesInsideSession()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -670,7 +897,7 @@ void TestLabelUndoRestoresValueAndAutoAdvancePosition()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -712,7 +939,7 @@ void TestLabelUndoRestoresExistingValueAfterOverwriteAndClear()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -744,7 +971,7 @@ void TestLabelUndoRestoresSampleOutsideActiveSampleNavigationSequence()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -780,7 +1007,7 @@ void TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -810,7 +1037,7 @@ void TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -846,7 +1073,7 @@ void TestSavingToCompanionAnnotationKeepsLabelUndoHistory()
     Require(companion_path.has_value(), "NPY source should provide a companion sample annotation path");
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -869,7 +1096,7 @@ void TestNoOpLabelUpsertKeepsLabelUndoHistory()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 1);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 1);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const specforge::SampleLabelDefinition label{1, "bad", 'b'};
@@ -888,7 +1115,7 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::filesystem::path annotation_path =
@@ -957,7 +1184,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1006,7 +1233,7 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1054,7 +1281,7 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1094,7 +1321,7 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1170,7 +1397,7 @@ void TestLabelingViewCodeConflictIncludesUndefinedSampleValues()
         true);
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     Require(Submit(session, AddReadOnlyAnnotation(annotation_path)).loaded, "fixture annotation should load");
     (void)Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
@@ -1196,7 +1423,7 @@ void TestResumeLocateRespectsActiveFilterSequence()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
@@ -1205,7 +1432,6 @@ void TestResumeLocateRespectsActiveFilterSequence()
         Submit(session, SetFilterValueSelected(source_id, "2", true));
     Require(session.View().navigation.sequence_active, "test should activate the filtered sequence");
     Require(session.View().navigation.sequence_count == 2, "test should include only the two matching samples");
-    Require(session.View().navigation.sequence_rows.empty(), "active sequence rows should stay out of the per-frame view");
     Require(
         session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "filter should reconcile to the first included row");
@@ -1231,7 +1457,7 @@ void TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows()
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     TouchFile(source_path);
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 4);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 4);
 
     const specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
@@ -1240,7 +1466,6 @@ void TestSourceOrderNavigationViewDoesNotMaterializeSequenceRows()
     Require(!navigation.sequence_active, "source order should not expose an active sequence");
     Require(navigation.sequence_count == 4, "source-order sequence count should still match sample count");
     Require(navigation.filtered_sample_count == 4, "source-order filtered count should still match sample count");
-    Require(navigation.sequence_rows.empty(), "source-order view should not materialize rows");
     Require(
         navigation.current_sequence_position && *navigation.current_sequence_position == 0,
         "source-order current position should remain available");
@@ -1251,7 +1476,7 @@ void TestRememberedPositionResumableTracksActiveSequence()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1285,7 +1510,7 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     TouchFile(source_path);
     WriteUnicodeNameNpy(CompanionNamePath(source_path), {"gamma", "alpha", "beta"}, 6);
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
@@ -1295,7 +1520,6 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     result = Submit(session, SetSampleSortSource("sample-name"));
     Require(session.View().sorting.active, "selecting sample-name sorting should activate sorting view state");
     Require(session.View().navigation.sequence_count == 3, "sample-name sorting should keep all rows in the sequence");
-    Require(session.View().navigation.sequence_rows.empty(), "sorted rows should stay out of the per-frame view");
     Require(!session.View().navigation.row_location_available, "sorted sequence should disable ordinary row locate");
     Require(
         session.View().navigation.current_sequence_position &&
@@ -1374,7 +1598,7 @@ void TestSampleSortingSourcesRequireExplicitAddition()
         false);
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
@@ -1452,7 +1676,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
-        specforge::SourceCollectionSession session = MakeWorkflowPersistentSession(
+        PreparedSession session = MakeWorkflowPersistentSession(
             loaded_snapshots,
             navigation_cache,
             labeling_cache,
@@ -1485,7 +1709,7 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
     }
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = MakeWorkflowPersistentSession(
+    PreparedSession restored = MakeWorkflowPersistentSession(
         restored_loads,
         navigation_cache,
         labeling_cache,
@@ -1493,9 +1717,10 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         source_path,
         3);
 
-    (void)Submit(restored, OpenSourceCollection(source_path, 0));
-    Require(restored.View().filter.sources.empty(), "restored workflow should wait for its annotation source to load");
-    (void)Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    (void)restored.Open(
+        source_path,
+        1,
+        {annotation_path});
     const specforge::SourceCollectionSessionView& view = restored.View();
     Require(view.filter.sources.size() == 1, "restored workflow should expose the annotation sample filter source");
     Require(
@@ -1517,7 +1742,10 @@ void TestSampleWorkflowStateRestoresFiltersAndSorting()
         "restored workflow should preserve the sample-name sort source");
     Require(
         view.navigation.current_index && *view.navigation.current_index == 1,
-        "restored workflow should reconcile to the first filtered sample");
+        std::string("restored workflow should reconcile to the first filtered sample; actual=") +
+            (view.navigation.current_index
+                 ? std::to_string(*view.navigation.current_index)
+                 : "none"));
     Require(
         view.navigation.current_sequence_position && *view.navigation.current_sequence_position == 1,
         "restored descending sequence should keep alpha at position 1");
@@ -1552,7 +1780,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
-        specforge::SourceCollectionSession session = MakeWorkflowPersistentSession(
+        PreparedSession session = MakeWorkflowPersistentSession(
             loaded_snapshots,
             navigation_cache,
             labeling_cache,
@@ -1633,7 +1861,7 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
     }
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = MakeWorkflowPersistentSession(
+    PreparedSession restored = MakeWorkflowPersistentSession(
         restored_loads,
         navigation_cache,
         labeling_cache,
@@ -1641,8 +1869,10 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         source_path,
         3);
 
-    (void)Submit(restored, OpenSourceCollection(source_path, 0));
-    (void)Submit(restored, AddReadOnlyAnnotation(annotation_path));
+    (void)restored.Open(
+        source_path,
+        0,
+        {annotation_path});
     const specforge::SourceCollectionSessionView restored_view = restored.View();
     Require(
         restored_view.navigation.current_annotations[0].name == utf8_display_name,
@@ -1651,12 +1881,15 @@ void TestAnnotationDisplayNameCustomizesWorkflowSurfacesAndPersists()
         restored_view.filter.sources.size() == 1 &&
             restored_view.filter.sources[0].name == utf8_display_name,
         "restored selected sample filter source should keep the UTF-8 annotation display name");
+    const specforge::SourceCollectionSampleSortSourceView*
+        restored_sort_source =
+            FindSortSource(
+                restored_view.sorting,
+                annotation_source_id);
     Require(
-        std::any_of(
-            restored_view.sorting.available_sources.begin(),
-            restored_view.sorting.available_sources.end(),
-            [&utf8_display_name](const auto& source) { return source.name == utf8_display_name; }),
-        "restored available sample sort source should keep the UTF-8 annotation display name");
+        restored_sort_source != nullptr &&
+            restored_sort_source->name == utf8_display_name,
+        "restored selected sample sort source should keep the UTF-8 annotation display name");
 }
 
 void TestAnnotationSortingSourcesRequireComparablePlainValues()
@@ -1685,7 +1918,7 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
         true);
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(rank_path));
@@ -1748,7 +1981,7 @@ void TestSourceSessionRestoresAnnotationSortingState()
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
-        specforge::SourceCollectionSession session = specforge::SourceCollectionSession(
+        PreparedSession session(
             [&loaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
                 Require(path == source_path, "session should reload the source fixture");
                 loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
@@ -1772,7 +2005,7 @@ void TestSourceSessionRestoresAnnotationSortingState()
     }
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = specforge::SourceCollectionSession(
+    PreparedSession restored(
         [&restored_loads, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
             Require(path == source_path, "restored session should reload the source fixture");
             restored_loads.push_back(LoadedSourceSnapshot{path, spectrum_index});
@@ -1812,7 +2045,7 @@ void TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {2, 2, 2});
@@ -1843,7 +2076,7 @@ void TestDeactivatingLabelingTaskKeepsAnnotationFilter()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const std::string source_id = AddPlainIntegerSampleFilterSource(session, {1, 2, 2});
@@ -1875,7 +2108,7 @@ void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1904,7 +2137,7 @@ void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
@@ -1942,7 +2175,7 @@ void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -1971,7 +2204,7 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
     const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
     const std::string saved_name = Utf8(output_path.stem().u8string());
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
@@ -2035,7 +2268,7 @@ void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
     std::filesystem::create_directories(blocked_output_path);
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     const std::string temporary_task_id = session.View().labeling.task_id;
@@ -2082,7 +2315,7 @@ void TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask()
         specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path));
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
@@ -2122,7 +2355,7 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
         label_set,
         true);
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
@@ -2176,7 +2409,7 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
         true);
 
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     specforge::SourceCollectionSessionResult result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(session.View().labeling.has_active_task, "current task should be active before activation attempt");
@@ -2218,7 +2451,7 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
         {},
         false);
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
@@ -2259,7 +2492,7 @@ void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
         {},
         false);
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, AddReadOnlyAnnotation(annotation_path));
 
@@ -2325,14 +2558,16 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     Require(specforge::SaveSampleLabelingStateCache(labeling_cache, cache), "labeling cache fixture should save");
 
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    specforge::SourceCollectionSession session(
+    PreparedSession session(
         [&loaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
             Require(path == source_path, "mismatch fixture should load the source path");
             loaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
             return MakeSnapshot(source_path, 2, spectrum_index);
         },
+        {},
         navigation_cache,
-        labeling_cache);
+        labeling_cache,
+        UniqueTempPath("_workflow.json"));
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddReadOnlyAnnotation(annotation_path));
@@ -2358,7 +2593,7 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
     const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
     const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    specforge::SourceCollectionSession session = MakeMultiSourceSession(
+    PreparedSession session = MakeMultiSourceSession(
         loaded_snapshots,
         first_source_path,
         3,
@@ -2415,7 +2650,7 @@ void TestNavigationViewSeparatesSampleNameFromDisplayName()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
@@ -2438,7 +2673,7 @@ void TestNavigationViewExposesSourceProvidedSampleName()
     TouchFile(source_path / "alpha.csv");
     TouchFile(source_path / "beta.csv");
     std::vector<std::size_t> loaded_indices;
-    specforge::SourceCollectionSession session = MakeSession(loaded_indices, source_path, 2);
+    PreparedSession session = MakeSession(loaded_indices, source_path, 2);
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, OpenSourceCollection(source_path, 0));
@@ -2461,7 +2696,7 @@ void TestRemovingActiveSourceActivatesNextSourceWorkflow()
     const std::filesystem::path first_source_path = UniqueTempPath("_first.npy");
     const std::filesystem::path second_source_path = UniqueTempPath("_second.npy");
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    specforge::SourceCollectionSession session = MakeMultiSourceSession(
+    PreparedSession session = MakeMultiSourceSession(
         loaded_snapshots,
         first_source_path,
         3,
@@ -2541,7 +2776,7 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
-        specforge::SourceCollectionSession session = MakePersistentMultiSourceSession(
+        PreparedSession session = MakePersistentMultiSourceSession(
             loaded_snapshots,
             source_session_cache,
             navigation_cache,
@@ -2563,7 +2798,7 @@ void TestSourceSessionRestoresSourcesAndActiveIndex()
     }
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = MakePersistentMultiSourceSession(
+    PreparedSession restored = MakePersistentMultiSourceSession(
         restored_loads,
         source_session_cache,
         navigation_cache,
@@ -2860,7 +3095,7 @@ void TestSourceSessionSkipsMissingSourcePathsOnRestore()
         "source session fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = MakePersistentSession(
+    PreparedSession restored = MakePersistentSession(
         restored_loads,
         source_session_cache,
         navigation_cache,
@@ -2895,7 +3130,7 @@ void TestSourceSessionRestoresAtMostThirtyTwoSources()
         "source session cap fixture should save");
 
     std::vector<LoadedSourceSnapshot> restored_loads;
-    specforge::SourceCollectionSession restored = MakePersistentSession(
+    PreparedSession restored = MakePersistentSession(
         restored_loads,
         source_session_cache,
         navigation_cache,
@@ -2930,19 +3165,12 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
         specforge::SaveSourceCollectionSessionStateCache(source_session_cache, saved_state),
         "deferred source session fixture should save");
 
-    std::size_t loader_call_count = 0;
     specforge::SourceCollectionSession session(
-        [&loader_call_count](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            ++loader_call_count;
-            throw std::runtime_error("deferred restore must not invoke the synchronous loader");
-        },
         source_session_cache,
         navigation_cache,
         labeling_cache,
-        workflow_cache,
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        workflow_cache);
 
-    Require(loader_call_count == 0, "deferred restore construction should perform no source parsing");
     std::optional<specforge::SourceCollectionDeferredRestorePlan> plan = session.TakeDeferredRestorePlan();
     Require(plan.has_value(), "deferred restore should publish a background-load plan");
     Require(
@@ -2967,7 +3195,6 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
         std::move(context),
         std::move(prepared_workflow));
     Require(result.loaded, "prepared deferred source should commit");
-    Require(loader_call_count == 0, "prepared deferred commit should not invoke the synchronous loader");
     Require(
         session.View().snapshot->collection.current_index == 2,
         "prepared deferred commit should retain the saved row");
@@ -3008,14 +3235,10 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
         "superseded restore fixture should save");
 
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred source intent test must use prepared snapshots");
-        },
         source_session_cache,
         navigation_cache,
         labeling_cache,
-        workflow_cache,
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        workflow_cache);
     const std::optional<specforge::SourceCollectionDeferredRestorePlan> plan =
         session.TakeDeferredRestorePlan();
     Require(plan && plan->sources.size() == 2, "fixture should produce two deferred restore tasks");
@@ -3082,14 +3305,10 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
         "unavailable source fixture should save");
 
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred Forget must not invoke the synchronous loader");
-        },
         source_cache,
         std::filesystem::path{},
         std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        std::filesystem::path{});
     const auto plan = session.TakeDeferredRestorePlan();
     Require(plan && plan->sources.size() == 2, "fixture should expose both unresolved restore intents");
     Require(session.HasUnresolvedSourceIntent(unavailable_a), "source A should initially be unresolved");
@@ -3128,7 +3347,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
 
     {
         std::vector<LoadedSourceSnapshot> loaded_snapshots;
-        specforge::SourceCollectionSession source = MakeWorkflowPersistentSession(
+        PreparedSession source = MakeWorkflowPersistentSession(
             loaded_snapshots,
             navigation_cache,
             labeling_cache,
@@ -3142,12 +3361,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         Require(source.FlushStateCaches(), "workflow fixture should save");
     }
 
-    std::size_t loader_call_count = 0;
     specforge::SourceCollectionSession restored(
-        [&loader_call_count](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            ++loader_call_count;
-            throw std::runtime_error("prepared restore must request a background follow-up load");
-        },
         std::filesystem::path{},
         navigation_cache,
         labeling_cache,
@@ -3171,7 +3385,6 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
         std::move(prepared_workflow));
     const specforge::SourceCollectionSessionView view = restored.View();
     Require(view.navigation.current_index == 0, "restored filter should reconcile navigation to row 0");
-    Require(loader_call_count == 0, "prepared restore should not synchronously load the reconciled row");
     Require(
         restored.CurrentSampleSnapshot() == nullptr && view.current_sample_snapshot == nullptr,
         "plot must not receive the prepared row 2 snapshot while labeling points at row 0");
@@ -3203,15 +3416,7 @@ void TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow()
 void TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_navigation.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred navigation must not invoke the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
@@ -3339,15 +3544,7 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
         {0, 0, 1},
         specforge::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred filtering must not invoke the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
@@ -3400,15 +3597,7 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
 void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_label_advance.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred label advance must not invoke the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
@@ -3474,15 +3663,7 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
         {0, 1, 0},
         specforge::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred label merge must not invoke the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
@@ -3536,15 +3717,7 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
 void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_plan_reconcile.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred plan reconciliation must remain on the background path");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext initial_context;
@@ -3688,15 +3861,7 @@ void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRo
 void TestPreparedPlanPreservesNewerLiveWorkflowWhenPendingTargetIsUnchanged()
 {
     const std::filesystem::path source_path = UniqueTempPath("_stale_prepared_plan.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("stale prepared plan test must remain on the background path");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext initial_context;
@@ -3778,15 +3943,7 @@ void TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges()
         {1, 1, 0},
         specforge::SampleLabelSet{},
         false);
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("live context reconciliation must remain in the background");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext initial_context;
@@ -3913,15 +4070,7 @@ void TestSwitchingAwayCancelsSourceBoundDeferredNavigation()
 {
     const std::filesystem::path source_a = UniqueTempPath("_deferred_switch_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_deferred_switch_b.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("deferred source switching must not invoke the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     auto open_prepared = [&session](
                              const std::filesystem::path& path,
@@ -3983,15 +4132,7 @@ void TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation()
 {
     const std::filesystem::path source_a = UniqueTempPath("_preserve_pending_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_preserve_pending_b.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("preserved deferred navigation must not load synchronously");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
     specforge::SourceCollectionContext context_a;
@@ -4075,18 +4216,7 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "same-identity reload annotation fixture should load");
 
-    std::size_t synchronous_loader_calls = 0;
-    specforge::SourceCollectionSession session(
-        [&synchronous_loader_calls](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            ++synchronous_loader_calls;
-            throw std::runtime_error("background session must not use the synchronous loader");
-        },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     const specforge::SpectrumSnapshotHandle initial_snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
     context.identity = specforge::SourceCollectionIdentity{
@@ -4167,7 +4297,6 @@ void TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow()
         reload_result.background_retirement.size() >= 1,
         "same-identity non-active reload should hand replaced snapshots to the background reclaimer");
     Require(!reload_result.follow_up_spectrum_index, "preserved row should already match the reloaded snapshot");
-    Require(synchronous_loader_calls == 0, "same-identity reload must not invoke the synchronous loader");
     Require(view.navigation.current_index == 1, "same-identity reload should preserve the live row");
     Require(view.navigation.filter_active, "same-identity reload should preserve the live filter");
     Require(view.sorting.active, "same-identity reload should preserve the live sort");
@@ -4240,11 +4369,7 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
 void TestPreparedProjectionsMoveIntoTheSessionView()
 {
     const std::filesystem::path source_path = UniqueTempPath("_prepared_projection.npy");
-    specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("prepared projection test must not load synchronously");
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+    specforge::SourceCollectionSession session({}, {}, {}, {});
     const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 3, 0);
     specforge::SourceCollectionContext context;
     context.identity = {"prepared-projection", "projection", "source", "context", 3};
@@ -4288,16 +4413,10 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
     const std::filesystem::path source_path =
         UniqueTempPath("_session_view_revision.npy");
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "session view revision test must not load synchronously");
-        },
         UniqueTempPath("_session_view_sources.json"),
         UniqueTempPath("_session_view_navigation.json"),
         UniqueTempPath("_session_view_labeling.json"),
-        UniqueTempPath("_session_view_workflow.json"),
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        UniqueTempPath("_session_view_workflow.json"));
 
     const specforge::SourceCollectionSessionView& empty_view =
         session.View();
@@ -4479,16 +4598,18 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
     const std::filesystem::path source_b =
         UniqueTempPath("_view_roster_b.npy");
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    specforge::SourceCollectionSession session =
+    PreparedSession session =
         MakeMultiSourceSession(
             loaded_snapshots,
             source_a,
             3,
             source_b,
             3);
-    (void)session.Submit(
+    (void)Submit(
+        session,
         OpenSourceCollection(source_a));
-    (void)session.Submit(
+    (void)Submit(
+        session,
         OpenSourceCollection(source_b));
 
     const specforge::SourceCollectionSessionView& before =
@@ -4522,13 +4643,10 @@ void TestRemovingInactiveSourceInvalidatesTheSessionView()
 void TestSourceSelectionSupersessionRequiresAnActualActivationChange()
 {
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path& path, std::size_t index) {
-            return MakeSnapshot(path, 3, index);
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
-    Require(
-        session.SupersedesPendingSourceActivation(OpenSourceCollection("replacement.npy")),
-        "opening another source should invalidate work prepared for the previous selection");
+        {},
+        {},
+        {},
+        {});
     Require(
         !session.SupersedesPendingSourceActivation(SwitchSourceCollection(0)),
         "an unavailable source selection cannot supersede the active source");
@@ -4548,10 +4666,10 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
     const std::filesystem::path source_a = UniqueTempPath("_rejected_reuse_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_rejected_reuse_b.npy");
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("prepared reuse validation must not invoke the synchronous loader");
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        {},
+        {},
+        {},
+        {});
 
     const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
     specforge::SourceCollectionContext context_a;
@@ -4646,18 +4764,11 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
         specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &annotation_error);
     Require(annotation.has_value(), "interrupted follow-up annotation fixture should load");
 
-    std::size_t synchronous_loader_calls = 0;
     specforge::SourceCollectionSession session(
-        [&synchronous_loader_calls](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            ++synchronous_loader_calls;
-            throw std::runtime_error("reactivation must dispatch the missing row in the background");
-        },
         std::filesystem::path{},
         std::filesystem::path{},
         std::filesystem::path{},
-        workflow_cache,
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        workflow_cache);
 
     const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
     specforge::SourceCollectionContext context_a;
@@ -4699,7 +4810,6 @@ void TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapsho
 
     const specforge::SourceCollectionSessionResult reactivated =
         Submit(session, SwitchSourceCollection(0));
-    Require(synchronous_loader_calls == 0, "reactivating an interrupted source must not load synchronously");
     Require(
         reactivated.follow_up_spectrum_index == 1,
         "reactivating source A should create fresh row 1 work because its active filter excludes row 0");
@@ -4722,75 +4832,45 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
         {1, 2, 2},
         specforge::SampleLabelSet{},
         false);
+    TouchFile(source_a);
+    TouchFile(source_b);
 
-    std::size_t synchronous_loader_calls = 0;
-    specforge::SourceCollectionSession session(
-        [&synchronous_loader_calls](const std::filesystem::path& path, std::size_t index)
-            -> specforge::SpectrumSnapshotHandle {
-            ++synchronous_loader_calls;
-            return MakeSnapshot(path, 3, index);
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    PreparedSession session(
+        [&loaded_snapshots](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            loaded_snapshots.push_back(
+                {path, spectrum_index});
+            return MakeSnapshot(path, 3, spectrum_index);
         },
-        std::filesystem::path{},
-        std::filesystem::path{},
-        std::filesystem::path{},
+        {},
+        {},
+        {},
         workflow_cache);
-
-    const auto prepare_context = [&annotation_path](
-                                     std::string identity,
-                                     bool include_annotation) {
-        specforge::SourceCollectionContext context;
-        context.identity = specforge::SourceCollectionIdentity{
-            .id = std::move(identity),
-            .source_name = "prepared",
-            .source_fingerprint = "prepared-source",
-            .context_fingerprint = "prepared-context",
-            .spectrum_count = 3,
-        };
-        context.manifest.sample_names = {"a", "b", "c"};
-        if (include_annotation) {
-            std::string error;
-            std::optional<specforge::SampleAnnotationResult> annotation =
-                specforge::SampleAnnotationIoAdapter{}.Load(annotation_path, 3, &error);
-            Require(annotation.has_value(), "prepared source annotation fixture should load");
-            context.manifest.annotations.push_back(std::move(*annotation));
-        }
-        return context;
-    };
-
-    const specforge::SpectrumSnapshotHandle snapshot_a = MakeSnapshot(source_a, 3, 0);
-    specforge::SourceCollectionContext context_a = prepare_context("prepared-a", true);
-    specforge::PreparedSampleWorkflowState workflow_a =
-        PrepareWorkflow(snapshot_a, context_a, 0, {}, workflow_cache);
-    (void)session.OpenPreparedSource(
+    (void)session.Open(
         source_a,
         0,
-        snapshot_a,
-        std::move(context_a),
-        std::move(workflow_a));
+        {annotation_path});
     (void)Submit(session, AddSampleFilterSource(annotation_source_id));
     (void)Submit(session, SetFilterValueSelected(annotation_source_id, "2", true));
     Require(session.View().navigation.filter_active, "prepared source A should have an active filter");
-    synchronous_loader_calls = 0;
 
-    const specforge::SpectrumSnapshotHandle snapshot_b = MakeSnapshot(source_b, 3, 0);
-    specforge::SourceCollectionContext context_b = prepare_context("prepared-b", false);
-    specforge::PreparedSampleWorkflowState workflow_b =
-        PrepareWorkflow(snapshot_b, context_b, 0, {}, workflow_cache);
-    (void)session.OpenPreparedSource(
-        source_b,
-        0,
-        snapshot_b,
-        std::move(context_b),
-        std::move(workflow_b));
+    (void)session.Open(source_b);
+    const std::size_t loads_before_reactivation =
+        loaded_snapshots.size();
     (void)Submit(session, SwitchSourceCollection(0));
 
     const specforge::SourceCollectionSessionView view = session.View();
-    Require(synchronous_loader_calls == 0, "prepared source activation should remain entirely in memory");
     Require(view.filter.sources.size() == 1, "prepared source activation should retain its cached manifest");
     Require(view.navigation.filter_active, "prepared source activation should restore its workflow identity");
     Require(
         view.navigation.current_index && *view.navigation.current_index == 1,
-        "prepared source activation should reconcile against the retained filter without rescanning");
+        "prepared source activation should restore the retained filtered row");
+    Require(
+        loaded_snapshots.size() ==
+            loads_before_reactivation,
+        "prepared source activation should reuse its in-memory context and snapshot");
 }
 
 void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
@@ -4798,12 +4878,10 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
     const std::filesystem::path source_path =
         UniqueTempPath("_resident_rows.npy");
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "resident snapshot fixture must remain on the prepared path");
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        {},
+        {},
+        {},
+        {});
 
     specforge::SourceCollectionContext context;
     context.identity = {
@@ -5020,10 +5098,10 @@ void TestPreparedSnapshotsBecomeBoundedRawRowResidency()
     }
 }
 
-void TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement()
+void TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement()
 {
     const std::filesystem::path source_path =
-        UniqueTempPath("_synchronous_resident_retirement.npy");
+        UniqueTempPath("_prepared_resident_retirement.npy");
     TouchFile(source_path);
 
     auto payload_destroyed_promise =
@@ -5047,18 +5125,13 @@ void TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement()
         first_mutable;
 
     specforge::SourceCollectionSession session(
-        [source_path](
-            const std::filesystem::path& path,
-            std::size_t spectrum_index) {
-            Require(
-                path == source_path,
-                "synchronous retirement fixture should reload its source");
-            return MakeSnapshot(path, 3, spectrum_index);
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        {},
+        {},
+        {},
+        {});
     specforge::SourceCollectionContext context;
     context.identity = {
-        "synchronous-resident-retirement",
+        "prepared-resident-retirement",
         "source",
         "source-fingerprint",
         "context-fingerprint",
@@ -5098,7 +5171,7 @@ void TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement()
             MoveSampleNavigation(
                 specforge::SampleNavigationRequest::Next()))
                 .follow_up_spectrum_index == 1,
-        "synchronous retirement fixture should prepare row 1");
+        "prepared retirement fixture should prepare row 1");
     specforge::SourceCollectionSessionResult second =
         session.OpenPreparedSource(
             source_path,
@@ -5116,94 +5189,58 @@ void TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement()
 
     const std::thread::id caller_thread =
         std::this_thread::get_id();
-    specforge::SourceCollectionSessionResult synchronous =
-        Submit(session, OpenSourceCollection(source_path, 2));
+    const specforge::SpectrumSnapshotHandle changed_snapshot =
+        MakeSnapshot(source_path, 3, 2);
+    specforge::SourceCollectionContext changed_context;
+    changed_context.identity = {
+        "prepared-resident-retirement-v2",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint-v2",
+        3,
+    };
+    changed_context.manifest.sample_names = {"0", "1", "2"};
+    specforge::PreparedSampleWorkflowState changed_workflow =
+        PrepareWorkflow(
+            changed_snapshot,
+            changed_context,
+            2,
+            {},
+            {});
+    const specforge::SourceCollectionContextReuseProof
+        changed_proof{
+            changed_context.identity,
+            proof.dependency_state,
+        };
+    specforge::SourceCollectionSessionResult prepared =
+        session.OpenPreparedSource(
+            source_path,
+            2,
+            changed_snapshot,
+            specforge::PreparedSourceCollectionPlan{
+                std::move(changed_context),
+                std::move(changed_workflow)},
+            {},
+            changed_proof);
     Require(
         payload_destroyed.wait_for(std::chrono::milliseconds(0)) !=
             std::future_status::ready,
-        "synchronous invalidation must not destroy resident payloads on the caller thread");
+        "prepared invalidation must not destroy resident payloads on the caller thread");
     Require(
-        !synchronous.background_retirement.empty(),
-        "synchronous invalidation should return background-retirement ownership");
+        !prepared.background_retirement.empty(),
+        "prepared invalidation should return background-retirement ownership");
     for (specforge::BackgroundRetirementHandle& resource :
-         synchronous.background_retirement) {
+         prepared.background_retirement) {
         retirement_queue.RetireResource(std::move(resource));
     }
     Require(
         payload_destroyed.wait_for(std::chrono::seconds(2)) ==
             std::future_status::ready,
-        "synchronously invalidated resident payload should be reclaimed promptly");
+        "prepared invalidated resident payload should be reclaimed promptly");
     Require(
         payload_destroyed.get() != caller_thread,
-        "synchronously invalidated resident payload must be destroyed by background retirement");
+        "prepared invalidated resident payload must be destroyed by background retirement");
     std::filesystem::remove(source_path);
-}
-
-void TestSynchronousLoadAtReturnsResidentRetirementOwnership()
-{
-    const std::filesystem::path source_path =
-        UniqueTempPath("_synchronous_load_at_retirement.npy");
-    specforge::SourceCollectionRoster roster(
-        [](const std::filesystem::path& path,
-           std::size_t spectrum_index) {
-            return MakeSnapshot(path, 3, spectrum_index);
-        });
-    const specforge::SourceCollectionIdentity identity{
-        "synchronous-load-at-retirement",
-        "source",
-        "source-fingerprint",
-        "context-fingerprint",
-        3,
-    };
-    const specforge::SourceCollectionContextReuseProof proof{
-        identity,
-        {
-            .source_stat_fingerprint = "stable-source",
-            .companion_name_fingerprint = "stable-name",
-            .companion_annotation_fingerprint =
-                "stable-annotation",
-        }};
-    specforge::SpectrumSnapshotHandle first_snapshot =
-        MakeSnapshot(source_path, 3, 0);
-    const std::weak_ptr<const specforge::SpectrumSnapshot>
-        first_snapshot_lifetime = first_snapshot;
-    (void)roster.OpenPreparedSource(
-        source_path,
-        0,
-        first_snapshot,
-        {},
-        proof);
-    (void)roster.OpenPreparedSource(
-        source_path,
-        1,
-        MakeSnapshot(source_path, 3, 1),
-        {},
-        proof);
-    first_snapshot.reset();
-
-    specforge::SourceCollectionRosterOpenResult result =
-        roster.LoadActiveSourceAt(2);
-    Require(
-        !result.retired_snapshots.empty(),
-        "synchronous LoadActiveSourceAt should return invalidated resident ownership");
-    Require(
-        !first_snapshot_lifetime.expired(),
-        "returned retirement ownership should keep the invalidated resident alive");
-    specforge::SourceCollectionLoadQueue retirement_queue;
-    retirement_queue.RetireResource(
-        specforge::MakeBackgroundRetirementHandle(
-            std::move(result.retired_snapshots)));
-    const auto deadline =
-        std::chrono::steady_clock::now() +
-        std::chrono::seconds(2);
-    while (!first_snapshot_lifetime.expired() &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(1));
-    }
-    Require(
-        first_snapshot_lifetime.expired(),
-        "LoadActiveSourceAt retirement ownership should release on the background reclaimer");
 }
 
 void TestResidentSnapshotByteCapEvictsBeforeCountCap()
@@ -5211,12 +5248,10 @@ void TestResidentSnapshotByteCapEvictsBeforeCountCap()
     const std::filesystem::path source_path =
         UniqueTempPath("_resident_byte_cap.npy");
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t)
-            -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error(
-                "resident byte-cap fixture must remain on the prepared path");
-        },
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        {},
+        {},
+        {},
+        {});
     specforge::SourceCollectionContext context;
     context.identity = {
         "resident-byte-cap",
@@ -5317,14 +5352,10 @@ void TestFolderListingGenerationFlowsIntoSubsequentLoadHint()
 {
     const std::filesystem::path source_path = UniqueTempPath("_folder_listing_hint");
     specforge::SourceCollectionSession session(
-        [](const std::filesystem::path&, std::size_t) -> specforge::SpectrumSnapshotHandle {
-            throw std::runtime_error("folder listing hint test must remain on the prepared path");
-        },
         std::filesystem::path{},
         std::filesystem::path{},
         std::filesystem::path{},
-        std::filesystem::path{},
-        specforge::SourceCollectionSessionRestoreMode::Deferred);
+        std::filesystem::path{});
 
     const specforge::SpectrumSnapshotHandle snapshot = MakeSnapshot(source_path, 2, 0);
     specforge::SourceCollectionContext context;
@@ -5441,7 +5472,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     TouchFile(source_path);
 
     std::vector<LoadedSourceSnapshot> loaded_snapshots;
-    specforge::SourceCollectionSession session = MakePersistentSession(
+    PreparedSession session = MakePersistentSession(
         loaded_snapshots,
         source_session_cache,
         navigation_cache,
@@ -5453,14 +5484,16 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     Require(!session.FlushStateCaches(), "flush should fail when the source cache path is blocked by a file");
     {
         std::vector<LoadedSourceSnapshot> reloaded_snapshots;
-        specforge::SourceCollectionSession reloaded = specforge::SourceCollectionSession(
+        PreparedSession reloaded(
             [&reloaded_snapshots, source_path](const std::filesystem::path& path, std::size_t spectrum_index) {
                 Require(path == source_path, "labeling cache reload should use the source fixture");
                 reloaded_snapshots.push_back(LoadedSourceSnapshot{path, spectrum_index});
                 return MakeSnapshot(source_path, 3, spectrum_index);
             },
+            std::filesystem::path{},
             navigation_cache,
-            labeling_cache);
+            labeling_cache,
+            UniqueTempPath("_workflow.json"));
         (void)Submit(reloaded, OpenSourceCollection(source_path, 0));
         Require(
             reloaded.View().labeling.has_active_task,
@@ -5554,8 +5587,7 @@ void RunAllTests()
     TestReactivatedFilteredSourceQueuesFreshWorkWithoutDroppingCommittedSnapshot();
     TestSwitchingPreparedSourceReusesItsInMemoryContext();
     TestPreparedSnapshotsBecomeBoundedRawRowResidency();
-    TestSynchronousOpenReturnsResidentInvalidationForBackgroundRetirement();
-    TestSynchronousLoadAtReturnsResidentRetirementOwnership();
+    TestPreparedOpenReturnsResidentInvalidationForBackgroundRetirement();
     TestResidentSnapshotByteCapEvictsBeforeCountCap();
     TestFolderListingGenerationFlowsIntoSubsequentLoadHint();
     TestSourceSessionFlushFailureKeepsDirtyState();

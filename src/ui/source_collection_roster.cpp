@@ -132,9 +132,8 @@ bool ResidencyBoundariesMatch(
 
 }  // namespace
 
-SourceCollectionRoster::SourceCollectionRoster(SnapshotLoader snapshot_loader)
-    : snapshot_loader_(std::move(snapshot_loader)),
-      snapshot_(MakeSmallSyntheticSpectrumSnapshot())
+SourceCollectionRoster::SourceCollectionRoster()
+    : snapshot_(MakeSmallSyntheticSpectrumSnapshot())
 {
 }
 
@@ -353,21 +352,6 @@ SourceCollectionRoster::RetainPrefetchedSnapshot(
     return result;
 }
 
-SourceCollectionRosterOpenResult SourceCollectionRoster::OpenSource(
-    const std::filesystem::path& path,
-    std::size_t spectrum_index)
-{
-    SourceCollectionRosterOpenResult result;
-    SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
-    AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = update.source_index;
-    result.retired_snapshots = std::move(update.retired_snapshots);
-    result.replaced_folder_listing_generation =
-        std::move(update.replaced_folder_listing_generation);
-    SetSnapshot(std::move(loaded_snapshot), result.action);
-    return result;
-}
-
 SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index,
@@ -446,26 +430,6 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
     if (current_source_index_ && *current_source_index_ > source_index) {
         current_source_index_ = *current_source_index_ - 1;
     }
-    return result;
-}
-
-SourceCollectionRosterOpenResult SourceCollectionRoster::LoadActiveSourceAt(
-    std::size_t spectrum_index)
-{
-    SourceCollectionRosterOpenResult result;
-    const SourceListEntry* source = current_source();
-    if (source == nullptr || source->path.empty()) {
-        return result;
-    }
-
-    const std::filesystem::path path = source->path;
-    SpectrumSnapshotHandle loaded_snapshot = snapshot_loader_(path, spectrum_index);
-    AddOrUpdateSourceResult update = AddOrUpdateSource(path, loaded_snapshot, spectrum_index);
-    current_source_index_ = update.source_index;
-    result.retired_snapshots = std::move(update.retired_snapshots);
-    result.replaced_folder_listing_generation =
-        std::move(update.replaced_folder_listing_generation);
-    SetSnapshot(std::move(loaded_snapshot), result.action);
     return result;
 }
 
