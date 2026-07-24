@@ -715,45 +715,53 @@ void ShellUi::Render(const ShellStatus& status)
         RetireSessionViews();
         return;
     }
-    PanelVisibilityState& panel_visibility =
-        application_settings_.panel_visibility();
-    const PanelVisibilityState previous_panel_visibility =
-        panel_visibility;
     RenderDockHost(status);
+    const ApplicationSettingsView settings =
+        application_settings_.View();
+    const PanelVisibilityState& panel_visibility =
+        settings.panel_visibility;
     if (panel_visibility.files) {
-        RenderFilesPanel();
+        RenderFilesPanel(
+            panel_visibility.files,
+            settings.language);
     }
     if (panel_visibility.navigation) {
-        RenderNavigationPanel();
+        RenderNavigationPanel(
+            panel_visibility.navigation);
     }
     if (panel_visibility.annotations) {
-        RenderAnnotationsPanel();
+        RenderAnnotationsPanel(
+            panel_visibility.annotations);
     }
     if (panel_visibility.smoothing) {
-        RenderSmoothingPanel();
+        RenderSmoothingPanel(
+            panel_visibility.smoothing);
     }
     RenderMainPlot(status);
     if (panel_visibility.labeling) {
-        RenderLabelingPanel();
+        RenderLabelingPanel(
+            panel_visibility.labeling);
     }
     if (panel_visibility.filters) {
-        RenderFiltersPanel();
+        RenderFiltersPanel(
+            panel_visibility.filters);
     }
     if (panel_visibility.sorting) {
-        RenderSortingPanel();
+        RenderSortingPanel(
+            panel_visibility.sorting);
     }
     if (panel_visibility.information) {
-        RenderInfoTagsPanel();
+        RenderInfoTagsPanel(
+            panel_visibility.information);
     }
     if (panel_visibility.spectral_lines) {
-        RenderSpectralLinesPanel();
+        RenderSpectralLinesPanel(
+            panel_visibility.spectral_lines);
     }
     RenderSettingsPanel(status);
     HandleSampleWorkflowShortcut();
     pending_keyboard_previous_at_.reset();
     pending_keyboard_next_at_.reset();
-    application_settings_.CommitPanelVisibilityChange(
-        previous_panel_visibility);
     RetireSessionViews();
 }
 
@@ -990,7 +998,9 @@ void ShellUi::OpenAnnotationFromFilePicker()
             SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
                 SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
         if (result.loaded) {
-            application_settings_.panel_visibility().annotations = true;
+            SetPanelVisibility(
+                ApplicationPanel::Annotations,
+                true);
         }
     }
 }
@@ -1184,25 +1194,66 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
     }
 
     if (ImGui::BeginMenu("View")) {
-        PanelVisibilityState& panel_visibility =
-            application_settings_.panel_visibility();
+        const PanelVisibilityState panel_visibility =
+            application_settings_.View().panel_visibility;
         if (ImGui::MenuItem("Immersive Plot Mode", "F11", immersive_plot_mode_)) {
             immersive_plot_toggle_requested_ = true;
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Show all panels")) {
-            panel_visibility = {};
+            (void)application_settings_.Apply(
+                ApplicationSettingsIntent::ShowAllPanels(),
+                {});
         }
         ImGui::Separator();
-        ImGui::MenuItem("Files", nullptr, &panel_visibility.files);
-        ImGui::MenuItem("Navigation", nullptr, &panel_visibility.navigation);
-        ImGui::MenuItem("Annotations", nullptr, &panel_visibility.annotations);
-        ImGui::MenuItem("Labeling", nullptr, &panel_visibility.labeling);
-        ImGui::MenuItem("Sample Filters", nullptr, &panel_visibility.filters);
-        ImGui::MenuItem("Sample Sorting", nullptr, &panel_visibility.sorting);
-        ImGui::MenuItem("Smoothing", nullptr, &panel_visibility.smoothing);
-        ImGui::MenuItem("Information", nullptr, &panel_visibility.information);
-        ImGui::MenuItem("Spectral Lines", nullptr, &panel_visibility.spectral_lines);
+        const auto render_panel_toggle =
+            [this](
+                const char* label,
+                ApplicationPanel panel,
+                bool visible) {
+                if (ImGui::MenuItem(label, nullptr, visible)) {
+                    (void)application_settings_.Apply(
+                        ApplicationSettingsIntent::
+                            TogglePanelVisibility(panel),
+                        {});
+                }
+            };
+        render_panel_toggle(
+            "Files",
+            ApplicationPanel::Files,
+            panel_visibility.files);
+        render_panel_toggle(
+            "Navigation",
+            ApplicationPanel::Navigation,
+            panel_visibility.navigation);
+        render_panel_toggle(
+            "Annotations",
+            ApplicationPanel::Annotations,
+            panel_visibility.annotations);
+        render_panel_toggle(
+            "Labeling",
+            ApplicationPanel::Labeling,
+            panel_visibility.labeling);
+        render_panel_toggle(
+            "Sample Filters",
+            ApplicationPanel::Filters,
+            panel_visibility.filters);
+        render_panel_toggle(
+            "Sample Sorting",
+            ApplicationPanel::Sorting,
+            panel_visibility.sorting);
+        render_panel_toggle(
+            "Smoothing",
+            ApplicationPanel::Smoothing,
+            panel_visibility.smoothing);
+        render_panel_toggle(
+            "Information",
+            ApplicationPanel::Information,
+            panel_visibility.information);
+        render_panel_toggle(
+            "Spectral Lines",
+            ApplicationPanel::SpectralLines,
+            panel_visibility.spectral_lines);
         ImGui::EndMenu();
     }
 
@@ -1220,16 +1271,18 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
     ImGui::EndMenuBar();
 }
 
-void ShellUi::RenderFilesPanel()
+void ShellUi::RenderFilesPanel(
+    bool panel_open,
+    UiLanguage language)
 {
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(source_collection_panel_ui_.RenderFiles(
         view,
-        application_settings_.View().language,
+        language,
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
-        &application_settings_.panel_visibility().files,
+        &panel_open,
         []() {
             return ShowSourceFilePicker();
         },
@@ -1239,9 +1292,10 @@ void ShellUi::RenderFilesPanel()
         [this](const std::filesystem::path& path) {
             OpenSource(path);
         }));
+    SetPanelVisibility(ApplicationPanel::Files, panel_open);
 }
 
-void ShellUi::RenderNavigationPanel()
+void ShellUi::RenderNavigationPanel(bool panel_open)
 {
     const SourceCollectionSessionView& view = SessionView();
     SampleWorkflowShortcut shortcut;
@@ -1260,12 +1314,15 @@ void ShellUi::RenderNavigationPanel()
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
-        &application_settings_.panel_visibility().navigation,
+        &panel_open,
         shortcut));
+    SetPanelVisibility(
+        ApplicationPanel::Navigation,
+        panel_open);
     QueueSampleWorkflowShortcut(shortcut);
 }
 
-void ShellUi::RenderAnnotationsPanel()
+void ShellUi::RenderAnnotationsPanel(bool panel_open)
 {
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(source_collection_panel_ui_.RenderAnnotations(
@@ -1274,13 +1331,16 @@ void ShellUi::RenderAnnotationsPanel()
         [this](SourceCollectionSessionIntent command) {
             return SubmitSessionCommandForPanel(std::move(command));
         },
-        &application_settings_.panel_visibility().annotations,
+        &panel_open,
         []() {
             return ShowAnnotationFilePicker();
         }));
+    SetPanelVisibility(
+        ApplicationPanel::Annotations,
+        panel_open);
 }
 
-void ShellUi::RenderLabelingPanel()
+void ShellUi::RenderLabelingPanel(bool panel_open)
 {
     const SourceCollectionSessionView& view = SessionView();
     SampleWorkflowShortcut shortcut;
@@ -1297,15 +1357,18 @@ void ShellUi::RenderLabelingPanel()
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
-        &application_settings_.panel_visibility().labeling,
+        &panel_open,
         []() {
             return ShowLabelOutputFilePicker();
         },
         shortcut));
+    SetPanelVisibility(
+        ApplicationPanel::Labeling,
+        panel_open);
     QueueSampleWorkflowShortcut(shortcut);
 }
 
-void ShellUi::RenderFiltersPanel()
+void ShellUi::RenderFiltersPanel(bool panel_open)
 {
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(sample_workflow_panel_ui_.RenderFilters(
@@ -1316,10 +1379,13 @@ void ShellUi::RenderFiltersPanel()
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
-        &application_settings_.panel_visibility().filters));
+        &panel_open));
+    SetPanelVisibility(
+        ApplicationPanel::Filters,
+        panel_open);
 }
 
-void ShellUi::RenderSortingPanel()
+void ShellUi::RenderSortingPanel(bool panel_open)
 {
     const SourceCollectionSessionView& view = SessionView();
     HandleSessionAction(sample_workflow_panel_ui_.RenderSorting(
@@ -1330,15 +1396,21 @@ void ShellUi::RenderSortingPanel()
         [this]() -> const SourceCollectionSessionView& {
             return SessionView();
         },
-        &application_settings_.panel_visibility().sorting));
+        &panel_open));
+    SetPanelVisibility(
+        ApplicationPanel::Sorting,
+        panel_open);
 }
 
-void ShellUi::RenderSmoothingPanel()
+void ShellUi::RenderSmoothingPanel(bool panel_open)
 {
     if (!ImGui::Begin(
             kSmoothingWindow,
-            &application_settings_.panel_visibility().smoothing)) {
+            &panel_open)) {
         ImGui::End();
+        SetPanelVisibility(
+            ApplicationPanel::Smoothing,
+            panel_open);
         return;
     }
 
@@ -1349,6 +1421,9 @@ void ShellUi::RenderSmoothingPanel()
     if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
         ImGui::TextDisabled("No plottable spectrum");
         ImGui::End();
+        SetPanelVisibility(
+            ApplicationPanel::Smoothing,
+            panel_open);
         return;
     }
 
@@ -1409,14 +1484,20 @@ void ShellUi::RenderSmoothingPanel()
     }
 
     ImGui::End();
+    SetPanelVisibility(
+        ApplicationPanel::Smoothing,
+        panel_open);
 }
 
-void ShellUi::RenderInfoTagsPanel()
+void ShellUi::RenderInfoTagsPanel(bool panel_open)
 {
     if (!ImGui::Begin(
             kInfoTagsWindow,
-            &application_settings_.panel_visibility().information)) {
+            &panel_open)) {
         ImGui::End();
+        SetPanelVisibility(
+            ApplicationPanel::Information,
+            panel_open);
         return;
     }
 
@@ -1473,6 +1554,9 @@ void ShellUi::RenderInfoTagsPanel()
     RenderDiagnosticRows(snapshot);
 
     ImGui::End();
+    SetPanelVisibility(
+        ApplicationPanel::Information,
+        panel_open);
 }
 
 void ShellUi::RenderMainPlot(const ShellStatus& status)
@@ -1527,10 +1611,16 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
             .profile_path = status.profile_path,
             .profile_status_message = status.profile_status_message,
         });
+    const ApplicationSettingsRuntimeState runtime{
+        .profile_recording_in_progress =
+            status.profile_open || status.profile_stopping,
+    };
     if (std::optional<ApplicationSettingsIntent> intent =
             settings_panel_ui_.
                 TakeApplicationSettingsIntent()) {
-        (void)application_settings_.Apply(std::move(*intent));
+        (void)application_settings_.Apply(
+            std::move(*intent),
+            runtime);
     }
     if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
         if (std::optional<std::filesystem::path> directory =
@@ -1538,9 +1628,21 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
             (void)application_settings_.Apply(
                 ApplicationSettingsIntent::
                     SetProfileOutputDirectory(
-                        std::move(*directory)));
+                        std::move(*directory)),
+                runtime);
         }
     }
+}
+
+void ShellUi::SetPanelVisibility(
+    ApplicationPanel panel,
+    bool visible)
+{
+    (void)application_settings_.Apply(
+        ApplicationSettingsIntent::SetPanelVisibility(
+            panel,
+            visible),
+        {});
 }
 
 void ShellUi::QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut)
@@ -1589,12 +1691,15 @@ void ShellUi::HandleSampleWorkflowShortcut()
     }
 }
 
-void ShellUi::RenderSpectralLinesPanel()
+void ShellUi::RenderSpectralLinesPanel(bool panel_open)
 {
     spectral_lines_panel_ui_.Render(
         spectral_lines_panel_,
         session_.CurrentSampleSnapshot(),
-        &application_settings_.panel_visibility().spectral_lines);
+        &panel_open);
+    SetPanelVisibility(
+        ApplicationPanel::SpectralLines,
+        panel_open);
 }
 
 void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)

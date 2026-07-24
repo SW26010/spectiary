@@ -87,17 +87,22 @@ private:
     void RenderDockHost(const ShellStatus& status);
     void RenderImmersivePlot(const ShellStatus& status);
     void RenderMainMenuBar(const ShellStatus& status);
-    void RenderFilesPanel();
-    void RenderInfoTagsPanel();
-    void RenderNavigationPanel();
-    void RenderAnnotationsPanel();
-    void RenderLabelingPanel();
-    void RenderFiltersPanel();
-    void RenderSortingPanel();
-    void RenderSmoothingPanel();
+    void RenderFilesPanel(
+        bool panel_open,
+        UiLanguage language);
+    void RenderInfoTagsPanel(bool panel_open);
+    void RenderNavigationPanel(bool panel_open);
+    void RenderAnnotationsPanel(bool panel_open);
+    void RenderLabelingPanel(bool panel_open);
+    void RenderFiltersPanel(bool panel_open);
+    void RenderSortingPanel(bool panel_open);
+    void RenderSmoothingPanel(bool panel_open);
     void RenderMainPlot(const ShellStatus& status);
     void RenderSettingsPanel(const ShellStatus& status);
-    void RenderSpectralLinesPanel();
+    void RenderSpectralLinesPanel(bool panel_open);
+    void SetPanelVisibility(
+        ApplicationPanel panel,
+        bool visible);
     void SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size);
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
     void HandleSampleWorkflowShortcut();

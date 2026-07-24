@@ -369,15 +369,16 @@ void SettingsPanelUi::RenderLanguage(
         coverage.data());
     ImGui::PopTextWrapPos();
 
-    if (settings.status.setting != ApplicationSetting::Language ||
-        settings.status.kind ==
-            ApplicationSettingsStatusKind::Ready) {
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(ApplicationSetting::Language);
+    if (setting_status.kind ==
+        ApplicationSettingsStatusKind::Ready) {
         return;
     }
 
     ImGui::Spacing();
     const bool failed =
-        settings.status.kind !=
+        setting_status.kind !=
         ApplicationSettingsStatusKind::LoadWarning;
     const UiTextId feedback_text_id = failed
         ? UiTextId::LanguageSaveError
@@ -393,10 +394,10 @@ void SettingsPanelUi::RenderLanguage(
         "%.*s",
         static_cast<int>(feedback.size()),
         feedback.data());
-    if (!settings.status.detail.empty()) {
+    if (!setting_status.detail.empty()) {
         ImGui::TextDisabled(
             "%s",
-            settings.status.detail.c_str());
+            setting_status.detail.c_str());
     }
     ImGui::PopTextWrapPos();
 }
@@ -588,18 +589,19 @@ void SettingsPanelUi::RenderDiagnostics(
         ImGui::PopTextWrapPos();
     }
 
-    if (settings.status.setting ==
-            ApplicationSetting::ProfileOutputDirectory &&
-        settings.status.kind !=
-            ApplicationSettingsStatusKind::Ready) {
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(
+            ApplicationSetting::ProfileOutputDirectory);
+    if (setting_status.kind !=
+        ApplicationSettingsStatusKind::Ready) {
         ImGui::Spacing();
         ImGui::TextColored(
             ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
             "Could not update the profile output directory.");
-        if (!settings.status.detail.empty()) {
+        if (!setting_status.detail.empty()) {
             ImGui::TextDisabled(
                 "%s",
-                settings.status.detail.c_str());
+                setting_status.detail.c_str());
         }
     }
 

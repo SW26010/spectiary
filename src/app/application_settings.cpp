@@ -6,6 +6,36 @@
 #include <utility>
 
 namespace specforge {
+namespace {
+
+bool& PanelVisibilityValue(
+    PanelVisibilityState& visibility,
+    ApplicationPanel panel)
+{
+    switch (panel) {
+    case ApplicationPanel::Files:
+        return visibility.files;
+    case ApplicationPanel::Navigation:
+        return visibility.navigation;
+    case ApplicationPanel::Annotations:
+        return visibility.annotations;
+    case ApplicationPanel::Labeling:
+        return visibility.labeling;
+    case ApplicationPanel::Filters:
+        return visibility.filters;
+    case ApplicationPanel::Sorting:
+        return visibility.sorting;
+    case ApplicationPanel::Smoothing:
+        return visibility.smoothing;
+    case ApplicationPanel::Information:
+        return visibility.information;
+    case ApplicationPanel::SpectralLines:
+        return visibility.spectral_lines;
+    }
+    return visibility.files;
+}
+
+}  // namespace
 
 ApplicationSettingsIntent ApplicationSettingsIntent::SetLanguage(
     UiLanguage language)
@@ -37,6 +67,33 @@ ApplicationSettingsIntent::RestoreDefaultProfileOutputDirectory()
     };
 }
 
+ApplicationSettingsIntent ApplicationSettingsIntent::SetPanelVisibility(
+    ApplicationPanel panel,
+    bool visible)
+{
+    return {
+        .kind = ApplicationSettingsIntentKind::SetPanelVisibility,
+        .panel = panel,
+        .visible = visible,
+    };
+}
+
+ApplicationSettingsIntent ApplicationSettingsIntent::TogglePanelVisibility(
+    ApplicationPanel panel)
+{
+    return {
+        .kind = ApplicationSettingsIntentKind::TogglePanelVisibility,
+        .panel = panel,
+    };
+}
+
+ApplicationSettingsIntent ApplicationSettingsIntent::ShowAllPanels()
+{
+    return {
+        .kind = ApplicationSettingsIntentKind::ShowAllPanels,
+    };
+}
+
 ApplicationSettingsStorage DefaultApplicationSettingsStorage()
 {
     const RuntimePaths paths = DefaultRuntimePaths();
@@ -62,6 +119,12 @@ ApplicationSettings::ApplicationSettings(
     : storage_(std::move(storage)),
       panel_visibility_persistence_(storage_.panel_visibility_path)
 {
+    for (std::size_t index = 0;
+         index < statuses_.size();
+         ++index) {
+        statuses_[index].setting =
+            static_cast<ApplicationSetting>(index);
+    }
     if (!storage_.persistent) {
         profile_output_directory_ = ResolveProfileOutputDirectory(
             {},
@@ -97,45 +160,37 @@ ApplicationSettingsView ApplicationSettings::View() const
             storage_.default_profile_output_directory,
         .profile_output_directory_source =
             profile_output_directory_.source,
-        .status = status_,
+        .panel_visibility = panel_visibility_,
+        .statuses = statuses_,
     };
 }
 
 ApplicationSettingsResult ApplicationSettings::Apply(
-    ApplicationSettingsIntent intent)
+    ApplicationSettingsIntent intent,
+    ApplicationSettingsRuntimeState runtime)
 {
     switch (intent.kind) {
     case ApplicationSettingsIntentKind::SetLanguage:
         return ApplyLanguage(intent.language);
     case ApplicationSettingsIntentKind::SetProfileOutputDirectory:
-        return ApplyProfileOutputDirectory(std::move(intent.directory));
+        return ApplyProfileOutputDirectory(
+            std::move(intent.directory),
+            runtime);
     case ApplicationSettingsIntentKind::
         RestoreDefaultProfileOutputDirectory:
-        return ApplyProfileOutputDirectory(std::nullopt);
+        return ApplyProfileOutputDirectory(std::nullopt, runtime);
+    case ApplicationSettingsIntentKind::SetPanelVisibility:
+        return ApplyPanelVisibility(intent.panel, intent.visible);
+    case ApplicationSettingsIntentKind::TogglePanelVisibility:
+        return ApplyPanelVisibility(
+            intent.panel,
+            !PanelVisibilityValue(
+                panel_visibility_,
+                intent.panel));
+    case ApplicationSettingsIntentKind::ShowAllPanels:
+        return ShowAllPanels();
     }
     return {};
-}
-
-PanelVisibilityState& ApplicationSettings::panel_visibility() noexcept
-{
-    return panel_visibility_;
-}
-
-const PanelVisibilityState&
-ApplicationSettings::panel_visibility() const noexcept
-{
-    return panel_visibility_;
-}
-
-void ApplicationSettings::CommitPanelVisibilityChange(
-    const PanelVisibilityState& previous)
-{
-    if (!storage_.persistent) {
-        return;
-    }
-    panel_visibility_persistence_.MarkDirtyIfChanged(
-        previous,
-        panel_visibility_);
 }
 
 void ApplicationSettings::RunMaintenance(
@@ -152,9 +207,7 @@ void ApplicationSettings::RunMaintenance(
         return;
     }
     if (*saved) {
-        if (status_.setting == ApplicationSetting::PanelVisibility) {
-            ClearStatus();
-        }
+        ClearStatus(ApplicationSetting::PanelVisibility);
         return;
     }
     SetStatus(
@@ -178,6 +231,7 @@ bool ApplicationSettings::Flush()
         return true;
     }
     if (panel_visibility_persistence_.Flush(panel_visibility_)) {
+        ClearStatus(ApplicationSetting::PanelVisibility);
         return true;
     }
     SetStatus(
@@ -230,7 +284,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     }
 
     language_ = language;
-    ClearStatus();
+    ClearStatus(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -239,7 +293,8 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
 
 ApplicationSettingsResult
 ApplicationSettings::ApplyProfileOutputDirectory(
-    std::optional<std::filesystem::path> directory)
+    std::optional<std::filesystem::path> directory,
+    const ApplicationSettingsRuntimeState& runtime)
 {
     constexpr ApplicationSetting kSetting =
         ApplicationSetting::ProfileOutputDirectory;
@@ -248,6 +303,19 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         const std::string detail =
             "The output directory is controlled by "
             "SPECFORGE_PROFILE_DIR.";
+        SetStatus(
+            ApplicationSettingsStatusKind::Rejected,
+            kSetting,
+            detail);
+        return {
+            .outcome = ApplicationSettingsOutcome::Rejected,
+            .setting = kSetting,
+            .detail = detail,
+        };
+    }
+    if (runtime.profile_recording_in_progress) {
+        const std::string detail =
+            "Stop the current recording before changing its output directory.";
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
@@ -304,7 +372,61 @@ ApplicationSettings::ApplyProfileOutputDirectory(
     }
 
     profile_output_directory_ = requested;
-    ClearStatus();
+    ClearStatus(kSetting);
+    return {
+        .outcome = ApplicationSettingsOutcome::Applied,
+        .setting = kSetting,
+    };
+}
+
+ApplicationSettingsResult ApplicationSettings::ApplyPanelVisibility(
+    ApplicationPanel panel,
+    bool visible)
+{
+    constexpr ApplicationSetting kSetting =
+        ApplicationSetting::PanelVisibility;
+    bool& current = PanelVisibilityValue(
+        panel_visibility_,
+        panel);
+    if (current == visible) {
+        return {
+            .outcome = ApplicationSettingsOutcome::Unchanged,
+            .setting = kSetting,
+        };
+    }
+
+    const PanelVisibilityState previous = panel_visibility_;
+    current = visible;
+    if (storage_.persistent) {
+        panel_visibility_persistence_.MarkDirtyIfChanged(
+            previous,
+            panel_visibility_);
+    }
+    return {
+        .outcome = ApplicationSettingsOutcome::Applied,
+        .setting = kSetting,
+    };
+}
+
+ApplicationSettingsResult ApplicationSettings::ShowAllPanels()
+{
+    constexpr ApplicationSetting kSetting =
+        ApplicationSetting::PanelVisibility;
+    const PanelVisibilityState visible;
+    if (panel_visibility_ == visible) {
+        return {
+            .outcome = ApplicationSettingsOutcome::Unchanged,
+            .setting = kSetting,
+        };
+    }
+
+    const PanelVisibilityState previous = panel_visibility_;
+    panel_visibility_ = visible;
+    if (storage_.persistent) {
+        panel_visibility_persistence_.MarkDirtyIfChanged(
+            previous,
+            panel_visibility_);
+    }
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -316,16 +438,18 @@ void ApplicationSettings::SetStatus(
     ApplicationSetting setting,
     std::string detail)
 {
-    status_ = {
+    statuses_[static_cast<std::size_t>(setting)] = {
         .kind = kind,
         .setting = setting,
         .detail = std::move(detail),
     };
 }
 
-void ApplicationSettings::ClearStatus()
+void ApplicationSettings::ClearStatus(ApplicationSetting setting)
 {
-    status_ = {};
+    statuses_[static_cast<std::size_t>(setting)] = {
+        .setting = setting,
+    };
 }
 
 }  // namespace specforge

@@ -80,7 +80,8 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
 
     const auto language_result = settings.Apply(
         specforge::ApplicationSettingsIntent::SetLanguage(
-            specforge::UiLanguage::SimplifiedChinese));
+            specforge::UiLanguage::SimplifiedChinese),
+        {});
     Require(
         language_result.applied(),
         "language intent should apply");
@@ -89,7 +90,8 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         temporary.path() / "custom profiles";
     const auto directory_result = settings.Apply(
         specforge::ApplicationSettingsIntent::
-            SetProfileOutputDirectory(custom_directory));
+            SetProfileOutputDirectory(custom_directory),
+        {});
     Require(
         directory_result.applied(),
         "profile output directory intent should apply");
@@ -111,7 +113,8 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
 
     const auto restore_result = reloaded.Apply(
         specforge::ApplicationSettingsIntent::
-            RestoreDefaultProfileOutputDirectory());
+            RestoreDefaultProfileOutputDirectory(),
+        {});
     Require(
         restore_result.applied(),
         "restore-default intent should apply");
@@ -141,23 +144,26 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
 
     const auto result = settings.Apply(
         specforge::ApplicationSettingsIntent::SetLanguage(
-            specforge::UiLanguage::SimplifiedChinese));
+            specforge::UiLanguage::SimplifiedChinese),
+        {});
     Require(
         result.outcome ==
             specforge::ApplicationSettingsOutcome::
                 PersistenceFailed,
         "save failure should be a typed persistence outcome");
     const specforge::ApplicationSettingsView view = settings.View();
+    const specforge::ApplicationSettingsStatus& language_status =
+        view.StatusFor(specforge::ApplicationSetting::Language);
     Require(
         view.language == specforge::UiLanguage::English,
         "save failure should retain the previous language");
     Require(
-        view.status.kind ==
+        language_status.kind ==
                 specforge::ApplicationSettingsStatusKind::
                     PersistenceError &&
-            view.status.setting ==
+            language_status.setting ==
                 specforge::ApplicationSetting::Language &&
-            !view.status.detail.empty(),
+            !language_status.detail.empty(),
         "save failure should remain visible on the owner view");
 }
 
@@ -174,11 +180,13 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
 
     specforge::ApplicationSettings settings(storage);
     const specforge::ApplicationSettingsView loaded = settings.View();
+    const specforge::ApplicationSettingsStatus& language_status =
+        loaded.StatusFor(specforge::ApplicationSetting::Language);
     Require(
-        loaded.status.kind ==
+        language_status.kind ==
                 specforge::ApplicationSettingsStatusKind::
                     LoadWarning &&
-            loaded.status.setting ==
+            language_status.setting ==
                 specforge::ApplicationSetting::Language,
         "damaged language settings should produce a typed load warning");
     Require(
@@ -189,7 +197,8 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
     const auto result = settings.Apply(
         specforge::ApplicationSettingsIntent::
             SetProfileOutputDirectory(
-                temporary.path() / "ignored"));
+                temporary.path() / "ignored"),
+        {});
     Require(
         result.outcome ==
             specforge::ApplicationSettingsOutcome::Rejected,
@@ -207,19 +216,147 @@ void TestPanelVisibilitySharesTheSettingsLifecycle()
     TemporaryDirectory temporary;
     const auto storage = MakeStorage(temporary.path());
     specforge::ApplicationSettings settings(storage);
-    const specforge::PanelVisibilityState previous =
-        settings.panel_visibility();
-    settings.panel_visibility().annotations = false;
-    settings.panel_visibility().spectral_lines = false;
-    settings.CommitPanelVisibilityChange(previous);
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetPanelVisibility(
+                specforge::ApplicationPanel::Annotations,
+                false),
+            {})
+            .applied(),
+        "panel close intent should apply");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::TogglePanelVisibility(
+                specforge::ApplicationPanel::SpectralLines),
+            {})
+            .applied(),
+        "panel toggle intent should apply");
     settings.RunMaintenance(
         specforge::LocalUserStateSaveScheduler::Clock::now() + 1s);
 
     specforge::ApplicationSettings reloaded(storage);
     Require(
-        !reloaded.panel_visibility().annotations &&
-            !reloaded.panel_visibility().spectral_lines,
+        !reloaded.View().panel_visibility.annotations &&
+            !reloaded.View().panel_visibility.spectral_lines,
         "panel visibility should persist through application settings maintenance");
+
+    Require(
+        reloaded.Apply(
+            specforge::ApplicationSettingsIntent::ShowAllPanels(),
+            {})
+            .applied(),
+        "show-all intent should apply atomically");
+    Require(
+        reloaded.View().panel_visibility ==
+            specforge::PanelVisibilityState{},
+        "show-all intent should update the complete projection");
+    reloaded.RunMaintenance(
+        specforge::LocalUserStateSaveScheduler::Clock::now() + 1s);
+    const specforge::ApplicationSettings restored(storage);
+    Require(
+        restored.View().panel_visibility ==
+            specforge::PanelVisibilityState{},
+        "show-all intent should persist through maintenance and reload");
+}
+
+void TestProfileDirectoryChangeIsRejectedWhileRecording()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    specforge::ApplicationSettings settings(storage);
+
+    const auto result = settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            SetProfileOutputDirectory(
+                temporary.path() / "recording-target"),
+        {.profile_recording_in_progress = true});
+
+    Require(
+        result.outcome ==
+            specforge::ApplicationSettingsOutcome::Rejected,
+        "recording should reject a profile directory change in the owner");
+    Require(
+        settings.View().profile_output_directory ==
+            storage.default_profile_output_directory,
+        "recording rejection should preserve the current profile directory");
+    Require(
+        settings.View()
+                .StatusFor(
+                    specforge::ApplicationSetting::
+                        ProfileOutputDirectory)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::Rejected,
+        "recording rejection should remain visible on the profile setting");
+
+    const std::filesystem::path custom_directory =
+        temporary.path() / "custom-target";
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetProfileOutputDirectory(custom_directory),
+            {})
+            .applied(),
+        "profile directory should remain editable when recording is inactive");
+    const auto restore_result = settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            RestoreDefaultProfileOutputDirectory(),
+        {.profile_recording_in_progress = true});
+    Require(
+        restore_result.outcome ==
+            specforge::ApplicationSettingsOutcome::Rejected,
+        "recording should also reject restoring the profile directory");
+    Require(
+        settings.View().profile_output_directory ==
+            custom_directory,
+        "rejected restore should preserve the custom profile directory");
+}
+
+void TestSuccessfulSettingDoesNotClearAnotherSettingsStatus()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block language settings directory creation";
+    }
+    auto storage = MakeStorage(temporary.path());
+    storage.language_settings_path =
+        blocker / "ui-language.json";
+    specforge::ApplicationSettings settings(storage);
+
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::SimplifiedChinese),
+            {})
+                .outcome ==
+            specforge::ApplicationSettingsOutcome::
+                PersistenceFailed,
+        "language persistence failure should be observable");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetProfileOutputDirectory(
+                    temporary.path() / "profiles-2"),
+            {})
+            .applied(),
+        "independent profile directory change should apply");
+
+    const specforge::ApplicationSettingsView view = settings.View();
+    Require(
+        view.StatusFor(specforge::ApplicationSetting::Language)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError,
+        "successful profile change must not clear language failure");
+    Require(
+        view.StatusFor(
+                specforge::ApplicationSetting::
+                    ProfileOutputDirectory)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::Ready,
+        "successful profile change should clear only its own status");
 }
 
 }  // namespace
@@ -230,5 +367,7 @@ int main()
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestLoadWarningAndEnvironmentOverrideAreTyped();
     TestPanelVisibilitySharesTheSettingsLifecycle();
+    TestProfileDirectoryChangeIsRejectedWhileRecording();
+    TestSuccessfulSettingDoesNotClearAnotherSettingsStatus();
     return 0;
 }
