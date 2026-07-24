@@ -490,6 +490,29 @@ std::optional<std::string> RenderSampleSortDropTarget(
     return dropped_source;
 }
 
+const SourceCollectionAnnotationValueView* AcceptSampleLabelingTaskDrop(
+    const SourceCollectionSessionView& session_view,
+    bool task_switch_locked,
+    bool& accepted)
+{
+    accepted = false;
+    const ImGuiDragDropFlags flags =
+        ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSampleAnnotationDragPayload, flags)) {
+        const std::filesystem::path annotation_path = Utf8ToPath(PayloadString(*payload));
+        const SourceCollectionAnnotationValueView* annotation =
+            FindAnnotationViewByPath(session_view, annotation_path);
+        if (annotation == nullptr || !annotation->can_activate_labeling || task_switch_locked) {
+            return nullptr;
+        }
+        accepted = true;
+        if (payload->IsDelivery()) {
+            return annotation;
+        }
+    }
+    return nullptr;
+}
+
 SampleNavigationSortDirection OppositeSortDirection(SampleNavigationSortDirection direction)
 {
     return direction == SampleNavigationSortDirection::Ascending
@@ -788,27 +811,35 @@ SourceCollectionSessionAction SampleWorkflowPanelUi::RenderLabeling(
         ImGui::EndCombo();
     }
 
+    bool labeling_drop_accepted = false;
+    const SourceCollectionAnnotationValueView* dropped_annotation = nullptr;
     if (ImGui::BeginDragDropTargetCustom(selector_rect, selector_id)) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSampleAnnotationDragPayload)) {
-            const std::filesystem::path annotation_path = Utf8ToPath(PayloadString(*payload));
-            if (const SourceCollectionAnnotationValueView* annotation =
-                    FindAnnotationViewByPath(session_view, annotation_path);
-                annotation != nullptr && annotation->can_activate_labeling && !task_switch_locked) {
-                if (AnnotationActivationNeedsConfirmation(annotation->relationship)) {
-                    pending_annotation_activation_path_ = annotation->path;
-                    pending_annotation_activation_name_ = annotation->name;
-                    pending_annotation_activation_relationship_ = annotation->relationship;
-                    ImGui::OpenPopup(kAnnotationToLabelingPopup);
-                } else {
-                    MergeSourceCollectionSessionAction(
-                        action,
-                        submit(ChangeActiveSampleWorkflow(
-                                   ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(annotation->path)))
-                            .action);
-                }
-            }
-        }
+        dropped_annotation =
+            AcceptSampleLabelingTaskDrop(session_view, task_switch_locked, labeling_drop_accepted);
         ImGui::EndDragDropTarget();
+    }
+    if (labeling_drop_accepted) {
+        ImGui::GetWindowDrawList()->AddRect(
+            selector_rect.Min,
+            selector_rect.Max,
+            ImGui::GetColorU32(ImGuiCol_DragDropTarget),
+            3.0f,
+            0,
+            2.0f);
+    }
+    if (dropped_annotation != nullptr) {
+        if (AnnotationActivationNeedsConfirmation(dropped_annotation->relationship)) {
+            pending_annotation_activation_path_ = dropped_annotation->path;
+            pending_annotation_activation_name_ = dropped_annotation->name;
+            pending_annotation_activation_relationship_ = dropped_annotation->relationship;
+            ImGui::OpenPopup(kAnnotationToLabelingPopup);
+        } else {
+            MergeSourceCollectionSessionAction(
+                action,
+                submit(ChangeActiveSampleWorkflow(
+                           ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(dropped_annotation->path)))
+                    .action);
+        }
     }
 
     if (labeling_view.has_active_task) {
