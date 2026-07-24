@@ -105,6 +105,15 @@ void TestSupportedLanguagesRoundTripWithStableValues()
         ReadFile(path).find(R"("language": "en")") !=
             std::string::npos,
         "English should persist as en");
+    const std::string stable_english_output =
+        ReadFile(path);
+    Require(
+        specforge::SaveUiLanguageSettings(
+            path,
+            specforge::UiLanguage::English,
+            &error) &&
+            ReadFile(path) == stable_english_output,
+        "language settings output should be byte-stable");
     specforge::UiLanguageSettingsLoadResult loaded =
         specforge::LoadUiLanguageSettings(path);
     Require(
@@ -128,6 +137,23 @@ void TestSupportedLanguagesRoundTripWithStableValues()
                 specforge::UiLanguage::SimplifiedChinese &&
             loaded.warning.empty(),
         "Simplified Chinese should reload without warning");
+}
+
+void TestLegacyCompactSettingsRemainReadable()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path path =
+        temporary.path() / "ui-language.json";
+    WriteFile(
+        path,
+        R"({"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"zh-Hans"})");
+    const specforge::UiLanguageSettingsLoadResult loaded =
+        specforge::LoadUiLanguageSettings(path);
+    Require(
+        loaded.language ==
+                specforge::UiLanguage::SimplifiedChinese &&
+            loaded.warning.empty(),
+        "legacy compact language settings should remain readable");
 }
 
 void TestUnknownLanguageFallsBackWithWarning()
@@ -208,6 +234,7 @@ int main()
         TestDefaultPathUsesDedicatedFile();
         TestMissingFileDefaultsToEnglishWithoutWarning();
         TestSupportedLanguagesRoundTripWithStableValues();
+        TestLegacyCompactSettingsRemainReadable();
         TestUnknownLanguageFallsBackWithWarning();
         TestDamagedJsonFallsBackWithWarning();
         TestUnsupportedSchemaFallsBackWithWarning();

@@ -14,6 +14,8 @@ struct JsonValue;
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
 [[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
 [[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value);
+[[nodiscard]] JsonValue PersistedPathReferenceJson(
+    const std::filesystem::path& path);
 void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path);
 
 class LocalUserStateSaveStatus {

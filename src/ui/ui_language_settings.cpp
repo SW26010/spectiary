@@ -3,7 +3,6 @@
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
 
-#include <ostream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -85,18 +84,14 @@ bool SaveUiLanguageSettings(
         return false;
     }
 
-    return WriteVersionedJsonCacheFile(
+    return WriteVersionedJsonCacheDocument(
         path,
         kSettingsFormatKind,
         kSettingsSchemaVersion,
         "UI language settings",
-        [stable_value](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            stream << "  \"language\": ";
-            WriteJsonString(stream, stable_value);
-            stream << "\n";
-            return true;
-        },
+        JsonObjectValue({
+            {"language", JsonStringValue(stable_value)},
+        }),
         error_message);
 }
 

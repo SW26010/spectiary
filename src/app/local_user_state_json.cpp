@@ -388,6 +388,83 @@ char JsonHexNibble(unsigned char value)
     return static_cast<char>(value < 10 ? ('0' + value) : ('A' + value - 10));
 }
 
+void WriteJsonIndent(
+    std::ostream& stream,
+    std::size_t level)
+{
+    for (std::size_t index = 0; index < level; ++index) {
+        stream << "  ";
+    }
+}
+
+void WriteStructuredJsonValue(
+    std::ostream& stream,
+    const JsonValue& value,
+    std::size_t level)
+{
+    switch (value.kind) {
+    case JsonValue::Kind::Null:
+        stream << "null";
+        return;
+    case JsonValue::Kind::String:
+        WriteJsonString(stream, value.string_value);
+        return;
+    case JsonValue::Kind::Bool:
+        stream << (value.bool_value ? "true" : "false");
+        return;
+    case JsonValue::Kind::Integer:
+        stream << value.integer_value;
+        return;
+    case JsonValue::Kind::Object: {
+        if (value.object.empty()) {
+            stream << "{}";
+            return;
+        }
+        stream << "{\n";
+        const std::vector<std::string> keys =
+            SortedCacheKeys(value.object);
+        for (std::size_t index = 0;
+             index < keys.size();
+             ++index) {
+            WriteJsonIndent(stream, level + 1);
+            WriteJsonString(stream, keys[index]);
+            stream << ": ";
+            WriteStructuredJsonValue(
+                stream,
+                value.object.at(keys[index]),
+                level + 1);
+            stream << (index + 1 < keys.size()
+                           ? ",\n"
+                           : "\n");
+        }
+        WriteJsonIndent(stream, level);
+        stream << "}";
+        return;
+    }
+    case JsonValue::Kind::Array:
+        if (value.array.empty()) {
+            stream << "[]";
+            return;
+        }
+        stream << "[\n";
+        for (std::size_t index = 0;
+             index < value.array.size();
+             ++index) {
+            WriteJsonIndent(stream, level + 1);
+            WriteStructuredJsonValue(
+                stream,
+                value.array[index],
+                level + 1);
+            stream << (index + 1 < value.array.size()
+                           ? ",\n"
+                           : "\n");
+        }
+        WriteJsonIndent(stream, level);
+        stream << "]";
+        return;
+    }
+}
+
 }  // namespace
 
 bool ReadTextStreamCancelable(
@@ -521,6 +598,56 @@ void WriteJsonString(std::ostream& stream, std::string_view value)
     stream << '"' << JsonEscape(value) << '"';
 }
 
+JsonValue JsonNullValue()
+{
+    return {};
+}
+
+JsonValue JsonObjectValue(
+    std::initializer_list<
+        std::pair<std::string, JsonValue>> members)
+{
+    JsonValue value;
+    value.kind = JsonValue::Kind::Object;
+    for (const auto& [name, member] : members) {
+        value.object.insert_or_assign(name, member);
+    }
+    return value;
+}
+
+JsonValue JsonArrayValue(
+    std::initializer_list<JsonValue> values)
+{
+    JsonValue value;
+    value.kind = JsonValue::Kind::Array;
+    value.array.assign(values.begin(), values.end());
+    return value;
+}
+
+JsonValue JsonStringValue(std::string_view text)
+{
+    JsonValue value;
+    value.kind = JsonValue::Kind::String;
+    value.string_value = text;
+    return value;
+}
+
+JsonValue JsonBoolValue(bool state)
+{
+    JsonValue value;
+    value.kind = JsonValue::Kind::Bool;
+    value.bool_value = state;
+    return value;
+}
+
+JsonValue JsonIntegerValue(std::int64_t integer)
+{
+    JsonValue value;
+    value.kind = JsonValue::Kind::Integer;
+    value.integer_value = integer;
+    return value;
+}
+
 VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     const std::filesystem::path& path,
     std::string_view format_kind,
@@ -597,6 +724,60 @@ bool WriteVersionedJsonCacheFile(
         stream << "}\n";
         return true;
     }, error_message);
+}
+
+bool WriteVersionedJsonCacheDocument(
+    const std::filesystem::path& path,
+    std::string_view format_kind,
+    int schema_version,
+    std::string_view description,
+    const JsonValue& body,
+    std::string* error_message)
+{
+    if (body.kind != JsonValue::Kind::Object) {
+        if (error_message != nullptr) {
+            *error_message =
+                "The structured JSON cache body must be an object.";
+        }
+        return false;
+    }
+    if (body.object.contains("format_kind") ||
+        body.object.contains("schema_version")) {
+        if (error_message != nullptr) {
+            *error_message =
+                "The structured JSON cache body contains a reserved member.";
+        }
+        return false;
+    }
+
+    AtomicFileWriteOptions options;
+    options.target_description = description;
+    return WriteFileAtomically(
+        path,
+        options,
+        [&](std::ostream& stream, std::string&) {
+            stream << "{\n";
+            stream << "  \"format_kind\": ";
+            WriteJsonString(stream, format_kind);
+            stream << ",\n";
+            stream << "  \"schema_version\": "
+                   << schema_version;
+            const std::vector<std::string> keys =
+                SortedCacheKeys(body.object);
+            for (const std::string& key : keys) {
+                stream << ",\n";
+                WriteJsonIndent(stream, 1);
+                WriteJsonString(stream, key);
+                stream << ": ";
+                WriteStructuredJsonValue(
+                    stream,
+                    body.object.at(key),
+                    1);
+            }
+            stream << "\n}\n";
+            return true;
+        },
+        error_message);
 }
 
 }  // namespace specforge

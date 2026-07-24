@@ -171,6 +171,25 @@ std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue&
     return std::nullopt;
 }
 
+JsonValue PersistedPathReferenceJson(
+    const std::filesystem::path& path)
+{
+    std::filesystem::path relative_path;
+    if (TryMakePackageRelativePath(path, relative_path)) {
+        return JsonObjectValue({
+            {"path_kind",
+             JsonStringValue(kPathKindPackageRelative)},
+            {"path",
+             JsonStringValue(
+                 PathToUtf8(relative_path))},
+        });
+    }
+    return JsonObjectValue({
+        {"path_kind", JsonStringValue(kPathKindAbsolute)},
+        {"path", JsonStringValue(PathToUtf8(path))},
+    });
+}
+
 void WritePersistedPathReference(std::ostream& stream, const std::filesystem::path& path)
 {
     std::filesystem::path relative_path;

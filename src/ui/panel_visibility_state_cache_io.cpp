@@ -2,7 +2,6 @@
 
 #include "app/local_user_state_json.h"
 
-#include <ostream>
 #include <string>
 #include <utility>
 
@@ -11,12 +10,6 @@ namespace {
 
 constexpr const char* kStateFormatKind = "specforge.panel_visibility.cache";
 constexpr int kStateSchemaVersion = 1;
-
-void WriteBoolMember(std::ostream& stream, const char* name, bool value, bool last = false)
-{
-    stream << "  \"" << name << "\": " << (value ? "true" : "false");
-    stream << (last ? "\n" : ",\n");
-}
 
 }  // namespace
 
@@ -55,24 +48,28 @@ bool SavePanelVisibilityStateCache(
         return false;
     }
 
-    return WriteVersionedJsonCacheFile(
+    return WriteVersionedJsonCacheDocument(
         path,
         kStateFormatKind,
         kStateSchemaVersion,
         "panel visibility state cache",
-        [&](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            WriteBoolMember(stream, "files", state.files);
-            WriteBoolMember(stream, "navigation", state.navigation);
-            WriteBoolMember(stream, "annotations", state.annotations);
-            WriteBoolMember(stream, "labeling", state.labeling);
-            WriteBoolMember(stream, "filters", state.filters);
-            WriteBoolMember(stream, "sorting", state.sorting);
-            WriteBoolMember(stream, "smoothing", state.smoothing);
-            WriteBoolMember(stream, "information", state.information);
-            WriteBoolMember(stream, "spectral_lines", state.spectral_lines, true);
-            return true;
-        });
+        JsonObjectValue({
+            {"files", JsonBoolValue(state.files)},
+            {"navigation",
+             JsonBoolValue(state.navigation)},
+            {"annotations",
+             JsonBoolValue(state.annotations)},
+            {"labeling",
+             JsonBoolValue(state.labeling)},
+            {"filters", JsonBoolValue(state.filters)},
+            {"sorting", JsonBoolValue(state.sorting)},
+            {"smoothing",
+             JsonBoolValue(state.smoothing)},
+            {"information",
+             JsonBoolValue(state.information)},
+            {"spectral_lines",
+             JsonBoolValue(state.spectral_lines)},
+        }));
 }
 
 PanelVisibilityStatePersistence::PanelVisibilityStatePersistence(

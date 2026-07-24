@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -39,6 +40,25 @@ public:
 private:
     std::filesystem::path path_;
 };
+
+std::string ReadFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    return std::string(
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>());
+}
+
+void WriteFile(
+    const std::filesystem::path& path,
+    std::string_view contents)
+{
+    std::ofstream stream(path);
+    stream << contents;
+    Require(
+        stream.good(),
+        "profile settings fixture should write");
+}
 
 class ScopedWideEnvironmentVariable {
 public:
@@ -109,9 +129,34 @@ void TestCustomDirectoryRoundTrips()
         specforge::SaveProfileSettings(settings_path, expected, &error),
         "custom profile output directory should save");
     Require(error.empty(), "successful settings save should not report an error");
+    const std::string stable_output =
+        ReadFile(settings_path);
+    Require(
+        specforge::SaveProfileSettings(
+            settings_path,
+            expected,
+            &error) &&
+            ReadFile(settings_path) == stable_output,
+        "profile settings output should be byte-stable");
     Require(
         specforge::LoadProfileSettings(settings_path) == expected,
         "custom profile output directory should round-trip as Unicode");
+}
+
+void TestLegacyCompactSettingsRemainReadable()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path settings_path =
+        temporary.path() / "profile-settings.json";
+    WriteFile(
+        settings_path,
+        R"({"format_kind":"specforge.profile_settings","schema_version":1,"output_directory":{"path_kind":"absolute","path":"C:/legacy/profiles"}})");
+    Require(
+        specforge::LoadProfileSettings(settings_path)
+                .output_directory ==
+            std::optional<std::filesystem::path>{
+                "C:/legacy/profiles"},
+        "legacy compact profile settings should remain readable");
 }
 
 void TestResetToDefaultRoundTrips()
@@ -182,6 +227,18 @@ void TestMalformedSettingsAreIgnored()
     Require(!loaded.output_directory, "malformed output directory should fall back safely");
 }
 
+void TestCorruptSettingsAreIgnored()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path settings_path =
+        temporary.path() / "profile-settings.json";
+    WriteFile(settings_path, "{ invalid json");
+    Require(
+        !specforge::LoadProfileSettings(settings_path)
+             .output_directory,
+        "corrupt profile settings should fall back safely");
+}
+
 }  // namespace
 
 int main()
@@ -189,10 +246,12 @@ int main()
     try {
         TestMissingSettingsUseDefaultDirectory();
         TestCustomDirectoryRoundTrips();
+        TestLegacyCompactSettingsRemainReadable();
         TestResetToDefaultRoundTrips();
         TestEnvironmentOverrideWins();
         TestUnicodeEnvironmentOverrideRoundTrips();
         TestMalformedSettingsAreIgnored();
+        TestCorruptSettingsAreIgnored();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';

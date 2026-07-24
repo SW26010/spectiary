@@ -259,23 +259,52 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     std::filesystem::remove_all(root, cleanup_error);
 
     std::string error;
+    const specforge::JsonValue body =
+        specforge::JsonObjectValue({
+            {"items",
+             specforge::JsonArrayValue({
+                 specforge::JsonObjectValue({
+                     {"value",
+                      specforge::JsonIntegerValue(7)},
+                     {"name",
+                      specforge::JsonStringValue(
+                          "alpha")},
+                 }),
+             })},
+        });
     Require(
-        specforge::WriteVersionedJsonCacheFile(
+        specforge::WriteVersionedJsonCacheDocument(
             path,
             "specforge.test.cache",
             2,
             "test cache",
-            [](std::ostream& stream, std::string&) {
-                stream << ",\n";
-                stream << "  \"items\": [\n";
-                stream << "    { \"name\": ";
-                specforge::WriteJsonString(stream, "alpha");
-                stream << ", \"value\": 7 }\n";
-                stream << "  ]";
-                return true;
-            },
+            body,
             &error),
         error.empty() ? "versioned cache write failed" : error);
+    const std::string expected =
+        "{\n"
+        "  \"format_kind\": \"specforge.test.cache\",\n"
+        "  \"schema_version\": 2,\n"
+        "  \"items\": [\n"
+        "    {\n"
+        "      \"name\": \"alpha\",\n"
+        "      \"value\": 7\n"
+        "    }\n"
+        "  ]\n"
+        "}\n";
+    Require(
+        ReadTextFile(path) == expected,
+        "structured cache output should be stable and ordered");
+    Require(
+        specforge::WriteVersionedJsonCacheDocument(
+            path,
+            "specforge.test.cache",
+            2,
+            "test cache",
+            body,
+            &error) &&
+            ReadTextFile(path) == expected,
+        "repeated structured writes should be byte-stable");
 
     const specforge::VersionedJsonCacheLoadResult loaded =
         specforge::LoadVersionedJsonCacheFile(path, "specforge.test.cache", {2}, "test cache");
@@ -291,6 +320,33 @@ void TestVersionedJsonCacheShellRoundTripsDocument()
     Require(
         specforge::ReadJsonIntMember(items->array.front(), "value").value_or(0) == 7,
         "versioned cache should parse item integers");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestStructuredJsonCacheRejectsInvalidBody()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_json_document_invalid_tests";
+    const std::filesystem::path path = root / "state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    WriteTextFile(path, "stable");
+    std::string error;
+    Require(
+        !specforge::WriteVersionedJsonCacheDocument(
+            path,
+            "specforge.test.cache",
+            1,
+            "test cache",
+            specforge::JsonStringValue("invalid"),
+            &error),
+        "structured cache should reject a non-object body");
+    Require(
+        !error.empty() &&
+            ReadTextFile(path) == "stable",
+        "invalid body should preserve the existing target");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -460,6 +516,11 @@ void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
     state.spectral_lines = false;
 
     Require(specforge::SavePanelVisibilityStateCache(path, state), "panel visibility cache should save");
+    const std::string stable_output = ReadTextFile(path);
+    Require(
+        specforge::SavePanelVisibilityStateCache(path, state) &&
+            ReadTextFile(path) == stable_output,
+        "panel visibility output should be byte-stable");
     const specforge::PanelVisibilityState loaded = specforge::LoadPanelVisibilityStateCache(path);
     Require(!loaded.files, "files panel hidden state should persist");
     Require(loaded.navigation, "navigation panel visible state should persist");
@@ -470,6 +531,24 @@ void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
     Require(loaded.smoothing, "smoothing panel visible state should persist");
     Require(!loaded.information, "information panel hidden state should persist");
     Require(!loaded.spectral_lines, "spectral lines panel hidden state should persist");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityStateCacheIgnoresCorruptJson()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_panel_visibility_corrupt_tests";
+    const std::filesystem::path path =
+        root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    WriteTextFile(path, "{ invalid json");
+    Require(
+        specforge::LoadPanelVisibilityStateCache(path) ==
+            specforge::PanelVisibilityState{},
+        "corrupt panel visibility cache should use defaults");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -599,6 +678,7 @@ int main()
     TestAtomicWriteCreatesParentAndReplacesExistingFile();
     TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
     TestVersionedJsonCacheShellRoundTripsDocument();
+    TestStructuredJsonCacheRejectsInvalidBody();
     TestVersionedJsonCacheShellReportsCorruptCacheWarning();
     TestVersionedJsonCacheShellRejectsUnsupportedSchema();
     TestSortedCacheKeysReturnsStableOrder();
@@ -608,6 +688,7 @@ int main()
     TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
     TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported();
     TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
+    TestPanelVisibilityStateCacheIgnoresCorruptJson();
     TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
     TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
     TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();

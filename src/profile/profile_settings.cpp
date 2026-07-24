@@ -5,7 +5,6 @@
 
 #include <cstdlib>
 #include <memory>
-#include <ostream>
 #include <string>
 
 namespace specforge {
@@ -47,22 +46,19 @@ bool SaveProfileSettings(
     const ProfileSettings& settings,
     std::string* error_message)
 {
-    return WriteVersionedJsonCacheFile(
+    const JsonValue output_directory =
+        settings.output_directory
+        ? PersistedPathReferenceJson(
+              *settings.output_directory)
+        : JsonNullValue();
+    return WriteVersionedJsonCacheDocument(
         path,
         kSettingsFormatKind,
         kSettingsSchemaVersion,
         "performance profile settings",
-        [&](std::ostream& stream, std::string&) {
-            stream << ",\n";
-            stream << "  \"output_directory\": ";
-            if (settings.output_directory) {
-                WritePersistedPathReference(stream, *settings.output_directory);
-            } else {
-                stream << "null";
-            }
-            stream << "\n";
-            return true;
-        },
+        JsonObjectValue({
+            {"output_directory", output_directory},
+        }),
         error_message);
 }
 
