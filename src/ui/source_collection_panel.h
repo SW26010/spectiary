@@ -1,7 +1,7 @@
 #pragma once
 
+#include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
-#include "ui/source_collection_session.h"
 #include "ui/ui_text.h"
 
 #include <array>
@@ -14,55 +14,45 @@ namespace specforge {
 
 using SourceCollectionPathPicker = std::function<std::optional<std::filesystem::path>()>;
 using SourceCollectionPathOpener = std::function<void(const std::filesystem::path&)>;
-using SourceCollectionStepSubmitter = std::function<SourceCollectionSessionResult(
-    SourceCollectionSessionIntent,
-    SampleNavigationRequestKind)>;
-
 class SourceCollectionPanelUi {
 public:
     [[nodiscard]] static const char* FilesWindowName();
     [[nodiscard]] static const char* NavigationWindowName();
     [[nodiscard]] static const char* AnnotationsWindowName();
 
-    void SyncNavigationInputs(const SourceCollectionSessionView& session_view);
+    void SyncNavigationInputs(const SourceCollectionNavigationView& navigation);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderFiles(
-        const SourceCollectionSessionView& session_view,
+    void RenderFiles(
+        PanelSessionInteraction& interaction,
         UiLanguage language,
-        const SourceCollectionSessionIntentSubmitter& submit,
         bool* open,
         const SourceCollectionPathPicker& choose_source_file,
         const SourceCollectionPathPicker& choose_source_folder,
         const SourceCollectionPathOpener& open_source);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderNavigation(
-        const SourceCollectionSessionView& session_view,
-        const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionStepSubmitter& submit_step,
-        const SourceCollectionSessionViewReader& read_view,
+    void RenderNavigation(
+        PanelSessionInteraction& interaction,
         bool* open,
         SampleWorkflowShortcut& shortcut);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderAnnotations(
-        const SourceCollectionSessionView& session_view,
+    void RenderAnnotations(
+        PanelSessionInteraction& interaction,
         UiLanguage language,
-        const SourceCollectionSessionIntentSubmitter& submit,
         bool* open,
         const SourceCollectionPathPicker& choose_annotation_file);
 
 private:
-    void BeginSampleNameSearch(const SourceCollectionSessionView& session_view);
+    void BeginSampleNameSearch(const SourceCollectionNavigationView& navigation);
     void ClearSampleNameSearch();
-    [[nodiscard]] SourceCollectionSessionAction RestoreFailedSampleNameSearch(
-        const SourceCollectionSessionIntentSubmitter& submit);
-    [[nodiscard]] SourceCollectionSessionAction CommitSampleNameSearch(
+    void RestoreFailedSampleNameSearch(
+        PanelSessionInteraction& interaction);
+    void CommitSampleNameSearch(
         std::size_t target_row,
         const std::string& matched_name,
-        const SourceCollectionSessionIntentSubmitter& submit);
-    [[nodiscard]] SourceCollectionSessionAction RenderSampleNameSearch(
-        SourceCollectionSessionView session_view,
-        const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionSessionViewReader& read_view);
+        PanelSessionInteraction& interaction);
+    void RenderSampleNameSearch(
+        SourceCollectionNavigationView navigation,
+        PanelSessionInteraction& interaction);
 
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};

@@ -212,6 +212,7 @@ add_library(specforge_desktop_ui STATIC
     src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
+    src/ui/panel_session_interaction.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
     src/ui/settings_panel.cpp
@@ -433,6 +434,12 @@ add_test(
         -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"
 )
+add_test(
+    NAME specforge_panel_session_render_architecture_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/panel_session_render_architecture_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
 specforge_add_test(
     specforge_win32_compositor_clock_tests
     tests/win32_compositor_clock_tests.cpp
@@ -462,6 +469,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_sample_workflow_shortcut_tests
     tests/sample_workflow_shortcut_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_panel_session_interaction_tests
+    tests/panel_session_interaction_tests.cpp
     specforge_desktop_ui
 )
 specforge_add_test(

@@ -257,9 +257,8 @@ const char* SourceCollectionPanelUi::AnnotationsWindowName()
 }
 
 void SourceCollectionPanelUi::SyncNavigationInputs(
-    const SourceCollectionSessionView& session_view)
+    const SourceCollectionNavigationView& navigation)
 {
-    const SourceCollectionNavigationView& navigation = session_view.navigation;
     const std::optional<std::size_t> navigation_index = navigation.current_index;
     if (navigation_index) {
         std::snprintf(
@@ -275,22 +274,20 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
     ClearSampleNameSearch();
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
-    const SourceCollectionSessionView& session_view,
+void SourceCollectionPanelUi::RenderFiles(
+    PanelSessionInteraction& interaction,
     UiLanguage language,
-    const SourceCollectionSessionIntentSubmitter& submit,
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
     const SourceCollectionPathPicker& choose_source_folder,
     const SourceCollectionPathOpener& open_source)
 {
-    SourceCollectionSessionAction action;
     if (!ImGui::Begin(kFilesWindow, open)) {
         ImGui::End();
-        return action;
+        return;
     }
 
-    SourceCollectionSessionView view = session_view;
+    const SourceCollectionSessionView& view = interaction.View();
     ImGui::TextUnformatted("Files");
     ImGui::Separator();
 
@@ -343,9 +340,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
             ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(index));
             if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
-                SourceCollectionSessionResult result =
-                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
-                MergeSourceCollectionSessionAction(action, result.action);
+                (void)interaction.Submit(
+                    EditSourceCollection(
+                        SourceCollectionIntent::SwitchActive(index)));
             }
             if (ImGui::IsItemHovered()) {
                 const std::string path = NarrowPath(entry.path);
@@ -357,9 +354,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
                 ? std::string_view{*entry.type}
                 : UiText(language, UiTextId::UnknownSourceType);
             if (TableCellTextButton("type", type, ImGui::GetColorU32(ImGuiCol_Text))) {
-                SourceCollectionSessionResult result =
-                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
-                MergeSourceCollectionSessionAction(action, result.action);
+                (void)interaction.Submit(
+                    EditSourceCollection(
+                        SourceCollectionIntent::SwitchActive(index)));
             }
 
             ImGui::TableSetColumnIndex(2);
@@ -368,9 +365,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
                     "state",
                     UiText(language, entry.state),
                     state_color)) {
-                SourceCollectionSessionResult result =
-                    submit(EditSourceCollection(SourceCollectionIntent::SwitchActive(index)));
-                MergeSourceCollectionSessionAction(action, result.action);
+                (void)interaction.Submit(
+                    EditSourceCollection(
+                        SourceCollectionIntent::SwitchActive(index)));
             }
 
             ImGui::TableSetColumnIndex(3);
@@ -385,31 +382,26 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderFiles(
         ImGui::EndTable();
 
         if (source_to_remove) {
-            SourceCollectionSessionResult result =
-                submit(EditSourceCollection(SourceCollectionIntent::Remove(*source_to_remove)));
-            MergeSourceCollectionSessionAction(action, result.action);
+            (void)interaction.Submit(
+                EditSourceCollection(
+                    SourceCollectionIntent::Remove(*source_to_remove)));
         }
     }
     ImGui::End();
-    return action;
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
-    const SourceCollectionSessionView& session_view,
-    const SourceCollectionSessionIntentSubmitter& submit,
-    const SourceCollectionStepSubmitter& submit_step,
-    const SourceCollectionSessionViewReader& read_view,
+void SourceCollectionPanelUi::RenderNavigation(
+    PanelSessionInteraction& interaction,
     bool* open,
     SampleWorkflowShortcut& shortcut)
 {
-    SourceCollectionSessionAction action;
     shortcut = {};
     if (!ImGui::Begin(kNavigationWindow, open)) {
         ImGui::End();
-        return action;
+        return;
     }
-    SourceCollectionSessionView view = session_view;
-    SourceCollectionNavigationView navigation = view.navigation;
+    SourceCollectionNavigationView navigation =
+        interaction.View().navigation;
     if (!navigation.has_active_source) {
         ImGui::TextDisabled("No active source");
         const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -419,7 +411,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
             .hovered = shortcut_hovered,
             .navigation_enabled = true});
         ImGui::End();
-        return action;
+        return;
     }
 
     const std::size_t navigation_index = navigation.current_index.value_or(0);
@@ -447,17 +439,18 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         if (target_sample && *target_sample <= navigation_count) {
             const std::size_t target_row = *target_sample - 1;
             if (target_row != navigation_index) {
-                SourceCollectionSessionResult result =
-                    submit(UpdateSampleNavigation(SampleNavigationIntent::Move(
-                        SampleNavigationRequest::LocateRow(target_row))));
-                MergeSourceCollectionSessionAction(action, result.action);
-                view = read_view();
-                navigation = view.navigation;
+                PanelSessionInteraction::Update update =
+                    interaction.Submit(
+                        UpdateSampleNavigation(
+                            SampleNavigationIntent::Move(
+                                SampleNavigationRequest::LocateRow(
+                                    target_row))));
+                navigation = update.view.get().navigation;
             }
         }
     }
     if (index_deactivated_after_edit) {
-        SyncNavigationInputs(view);
+        SyncNavigationInputs(navigation);
     }
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
@@ -469,12 +462,13 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("-##PreviousSample", sample_step_button_size)) {
-        SourceCollectionSessionResult result = submit_step(
-            UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Previous())),
-            SampleNavigationRequestKind::Previous);
-        MergeSourceCollectionSessionAction(action, result.action);
-        view = read_view();
-        navigation = view.navigation;
+        PanelSessionInteraction::Update update =
+            interaction.SubmitNavigation(
+                UpdateSampleNavigation(
+                    SampleNavigationIntent::Move(
+                        SampleNavigationRequest::Previous())),
+                SampleNavigationRequestKind::Previous);
+        navigation = update.view.get().navigation;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Previous sample (Left Arrow)");
@@ -487,12 +481,13 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         ImGui::BeginDisabled();
     }
     if (ImGui::Button("+##NextSample", sample_step_button_size)) {
-        SourceCollectionSessionResult result = submit_step(
-            UpdateSampleNavigation(SampleNavigationIntent::Move(SampleNavigationRequest::Next())),
-            SampleNavigationRequestKind::Next);
-        MergeSourceCollectionSessionAction(action, result.action);
-        view = read_view();
-        navigation = view.navigation;
+        PanelSessionInteraction::Update update =
+            interaction.SubmitNavigation(
+                UpdateSampleNavigation(
+                    SampleNavigationIntent::Move(
+                        SampleNavigationRequest::Next())),
+                SampleNavigationRequestKind::Next);
+        navigation = update.view.get().navigation;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("Next sample (Right Arrow)");
@@ -515,8 +510,9 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         }
     }
 
-    view.navigation = std::move(navigation);
-    MergeSourceCollectionSessionAction(action, RenderSampleNameSearch(std::move(view), submit, read_view));
+    RenderSampleNameSearch(
+        std::move(navigation),
+        interaction);
 
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
@@ -525,16 +521,12 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderNavigation(
         .hovered = shortcut_hovered,
         .navigation_enabled = true});
     ImGui::End();
-    return action;
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
-    SourceCollectionSessionView session_view,
-    const SourceCollectionSessionIntentSubmitter& submit,
-    const SourceCollectionSessionViewReader& read_view)
+void SourceCollectionPanelUi::RenderSampleNameSearch(
+    SourceCollectionNavigationView navigation,
+    PanelSessionInteraction& interaction)
 {
-    SourceCollectionSessionAction action;
-    SourceCollectionNavigationView navigation = std::move(session_view.navigation);
     const std::size_t navigation_index = navigation.current_index.value_or(0);
     ImGui::TextUnformatted("name:");
     ImGui::SameLine();
@@ -550,19 +542,22 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
     const bool sample_name_input_active = ImGui::IsItemActive();
 
     if (sample_name_input_activated || (sample_name_changed && !sample_name_search_active_)) {
-        BeginSampleNameSearch(session_view);
+        BeginSampleNameSearch(navigation);
     }
 
     if (sample_name_changed) {
-        SourceCollectionSessionResult result =
-            submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(sample_name_query_buffer_.data())));
-        MergeSourceCollectionSessionAction(action, result.action);
-        navigation = read_view().navigation;
+        PanelSessionInteraction::Update update =
+            interaction.Submit(
+                UpdateSampleNavigation(
+                    SampleNavigationIntent::SetSampleNameQuery(
+                        sample_name_query_buffer_.data())));
+        navigation = update.view.get().navigation;
         if (navigation.exact_sample_name_match) {
-            MergeSourceCollectionSessionAction(
-                action,
-                CommitSampleNameSearch(*navigation.exact_sample_name_match, navigation.exact_sample_name, submit));
-            return action;
+            CommitSampleNameSearch(
+                *navigation.exact_sample_name_match,
+                navigation.exact_sample_name,
+                interaction);
+            return;
         }
         if (navigation.has_partial_sample_name_matches) {
             sample_name_matches_open_ = true;
@@ -614,8 +609,11 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
     }
 
     if (selected_row) {
-        MergeSourceCollectionSessionAction(action, CommitSampleNameSearch(*selected_row, selected_name, submit));
-        return action;
+        CommitSampleNameSearch(
+            *selected_row,
+            selected_name,
+            interaction);
+        return;
     }
 
     if (ShouldRestoreSampleNameSearch(
@@ -623,38 +621,37 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderSampleNameSearch(
             selected_row.has_value(),
             sample_name_input_active,
             sample_name_dropdown_interacting)) {
-        MergeSourceCollectionSessionAction(action, RestoreFailedSampleNameSearch(submit));
+        RestoreFailedSampleNameSearch(interaction);
     }
-
-    return action;
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
-    const SourceCollectionSessionView& session_view,
+void SourceCollectionPanelUi::RenderAnnotations(
+    PanelSessionInteraction& interaction,
     UiLanguage language,
-    const SourceCollectionSessionIntentSubmitter& submit,
     bool* open,
     const SourceCollectionPathPicker& choose_annotation_file)
 {
-    SourceCollectionSessionAction action;
     if (!ImGui::Begin(kAnnotationsWindow, open)) {
         ImGui::End();
-        return action;
+        return;
     }
 
+    const SourceCollectionSessionView& session_view =
+        interaction.View();
     const SpectrumSnapshotHandle& snapshot = session_view.snapshot;
     const SourceCollectionNavigationView& navigation = session_view.navigation;
     if (!snapshot || !navigation.has_active_source || snapshot->source.path.empty()) {
         ImGui::TextDisabled("No active source");
         ImGui::End();
-        return action;
+        return;
     }
 
     if (ImGui::Button("Add file...")) {
         if (std::optional<std::filesystem::path> path = choose_annotation_file()) {
-            SourceCollectionSessionResult result = submit(EditSourceCollection(
-                SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
-            MergeSourceCollectionSessionAction(action, result.action);
+            (void)interaction.Submit(
+                EditSourceCollection(
+                    SourceCollectionIntent::
+                        AddReadOnlyAnnotationResult(*path)));
         }
     }
 
@@ -668,7 +665,7 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
     if (navigation.current_annotations.empty()) {
         ImGui::TextDisabled("No read-only annotations");
         ImGui::End();
-        return action;
+        return;
     }
 
     if (ImGui::BeginTable(
@@ -786,26 +783,28 @@ SourceCollectionSessionAction SourceCollectionPanelUi::RenderAnnotations(
         ImGui::EndTable();
 
         if (annotation_to_remove) {
-            SourceCollectionSessionResult result = submit(EditSourceCollection(
-                SourceCollectionIntent::RemoveReadOnlyAnnotationResult(*annotation_to_remove)));
-            MergeSourceCollectionSessionAction(action, result.action);
+            (void)interaction.Submit(
+                EditSourceCollection(
+                    SourceCollectionIntent::
+                        RemoveReadOnlyAnnotationResult(
+                            *annotation_to_remove)));
         }
         if (annotation_to_rename) {
-            SourceCollectionSessionResult result = submit(RenameAnnotationDisplayName(
-                std::move(annotation_to_rename->first),
-                std::move(annotation_to_rename->second)));
-            MergeSourceCollectionSessionAction(action, result.action);
+            (void)interaction.Submit(
+                RenameAnnotationDisplayName(
+                    std::move(annotation_to_rename->first),
+                    std::move(annotation_to_rename->second)));
         }
     }
 
     ImGui::End();
-    return action;
 }
 
-void SourceCollectionPanelUi::BeginSampleNameSearch(const SourceCollectionSessionView& session_view)
+void SourceCollectionPanelUi::BeginSampleNameSearch(
+    const SourceCollectionNavigationView& navigation)
 {
     sample_name_search_active_ = true;
-    displayed_sample_name_ = session_view.navigation.current_sample_name;
+    displayed_sample_name_ = navigation.current_sample_name;
     sample_name_search_restore_name_ = displayed_sample_name_;
 }
 
@@ -816,26 +815,29 @@ void SourceCollectionPanelUi::ClearSampleNameSearch()
     sample_name_search_restore_name_.clear();
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::RestoreFailedSampleNameSearch(
-    const SourceCollectionSessionIntentSubmitter& submit)
+void SourceCollectionPanelUi::RestoreFailedSampleNameSearch(
+    PanelSessionInteraction& interaction)
 {
     CopyToBuffer(sample_name_query_buffer_, sample_name_search_restore_name_);
-    SourceCollectionSessionResult result =
-        submit(UpdateSampleNavigation(SampleNavigationIntent::SetSampleNameQuery(sample_name_search_restore_name_)));
+    (void)interaction.Submit(
+        UpdateSampleNavigation(
+            SampleNavigationIntent::SetSampleNameQuery(
+                sample_name_search_restore_name_)));
     ClearSampleNameSearch();
-    return result.action;
 }
 
-SourceCollectionSessionAction SourceCollectionPanelUi::CommitSampleNameSearch(
+void SourceCollectionPanelUi::CommitSampleNameSearch(
     std::size_t target_row,
     const std::string& matched_name,
-    const SourceCollectionSessionIntentSubmitter& submit)
+    PanelSessionInteraction& interaction)
 {
     CopyToBuffer(sample_name_query_buffer_, matched_name);
-    SourceCollectionSessionResult result =
-        submit(UpdateSampleNavigation(SampleNavigationIntent::CommitSampleNameSelection(target_row, matched_name)));
+    (void)interaction.Submit(
+        UpdateSampleNavigation(
+            SampleNavigationIntent::CommitSampleNameSelection(
+                target_row,
+                matched_name)));
     ClearSampleNameSearch();
-    return result.action;
 }
 
 }  // namespace specforge

@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -240,10 +239,6 @@ struct SourceCollectionSessionResult {
     bool loaded = false;
     std::string message;
 };
-
-using SourceCollectionSessionIntentSubmitter =
-    std::function<SourceCollectionSessionResult(SourceCollectionSessionIntent)>;
-using SourceCollectionSessionViewReader = std::function<const SourceCollectionSessionView&()>;
 
 class SourceCollectionSession {
 public:

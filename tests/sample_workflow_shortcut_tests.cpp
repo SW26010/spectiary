@@ -260,16 +260,22 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
     ImGui::SetNextWindowSize(ImVec2(520.0f, 500.0f), ImGuiCond_Always);
     bool open = true;
     specforge::SampleWorkflowShortcut shortcut;
-    const auto submit = [](specforge::SourceCollectionSessionIntent) {
-        return specforge::SourceCollectionSessionResult{};
-    };
-    (void)panel.RenderLabeling(
-        frame_view,
-        submit,
-        submit,
-        [&latest_view]() -> const specforge::SourceCollectionSessionView& {
-            return latest_view;
+    int view_reads = 0;
+    specforge::PanelSessionInteraction interaction(
+        [](
+            specforge::SourceCollectionSessionIntent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            return specforge::SourceCollectionSessionResult{};
         },
+        [&]() -> const specforge::SourceCollectionSessionView& {
+            return view_reads++ == 0
+                ? frame_view
+                : latest_view;
+        }
+    );
+    panel.RenderLabeling(
+        interaction,
         &open,
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
@@ -304,21 +310,26 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     ImGui::SetNextWindowSize(ImVec2(520.0f, 500.0f), ImGuiCond_Always);
     bool open = true;
     LabelingTaskSwitchFrameObservation observation;
-    const auto submit = [&observation, &latest_view, &activated_view](
-                            specforge::SourceCollectionSessionIntent) {
-        ++observation.submission_count;
-        latest_view = activated_view;
-        specforge::SourceCollectionSessionResult result;
-        result.action.workflow_changed = true;
-        return result;
-    };
-    (void)panel.RenderLabeling(
-        frame_view,
-        submit,
-        submit,
-        [&latest_view]() -> const specforge::SourceCollectionSessionView& {
-            return latest_view;
+    int view_reads = 0;
+    specforge::PanelSessionInteraction interaction(
+        [&](
+            specforge::SourceCollectionSessionIntent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            ++observation.submission_count;
+            latest_view = activated_view;
+            specforge::SourceCollectionSessionResult result;
+            result.action.workflow_changed = true;
+            return result;
         },
+        [&]() -> const specforge::SourceCollectionSessionView& {
+            return view_reads++ == 0
+                ? frame_view
+                : latest_view;
+        }
+    );
+    panel.RenderLabeling(
+        interaction,
         &open,
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;

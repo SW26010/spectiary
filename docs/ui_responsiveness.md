@@ -55,7 +55,9 @@ SpecForge 的 UI 响应速度是产品目标，不是后期优化项。主图 pa
 后续硬化：
 
 - `SourceCollectionSessionResult` 只表达 command action、navigation result、changed/loaded/message，不携带 `SourceCollectionSessionView`，避免 command 提交默认构造 full session view。
-- panel 交互如果需要继续渲染刷新后的面板状态，必须通过显式 `SessionView()` reader 读取 invalidation-driven view cache。
+- panel 交互统一经过 Shell-owned `PanelSessionInteraction`：提交 intent 后由该
+  module 重读 invalidation-driven view、聚合 action，并把 previous/next 与 label
+  auto-advance 映射到 latency classification；panel 不自行组合 submit/read 回调。
 - plot、smoothing、information、spectral lines 等 snapshot-only surface 继续使用 `CurrentSampleSnapshot()`，不通过 full session view 取当前 sample。
 
 ## 复盘：2026-06-29 sample navigation sequence 退化
@@ -304,6 +306,9 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 14. Known-source context 只能在已提交 identity、source/companion/annotation dependency proof 和 folder generation（若适用）均通过两阶段检查时复用；单独的 identity 或 generation hint 不能跳过 manifest materialization。
 15. Resident snapshot 由 roster 按 raw row 和完整 source/context/generation 边界管理；session 只选择候选，load worker 在后台完成 currentness/TOCTOU 验证后才能跳过 decode。命中、淘汰、取消和 stale completion 都不能绕过原 pending/commit/supersede 事务。
 16. Adjacent prefetch 只能在前台导航成功激活后，从同一 filtered/sorted sequence 按当前方向选择 raw row；同一时刻最多一个 below-normal worker，必须可被任何新前台意图取消，并使用不阻塞 foreground ordered publication 的独立完成通道。prefetch drain 只写 roster residency，不能激活、移动 index 或提交 workflow。
+17. Panel-facing session mutation/read 协议由 Shell-owned interaction module
+    统一持有。Panel 只提交用户 intent 并消费返回的新 projection；action merge、
+    mutation 后重读和 latency classification 不能散落回 panel 或逐 panel lambda。
 
 ## 推荐实现形态
 
@@ -351,6 +356,7 @@ after `target_resolution` p95 为 7.12ms，属于明确不包含的下一个独�
 - previous/next 和 label auto-advance 是否只加载目标 sample，不触发 source/workflow 全量重同步。
 - panel view 是否只包含显示需要的状态，没有复制 owner 内部大列表。
 - cache 失效条件是否覆盖 source、annotation、labeling、filter/sort choice、workflow context 和 maintenance 可见状态变化。
+- panel mutation 是否全部经过 `PanelSessionInteraction`，且每个 panel 边界只消费一次聚合 action。
 - resident snapshot 的 key 是否使用 raw row 和完整 source/context/generation 边界，cache hit 是否真的跳过 decoder，淘汰是否走后台 retirement。
 - 新增测试是否覆盖规则正确性；新增或更新 profile 是否覆盖交互预算。
 - 运行 build/test/profile 命令时是否设置了合理超时，避免诊断卡死。

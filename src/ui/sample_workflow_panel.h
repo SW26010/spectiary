@@ -2,8 +2,8 @@
 
 #include "domain/sample_filter.h"
 #include "domain/spectrum_snapshot.h"
+#include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
-#include "ui/source_collection_session.h"
 
 #include <array>
 #include <filesystem>
@@ -22,25 +22,18 @@ public:
 
     void ResetForSampleWorkflow();
 
-    [[nodiscard]] SourceCollectionSessionAction RenderLabeling(
-        const SourceCollectionSessionView& session_view,
-        const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionSessionIntentSubmitter& submit_auto_advance,
-        const SourceCollectionSessionViewReader& read_view,
+    void RenderLabeling(
+        PanelSessionInteraction& interaction,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
         SampleWorkflowShortcut& shortcut);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderFilters(
-        const SourceCollectionSessionView& session_view,
-        const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionSessionViewReader& read_view,
+    void RenderFilters(
+        PanelSessionInteraction& interaction,
         bool* open);
 
-    [[nodiscard]] SourceCollectionSessionAction RenderSorting(
-        const SourceCollectionSessionView& session_view,
-        const SourceCollectionSessionIntentSubmitter& submit,
-        const SourceCollectionSessionViewReader& read_view,
+    void RenderSorting(
+        PanelSessionInteraction& interaction,
         bool* open);
 
 private:

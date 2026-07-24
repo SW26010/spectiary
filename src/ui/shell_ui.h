@@ -3,10 +3,11 @@
 #include "app/application_settings.h"
 #include "domain/spectrum_snapshot.h"
 #include "profile/navigation_latency_trace.h"
-#include "ui/source_collection_panel.h"
+#include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/sample_workflow_panel.h"
 #include "ui/settings_panel.h"
+#include "ui/source_collection_panel.h"
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_activation_transaction.h"
@@ -106,9 +107,6 @@ private:
         std::optional<
             SourceCollectionActivationTransaction::NavigationIntent>
             navigation = std::nullopt);
-    [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommandForPanel(
-        SourceCollectionSessionIntent command,
-        std::optional<NavigationLatencyInputKind> navigation_kind = std::nullopt);
     void HandleSessionAction(const SourceCollectionSessionAction& action);
     [[nodiscard]] std::optional<NavigationLatencyTimePoint> TakeNavigationKeyInput(
         NavigationLatencyInputKind kind);
@@ -125,6 +123,7 @@ private:
     SourceCollectionSession session_;
     SpectrumViewSession spectrum_view_session_;
     SourceCollectionActivationTransaction source_activation_;
+    PanelSessionInteraction panel_session_interaction_;
     SpectralLinesPanelController spectral_lines_panel_;
     SpectralLinesPanelUi spectral_lines_panel_ui_;
     SourceCollectionPanelUi source_collection_panel_ui_;
