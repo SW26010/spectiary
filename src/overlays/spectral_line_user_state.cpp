@@ -35,6 +35,20 @@ bool ContainsCaseInsensitive(std::string_view text, std::string_view pattern)
     return LowerAscii(std::string(text)).find(LowerAscii(std::string(pattern))) != std::string::npos;
 }
 
+std::string TrimWhitespace(std::string_view value)
+{
+    const auto is_space = [](unsigned char character) {
+        return std::isspace(character) != 0;
+    };
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.front()))) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.back()))) {
+        value.remove_suffix(1);
+    }
+    return std::string(value);
+}
+
 std::string SanitizeId(std::string_view value)
 {
     std::string id;
@@ -116,6 +130,41 @@ const UserGroup* FindGroup(const GroupingView& view, std::string_view group_id)
 bool IsUnassignedGroup(const UserGroup& group)
 {
     return group.is_unassigned || group.id == kUnassignedUserGroupId;
+}
+
+bool SameIdentityValue(const CatalogIdentity& left, const CatalogIdentity& right)
+{
+    return left.id == right.id && left.display_name == right.display_name;
+}
+
+bool SameReferenceValue(const MarkerReference& left, const MarkerReference& right)
+{
+    return SameIdentityValue(left.catalog_identity, right.catalog_identity) &&
+           left.marker_id == right.marker_id;
+}
+
+bool SameGroupValue(const UserGroup& left, const UserGroup& right)
+{
+    return left.id == right.id && left.name == right.name &&
+           left.is_unassigned == right.is_unassigned &&
+           left.marker_references.size() == right.marker_references.size() &&
+           std::equal(
+               left.marker_references.begin(),
+               left.marker_references.end(),
+               right.marker_references.begin(),
+               SameReferenceValue);
+}
+
+bool SameGroupingViewValue(const GroupingView& left, const GroupingView& right)
+{
+    return left.id == right.id && left.name == right.name &&
+           left.read_only == right.read_only &&
+           left.groups.size() == right.groups.size() &&
+           std::equal(
+               left.groups.begin(),
+               left.groups.end(),
+               right.groups.begin(),
+               SameGroupValue);
 }
 
 UserGroup& EnsureUnassignedGroup(GroupingView& view)
@@ -371,6 +420,160 @@ GroupingView EffectiveUserGroupingView(
         }
     }
     return view;
+}
+
+CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
+    CatalogUserState& state,
+    CatalogPanelState& panel_state,
+    const SpectralLineCatalog& catalog,
+    const CatalogIdentity& identity,
+    const std::optional<GroupingView>& catalog_grouping_view)
+{
+    CatalogUserStateCanonicalizationResult result;
+    if (!SameIdentityValue(state.catalog_identity, identity)) {
+        state.catalog_identity = identity;
+        result.changed = true;
+    }
+
+    std::vector<GroupingView> normalized_views;
+    normalized_views.reserve(state.grouping_views.size());
+    std::unordered_set<std::string> view_ids;
+    for (const GroupingView& source_view : state.grouping_views) {
+        if (source_view.id.empty() ||
+            source_view.id == CatalogGroupingViewId() ||
+            !view_ids.insert(source_view.id).second) {
+            result.changed = true;
+            continue;
+        }
+
+        GroupingView normalized_view;
+        normalized_view.id = source_view.id;
+        normalized_view.name = TrimWhitespace(source_view.name);
+        if (normalized_view.name.empty()) {
+            normalized_view.name =
+                "Grouping " + std::to_string(normalized_views.size() + 1);
+        }
+        normalized_view.read_only = false;
+
+        std::unordered_set<std::string> group_ids;
+        std::unordered_set<std::string> unassigned_marker_ids;
+        UserGroup unassigned_group;
+        unassigned_group.id = UnassignedUserGroupId();
+        unassigned_group.name = "Unassigned";
+        unassigned_group.is_unassigned = true;
+
+        for (const UserGroup& source_group : source_view.groups) {
+            const bool is_unassigned =
+                source_group.is_unassigned ||
+                source_group.id == UnassignedUserGroupId();
+            if (is_unassigned) {
+                for (const MarkerReference& reference :
+                     source_group.marker_references) {
+                    if (SameCatalogIdentity(
+                            reference.catalog_identity,
+                            identity) &&
+                        !reference.marker_id.empty() &&
+                        unassigned_marker_ids.insert(reference.marker_id)
+                            .second) {
+                        unassigned_group.marker_references.push_back(
+                            MarkerReference{identity, reference.marker_id});
+                    }
+                }
+                continue;
+            }
+            if (source_group.id.empty() ||
+                !group_ids.insert(source_group.id).second) {
+                result.changed = true;
+                continue;
+            }
+
+            UserGroup group;
+            group.id = source_group.id;
+            group.name = TrimWhitespace(source_group.name);
+            if (group.name.empty()) {
+                group.name = "Group";
+            }
+            std::unordered_set<std::string> marker_ids;
+            for (const MarkerReference& reference :
+                 source_group.marker_references) {
+                if (SameCatalogIdentity(
+                        reference.catalog_identity,
+                        identity) &&
+                    !reference.marker_id.empty() &&
+                    marker_ids.insert(reference.marker_id).second) {
+                    group.marker_references.push_back(
+                        MarkerReference{identity, reference.marker_id});
+                }
+            }
+            normalized_view.groups.push_back(std::move(group));
+        }
+        normalized_view.groups.push_back(std::move(unassigned_group));
+        normalized_view =
+            EffectiveUserGroupingView(normalized_view, catalog, identity);
+        if (!SameGroupingViewValue(source_view, normalized_view)) {
+            result.changed = true;
+        }
+        normalized_views.push_back(std::move(normalized_view));
+    }
+    state.grouping_views = std::move(normalized_views);
+
+    for (auto iterator = state.marker_visibility.begin();
+         iterator != state.marker_visibility.end();) {
+        if (iterator->first.empty()) {
+            iterator = state.marker_visibility.erase(iterator);
+            result.changed = true;
+        } else {
+            ++iterator;
+        }
+    }
+
+    std::unordered_set<std::string> valid_expansion_keys;
+    if (catalog_grouping_view) {
+        for (const UserGroup& group : catalog_grouping_view->groups) {
+            valid_expansion_keys.insert(
+                GroupExpansionKey(catalog_grouping_view->id, group.id));
+        }
+    }
+    for (const GroupingView& view : state.grouping_views) {
+        for (const UserGroup& group : view.groups) {
+            valid_expansion_keys.insert(
+                GroupExpansionKey(view.id, group.id));
+        }
+    }
+    for (auto iterator = panel_state.expanded_group_ids.begin();
+         iterator != panel_state.expanded_group_ids.end();) {
+        if (!valid_expansion_keys.contains(*iterator)) {
+            iterator = panel_state.expanded_group_ids.erase(iterator);
+            result.changed = true;
+        } else {
+            ++iterator;
+        }
+    }
+
+    const bool active_view_exists =
+        (!state.active_view_id.empty() && catalog_grouping_view &&
+         catalog_grouping_view->id == state.active_view_id) ||
+        std::any_of(
+            state.grouping_views.begin(),
+            state.grouping_views.end(),
+            [&](const GroupingView& view) {
+                return view.id == state.active_view_id;
+            });
+    if (!active_view_exists) {
+        const std::string previous_active_view_id = state.active_view_id;
+        if (catalog_grouping_view) {
+            state.active_view_id = catalog_grouping_view->id;
+        } else if (!state.grouping_views.empty()) {
+            state.active_view_id = state.grouping_views.front().id;
+        } else {
+            state.active_view_id.clear();
+        }
+        result.active_view_changed =
+            state.active_view_id != previous_active_view_id;
+        result.changed = result.changed || result.active_view_changed;
+    }
+
+    return result;
 }
 
 bool IsMarkerVisible(const CatalogUserState& state, const std::string& marker_id)

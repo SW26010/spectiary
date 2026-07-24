@@ -176,7 +176,8 @@ struct SpectralLinePlotView {
 
 class SpectralLinesPanelController {
 public:
-    SpectralLinesPanelController();
+    explicit SpectralLinesPanelController(
+        std::filesystem::path packaged_catalog_path);
     SpectralLinesPanelController(
         SpectralLineCatalog catalog,
         CatalogIdentity catalog_identity,
@@ -199,8 +200,6 @@ private:
     [[nodiscard]] CatalogUserStateResult Applied(bool persistent_state_changed);
     [[nodiscard]] static CatalogUserStateResult NoChange();
     [[nodiscard]] static CatalogUserStateResult Rejected(std::string message);
-    [[nodiscard]] bool NormalizeOwnedState();
-    [[nodiscard]] bool NormalizeViewSelection();
     [[nodiscard]] bool ViewExists(std::string_view view_id) const;
     [[nodiscard]] bool MarkerExists(std::string_view marker_id) const;
     [[nodiscard]] GroupingView* FindUserGroupingView(std::string_view view_id);

@@ -33,25 +33,6 @@ MarkerReference MakeReference(const CatalogIdentity& identity, std::string marke
     return reference;
 }
 
-UserGroup& EnsureUnassignedGroup(GroupingView& view)
-{
-    for (UserGroup& group : view.groups) {
-        if (group.is_unassigned || group.id == UnassignedUserGroupId()) {
-            group.id = UnassignedUserGroupId();
-            group.name = "Unassigned";
-            group.is_unassigned = true;
-            return group;
-        }
-    }
-
-    UserGroup group;
-    group.id = UnassignedUserGroupId();
-    group.name = "Unassigned";
-    group.is_unassigned = true;
-    view.groups.push_back(std::move(group));
-    return view.groups.back();
-}
-
 const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
 {
     return JsonObjectMember(value, key);
@@ -78,17 +59,20 @@ std::optional<MarkerReference> ReadMarkerReference(
         return std::nullopt;
     }
 
-    const std::string marker_id = ReadStringMember(value, "marker_id");
-    if (marker_id.empty()) {
+    const JsonValue* marker_id = ObjectMember(value, "marker_id");
+    if (marker_id == nullptr || marker_id->kind != JsonValue::Kind::String) {
         return std::nullopt;
     }
     CatalogIdentity identity = fallback_identity;
-    const std::string identity_id = ReadStringMember(value, "catalog_identity");
-    if (!identity_id.empty()) {
-        identity.id = identity_id;
-        identity.display_name = DisplayNameForCatalogIdentity(identity_id);
+    if (const JsonValue* identity_id =
+            ObjectMember(value, "catalog_identity");
+        identity_id != nullptr &&
+        identity_id->kind == JsonValue::Kind::String) {
+        identity.id = identity_id->string_value;
+        identity.display_name =
+            DisplayNameForCatalogIdentity(identity.id);
     }
-    return MakeReference(identity, marker_id);
+    return MakeReference(identity, marker_id->string_value);
 }
 
 std::vector<MarkerReference> ReadMarkerReferences(
@@ -120,14 +104,8 @@ std::vector<UserGroup> ReadUserGroups(const JsonValue& value, const CatalogIdent
         UserGroup group;
         group.id = ReadStringMember(item, "id");
         group.name = ReadStringMember(item, "name");
-        group.is_unassigned = ReadBoolMember(item, "is_unassigned", false) || group.id == UnassignedUserGroupId();
-        if (group.is_unassigned) {
-            group.id = UnassignedUserGroupId();
-            group.name = "Unassigned";
-        }
-        if (group.id.empty() || group.name.empty()) {
-            continue;
-        }
+        group.is_unassigned =
+            ReadBoolMember(item, "is_unassigned", false);
         if (const JsonValue* references = ObjectMember(item, "marker_references")) {
             group.marker_references = ReadMarkerReferences(*references, identity);
         }
@@ -150,13 +128,9 @@ std::vector<GroupingView> ReadGroupingViews(const JsonValue& value, const Catalo
         view.id = ReadStringMember(item, "id");
         view.name = ReadStringMember(item, "name");
         view.read_only = ReadBoolMember(item, "read_only", false);
-        if (view.id.empty() || view.name.empty() || view.read_only) {
-            continue;
-        }
         if (const JsonValue* groups = ObjectMember(item, "groups")) {
             view.groups = ReadUserGroups(*groups, identity);
         }
-        EnsureUnassignedGroup(view);
         views.push_back(std::move(view));
     }
     return views;
@@ -169,7 +143,7 @@ std::unordered_set<std::string> ReadExpandedGroupIds(const JsonValue& value)
         return expanded;
     }
     for (const JsonValue& item : value.array) {
-        if (item.kind == JsonValue::Kind::String && !item.string_value.empty()) {
+        if (item.kind == JsonValue::Kind::String) {
             expanded.insert(item.string_value);
         }
     }
@@ -183,7 +157,7 @@ std::unordered_map<std::string, bool> ReadMarkerVisibility(const JsonValue& valu
         return visibility;
     }
     for (const auto& [marker_id, item] : value.object) {
-        if (!marker_id.empty() && item.kind == JsonValue::Kind::Bool) {
+        if (item.kind == JsonValue::Kind::Bool) {
             visibility.emplace(marker_id, item.bool_value);
         }
     }
@@ -317,10 +291,13 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         CatalogIdentity identity;
         identity.id = identity_id;
         identity.display_name = DisplayNameForCatalogIdentity(identity_id);
-        CatalogUserState state = MakeCatalogUserState(identity);
-        const std::string active_view_id = ReadStringMember(catalog_value, "active_view_id");
-        if (!active_view_id.empty()) {
-            state.active_view_id = active_view_id;
+        CatalogUserState state;
+        state.catalog_identity = identity;
+        if (const JsonValue* active_view_id =
+                ObjectMember(catalog_value, "active_view_id");
+            active_view_id != nullptr &&
+            active_view_id->kind == JsonValue::Kind::String) {
+            state.active_view_id = active_view_id->string_value;
         }
         if (const JsonValue* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
             state.marker_visibility = ReadMarkerVisibility(*marker_visibility);

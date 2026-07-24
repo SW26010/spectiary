@@ -13,16 +13,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
-
 #ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
 #include "specforge/public_spectral_lines_embedded.h"
 #endif
@@ -159,49 +149,6 @@ bool ValidateMarker(const SpectralLineMarker& marker, bool require_group, std::s
         return false;
     }
     return true;
-}
-
-std::optional<std::filesystem::path> ExecutableDirectory()
-{
-#ifdef _WIN32
-    std::wstring buffer(MAX_PATH, L'\0');
-    for (;;) {
-        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (length == 0) {
-            return std::nullopt;
-        }
-        if (length < buffer.size()) {
-            buffer.resize(length);
-            return std::filesystem::path(buffer).parent_path();
-        }
-        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-            return std::nullopt;
-        }
-        buffer.resize(buffer.size() * 2);
-    }
-#else
-    return std::nullopt;
-#endif
-}
-
-std::vector<std::filesystem::path> DefaultCatalogCandidates()
-{
-    std::vector<std::filesystem::path> candidates;
-    std::error_code error;
-    const std::filesystem::path current = std::filesystem::current_path(error);
-    const std::filesystem::path relative(kDefaultCatalogPath);
-    if (const std::optional<std::filesystem::path> executable_dir = ExecutableDirectory()) {
-        candidates.push_back(*executable_dir / relative);
-    }
-    if (!error) {
-        std::filesystem::path base = current;
-        for (int index = 0; index < 5; ++index) {
-            candidates.push_back(base / relative);
-            base /= "..";
-        }
-    }
-    candidates.push_back(relative);
-    return candidates;
 }
 
 SpectralLineCatalog LoadSpectralLineCatalogFromStream(
@@ -343,22 +290,14 @@ SpectralLineCatalog LoadPublicSpectralLineCatalogFromPath(const std::filesystem:
     return LoadSpectralLineCatalogFromStream(stream, path, true);
 }
 
-SpectralLineCatalog LoadDefaultSpectralLineCatalog()
+SpectralLineCatalog LoadPackagedPublicSpectralLineCatalog(
+    const std::filesystem::path& path)
 {
-    for (const std::filesystem::path& candidate : DefaultCatalogCandidates()) {
-        std::error_code error;
-        if (std::filesystem::exists(candidate, error)) {
-            return LoadPublicSpectralLineCatalogFromPath(candidate);
-        }
-    }
-
 #ifdef SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES
     std::istringstream stream(kEmbeddedPublicSpectralLineCatalog);
     return LoadSpectralLineCatalogFromStream(stream, std::filesystem::path(kDefaultCatalogPath), true);
 #else
-    SpectralLineCatalog catalog;
-    catalog.load_error = "could not find default spectral line catalog: config/spectral_lines.public.tsv";
-    return catalog;
+    return LoadPublicSpectralLineCatalogFromPath(path);
 #endif
 }
 

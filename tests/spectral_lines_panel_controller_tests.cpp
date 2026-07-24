@@ -1,3 +1,4 @@
+#include "overlays/spectral_line_user_state_cache_io.h"
 #include "ui/spectral_lines_panel_controller.h"
 
 #include <algorithm>
@@ -68,6 +69,57 @@ std::string ReadFile(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+}
+
+void WriteNonCanonicalCache(const std::filesystem::path& path)
+{
+    std::ofstream stream(path);
+    stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "missing-view",
+      "marker_visibility": {"": false},
+      "grouping_views": [{
+        "id": "view-1",
+        "name": "  Review  ",
+        "read_only": true,
+        "groups": [{
+          "id": "group-1",
+          "name": "  Hydrogen  ",
+          "is_unassigned": false,
+          "marker_references": [
+            {"catalog_identity": "specforge.public", "marker_id": "h_alpha"},
+            {"catalog_identity": "specforge.public", "marker_id": "missing-marker"},
+            {"catalog_identity": "foreign.catalog", "marker_id": "h_beta"}
+          ]
+        }, {
+          "id": "__unassigned__",
+          "name": "Wrong",
+          "is_unassigned": false,
+          "marker_references": [
+            {"catalog_identity": "specforge.public", "marker_id": "h_beta"}
+          ]
+        }, {
+          "id": "",
+          "name": "",
+          "is_unassigned": false,
+          "marker_references": []
+        }]
+      }, {
+        "id": "view-1",
+        "name": "Duplicate",
+        "groups": []
+      }]
+    }
+  },
+  "catalog_panel_state": {
+    "specforge.public": {
+      "expanded_group_ids": ["missing/group", "view-1/group-1"]
+    }
+  }
+})json";
 }
 
 const specforge::SpectralLineGroupingView* FindGroupingView(
@@ -221,6 +273,130 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
                 }),
             "plot view should not expose a marker hidden through catalog user state");
     }
+    RemoveTestCache(path);
+}
+
+void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
+{
+    const std::filesystem::path path =
+        TestCachePath("canonicalization");
+    RemoveTestCache(path);
+    WriteNonCanonicalCache(path);
+
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        const specforge::CatalogUserStateView state = session.View();
+        Require(
+            state.user_grouping_view_count == 1,
+            "domain canonicalization should remove duplicate view identities");
+
+        const specforge::SpectralLineGroupingView* catalog_view =
+            FindGroupingView(state, specforge::CatalogGroupingViewId());
+        Require(
+            catalog_view != nullptr && catalog_view->active &&
+                catalog_view->selection_requested,
+            "domain canonicalization should repair invalid active selection and request presentation");
+
+        const specforge::SpectralLineGroupingView* user_view =
+            FindGroupingView(state, "view-1");
+        Require(
+            user_view != nullptr && user_view->editable &&
+                user_view->name == "Review",
+            "domain canonicalization should own persisted view flags and names");
+        const specforge::SpectralLineGroupView* group =
+            FindGroup(*user_view, "group-1");
+        const specforge::SpectralLineGroupView* unassigned =
+            FindUnassignedGroup(*user_view);
+        Require(
+            group != nullptr && group->name == "Hydrogen" &&
+                group->expanded,
+            "domain canonicalization should trim group names and retain valid panel state");
+        Require(
+            unassigned != nullptr &&
+                unassigned->id == specforge::UnassignedUserGroupId() &&
+                unassigned->name == "Unassigned",
+            "domain canonicalization should create exactly the canonical unassigned group");
+
+        const specforge::SpectralLineMarkerReferenceView* unresolved =
+            FindMarker(*group, "missing-marker");
+        Require(
+            unresolved != nullptr && !unresolved->resolved,
+            "unresolved persisted markers should survive the canonicalization path");
+        Require(
+            FindMarker(*group, "h_beta") == nullptr &&
+                FindMarker(*unassigned, "h_beta") != nullptr,
+            "foreign references should be removed while current catalog markers remain assigned");
+
+        Require(
+            session.Flush(),
+            "canonical state repaired during cache load should persist");
+    }
+
+    const specforge::CatalogUserStateCacheLoadResult persisted =
+        specforge::LoadCatalogUserStateCache(path);
+    const specforge::CatalogUserState& state =
+        persisted.cache.catalogs.at("specforge.public");
+    const specforge::CatalogPanelState& panel =
+        persisted.cache.catalog_panel_state.at("specforge.public");
+    Require(
+        !state.marker_visibility.contains("") &&
+            state.grouping_views.size() == 1 &&
+            !state.grouping_views.front().read_only,
+        "persisted cache should contain the domain-canonical form");
+    Require(
+        panel.expanded_group_ids.size() == 1 &&
+            panel.expanded_group_ids.contains("view-1/group-1"),
+        "domain canonicalization should discard unresolved panel expansion keys");
+
+    RemoveTestCache(path);
+}
+
+void TestPersistentIntentUsesDomainCanonicalizationForSelection()
+{
+    const std::filesystem::path path =
+        TestCachePath("intent_canonicalization");
+    RemoveTestCache(path);
+
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    CreateUserGroupingView()),
+            "creating a view should apply");
+        specforge::CatalogUserStateView state = session.View();
+        const specforge::SpectralLineGroupingView* user_view =
+            FindActiveEditableView(state);
+        Require(
+            user_view != nullptr,
+            "created view should become active");
+        const std::string user_view_id = user_view->id;
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    AcknowledgeGroupingViewSelection(user_view_id)),
+            "selection acknowledgement should apply");
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    DeleteUserGroupingView(user_view_id)),
+            "deleting the active view should apply");
+        state = session.View();
+        const specforge::SpectralLineGroupingView* catalog_view =
+            FindGroupingView(state, specforge::CatalogGroupingViewId());
+        Require(
+            catalog_view != nullptr && catalog_view->active &&
+                catalog_view->selection_requested,
+            "persistent intent should use domain canonicalization to select the fallback view");
+    }
+
     RemoveTestCache(path);
 }
 
@@ -393,6 +569,8 @@ int main()
 {
     TestForeignIdentitiesAreRejectedWithoutPersistence();
     TestPlotViewProjectsOnlyPlotOverlayState();
+    TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers();
+    TestPersistentIntentUsesDomainCanonicalizationForSelection();
     TestModificationSelectionAndPersistenceRoundTrip();
     return 0;
 }

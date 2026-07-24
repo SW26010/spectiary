@@ -96,6 +96,10 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
     const specforge::RuntimePaths portable_paths =
         specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Portable, inputs);
     Require(portable_paths.package_root == package_root, "portable package root should be the executable directory");
+    Require(
+        portable_paths.public_spectral_line_catalog_path ==
+            package_root / "config" / "spectral_lines.public.tsv",
+        "packaged spectral-line catalog should resolve from the package root");
     Require(portable_paths.local_user_state_root == package_root / "Data", "portable state should live under Data");
     Require(portable_paths.profile_log_directory == package_root / "Data" / "logs", "portable logs should live under Data/logs");
     Require(
@@ -105,6 +109,10 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
     const specforge::RuntimePaths installed_paths =
         specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Installed, inputs);
     Require(installed_paths.package_root == package_root, "installed package root should still be the executable directory");
+    Require(
+        installed_paths.public_spectral_line_catalog_path ==
+            package_root / "config" / "spectral_lines.public.tsv",
+        "installed profile should use the same package resource root");
     Require(installed_paths.local_user_state_root == installed_root, "installed state should use local app data root");
     Require(installed_paths.profile_log_directory == installed_root / "logs", "installed logs should live under installed state root");
     Require(

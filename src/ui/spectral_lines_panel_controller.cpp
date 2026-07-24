@@ -7,7 +7,6 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
-#include <unordered_set>
 #include <utility>
 
 namespace specforge {
@@ -50,38 +49,6 @@ std::string MarkerWavelengthText(const SpectralLineMarker& marker)
         return buffer.data();
     }
     return {};
-}
-
-bool SameIdentityValue(const CatalogIdentity& left, const CatalogIdentity& right)
-{
-    return left.id == right.id && left.display_name == right.display_name;
-}
-
-bool SameReferenceValue(const MarkerReference& left, const MarkerReference& right)
-{
-    return SameIdentityValue(left.catalog_identity, right.catalog_identity) && left.marker_id == right.marker_id;
-}
-
-bool SameGroupValue(const UserGroup& left, const UserGroup& right)
-{
-    if (left.id != right.id || left.name != right.name || left.is_unassigned != right.is_unassigned ||
-        left.marker_references.size() != right.marker_references.size()) {
-        return false;
-    }
-    return std::equal(
-        left.marker_references.begin(),
-        left.marker_references.end(),
-        right.marker_references.begin(),
-        SameReferenceValue);
-}
-
-bool SameGroupingViewValue(const GroupingView& left, const GroupingView& right)
-{
-    if (left.id != right.id || left.name != right.name || left.read_only != right.read_only ||
-        left.groups.size() != right.groups.size()) {
-        return false;
-    }
-    return std::equal(left.groups.begin(), left.groups.end(), right.groups.begin(), SameGroupValue);
 }
 
 bool GroupContainsMarker(
@@ -290,9 +257,10 @@ CatalogUserStateIntent CatalogUserStateIntent::SetMarkerVisibility(std::string m
     return intent;
 }
 
-SpectralLinesPanelController::SpectralLinesPanelController()
+SpectralLinesPanelController::SpectralLinesPanelController(
+    std::filesystem::path packaged_catalog_path)
     : SpectralLinesPanelController(
-          LoadDefaultSpectralLineCatalog(),
+          LoadPackagedPublicSpectralLineCatalog(packaged_catalog_path),
           PublicSpectralLineCatalogIdentity(),
           DefaultCatalogUserStateCachePath())
 {
@@ -313,7 +281,17 @@ SpectralLinesPanelController::SpectralLinesPanelController(
     load_warning_ = std::move(load_result.warning);
     user_state_ = EnsureCatalogUserState(user_state_cache_, catalog_identity_);
     panel_state_ = EnsureCatalogPanelState(user_state_cache_, catalog_identity_);
-    if (NormalizeOwnedState()) {
+    const CatalogUserStateCanonicalizationResult canonicalization =
+        CanonicalizeCatalogUserState(
+            user_state_,
+            panel_state_,
+            catalog_,
+            catalog_identity_,
+            catalog_grouping_view_);
+    if (canonicalization.active_view_changed) {
+        RequestGroupingViewSelection();
+    }
+    if (canonicalization.changed) {
         MarkCacheDirty();
     }
     next_view_index_ = static_cast<int>(user_state_.grouping_views.size()) + 1;
@@ -418,7 +396,6 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
                 ++iterator;
             }
         }
-        (void)NormalizeViewSelection();
         return Applied(true);
     }
 
@@ -729,7 +706,16 @@ bool SpectralLinesPanelController::Flush()
 CatalogUserStateResult SpectralLinesPanelController::Applied(bool persistent_state_changed)
 {
     if (persistent_state_changed) {
-        (void)NormalizeOwnedState();
+        const CatalogUserStateCanonicalizationResult canonicalization =
+            CanonicalizeCatalogUserState(
+                user_state_,
+                panel_state_,
+                catalog_,
+                catalog_identity_,
+                catalog_grouping_view_);
+        if (canonicalization.active_view_changed) {
+            RequestGroupingViewSelection();
+        }
         MarkCacheDirty();
     }
     CatalogUserStateResult result;
@@ -752,131 +738,6 @@ CatalogUserStateResult SpectralLinesPanelController::Rejected(std::string messag
     result.status = CatalogUserStateResultStatus::Rejected;
     result.message = std::move(message);
     return result;
-}
-
-bool SpectralLinesPanelController::NormalizeOwnedState()
-{
-    bool changed = false;
-    if (!SameIdentityValue(user_state_.catalog_identity, catalog_identity_)) {
-        user_state_.catalog_identity = catalog_identity_;
-        changed = true;
-    }
-
-    std::vector<GroupingView> normalized_views;
-    normalized_views.reserve(user_state_.grouping_views.size());
-    std::unordered_set<std::string> view_ids;
-    for (const GroupingView& source_view : user_state_.grouping_views) {
-        if (source_view.id.empty() || source_view.id == CatalogGroupingViewId() ||
-            !view_ids.insert(source_view.id).second) {
-            changed = true;
-            continue;
-        }
-
-        GroupingView normalized_view;
-        normalized_view.id = source_view.id;
-        normalized_view.name = TrimWhitespace(source_view.name);
-        if (normalized_view.name.empty()) {
-            normalized_view.name = "Grouping " + std::to_string(normalized_views.size() + 1);
-        }
-        normalized_view.read_only = false;
-
-        std::unordered_set<std::string> group_ids;
-        std::unordered_set<std::string> unassigned_marker_ids;
-        UserGroup unassigned_group;
-        unassigned_group.id = UnassignedUserGroupId();
-        unassigned_group.name = "Unassigned";
-        unassigned_group.is_unassigned = true;
-
-        for (const UserGroup& source_group : source_view.groups) {
-            const bool is_unassigned =
-                source_group.is_unassigned || source_group.id == UnassignedUserGroupId();
-            if (is_unassigned) {
-                for (const MarkerReference& reference : source_group.marker_references) {
-                    if (SameCatalogIdentity(reference.catalog_identity, catalog_identity_) &&
-                        !reference.marker_id.empty() &&
-                        unassigned_marker_ids.insert(reference.marker_id).second) {
-                        unassigned_group.marker_references.push_back(
-                            MarkerReference{catalog_identity_, reference.marker_id});
-                    }
-                }
-                continue;
-            }
-            if (source_group.id.empty() || !group_ids.insert(source_group.id).second) {
-                continue;
-            }
-
-            UserGroup group;
-            group.id = source_group.id;
-            group.name = TrimWhitespace(source_group.name);
-            if (group.name.empty()) {
-                group.name = "Group";
-            }
-            std::unordered_set<std::string> marker_ids;
-            for (const MarkerReference& reference : source_group.marker_references) {
-                if (SameCatalogIdentity(reference.catalog_identity, catalog_identity_) &&
-                    !reference.marker_id.empty() && marker_ids.insert(reference.marker_id).second) {
-                    group.marker_references.push_back(MarkerReference{catalog_identity_, reference.marker_id});
-                }
-            }
-            normalized_view.groups.push_back(std::move(group));
-        }
-        normalized_view.groups.push_back(std::move(unassigned_group));
-        normalized_view = EffectiveUserGroupingView(normalized_view, catalog_, catalog_identity_);
-        if (!SameGroupingViewValue(source_view, normalized_view)) {
-            changed = true;
-        }
-        normalized_views.push_back(std::move(normalized_view));
-    }
-    user_state_.grouping_views = std::move(normalized_views);
-
-    for (auto iterator = user_state_.marker_visibility.begin();
-         iterator != user_state_.marker_visibility.end();) {
-        if (iterator->first.empty()) {
-            iterator = user_state_.marker_visibility.erase(iterator);
-            changed = true;
-        } else {
-            ++iterator;
-        }
-    }
-
-    std::unordered_set<std::string> valid_expansion_keys;
-    if (catalog_grouping_view_) {
-        for (const UserGroup& group : catalog_grouping_view_->groups) {
-            valid_expansion_keys.insert(GroupExpansionKey(catalog_grouping_view_->id, group.id));
-        }
-    }
-    for (const GroupingView& view : user_state_.grouping_views) {
-        for (const UserGroup& group : view.groups) {
-            valid_expansion_keys.insert(GroupExpansionKey(view.id, group.id));
-        }
-    }
-    for (auto iterator = panel_state_.expanded_group_ids.begin();
-         iterator != panel_state_.expanded_group_ids.end();) {
-        if (!valid_expansion_keys.contains(*iterator)) {
-            iterator = panel_state_.expanded_group_ids.erase(iterator);
-            changed = true;
-        } else {
-            ++iterator;
-        }
-    }
-
-    return NormalizeViewSelection() || changed;
-}
-
-bool SpectralLinesPanelController::NormalizeViewSelection()
-{
-    if (ViewExists(user_state_.active_view_id)) {
-        return false;
-    }
-    if (catalog_grouping_view_) {
-        user_state_.active_view_id = catalog_grouping_view_->id;
-    } else if (!user_state_.grouping_views.empty()) {
-        user_state_.active_view_id = user_state_.grouping_views.front().id;
-    } else {
-        user_state_.active_view_id.clear();
-    }
-    RequestGroupingViewSelection();
-    return true;
 }
 
 bool SpectralLinesPanelController::ViewExists(std::string_view view_id) const

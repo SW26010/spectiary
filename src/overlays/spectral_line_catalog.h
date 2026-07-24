@@ -31,7 +31,8 @@ struct SpectralLineCatalog {
     std::string load_error;
 };
 
-[[nodiscard]] SpectralLineCatalog LoadDefaultSpectralLineCatalog();
+[[nodiscard]] SpectralLineCatalog LoadPackagedPublicSpectralLineCatalog(
+    const std::filesystem::path& path);
 [[nodiscard]] SpectralLineCatalog LoadSpectralLineCatalogFromPath(const std::filesystem::path& path);
 [[nodiscard]] SpectralLineCatalog LoadPublicSpectralLineCatalogFromPath(const std::filesystem::path& path);
 [[nodiscard]] double SpectralLineMarkerPosition(const SpectralLineMarker& marker);

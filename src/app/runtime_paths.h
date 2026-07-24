@@ -18,6 +18,7 @@ struct RuntimePaths {
     ReleaseProfile release_profile = ReleaseProfile::Portable;
     std::filesystem::path executable_path;
     std::filesystem::path package_root;
+    std::filesystem::path public_spectral_line_catalog_path;
     std::filesystem::path local_user_state_root;
     std::filesystem::path profile_log_directory;
     std::filesystem::path imgui_ini_path;

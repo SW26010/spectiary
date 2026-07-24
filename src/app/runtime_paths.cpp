@@ -115,6 +115,8 @@ RuntimePaths RuntimePathsForProfile(ReleaseProfile profile, RuntimePathInputs in
     paths.release_profile = profile;
     paths.executable_path = inputs.executable_path.empty() ? CurrentExecutablePath() : std::move(inputs.executable_path);
     paths.package_root = PackageRootForExecutable(paths.executable_path);
+    paths.public_spectral_line_catalog_path =
+        paths.package_root / "config" / "spectral_lines.public.tsv";
 
     std::filesystem::path installed_root = inputs.installed_local_user_state_root.empty()
                                                ? DefaultInstalledLocalUserStateRoot()

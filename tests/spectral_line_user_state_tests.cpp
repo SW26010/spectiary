@@ -542,6 +542,81 @@ void TestCacheRoundTrip()
         "cache should preserve expanded group ids");
 }
 
+void TestCacheLoadLeavesCanonicalizationToTheDomain()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_spectral_line_user_state_raw_cache_test.json";
+    {
+        std::ofstream stream(path);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "",
+      "marker_visibility": {"": false},
+      "grouping_views": [{
+        "id": "view-1",
+        "name": "  Review  ",
+        "read_only": true,
+        "groups": [{
+          "id": "",
+          "name": "",
+          "is_unassigned": false,
+          "marker_references": [{
+            "catalog_identity": "",
+            "marker_id": ""
+          }]
+        }]
+      }]
+    }
+  },
+  "catalog_panel_state": {
+    "specforge.public": {"expanded_group_ids": [""]}
+  }
+})json";
+    }
+
+    const specforge::CatalogUserStateCacheLoadResult loaded =
+        specforge::LoadCatalogUserStateCache(path);
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
+
+    Require(loaded.warning.empty(), loaded.warning);
+    const auto catalog =
+        loaded.cache.catalogs.find("specforge.public");
+    Require(
+        catalog != loaded.cache.catalogs.end(),
+        "raw cache should preserve the parsed catalog entry");
+    const specforge::CatalogUserState& state = catalog->second;
+    Require(
+        state.active_view_id.empty() &&
+            state.marker_visibility.contains(""),
+        "cache parsing should preserve raw selection and visibility keys");
+    Require(
+        state.grouping_views.size() == 1 &&
+            state.grouping_views.front().read_only &&
+            state.grouping_views.front().name == "  Review  ",
+        "cache parsing should not canonicalize view flags or names");
+    Require(
+        state.grouping_views.front().groups.size() == 1 &&
+            state.grouping_views.front().groups.front().id.empty(),
+        "cache parsing should preserve invalid groups for domain canonicalization");
+    const specforge::UserGroup& raw_group =
+        state.grouping_views.front().groups.front();
+    Require(
+        raw_group.marker_references.size() == 1 &&
+            raw_group.marker_references.front().marker_id.empty(),
+        "cache parsing should preserve invalid references for domain canonicalization");
+    const auto panel =
+        loaded.cache.catalog_panel_state.find("specforge.public");
+    Require(
+        panel != loaded.cache.catalog_panel_state.end() &&
+            panel->second.expanded_group_ids.contains(""),
+        "cache parsing should preserve raw panel keys");
+}
+
 void TestCacheSaveReplacesExistingFileWithoutLeavingTempFile()
 {
     specforge::CatalogUserState state =
@@ -754,6 +829,7 @@ int main()
     TestUngroupedCatalogHasNoCatalogGroupingView();
     TestCatalogGroupingViewUsesUniqueGroupIds();
     TestCacheRoundTrip();
+    TestCacheLoadLeavesCanonicalizationToTheDomain();
     TestCacheSaveReplacesExistingFileWithoutLeavingTempFile();
     TestCacheSeparatesCatalogIdentities();
     TestLegacyExpandedGroupsMigrateToPanelState();

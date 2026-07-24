@@ -1,5 +1,6 @@
 #include "ui/shell_ui.h"
 
+#include "app/runtime_paths.h"
 #include "domain/spectrum_loader.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
@@ -660,6 +661,8 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
 ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
     : session_(LoadSpectrumSnapshotFromPath, SourceCollectionSessionRestoreMode::Deferred),
       source_activation_(session_),
+      spectral_lines_panel_(
+          DefaultRuntimePaths().public_spectral_line_catalog_path),
       touchpad_gestures_(touchpad_gestures)
 {
     RefreshSystemColors();
@@ -673,6 +676,8 @@ ShellUi::ShellUi(
       source_activation_(
           session_,
           std::move(source_load_queue)),
+      spectral_lines_panel_(
+          DefaultRuntimePaths().public_spectral_line_catalog_path),
       application_settings_(
           ApplicationSettingsStorage{.persistent = false}),
       persist_local_state_(false)

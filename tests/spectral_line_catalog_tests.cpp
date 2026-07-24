@@ -1,3 +1,4 @@
+#include "app/runtime_paths.h"
 #include "overlays/spectral_line_catalog.h"
 
 #include <algorithm>
@@ -228,24 +229,30 @@ void TestPublicCatalogRequiresGrouping()
     Require(catalog.markers.empty(), "public group failure should clear partial catalog results");
 }
 
-#ifdef _WIN32
-void TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers()
+void TestPackagedCatalogPathIsIndependentOfCurrentDirectory()
 {
+    const std::filesystem::path path =
+        specforge::DefaultRuntimePaths().public_spectral_line_catalog_path;
     const ScopedCurrentPath scoped_current_path(std::filesystem::temp_directory_path());
 
-    const specforge::SpectralLineCatalog catalog = specforge::LoadDefaultSpectralLineCatalog();
+    const specforge::SpectralLineCatalog catalog =
+        specforge::LoadPackagedPublicSpectralLineCatalog(path);
 
     Require(catalog.load_error.empty(), catalog.load_error);
-    Require(!catalog.markers.empty(), "default catalog should load from executable directory when cwd differs");
-    Require(catalog.path.filename() == "spectral_lines.public.tsv", "default catalog should report the loaded TSV path");
+    Require(
+        !catalog.markers.empty(),
+        "packaged catalog should load from its explicit runtime path when cwd differs");
     RequireScientificLabelUtf8(catalog);
 #ifdef SPECFORGE_EXPECT_EMBEDDED_PUBLIC_SPECTRAL_LINES
     Require(
         catalog.path.is_relative(),
         "static-release catalog test should load the embedded resource, not an external TSV");
+#else
+    Require(
+        catalog.path == path,
+        "external packaged catalog should report the exact RuntimePaths location");
 #endif
 }
-#endif
 
 void TestRejectsDuplicateMarkerIds()
 {
@@ -321,9 +328,7 @@ int main()
         TestLoadsCatalogWithoutOptionalNotesColumn();
         TestGenericCatalogMayOmitGrouping();
         TestPublicCatalogRequiresGrouping();
-#ifdef _WIN32
-        TestDefaultCatalogLoadsFromExecutableDirectoryWhenCwdDiffers();
-#endif
+        TestPackagedCatalogPathIsIndependentOfCurrentDirectory();
         TestRejectsDuplicateMarkerIds();
         TestRejectsEmptySourceRef();
         TestRejectsNonPositiveWavelengths();

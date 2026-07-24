@@ -52,6 +52,11 @@ struct CatalogUserStateCache {
     std::unordered_map<std::string, CatalogPanelState> catalog_panel_state;
 };
 
+struct CatalogUserStateCanonicalizationResult {
+    bool changed = false;
+    bool active_view_changed = false;
+};
+
 enum class GroupVisibilityState {
     Empty,
     AllVisible,
@@ -71,6 +76,13 @@ enum class GroupVisibilityState {
 [[nodiscard]] CatalogPanelState& EnsureCatalogPanelState(
     CatalogUserStateCache& cache,
     const CatalogIdentity& identity);
+[[nodiscard]] CatalogUserStateCanonicalizationResult
+CanonicalizeCatalogUserState(
+    CatalogUserState& state,
+    CatalogPanelState& panel_state,
+    const SpectralLineCatalog& catalog,
+    const CatalogIdentity& identity,
+    const std::optional<GroupingView>& catalog_grouping_view);
 
 [[nodiscard]] const SpectralLineMarker* FindCatalogMarker(
     const SpectralLineCatalog& catalog,
