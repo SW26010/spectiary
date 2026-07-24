@@ -679,7 +679,7 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
         for (int attempt = 0; attempt < 4 && !std::filesystem::exists(navigation_cache); ++attempt) {
             const auto deadline = coordinator.NextMaintenanceDeadline();
             Require(deadline.has_value(), "coordinator should expose navigation maintenance");
-            coordinator.RunMaintenance(*deadline);
+            (void)coordinator.RunMaintenance(*deadline);
         }
         Require(
             std::filesystem::exists(navigation_cache),
