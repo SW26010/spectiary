@@ -96,7 +96,7 @@ std::string NarrowPath(const std::filesystem::path& path)
     return PathToUtf8(path);
 }
 
-void RenderTopBarStatus(
+bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
     std::string_view source_load_error)
@@ -146,7 +146,7 @@ void RenderTopBarStatus(
         operation_important,
         status.profile_open || status.profile_stopping);
     if (layout.width <= 0.0f) {
-        return;
+        return false;
     }
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -232,7 +232,7 @@ void RenderTopBarStatus(
     if (layout.show_operation && operation_error &&
         IsTopBarStatusHoverTarget(operation_rect.Min, operation_rect.Max)) {
         ImGui::SetTooltip(
-            "Load failed:\n%.*s",
+            "Load failed (click to dismiss):\n%.*s",
             static_cast<int>(source_load_error.size()),
             source_load_error.data());
     }
@@ -256,6 +256,10 @@ void RenderTopBarStatus(
                 status.profile_status_message.data());
         }
     }
+    return layout.show_operation && operation_error &&
+        IsTopBarStatusLeftClickTarget(
+            operation_rect.Min,
+            operation_rect.Max);
 }
 
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
@@ -1209,10 +1213,12 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         settings_panel_ui_.Open();
     }
 
-    RenderTopBarStatus(
-        status,
-        source_activation_.NeedsService(),
-        source_activation_.ErrorMessage());
+    if (RenderTopBarStatus(
+            status,
+            source_activation_.NeedsService(),
+            source_activation_.ErrorMessage())) {
+        source_activation_.AcknowledgeLoadFailures();
+    }
 
     ImGui::EndMenuBar();
 }

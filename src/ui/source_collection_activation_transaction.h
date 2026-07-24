@@ -102,6 +102,9 @@ public:
     [[nodiscard]] std::size_t PendingLoadCount() const;
     [[nodiscard]] bool PrefetchActive() const;
     [[nodiscard]] std::string_view ErrorMessage() const;
+    // Hides the currently failed generations from the UI projection while
+    // retaining their terminal outcomes.
+    void AcknowledgeLoadFailures();
 
     void RetireResource(BackgroundRetirementHandle resource);
 
@@ -139,6 +142,7 @@ private:
         std::filesystem::path path;
         std::uint64_t generation = 0;
         std::optional<std::string> error_message;
+        bool failure_acknowledged = false;
     };
 
     struct PendingSnapshotPrefetch {

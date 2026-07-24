@@ -47,6 +47,7 @@ struct HoverObservation {
     bool geometry_hovered = false;
     bool host_hovered = false;
     bool status_hovered = false;
+    bool status_clicked = false;
 };
 
 HoverObservation RenderFrame(bool cover_top_bar)
@@ -73,6 +74,10 @@ HoverObservation RenderFrame(bool cover_top_bar)
         observation.host_hovered = ImGui::IsWindowHovered();
         observation.status_hovered =
             specforge::IsTopBarStatusHoverTarget(status_min, status_max);
+        observation.status_clicked =
+            specforge::IsTopBarStatusLeftClickTarget(
+                status_min,
+                status_max);
         ImGui::EndMenuBar();
     }
     ImGui::End();
@@ -119,11 +124,43 @@ void TestFloatingWindowBlocksCoveredStatusHover()
         "covered status must not activate its tooltip target");
 }
 
+void TestVisibleStatusAcceptsLeftClick()
+{
+    ScopedImGuiContext context;
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent(350.0f, 10.0f);
+    (void)RenderFrame(false);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    const HoverObservation observation =
+        RenderFrame(false);
+
+    Require(
+        observation.status_clicked,
+        "visible status should accept a left click");
+}
+
+void TestFloatingWindowBlocksCoveredStatusClick()
+{
+    ScopedImGuiContext context;
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent(350.0f, 10.0f);
+    (void)RenderFrame(true);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    const HoverObservation observation =
+        RenderFrame(true);
+
+    Require(
+        !observation.status_clicked,
+        "covered status must not accept a left click");
+}
+
 }  // namespace
 
 int main()
 {
     TestVisibleStatusAcceptsHover();
     TestFloatingWindowBlocksCoveredStatusHover();
+    TestVisibleStatusAcceptsLeftClick();
+    TestFloatingWindowBlocksCoveredStatusClick();
     return 0;
 }

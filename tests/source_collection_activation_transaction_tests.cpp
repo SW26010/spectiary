@@ -3,6 +3,7 @@
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -278,6 +279,8 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
             return !activation.ErrorMessage().empty() &&
                 !activation.HasPendingLoads();
         });
+    const std::string error(
+        activation.ErrorMessage());
     const auto reports =
         activation.CompleteSourceLoadFramePresentations(
             11,
@@ -287,6 +290,10 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     Require(
         failure_drained,
         "failed load should become a visible lifecycle result");
+    Require(
+        error.find(path.string()) !=
+            std::string::npos,
+        "a single failed load should identify its source path");
     Require(
         reports.size() == 1 &&
             reports.front().outcome ==
@@ -412,6 +419,104 @@ void TestConcurrentFailuresRemainVisible()
             error.find("second source failed") !=
                 std::string::npos,
         "all current source failures should remain visible");
+}
+
+void TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears()
+{
+    const std::filesystem::path first_path =
+        UniqueTempPath("_acknowledged_first.csv");
+    const std::filesystem::path second_path =
+        UniqueTempPath("_acknowledged_second.csv");
+    WriteFixture(first_path);
+    WriteFixture(second_path);
+    std::atomic_uint32_t first_attempts = 0;
+    auto dependencies = MakeDependencies(
+        [first_path, &first_attempts](
+            const std::filesystem::path& source,
+            std::size_t,
+            const auto&)
+            -> specforge::SpectrumSnapshotHandle {
+            if (source == first_path) {
+                if (first_attempts.fetch_add(1) == 0) {
+                    throw std::runtime_error(
+                        "first acknowledged failure");
+                }
+                throw std::runtime_error(
+                    "new generation failure");
+            }
+            throw std::runtime_error(
+                "second acknowledged failure");
+        });
+    specforge::SourceCollectionSession session(
+        [](const std::filesystem::path&,
+           std::size_t)
+            -> specforge::SpectrumSnapshotHandle {
+            throw std::runtime_error(
+                "activation test must remain asynchronous");
+        },
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        std::filesystem::path{},
+        specforge::SourceCollectionSessionRestoreMode::
+            Deferred);
+    Activation activation(
+        session,
+        specforge::SourceCollectionLoadQueue(
+            std::move(dependencies)));
+    activation.SetPresentationContext(true, 13);
+
+    (void)activation.OpenSource(first_path, 0);
+    (void)activation.OpenSource(second_path, 0);
+    const bool failures_drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.HasPendingLoads();
+        });
+    activation.AcknowledgeLoadFailures();
+    const bool failures_hidden =
+        activation.ErrorMessage().empty();
+    const auto terminal_reports =
+        activation.CompleteSourceLoadFramePresentations(
+            13,
+            {});
+
+    (void)activation.OpenSource(first_path, 0);
+    const bool new_failure_drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.HasPendingLoads();
+        });
+    const std::string new_error(
+        activation.ErrorMessage());
+
+    std::filesystem::remove(first_path);
+    std::filesystem::remove(second_path);
+    Require(
+        failures_drained,
+        "concurrent failures should drain before acknowledgment");
+    Require(
+        failures_hidden,
+        "one acknowledgment should hide all current failure projections");
+    Require(
+        terminal_reports.size() == 2 &&
+            std::ranges::all_of(
+                terminal_reports,
+                [](const auto& report) {
+                    return report.outcome ==
+                        specforge::SourceLoadLatencyOutcome::
+                            Failed;
+                }),
+        "acknowledgment must not delete terminal failure outcomes");
+    Require(
+        new_failure_drained &&
+            new_error.find("new generation failure") !=
+                std::string::npos,
+        "a later failed generation should become visible again");
+    Require(
+        new_error.find("second acknowledged failure") ==
+            std::string::npos,
+        "a new failure must not restore another source's acknowledged generation");
 }
 
 void TestSuccessfulRetryClearsOnlyItsSourceFailure()
@@ -691,6 +796,7 @@ int main()
         TestFailedExplicitOpenProducesTerminalLifecycleResult();
         TestSuccessfulSourceDoesNotHideConcurrentFailure();
         TestConcurrentFailuresRemainVisible();
+        TestAcknowledgedFailuresStayTerminalAndNewGenerationReappears();
         TestSuccessfulRetryClearsOnlyItsSourceFailure();
         TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();

@@ -14,4 +14,12 @@ namespace specforge {
            ImGui::IsMouseHoveringRect(min, max, true);
 }
 
+[[nodiscard]] inline bool IsTopBarStatusLeftClickTarget(
+    const ImVec2& min,
+    const ImVec2& max) noexcept
+{
+    return IsTopBarStatusHoverTarget(min, max) &&
+           ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+}
+
 }  // namespace specforge

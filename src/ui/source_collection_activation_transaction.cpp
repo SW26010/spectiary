@@ -385,6 +385,19 @@ SourceCollectionActivationTransaction::ErrorMessage() const
     return error_message_;
 }
 
+void SourceCollectionActivationTransaction::
+    AcknowledgeLoadFailures()
+{
+    for (auto& [path_key, outcome] :
+         terminal_outcomes_) {
+        (void)path_key;
+        if (outcome.error_message) {
+            outcome.failure_acknowledged = true;
+        }
+    }
+    RebuildErrorMessage();
+}
+
 void SourceCollectionActivationTransaction::RetireResource(
     BackgroundRetirementHandle resource)
 {
@@ -1429,6 +1442,7 @@ void SourceCollectionActivationTransaction::
             .path = ticket.path,
             .generation = ticket.generation,
             .error_message = std::move(error_message),
+            .failure_acknowledged = false,
         });
     RebuildErrorMessage();
 }
@@ -1436,32 +1450,22 @@ void SourceCollectionActivationTransaction::
 void SourceCollectionActivationTransaction::
     RebuildErrorMessage()
 {
-    std::size_t failure_count = 0;
-    for (const auto& [path_key, outcome] :
-         terminal_outcomes_) {
-        (void)path_key;
-        if (outcome.error_message) {
-            ++failure_count;
-        }
-    }
-
     error_message_.clear();
     for (const auto& [path_key, outcome] :
          terminal_outcomes_) {
         (void)path_key;
-        if (!outcome.error_message) {
+        if (!outcome.error_message ||
+            outcome.failure_acknowledged) {
             continue;
         }
         if (!error_message_.empty()) {
             error_message_ += '\n';
         }
-        if (failure_count > 1) {
-            const std::string source_name =
-                PathToUtf8(outcome.path);
-            if (!source_name.empty()) {
-                error_message_ += source_name;
-                error_message_ += ": ";
-            }
+        const std::string source_name =
+            PathToUtf8(outcome.path);
+        if (!source_name.empty()) {
+            error_message_ += source_name;
+            error_message_ += ": ";
         }
         error_message_ += *outcome.error_message;
     }
