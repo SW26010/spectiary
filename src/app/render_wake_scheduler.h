@@ -42,6 +42,7 @@ public:
 
     void RequestFrame(std::optional<Duration> settings_save_delay = std::nullopt);
     void SetCompositorClockPaced(bool paced) noexcept;
+    void SetContinuousRendering(bool active) noexcept;
     void RequestTouchpadUpdate() noexcept;
     void CancelTouchpadUpdate() noexcept;
     [[nodiscard]] CompositorClockTickOutcome OnCompositorClockTick(
@@ -68,6 +69,7 @@ private:
     bool schedule_follow_up_ = false;
     bool compositor_clock_paced_ = false;
     bool compositor_frame_permitted_ = false;
+    bool continuous_rendering_ = false;
     bool touchpad_update_pending_ = false;
     bool touchpad_update_permitted_ = false;
     bool popup_open_ = false;

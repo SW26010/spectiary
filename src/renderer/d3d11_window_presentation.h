@@ -17,9 +17,17 @@ enum class D3D11PresentationBackend {
     Dxgi,
 };
 
+enum class D3D11PresentMode {
+    DisplayVSync,
+    CompositorClock,
+    Immediate,
+};
+
 enum class D3D11PresentationDegradation {
     None,
     TearingAtTargetRate,
+    TearingAllowed,
+    ImmediateWithoutTearingSupport,
     ReducedRateTearFree,
 };
 
@@ -42,8 +50,31 @@ struct D3D11PresentationTransition {
 
 [[nodiscard]] const char* D3D11PresentationBackendName(
     D3D11PresentationBackend backend) noexcept;
+[[nodiscard]] const char* D3D11PresentModeName(
+    D3D11PresentMode mode) noexcept;
 [[nodiscard]] const char* D3D11PresentationDegradationName(
     D3D11PresentationDegradation degradation) noexcept;
+[[nodiscard]] constexpr UINT D3D11PresentSyncInterval(
+    D3D11PresentMode mode,
+    bool tearing_supported) noexcept
+{
+    if (mode == D3D11PresentMode::DisplayVSync) {
+        return 1U;
+    }
+    if (mode == D3D11PresentMode::CompositorClock &&
+        !tearing_supported) {
+        return 1U;
+    }
+    return 0U;
+}
+[[nodiscard]] constexpr UINT D3D11PresentFlags(
+    D3D11PresentMode mode,
+    bool tearing_supported) noexcept
+{
+    return mode != D3D11PresentMode::DisplayVSync && tearing_supported
+               ? DXGI_PRESENT_ALLOW_TEARING
+               : 0U;
+}
 
 class D3D11WindowPresentation {
 public:
@@ -70,7 +101,7 @@ public:
         const float clear_color[4],
         bool clear = true,
         DWORD availability_timeout_ms = 1'000);
-    HRESULT Present(bool compositor_clock_paced);
+    HRESULT Present(D3D11PresentMode mode);
 
     [[nodiscard]] D3D11PresentationTransition TakeTransition() noexcept;
     [[nodiscard]] D3D11CompositionFeedback TakeCompositionFeedback() noexcept;
@@ -79,7 +110,7 @@ public:
         return backend_;
     }
     [[nodiscard]] D3D11PresentationDegradation degradation(
-        bool compositor_clock_paced) const noexcept;
+        D3D11PresentMode mode) const noexcept;
     [[nodiscard]] const Win32DisplayRefreshState& refresh_state() const noexcept
     {
         return refresh_state_;

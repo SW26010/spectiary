@@ -144,6 +144,7 @@ endfunction()
 add_library(specforge_core STATIC
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
+    src/app/pan_pacing.cpp
     src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
     src/domain/fits_file_reader.cpp

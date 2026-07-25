@@ -301,6 +301,7 @@ void SpecForgeApp::Initialize(
     int show_command,
     const std::optional<std::filesystem::path>& initial_source)
 {
+    pan_pacing_ = ResolvePanPacingEnvironment();
     if (initial_source) {
         ui_.OpenSource(*initial_source);
     }
@@ -336,7 +337,11 @@ void SpecForgeApp::Initialize(
     });
     ApplyTitleBarTheme(window_.hwnd());
 
-    const HRESULT renderer_result = renderer_.Initialize(window_.hwnd());
+    const HRESULT renderer_result = renderer_.Initialize(
+        window_.hwnd(),
+        pan_pacing_.effective == PanPacingMode::Uncapped
+            ? D3D11CompositionPolicy::Disabled
+            : D3D11CompositionPolicy::Prefer);
     if (FAILED(renderer_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), renderer_result));
     }
@@ -368,6 +373,7 @@ void SpecForgeApp::Initialize(
     window_.Show(show_command);
     LogDisplayEnvironment("startup");
     LogPresentationUpdates();
+    WritePanPacingState("startup", false);
 }
 
 void SpecForgeApp::InitializeUiBackends()
@@ -562,9 +568,7 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         latency_presentations.push_back({completion.viewport_id, completion.completed_at});
     }
 
-    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
-                                                 ? D3D11PresentMode::CompositorClock
-                                                 : D3D11PresentMode::DisplayVSync;
+    const D3D11PresentMode present_mode = MainPresentMode();
     HRESULT present_result = S_OK;
     NavigationLatencyTimePoint present_completed_at;
     const bool profile_frame_active_at_present =
@@ -600,7 +604,18 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
 void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active)
 {
     const bool plot_interaction_active = ui_.latency_sensitive_plot_interaction_active();
-    const bool requested = window_renderable && (plot_interaction_active || touchpad_active);
+    const bool uncapped_pan_active = UncappedPanActive(window_renderable);
+    render_wake_scheduler_.SetContinuousRendering(uncapped_pan_active);
+    if (uncapped_pan_active != uncapped_pan_active_) {
+        uncapped_pan_active_ = uncapped_pan_active;
+        WritePanPacingState("pan_state_changed", uncapped_pan_active_);
+    }
+
+    const bool requested =
+        window_renderable &&
+        ((plot_interaction_active &&
+          pan_pacing_.effective == PanPacingMode::Display) ||
+         (touchpad_active && !uncapped_pan_active));
     if (requested == compositor_clock_.boost_requested()) {
         render_wake_scheduler_.SetCompositorClockPaced(
             compositor_clock_.boost_active());
@@ -634,9 +649,7 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
                                                       "presentation_degradation",
                                                       D3D11PresentationDegradationName(
                                                           renderer_.presentation_degradation(
-                                                              compositor_clock_.boost_active()
-                                                                  ? D3D11PresentMode::CompositorClock
-                                                                  : D3D11PresentMode::DisplayVSync))),
+                                                              MainPresentMode()))),
                                                   ProfileSink::Field::String(
                                                       "result",
                                                       HResultHex(compositor_clock_.last_boost_result())),
@@ -647,6 +660,86 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
                                                       "tick_count",
                                                       std::to_string(compositor_clock_.tick_count())),
                                               });
+}
+
+bool SpecForgeApp::UncappedPanActive(bool window_renderable) const
+{
+    return pan_pacing_.effective == PanPacingMode::Uncapped &&
+           window_renderable &&
+           ui_.latency_sensitive_plot_interaction_active();
+}
+
+D3D11PresentMode SpecForgeApp::MainPresentMode() const
+{
+    if (UncappedPanActive(!minimized_ && window_visible_)) {
+        return D3D11PresentMode::Immediate;
+    }
+    return compositor_clock_.boost_active()
+               ? D3D11PresentMode::CompositorClock
+               : D3D11PresentMode::DisplayVSync;
+}
+
+void SpecForgeApp::WritePanPacingState(
+    std::string_view reason,
+    bool active)
+{
+    if (!profile_.is_open()) {
+        return;
+    }
+    const D3D11PresentMode present_mode =
+        active ? D3D11PresentMode::Immediate : MainPresentMode();
+    profile_.WriteEvent("pan_pacing", {
+                                                ProfileSink::Field::String(
+                                                    "reason",
+                                                    std::string(reason)),
+                                                ProfileSink::Field::String(
+                                                    "requested",
+                                                    pan_pacing_.requested),
+                                                ProfileSink::Field::String(
+                                                    "effective",
+                                                    PanPacingModeName(
+                                                        pan_pacing_.effective)),
+                                                ProfileSink::Field::Bool(
+                                                    "recognized",
+                                                    pan_pacing_.recognized),
+                                                ProfileSink::Field::Bool(
+                                                    "pan_active",
+                                                    active),
+                                                ProfileSink::Field::Bool(
+                                                    "continuous_rendering",
+                                                    active),
+                                                ProfileSink::Field::String(
+                                                    "backend",
+                                                    D3D11PresentationBackendName(
+                                                        renderer_.presentation_backend())),
+                                                ProfileSink::Field::String(
+                                                    "present_mode",
+                                                    D3D11PresentModeName(
+                                                        present_mode)),
+                                                ProfileSink::Field::Number(
+                                                    "sync_interval",
+                                                    std::to_string(
+                                                        D3D11PresentSyncInterval(
+                                                            present_mode,
+                                                            renderer_
+                                                                .tearing_supported()))),
+                                                ProfileSink::Field::Number(
+                                                    "present_flags",
+                                                    std::to_string(
+                                                        D3D11PresentFlags(
+                                                            present_mode,
+                                                            renderer_
+                                                                .tearing_supported()))),
+                                                ProfileSink::Field::Bool(
+                                                    "tearing_supported",
+                                                    renderer_.tearing_supported()),
+                                                ProfileSink::Field::String(
+                                                    "display_feedback",
+                                                    renderer_.presentation_backend() ==
+                                                            D3D11PresentationBackend::Composition
+                                                        ? "composition"
+                                                        : "unavailable"),
+                                            });
 }
 
 void SpecForgeApp::InvalidateRenderFromWin32Message(void* context) noexcept
@@ -895,8 +988,11 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
                                                   ProfileSink::Field::Number(
                                                       "tick_count",
                                                       std::to_string(compositor_clock_.tick_count())),
-                                              });
+    });
     LogDisplayEnvironment("recording_started");
+    WritePanPacingState(
+        "recording_started",
+        UncappedPanActive(!minimized_ && window_visible_));
 }
 
 void SpecForgeApp::StopProfileRecording(std::string_view trigger)
@@ -955,6 +1051,16 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
     profile_.WriteEvent("runtime_config", {
                                             ProfileSink::Field::String("reason", std::string(reason)),
                                             ProfileSink::Field::String("target", "win32_dx11_imgui_implot"),
+                                            ProfileSink::Field::String(
+                                                "pan_pacing_requested",
+                                                pan_pacing_.requested),
+                                            ProfileSink::Field::String(
+                                                "pan_pacing_effective",
+                                                PanPacingModeName(
+                                                    pan_pacing_.effective)),
+                                            ProfileSink::Field::Bool(
+                                                "pan_pacing_recognized",
+                                                pan_pacing_.recognized),
                                             ProfileSink::Field::String(
                                                 "release_profile",
                                                 ReleaseProfileName(runtime_paths.release_profile)),
@@ -1025,9 +1131,7 @@ void SpecForgeApp::RefreshProfileRecordingStatus()
 
 void SpecForgeApp::LogPresentationUpdates()
 {
-    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
-                                                  ? D3D11PresentMode::CompositorClock
-                                                  : D3D11PresentMode::DisplayVSync;
+    const D3D11PresentMode present_mode = MainPresentMode();
     WritePresentationUpdate(
         "main",
         0,
@@ -1284,9 +1388,7 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                          : 0.0;
     const Win32DisplayRefreshState& refresh_state =
         renderer_.display_refresh_state();
-    const D3D11PresentMode present_mode = compositor_clock_.boost_active()
-                                                  ? D3D11PresentMode::CompositorClock
-                                                  : D3D11PresentMode::DisplayVSync;
+    const D3D11PresentMode present_mode = MainPresentMode();
 
     profile_.WriteEvent("display_environment", {
                                                   ProfileSink::Field::String("reason", std::string(reason)),
@@ -1393,6 +1495,37 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                       D3D11PresentationDegradationName(
                                                           renderer_.presentation_degradation(
                                                               present_mode))),
+                                                  ProfileSink::Field::String(
+                                                      "pan_pacing_requested",
+                                                      pan_pacing_.requested),
+                                                  ProfileSink::Field::String(
+                                                      "pan_pacing_effective",
+                                                      PanPacingModeName(
+                                                          pan_pacing_.effective)),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_present_mode",
+                                                      D3D11PresentModeName(
+                                                          present_mode)),
+                                                  ProfileSink::Field::Number(
+                                                      "presentation_sync_interval",
+                                                      std::to_string(
+                                                          D3D11PresentSyncInterval(
+                                                              present_mode,
+                                                              renderer_
+                                                                  .tearing_supported()))),
+                                                  ProfileSink::Field::Number(
+                                                      "presentation_flags",
+                                                      std::to_string(
+                                                          D3D11PresentFlags(
+                                                              present_mode,
+                                                              renderer_
+                                                                  .tearing_supported()))),
+                                                  ProfileSink::Field::String(
+                                                      "presentation_feedback",
+                                                      renderer_.presentation_backend() ==
+                                                              D3D11PresentationBackend::Composition
+                                                          ? "composition"
+                                                          : "unavailable"),
                                                   ProfileSink::Field::Bool(
                                                       "composition_independent_flip_supported",
                                                       renderer_
@@ -1468,7 +1601,8 @@ void SpecForgeApp::LogDisplayEnvironment(std::string_view reason)
                                                   ProfileSink::Field::Number(
                                                       "swapchain_present_sync_interval",
                                                       std::to_string(D3D11PresentSyncInterval(
-                                                          D3D11PresentMode::DisplayVSync))),
+                                                          D3D11PresentMode::DisplayVSync,
+                                                          renderer_.tearing_supported()))),
                                                   ProfileSink::Field::Bool(
                                                       "swapchain_tearing_supported",
                                                       renderer_.tearing_supported()),

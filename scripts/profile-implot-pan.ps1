@@ -5,6 +5,8 @@ param(
     [double]$BudgetMs = 7.6923,
     [double]$MinDragMs = 10000.0,
     [int]$MinInputSamples = 100,
+    [ValidateSet('Default', 'Uncapped')]
+    [string]$PanPacing = 'Default',
     [switch]$SkipAnalyze,
     [switch]$ReportOnly
 )
@@ -37,6 +39,7 @@ $logDir = Join-Path $repoRoot 'logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
 Write-Host 'SpecForge ImPlot pan-drag profile'
+Write-Host "Pan pacing: $PanPacing"
 if ($InitialSource) {
     Write-Host "Initial source: $InitialSource"
 }
@@ -47,8 +50,15 @@ Write-Host ''
 
 $previousProfile = $env:SPECFORGE_PROFILE
 $previousProfileDir = $env:SPECFORGE_PROFILE_DIR
+$previousPanPacing = $env:SPECFORGE_PAN_PACING
 $env:SPECFORGE_PROFILE = '1'
 $env:SPECFORGE_PROFILE_DIR = $logDir
+if ($PanPacing -eq 'Uncapped') {
+    $env:SPECFORGE_PAN_PACING = 'uncapped'
+}
+else {
+    Remove-Item Env:SPECFORGE_PAN_PACING -ErrorAction SilentlyContinue
+}
 $launchTime = Get-Date
 try {
     $startProcessArguments = @{
@@ -80,6 +90,13 @@ finally {
     else {
         $env:SPECFORGE_PROFILE_DIR = $previousProfileDir
     }
+
+    if ($null -eq $previousPanPacing) {
+        Remove-Item Env:SPECFORGE_PAN_PACING -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:SPECFORGE_PAN_PACING = $previousPanPacing
+    }
 }
 
 $latestLog = Get-ChildItem -Path $logDir -Filter 'specforge-profile-*.jsonl' |
@@ -100,6 +117,7 @@ if (-not $SkipAnalyze) {
         BudgetMs = $BudgetMs
         MinDragMs = $MinDragMs
         MinInputSamples = $MinInputSamples
+        ExpectedPanPacing = $PanPacing
     }
     if ($ReportOnly) {
         $analyzerArgs.ReportOnly = $true

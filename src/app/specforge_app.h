@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/pan_pacing.h"
 #include "app/render_wake_scheduler.h"
 #include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
@@ -54,6 +55,9 @@ private:
     void Shutdown();
     [[nodiscard]] RenderFrameOutcome RenderFrame();
     void UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active);
+    [[nodiscard]] bool UncappedPanActive(bool window_renderable) const;
+    [[nodiscard]] D3D11PresentMode MainPresentMode() const;
+    void WritePanPacingState(std::string_view reason, bool active);
     static void InvalidateRenderFromWin32Message(void* context) noexcept;
     static void ObserveWin32Message(
         void* context,
@@ -100,12 +104,14 @@ private:
     Win32MessageRenderObserver message_render_observer_;
     RenderWakeScheduler render_wake_scheduler_;
     ShellUi ui_{&touchpad_gestures_};
+    PanPacingConfiguration pan_pacing_;
 
     std::string imgui_ini_path_utf8_;
     bool imgui_initialized_ = false;
     bool running_ = true;
     bool minimized_ = false;
     bool window_visible_ = true;
+    bool uncapped_pan_active_ = false;
     ImGuiStyle base_imgui_style_;
     float ui_dpi_scale_ = 1.0f;
     std::optional<PendingResize> pending_resize_;

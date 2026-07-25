@@ -231,7 +231,9 @@ void D3D11ImGuiViewportRenderer::SwapViewportBuffers(ImGuiViewport* viewport, vo
     }
     data->frame_acquired = false;
     const HRESULT result = data->presentation.Present(
-        instance->compositor_clock_paced_);
+        instance->compositor_clock_paced_
+            ? D3D11PresentMode::CompositorClock
+            : D3D11PresentMode::DisplayVSync);
     const auto completed_at = std::chrono::steady_clock::now();
     if (result == S_OK) {
         instance->present_completions_.push_back({viewport->ID, completed_at});
@@ -260,7 +262,10 @@ void D3D11ImGuiViewportRenderer::CollectPresentationUpdate(
         .viewport_id = viewport.ID,
         .hwnd = ViewportWindowHandle(viewport),
         .backend = presentation.backend(),
-        .degradation = presentation.degradation(compositor_clock_paced_),
+        .degradation = presentation.degradation(
+            compositor_clock_paced_
+                ? D3D11PresentMode::CompositorClock
+                : D3D11PresentMode::DisplayVSync),
         .refresh_state = presentation.refresh_state(),
         .transition = transition,
         .feedback = feedback,

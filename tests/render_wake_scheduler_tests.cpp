@@ -1,4 +1,5 @@
 #include "app/render_wake_scheduler.h"
+#include "app/pan_pacing.h"
 
 #include <imgui.h>
 
@@ -505,6 +506,99 @@ void TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance()
         "hidden-window invalidation should remain pending for restore");
 }
 
+void TestPanPacingConfigurationIsExactAndDefaultsToDisplay()
+{
+    const specforge::PanPacingConfiguration missing =
+        specforge::ResolvePanPacing(std::nullopt);
+    Require(
+        missing.effective == specforge::PanPacingMode::Display &&
+            missing.requested == "display" &&
+            missing.recognized,
+        "a missing pacing environment value should preserve display pacing");
+
+    const specforge::PanPacingConfiguration uncapped =
+        specforge::ResolvePanPacing("uncapped");
+    Require(
+        uncapped.effective == specforge::PanPacingMode::Uncapped &&
+            uncapped.recognized,
+        "the exact uncapped value should enable diagnostic pacing");
+
+    const specforge::PanPacingConfiguration unknown =
+        specforge::ResolvePanPacing("Uncapped");
+    Require(
+        unknown.effective == specforge::PanPacingMode::Display &&
+            !unknown.recognized &&
+            unknown.requested == "Uncapped",
+        "unknown or differently-cased values must not silently enable uncapped pacing");
+}
+
+void TestContinuousRenderingStopsWithoutAResidualBusyLoop()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    scheduler.SetContinuousRendering(true);
+    Require(
+        scheduler.TakeAction(start + 1s, true) == Action::RenderFrame,
+        "active uncapped pan should schedule a frame without a compositor tick");
+    scheduler.CompleteFrame(
+        start + 1s,
+        {},
+        FrameOutcome::Presented);
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) ==
+            Scheduler::TimePoint::min(),
+        "a successful uncapped pan frame should immediately schedule its successor");
+
+    Require(
+        scheduler.TakeAction(start + 1s, true) == Action::RenderFrame,
+        "continuous rendering should proceed immediately after a successful frame");
+    scheduler.SetContinuousRendering(false);
+    scheduler.CompleteFrame(
+        start + 1s,
+        {},
+        FrameOutcome::Presented);
+    Require(
+        !scheduler.NextWakeDeadline(true, std::nullopt),
+        "ending pan should remove continuous render demand immediately");
+
+    scheduler.SetContinuousRendering(true);
+    Require(
+        scheduler.TakeAction(start + 2s, false) == Action::Wait &&
+            !scheduler.NextWakeDeadline(false, std::nullopt),
+        "a minimized window must not spin even if continuous state was previously active");
+    scheduler.SetContinuousRendering(false);
+}
+
+void TestContinuousRenderingPreservesRetrySemantics()
+{
+    const Scheduler::TimePoint start{};
+    Scheduler scheduler;
+    SettleInitialFrame(scheduler, start);
+
+    scheduler.SetContinuousRendering(true);
+    Require(
+        scheduler.TakeAction(start + 1s, true) == Action::RenderFrame,
+        "continuous rendering should begin a pan frame");
+    scheduler.SetContinuousRendering(false);
+    scheduler.CompleteFrame(
+        start + 1s,
+        {},
+        FrameOutcome::PresentRetry);
+    Require(
+        scheduler.TakeAction(start + 1s, true) == Action::RenderFrame,
+        "a failed present should retain one retry after continuous rendering stops");
+    scheduler.CompleteFrame(
+        start + 1s,
+        {},
+        FrameOutcome::Presented);
+    Require(
+        scheduler.NextWakeDeadline(true, std::nullopt) !=
+            Scheduler::TimePoint::min(),
+        "a completed retry must not leave an immediate busy loop");
+}
+
 }  // namespace
 
 int main()
@@ -521,5 +615,8 @@ int main()
     TestPopupTransitionAnimatesForABoundedInterval();
     TestTextInputAndTouchpadExposeTimeDrivenDemand();
     TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance();
+    TestPanPacingConfigurationIsExactAndDefaultsToDisplay();
+    TestContinuousRenderingStopsWithoutAResidualBusyLoop();
+    TestContinuousRenderingPreservesRetrySemantics();
     return 0;
 }

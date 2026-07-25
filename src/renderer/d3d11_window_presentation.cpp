@@ -18,12 +18,29 @@ const char* D3D11PresentationBackendName(
     }
 }
 
+const char* D3D11PresentModeName(D3D11PresentMode mode) noexcept
+{
+    switch (mode) {
+    case D3D11PresentMode::CompositorClock:
+        return "compositor_clock";
+    case D3D11PresentMode::Immediate:
+        return "immediate";
+    case D3D11PresentMode::DisplayVSync:
+    default:
+        return "display_vsync";
+    }
+}
+
 const char* D3D11PresentationDegradationName(
     D3D11PresentationDegradation degradation) noexcept
 {
     switch (degradation) {
     case D3D11PresentationDegradation::TearingAtTargetRate:
         return "tearing_at_target_rate";
+    case D3D11PresentationDegradation::TearingAllowed:
+        return "tearing_allowed";
+    case D3D11PresentationDegradation::ImmediateWithoutTearingSupport:
+        return "immediate_without_tearing_support";
     case D3D11PresentationDegradation::ReducedRateTearFree:
         return "reduced_rate_tear_free";
     case D3D11PresentationDegradation::None:
@@ -235,7 +252,7 @@ HRESULT D3D11WindowPresentation::BeginFrame(
     return RecordFailure("D3D11WindowPresentation::BeginFrame backend", E_FAIL);
 }
 
-HRESULT D3D11WindowPresentation::Present(bool compositor_clock_paced)
+HRESULT D3D11WindowPresentation::Present(D3D11PresentMode mode)
 {
     if (backend_ == D3D11PresentationBackend::Composition) {
         const HRESULT result = composition_.Present(device_context_);
@@ -251,12 +268,9 @@ HRESULT D3D11WindowPresentation::Present(bool compositor_clock_paced)
         return S_OK;
     }
     if (backend_ == D3D11PresentationBackend::Dxgi) {
-        const bool tearing_at_target_rate =
-            compositor_clock_paced && tearing_supported_;
-        const UINT sync_interval = tearing_at_target_rate ? 0U : 1U;
-        const UINT flags = tearing_at_target_rate
-                               ? DXGI_PRESENT_ALLOW_TEARING
-                               : 0U;
+        const UINT sync_interval =
+            D3D11PresentSyncInterval(mode, tearing_supported_);
+        const UINT flags = D3D11PresentFlags(mode, tearing_supported_);
         const HRESULT result = dxgi_.Present(sync_interval, flags);
         if (FAILED(result)) {
             return RecordFailure(dxgi_.last_error_operation(), result);
@@ -279,13 +293,19 @@ D3D11WindowPresentation::TakeCompositionFeedback() noexcept
 }
 
 D3D11PresentationDegradation D3D11WindowPresentation::degradation(
-    bool compositor_clock_paced) const noexcept
+    D3D11PresentMode mode) const noexcept
 {
     if (backend_ == D3D11PresentationBackend::Composition) {
         return D3D11PresentationDegradation::None;
     }
     if (backend_ == D3D11PresentationBackend::Dxgi) {
-        if (compositor_clock_paced && tearing_supported_) {
+        if (mode == D3D11PresentMode::Immediate) {
+            if (tearing_supported_) {
+                return D3D11PresentationDegradation::TearingAllowed;
+            }
+            return D3D11PresentationDegradation::ImmediateWithoutTearingSupport;
+        }
+        if (mode == D3D11PresentMode::CompositorClock && tearing_supported_) {
             return D3D11PresentationDegradation::TearingAtTargetRate;
         }
         return D3D11PresentationDegradation::ReducedRateTearFree;

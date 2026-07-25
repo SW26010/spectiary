@@ -31,6 +31,8 @@
   但不是光子到达屏幕的直接测量。
 - `display_environment`: 当前窗口所在 monitor、Windows display mode 频率、DWM timing、swapchain refresh desc 和 `Present` sync interval。
 - `compositor_clock`: 初始化与 boost 状态变化。`available` 表示 Windows API 可用，`requested` 表示交互策略提出请求，`active` 表示请求成功且 compositor tick pacing 正在运行。
+- `runtime_config` / `pan_pacing`: 分别记录会话请求和实际生效的 pan pacing，以及 pan 活跃时的
+  backend、Present mode、sync interval、flags、tearing 支持和连续渲染状态。
 
 主要判定指标：
 
@@ -90,6 +92,85 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 ```
 
 程序启动后只做一件事：在 `Spectrum` 主图 plot 区域按住左键连续平移 10-15 秒，然后关闭程序。脚本会等待 SpecForge 退出，再分析本次运行生成的 `logs/specforge-profile-*.jsonl`。
+
+### Default / Uncapped A/B
+
+`profile-implot-pan.ps1` 的 `-PanPacing` 只接受 `Default` 或 `Uncapped`。`Default` 不设置
+`SPECFORGE_PAN_PACING`，保留正常 Composition/compositor-clock 行为；`Uncapped` 只为本次子进程
+设置精确的 `SPECFORGE_PAN_PACING=uncapped`，让主窗口 `Spectrum` pan 使用 DXGI immediate
+提交。脚本退出时会恢复调用者原有的环境变量。
+
+正式 A/B 必须使用同一个新构建的 Release 可执行文件、同一真实数据、同一窗口尺寸和显示模式。
+先构建一次：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\build-ninja-msvc-debug.ps1 `
+  -Configure `
+  -Preset ninja-msvc-portable-release-static `
+  -Target specforge_native `
+  -TimeoutSec 1200
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\build-ninja-msvc-debug.ps1 `
+  -Preset ninja-msvc-portable-release-static `
+  -Target specforge_native `
+  -TimeoutSec 1200
+```
+
+第一条配置 preset，第二条构建同一 preset 的 `specforge_native`。然后分别运行：
+
+```powershell
+$exe = ".\build\ninja-msvc-portable-release-static\SpecForge.exe"
+$source = "C:\path\to\same-real-source.npy"
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\profile-implot-pan.ps1 `
+  -Executable $exe `
+  -InitialSource $source `
+  -PanPacing Default `
+  -BudgetMs 8.3333
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\profile-implot-pan.ps1 `
+  -Executable $exe `
+  -InitialSource $source `
+  -PanPacing Uncapped `
+  -BudgetMs 8.3333
+```
+
+两组各自在 `Spectrum` 主图连续左键 pan 至少 10-15 秒；不要在一次窗口内混入 resize、docking、
+wheel zoom 或侧栏操作。记录 source 路径或内容标识，因为进程启动时异步 snapshot 可能尚未进入
+`runtime_config.source`，仅凭该字段为空不能自证两组使用了同一数据。日志仍是运行产物，不纳入提交。
+
+launcher 会把选择的模式作为 `-ExpectedPanPacing` 传给 analyzer。手动分析时必须显式给出期望模式：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\analyze-profile.ps1 `
+  logs\specforge-profile-<default-timestamp>.jsonl `
+  -ExpectedPanPacing Default `
+  -BudgetMs 8.3333
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts\analyze-profile.ps1 `
+  logs\specforge-profile-<uncapped-timestamp>.jsonl `
+  -ExpectedPanPacing Uncapped `
+  -BudgetMs 8.3333
+```
+
+`-ExpectedPanPacing Uncapped` 除了检查 requested/effective marker，还要求 pan 活跃 marker 自证
+`backend=dxgi`、`present_mode=immediate`、`sync_interval=0`、与 tearing 支持一致的 flags，以及
+`continuous_rendering=true`。marker 缺失或不一致时分析失败；不能把一个普通 profile 错标为
+Uncapped 结果。
+
+Uncapped 报告中的 `submission_fps` 只表示带 recorder 插桩时测得的应用提交上限，不是实际显示
+帧率或光子到屏幕速率。DXGI 没有本流程使用的 Composition feedback，analyzer 会把实际显示反馈写成
+`unavailable`，不能解释成零丢帧。CPU、GPU 和功耗没有外部计数器时同样保持 `unmeasured`。
+
+本诊断模式只支持主窗口中的 `Spectrum` pan。detached ImGui viewport 不切换到 uncapped Present
+合同，也不属于本次结果保证范围；正式 A/B 应把 `Spectrum` 停靠在主窗口。detached viewport 的
+Present 仍可能影响整个 UI frame，不能把这种混合场景与主窗口结果合并。
 
 自动化采集继续使用 `SPECFORGE_PROFILE=1`，以便从进程启动阶段保留完整上下文。Release 版本也可以通过
 `Settings > Diagnostics` 在运行时开始/停止采集；沉浸模式右上角的 `REC` 标记表示正在录制。复现卡顿后
@@ -439,12 +520,16 @@ DRR 升档。Windows 10 或 API 缺失时会自动保留原有 display-vsync 路
 
 报告结论按这个顺序写：
 
-1. 数据源：日志文件名、窗口/显示器刷新率、预算。
+1. 数据源：日志文件名、真实 source 标识、窗口/显示器刷新率、预算。
 2. 场景：只包含 ImPlot 主图左键 pan/drag，还是混入了其他操作。
-3. 实际环境：列出 `display_environment` 中的 Windows mode Hz、DWM Hz、DWM period 和 `Present` sync interval。
-4. 结果：列出 `win32 drag move interval p95`、`input -> axis limits p95`、`input -> present p95`、`present interval p95`、`implot pan sample interval p95`。
+3. 实际环境：列出 requested/effective pan pacing、backend、Windows mode Hz、DWM Hz、DWM period、
+   Present mode、sync interval、flags 和 tearing 支持。
+4. 结果：列出提交 FPS、axis-update FPS、重复提交比例，以及 `win32 drag move interval`、
+   `input -> axis limits`、`input -> present`、`present interval`、`implot pan sample interval`
+   和 instrumented frame-work 的 p50/p95/p99。
 5. 诊断：如果失败，说明失败发生在输入到达、ImPlot 采样、render pass 还是 Present。
-6. 结论：使用脚本末尾 `Result: PASS/FAIL`，只声明该日志证明的刷新率目标，不外推到真实数据或其他交互。
+6. 结论：使用脚本末尾 `Result: PASS/FAIL`；Uncapped 只声明应用提交上限，并明确实际显示 feedback
+   是否可用，不外推到显示帧率、detached viewport、CPU/GPU/功耗或其他交互。
 
 ## 当前真实数据基线
 

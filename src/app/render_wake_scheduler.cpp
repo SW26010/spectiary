@@ -38,6 +38,11 @@ void RenderWakeScheduler::SetCompositorClockPaced(bool paced) noexcept
     touchpad_update_permitted_ = false;
 }
 
+void RenderWakeScheduler::SetContinuousRendering(bool active) noexcept
+{
+    continuous_rendering_ = active;
+}
+
 void RenderWakeScheduler::RequestTouchpadUpdate() noexcept
 {
     touchpad_update_pending_ = true;
@@ -74,7 +79,8 @@ bool RenderWakeScheduler::RenderPermitted() const noexcept
 
 bool RenderWakeScheduler::HasRenderWork(TimePoint now) const noexcept
 {
-    return render_requested_ ||
+    return continuous_rendering_ ||
+           render_requested_ ||
            (next_frame_deadline_ && now >= *next_frame_deadline_) ||
            (settings_save_deadline_ && now >= *settings_save_deadline_);
 }
@@ -176,7 +182,7 @@ std::optional<RenderWakeScheduler::TimePoint> RenderWakeScheduler::NextWakeDeadl
     }
 
     if (RenderPermitted()) {
-        if (render_requested_) {
+        if (continuous_rendering_ || render_requested_) {
             ConsiderEarlier(deadline, TimePoint::min());
         }
         if (next_frame_deadline_) {

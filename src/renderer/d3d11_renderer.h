@@ -12,23 +12,6 @@
 
 namespace specforge {
 
-enum class D3D11PresentMode {
-    DisplayVSync,
-    CompositorClock,
-};
-
-[[nodiscard]] constexpr UINT D3D11PresentSyncInterval(D3D11PresentMode mode) noexcept
-{
-    return mode == D3D11PresentMode::CompositorClock ? 0U : 1U;
-}
-
-[[nodiscard]] constexpr UINT D3D11PresentFlags(D3D11PresentMode mode, bool tearing_supported) noexcept
-{
-    return mode == D3D11PresentMode::CompositorClock && tearing_supported
-               ? DXGI_PRESENT_ALLOW_TEARING
-               : 0U;
-}
-
 class D3D11Renderer {
 public:
     D3D11Renderer() = default;
@@ -37,7 +20,10 @@ public:
     D3D11Renderer(const D3D11Renderer&) = delete;
     D3D11Renderer& operator=(const D3D11Renderer&) = delete;
 
-    HRESULT Initialize(HWND hwnd);
+    HRESULT Initialize(
+        HWND hwnd,
+        D3D11CompositionPolicy composition_policy =
+            D3D11CompositionPolicy::Prefer);
     void Shutdown();
 
     HRESULT Resize(UINT width, UINT height);
@@ -65,7 +51,7 @@ public:
     [[nodiscard]] D3D11PresentationDegradation presentation_degradation(
         D3D11PresentMode mode) const noexcept
     {
-        return presentation_.degradation(mode == D3D11PresentMode::CompositorClock);
+        return presentation_.degradation(mode);
     }
     [[nodiscard]] const Win32DisplayRefreshState& display_refresh_state() const noexcept
     {

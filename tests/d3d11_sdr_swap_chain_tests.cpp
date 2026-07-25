@@ -278,11 +278,28 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
         specforge::kSdrSwapChainColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
         "content color space should be explicitly tagged as sRGB/Rec.709 SDR");
     Require(
-        specforge::D3D11PresentSyncInterval(specforge::D3D11PresentMode::DisplayVSync) == 1,
+        specforge::D3D11PresentSyncInterval(
+            specforge::D3D11PresentMode::DisplayVSync,
+            true) == 1,
         "normal event-driven presentation should remain display-vsync synchronized");
     Require(
-        specforge::D3D11PresentSyncInterval(specforge::D3D11PresentMode::CompositorClock) == 0,
+        specforge::D3D11PresentSyncInterval(
+            specforge::D3D11PresentMode::CompositorClock,
+            true) == 0,
         "compositor-clock-paced presentation should not wait again on virtualized DXGI vblank");
+    Require(
+        specforge::D3D11PresentSyncInterval(
+            specforge::D3D11PresentMode::CompositorClock,
+            false) == 1,
+        "compositor-clock DXGI fallback should preserve tear-free vsync when tearing is unsupported");
+    Require(
+        specforge::D3D11PresentSyncInterval(
+            specforge::D3D11PresentMode::Immediate,
+            false) == 0 &&
+            specforge::D3D11PresentSyncInterval(
+                specforge::D3D11PresentMode::Immediate,
+                true) == 0,
+        "uncapped presentation should submit without waiting for DXGI vblank");
     Require(
         specforge::D3D11PresentFlags(specforge::D3D11PresentMode::DisplayVSync, true) == 0,
         "normal presentation should retain synchronized, tear-free semantics");
@@ -293,6 +310,11 @@ void TestSdrSwapChainUsesModernSrgbPresentationContract()
         specforge::D3D11PresentFlags(specforge::D3D11PresentMode::CompositorClock, true) ==
             DXGI_PRESENT_ALLOW_TEARING,
         "boosted presentation should opt into variable-refresh delivery when supported");
+    Require(
+        specforge::D3D11PresentFlags(specforge::D3D11PresentMode::Immediate, false) == 0 &&
+            specforge::D3D11PresentFlags(specforge::D3D11PresentMode::Immediate, true) ==
+                DXGI_PRESENT_ALLOW_TEARING,
+        "uncapped presentation should use tearing only when the adapter supports it");
 }
 
 void TestDisplayRefreshDurationPolicy()
@@ -355,14 +377,14 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         SUCCEEDED(presentation.BeginFrame(clear_color)),
         "the selected backend should acquire and bind a render target");
     Require(
-        SUCCEEDED(presentation.Present(false)),
+        SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::DisplayVSync)),
         "the selected backend should submit an ordinary tear-free frame");
     Require(
         SUCCEEDED(presentation.Resize(640, 360)),
         "the selected backend should rebuild its buffers on resize");
     Require(
         SUCCEEDED(presentation.BeginFrame(clear_color)) &&
-            SUCCEEDED(presentation.Present(true)),
+            SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::CompositorClock)),
         "the selected backend should present after resize under compositor pacing");
     Require(
         SUCCEEDED(presentation.RefreshTarget()),
@@ -392,7 +414,7 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
         "the deterministic fallback should remain observable");
     Require(
         SUCCEEDED(presentation.BeginFrame(clear_color)) &&
-            SUCCEEDED(presentation.Present(false)),
+            SUCCEEDED(presentation.Present(specforge::D3D11PresentMode::Immediate)),
         "the deterministic DXGI fallback should render and present");
 }
 

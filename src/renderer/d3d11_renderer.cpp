@@ -9,7 +9,9 @@ D3D11Renderer::~D3D11Renderer()
     Shutdown();
 }
 
-HRESULT D3D11Renderer::Initialize(HWND hwnd)
+HRESULT D3D11Renderer::Initialize(
+    HWND hwnd,
+    D3D11CompositionPolicy composition_policy)
 {
     Shutdown();
     last_error_operation_ = {};
@@ -76,7 +78,8 @@ HRESULT D3D11Renderer::Initialize(HWND hwnd)
         device_context_.Get(),
         hwnd,
         static_cast<UINT>(client_rect.right - client_rect.left),
-        static_cast<UINT>(client_rect.bottom - client_rect.top));
+        static_cast<UINT>(client_rect.bottom - client_rect.top),
+        composition_policy);
     if (FAILED(result)) {
         const std::string_view operation = presentation_.last_error_operation();
         Shutdown();
@@ -120,8 +123,7 @@ HRESULT D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
 
 HRESULT D3D11Renderer::Present(D3D11PresentMode mode)
 {
-    const HRESULT result = presentation_.Present(
-        mode == D3D11PresentMode::CompositorClock);
+    const HRESULT result = presentation_.Present(mode);
     if (FAILED(result)) {
         return RecordFailure(presentation_.last_error_operation(), result);
     }

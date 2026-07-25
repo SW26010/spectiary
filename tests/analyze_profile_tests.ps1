@@ -69,7 +69,9 @@ function New-PassingProfileLines {
 function Invoke-Analyzer {
     param(
         [string]$ProfilePath,
-        [switch]$AllowLegacyIncompleteRecording
+        [switch]$AllowLegacyIncompleteRecording,
+        [ValidateSet('', 'Default', 'Uncapped')]
+        [string]$ExpectedPanPacing = ''
     )
 
     $arguments = @(
@@ -83,6 +85,9 @@ function Invoke-Analyzer {
     )
     if ($AllowLegacyIncompleteRecording) {
         $arguments += '-AllowLegacyIncompleteRecording'
+    }
+    if ($ExpectedPanPacing) {
+        $arguments += @('-ExpectedPanPacing', $ExpectedPanPacing)
     }
 
     $previousErrorActionPreference = $ErrorActionPreference
@@ -108,6 +113,116 @@ try {
     [System.IO.File]::WriteAllLines($completePath, (New-PassingProfileLines -IncludeSummary))
     $complete = Invoke-Analyzer $completePath
     Assert-True ($complete.ExitCode -eq 0) "A complete zero-drop recording should pass:`n$($complete.Output)"
+
+    $metricsPath = Join-Path $temporaryDirectory 'pan-metrics.jsonl'
+    $metricsLines = [System.Collections.Generic.List[string]]::new()
+    $metricsLines.Add((New-ProfileEvent 0 'runtime_config' @{
+                pan_pacing_requested = 'uncapped'
+                pan_pacing_effective = 'uncapped'
+                pan_pacing_recognized = $true
+            }))
+    $metricsLines.Add((New-ProfileEvent 1000000 'implot.pan_drag.state' @{ active = $true; frame = 1 }))
+    $metricsLines.Add((New-ProfileEvent 2000000 'pan_pacing' @{
+                requested = 'uncapped'
+                effective = 'uncapped'
+                pan_active = $true
+                continuous_rendering = $true
+                backend = 'dxgi'
+                present_mode = 'immediate'
+                sync_interval = 0
+                present_flags = 512
+                tearing_supported = $true
+                display_feedback = 'unavailable'
+            }))
+    $metricsLines.Add((New-ProfileEvent 100000000 'display_environment' @{
+                presentation_backend = 'dxgi'
+                presentation_degradation = 'tearing_allowed'
+                dwm_timing_ok = $false
+            }))
+    $metricsLines.Add((New-ProfileEvent 110000000 'input' @{
+                kind = 'pointer_move'
+                left_down = $true
+            }))
+    $metricsLines.Add((New-ProfileEvent 120000000 'implot.pan_drag.sample' @{ frame = 1 }))
+    $metricsLines.Add((New-ProfileEvent 310000000 'input' @{
+                kind = 'pointer_move'
+                left_down = $true
+            }))
+    $metricsLines.Add((New-ProfileEvent 700000000 'implot.pan_drag.sample' @{ frame = 4 }))
+    foreach ($frame in 1..4) {
+        $base = [long]$frame * 200000000
+        $duration = [double]$frame
+        $metricsLines.Add((New-ProfileEvent ($base - 4000000) 'view_update' @{
+                    frame = $frame
+                    duration_ms = $duration
+                }))
+        $metricsLines.Add((New-ProfileEvent ($base - 3000000) 'draw_submission' @{
+                    frame = $frame
+                    duration_ms = $duration
+                }))
+        $metricsLines.Add((New-ProfileEvent ($base - 2000000) 'render_pass' @{
+                    frame = $frame
+                    duration_ms = $duration
+                }))
+        if ($frame -eq 1 -or $frame -eq 3) {
+            $metricsLines.Add((New-ProfileEvent ($base - 1000000) 'implot.axis_limits_changed' @{
+                        frame = $frame
+                    }))
+        }
+        $metricsLines.Add((New-ProfileEvent $base 'present' @{
+                    frame = $frame
+                    duration_ms = $duration
+                }))
+    }
+    $metricsLines.Add((New-ProfileEvent 1000000000 'implot.pan_drag.state' @{ active = $false; frame = 5 }))
+    $metricsLines.Add((New-ProfileEvent 1500000000 'view_update' @{
+                frame = 99
+                duration_ms = 9999.0
+            }))
+    $metricsLines.Add((New-ProfileEvent 2000000000 'profile_recorder_summary' @{
+                stop_reason = 'explicit'
+                accepted_bytes = 4096
+                dropped_events = 0
+            }))
+    [System.IO.File]::WriteAllLines($metricsPath, $metricsLines)
+    $metrics = Invoke-Analyzer $metricsPath -ExpectedPanPacing Uncapped
+    Assert-True ($metrics.ExitCode -eq 0) "A consistent uncapped profile should pass:`n$($metrics.Output)"
+    Assert-True (
+        $metrics.Output -match 'submission_fps=4\.004, axis_update_fps=2\.002, repeated_submissions=50\.000% \(2/4\)'
+    ) "Pan rates and repeated submissions should be computed inside the pan window:`n$($metrics.Output)"
+    Assert-True (
+        $metrics.Output -match 'instrumented frame work\s+4\s+10\.000\s+15\.400\s+15\.880'
+    ) "Instrumented stages should be summed by frame before percentiles are computed:`n$($metrics.Output)"
+    Assert-True (
+        $metrics.Output -notmatch '9999\.000'
+    ) "An extreme duration outside the pan window must not affect pan percentiles:`n$($metrics.Output)"
+    Assert-True (
+        $metrics.Output -match 'backend=dxgi.*actual=unavailable'
+    ) "DXGI profiles must report Composition display feedback as unavailable:`n$($metrics.Output)"
+    Assert-True (
+        $metrics.Output -match 'accepted_bytes=4096, dropped_events=0'
+    ) "Recorder byte and drop counts should be printed:`n$($metrics.Output)"
+
+    $missingPacing = Invoke-Analyzer $completePath -ExpectedPanPacing Uncapped
+    Assert-True (
+        $missingPacing.ExitCode -ne 0 -and
+        $missingPacing.Output -match 'pacing marker'
+    ) "Uncapped analysis must fail when its runtime marker is missing:`n$($missingPacing.Output)"
+
+    $mismatchPath = Join-Path $temporaryDirectory 'pacing-mismatch.jsonl'
+    $mismatchLines = [System.Collections.Generic.List[string]]::new()
+    $mismatchLines.Add((New-ProfileEvent 0 'runtime_config' @{
+                pan_pacing_requested = 'display'
+                pan_pacing_effective = 'display'
+                pan_pacing_recognized = $true
+            }))
+    $mismatchLines.AddRange([string[]](New-PassingProfileLines -IncludeSummary))
+    [System.IO.File]::WriteAllLines($mismatchPath, $mismatchLines)
+    $mismatch = Invoke-Analyzer $mismatchPath -ExpectedPanPacing Uncapped
+    Assert-True (
+        $mismatch.ExitCode -ne 0 -and
+        $mismatch.Output -match 'marker mismatch'
+    ) "Uncapped analysis must fail when the effective marker is display paced:`n$($mismatch.Output)"
 
     $droppedPath = Join-Path $temporaryDirectory 'dropped.jsonl'
     [System.IO.File]::WriteAllLines($droppedPath, (New-PassingProfileLines -IncludeSummary -DroppedEvents 3))
