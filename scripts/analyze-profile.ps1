@@ -19,6 +19,214 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'profile-analysis-common.ps1')
+Add-Type -AssemblyName System.Web.Extensions
+$profileJsonSerializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+$profileJsonSerializer.MaxJsonLength = [int]::MaxValue
+
+function Get-EventValue {
+    param(
+        [Parameter(Mandatory = $true)] $Event,
+        [Parameter(Mandatory = $true)] [string]$Name,
+        $Default = $null
+    )
+
+    if ($Event -is [System.Collections.IDictionary]) {
+        if ($Event.ContainsKey($Name)) {
+            return $Event[$Name]
+        }
+        return $Default
+    }
+
+    $property = $Event.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $Default
+    }
+    return $property.Value
+}
+
+function Read-PanProfileEvents {
+    param(
+        [string]$Path,
+        [switch]$AllowPartial
+    )
+
+    $events = [System.Collections.Generic.List[object]]::new()
+    $failures = [System.Collections.Generic.List[string]]::new()
+    $summaryEvents = [System.Collections.Generic.List[object]]::new()
+    $activePacingMarkers = [System.Collections.Generic.List[object]]::new()
+    $dragWindows = [System.Collections.Generic.List[object]]::new()
+    $lineNumber = 0
+    $previousTimestamp = [int64]::MinValue
+    $isChronological = $true
+    $lastRuntimeMarker = $null
+    $lastDisplayEvent = $null
+    $lastPresentationFeedback = $null
+    $dragStart = $null
+    $lastTimestamp = 0L
+    foreach ($rawLine in [System.IO.File]::ReadLines($Path)) {
+        $lineNumber++
+        $line = $rawLine.Trim()
+        if (-not $line) {
+            continue
+        }
+
+        try {
+            $event = $profileJsonSerializer.DeserializeObject($line)
+        }
+        catch {
+            $message = "${Path}:$lineNumber`: invalid or truncated JSON: $($_.Exception.Message)"
+            if (-not $AllowPartial) {
+                throw $message
+            }
+            [void]$failures.Add($message)
+            break
+        }
+
+        if (-not ($event -is [System.Collections.IDictionary])) {
+            continue
+        }
+
+        $timestampValue = $event['steady_ns']
+        $eventName = $event['event']
+        if ($null -eq $timestampValue -or $null -eq $eventName) {
+            continue
+        }
+
+        $timestamp = [int64]$timestampValue
+        if ($timestamp -lt $previousTimestamp) {
+            $isChronological = $false
+        }
+        $previousTimestamp = $timestamp
+        $lastTimestamp = $timestamp
+        [void]$events.Add($event)
+
+        switch ([string]$eventName) {
+            'profile_recorder_summary' {
+                [void]$summaryEvents.Add($event)
+            }
+            'runtime_config' {
+                if ($null -ne $event['pan_pacing_effective']) {
+                    $lastRuntimeMarker = $event
+                }
+            }
+            'pan_pacing' {
+                if ($event['pan_active']) {
+                    [void]$activePacingMarkers.Add($event)
+                }
+            }
+            'display_environment' {
+                $lastDisplayEvent = $event
+            }
+            'presentation_feedback' {
+                if ($event['target'] -eq 'main' -and
+                    [double]$event['last_actual_duration'] -gt 0) {
+                    $lastPresentationFeedback = $event
+                }
+            }
+            'implot.pan_drag.state' {
+                $active = Convert-ToBool $event['active']
+                if ($active -and $null -eq $dragStart) {
+                    $dragStart = $timestamp
+                }
+                elseif (-not $active -and $null -ne $dragStart) {
+                    [void]$dragWindows.Add(
+                        [pscustomobject]@{ Start = [int64]$dragStart; End = $timestamp }
+                    )
+                    $dragStart = $null
+                }
+            }
+        }
+    }
+
+    if ($null -ne $dragStart) {
+        [void]$dragWindows.Add(
+            [pscustomobject]@{ Start = [int64]$dragStart; End = $lastTimestamp }
+        )
+    }
+
+    return [pscustomobject]@{
+        Events = [object[]]$events.ToArray()
+        Failures = [string[]]$failures.ToArray()
+        IsChronological = $isChronological
+        SummaryEvents = [object[]]$summaryEvents.ToArray()
+        LastSummary = if ($summaryEvents.Count -gt 0) { $summaryEvents[-1] } else { $null }
+        LastRuntimeMarker = $lastRuntimeMarker
+        ActivePacingMarkers = [object[]]$activePacingMarkers.ToArray()
+        DragWindows = [object[]]$dragWindows.ToArray()
+        LastDisplayEvent = $lastDisplayEvent
+        LastPresentationFeedback = $lastPresentationFeedback
+    }
+}
+
+function Get-PanProfileMetadata {
+    param([object[]]$Events)
+
+    $activePacingMarkers = [System.Collections.Generic.List[object]]::new()
+    $dragWindows = [System.Collections.Generic.List[object]]::new()
+    $lastRuntimeMarker = $null
+    $lastSummary = $null
+    $lastDisplayEvent = $null
+    $lastPresentationFeedback = $null
+    $dragStart = $null
+    $lastTimestamp = 0L
+
+    foreach ($event in $Events) {
+        $eventName = [string]$event['event']
+        $timestamp = [int64]$event['steady_ns']
+        $lastTimestamp = $timestamp
+        switch ($eventName) {
+            'profile_recorder_summary' {
+                $lastSummary = $event
+            }
+            'runtime_config' {
+                if ($null -ne $event['pan_pacing_effective']) {
+                    $lastRuntimeMarker = $event
+                }
+            }
+            'pan_pacing' {
+                if ($event['pan_active']) {
+                    [void]$activePacingMarkers.Add($event)
+                }
+            }
+            'display_environment' {
+                $lastDisplayEvent = $event
+            }
+            'presentation_feedback' {
+                if ($event['target'] -eq 'main' -and
+                    [double]$event['last_actual_duration'] -gt 0) {
+                    $lastPresentationFeedback = $event
+                }
+            }
+            'implot.pan_drag.state' {
+                $active = Convert-ToBool $event['active']
+                if ($active -and $null -eq $dragStart) {
+                    $dragStart = $timestamp
+                }
+                elseif (-not $active -and $null -ne $dragStart) {
+                    [void]$dragWindows.Add(
+                        [pscustomobject]@{ Start = [int64]$dragStart; End = $timestamp }
+                    )
+                    $dragStart = $null
+                }
+            }
+        }
+    }
+
+    if ($null -ne $dragStart) {
+        [void]$dragWindows.Add(
+            [pscustomobject]@{ Start = [int64]$dragStart; End = $lastTimestamp }
+        )
+    }
+
+    return [pscustomobject]@{
+        LastSummary = $lastSummary
+        LastRuntimeMarker = $lastRuntimeMarker
+        ActivePacingMarkers = [object[]]$activePacingMarkers.ToArray()
+        DragWindows = [object[]]$dragWindows.ToArray()
+        LastDisplayEvent = $lastDisplayEvent
+        LastPresentationFeedback = $lastPresentationFeedback
+    }
+}
 
 function Convert-ToDouble {
     param($Value)
@@ -72,20 +280,6 @@ function Get-IntervalsMs {
         }
     }
     return [double[]]$values.ToArray()
-}
-
-function Test-InWindow {
-    param(
-        [int64]$Timestamp,
-        [object[]]$Windows
-    )
-
-    foreach ($window in $Windows) {
-        if ($Timestamp -ge $window.Start -and $Timestamp -le $window.End) {
-            return $true
-        }
-    }
-    return $false
 }
 
 function Get-IntervalsMsInsideWindows {
@@ -153,150 +347,127 @@ function Get-NextLatenciesMsInsideWindows {
     return [double[]]$values.ToArray()
 }
 
-function Get-DurationValues {
-    param(
-        [object[]]$Events,
-        [string]$EventName
-    )
-
-    $values = [System.Collections.Generic.List[double]]::new()
-    foreach ($event in $Events) {
-        if ((Get-EventValue $event 'event') -ne $EventName) {
-            continue
-        }
-        $duration = Get-EventValue $event 'duration_ms'
-        if ($null -ne $duration) {
-            $values.Add((Convert-ToDouble $duration))
-        }
-    }
-    return [double[]]$values.ToArray()
-}
-
-function Get-DurationValuesInsideWindows {
-    param(
-        [object[]]$Events,
-        [string]$EventName,
-        [object[]]$Windows
-    )
-
-    $values = [System.Collections.Generic.List[double]]::new()
-    foreach ($event in $Events) {
-        if ((Get-EventValue $event 'event') -ne $EventName) {
-            continue
-        }
-        $timestamp = [int64](Get-EventValue $event 'steady_ns')
-        if ($Windows.Count -gt 0 -and -not (Test-InWindow $timestamp $Windows)) {
-            continue
-        }
-        $duration = Get-EventValue $event 'duration_ms'
-        if ($null -ne $duration) {
-            $values.Add((Convert-ToDouble $duration))
-        }
-    }
-    return [double[]]$values.ToArray()
-}
-
-function Get-InstrumentedFrameWorkValues {
+function Collect-PanAnalysisData {
     param(
         [object[]]$Events,
         [object[]]$Windows
     )
 
-    $stageNames = @{
-        view_update = $true
-        draw_submission = $true
-        render_pass = $true
-        present = $true
+    $inputNs = [System.Collections.Generic.List[int64]]::new()
+    $panSampleNs = [System.Collections.Generic.List[int64]]::new()
+    $axisChangeNs = [System.Collections.Generic.List[int64]]::new()
+    $presentNs = [System.Collections.Generic.List[int64]]::new()
+    $presentFrames = [System.Collections.Generic.List[string]]::new()
+    $axisFrames = @{}
+    $durationValues = @{
+        view_update = [System.Collections.Generic.List[double]]::new()
+        draw_submission = [System.Collections.Generic.List[double]]::new()
+        render_pass = [System.Collections.Generic.List[double]]::new()
+        present = [System.Collections.Generic.List[double]]::new()
     }
-    $totals = @{}
+    $frameTotals = @{}
+    $panSampleEventCount = 0
+    $axisChangeEventCount = 0
+    $presentEventCount = 0
+    $hasWindows = $Windows.Count -gt 0
+    $windowIndex = 0
+
     foreach ($event in $Events) {
-        $eventName = [string](Get-EventValue $event 'event' '')
-        if (-not $stageNames.ContainsKey($eventName)) {
+        $eventName = [string]$event['event']
+        $timestamp = [int64]$event['steady_ns']
+        $insideWindow = -not $hasWindows
+        if ($hasWindows) {
+            while ($windowIndex -lt $Windows.Count -and
+                $timestamp -gt $Windows[$windowIndex].End) {
+                $windowIndex++
+            }
+            $insideWindow =
+                $windowIndex -lt $Windows.Count -and
+                $timestamp -ge $Windows[$windowIndex].Start -and
+                $timestamp -le $Windows[$windowIndex].End
+        }
+
+        switch ($eventName) {
+            'input' {
+                if ($insideWindow -and
+                    $event['kind'] -eq 'pointer_move' -and
+                    (Convert-ToBool $event['left_down'])) {
+                    [void]$inputNs.Add($timestamp)
+                }
+            }
+            'implot.pan_drag.sample' {
+                $panSampleEventCount++
+                if ($insideWindow) {
+                    [void]$panSampleNs.Add($timestamp)
+                }
+            }
+            'implot.axis_limits_changed' {
+                $axisChangeEventCount++
+                if ($insideWindow) {
+                    [void]$axisChangeNs.Add($timestamp)
+                    $axisFrame = $event['frame']
+                    if ($null -ne $axisFrame) {
+                        $axisFrames[[string]$axisFrame] = $true
+                    }
+                }
+            }
+            'present' {
+                $presentEventCount++
+                if ($insideWindow) {
+                    [void]$presentNs.Add($timestamp)
+                    $presentFrame = $event['frame']
+                    if ($null -ne $presentFrame) {
+                        [void]$presentFrames.Add([string]$presentFrame)
+                    }
+                }
+            }
+        }
+
+        if (-not $insideWindow -or -not $durationValues.ContainsKey($eventName)) {
             continue
         }
-        $timestamp = [int64](Get-EventValue $event 'steady_ns')
-        if ($Windows.Count -gt 0 -and -not (Test-InWindow $timestamp $Windows)) {
+
+        $duration = $event['duration_ms']
+        if ($null -eq $duration) {
             continue
         }
-        $frame = Get-EventValue $event 'frame'
-        $duration = Get-EventValue $event 'duration_ms'
-        if ($null -eq $frame -or $null -eq $duration) {
+        $durationValue = Convert-ToDouble $duration
+        [void]$durationValues[$eventName].Add($durationValue)
+
+        $frame = $event['frame']
+        if ($null -eq $frame) {
             continue
         }
         $key = [string]$frame
-        if (-not $totals.ContainsKey($key)) {
-            $totals[$key] = 0.0
+        if (-not $frameTotals.ContainsKey($key)) {
+            $frameTotals[$key] = 0.0
         }
-        $totals[$key] += Convert-ToDouble $duration
-    }
-    return [double[]]@($totals.Values)
-}
-
-function Get-EventsInsideWindows {
-    param(
-        [object[]]$Events,
-        [string]$EventName,
-        [object[]]$Windows
-    )
-
-    return [object[]]@(
-        foreach ($event in $Events) {
-            if ((Get-EventValue $event 'event') -ne $EventName) {
-                continue
-            }
-            $timestamp = [int64](Get-EventValue $event 'steady_ns')
-            if ($Windows.Count -eq 0 -or (Test-InWindow $timestamp $Windows)) {
-                $event
-            }
-        }
-    )
-}
-
-function Get-EventTimes {
-    param(
-        [object[]]$Events,
-        [string]$EventName
-    )
-
-    $times = [System.Collections.Generic.List[int64]]::new()
-    foreach ($event in $Events) {
-        if ((Get-EventValue $event 'event') -eq $EventName) {
-            $times.Add([int64](Get-EventValue $event 'steady_ns'))
-        }
-    }
-    return [int64[]]$times.ToArray()
-}
-
-function Get-DragWindows {
-    param([object[]]$Events)
-
-    $windows = [System.Collections.Generic.List[object]]::new()
-    $start = $null
-    $lastTime = 0L
-    if ($Events.Count -gt 0) {
-        $lastTime = [int64](Get-EventValue $Events[-1] 'steady_ns' 0)
+        $frameTotals[$key] += $durationValue
     }
 
-    foreach ($event in $Events) {
-        if ((Get-EventValue $event 'event') -ne 'implot.pan_drag.state') {
-            continue
-        }
-
-        $timestamp = [int64](Get-EventValue $event 'steady_ns')
-        $active = Convert-ToBool (Get-EventValue $event 'active')
-        if ($active -and $null -eq $start) {
-            $start = $timestamp
-        }
-        elseif (-not $active -and $null -ne $start) {
-            $windows.Add([pscustomobject]@{ Start = [int64]$start; End = [int64]$timestamp })
-            $start = $null
+    $repeatedSubmissions = 0
+    foreach ($frame in $presentFrames) {
+        if (-not $axisFrames.ContainsKey($frame)) {
+            $repeatedSubmissions++
         }
     }
 
-    if ($null -ne $start) {
-        $windows.Add([pscustomobject]@{ Start = [int64]$start; End = [int64]$lastTime })
+    return [pscustomobject]@{
+        InputNs = [int64[]]$inputNs.ToArray()
+        PanSampleNs = [int64[]]$panSampleNs.ToArray()
+        AxisChangeNs = [int64[]]$axisChangeNs.ToArray()
+        PresentNs = [int64[]]$presentNs.ToArray()
+        ViewUpdateDurations = [double[]]$durationValues.view_update.ToArray()
+        DrawSubmissionDurations = [double[]]$durationValues.draw_submission.ToArray()
+        RenderPassDurations = [double[]]$durationValues.render_pass.ToArray()
+        PresentDurations = [double[]]$durationValues.present.ToArray()
+        InstrumentedFrameWork = [double[]]@($frameTotals.Values)
+        PanSampleEventCount = $panSampleEventCount
+        AxisChangeEventCount = $axisChangeEventCount
+        PresentEventCount = $presentEventCount
+        FramedSubmissionCount = $presentFrames.Count
+        RepeatedSubmissionCount = $repeatedSubmissions
     }
-    return [object[]]$windows.ToArray()
 }
 
 function Write-Metric {
@@ -335,15 +506,17 @@ function Write-Metric {
 }
 
 function Write-DisplayEnvironment {
-    param([object[]]$Events)
+    param(
+        $DisplayEvent,
+        $PresentationFeedback
+    )
 
-    $displayEvents = @($Events | Where-Object { (Get-EventValue $_ 'event') -eq 'display_environment' })
-    if ($displayEvents.Count -eq 0) {
+    if ($null -eq $DisplayEvent) {
         Write-Host 'Display environment: not logged'
         return
     }
 
-    $event = $displayEvents[-1]
+    $event = $DisplayEvent
     $dwmTimingOk = Convert-ToBool (Get-EventValue $event 'dwm_timing_ok')
     if ($dwmTimingOk) {
         $dwmText = 'DWM={0} Hz ({1} ms, target={2})' -f `
@@ -367,14 +540,9 @@ function Write-DisplayEnvironment {
 
     $backend = Get-EventValue $event 'presentation_backend' ''
     if ($backend) {
-        $feedbackEvents = @($Events | Where-Object {
-                (Get-EventValue $_ 'event') -eq 'presentation_feedback' -and
-                (Get-EventValue $_ 'target') -eq 'main' -and
-                [double](Get-EventValue $_ 'last_actual_duration' 0) -gt 0
-            })
         $actualText = if ($backend -eq 'dxgi') { 'unavailable' } else { '-' }
-        if ($backend -ne 'dxgi' -and $feedbackEvents.Count -gt 0) {
-            $actualDuration = [double](Get-EventValue $feedbackEvents[-1] 'last_actual_duration' 0)
+        if ($backend -ne 'dxgi' -and $null -ne $PresentationFeedback) {
+            $actualDuration = [double](Get-EventValue $PresentationFeedback 'last_actual_duration' 0)
             $actualText = '{0} Hz' -f (Format-Number (10000000.0 / $actualDuration))
         }
         Write-Host (
@@ -400,16 +568,13 @@ function Write-DisplayEnvironment {
 
 function Test-PanPacingMarkers {
     param(
-        [object[]]$Events,
+        $RuntimeMarker,
+        [object[]]$ActiveMarkers,
         [string]$Expected,
         [System.Collections.Generic.List[string]]$Failures
     )
 
-    $runtimeMarkers = @($Events | Where-Object {
-            (Get-EventValue $_ 'event') -eq 'runtime_config' -and
-            $null -ne (Get-EventValue $_ 'pan_pacing_effective')
-        })
-    if ($runtimeMarkers.Count -eq 0) {
+    if ($null -eq $RuntimeMarker) {
         Write-Host "Pan pacing: expected=$Expected, marker=missing"
         if ($Expected -ne 'Auto') {
             Add-GateFailure $Failures "Expected $Expected pan pacing, but no runtime_config pacing marker was found."
@@ -417,7 +582,7 @@ function Test-PanPacingMarkers {
         return
     }
 
-    $runtime = $runtimeMarkers[-1]
+    $runtime = $RuntimeMarker
     $requested = [string](Get-EventValue $runtime 'pan_pacing_requested' '')
     $effective = [string](Get-EventValue $runtime 'pan_pacing_effective' '')
     $recognized = Convert-ToBool (Get-EventValue $runtime 'pan_pacing_recognized')
@@ -439,10 +604,6 @@ function Test-PanPacingMarkers {
         return
     }
 
-    $activeMarkers = @($Events | Where-Object {
-            (Get-EventValue $_ 'event') -eq 'pan_pacing' -and
-            (Convert-ToBool (Get-EventValue $_ 'pan_active'))
-        })
     if ($activeMarkers.Count -eq 0) {
         Add-GateFailure $Failures 'Uncapped analysis requires an active pan_pacing marker.'
         return
@@ -472,34 +633,16 @@ function Test-PanPacingMarkers {
 
 function Write-PanRates {
     param(
-        [object[]]$PresentEvents,
-        [object[]]$AxisEvents,
+        [int]$PresentCount,
+        [int]$AxisCount,
+        [int]$FramedSubmissions,
+        [int]$RepeatedSubmissions,
         [double]$WindowMs
     )
 
     $windowSeconds = $WindowMs / 1000.0
-    $submissionFps = if ($windowSeconds -gt 0) { $PresentEvents.Count / $windowSeconds } else { 0.0 }
-    $axisFps = if ($windowSeconds -gt 0) { $AxisEvents.Count / $windowSeconds } else { 0.0 }
-
-    $axisFrames = @{}
-    foreach ($event in $AxisEvents) {
-        $frame = Get-EventValue $event 'frame'
-        if ($null -ne $frame) {
-            $axisFrames[[string]$frame] = $true
-        }
-    }
-    $framedSubmissions = 0
-    $repeatedSubmissions = 0
-    foreach ($event in $PresentEvents) {
-        $frame = Get-EventValue $event 'frame'
-        if ($null -eq $frame) {
-            continue
-        }
-        $framedSubmissions++
-        if (-not $axisFrames.ContainsKey([string]$frame)) {
-            $repeatedSubmissions++
-        }
-    }
+    $submissionFps = if ($windowSeconds -gt 0) { $PresentCount / $windowSeconds } else { 0.0 }
+    $axisFps = if ($windowSeconds -gt 0) { $AxisCount / $windowSeconds } else { 0.0 }
     $repeatRatio = if ($framedSubmissions -gt 0) {
         100.0 * $repeatedSubmissions / $framedSubmissions
     }
@@ -517,25 +660,25 @@ function Write-PanRates {
 }
 
 function Write-RecorderStatistics {
-    param([object[]]$Events)
+    param(
+        $Summary,
+        $FirstEvent,
+        [int]$EventCount
+    )
 
-    $summaries = @($Events | Where-Object {
-            (Get-EventValue $_ 'event') -eq 'profile_recorder_summary'
-        })
-    if ($summaries.Count -eq 0) {
+    if ($null -eq $Summary) {
         Write-Host 'Recorder: event_rate=unavailable, accepted_bytes=unavailable, dropped_events=unavailable'
         return
     }
 
-    $summary = $summaries[-1]
     $durationSeconds = 0.0
-    if ($Events.Count -gt 1) {
+    if ($EventCount -gt 1) {
         $durationSeconds =
-            ([int64](Get-EventValue $summary 'steady_ns') -
-             [int64](Get-EventValue $Events[0] 'steady_ns')) / 1000000000.0
+            ([int64](Get-EventValue $Summary 'steady_ns') -
+             [int64](Get-EventValue $FirstEvent 'steady_ns')) / 1000000000.0
     }
     $eventRate = if ($durationSeconds -gt 0) {
-        ($Events.Count - 1) / $durationSeconds
+        ($EventCount - 1) / $durationSeconds
     }
     else {
         0.0
@@ -543,8 +686,8 @@ function Write-RecorderStatistics {
     Write-Host (
         'Recorder: event_rate={0:F3} events/s, accepted_bytes={1}, dropped_events={2}' -f
             $eventRate,
-            (Get-EventValue $summary 'accepted_bytes' 'unavailable'),
-            (Get-EventValue $summary 'dropped_events' 'unavailable')
+            (Get-EventValue $Summary 'accepted_bytes' 'unavailable'),
+            (Get-EventValue $Summary 'dropped_events' 'unavailable')
     )
 }
 
@@ -559,7 +702,7 @@ function Add-GateFailure {
 
 $resolvedProfile = Resolve-Path -Path $Profile
 $gateFailures = [System.Collections.Generic.List[string]]::new()
-$readResult = Read-ProfileEvents $resolvedProfile.Path -AllowPartial:$ReportOnly
+$readResult = Read-PanProfileEvents $resolvedProfile.Path -AllowPartial:$ReportOnly
 $rawEvents = @($readResult.Events)
 foreach ($failure in $readResult.Failures) {
     Add-GateFailure $gateFailures $failure
@@ -568,7 +711,28 @@ if ($rawEvents.Count -eq 0) {
     Add-GateFailure $gateFailures "$($resolvedProfile.Path): no profile events found"
 }
 
-$summaryCheck = Test-ProfileRecorderSummary $rawEvents -AllowMissing:$AllowLegacyIncompleteRecording
+$summaryEvents = @($readResult.SummaryEvents)
+$summaryCheckEvents = [System.Collections.Generic.List[object]]::new()
+foreach ($summaryEvent in $summaryEvents) {
+    [void]$summaryCheckEvents.Add($summaryEvent)
+}
+if ($summaryEvents.Count -eq 0) {
+    $completenessSentinel = if ($rawEvents.Count -gt 0) {
+        $rawEvents[-1]
+    }
+    else {
+        [pscustomobject]@{ event = '' }
+    }
+    [void]$summaryCheckEvents.Add($completenessSentinel)
+}
+elseif ($summaryEvents.Count -eq 1 -and
+    $rawEvents.Count -gt 0 -and
+    $rawEvents[-1]['event'] -ne 'profile_recorder_summary') {
+    [void]$summaryCheckEvents.Add($rawEvents[-1])
+}
+$summaryCheck = Test-ProfileRecorderSummary `
+    ([object[]]$summaryCheckEvents.ToArray()) `
+    -AllowMissing:$AllowLegacyIncompleteRecording
 $recordingCompleteness = $summaryCheck.Status
 foreach ($failure in $summaryCheck.Failures) {
     Add-GateFailure $gateFailures $failure
@@ -577,48 +741,51 @@ if ($recordingCompleteness -like 'LEGACY*') {
     Write-Warning 'Legacy profile has no profile_recorder_summary; recording completeness cannot be verified.'
 }
 
-$events = @($rawEvents | Sort-Object { [int64](Get-EventValue $_ 'steady_ns') })
-Test-PanPacingMarkers $events $ExpectedPanPacing $gateFailures
+$events = if ($readResult.IsChronological) {
+    $rawEvents
+}
+else {
+    @($rawEvents | Sort-Object { [int64](Get-EventValue $_ 'steady_ns') })
+}
+$profileMetadata = if ($readResult.IsChronological) {
+    $readResult
+}
+else {
+    Get-PanProfileMetadata $events
+}
+Test-PanPacingMarkers `
+    $profileMetadata.LastRuntimeMarker `
+    $profileMetadata.ActivePacingMarkers `
+    $ExpectedPanPacing `
+    $gateFailures
 
-$windows = @(Get-DragWindows $events)
+$windows = @($profileMetadata.DragWindows)
 $totalWindowMs = 0.0
 foreach ($window in $windows) {
     $totalWindowMs += Convert-NanosecondsToMilliseconds ($window.End - $window.Start)
 }
 
-$inputEvents = @(
-    foreach ($event in $events) {
-        if ((Get-EventValue $event 'event') -ne 'input') {
-            continue
-        }
-        if ((Get-EventValue $event 'kind') -ne 'pointer_move') {
-            continue
-        }
-        if (-not (Convert-ToBool (Get-EventValue $event 'left_down'))) {
-            continue
-        }
-        $timestamp = [int64](Get-EventValue $event 'steady_ns')
-        if ($windows.Count -eq 0 -or (Test-InWindow $timestamp $windows)) {
-            $event
-        }
-    }
-)
-
-$inputNs = [int64[]]@($inputEvents | ForEach-Object { [int64](Get-EventValue $_ 'steady_ns') })
-$panSampleNs = [int64[]]@(Get-EventTimes $events 'implot.pan_drag.sample')
-$axisChangeNs = [int64[]]@(Get-EventTimes $events 'implot.axis_limits_changed')
-$presentNs = [int64[]]@(Get-EventTimes $events 'present')
-$axisEventsInsideWindows = @(Get-EventsInsideWindows $events 'implot.axis_limits_changed' $windows)
-$presentEventsInsideWindows = @(Get-EventsInsideWindows $events 'present' $windows)
+$analysisData = Collect-PanAnalysisData $events $windows
+$inputNs = $analysisData.InputNs
+$panSampleNs = $analysisData.PanSampleNs
+$axisChangeNs = $analysisData.AxisChangeNs
+$presentNs = $analysisData.PresentNs
 
 Write-Host "Profile: $($resolvedProfile.Path)"
 Write-Host "Events: $($events.Count)"
 Write-Host "Recording completeness: $recordingCompleteness"
 Write-Host "ImPlot pan-drag windows: $($windows.Count)"
 Write-Host ('ImPlot pan-drag window time: {0:F1} ms' -f $totalWindowMs)
-Write-DisplayEnvironment $events
-Write-PanRates $presentEventsInsideWindows $axisEventsInsideWindows $totalWindowMs
-Write-RecorderStatistics $events
+Write-DisplayEnvironment $profileMetadata.LastDisplayEvent $profileMetadata.LastPresentationFeedback
+Write-PanRates `
+    $presentNs.Count `
+    $axisChangeNs.Count `
+    $analysisData.FramedSubmissionCount `
+    $analysisData.RepeatedSubmissionCount `
+    $totalWindowMs
+$recorderSummary = $profileMetadata.LastSummary
+$firstEvent = if ($events.Count -gt 0) { $events[0] } else { $null }
+Write-RecorderStatistics $recorderSummary $firstEvent $events.Count
 Write-Host 'Measurement scope: submission_fps is application submission rate; display/photon FPS and CPU/GPU/power are unmeasured.'
 Write-Host ('Budget: p95 <= {0:F4} ms' -f $BudgetMs)
 Write-Host ('Quality gate: drag >= {0:F1} ms, input samples >= {1}' -f $MinDragMs, $MinInputSamples)
@@ -632,11 +799,11 @@ $metrics = @(
     Write-Metric 'input -> pan sample' (Get-NextLatenciesMsInsideWindows $inputNs $panSampleNs $windows) $BudgetMs
     Write-Metric 'input -> axis limits' (Get-NextLatenciesMsInsideWindows $inputNs $axisChangeNs $windows) $BudgetMs
     Write-Metric 'input -> present' (Get-NextLatenciesMsInsideWindows $inputNs $presentNs $windows) $BudgetMs
-    Write-Metric 'view_update duration' (Get-DurationValuesInsideWindows $events 'view_update' $windows) $BudgetMs
-    Write-Metric 'draw_submission duration' (Get-DurationValuesInsideWindows $events 'draw_submission' $windows) $BudgetMs
-    Write-Metric 'render_pass duration' (Get-DurationValuesInsideWindows $events 'render_pass' $windows) $BudgetMs
-    Write-Metric 'present duration' (Get-DurationValuesInsideWindows $events 'present' $windows) $BudgetMs
-    Write-Metric 'instrumented frame work' (Get-InstrumentedFrameWorkValues $events $windows) $BudgetMs
+    Write-Metric 'view_update duration' $analysisData.ViewUpdateDurations $BudgetMs
+    Write-Metric 'draw_submission duration' $analysisData.DrawSubmissionDurations $BudgetMs
+    Write-Metric 'render_pass duration' $analysisData.RenderPassDurations $BudgetMs
+    Write-Metric 'present duration' $analysisData.PresentDurations $BudgetMs
+    Write-Metric 'instrumented frame work' $analysisData.InstrumentedFrameWork $BudgetMs
 )
 
 if ($windows.Count -eq 0) {
@@ -648,13 +815,13 @@ if ($totalWindowMs -lt $MinDragMs) {
 if ($inputNs.Count -lt $MinInputSamples) {
     Add-GateFailure $gateFailures "Left-button pointer_move samples $($inputNs.Count) are below the $MinInputSamples minimum."
 }
-if ($panSampleNs.Count -eq 0) {
+if ($analysisData.PanSampleEventCount -eq 0) {
     Add-GateFailure $gateFailures 'No implot.pan_drag.sample events were found.'
 }
-if ($axisChangeNs.Count -eq 0) {
+if ($analysisData.AxisChangeEventCount -eq 0) {
     Add-GateFailure $gateFailures 'No implot.axis_limits_changed events were found.'
 }
-if ($presentNs.Count -eq 0) {
+if ($analysisData.PresentEventCount -eq 0) {
     Add-GateFailure $gateFailures 'No present events were found.'
 }
 
@@ -685,7 +852,7 @@ if ($inputNs.Count -eq 0) {
     Write-Host ''
     Write-Warning 'No left-button pointer_move events were found inside an ImPlot pan-drag window.'
 }
-if ($panSampleNs.Count -eq 0) {
+if ($analysisData.PanSampleEventCount -eq 0) {
     Write-Host ''
     Write-Warning 'No implot.pan_drag.sample events were found. Drag inside the main Spectrum plot.'
 }

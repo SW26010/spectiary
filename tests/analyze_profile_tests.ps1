@@ -66,6 +66,40 @@ function New-PassingProfileLines {
     return [string[]]$lines.ToArray()
 }
 
+function New-LargeProfileLines {
+    $frameCount = 25000
+    $lines = [System.Collections.Generic.List[string]]::new(100010)
+    $lines.Add((New-ProfileEvent 1000000 'implot.pan_drag.state' @{ active = $true }))
+    $lines.Add((New-ProfileEvent 1100000 'input' @{ kind = 'pointer_move'; left_down = $true }))
+    $lines.Add((New-ProfileEvent 1200000 'implot.pan_drag.sample'))
+    $lines.Add((New-ProfileEvent 1300000 'implot.axis_limits_changed'))
+    $lines.Add((New-ProfileEvent 1400000 'input' @{ kind = 'pointer_move'; left_down = $true }))
+    $lines.Add((New-ProfileEvent 1500000 'implot.pan_drag.sample'))
+    $lines.Add((New-ProfileEvent 1600000 'implot.axis_limits_changed'))
+    foreach ($frame in 1..$frameCount) {
+        $base = 1000000L + ([long]$frame * 1000000L)
+        $lines.Add(('{{"steady_ns":{0},"event":"view_update","frame":{1},"duration_ms":0.25}}' -f
+                    $base, $frame))
+        $lines.Add(('{{"steady_ns":{0},"event":"draw_submission","frame":{1},"duration_ms":0.25}}' -f
+                    ($base + 1000L), $frame))
+        $lines.Add(('{{"steady_ns":{0},"event":"render_pass","frame":{1},"duration_ms":0.25}}' -f
+                    ($base + 2000L), $frame))
+        $lines.Add(('{{"steady_ns":{0},"event":"present","frame":{1},"duration_ms":0.25}}' -f
+                    ($base + 3000L), $frame))
+    }
+    $lines.Add((New-ProfileEvent 30000000000 'implot.pan_drag.state' @{ active = $false }))
+    $lines.Add((New-ProfileEvent 31000000000 'view_update' @{
+                frame = 99999
+                duration_ms = 9999.0
+            }))
+    $lines.Add((New-ProfileEvent 32000000000 'profile_recorder_summary' @{
+                stop_reason = 'explicit'
+                accepted_bytes = 10000000
+                dropped_events = 0
+            }))
+    return [string[]]$lines.ToArray()
+}
+
 function Invoke-Analyzer {
     param(
         [string]$ProfilePath,
@@ -113,6 +147,27 @@ try {
     [System.IO.File]::WriteAllLines($completePath, (New-PassingProfileLines -IncludeSummary))
     $complete = Invoke-Analyzer $completePath
     Assert-True ($complete.ExitCode -eq 0) "A complete zero-drop recording should pass:`n$($complete.Output)"
+
+    $unorderedPath = Join-Path $temporaryDirectory 'unordered.jsonl'
+    $orderedLines = New-PassingProfileLines -IncludeSummary
+    $unorderedLines = [string[]]@(
+        $orderedLines[0],
+        $orderedLines[5],
+        $orderedLines[6],
+        $orderedLines[7],
+        $orderedLines[8],
+        $orderedLines[1],
+        $orderedLines[2],
+        $orderedLines[3],
+        $orderedLines[4],
+        $orderedLines[9],
+        $orderedLines[10]
+    )
+    [System.IO.File]::WriteAllLines($unorderedPath, $unorderedLines)
+    $unordered = Invoke-Analyzer $unorderedPath
+    Assert-True (
+        $unordered.ExitCode -eq 0
+    ) "An unordered profile should retain the analyzer's chronological sort fallback:`n$($unordered.Output)"
 
     $metricsPath = Join-Path $temporaryDirectory 'pan-metrics.jsonl'
     $metricsLines = [System.Collections.Generic.List[string]]::new()
@@ -202,6 +257,20 @@ try {
     Assert-True (
         $metrics.Output -match 'accepted_bytes=4096, dropped_events=0'
     ) "Recorder byte and drop counts should be printed:`n$($metrics.Output)"
+
+    $largePath = Join-Path $temporaryDirectory 'large-uncapped-style.jsonl'
+    [System.IO.File]::WriteAllLines($largePath, (New-LargeProfileLines))
+    $large = Invoke-Analyzer $largePath
+    Assert-True ($large.ExitCode -eq 0) "A large uncapped-style profile should pass:`n$($large.Output)"
+    Assert-True (
+        $large.Output -match 'Events:\s+100010'
+    ) "The large fixture must exercise at least 100,000 events:`n$($large.Output)"
+    Assert-True (
+        $large.Output -match 'instrumented frame work\s+25000\s+1\.000\s+1\.000\s+1\.000\s+1\.000'
+    ) "Large-profile instrumented stages should be summed by frame before percentiles are computed:`n$($large.Output)"
+    Assert-True (
+        $large.Output -notmatch '9999\.000'
+    ) "A large-profile extreme duration outside the pan window must not affect pan percentiles:`n$($large.Output)"
 
     $missingPacing = Invoke-Analyzer $completePath -ExpectedPanPacing Uncapped
     Assert-True (
