@@ -16,6 +16,9 @@ param(
     [string]$BuiltExecutable,
 
     [Parameter(Mandatory = $true)]
+    [string]$GeneratedManifest,
+
+    [Parameter(Mandatory = $true)]
     [string]$SpecForgeVersion,
 
     [Parameter(Mandatory = $true)]
@@ -311,6 +314,7 @@ $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_metadata.json.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
+$manifestTemplatePath = Join-Path $RepoRoot 'src\platform\specforge.exe.manifest.in'
 
 foreach ($requiredPath in @(
     $eulaPath,
@@ -321,7 +325,9 @@ foreach ($requiredPath in @(
     $aboutSourcePath,
     $cmakeSourcePath,
     $buildMetadataTemplatePath,
-    $buildSourceContractPath
+    $buildSourceContractPath,
+    $manifestTemplatePath,
+    $GeneratedManifest
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required release source is missing: $requiredPath"
@@ -439,6 +445,57 @@ $packageScript = Get-Content -Raw -LiteralPath $packageScriptPath
 $aboutSource = Get-Content -Raw -LiteralPath $aboutSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
 $buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath
+$manifestTemplate = Get-Content -Raw -LiteralPath $manifestTemplatePath
+$generatedManifestText = Get-Content -Raw -LiteralPath $GeneratedManifest
+[xml]$generatedManifest = $generatedManifestText
+$generatedAssemblyVersion = [string]$generatedManifest.assembly.assemblyIdentity.version
+$expectedAssemblyVersion = "$SpecForgeVersion.0"
+if ($generatedAssemblyVersion -cne $expectedAssemblyVersion) {
+    throw "Generated manifest assembly version expected '$expectedAssemblyVersion'; found '$generatedAssemblyVersion'."
+}
+Assert-Contains $manifestTemplate `
+    'version="@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"' `
+    'Manifest version template'
+Assert-NotContains $manifestTemplate 'version="0.1.0.0"' 'Manifest version template'
+if ($manifestTemplate -match 'version="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"') {
+    throw 'Manifest template contains a handwritten numeric assembly version.'
+}
+if (Test-Path -LiteralPath (Join-Path $RepoRoot 'src\platform\specforge.exe.manifest')) {
+    throw 'Tracked final manifest still exists beside the manifest template.'
+}
+Assert-Contains $cmakeSource `
+    'set(SPECFORGE_MANIFEST_TEMPLATE' `
+    'CMake manifest template binding'
+Assert-Contains $cmakeSource `
+    '"${CMAKE_BINARY_DIR}/generated/specforge/specforge.exe.manifest"' `
+    'CMake generated manifest path'
+Assert-Contains $cmakeSource `
+    '"${SPECFORGE_MANIFEST_TEMPLATE}"' `
+    'CMake manifest configure input'
+Assert-Contains $cmakeSource `
+    '"${SPECFORGE_MANIFEST}"' `
+    'CMake manifest configure output and target source'
+$nativeTargetStart = $cmakeSource.IndexOf(
+    'add_executable(specforge_native WIN32',
+    [StringComparison]::Ordinal)
+if ($nativeTargetStart -lt 0) {
+    throw 'Could not locate the specforge_native source declaration.'
+}
+$nativeTargetEnd = $cmakeSource.IndexOf(
+    'specforge_configure_production_target(specforge_native)',
+    $nativeTargetStart,
+    [StringComparison]::Ordinal)
+if ($nativeTargetEnd -lt 0) {
+    throw 'Could not locate the specforge_native source declaration.'
+}
+$nativeTargetSources = $cmakeSource.Substring(
+    $nativeTargetStart,
+    $nativeTargetEnd - $nativeTargetStart)
+Assert-Contains $nativeTargetSources '${SPECFORGE_MANIFEST}' 'specforge_native sources'
+Assert-NotContains `
+    $nativeTargetSources `
+    'src/platform/specforge.exe.manifest' `
+    'specforge_native sources'
 Assert-Contains $packageScript "`$releaseDocumentDirectoryName = 'Legal'" 'Portable packaging script'
 Assert-Contains $packageScript `
     "`$sourceExecutableDirectory = Split-Path -Parent `$sourceExecutable" `

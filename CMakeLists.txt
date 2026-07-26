@@ -23,7 +23,12 @@ find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
-set(SPECFORGE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/specforge.exe.manifest")
+set(SPECFORGE_MANIFEST_TEMPLATE
+    "${CMAKE_SOURCE_DIR}/src/platform/specforge.exe.manifest.in"
+)
+set(SPECFORGE_MANIFEST
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge.exe.manifest"
+)
 set(SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
 set(SPECFORGE_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
 set(SPECFORGE_RELEASE_DOCUMENTS
@@ -59,6 +64,11 @@ message(STATUS
 )
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/specforge")
+configure_file(
+    "${SPECFORGE_MANIFEST_TEMPLATE}"
+    "${SPECFORGE_MANIFEST}"
+    @ONLY
+)
 configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/third_party_versions.h.in"
     "${CMAKE_BINARY_DIR}/generated/specforge/third_party_versions.h"
@@ -441,6 +451,7 @@ add_test(
         -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
         -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
         -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+        -GeneratedManifest "${SPECFORGE_MANIFEST}"
         -SpecForgeVersion "${PROJECT_VERSION}"
         -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"
