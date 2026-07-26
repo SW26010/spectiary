@@ -1,5 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "source_mode": "@SPECFORGE_BUILD_SOURCE_MODE@",
+  "source_revision": @SPECFORGE_BUILD_SOURCE_REVISION_JSON@,
   "specforge_version": "@PROJECT_VERSION@",
   "release_profile": "@SPECFORGE_RELEASE_PROFILE@",
   "configuration": "$<CONFIG>",

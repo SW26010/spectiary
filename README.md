@@ -125,9 +125,12 @@ zero dropped events.
 
 ## Portable Package
 
-The first portable package is a no-launcher zip with `SpecForge.exe`, `Data/`,
-and `Legal/` at the zip root. `Legal/` contains the SpecForge EULA, complete
-third-party software notices, and scientific data attribution:
+The first portable package is a no-launcher zip with `SpecForge.exe`,
+`specforge_build_metadata.json`, `Data/`, and `Legal/` at the zip root.
+`specforge_build_metadata.json` identifies current packages as working-tree
+builds with no claimed Git revision; immutable build metadata stays outside the
+mutable `Data/` user-state directory. `Legal/` contains the SpecForge EULA,
+complete third-party software notices, and scientific data attribution:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1

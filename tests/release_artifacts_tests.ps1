@@ -22,7 +22,10 @@ param(
     [string]$ReleaseProfile,
 
     [Parameter(Mandatory = $true)]
-    [string]$Configuration
+    [string]$Configuration,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SourceMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -110,10 +113,18 @@ if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
 }
 
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
-if ($buildMetadata.schema_version -ne 1) {
+if ($buildMetadata.schema_version -ne 2) {
     throw "Built executable metadata has unsupported schema version '$($buildMetadata.schema_version)'."
 }
+$sourceRevisionProperty = $buildMetadata.PSObject.Properties['source_revision']
+if ($null -eq $sourceRevisionProperty) {
+    throw "Built executable metadata is missing 'source_revision'."
+}
+if ($null -ne $sourceRevisionProperty.Value) {
+    throw "Working-tree build metadata must use null source_revision."
+}
 $expectedBuildMetadata = [ordered]@{
+    source_mode = $SourceMode
     specforge_version = $SpecForgeVersion
     release_profile = $ReleaseProfile
     configuration = $Configuration
@@ -272,6 +283,9 @@ Assert-Contains $packageScript `
     '& cmake --build --preset $Preset --config $Configuration' `
     'Portable packaging configuration binding'
 Assert-Contains $packageScript `
+    '& cmake --preset $Preset -DSPECFORGE_BUILD_SOURCE_MODE=working_tree' `
+    'Portable packaging source-mode binding'
+Assert-Contains $packageScript `
     "Join-Path `$sourceExecutableDirectory 'specforge_build_metadata.json'" `
     'Portable packaging metadata binding'
 Assert-NotContains $packageScript `
@@ -287,7 +301,12 @@ Assert-Contains $cmakeSource `
 Assert-Contains $cmakeSource `
     'add_dependencies(specforge_native specforge_release_documents)' `
     'CMake executable release-document dependency'
+Assert-Contains $cmakeSource `
+    'add_dependencies(specforge_native specforge_build_metadata)' `
+    'CMake executable build-metadata dependency'
 foreach ($propertyName in @(
+    'source_mode',
+    'source_revision',
     'specforge_version',
     'release_profile',
     'configuration',
@@ -303,6 +322,93 @@ Assert-Contains $aboutSource 'build_info::kZlibVersion' 'About zlib version'
 foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
     Assert-Contains $packageScript $documentName 'Portable packaging script'
     Assert-Contains $aboutSource "Legal/$documentName" 'About panel'
+}
+
+$testRoot = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    "specforge-release-artifacts-$PID-$([Guid]::NewGuid().ToString('N'))"
+$testBuildRoot = Join-Path $testRoot 'build'
+$testDistRoot = Join-Path $testRoot 'dist'
+$testPackageName = 'SpecForge-portable-test'
+$testPackageRoot = Join-Path $testDistRoot $testPackageName
+$testZipPath = Join-Path $testDistRoot "$testPackageName.zip"
+try {
+    New-Item -ItemType Directory -Path $testBuildRoot -Force | Out-Null
+    Copy-Item -LiteralPath $resolvedBuiltExecutable -Destination (Join-Path $testBuildRoot 'SpecForge.exe')
+    Copy-Item -LiteralPath $buildMetadataPath -Destination (Join-Path $testBuildRoot 'specforge_build_metadata.json')
+
+    & $packageScriptPath `
+        -SkipBuild `
+        -Configuration $Configuration `
+        -PackageName $testPackageName `
+        -BuildRoot $testBuildRoot `
+        -DistRoot $testDistRoot
+
+    $expectedPackageEntries = @(
+        'Data',
+        'Legal',
+        'SpecForge.exe',
+        'specforge_build_metadata.json'
+    )
+    $actualPackageEntries = @(
+        Get-ChildItem -LiteralPath $testPackageRoot |
+            ForEach-Object { $_.Name } |
+            Sort-Object
+    )
+    if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
+        throw "Portable package root entries are wrong: $($actualPackageEntries -join ', ')."
+    }
+    Assert-FilesMatch `
+        -ExpectedPath $buildMetadataPath `
+        -ActualPath (Join-Path $testPackageRoot 'specforge_build_metadata.json') `
+        -Description 'Packaged build metadata'
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($testZipPath)
+    try {
+        $expectedZipEntries = @(
+            'Data/',
+            'Legal/',
+            'Legal/DATA_SOURCES.txt',
+            'Legal/EULA.txt',
+            'Legal/THIRD_PARTY_NOTICES.txt',
+            'SpecForge.exe',
+            'specforge_build_metadata.json'
+        )
+        $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
+        if (($actualZipEntries -join "`n") -cne (($expectedZipEntries | Sort-Object) -join "`n")) {
+            throw "Portable ZIP entries are wrong: $($actualZipEntries -join ', ')."
+        }
+
+        $metadataEntry = $archive.GetEntry('specforge_build_metadata.json')
+        $metadataStream = $metadataEntry.Open()
+        try {
+            $memoryStream = [IO.MemoryStream]::new()
+            try {
+                $metadataStream.CopyTo($memoryStream)
+                $zipMetadataBytes = [Convert]::ToBase64String($memoryStream.ToArray())
+            }
+            finally {
+                $memoryStream.Dispose()
+            }
+        }
+        finally {
+            $metadataStream.Dispose()
+        }
+        $buildMetadataBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($buildMetadataPath))
+        if ($zipMetadataBytes -cne $buildMetadataBytes) {
+            throw 'Portable ZIP build metadata does not byte-match executable-adjacent metadata.'
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $testRoot) {
+        Remove-Item -LiteralPath $testRoot -Recurse -Force
+    }
 }
 
 Write-Output 'release artifact tests passed'

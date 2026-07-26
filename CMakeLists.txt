@@ -9,10 +9,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
 set(SPECFORGE_RELEASE_PROFILE "" CACHE STRING "SpecForge release profile: Portable or Installed.")
 set_property(CACHE SPECFORGE_RELEASE_PROFILE PROPERTY STRINGS Portable Installed)
+set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
+set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree)
 
 if(NOT SPECFORGE_RELEASE_PROFILE MATCHES "^(Portable|Installed)$")
     message(FATAL_ERROR "SPECFORGE_RELEASE_PROFILE must be exactly Portable or Installed.")
 endif()
+if(NOT SPECFORGE_BUILD_SOURCE_MODE STREQUAL "working_tree")
+    message(FATAL_ERROR "SPECFORGE_BUILD_SOURCE_MODE must currently be exactly working_tree.")
+endif()
+
+set(SPECFORGE_BUILD_SOURCE_REVISION_JSON "null")
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
@@ -281,6 +288,12 @@ set_target_properties(specforge_native PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
+if(CMAKE_CONFIGURATION_TYPES)
+    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>")
+else()
+    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
+
 if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET specforge_native POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
@@ -290,17 +303,16 @@ if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     )
 endif()
 
-add_custom_command(TARGET specforge_native POST_BUILD
+add_custom_target(specforge_build_metadata
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
-        "$<TARGET_FILE_DIR:specforge_native>/specforge_build_metadata.json"
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/specforge_build_metadata.json"
+    DEPENDS
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
+    COMMENT "Synchronizing SpecForge build metadata"
+    VERBATIM
 )
-
-if(CMAKE_CONFIGURATION_TYPES)
-    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>")
-else()
-    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-endif()
+add_dependencies(specforge_native specforge_build_metadata)
 
 set(SPECFORGE_RELEASE_DOCUMENT_OUTPUTS)
 set(SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS)
@@ -434,6 +446,7 @@ add_test(
         -SpecForgeVersion "${PROJECT_VERSION}"
         -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"
+        -SourceMode "${SPECFORGE_BUILD_SOURCE_MODE}"
 )
 add_test(
     NAME specforge_panel_session_render_architecture_tests

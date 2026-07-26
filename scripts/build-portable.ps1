@@ -3,10 +3,16 @@ param(
     [string]$Preset = 'vs2022-x64-portable-release-static',
     [string]$Configuration = 'Release',
     [string]$PackageName = 'SpecForge-portable',
+    [string]$BuildRoot,
+    [string]$DistRoot,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module `
+    (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
+    -Force `
+    -ErrorAction Stop
 
 function Get-NormalizedFullPath {
     param([Parameter(Mandatory = $true)] [string]$Path)
@@ -54,8 +60,18 @@ function Assert-SingleNoticeHeading {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
-$buildRoot = Join-Path $repoRoot "build\$Preset"
-$distRoot = Join-Path $repoRoot 'dist'
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
+    $BuildRoot = Join-Path $repoRoot "build\$Preset"
+}
+else {
+    $BuildRoot = Get-NormalizedFullPath -Path $BuildRoot
+}
+if ([string]::IsNullOrWhiteSpace($DistRoot)) {
+    $DistRoot = Join-Path $repoRoot 'dist'
+}
+else {
+    $DistRoot = Get-NormalizedFullPath -Path $DistRoot
+}
 $packageRoot = Join-Path $distRoot $PackageName
 $zipPath = Join-Path $distRoot "$PackageName.zip"
 $releaseDocumentSourceRoot = Join-Path $repoRoot 'legal'
@@ -68,7 +84,7 @@ $releaseDocumentNames = @(
 
 if (-not $SkipBuild) {
     Write-Host 'build-portable.ps1 invokes CMake directly; run it from a normal developer shell or an approved unsandboxed agent run.'
-    & cmake --preset $Preset
+    & cmake --preset $Preset -DSPECFORGE_BUILD_SOURCE_MODE=working_tree
     if ($LASTEXITCODE -ne 0) {
         throw "CMake configure failed for preset $Preset."
     }
@@ -95,6 +111,7 @@ if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
 }
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
 foreach ($propertyName in @(
+    'source_mode',
     'specforge_version',
     'release_profile',
     'configuration',
@@ -106,8 +123,17 @@ foreach ($propertyName in @(
         throw "Build metadata is missing '$propertyName'."
     }
 }
-if ($buildMetadata.schema_version -ne 1) {
+if ($buildMetadata.schema_version -ne 2) {
     throw "Unsupported build metadata schema version '$($buildMetadata.schema_version)'."
+}
+if ($buildMetadata.source_mode -cne 'working_tree') {
+    throw "Build metadata has source mode '$($buildMetadata.source_mode)'; expected 'working_tree'."
+}
+if (-not ($buildMetadata.PSObject.Properties.Name -ccontains 'source_revision')) {
+    throw "Build metadata is missing 'source_revision'."
+}
+if ($null -ne $buildMetadata.source_revision) {
+    throw "Working-tree build metadata must use null source_revision."
 }
 if ($buildMetadata.release_profile -cne 'Portable') {
     throw "SpecForge.exe has release profile '$($buildMetadata.release_profile)'; expected 'Portable'."
@@ -155,6 +181,10 @@ New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-
 $releaseDocumentPackageRoot = Join-Path $packageRoot $releaseDocumentDirectoryName
 New-Item -ItemType Directory -Path $releaseDocumentPackageRoot -Force | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot 'SpecForge.exe') -Force
+Copy-Item `
+    -LiteralPath $buildMetadataPath `
+    -Destination (Join-Path $packageRoot 'specforge_build_metadata.json') `
+    -Force
 foreach ($documentName in $releaseDocumentNames) {
     Copy-Item `
         -LiteralPath (Join-Path $releaseDocumentSourceRoot $documentName) `
@@ -177,6 +207,11 @@ try {
             $archive,
             (Join-Path $packageRoot 'SpecForge.exe'),
             'SpecForge.exe',
+            [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive,
+            (Join-Path $packageRoot 'specforge_build_metadata.json'),
+            'specforge_build_metadata.json',
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [void]$archive.CreateEntry('Data/')
         [void]$archive.CreateEntry("$releaseDocumentDirectoryName/")

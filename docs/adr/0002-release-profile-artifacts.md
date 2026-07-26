@@ -9,8 +9,13 @@ program files live in a per-user application location while its local user state
 remains separate under local application data. Portable builds use an app-owned
 profile under `Data` in the package root. For the current no-launcher Portable
 artifact, the package root is the executable directory: the zip root contains
-`SpecForge.exe`, with `Data` and `Legal` beside it. The artifact does not
-introduce a launcher or a `bin` subdirectory. CMake validates the selected
+`SpecForge.exe` and immutable `specforge_build_metadata.json`, with mutable user
+state under `Data` and release documents under `Legal` beside them. Build
+metadata schema 2 records the source contract separately from the product
+version and release profile. A package built directly from workspace files uses
+`source_mode: "working_tree"` and `source_revision: null`; it must not infer a
+Git revision. The artifact does not introduce a launcher or a `bin` subdirectory.
+CMake validates the selected
 release profile and emits one explicit target compile definition such as
 `SPECFORGE_RELEASE_PROFILE_PORTABLE` or
 `SPECFORGE_RELEASE_PROFILE_INSTALLED`, so the C++ startup path fails at compile
