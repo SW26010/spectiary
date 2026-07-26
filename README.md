@@ -127,21 +127,33 @@ zero dropped events.
 
 The first portable package is a no-launcher zip with `SpecForge.exe`,
 `specforge_build_metadata.json`, `Data/`, and `Legal/` at the zip root.
-`specforge_build_metadata.json` identifies current packages as working-tree
-builds with no claimed Git revision; immutable build metadata stays outside the
-mutable `Data/` user-state directory. `Legal/` contains the SpecForge EULA,
-complete third-party software notices, and scientific data attribution:
+`specforge_build_metadata.json` identifies whether a package came from current
+workspace files or an isolated committed `HEAD` snapshot; immutable build
+metadata stays outside the mutable `Data/` user-state directory. `Legal/`
+contains the SpecForge EULA, complete third-party software notices, and
+scientific data attribution.
+
+Build current workspace files without claiming a Git revision:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
 ```
 
-The script invokes CMake directly with the Visual Studio portable release
-preset, so run it from a normal developer shell or an approved unsandboxed agent
-run.
+Build the exact local `HEAD` commit from a temporary `git archive` snapshot:
 
-The package is staged under `dist\SpecForge-portable` and zipped as
-`dist\SpecForge-portable.zip` with a matching `.sha256` file.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable-from-head.ps1
+```
+
+Both scripts invoke CMake directly with the Visual Studio portable release
+preset, so run them from a normal developer shell or an approved unsandboxed
+agent run. The shared builder's source-mode parameters are an internal contract
+between these entrypoints: `head` mode is rejected when the builder is running
+from a Git checkout instead of an exported snapshot.
+
+Working-tree output uses `dist\SpecForge-portable`; isolated HEAD output uses
+`dist\head\SpecForge-portable`. Each package has a matching ZIP and `.sha256`
+file in its own output directory.
 
 Launch with a spectrum source path to smoke-test the real-data loader:
 

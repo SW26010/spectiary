@@ -25,7 +25,11 @@ param(
     [string]$Configuration,
 
     [Parameter(Mandatory = $true)]
-    [string]$SourceMode
+    [string]$SourceMode,
+
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
+    [string]$SourceRevision
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,6 +73,167 @@ function Assert-FilesMatch {
     $actualBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ActualPath))
     if ($actualBytes -cne $expectedBytes) {
         throw "$Description is stale: expected $ExpectedPath to match $ActualPath."
+    }
+}
+
+function Assert-BuildSourceContract {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [string]$ExpectedMode,
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$ExpectedRevision,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    if ($Metadata.source_mode -cne $ExpectedMode) {
+        throw "$Description source_mode expected '$ExpectedMode'; found '$($Metadata.source_mode)'."
+    }
+    $sourceRevisionProperty = $Metadata.PSObject.Properties['source_revision']
+    if ($null -eq $sourceRevisionProperty) {
+        throw "$Description is missing 'source_revision'."
+    }
+    if ($ExpectedMode -ceq 'working_tree') {
+        if ($null -ne $sourceRevisionProperty.Value) {
+            throw "$Description working-tree source_revision must be null."
+        }
+    }
+    elseif ($sourceRevisionProperty.Value -cne $ExpectedRevision) {
+        throw "$Description source_revision expected '$ExpectedRevision'; found '$($sourceRevisionProperty.Value)'."
+    }
+}
+
+function Assert-PortablePackage {
+    param(
+        [Parameter(Mandatory = $true)] [string]$ExpectedMetadataPath,
+        [Parameter(Mandatory = $true)] [string]$PackageRoot,
+        [Parameter(Mandatory = $true)] [string]$ZipPath,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $expectedPackageEntries = @(
+        'Data',
+        'Legal',
+        'SpecForge.exe',
+        'specforge_build_metadata.json'
+    )
+    $actualPackageEntries = @(
+        Get-ChildItem -LiteralPath $PackageRoot |
+            ForEach-Object { $_.Name } |
+            Sort-Object
+    )
+    if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
+        throw "$Description package root entries are wrong: $($actualPackageEntries -join ', ')."
+    }
+    Assert-FilesMatch `
+        -ExpectedPath $ExpectedMetadataPath `
+        -ActualPath (Join-Path $PackageRoot 'specforge_build_metadata.json') `
+        -Description "$Description packaged build metadata"
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $expectedZipEntries = @(
+            'Data/',
+            'Legal/',
+            'Legal/DATA_SOURCES.txt',
+            'Legal/EULA.txt',
+            'Legal/THIRD_PARTY_NOTICES.txt',
+            'SpecForge.exe',
+            'specforge_build_metadata.json'
+        )
+        $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
+        if (($actualZipEntries -join "`n") -cne (($expectedZipEntries | Sort-Object) -join "`n")) {
+            throw "$Description ZIP entries are wrong: $($actualZipEntries -join ', ')."
+        }
+
+        $metadataEntry = $archive.GetEntry('specforge_build_metadata.json')
+        if ($null -eq $metadataEntry) {
+            throw "$Description ZIP is missing specforge_build_metadata.json."
+        }
+        $metadataStream = $metadataEntry.Open()
+        try {
+            $memoryStream = [IO.MemoryStream]::new()
+            try {
+                $metadataStream.CopyTo($memoryStream)
+                $zipMetadataBytes = [Convert]::ToBase64String($memoryStream.ToArray())
+            }
+            finally {
+                $memoryStream.Dispose()
+            }
+        }
+        finally {
+            $metadataStream.Dispose()
+        }
+        $expectedMetadataBytes = [Convert]::ToBase64String(
+            [IO.File]::ReadAllBytes($ExpectedMetadataPath))
+        if ($zipMetadataBytes -cne $expectedMetadataBytes) {
+            throw "$Description ZIP metadata does not byte-match executable-adjacent metadata."
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Assert-ScriptFails {
+    param(
+        [Parameter(Mandatory = $true)] [string]$ScriptPath,
+        [Parameter(Mandatory = $true)] [object[]]$Arguments,
+        [Parameter(Mandatory = $true)] [string]$Description,
+        [string]$ExpectedMessage
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(
+            & powershell `
+                -NoProfile `
+                -ExecutionPolicy Bypass `
+                -File $ScriptPath `
+                @Arguments 2>&1
+        )
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -eq 0) {
+        throw "$Description unexpectedly succeeded."
+    }
+    $outputText = $output -join [Environment]::NewLine
+    if (-not [string]::IsNullOrEmpty($ExpectedMessage) -and
+        $outputText.IndexOf($ExpectedMessage, [StringComparison]::Ordinal) -lt 0) {
+        throw "$Description failed for the wrong reason: $outputText"
+    }
+}
+
+function Assert-BuildSourceCMakeContract {
+    param(
+        [Parameter(Mandatory = $true)] [string]$ContractPath,
+        [Parameter(Mandatory = $true)] [string]$Mode,
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Revision,
+        [Parameter(Mandatory = $true)] [bool]$ShouldSucceed,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(
+            & cmake `
+                "-DSPECFORGE_BUILD_SOURCE_MODE=$Mode" `
+                "-DSPECFORGE_BUILD_SOURCE_REVISION=$Revision" `
+                -P $ContractPath 2>&1
+        )
+        $succeeded = $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($succeeded -ne $ShouldSucceed) {
+        throw "$Description expected success '$ShouldSucceed'; output: $($output -join ' | ')"
     }
 }
 
@@ -116,15 +281,12 @@ $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-
 if ($buildMetadata.schema_version -ne 2) {
     throw "Built executable metadata has unsupported schema version '$($buildMetadata.schema_version)'."
 }
-$sourceRevisionProperty = $buildMetadata.PSObject.Properties['source_revision']
-if ($null -eq $sourceRevisionProperty) {
-    throw "Built executable metadata is missing 'source_revision'."
-}
-if ($null -ne $sourceRevisionProperty.Value) {
-    throw "Working-tree build metadata must use null source_revision."
-}
+Assert-BuildSourceContract `
+    -Metadata $buildMetadata `
+    -ExpectedMode $SourceMode `
+    -ExpectedRevision $SourceRevision `
+    -Description 'Built executable metadata'
 $expectedBuildMetadata = [ordered]@{
-    source_mode = $SourceMode
     specforge_version = $SpecForgeVersion
     release_profile = $ReleaseProfile
     configuration = $Configuration
@@ -148,6 +310,7 @@ $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_metadata.json.in'
+$buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 
 foreach ($requiredPath in @(
     $eulaPath,
@@ -157,7 +320,8 @@ foreach ($requiredPath in @(
     $packageScriptPath,
     $aboutSourcePath,
     $cmakeSourcePath,
-    $buildMetadataTemplatePath
+    $buildMetadataTemplatePath,
+    $buildSourceContractPath
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required release source is missing: $requiredPath"
@@ -283,8 +447,11 @@ Assert-Contains $packageScript `
     '& cmake --build --preset $Preset --config $Configuration' `
     'Portable packaging configuration binding'
 Assert-Contains $packageScript `
-    '& cmake --preset $Preset -DSPECFORGE_BUILD_SOURCE_MODE=working_tree' `
+    '"-DSPECFORGE_BUILD_SOURCE_MODE=$SourceMode"' `
     'Portable packaging source-mode binding'
+Assert-Contains $packageScript `
+    '"-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"' `
+    'Portable packaging source-revision binding'
 Assert-Contains $packageScript `
     "Join-Path `$sourceExecutableDirectory 'specforge_build_metadata.json'" `
     'Portable packaging metadata binding'
@@ -292,6 +459,9 @@ Assert-NotContains $packageScript `
     "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
     'Portable packaging script'
 Assert-Contains $cmakeSource 'specforge_build_metadata.json' 'CMake build metadata'
+Assert-Contains $cmakeSource `
+    'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
+    'CMake build-source contract entry'
 Assert-Contains $cmakeSource `
     'add_custom_target(specforge_release_documents' `
     'CMake release-document target'
@@ -323,86 +493,187 @@ foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES
     Assert-Contains $packageScript $documentName 'Portable packaging script'
     Assert-Contains $aboutSource "Legal/$documentName" 'About panel'
 }
-
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     "specforge-release-artifacts-$PID-$([Guid]::NewGuid().ToString('N'))"
-$testBuildRoot = Join-Path $testRoot 'build'
 $testDistRoot = Join-Path $testRoot 'dist'
-$testPackageName = 'SpecForge-portable-test'
-$testPackageRoot = Join-Path $testDistRoot $testPackageName
-$testZipPath = Join-Path $testDistRoot "$testPackageName.zip"
 try {
-    New-Item -ItemType Directory -Path $testBuildRoot -Force | Out-Null
-    Copy-Item -LiteralPath $resolvedBuiltExecutable -Destination (Join-Path $testBuildRoot 'SpecForge.exe')
-    Copy-Item -LiteralPath $buildMetadataPath -Destination (Join-Path $testBuildRoot 'specforge_build_metadata.json')
+    $headRevision = '0123456789abcdef0123456789abcdef01234567'
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments @(
+            '-SkipBuild',
+            '-BuildRoot',
+            (Join-Path $testRoot 'direct-head-build'),
+            '-DistRoot',
+            $testDistRoot,
+            '-SourceMode',
+            'head',
+            '-SourceRevision',
+            $headRevision
+        ) `
+        -ExpectedMessage 'Head source mode is reserved for an isolated snapshot' `
+        -Description 'Direct checkout head-mode packaging'
 
-    & $packageScriptPath `
-        -SkipBuild `
-        -Configuration $Configuration `
-        -PackageName $testPackageName `
-        -BuildRoot $testBuildRoot `
-        -DistRoot $testDistRoot
-
-    $expectedPackageEntries = @(
-        'Data',
-        'Legal',
-        'SpecForge.exe',
-        'specforge_build_metadata.json'
-    )
-    $actualPackageEntries = @(
-        Get-ChildItem -LiteralPath $testPackageRoot |
-            ForEach-Object { $_.Name } |
-            Sort-Object
-    )
-    if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
-        throw "Portable package root entries are wrong: $($actualPackageEntries -join ', ')."
+    $snapshotPackageRoot = Join-Path $testRoot 'package-script-snapshot'
+    $snapshotPackageScriptsRoot = Join-Path $snapshotPackageRoot 'scripts'
+    $snapshotPackageLegalRoot = Join-Path $snapshotPackageRoot 'legal'
+    New-Item -ItemType Directory -Path $snapshotPackageScriptsRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $snapshotPackageLegalRoot -Force | Out-Null
+    $snapshotPackageScriptPath = Join-Path `
+        $snapshotPackageScriptsRoot `
+        'build-portable.ps1'
+    Copy-Item -LiteralPath $packageScriptPath -Destination $snapshotPackageScriptPath
+    foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
+        Copy-Item `
+            -LiteralPath (Join-Path $legalRoot $documentName) `
+            -Destination (Join-Path $snapshotPackageLegalRoot $documentName)
     }
-    Assert-FilesMatch `
-        -ExpectedPath $buildMetadataPath `
-        -ActualPath (Join-Path $testPackageRoot 'specforge_build_metadata.json') `
-        -Description 'Packaged build metadata'
 
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [IO.Compression.ZipFile]::OpenRead($testZipPath)
-    try {
-        $expectedZipEntries = @(
-            'Data/',
-            'Legal/',
-            'Legal/DATA_SOURCES.txt',
-            'Legal/EULA.txt',
-            'Legal/THIRD_PARTY_NOTICES.txt',
-            'SpecForge.exe',
-            'specforge_build_metadata.json'
-        )
-        $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
-        if (($actualZipEntries -join "`n") -cne (($expectedZipEntries | Sort-Object) -join "`n")) {
-            throw "Portable ZIP entries are wrong: $($actualZipEntries -join ', ')."
+    $packageFixtures = @(
+        [pscustomobject]@{
+            Mode = 'working_tree'
+            Revision = ''
+            PackageName = 'SpecForge-portable-working-tree-test'
+        },
+        [pscustomobject]@{
+            Mode = 'head'
+            Revision = $headRevision
+            PackageName = 'SpecForge-portable-head-test'
         }
+    )
 
-        $metadataEntry = $archive.GetEntry('specforge_build_metadata.json')
-        $metadataStream = $metadataEntry.Open()
-        try {
-            $memoryStream = [IO.MemoryStream]::new()
-            try {
-                $metadataStream.CopyTo($memoryStream)
-                $zipMetadataBytes = [Convert]::ToBase64String($memoryStream.ToArray())
-            }
-            finally {
-                $memoryStream.Dispose()
-            }
+    foreach ($fixture in $packageFixtures) {
+        $fixturePackageScriptPath = if ($fixture.Mode -ceq 'head') {
+            $snapshotPackageScriptPath
         }
-        finally {
-            $metadataStream.Dispose()
+        else {
+            $packageScriptPath
         }
-        $buildMetadataBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($buildMetadataPath))
-        if ($zipMetadataBytes -cne $buildMetadataBytes) {
-            throw 'Portable ZIP build metadata does not byte-match executable-adjacent metadata.'
+        $fixtureBuildRoot = Join-Path $testRoot "build-$($fixture.Mode)"
+        New-Item -ItemType Directory -Path $fixtureBuildRoot -Force | Out-Null
+        Copy-Item `
+            -LiteralPath $resolvedBuiltExecutable `
+            -Destination (Join-Path $fixtureBuildRoot 'SpecForge.exe')
+
+        $fixtureMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
+        $fixtureMetadata.source_mode = $fixture.Mode
+        $fixtureMetadata.source_revision = if ($fixture.Mode -ceq 'working_tree') {
+            $null
         }
+        else {
+            $fixture.Revision
+        }
+        $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'specforge_build_metadata.json'
+        $fixtureMetadata |
+            ConvertTo-Json -Depth 10 |
+            Set-Content -LiteralPath $fixtureMetadataPath -Encoding UTF8
+
+        & $fixturePackageScriptPath `
+            -SkipBuild `
+            -Configuration $Configuration `
+            -PackageName $fixture.PackageName `
+            -BuildRoot $fixtureBuildRoot `
+            -DistRoot $testDistRoot `
+            -SourceMode $fixture.Mode `
+            -SourceRevision $fixture.Revision
+
+        $fixturePackageRoot = Join-Path $testDistRoot $fixture.PackageName
+        $fixtureZipPath = Join-Path $testDistRoot "$($fixture.PackageName).zip"
+        Assert-PortablePackage `
+            -ExpectedMetadataPath $fixtureMetadataPath `
+            -PackageRoot $fixturePackageRoot `
+            -ZipPath $fixtureZipPath `
+            -Description "$($fixture.Mode) Portable fixture"
+        $packagedMetadata = Get-Content -Raw `
+            -LiteralPath (Join-Path $fixturePackageRoot 'specforge_build_metadata.json') |
+            ConvertFrom-Json
+        Assert-BuildSourceContract `
+            -Metadata $packagedMetadata `
+            -ExpectedMode $fixture.Mode `
+            -ExpectedRevision $fixture.Revision `
+            -Description "$($fixture.Mode) packaged metadata"
     }
-    finally {
-        $archive.Dispose()
+
+    $invalidBaseArguments = @(
+        '-SkipBuild',
+        '-BuildRoot',
+        (Join-Path $testRoot 'invalid-build'),
+        '-DistRoot',
+        $testDistRoot
+    )
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments ($invalidBaseArguments + @('-SourceMode', 'unknown')) `
+        -Description 'Unknown source mode'
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments ($invalidBaseArguments + @('-SourceMode', 'head')) `
+        -Description 'Head mode without revision'
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments ($invalidBaseArguments + @(
+            '-SourceMode',
+            'working_tree',
+            '-SourceRevision',
+            $headRevision
+        )) `
+        -Description 'Working-tree mode with revision'
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments ($invalidBaseArguments + @(
+            '-SourceMode',
+            'head',
+            '-SourceRevision',
+            'not-a-full-object-id'
+        )) `
+        -Description 'Head mode with invalid revision'
+
+    $cmakeContractCases = @(
+        [pscustomobject]@{
+            Mode = 'working_tree'
+            Revision = ''
+            ShouldSucceed = $true
+            Description = 'CMake working-tree contract'
+        },
+        [pscustomobject]@{
+            Mode = 'head'
+            Revision = $headRevision
+            ShouldSucceed = $true
+            Description = 'CMake head contract'
+        },
+        [pscustomobject]@{
+            Mode = 'unknown'
+            Revision = ''
+            ShouldSucceed = $false
+            Description = 'CMake unknown mode'
+        },
+        [pscustomobject]@{
+            Mode = 'head'
+            Revision = ''
+            ShouldSucceed = $false
+            Description = 'CMake head without revision'
+        },
+        [pscustomobject]@{
+            Mode = 'working_tree'
+            Revision = $headRevision
+            ShouldSucceed = $false
+            Description = 'CMake working tree with revision'
+        },
+        [pscustomobject]@{
+            Mode = 'head'
+            Revision = 'not-a-full-object-id'
+            ShouldSucceed = $false
+            Description = 'CMake invalid head revision'
+        }
+    )
+    foreach ($contractCase in $cmakeContractCases) {
+        Assert-BuildSourceCMakeContract `
+            -ContractPath $buildSourceContractPath `
+            -Mode $contractCase.Mode `
+            -Revision $contractCase.Revision `
+            -ShouldSucceed $contractCase.ShouldSucceed `
+            -Description $contractCase.Description
     }
 }
 finally {

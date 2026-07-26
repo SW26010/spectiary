@@ -5,6 +5,11 @@ param(
     [string]$PackageName = 'SpecForge-portable',
     [string]$BuildRoot,
     [string]$DistRoot,
+    [Parameter(DontShow = $true)]
+    [string]$SourceMode = 'working_tree',
+    [Parameter(DontShow = $true)]
+    [AllowEmptyString()]
+    [string]$SourceRevision = '',
     [switch]$SkipBuild
 )
 
@@ -60,6 +65,24 @@ function Assert-SingleNoticeHeading {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
+
+if ($SourceMode -cnotin @('working_tree', 'head')) {
+    throw "SourceMode must be exactly 'working_tree' or 'head'."
+}
+if ($SourceMode -ceq 'working_tree') {
+    if (-not [string]::IsNullOrEmpty($SourceRevision)) {
+        throw "SourceRevision must be empty when SourceMode is 'working_tree'."
+    }
+}
+else {
+    if ($SourceRevision -cnotmatch '^[0-9a-f]{40}$') {
+        throw "SourceRevision must be a full 40-character lowercase hexadecimal Git object ID when SourceMode is 'head'."
+    }
+    if (Test-Path -LiteralPath (Join-Path $repoRoot '.git')) {
+        throw 'Head source mode is reserved for an isolated snapshot without Git repository metadata.'
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
     $BuildRoot = Join-Path $repoRoot "build\$Preset"
 }
@@ -84,14 +107,26 @@ $releaseDocumentNames = @(
 
 if (-not $SkipBuild) {
     Write-Host 'build-portable.ps1 invokes CMake directly; run it from a normal developer shell or an approved unsandboxed agent run.'
-    & cmake --preset $Preset -DSPECFORGE_BUILD_SOURCE_MODE=working_tree
-    if ($LASTEXITCODE -ne 0) {
-        throw "CMake configure failed for preset $Preset."
-    }
+    Push-Location -LiteralPath $repoRoot
+    try {
+        $configureArguments = @(
+            '--preset',
+            $Preset,
+            "-DSPECFORGE_BUILD_SOURCE_MODE=$SourceMode",
+            "-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"
+        )
+        & cmake @configureArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "CMake configure failed for preset $Preset."
+        }
 
-    & cmake --build --preset $Preset --config $Configuration
-    if ($LASTEXITCODE -ne 0) {
-        throw "CMake build failed for preset $Preset."
+        & cmake --build --preset $Preset --config $Configuration
+        if ($LASTEXITCODE -ne 0) {
+            throw "CMake build failed for preset $Preset."
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 
@@ -126,14 +161,17 @@ foreach ($propertyName in @(
 if ($buildMetadata.schema_version -ne 2) {
     throw "Unsupported build metadata schema version '$($buildMetadata.schema_version)'."
 }
-if ($buildMetadata.source_mode -cne 'working_tree') {
-    throw "Build metadata has source mode '$($buildMetadata.source_mode)'; expected 'working_tree'."
+if ($buildMetadata.source_mode -cne $SourceMode) {
+    throw "Build metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
 }
 if (-not ($buildMetadata.PSObject.Properties.Name -ccontains 'source_revision')) {
     throw "Build metadata is missing 'source_revision'."
 }
-if ($null -ne $buildMetadata.source_revision) {
+if ($SourceMode -ceq 'working_tree' -and $null -ne $buildMetadata.source_revision) {
     throw "Working-tree build metadata must use null source_revision."
+}
+if ($SourceMode -ceq 'head' -and $buildMetadata.source_revision -cne $SourceRevision) {
+    throw "Head build metadata has source revision '$($buildMetadata.source_revision)'; expected '$SourceRevision'."
 }
 if ($buildMetadata.release_profile -cne 'Portable') {
     throw "SpecForge.exe has release profile '$($buildMetadata.release_profile)'; expected 'Portable'."

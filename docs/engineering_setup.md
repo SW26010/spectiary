@@ -190,16 +190,31 @@ profile 输出目录；选择结果持久化到 `Data/profile-settings.json`。�
 ## Portable release
 
 第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe`、
-`specforge_build_metadata.json`、`Data\` 和 `Legal\`。构建并打包：
+`specforge_build_metadata.json`、`Data\` 和 `Legal\`。直接从当前工作区文件构建：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
 ```
 
-这个脚本直接调用 CMake 和 Visual Studio portable release preset，预期在正常开发 shell 或已批准的非沙箱
-agent 运行中执行；它不复用 Ninja debug wrapper 的日志、timeout 和 preflight 形态。
+严格忽略 tracked dirty 和 untracked 文件、从构建开始时的本地完整 `HEAD` object ID 构建：
 
-输出位于 `dist\SpecForge-portable`，zip 为 `dist\SpecForge-portable.zip`，旁边生成 `.sha256`。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable-from-head.ps1
+```
+
+HEAD 脚本先解析并冻结完整 `HEAD` object ID，再用 `git archive` 将该精确 revision
+展开到经过校验的临时目录，并调用快照内同一份 `build-portable.ps1`。成功或失败都会
+清理临时源码和 build 目录，不修改当前工作区或 Git index。
+
+两个脚本都直接调用 CMake 和 Visual Studio portable release preset，预期在正常开发 shell
+或已批准的非沙箱 agent 运行中执行；它们不复用 Ninja debug wrapper 的日志、timeout 和
+preflight 形态。
+
+Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
+`dist\head\SpecForge-portable`。各自的 ZIP 和 `.sha256` 位于对应输出目录，HEAD
+构建不会删除或覆盖 working-tree 包。
+共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
+checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
 目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_build_metadata.json`、
 `Data\` 和 `Legal\`；`Legal\` 必须包含 `EULA.txt`、
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt`。
@@ -208,9 +223,10 @@ agent 运行中执行；它不复用 Ninja debug wrapper 的日志、timeout 和
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。About 编译时使用
 `build\<preset>\generated\specforge\third_party_versions.h`。构建成功后，
 CMake 将包含 SpecForge 版本、release profile、configuration、第三方版本和构建来源的
-schema 2 `specforge_build_metadata.json` 复制到实际 EXE 旁。当前脚本显式配置
-`source_mode` 为 `working_tree`，`source_revision` 为 JSON `null`，不会从 Git
-推断或声明 HEAD。打包脚本校验这个旁置文件，按字节复制到 Portable 根目录，
+schema 2 `specforge_build_metadata.json` 复制到实际 EXE 旁。共同打包脚本接受两种
+严格组合：`working_tree` 必须使用 JSON `null` revision；`head` 必须显式携带完整
+40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口负责
+解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，按字节复制到 Portable 根目录，
 并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态
 目录 `Data\`。仅重新 configure 不会改变可打包 EXE
 对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包必须失败，

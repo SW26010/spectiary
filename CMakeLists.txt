@@ -10,16 +10,14 @@ option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line cat
 set(SPECFORGE_RELEASE_PROFILE "" CACHE STRING "SpecForge release profile: Portable or Installed.")
 set_property(CACHE SPECFORGE_RELEASE_PROFILE PROPERTY STRINGS Portable Installed)
 set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
-set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree)
+set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
+set(SPECFORGE_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
 
 if(NOT SPECFORGE_RELEASE_PROFILE MATCHES "^(Portable|Installed)$")
     message(FATAL_ERROR "SPECFORGE_RELEASE_PROFILE must be exactly Portable or Installed.")
 endif()
-if(NOT SPECFORGE_BUILD_SOURCE_MODE STREQUAL "working_tree")
-    message(FATAL_ERROR "SPECFORGE_BUILD_SOURCE_MODE must currently be exactly working_tree.")
-endif()
 
-set(SPECFORGE_BUILD_SOURCE_REVISION_JSON "null")
+include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
@@ -447,6 +445,16 @@ add_test(
         -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"
         -SourceMode "${SPECFORGE_BUILD_SOURCE_MODE}"
+        -SourceRevision "${SPECFORGE_BUILD_SOURCE_REVISION}"
+)
+add_test(
+    NAME specforge_head_snapshot_build_tests
+    COMMAND
+        powershell
+        -NoProfile
+        -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/head_snapshot_build_tests.ps1"
+        -RepoRoot "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 add_test(
     NAME specforge_panel_session_render_architecture_tests

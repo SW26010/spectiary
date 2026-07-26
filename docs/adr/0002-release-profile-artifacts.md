@@ -14,8 +14,16 @@ state under `Data` and release documents under `Legal` beside them. Build
 metadata schema 2 records the source contract separately from the product
 version and release profile. A package built directly from workspace files uses
 `source_mode: "working_tree"` and `source_revision: null`; it must not infer a
-Git revision. The artifact does not introduce a launcher or a `bin` subdirectory.
-CMake validates the selected
+Git revision. A committed-source package uses `source_mode: "head"` with an
+explicit full Git object ID. Its entrypoint freezes the local HEAD revision,
+exports that exact object through `git archive`, and runs the shared Portable
+builder inside the temporary snapshot. HEAD output lives under `dist/head`, so
+it does not replace the working-tree package. CMake and the shared packaging
+script reject unknown modes, missing or malformed HEAD revisions, and revisions
+attached to working-tree builds. The shared script treats its source-mode
+parameters as an internal entrypoint contract and rejects `head` while running
+from a source root that contains Git repository metadata. The artifact does not
+introduce a launcher or a `bin` subdirectory. CMake validates the selected
 release profile and emits one explicit target compile definition such as
 `SPECFORGE_RELEASE_PROFILE_PORTABLE` or
 `SPECFORGE_RELEASE_PROFILE_INSTALLED`, so the C++ startup path fails at compile
