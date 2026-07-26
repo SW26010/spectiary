@@ -75,6 +75,11 @@ configure_file(
     @ONLY
 )
 configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h"
+    @ONLY
+)
+configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/specforge_build_metadata.json.in"
     "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_metadata.json.in"
     @ONLY
@@ -422,6 +427,8 @@ specforge_add_test(
 )
 target_compile_definitions(specforge_settings_panel_tests PRIVATE
     SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+    SPECFORGE_EXPECTED_SOURCE_MODE="${SPECFORGE_BUILD_SOURCE_MODE}"
+    SPECFORGE_EXPECTED_SOURCE_REVISION="${SPECFORGE_BUILD_SOURCE_REVISION}"
 )
 target_link_libraries(specforge_settings_panel_tests PRIVATE dwmapi)
 add_test(

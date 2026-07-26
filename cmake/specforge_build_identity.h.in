@@ -1,0 +1,8 @@
+#pragma once
+
+namespace specforge::build_info {
+
+inline constexpr char kBuildSourceMode[] = "@SPECFORGE_BUILD_SOURCE_MODE@";
+inline constexpr char kBuildSourceRevision[] = "@SPECFORGE_BUILD_SOURCE_REVISION@";
+
+}  // namespace specforge::build_info

@@ -14,6 +14,14 @@
 #error "SPECFORGE_EXPECTED_VERSION must be provided by the build configuration."
 #endif
 
+#ifndef SPECFORGE_EXPECTED_SOURCE_MODE
+#error "SPECFORGE_EXPECTED_SOURCE_MODE must be provided by the build configuration."
+#endif
+
+#ifndef SPECFORGE_EXPECTED_SOURCE_REVISION
+#error "SPECFORGE_EXPECTED_SOURCE_REVISION must be provided by the build configuration."
+#endif
+
 namespace specforge {
 
 struct SettingsPanelUiTestAccess {
@@ -96,6 +104,10 @@ specforge::SettingsPanelUi MakePanel()
     return specforge::SettingsPanelUi({
         .version = "test",
         .release_profile = "Portable",
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
         .data_directory = "Data",
     });
 }
@@ -169,8 +181,87 @@ void TestDefaultEnvironmentDescribesThisBuild()
         !environment.release_profile.empty(),
         "settings should expose the release profile");
     Require(
+        environment.build_source.mode ==
+            SPECFORGE_EXPECTED_SOURCE_MODE,
+        "settings should expose the configured build source mode");
+    Require(
+        environment.build_source.revision ==
+            SPECFORGE_EXPECTED_SOURCE_REVISION,
+        "settings should expose the configured build source revision");
+    Require(
         !environment.data_directory.empty(),
         "settings should expose the application data directory");
+}
+
+void TestWorkingTreeBuildSourcePresentation()
+{
+    const specforge::SettingsPanelEnvironment environment = {
+        .version = "test-version",
+        .release_profile = "Portable",
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
+        .data_directory = "Data",
+    };
+
+    Require(
+        specforge::FormatBuildSourceForAbout(
+            environment.build_source) ==
+            "Source: Working tree",
+        "working-tree About text should identify the working tree");
+
+    const std::string diagnostics =
+        specforge::FormatDiagnosticInformation(
+            environment,
+            "Data/logs");
+    Require(
+        diagnostics ==
+            "SpecForge test-version\n"
+            "Release profile: Portable\n"
+            "Source mode: working_tree\n"
+            "Graphics: Direct3D 11 / SDR\n"
+            "Data directory: Data\n"
+            "Log directory: Data/logs",
+        "working-tree diagnostics should include the mode "
+        "without a source revision");
+}
+
+void TestHeadBuildSourcePresentation()
+{
+    constexpr const char kRevision[] =
+        "0123456789abcdef0123456789abcdef01234567";
+    const specforge::SettingsPanelEnvironment environment = {
+        .version = "test-version",
+        .release_profile = "Portable",
+        .build_source = {
+            .mode = "head",
+            .revision = kRevision,
+        },
+        .data_directory = "Data",
+    };
+
+    Require(
+        specforge::FormatBuildSourceForAbout(
+            environment.build_source) ==
+            "Source: HEAD 0123456789ab",
+        "HEAD About text should use the 12-character revision");
+
+    const std::string diagnostics =
+        specforge::FormatDiagnosticInformation(
+            environment,
+            "Data/logs");
+    Require(
+        diagnostics ==
+            "SpecForge test-version\n"
+            "Release profile: Portable\n"
+            "Source mode: head\n"
+            "Source revision: "
+            "0123456789abcdef0123456789abcdef01234567\n"
+            "Graphics: Direct3D 11 / SDR\n"
+            "Data directory: Data\n"
+            "Log directory: Data/logs",
+        "HEAD diagnostics should include the mode and full revision");
 }
 
 void TestOpenIsIdempotent()
@@ -425,6 +516,8 @@ void TestRenderSmoke()
 int main()
 {
     TestDefaultEnvironmentDescribesThisBuild();
+    TestWorkingTreeBuildSourcePresentation();
+    TestHeadBuildSourcePresentation();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();

@@ -240,6 +240,27 @@ function Assert-BuildSourceCMakeContract {
     }
 }
 
+function Assert-BuildIdentityHeader {
+    param(
+        [Parameter(Mandatory = $true)] [string]$FixturePath,
+        [Parameter(Mandatory = $true)] [string]$SourceRoot,
+        [Parameter(Mandatory = $true)] [string]$OutputPath,
+        [Parameter(Mandatory = $true)] [string]$Mode,
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Revision,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    & cmake `
+        "-DSOURCE_ROOT=$SourceRoot" `
+        "-DOUTPUT=$OutputPath" `
+        "-DEXPECTED_MODE=$Mode" `
+        "-DEXPECTED_REVISION=$Revision" `
+        -P $FixturePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed."
+    }
+}
+
 function Assert-NoticeSectionContains {
     param(
         [Parameter(Mandatory = $true)] [string]$Text,
@@ -313,7 +334,9 @@ $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_metadata.json.in'
+$buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
+$buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
 $manifestTemplatePath = Join-Path $RepoRoot 'src\platform\specforge.exe.manifest.in'
 
 foreach ($requiredPath in @(
@@ -325,7 +348,9 @@ foreach ($requiredPath in @(
     $aboutSourcePath,
     $cmakeSourcePath,
     $buildMetadataTemplatePath,
+    $buildIdentityTemplatePath,
     $buildSourceContractPath,
+    $buildIdentityFixturePath,
     $manifestTemplatePath,
     $GeneratedManifest
 )) {
@@ -445,6 +470,7 @@ $packageScript = Get-Content -Raw -LiteralPath $packageScriptPath
 $aboutSource = Get-Content -Raw -LiteralPath $aboutSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
 $buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath
+$buildIdentityTemplate = Get-Content -Raw -LiteralPath $buildIdentityTemplatePath
 $manifestTemplate = Get-Content -Raw -LiteralPath $manifestTemplatePath
 $generatedManifestText = Get-Content -Raw -LiteralPath $GeneratedManifest
 [xml]$generatedManifest = $generatedManifestText
@@ -516,6 +542,10 @@ Assert-NotContains $packageScript `
     "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
     'Portable packaging script'
 Assert-Contains $cmakeSource 'specforge_build_metadata.json' 'CMake build metadata'
+Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
+Assert-Contains $cmakeSource `
+    'generated/specforge/specforge_build_identity.h' `
+    'CMake generated build identity'
 Assert-Contains $cmakeSource `
     'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
     'CMake build-source contract entry'
@@ -543,6 +573,18 @@ foreach ($propertyName in @(
 )) {
     Assert-Contains $buildMetadataTemplate "`"$propertyName`"" 'Build metadata template'
 }
+Assert-Contains $buildIdentityTemplate `
+    '@SPECFORGE_BUILD_SOURCE_MODE@' `
+    'Build identity header template'
+Assert-Contains $buildIdentityTemplate `
+    '@SPECFORGE_BUILD_SOURCE_REVISION@' `
+    'Build identity header template'
+Assert-Contains $aboutSource `
+    'build_info::kBuildSourceMode' `
+    'About build source mode'
+Assert-Contains $aboutSource `
+    'build_info::kBuildSourceRevision' `
+    'About build source revision'
 Assert-Contains $aboutSource 'build_info::kDearImGuiVersion' 'About Dear ImGui version'
 Assert-Contains $aboutSource 'build_info::kImPlotVersion' 'About ImPlot version'
 Assert-Contains $aboutSource 'build_info::kZlibVersion' 'About zlib version'
@@ -556,6 +598,20 @@ $testRoot = Join-Path `
 $testDistRoot = Join-Path $testRoot 'dist'
 try {
     $headRevision = '0123456789abcdef0123456789abcdef01234567'
+    Assert-BuildIdentityHeader `
+        -FixturePath $buildIdentityFixturePath `
+        -SourceRoot $RepoRoot `
+        -OutputPath (Join-Path $testRoot 'working-tree-build-identity.h') `
+        -Mode 'working_tree' `
+        -Revision '' `
+        -Description 'Working-tree compile-time build identity'
+    Assert-BuildIdentityHeader `
+        -FixturePath $buildIdentityFixturePath `
+        -SourceRoot $RepoRoot `
+        -OutputPath (Join-Path $testRoot 'head-build-identity.h') `
+        -Mode 'head' `
+        -Revision $headRevision `
+        -Description 'HEAD compile-time build identity'
     Assert-ScriptFails `
         -ScriptPath $packageScriptPath `
         -Arguments @(
@@ -719,9 +775,15 @@ try {
         },
         [pscustomobject]@{
             Mode = 'head'
-            Revision = 'not-a-full-object-id'
+            Revision = '0123456789ab'
             ShouldSucceed = $false
-            Description = 'CMake invalid head revision'
+            Description = 'CMake abbreviated head revision'
+        },
+        [pscustomobject]@{
+            Mode = 'head'
+            Revision = '0123456789ABCDEF0123456789ABCDEF01234567'
+            ShouldSucceed = $false
+            Description = 'CMake uppercase head revision'
         }
     )
     foreach ($contractCase in $cmakeContractCases) {

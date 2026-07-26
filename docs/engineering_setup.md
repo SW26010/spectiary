@@ -232,6 +232,13 @@ schema 2 `specforge_build_metadata.json` 复制到实际 EXE 旁。共同打包�
 对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包必须失败，
 而不是发布过期版本声明。
 
+同一组 CMake build-source 变量还生成
+`build\<preset>\generated\specforge\specforge_build_identity.h` 并编译进 EXE。
+About 对 working-tree 构建显示 `Source: Working tree`，对 HEAD 构建显示完整
+revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
+40 位 revision。因此 EXE 脱离 Portable sidecar 后仍能说明源码来源，而
+working-tree 构建不会声称任何 commit。
+
 ## 仓库卫生
 
 以下内容不进入提交：

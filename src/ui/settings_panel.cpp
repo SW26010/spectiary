@@ -2,6 +2,7 @@
 
 #include "app/runtime_paths.h"
 #include "ui/profile_recording_ui_state.h"
+#include "specforge/specforge_build_identity.h"
 #include "specforge/third_party_versions.h"
 
 #include <Windows.h>
@@ -141,8 +142,52 @@ SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
     return {
         .version = SPECFORGE_VERSION,
         .release_profile = ReleaseProfileName(paths.release_profile),
+        .build_source = {
+            .mode = build_info::kBuildSourceMode,
+            .revision = build_info::kBuildSourceRevision,
+        },
         .data_directory = paths.local_user_state_root,
     };
+}
+
+std::string FormatBuildSourceForAbout(
+    const BuildSourceIdentity& build_source)
+{
+    if (build_source.mode == "working_tree") {
+        return "Source: Working tree";
+    }
+    if (build_source.mode == "head") {
+        constexpr std::size_t kDisplayedRevisionLength = 12;
+        return "Source: HEAD " +
+            build_source.revision.substr(
+                0,
+                kDisplayedRevisionLength);
+    }
+    return "Source: " + build_source.mode;
+}
+
+std::string FormatDiagnosticInformation(
+    const SettingsPanelEnvironment& environment,
+    const std::filesystem::path& profile_output_directory)
+{
+    std::string diagnostics;
+    diagnostics.reserve(320);
+    diagnostics += "SpecForge ";
+    diagnostics += environment.version;
+    diagnostics += "\nRelease profile: ";
+    diagnostics += environment.release_profile;
+    diagnostics += "\nSource mode: ";
+    diagnostics += environment.build_source.mode;
+    if (environment.build_source.mode == "head") {
+        diagnostics += "\nSource revision: ";
+        diagnostics += environment.build_source.revision;
+    }
+    diagnostics += "\nGraphics: Direct3D 11 / SDR";
+    diagnostics += "\nData directory: ";
+    diagnostics += PathToUtf8(environment.data_directory);
+    diagnostics += "\nLog directory: ";
+    diagnostics += PathToUtf8(profile_output_directory);
+    return diagnostics;
 }
 
 SettingsPanelUi::SettingsPanelUi()
@@ -632,6 +677,9 @@ void SettingsPanelUi::RenderAbout(
     ImGui::Spacing();
     RenderReadOnlyValue("Version", environment_.version.c_str());
     RenderReadOnlyValue("Release profile", environment_.release_profile.c_str());
+    const std::string source_text =
+        FormatBuildSourceForAbout(environment_.build_source);
+    ImGui::TextUnformatted(source_text.c_str());
     RenderReadOnlyValue("Graphics", "Direct3D 11 / SDR");
 
     ImGui::Spacing();
@@ -715,17 +763,10 @@ void SettingsPanelUi::CopyPath(const std::filesystem::path& path, const char* la
 void SettingsPanelUi::CopyDiagnosticInformation(
     const std::filesystem::path& profile_output_directory)
 {
-    std::string diagnostics;
-    diagnostics.reserve(256);
-    diagnostics += "SpecForge ";
-    diagnostics += environment_.version;
-    diagnostics += "\nRelease profile: ";
-    diagnostics += environment_.release_profile;
-    diagnostics += "\nGraphics: Direct3D 11 / SDR";
-    diagnostics += "\nData directory: ";
-    diagnostics += PathToUtf8(environment_.data_directory);
-    diagnostics += "\nLog directory: ";
-    diagnostics += PathToUtf8(profile_output_directory);
+    const std::string diagnostics =
+        FormatDiagnosticInformation(
+            environment_,
+            profile_output_directory);
     ImGui::SetClipboardText(diagnostics.c_str());
     action_failed_ = false;
     action_status_ = "Diagnostic information copied.";

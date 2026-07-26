@@ -19,9 +19,15 @@ enum class SettingsSection {
     About,
 };
 
+struct BuildSourceIdentity {
+    std::string mode;
+    std::string revision;
+};
+
 struct SettingsPanelEnvironment {
     std::string version;
     std::string release_profile;
+    BuildSourceIdentity build_source;
     std::filesystem::path data_directory;
 };
 
@@ -33,6 +39,11 @@ struct SettingsPanelStatus {
 };
 
 [[nodiscard]] SettingsPanelEnvironment DefaultSettingsPanelEnvironment();
+[[nodiscard]] std::string FormatBuildSourceForAbout(
+    const BuildSourceIdentity& build_source);
+[[nodiscard]] std::string FormatDiagnosticInformation(
+    const SettingsPanelEnvironment& environment,
+    const std::filesystem::path& profile_output_directory);
 
 class SettingsPanelUi {
 public:
