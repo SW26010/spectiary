@@ -63,6 +63,23 @@ function Assert-SingleNoticeHeading {
     }
 }
 
+function Get-RequiredMetadataString {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [string]$PropertyName
+    )
+
+    $property = $Metadata.PSObject.Properties[$PropertyName]
+    if ($null -eq $property -or $property.Value -isnot [string] -or
+        [string]::IsNullOrWhiteSpace($property.Value)) {
+        throw "Build metadata is missing non-empty string '$PropertyName'."
+    }
+    if ($property.Value -cne $property.Value.Trim()) {
+        throw "Build metadata '$PropertyName' must not have leading or trailing whitespace."
+    }
+    return $property.Value
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
 
@@ -150,15 +167,21 @@ foreach ($propertyName in @(
     'specforge_version',
     'release_profile',
     'configuration',
+    'compiler_id',
+    'compiler_version',
+    'cmake_version',
+    'generator',
+    'target_architecture',
+    'windows_sdk_version',
     'dear_imgui',
     'implot',
     'zlib'
 )) {
-    if ([string]::IsNullOrWhiteSpace([string]$buildMetadata.$propertyName)) {
-        throw "Build metadata is missing '$propertyName'."
-    }
+    [void](Get-RequiredMetadataString `
+        -Metadata $buildMetadata `
+        -PropertyName $propertyName)
 }
-if ($buildMetadata.schema_version -ne 2) {
+if ($buildMetadata.schema_version -ne 3) {
     throw "Unsupported build metadata schema version '$($buildMetadata.schema_version)'."
 }
 if ($buildMetadata.source_mode -cne $SourceMode) {
@@ -178,6 +201,24 @@ if ($buildMetadata.release_profile -cne 'Portable') {
 }
 if ($buildMetadata.configuration -cne $Configuration) {
     throw "SpecForge.exe has configuration '$($buildMetadata.configuration)'; expected '$Configuration'."
+}
+if ($buildMetadata.compiler_id -cne 'MSVC') {
+    throw "SpecForge.exe has compiler '$($buildMetadata.compiler_id)'; expected 'MSVC'."
+}
+if ($buildMetadata.compiler_version -cnotmatch '^[0-9]+(?:\.[0-9]+){1,3}$') {
+    throw "Build metadata has invalid compiler_version '$($buildMetadata.compiler_version)'."
+}
+if ($buildMetadata.cmake_version -cnotmatch '^[0-9]+(?:\.[0-9]+){2,3}$') {
+    throw "Build metadata has invalid cmake_version '$($buildMetadata.cmake_version)'."
+}
+if ($buildMetadata.generator -match '[\x00-\x1f]') {
+    throw "Build metadata has invalid generator '$($buildMetadata.generator)'."
+}
+if ($buildMetadata.target_architecture -cne 'x64') {
+    throw "SpecForge.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'x64'."
+}
+if ($buildMetadata.windows_sdk_version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
+    throw "Build metadata has invalid windows_sdk_version '$($buildMetadata.windows_sdk_version)'."
 }
 
 foreach ($documentName in $releaseDocumentNames) {

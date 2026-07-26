@@ -32,7 +32,26 @@ param(
 
     [Parameter(Mandatory = $true)]
     [AllowEmptyString()]
-    [string]$SourceRevision
+    [string]$SourceRevision,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CompilerId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CompilerVersion,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CMakeVersion,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Generator,
+
+    [Parameter(Mandatory = $true)]
+    [string]$TargetArchitecture,
+
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
+    [string]$WindowsSdkVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -101,6 +120,34 @@ function Assert-BuildSourceContract {
     }
     elseif ($sourceRevisionProperty.Value -cne $ExpectedRevision) {
         throw "$Description source_revision expected '$ExpectedRevision'; found '$($sourceRevisionProperty.Value)'."
+    }
+}
+
+function Assert-BuildToolchainContract {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [System.Collections.IDictionary]$Expected,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    foreach ($expectedProperty in $Expected.GetEnumerator()) {
+        $property = $Metadata.PSObject.Properties[$expectedProperty.Key]
+        if ($null -eq $property) {
+            throw "$Description is missing '$($expectedProperty.Key)'."
+        }
+        if ($null -eq $expectedProperty.Value) {
+            if ($null -ne $property.Value) {
+                throw "$Description '$($expectedProperty.Key)' must be null; found '$($property.Value)'."
+            }
+            continue
+        }
+        if ($property.Value -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($property.Value)) {
+            throw "$Description is missing non-empty string '$($expectedProperty.Key)'."
+        }
+        if ($property.Value -cne [string]$expectedProperty.Value) {
+            throw "$Description '$($expectedProperty.Key)' expected '$($expectedProperty.Value)'; found '$($property.Value)'."
+        }
     }
 }
 
@@ -302,13 +349,30 @@ if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
 }
 
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
-if ($buildMetadata.schema_version -ne 2) {
+if ($buildMetadata.schema_version -ne 3) {
     throw "Built executable metadata has unsupported schema version '$($buildMetadata.schema_version)'."
 }
 Assert-BuildSourceContract `
     -Metadata $buildMetadata `
     -ExpectedMode $SourceMode `
     -ExpectedRevision $SourceRevision `
+    -Description 'Built executable metadata'
+$expectedToolchainMetadata = [ordered]@{
+    compiler_id = $CompilerId
+    compiler_version = $CompilerVersion
+    cmake_version = $CMakeVersion
+    generator = $Generator
+    target_architecture = $TargetArchitecture
+    windows_sdk_version = if ([string]::IsNullOrEmpty($WindowsSdkVersion)) {
+        $null
+    }
+    else {
+        $WindowsSdkVersion
+    }
+}
+Assert-BuildToolchainContract `
+    -Metadata $buildMetadata `
+    -Expected $expectedToolchainMetadata `
     -Description 'Built executable metadata'
 $expectedBuildMetadata = [ordered]@{
     specforge_version = $SpecForgeVersion
@@ -567,6 +631,12 @@ foreach ($propertyName in @(
     'specforge_version',
     'release_profile',
     'configuration',
+    'compiler_id',
+    'compiler_version',
+    'cmake_version',
+    'generator',
+    'target_architecture',
+    'windows_sdk_version',
     'dear_imgui',
     'implot',
     'zlib'
@@ -598,6 +668,20 @@ $testRoot = Join-Path `
 $testDistRoot = Join-Path $testRoot 'dist'
 try {
     $headRevision = '0123456789abcdef0123456789abcdef01234567'
+    $packageWindowsSdkVersion = if ([string]::IsNullOrEmpty($WindowsSdkVersion)) {
+        '10.0.26100.0'
+    }
+    else {
+        $WindowsSdkVersion
+    }
+    $expectedPackageToolchainMetadata = [ordered]@{
+        compiler_id = $CompilerId
+        compiler_version = $CompilerVersion
+        cmake_version = $CMakeVersion
+        generator = $Generator
+        target_architecture = $TargetArchitecture
+        windows_sdk_version = $packageWindowsSdkVersion
+    }
     Assert-BuildIdentityHeader `
         -FixturePath $buildIdentityFixturePath `
         -SourceRoot $RepoRoot `
@@ -677,6 +761,7 @@ try {
         else {
             $fixture.Revision
         }
+        $fixtureMetadata.windows_sdk_version = $packageWindowsSdkVersion
         $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'specforge_build_metadata.json'
         $fixtureMetadata |
             ConvertTo-Json -Depth 10 |
@@ -706,6 +791,114 @@ try {
             -ExpectedMode $fixture.Mode `
             -ExpectedRevision $fixture.Revision `
             -Description "$($fixture.Mode) packaged metadata"
+        Assert-BuildToolchainContract `
+            -Metadata $packagedMetadata `
+            -Expected $expectedPackageToolchainMetadata `
+            -Description "$($fixture.Mode) packaged metadata"
+    }
+
+    $invalidMetadataCases = @(
+        [pscustomobject]@{
+            Description = 'Metadata legacy schema'
+            PropertyName = 'schema_version'
+            Remove = $false
+            Value = 2
+            ExpectedMessage = 'Unsupported build metadata schema version'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata missing compiler ID'
+            PropertyName = 'compiler_id'
+            Remove = $true
+            Value = $null
+            ExpectedMessage = "missing non-empty string 'compiler_id'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata blank generator'
+            PropertyName = 'generator'
+            Remove = $false
+            Value = ' '
+            ExpectedMessage = "missing non-empty string 'generator'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata unsupported compiler'
+            PropertyName = 'compiler_id'
+            Remove = $false
+            Value = 'Clang'
+            ExpectedMessage = "expected 'MSVC'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata invalid compiler version'
+            PropertyName = 'compiler_version'
+            Remove = $false
+            Value = 'latest'
+            ExpectedMessage = 'invalid compiler_version'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata invalid CMake version'
+            PropertyName = 'cmake_version'
+            Remove = $false
+            Value = '4'
+            ExpectedMessage = 'invalid cmake_version'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata unsupported target architecture'
+            PropertyName = 'target_architecture'
+            Remove = $false
+            Value = 'arm64'
+            ExpectedMessage = "expected 'x64'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata missing Windows SDK version'
+            PropertyName = 'windows_sdk_version'
+            Remove = $false
+            Value = $null
+            ExpectedMessage = "missing non-empty string 'windows_sdk_version'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata invalid Windows SDK version'
+            PropertyName = 'windows_sdk_version'
+            Remove = $false
+            Value = 'current'
+            ExpectedMessage = 'invalid windows_sdk_version'
+        }
+    )
+    foreach ($invalidCase in $invalidMetadataCases) {
+        $invalidBuildRoot = Join-Path `
+            $testRoot `
+            "invalid-metadata-$($invalidCase.PropertyName)-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $invalidBuildRoot -Force | Out-Null
+        Copy-Item `
+            -LiteralPath $resolvedBuiltExecutable `
+            -Destination (Join-Path $invalidBuildRoot 'SpecForge.exe')
+        $invalidMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
+            ConvertFrom-Json
+        $invalidMetadata.windows_sdk_version = $packageWindowsSdkVersion
+        if ($invalidCase.Remove) {
+            $invalidMetadata.PSObject.Properties.Remove($invalidCase.PropertyName)
+        }
+        else {
+            $invalidMetadata.($invalidCase.PropertyName) = $invalidCase.Value
+        }
+        $invalidMetadata |
+            ConvertTo-Json -Depth 10 |
+            Set-Content `
+                -LiteralPath (Join-Path $invalidBuildRoot 'specforge_build_metadata.json') `
+                -Encoding UTF8
+        Assert-ScriptFails `
+            -ScriptPath $packageScriptPath `
+            -Arguments @(
+                '-SkipBuild',
+                '-BuildRoot',
+                $invalidBuildRoot,
+                '-DistRoot',
+                $testDistRoot,
+                '-PackageName',
+                "SpecForge-portable-invalid-$($invalidCase.PropertyName)",
+                '-Configuration',
+                $Configuration
+            ) `
+            -ExpectedMessage $invalidCase.ExpectedMessage `
+            -Description $invalidCase.Description
     }
 
     $invalidBaseArguments = @(

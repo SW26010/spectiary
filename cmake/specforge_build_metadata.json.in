@@ -1,10 +1,16 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "source_mode": "@SPECFORGE_BUILD_SOURCE_MODE@",
   "source_revision": @SPECFORGE_BUILD_SOURCE_REVISION_JSON@,
   "specforge_version": "@PROJECT_VERSION@",
   "release_profile": "@SPECFORGE_RELEASE_PROFILE@",
   "configuration": "$<CONFIG>",
+  "compiler_id": "@SPECFORGE_BUILD_COMPILER_ID@",
+  "compiler_version": "@SPECFORGE_BUILD_COMPILER_VERSION@",
+  "cmake_version": "@SPECFORGE_BUILD_CMAKE_VERSION@",
+  "generator": "@SPECFORGE_BUILD_GENERATOR@",
+  "target_architecture": "@SPECFORGE_BUILD_TARGET_ARCHITECTURE@",
+  "windows_sdk_version": @SPECFORGE_BUILD_WINDOWS_SDK_VERSION_JSON@,
   "dear_imgui": "@SPECFORGE_IMGUI_VERSION@",
   "implot": "@SPECFORGE_IMPLOT_VERSION@",
   "zlib": "@SPECFORGE_ZLIB_VERSION@"

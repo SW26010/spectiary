@@ -222,8 +222,14 @@ checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` �
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。About 编译时使用
 `build\<preset>\generated\specforge\third_party_versions.h`。构建成功后，
-CMake 将包含 SpecForge 版本、release profile、configuration、第三方版本和构建来源的
-schema 2 `specforge_build_metadata.json` 复制到实际 EXE 旁。共同打包脚本接受两种
+CMake 将包含 SpecForge 版本、release profile、configuration、第三方版本、构建来源和
+若干构建环境诊断维度的 schema 3 `specforge_build_metadata.json` 复制到实际 EXE 旁。字段为
+`compiler_id`、`compiler_version`、`cmake_version`、`generator`、
+`target_architecture` 和 `windows_sdk_version`。这些值来自实际配置当前 target 的 CMake；
+若生成器没有提供权威的 Windows SDK 选择（例如 Ninja），开发构建写入
+`windows_sdk_version: null`，不会从 SDK 工具安装路径猜测。正式 Portable 打包仍要求
+MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 只校验并原样复制 metadata，
+不会从调用 shell 的环境重复推导构建信息。共同打包脚本接受两种
 严格组合：`working_tree` 必须使用 JSON `null` revision；`head` 必须显式携带完整
 40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口负责
 解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，按字节复制到 Portable 根目录，
@@ -238,6 +244,11 @@ About 对 working-tree 构建显示 `Source: Working tree`，对 HEAD 构建显�
 revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
 40 位 revision。因此 EXE 脱离 Portable sidecar 后仍能说明源码来源，而
 working-tree 构建不会声称任何 commit。
+
+metadata 有意不记录构建时间：configure、link 与 package 时间尚未形成稳定语义，直接嵌入
+当前时间也会破坏受控构建输入下的二进制可复现性。这些 schema 3 字段只用于诊断和比较，
+不是完整 artifact identity 或可复现性保证；最终 Portable ZIP 由 SHA-256 标识。CI build
+number、artifact manifest 和 Windows `VERSIONINFO` 分别属于后续独立契约。
 
 ## 仓库卫生
 

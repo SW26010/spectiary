@@ -128,10 +128,18 @@ zero dropped events.
 The first portable package is a no-launcher zip with `SpecForge.exe`,
 `specforge_build_metadata.json`, `Data/`, and `Legal/` at the zip root.
 `specforge_build_metadata.json` identifies whether a package came from current
-workspace files or an isolated committed `HEAD` snapshot; immutable build
-metadata stays outside the mutable `Data/` user-state directory. `Legal/`
-contains the SpecForge EULA, complete third-party software notices, and
-scientific data attribution.
+workspace files or an isolated committed `HEAD` snapshot. Schema 3 also records
+selected build-environment dimensions for diagnostics and comparison: compiler,
+CMake, generator, target architecture, and, when the generator exposes an
+authoritative selection, the Windows SDK. Ninja and other configurations
+without such a CMake value record `windows_sdk_version: null`; formal Portable
+packaging requires a non-null SDK version. CMake is the sole source of these
+values, and packaging does not re-derive them from the PowerShell environment.
+This tuple is not an artifact identity or a reproducibility guarantee; the
+packaged ZIP SHA-256 identifies the final artifact. Immutable build metadata
+stays outside the mutable `Data/` user-state directory. `Legal/` contains the
+SpecForge EULA, complete third-party software notices, and scientific data
+attribution.
 
 Build current workspace files without claiming a Git revision:
 

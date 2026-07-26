@@ -11,11 +11,19 @@ profile under `Data` in the package root. For the current no-launcher Portable
 artifact, the package root is the executable directory: the zip root contains
 `SpecForge.exe` and immutable `specforge_build_metadata.json`, with mutable user
 state under `Data` and release documents under `Legal` beside them. Build
-metadata schema 2 records the source contract separately from the product
-version and release profile. A package built directly from workspace files uses
-`source_mode: "working_tree"` and `source_revision: null`; it must not infer a
-Git revision. A committed-source package uses `source_mode: "head"` with an
-explicit full Git object ID. Its entrypoint freezes the local HEAD revision,
+metadata schema 3 records the source contract and selected build-environment
+dimensions separately from the product version and release profile. These
+diagnostic dimensions are compiler ID and version, CMake version, generator,
+normalized target architecture, and Windows SDK version when the generator
+exposes an authoritative selection. CMake is the sole source for these values.
+Configurations without an authoritative CMake SDK value record
+`windows_sdk_version: null` rather than infer it from an installed-tool path.
+Formal Portable packaging still requires MSVC, x64, and a non-null valid Windows
+SDK version; packaging validates and preserves metadata instead of re-deriving
+it from the PowerShell environment. A package built directly from workspace
+files uses `source_mode: "working_tree"` and `source_revision: null`; it must not
+infer a Git revision. A committed-source package uses `source_mode: "head"` with
+an explicit full Git object ID. Its entrypoint freezes the local HEAD revision,
 exports that exact object through `git archive`, and runs the shared Portable
 builder inside the temporary snapshot. HEAD output lives under `dist/head`, so
 it does not replace the working-tree package. CMake and the shared packaging
@@ -31,6 +39,15 @@ time if the release profile is missing or ambiguous. CMake may use a cache
 string for validation, but C++ must branch on mutually exclusive compile
 definitions rather than parse a string macro such as
 `SPECFORGE_RELEASE_PROFILE="Portable"`.
+
+Build time is deliberately absent from this schema. Configure, link, and
+package time have different meanings, no one meaning has been selected, and
+embedding the current time would damage reproducibility for otherwise identical
+controlled build inputs. The schema 3 environment tuple is diagnostic
+information for comparison, not an artifact identity or a reproducibility
+guarantee. The packaged artifact SHA-256 remains the final artifact identity.
+CI build numbers, Windows `VERSIONINFO`, signing, SBOM data, and tag gates
+remain separate release contracts.
 
 The initial delivery sequence is Portable first. Installed remains a defined
 release profile so the storage decision stays explicit, but the v1 deliverable
