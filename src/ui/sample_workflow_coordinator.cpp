@@ -4,6 +4,7 @@
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_workflow_preparation.h"
+#include "ui/source_collection_session.h"
 
 #include <algorithm>
 #include <cctype>
@@ -147,6 +148,29 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
 
 }  // namespace
 
+void MergeSampleWorkflowTransitionOutcome(
+    SampleWorkflowTransitionOutcome& target,
+    SampleWorkflowTransitionOutcome source)
+{
+    MergeSourceCollectionSessionAction(
+        target.action,
+        source.action);
+    target.navigation = std::move(source.navigation);
+    if (source.snapshot_target_updated) {
+        target.snapshot_target_updated = true;
+        target.snapshot_index_to_load =
+            source.snapshot_index_to_load;
+    }
+    target.changed = target.changed || source.changed;
+    target.loaded = target.loaded || source.loaded;
+    target.invalidate_view =
+        target.invalidate_view ||
+        source.invalidate_view;
+    if (!source.message.empty()) {
+        target.message = std::move(source.message);
+    }
+}
+
 SampleWorkflowCoordinator::SampleWorkflowCoordinator()
     : workflow_state_cache_path_(DefaultSampleWorkflowStateCachePath()),
       workflow_state_cache_loader_([](const std::filesystem::path& path) {
@@ -195,23 +219,273 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
 {
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
+    SourceCollectionIntent intent,
+    const SpectrumSnapshotHandle& snapshot)
+{
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    switch (intent.kind) {
+    case SourceCollectionIntentKind::AddReadOnlyAnnotationResult:
+        outcome = AddReadOnlyAnnotationToActiveSource(intent.path);
+        break;
+    case SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult:
+        outcome = RemoveReadOnlyAnnotationFromActiveSource(intent.path);
+        break;
+    case SourceCollectionIntentKind::RenameAnnotationResultDisplayName:
+        outcome = RenameAnnotationDisplayNameForActiveSource(
+            std::move(intent.path),
+            std::move(intent.display_name));
+        break;
+    case SourceCollectionIntentKind::SwitchActive:
+    case SourceCollectionIntentKind::Remove:
+        break;
+    }
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before);
+}
+
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
+    SampleNavigationIntent intent,
+    const SpectrumSnapshotHandle& snapshot,
+    NavigationTargetResolutionReport* target_resolution)
+{
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    switch (intent.kind) {
+    case SampleNavigationIntentKind::Move:
+        outcome = RequestSampleNavigation(
+            intent.request,
+            snapshot,
+            std::nullopt,
+            target_resolution);
+        break;
+    case SampleNavigationIntentKind::SetSampleNameQuery:
+        outcome = SetSampleNameQuery(std::move(intent.query));
+        break;
+    case SampleNavigationIntentKind::CommitSampleNameSelection:
+        outcome = CommitSampleNameSelection(
+            intent.target_row,
+            std::move(intent.matched_name),
+            snapshot);
+        break;
+    }
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before);
+}
+
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
+    ActiveSampleWorkflowIntent intent,
+    const SpectrumSnapshotHandle& snapshot,
+    NavigationTargetResolutionReport* target_resolution)
+{
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    switch (intent.kind) {
+    case ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask:
+        outcome = StartOrResumeTemporaryLabelingTask();
+        break;
+    case ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation:
+        outcome = ActivateLabelingTaskFromAnnotation(
+            std::move(intent.path));
+        break;
+    case ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask:
+        outcome = DeleteActiveLabelingTask();
+        break;
+    case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
+        outcome = UpsertActiveLabel(std::move(intent.label));
+        break;
+    case ActiveSampleWorkflowIntentKind::UpdateActiveLabel:
+        outcome = UpdateActiveLabel(
+            intent.label_code,
+            std::move(intent.label),
+            intent.allow_used_label_code_change);
+        break;
+    case ActiveSampleWorkflowIntentKind::RemoveActiveLabel:
+        outcome = RemoveActiveLabel(intent.label_code);
+        break;
+    case ActiveSampleWorkflowIntentKind::SetActiveLabelingAutoAdvance:
+        outcome = SetActiveLabelingAutoAdvance(intent.enabled);
+        break;
+    case ActiveSampleWorkflowIntentKind::SetActiveLabelingSkipLabeledOnAdvance:
+        outcome = SetActiveLabelingSkipLabeledOnAdvance(
+            intent.enabled);
+        break;
+    case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
+        outcome = SetActiveLabelingOutputPath(std::move(intent.path));
+        break;
+    case ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask:
+        outcome = DeactivateActiveLabelingTask();
+        break;
+    case ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample:
+        outcome = AssignActiveLabelToCurrentSample(
+            snapshot,
+            intent.label_code,
+            target_resolution);
+        break;
+    case ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample:
+        outcome = ClearActiveLabelForCurrentSample(
+            snapshot,
+            target_resolution);
+        break;
+    case ActiveSampleWorkflowIntentKind::UndoLastLabelWrite:
+        outcome = UndoLastLabelWrite(snapshot);
+        break;
+    }
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before);
+}
+
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
+    SampleFilteringIntent intent,
+    const SpectrumSnapshotHandle& snapshot)
+{
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    switch (intent.kind) {
+    case SampleFilteringIntentKind::ClearFilters:
+        outcome = ClearFilters(snapshot);
+        break;
+    case SampleFilteringIntentKind::AddFilterSource:
+        outcome = AddFilterSource(
+            snapshot,
+            std::move(intent.source_id));
+        break;
+    case SampleFilteringIntentKind::RemoveFilterSource:
+        outcome = RemoveFilterSource(
+            snapshot,
+            std::move(intent.source_id));
+        break;
+    case SampleFilteringIntentKind::SetFilterValueSelected:
+        outcome = SetFilterValueSelected(
+            snapshot,
+            std::move(intent.source_id),
+            std::move(intent.value_key),
+            intent.selected);
+        break;
+    }
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before);
+}
+
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
+    SampleSortingIntent intent,
+    const SpectrumSnapshotHandle& snapshot)
+{
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    switch (intent.kind) {
+    case SampleSortingIntentKind::ClearSorting:
+        outcome = ClearSampleSorting(snapshot);
+        break;
+    case SampleSortingIntentKind::AddSortSource:
+        outcome = AddSampleSortSource(
+            snapshot,
+            std::move(intent.source_id));
+        break;
+    case SampleSortingIntentKind::RemoveSortSource:
+        outcome = RemoveSampleSortSource(
+            snapshot,
+            std::move(intent.source_id));
+        break;
+    case SampleSortingIntentKind::SetSortSource:
+        outcome = SetSampleSortSource(
+            snapshot,
+            std::move(intent.source_id));
+        break;
+    case SampleSortingIntentKind::SetSortDirection:
+        outcome = SetSampleSortDirection(
+            snapshot,
+            intent.direction);
+        break;
+    }
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before);
+}
+
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::CompleteTransition(
+    SampleWorkflowTransitionOutcome outcome,
+    const SpectrumSnapshotHandle& snapshot,
+    std::uint64_t presentation_revision_before,
+    bool align_snapshot_target) const
+{
+    if (align_snapshot_target &&
+        !outcome.snapshot_target_updated) {
+        const std::optional<std::size_t> pending_index =
+            navigation_.pending_index();
+        const std::optional<std::size_t> target_index =
+            pending_index
+            ? pending_index
+            : navigation_.current_index();
+        if (target_index && snapshot &&
+            snapshot->collection.spectrum_count > 0 &&
+            snapshot->collection.current_index !=
+                *target_index) {
+            outcome.snapshot_target_updated = true;
+            outcome.snapshot_index_to_load =
+                target_index;
+        }
+    }
+    if (outcome.snapshot_index_to_load) {
+        outcome.action.navigation_inputs_changed = true;
+    }
+    outcome.invalidate_view =
+        outcome.invalidate_view ||
+        outcome.action.source_roster_changed ||
+        outcome.action.snapshot_changed ||
+        outcome.action.workflow_changed ||
+        outcome.action.navigation_inputs_changed ||
+        outcome.changed ||
+        outcome.loaded ||
+        labeling_.View().revision !=
+            presentation_revision_before;
+    return outcome;
+}
+
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot)
 {
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
     DiscardPreparedViewCaches();
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
         navigation_.ClearActiveSource();
-        ClearSampleWorkflow(action);
-        return action;
+        ClearSampleWorkflow(outcome.action);
+        return CompleteTransition(
+            std::move(outcome),
+            snapshot,
+            presentation_revision_before,
+            true);
     }
 
-    return SyncActiveSourceWithContext(
+    outcome = SyncActiveSourceWithContext(
         std::move(source_key),
         snapshot,
         LoadSourceCollectionContext(*snapshot),
         std::nullopt);
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before,
+        true);
 }
 
 PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedActiveSource(
@@ -285,7 +559,7 @@ bool SampleWorkflowCoordinator::CanReusePreparedKnownSource(
            known->spectrum_count == identity.spectrum_count;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SyncReusedPreparedKnownSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncReusedPreparedKnownSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot,
     const SourceCollectionIdentity& identity)
@@ -293,7 +567,9 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncReusedPreparedKnown
     if (!snapshot || !CanReusePreparedKnownSource(source_key, identity)) {
         return {};
     }
-    return SyncKnownActiveSource(std::move(source_key), snapshot);
+    return SyncKnownActiveSource(
+        std::move(source_key),
+        snapshot);
 }
 
 std::optional<SourceCollectionIdentity> SampleWorkflowCoordinator::ActiveSourceIdentity() const
@@ -330,24 +606,34 @@ std::optional<SampleLabelingSourceState> SampleWorkflowCoordinator::LabelingStat
     return labeling_.SourceStateForIdentity(source_identity);
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SyncKnownActiveSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot)
 {
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
     DiscardPreparedViewCaches();
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
         navigation_.ClearActiveSource();
-        ClearSampleWorkflow(action);
-        return action;
+        ClearSampleWorkflow(outcome.action);
+        return CompleteTransition(
+            std::move(outcome),
+            snapshot,
+            presentation_revision_before,
+            true);
     }
 
     const std::optional<SourceCollectionIdentity> identity =
         navigation_.ActivateKnownSource(*source_key);
     if (!identity) {
         navigation_.ClearActiveSource();
-        ClearSampleWorkflow(action);
-        return action;
+        ClearSampleWorkflow(outcome.action);
+        return CompleteTransition(
+            std::move(outcome),
+            snapshot,
+            presentation_revision_before,
+            true);
     }
 
     const bool workflow_identity_changed =
@@ -359,28 +645,32 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncKnownActiveSource(
         ClearLabelUndoHistory();
     }
 
-    SyncSampleWorkflowSession(*identity, action);
+    SyncSampleWorkflowSession(*identity, outcome.action);
     if (workflow_identity_changed || workflow_context_changed) {
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 snapshot,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        presentation_revision_before,
+        true);
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSourceWithContext(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSourceWithContext(
     std::optional<std::string> source_key,
     const SpectrumSnapshotHandle& snapshot,
     SourceCollectionContext context,
     std::optional<std::size_t> prepared_index)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!source_key || !snapshot || snapshot->source.path.empty()) {
         navigation_.ClearActiveSource();
-        ClearSampleWorkflow(action);
-        return action;
+        ClearSampleWorkflow(outcome.action);
+        return outcome;
     }
 
     const SourceCollectionIdentity& identity = context.identity;
@@ -400,22 +690,27 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SyncActiveSourceWithCon
         identity,
         std::move(context.manifest),
         prepared_index);
-    SyncSampleWorkflowSession(identity, action);
+    SyncSampleWorkflowSession(identity, outcome.action);
     if (workflow_identity_changed || workflow_context_changed) {
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 snapshot,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::ClearActiveWorkflow()
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearActiveWorkflow()
 {
-    SourceCollectionSessionAction action;
-    ClearSampleWorkflow(action);
-    return action;
+    const std::uint64_t presentation_revision_before =
+        labeling_.View().revision;
+    SampleWorkflowTransitionOutcome outcome;
+    ClearSampleWorkflow(outcome.action);
+    return CompleteTransition(
+        std::move(outcome),
+        nullptr,
+        presentation_revision_before);
 }
 
 void SampleWorkflowCoordinator::BeginRestoringSourceSession()
@@ -525,14 +820,15 @@ std::optional<PendingSampleNavigation> SampleWorkflowCoordinator::pending_sample
     };
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::RequestSampleNavigation(
     const SampleNavigationRequest& request,
     const SpectrumSnapshotHandle& snapshot,
     std::optional<std::size_t> deferred_base_index,
     NavigationTargetResolutionReport* target_resolution)
 {
-    SampleWorkflowCommandResult result;
+    SampleWorkflowTransitionOutcome result;
     const std::optional<std::size_t> pending_index_before = navigation_.pending_index();
+    const std::optional<std::size_t> current_index_before = navigation_.current_index();
     result.navigation = deferred_sample_navigation_
         ? navigation_.NavigateDeferred(
               request,
@@ -540,6 +836,30 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
               deferred_base_index,
               target_resolution)
         : navigation_.Navigate(request);
+    const std::optional<std::size_t> pending_index_after =
+        navigation_.pending_index();
+    const std::optional<std::size_t> current_index_after =
+        navigation_.current_index();
+    const std::optional<std::size_t> snapshot_target_before =
+        deferred_sample_navigation_
+        ? pending_index_before
+        : current_index_before;
+    const std::optional<std::size_t> snapshot_target_after =
+        deferred_sample_navigation_
+        ? pending_index_after
+        : current_index_after;
+    if (snapshot_target_after != snapshot_target_before) {
+        result.snapshot_target_updated = true;
+        if (snapshot_target_after &&
+            (!snapshot ||
+             snapshot->collection.current_index !=
+                 *snapshot_target_after)) {
+            result.snapshot_index_to_load =
+                snapshot_target_after;
+        } else {
+            result.action.navigation_inputs_changed = true;
+        }
+    }
     if (result.navigation.has_active_source && result.navigation.target_found) {
         if (!deferred_sample_navigation_ && ShouldRememberLabelingPosition(request.kind)) {
             (void)labeling_.RememberActivePosition(result.navigation.current_index);
@@ -548,50 +868,33 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::RequestSampleNavigation(
     if (!result.navigation.has_active_source || !result.navigation.target_found) {
         return result;
     }
-
-    if (deferred_sample_navigation_) {
-        const std::optional<std::size_t> pending_index_after = navigation_.pending_index();
-        if (pending_index_after == pending_index_before) {
-            return result;
-        }
-        if (pending_index_after &&
-            (!snapshot || snapshot->collection.current_index != *pending_index_after)) {
-            result.snapshot_index_to_load = pending_index_after;
-        } else {
-            result.action.navigation_inputs_changed = true;
-        }
-    } else if (!snapshot || snapshot->collection.current_index != result.navigation.current_index) {
-        result.snapshot_index_to_load = result.navigation.current_index;
-    } else {
-        result.action.navigation_inputs_changed = true;
-    }
     return result;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::AddReadOnlyAnnotationToActiveSource(
-    const std::filesystem::path& path,
-    bool* loaded,
-    std::string* message)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::AddReadOnlyAnnotationToActiveSource(
+    const std::filesystem::path& path)
 {
-    SourceCollectionSessionAction action;
-    const bool annotation_loaded = navigation_.AddReadOnlyAnnotationToActiveSource(path, message);
-    if (loaded != nullptr) {
-        *loaded = annotation_loaded;
-    }
-    if (annotation_loaded) {
+    SampleWorkflowTransitionOutcome outcome;
+    outcome.loaded =
+        navigation_.AddReadOnlyAnnotationToActiveSource(
+            path,
+            &outcome.message);
+    if (outcome.loaded) {
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotationFromActiveSource(
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RemoveReadOnlyAnnotationFromActiveSource(
     const std::filesystem::path& path)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     std::optional<std::string> removed_source_id;
     if (const SourceCollectionManifest* context = navigation_.active_context()) {
         if (const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, path)) {
@@ -600,7 +903,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
     }
     const bool removed_annotation = navigation_.RemoveReadOnlyAnnotationFromActiveSource(path);
     if (!removed_annotation) {
-        return action;
+        return outcome;
     }
 
     if (removed_source_id) {
@@ -609,27 +912,28 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveReadOnlyAnnotatio
     }
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::RenameAnnotationDisplayNameForActiveSource(
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RenameAnnotationDisplayNameForActiveSource(
     std::filesystem::path path,
     std::string display_name)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.RenameAnnotationDisplayName(
             SourcePolicyContext(nullptr),
             path,
             std::move(display_name))) {
-        return action;
+        return outcome;
     }
     MarkActiveWorkflowStateDirty();
-    action.workflow_changed = true;
-    return action;
+    outcome.action.workflow_changed = true;
+    return outcome;
 }
 
 bool SampleWorkflowCoordinator::RestoreReadOnlyAnnotationsForActiveSource(
@@ -656,16 +960,17 @@ std::vector<std::filesystem::path> SampleWorkflowCoordinator::AnnotationPathsFor
     return navigation_.AnnotationPathsForSourceKey(source_key);
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleNameQuery(std::string query)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::SetSampleNameQuery(std::string query)
 {
-    SourceCollectionSessionAction action;
-    action.navigation_inputs_changed =
+    SampleWorkflowTransitionOutcome outcome;
+    outcome.action.navigation_inputs_changed =
         navigation_.SetSampleNameQuery(
             std::move(query));
-    return action;
+    return outcome;
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::CommitSampleNameSelection(
     std::size_t target_row,
     std::string matched_name,
     const SpectrumSnapshotHandle& snapshot)
@@ -674,7 +979,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
         navigation_.SetSampleNameQuery(
             std::move(matched_name));
     std::string query{navigation_.sample_name_query()};
-    SampleWorkflowCommandResult result =
+    SampleWorkflowTransitionOutcome result =
         RequestSampleNavigation(
             SampleNavigationRequest::LocateSampleNameMatch(
                 target_row,
@@ -686,15 +991,16 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::CommitSampleNameSelection
     return result;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingOperationResult result =
         labeling_.StartOrResumeTemporaryTask();
     if (result.changed) {
         ClearLabelUndoHistory();
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{
@@ -702,16 +1008,17 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::StartOrResumeTemporaryL
                     .filters_changed = true,
                     .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     std::filesystem::path annotation_path)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const SourceCollectionManifest* context = navigation_.active_context();
     if (context == nullptr || annotation_path.empty()) {
-        return action;
+        return outcome;
     }
 
     const std::vector<SampleLabelingTask>* active_source_tasks =
@@ -724,7 +1031,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         loaded_annotation =
             SampleAnnotationIoAdapter{}.Load(annotation_path, sample_count, &load_error);
         if (!loaded_annotation) {
-            return action;
+            return outcome;
         }
         annotation = &*loaded_annotation;
     }
@@ -737,21 +1044,21 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
             .active_source_tasks = active_source_tasks,
             .metadata = metadata ? &*metadata : nullptr});
     if (plan.kind == SampleAnnotationLabelingActivationKind::None) {
-        return action;
+        return outcome;
     }
     if (active_task != nullptr && active_task->task_id == plan.task_id) {
-        return action;
+        return outcome;
     }
     if (active_task != nullptr &&
         (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask().changed)) {
-        return action;
+        return outcome;
     }
 
     if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
         if (labeling_.ActivateTask(plan.task_id).accepted) {
             ClearLabelUndoHistory();
             ApplyNavigationInputEffects(
-                action,
+                outcome,
                 ReconcileNavigationInputs(
                     nullptr,
                     NavigationInputReconcileRequest{
@@ -759,7 +1066,7 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
                         .filters_changed = true,
                         .sorting_changed = true}));
         }
-        return action;
+        return outcome;
     }
 
     const SampleLabelingOperationResult create_result = labeling_.CreateTaskFromAnnotation(
@@ -770,30 +1077,31 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::ActivateLabelingTaskFro
         annotation->path,
         plan.metadata_clean);
     if (!create_result.accepted) {
-        return action;
+        return outcome;
     }
     ClearLabelUndoHistory();
     if (!plan.metadata_clean && create_result.output_saved) {
         (void)navigation_.AddReadOnlyAnnotationToActiveSource(annotation->path);
     }
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{
                 .workflow_changed = true,
                 .filters_changed = true,
                 .sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTask()
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::DeleteActiveLabelingTask()
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingTask* task = labeling_.View().active_task;
     const std::string deleted_task_source_id = task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*task);
     if (!labeling_.DeleteActiveTask().changed) {
-        return action;
+        return outcome;
     }
     ClearLabelUndoHistory();
 
@@ -802,54 +1110,49 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::DeleteActiveLabelingTas
     }
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{
                 .workflow_changed = true,
                 .filters_changed = true,
                 .sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::UpsertActiveLabel(
+    SampleLabelDefinition label)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingOperationResult operation =
         labeling_.UpsertActiveLabel(std::move(label));
-    const bool label_changed = operation.changed;
-    if (changed != nullptr) {
-        *changed = label_changed;
-    }
-    if (label_changed) {
+    outcome.changed = operation.changed;
+    if (outcome.changed) {
         ClearLabelUndoHistory();
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::UpdateActiveLabel(
     int original_code,
     SampleLabelDefinition label,
-    bool allow_used_code_change,
-    bool* changed)
+    bool allow_used_code_change)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const int updated_code = label.code;
     const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::string sample_filter_source_id =
         active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
     const SampleLabelingOperationResult operation =
         labeling_.UpdateActiveLabel(original_code, std::move(label), allow_used_code_change);
-    const bool label_changed = operation.changed;
-    if (changed != nullptr) {
-        *changed = label_changed;
-    }
-    if (label_changed) {
+    outcome.changed = operation.changed;
+    if (outcome.changed) {
         ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&
             workflow_sources_.ReplaceSampleFilterValue(
@@ -859,26 +1162,24 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::UpdateActiveLabel(
             MarkActiveWorkflowStateDirty();
         }
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int code, bool* changed)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RemoveActiveLabel(int code)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::string sample_filter_source_id =
         active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
     const SampleLabelingOperationResult operation = labeling_.RemoveActiveLabel(code);
-    const bool label_changed = operation.changed;
-    if (changed != nullptr) {
-        *changed = label_changed;
-    }
-    if (label_changed) {
+    outcome.changed = operation.changed;
+    if (outcome.changed) {
         ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&
             workflow_sources_.RemoveSampleFilterValue(
@@ -887,31 +1188,34 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveActiveLabel(int c
             MarkActiveWorkflowStateDirty();
         }
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingAutoAdvance(bool enabled)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::SetActiveLabelingAutoAdvance(bool enabled)
 {
-    SourceCollectionSessionAction action;
     (void)labeling_.SetActiveAutoAdvance(enabled);
-    return action;
+    return {};
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::SetActiveLabelingSkipLabeledOnAdvance(
+    bool enabled)
 {
-    SourceCollectionSessionAction action;
     (void)labeling_.SetActiveSkipLabeledOnAdvance(enabled);
-    return action;
+    return {};
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutputPath(std::filesystem::path output_path)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
+    std::filesystem::path output_path)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     const std::filesystem::path selected_output_path = output_path;
     const SampleLabelingOperationResult operation =
         labeling_.SaveActiveTemporaryTaskToOutput(
@@ -928,35 +1232,36 @@ SourceCollectionSessionAction SampleWorkflowCoordinator::SetActiveLabelingOutput
         }
         MarkActiveWorkflowStateDirty();
         ApplyNavigationInputEffects(
-            action,
+            outcome,
             ReconcileNavigationInputs(
                 nullptr,
                 NavigationInputReconcileRequest{.filters_changed = true, .sorting_changed = true}));
     }
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::DeactivateActiveLabelingTask()
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::DeactivateActiveLabelingTask()
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!labeling_.DeactivateActiveTask().changed) {
-        return action;
+        return outcome;
     }
     ClearLabelUndoHistory();
 
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             nullptr,
             NavigationInputReconcileRequest{
                 .workflow_changed = true,
                 .filters_changed = true,
                 .sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::AssignActiveLabelToCurrentSample(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::AssignActiveLabelToCurrentSample(
     const SpectrumSnapshotHandle& snapshot,
     int code,
     NavigationTargetResolutionReport* target_resolution)
@@ -973,7 +1278,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::AssignActiveLabelToCurren
         target_resolution);
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::ClearActiveLabelForCurrentSample(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearActiveLabelForCurrentSample(
     const SpectrumSnapshotHandle& snapshot,
     NavigationTargetResolutionReport* target_resolution)
 {
@@ -989,7 +1294,7 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ClearActiveLabelForCurren
         target_resolution);
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::UndoLastLabelWrite(
     const SpectrumSnapshotHandle& snapshot)
 {
     if (!LabelUndoHistoryMatchesActiveTask() || label_undo_history_->entries.empty()) {
@@ -1024,155 +1329,156 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::UndoLastLabelWrite(
         entry.sample_index);
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::ClearFilters(const SpectrumSnapshotHandle& snapshot)
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearFilters(
+    const SpectrumSnapshotHandle& snapshot)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     workflow_sources_.ClearFilters();
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.filters_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::AddFilterSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::AddFilterSource(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.AddFilterSource(SourcePolicyContext(snapshot), std::move(source_id))) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
-    action.workflow_changed = true;
-    return action;
+    outcome.action.workflow_changed = true;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveFilterSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::RemoveFilterSource(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.RemoveFilterSource(source_id)) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.filters_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetFilterValueSelected(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SetFilterValueSelected(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id,
     std::string value_key,
     bool selected)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.SetFilterValueSelected(
             SourcePolicyContext(snapshot),
             std::move(source_id),
             std::move(value_key),
             selected)) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.filters_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::ClearSampleSorting(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearSampleSorting(
     const SpectrumSnapshotHandle& snapshot)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     workflow_sources_.ClearSampleSorting();
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::AddSampleSortSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::AddSampleSortSource(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.AddSampleSortSource(SourcePolicyContext(snapshot), std::move(source_id))) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
-    action.workflow_changed = true;
-    return action;
+    outcome.action.workflow_changed = true;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::RemoveSampleSortSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::RemoveSampleSortSource(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (!workflow_sources_.RemoveSampleSortSource(source_id)) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortSource(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SetSampleSortSource(
     const SpectrumSnapshotHandle& snapshot,
     std::string source_id)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     if (source_id.empty()) {
         return ClearSampleSorting(snapshot);
     }
     if (!workflow_sources_.SetSampleSortSource(SourcePolicyContext(snapshot), std::move(source_id))) {
-        return action;
+        return outcome;
     }
 
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SampleWorkflowCoordinator::SetSampleSortDirection(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SetSampleSortDirection(
     const SpectrumSnapshotHandle& snapshot,
     SampleNavigationSortDirection direction)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     workflow_sources_.SetSampleSortDirection(direction);
     MarkActiveWorkflowStateDirty();
     ApplyNavigationInputEffects(
-        action,
+        outcome,
         ReconcileNavigationInputs(
             snapshot,
             NavigationInputReconcileRequest{.sorting_changed = true}));
-    return action;
+    return outcome;
 }
 
 SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const SpectrumSnapshotHandle& snapshot) const
@@ -1341,12 +1647,6 @@ std::optional<std::size_t> SampleWorkflowCoordinator::current_index() const
     return navigation_.current_index();
 }
 
-std::uint64_t
-SampleWorkflowCoordinator::presentation_revision() const
-{
-    return labeling_.View().revision;
-}
-
 std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
     SampleNavigationDirection direction,
     SampleNavigationPrefetchPolicy policy) const
@@ -1444,12 +1744,34 @@ SampleWorkflowCoordinator::ReconcileNavigationInputs(
     effects.workflow_changed = request.workflow_changed;
     effects.navigation_inputs_changed = request.filters_changed || request.sorting_changed;
     if (request.filters_changed) {
-        if (const std::optional<std::size_t> target = ApplySampleFilters(snapshot)) {
+        const std::optional<std::size_t> target_before =
+            deferred_sample_navigation_
+            ? navigation_.pending_index()
+            : navigation_.current_index();
+        const std::optional<std::size_t> target =
+            ApplySampleFilters(snapshot);
+        const std::optional<std::size_t> target_after =
+            deferred_sample_navigation_
+            ? navigation_.pending_index()
+            : navigation_.current_index();
+        if (target || target_after != target_before) {
+            effects.snapshot_target_updated = true;
             effects.snapshot_index_to_load = target;
         }
     }
     if (request.sorting_changed) {
-        if (const std::optional<std::size_t> target = ApplySampleSorting(snapshot)) {
+        const std::optional<std::size_t> target_before =
+            deferred_sample_navigation_
+            ? navigation_.pending_index()
+            : navigation_.current_index();
+        const std::optional<std::size_t> target =
+            ApplySampleSorting(snapshot);
+        const std::optional<std::size_t> target_after =
+            deferred_sample_navigation_
+            ? navigation_.pending_index()
+            : navigation_.current_index();
+        if (target || target_after != target_before) {
+            effects.snapshot_target_updated = true;
             effects.snapshot_index_to_load = target;
         }
     }
@@ -1457,21 +1779,19 @@ SampleWorkflowCoordinator::ReconcileNavigationInputs(
 }
 
 void SampleWorkflowCoordinator::ApplyNavigationInputEffects(
-    SourceCollectionSessionAction& action,
+    SampleWorkflowTransitionOutcome& outcome,
     const NavigationInputReconcileEffects& effects)
 {
-    action.workflow_changed = action.workflow_changed || effects.workflow_changed;
-    action.navigation_inputs_changed =
-        action.navigation_inputs_changed || effects.navigation_inputs_changed;
-}
-
-void SampleWorkflowCoordinator::ApplyNavigationInputEffects(
-    SampleWorkflowCommandResult& result,
-    const NavigationInputReconcileEffects& effects)
-{
-    ApplyNavigationInputEffects(result.action, effects);
-    if (effects.snapshot_index_to_load) {
-        result.snapshot_index_to_load = effects.snapshot_index_to_load;
+    outcome.action.workflow_changed =
+        outcome.action.workflow_changed ||
+        effects.workflow_changed;
+    outcome.action.navigation_inputs_changed =
+        outcome.action.navigation_inputs_changed ||
+        effects.navigation_inputs_changed;
+    if (effects.snapshot_target_updated) {
+        outcome.snapshot_target_updated = true;
+        outcome.snapshot_index_to_load =
+            effects.snapshot_index_to_load;
     }
 }
 
@@ -1656,7 +1976,7 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
     return false;
 }
 
-SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
+SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult(
     const SpectrumSnapshotHandle& snapshot,
     const SampleLabelWriteResult& result,
     NavigationTargetResolutionReport* target_resolution,
@@ -1664,9 +1984,9 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
     std::optional<std::size_t> restore_sample_index)
 {
     DiscardPreparedViewCaches();
-    SampleWorkflowCommandResult command_result;
+    SampleWorkflowTransitionOutcome outcome;
     if (!result.changed) {
-        return command_result;
+        return outcome;
     }
 
     if (record_undo) {
@@ -1678,26 +1998,25 @@ SampleWorkflowCommandResult SampleWorkflowCoordinator::ApplyLabelWriteResult(
     const NavigationInputReconcileEffects effects = ReconcileNavigationInputs(
         snapshot,
         NavigationInputReconcileRequest{.filters_changed = true});
-    ApplyNavigationInputEffects(command_result, effects);
+    ApplyNavigationInputEffects(outcome, effects);
 
     if (restore_sample_index) {
-        const SampleWorkflowCommandResult navigation_result = RequestSampleNavigation(
-            SampleNavigationRequest::RestoreLabelUndoPosition(*restore_sample_index),
-            snapshot);
-        MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
-        command_result.navigation = navigation_result.navigation;
-        command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;
+        MergeSampleWorkflowTransitionOutcome(
+            outcome,
+            RequestSampleNavigation(
+                SampleNavigationRequest::RestoreLabelUndoPosition(
+                    *restore_sample_index),
+                snapshot));
     } else if (result.advance_requested && task != nullptr) {
-        const SampleWorkflowCommandResult navigation_result = RequestSampleNavigation(
-            BuildAutoAdvanceRequest(*task),
-            snapshot,
-            result.sample_index,
-            target_resolution);
-        MergeSourceCollectionSessionAction(command_result.action, navigation_result.action);
-        command_result.navigation = navigation_result.navigation;
-        command_result.snapshot_index_to_load = navigation_result.snapshot_index_to_load;
+        MergeSampleWorkflowTransitionOutcome(
+            outcome,
+            RequestSampleNavigation(
+                BuildAutoAdvanceRequest(*task),
+                snapshot,
+                result.sample_index,
+                target_resolution));
     }
-    return command_result;
+    return outcome;
 }
 
 void SampleWorkflowCoordinator::RecordLabelUndo(const SampleLabelWriteResult& result)

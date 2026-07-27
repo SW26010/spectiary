@@ -22,6 +22,13 @@ still owns navigation order, filters, sorting, and undo coordination. A
 labeling write may request advance, but only the coordinator resolves and
 applies that navigation request.
 
+Workflow mutations cross the coordinator/session boundary as one complete
+transition outcome. The outcome carries domain change flags, navigation
+results, any snapshot index that must be loaded next, command-specific status,
+and whether the session view must be invalidated. `SourceCollectionSession`
+consumes that outcome while retaining ownership of the source roster,
+activation, background follow-up, and presentation lifecycles.
+
 We keep sample navigation, sample filtering, sample annotation inspection, and
 active manual labeling as separate UI surfaces. This avoids letting a labeling
 window own unrelated concerns like current index, sample-filter composition, loaded

@@ -21,7 +21,7 @@
 namespace specforge {
 
 class SampleWorkflowCoordinator;
-struct SampleWorkflowCommandResult;
+struct SampleWorkflowTransitionOutcome;
 class SourceCollectionRoster;
 struct SourceCollectionRosterOpenResult;
 class SourceCollectionSessionStatePersistence;
@@ -107,6 +107,7 @@ struct SourceCollectionIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
     SourceCollectionIntent() = default;
@@ -126,6 +127,7 @@ struct SampleNavigationIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
     SampleNavigationIntent() = default;
@@ -158,6 +160,7 @@ struct ActiveSampleWorkflowIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
     ActiveSampleWorkflowIntent() = default;
@@ -181,6 +184,7 @@ struct SampleFilteringIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
     SampleFilteringIntent() = default;
@@ -200,6 +204,7 @@ struct SampleSortingIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
     SampleSortingIntent() = default;
@@ -237,6 +242,7 @@ struct SourceCollectionSessionResult {
     std::vector<BackgroundRetirementHandle> background_retirement;
     bool changed = false;
     bool loaded = false;
+    bool view_invalidated = false;
     std::string message;
 };
 
@@ -310,81 +316,21 @@ public:
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
 
 private:
-    [[nodiscard]] SourceCollectionSessionAction ActivateSource(std::size_t source_index);
-    [[nodiscard]] SourceCollectionSessionAction RemoveSource(
+    [[nodiscard]] SampleWorkflowTransitionOutcome ActivateSource(
+        std::size_t source_index);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RemoveSource(
         std::size_t source_index,
         std::vector<BackgroundRetirementHandle>& background_retirement,
         std::optional<std::filesystem::path>* canceled_source_follow_up_path);
-    [[nodiscard]] SourceCollectionSessionAction RequestSampleNavigation(
-        const SampleNavigationRequest& request,
-        SampleNavigationResult* navigation_result = nullptr,
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
-        const std::filesystem::path& path,
-        bool* loaded = nullptr,
-        std::string* message = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
-        const std::filesystem::path& path);
-    [[nodiscard]] SourceCollectionSessionAction RenameAnnotationDisplayName(
-        std::filesystem::path path,
-        std::string display_name);
-
-    [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
-    [[nodiscard]] SourceCollectionSessionAction CommitSampleNameSelection(
-        std::size_t target_row,
-        std::string matched_name,
-        SampleNavigationResult* navigation_result = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction StartOrResumeTemporaryLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
-        std::filesystem::path annotation_path);
-    [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
-        SampleLabelDefinition label,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction UpdateActiveLabel(
-        int original_code,
-        SampleLabelDefinition label,
-        bool allow_used_code_change,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction RemoveActiveLabel(
-        int code,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
-    [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction AssignActiveLabelToCurrentSample(
-        int code,
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction ClearActiveLabelForCurrentSample(
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction UndoLastLabelWrite();
-    [[nodiscard]] SourceCollectionSessionAction ClearFilters();
-    [[nodiscard]] SourceCollectionSessionAction AddFilterSource(std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction RemoveFilterSource(std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetFilterValueSelected(
-        std::string source_id,
-        std::string value_key,
-        bool selected);
-    [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting();
-    [[nodiscard]] SourceCollectionSessionAction AddSampleSortSource(std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction RemoveSampleSortSource(std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(SampleNavigationSortDirection direction);
-
-    [[nodiscard]] SourceCollectionSessionAction
-        EnsureSnapshotMatchesNavigation();
-    void PreserveRequiredBackgroundSnapshotLoad();
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
     void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
     void InvalidateView();
     void AppendPendingBackgroundRetirement(
         std::vector<BackgroundRetirementHandle>& retirement);
-    void ApplyWorkflowCommandResult(
-        SourceCollectionSessionAction& action,
-        const SampleWorkflowCommandResult& command_result,
-        SampleNavigationResult* navigation_result = nullptr);
+    void ApplyWorkflowTransitionOutcome(
+        SourceCollectionSessionResult& result,
+        SampleWorkflowTransitionOutcome outcome);
     [[nodiscard]] SourceCollectionSessionAction AdoptRosterOpenResult(
         SourceCollectionRosterOpenResult result);
 

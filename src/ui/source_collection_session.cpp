@@ -497,8 +497,6 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     SourceCollectionSessionIntent intent,
     NavigationTargetResolutionReport* target_resolution)
 {
-    const std::uint64_t presentation_revision_before =
-        workflow_->presentation_revision();
     const NavigationLatencyTimePoint pending_activation_started_at =
         target_resolution != nullptr ? NavigationLatencyTrace::Now()
                                      : NavigationLatencyTimePoint{};
@@ -525,142 +523,74 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         workflow_->DiscardPreparedViewCaches();
     }
     SourceCollectionSessionResult result;
+    SampleWorkflowTransitionOutcome transition;
     switch (intent.kind) {
     case SourceCollectionSessionIntentKind::SourceCollection:
         switch (intent.source_collection.kind) {
         case SourceCollectionIntentKind::SwitchActive:
-            result.action = ActivateSource(intent.source_collection.source_index);
+            transition =
+                ActivateSource(
+                    intent.source_collection.source_index);
             break;
         case SourceCollectionIntentKind::Remove:
-            result.action = RemoveSource(
+            transition = RemoveSource(
                 intent.source_collection.source_index,
                 result.background_retirement,
                 &result.canceled_source_follow_up_path);
             break;
-        case SourceCollectionIntentKind::AddReadOnlyAnnotationResult:
-            result.action = AddReadOnlyAnnotationToActiveSource(
-                intent.source_collection.path,
-                &result.loaded,
-                &result.message);
+        case SourceCollectionIntentKind::AddReadOnlyAnnotationResult: {
+            transition = workflow_->Apply(
+                std::move(intent.source_collection),
+                roster_->snapshot());
+            if (transition.loaded) {
+                MarkSourceSessionCacheDirty();
+            }
             break;
-        case SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult:
-            result.action = RemoveReadOnlyAnnotationFromActiveSource(intent.source_collection.path);
+        }
+        case SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult: {
+            transition = workflow_->Apply(
+                std::move(intent.source_collection),
+                roster_->snapshot());
+            if (transition.action.navigation_inputs_changed ||
+                transition.action.workflow_changed ||
+                transition.action.snapshot_changed) {
+                MarkSourceSessionCacheDirty();
+            }
             break;
+        }
         case SourceCollectionIntentKind::RenameAnnotationResultDisplayName:
-            result.action = RenameAnnotationDisplayName(
-                std::move(intent.source_collection.path),
-                std::move(intent.source_collection.display_name));
+            transition = workflow_->Apply(
+                std::move(intent.source_collection),
+                roster_->snapshot());
             break;
         }
         break;
     case SourceCollectionSessionIntentKind::SampleNavigation:
-        switch (intent.sample_navigation.kind) {
-        case SampleNavigationIntentKind::Move:
-            result.action = RequestSampleNavigation(
-                intent.sample_navigation.request,
-                &result.navigation,
-                target_resolution);
-            break;
-        case SampleNavigationIntentKind::SetSampleNameQuery:
-            result.action = SetSampleNameQuery(std::move(intent.sample_navigation.query));
-            break;
-        case SampleNavigationIntentKind::CommitSampleNameSelection:
-            result.action = CommitSampleNameSelection(
-                intent.sample_navigation.target_row,
-                std::move(intent.sample_navigation.matched_name),
-                &result.navigation);
-            break;
-        }
+        transition = workflow_->Apply(
+            std::move(intent.sample_navigation),
+            roster_->snapshot(),
+            target_resolution);
         break;
     case SourceCollectionSessionIntentKind::ActiveSampleWorkflow:
-        switch (intent.active_sample_workflow.kind) {
-        case ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask:
-            result.action = StartOrResumeTemporaryLabelingTask();
-            break;
-        case ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation:
-            result.action = ActivateLabelingTaskFromAnnotation(std::move(intent.active_sample_workflow.path));
-            break;
-        case ActiveSampleWorkflowIntentKind::DeleteActiveLabelingTask:
-            result.action = DeleteActiveLabelingTask();
-            break;
-        case ActiveSampleWorkflowIntentKind::UpsertActiveLabel:
-            result.action = UpsertActiveLabel(std::move(intent.active_sample_workflow.label), &result.changed);
-            break;
-        case ActiveSampleWorkflowIntentKind::UpdateActiveLabel:
-            result.action = UpdateActiveLabel(
-                intent.active_sample_workflow.label_code,
-                std::move(intent.active_sample_workflow.label),
-                intent.active_sample_workflow.allow_used_label_code_change,
-                &result.changed);
-            break;
-        case ActiveSampleWorkflowIntentKind::RemoveActiveLabel:
-            result.action = RemoveActiveLabel(intent.active_sample_workflow.label_code, &result.changed);
-            break;
-        case ActiveSampleWorkflowIntentKind::SetActiveLabelingAutoAdvance:
-            result.action = SetActiveLabelingAutoAdvance(intent.active_sample_workflow.enabled);
-            break;
-        case ActiveSampleWorkflowIntentKind::SetActiveLabelingSkipLabeledOnAdvance:
-            result.action = SetActiveLabelingSkipLabeledOnAdvance(intent.active_sample_workflow.enabled);
-            break;
-        case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
-            result.action = SetActiveLabelingOutputPath(std::move(intent.active_sample_workflow.path));
-            break;
-        case ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask:
-            result.action = DeactivateActiveLabelingTask();
-            break;
-        case ActiveSampleWorkflowIntentKind::AssignActiveLabelToCurrentSample:
-            result.action = AssignActiveLabelToCurrentSample(
-                intent.active_sample_workflow.label_code,
-                target_resolution);
-            break;
-        case ActiveSampleWorkflowIntentKind::ClearActiveLabelForCurrentSample:
-            result.action = ClearActiveLabelForCurrentSample(target_resolution);
-            break;
-        case ActiveSampleWorkflowIntentKind::UndoLastLabelWrite:
-            result.action = UndoLastLabelWrite();
-            break;
-        }
+        transition = workflow_->Apply(
+            std::move(intent.active_sample_workflow),
+            roster_->snapshot(),
+            target_resolution);
         break;
     case SourceCollectionSessionIntentKind::SampleFiltering:
-        switch (intent.sample_filtering.kind) {
-        case SampleFilteringIntentKind::ClearFilters:
-            result.action = ClearFilters();
-            break;
-        case SampleFilteringIntentKind::AddFilterSource:
-            result.action = AddFilterSource(std::move(intent.sample_filtering.source_id));
-            break;
-        case SampleFilteringIntentKind::RemoveFilterSource:
-            result.action = RemoveFilterSource(std::move(intent.sample_filtering.source_id));
-            break;
-        case SampleFilteringIntentKind::SetFilterValueSelected:
-            result.action = SetFilterValueSelected(
-                std::move(intent.sample_filtering.source_id),
-                std::move(intent.sample_filtering.value_key),
-                intent.sample_filtering.selected);
-            break;
-        }
+        transition = workflow_->Apply(
+            std::move(intent.sample_filtering),
+            roster_->snapshot());
         break;
     case SourceCollectionSessionIntentKind::SampleSorting:
-        switch (intent.sample_sorting.kind) {
-        case SampleSortingIntentKind::ClearSorting:
-            result.action = ClearSampleSorting();
-            break;
-        case SampleSortingIntentKind::AddSortSource:
-            result.action = AddSampleSortSource(std::move(intent.sample_sorting.source_id));
-            break;
-        case SampleSortingIntentKind::RemoveSortSource:
-            result.action = RemoveSampleSortSource(std::move(intent.sample_sorting.source_id));
-            break;
-        case SampleSortingIntentKind::SetSortSource:
-            result.action = SetSampleSortSource(std::move(intent.sample_sorting.source_id));
-            break;
-        case SampleSortingIntentKind::SetSortDirection:
-            result.action = SetSampleSortDirection(intent.sample_sorting.direction);
-            break;
-        }
+        transition = workflow_->Apply(
+            std::move(intent.sample_sorting),
+            roster_->snapshot());
         break;
     }
-    PreserveRequiredBackgroundSnapshotLoad();
+    ApplyWorkflowTransitionOutcome(
+        result,
+        std::move(transition));
     const NavigationLatencyTimePoint pending_follow_up_started_at =
         target_resolution != nullptr ? NavigationLatencyTrace::Now()
                                      : NavigationLatencyTimePoint{};
@@ -691,12 +621,13 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         active_identity && !active_identity->id.empty()) {
         ++live_workflow_revisions_[active_identity->id];
     }
-    if (result.action.source_roster_changed ||
+    result.view_invalidated =
+        result.view_invalidated ||
+        result.action.source_roster_changed ||
         result.action.snapshot_changed ||
         result.action.workflow_changed ||
-        result.action.navigation_inputs_changed ||
-        workflow_->presentation_revision() !=
-            presentation_revision_before) {
+        result.action.navigation_inputs_changed;
+    if (result.view_invalidated) {
         InvalidateView();
     }
     AppendPendingBackgroundRetirement(
@@ -874,30 +805,39 @@ SourceCollectionSession::StorePrefetchedSnapshot(
     return result;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::ActivateSource(std::size_t source_index)
+SampleWorkflowTransitionOutcome
+SourceCollectionSession::ActivateSource(
+    std::size_t source_index)
 {
     if (!roster_->has_source(source_index)) {
         return {};
     }
 
-    SourceCollectionSessionAction action = roster_->ActivateSource(source_index);
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+    SampleWorkflowTransitionOutcome outcome;
+    outcome.action = roster_->ActivateSource(source_index);
+    MergeSampleWorkflowTransitionOutcome(
+        outcome,
+        workflow_->SyncKnownActiveSource(
+            roster_->current_source_key(),
+            roster_->snapshot()));
     MarkSourceSessionCacheDirty();
-    return action;
+    return outcome;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
+SampleWorkflowTransitionOutcome SourceCollectionSession::RemoveSource(
     std::size_t source_index,
     std::vector<BackgroundRetirementHandle>& background_retirement,
     std::optional<std::filesystem::path>* canceled_source_follow_up_path)
 {
-    SourceCollectionSessionAction action;
+    SampleWorkflowTransitionOutcome outcome;
     SourceCollectionRosterRemoveResult remove_result = roster_->RemoveSource(source_index);
-    MergeSourceCollectionSessionAction(action, remove_result.action);
+    MergeSourceCollectionSessionAction(
+        outcome.action,
+        remove_result.action);
     if (!remove_result.removed) {
-        return action;
+        return outcome;
     }
-    action.source_roster_changed = true;
+    outcome.action.source_roster_changed = true;
 
     if (canceled_source_follow_up_path != nullptr) {
         *canceled_source_follow_up_path = remove_result.removed_path;
@@ -917,90 +857,16 @@ SourceCollectionSessionAction SourceCollectionSession::RemoveSource(
         background_retirement.push_back(std::move(retired_workflow));
     }
     if (remove_result.removed_current) {
-        MergeSourceCollectionSessionAction(action, workflow_->ClearActiveWorkflow());
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
+        MergeSampleWorkflowTransitionOutcome(
+            outcome,
+            workflow_->ClearActiveWorkflow());
+        MergeSampleWorkflowTransitionOutcome(
+            outcome,
+            workflow_->SyncKnownActiveSource(
+                roster_->current_source_key(),
+                roster_->snapshot()));
     }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RequestSampleNavigation(
-    const SampleNavigationRequest& request,
-    SampleNavigationResult* navigation_result,
-    NavigationTargetResolutionReport* target_resolution)
-{
-    SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(
-        action,
-        workflow_->RequestSampleNavigation(
-            request,
-            roster_->snapshot(),
-            std::nullopt,
-            target_resolution),
-        navigation_result);
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::AddReadOnlyAnnotationToActiveSource(
-    const std::filesystem::path& path,
-    bool* loaded,
-    std::string* message)
-{
-    bool annotation_loaded = false;
-    SourceCollectionSessionAction action =
-        workflow_->AddReadOnlyAnnotationToActiveSource(path, &annotation_loaded, message);
-    if (loaded != nullptr) {
-        *loaded = annotation_loaded;
-    }
-    if (annotation_loaded) {
-        MarkSourceSessionCacheDirty();
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RemoveReadOnlyAnnotationFromActiveSource(
-    const std::filesystem::path& path)
-{
-    SourceCollectionSessionAction action = workflow_->RemoveReadOnlyAnnotationFromActiveSource(path);
-    if (action.navigation_inputs_changed || action.workflow_changed || action.snapshot_changed) {
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-        MarkSourceSessionCacheDirty();
-    }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RenameAnnotationDisplayName(
-    std::filesystem::path path,
-    std::string display_name)
-{
-    return workflow_->RenameAnnotationDisplayNameForActiveSource(
-        std::move(path),
-        std::move(display_name));
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetSampleNameQuery(std::string query)
-{
-    return workflow_->SetSampleNameQuery(std::move(query));
-}
-
-SourceCollectionSessionAction SourceCollectionSession::CommitSampleNameSelection(
-    std::size_t target_row,
-    std::string matched_name,
-    SampleNavigationResult* navigation_result)
-{
-    SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(
-        action,
-        workflow_->CommitSampleNameSelection(target_row, std::move(matched_name), roster_->snapshot()),
-        navigation_result);
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::StartOrResumeTemporaryLabelingTask()
-{
-    SourceCollectionSessionAction action = workflow_->StartOrResumeTemporaryLabelingTask();
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
+    return outcome;
 }
 
 SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
@@ -1107,6 +973,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             result.canceled_source_follow_up_path = previous_snapshot->source.path;
             result.message = "Prepared navigation no longer has a selectable final spectrum.";
         }
+        result.view_invalidated = true;
         InvalidateView();
         retire_folder_listing_generation();
         return result;
@@ -1156,12 +1023,21 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         }
     } else {
         const auto& reuse = std::get<PreparedSourceCollectionReuse>(payload);
-        MergeSourceCollectionSessionAction(
-            result.action,
+        SampleWorkflowTransitionOutcome transition =
             workflow_->SyncReusedPreparedKnownSource(
                 roster_->current_source_key(),
                 roster_->snapshot(),
-                reuse.identity));
+                reuse.identity);
+        MergeSourceCollectionSessionAction(
+            result.action,
+            transition.action);
+        result.view_invalidated =
+            result.view_invalidated ||
+            transition.invalidate_view;
+        if (transition.snapshot_index_to_load) {
+            result.follow_up_spectrum_index =
+                transition.snapshot_index_to_load;
+        }
     }
     const SpectrumSnapshotHandle& active_snapshot = roster_->snapshot();
     const std::optional<std::size_t> active_index = workflow_->current_index();
@@ -1178,6 +1054,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             return SourcePathIdentityKey(source.path) == prepared_path_key;
         });
     MarkSourceSessionCacheDirty();
+    result.view_invalidated = true;
     InvalidateView();
     AppendPendingBackgroundRetirement(
         result.background_retirement);
@@ -1266,183 +1143,6 @@ bool SourceCollectionSession::CancelActivePendingSampleNavigation()
     return true;
 }
 
-SourceCollectionSessionAction SourceCollectionSession::ActivateLabelingTaskFromAnnotation(
-    std::filesystem::path annotation_path)
-{
-    return workflow_->ActivateLabelingTaskFromAnnotation(std::move(annotation_path));
-}
-
-SourceCollectionSessionAction SourceCollectionSession::DeleteActiveLabelingTask()
-{
-    SourceCollectionSessionAction action = workflow_->DeleteActiveLabelingTask();
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::UpsertActiveLabel(SampleLabelDefinition label, bool* changed)
-{
-    return workflow_->UpsertActiveLabel(std::move(label), changed);
-}
-
-SourceCollectionSessionAction SourceCollectionSession::UpdateActiveLabel(
-    int original_code,
-    SampleLabelDefinition label,
-    bool allow_used_code_change,
-    bool* changed)
-{
-    SourceCollectionSessionAction action = workflow_->UpdateActiveLabel(
-        original_code,
-        std::move(label),
-        allow_used_code_change,
-        changed);
-    if (action.navigation_inputs_changed) {
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RemoveActiveLabel(int code, bool* changed)
-{
-    SourceCollectionSessionAction action = workflow_->RemoveActiveLabel(code, changed);
-    if (action.navigation_inputs_changed) {
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingAutoAdvance(bool enabled)
-{
-    return workflow_->SetActiveLabelingAutoAdvance(enabled);
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingSkipLabeledOnAdvance(bool enabled)
-{
-    return workflow_->SetActiveLabelingSkipLabeledOnAdvance(enabled);
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetActiveLabelingOutputPath(std::filesystem::path output_path)
-{
-    SourceCollectionSessionAction action = workflow_->SetActiveLabelingOutputPath(std::move(output_path));
-    if (action.navigation_inputs_changed) {
-        MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    }
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::DeactivateActiveLabelingTask()
-{
-    SourceCollectionSessionAction action = workflow_->DeactivateActiveLabelingTask();
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::AssignActiveLabelToCurrentSample(
-    int code,
-    NavigationTargetResolutionReport* target_resolution)
-{
-    SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(
-        action,
-        workflow_->AssignActiveLabelToCurrentSample(
-            roster_->snapshot(),
-            code,
-            target_resolution));
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::ClearActiveLabelForCurrentSample(
-    NavigationTargetResolutionReport* target_resolution)
-{
-    SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(
-        action,
-        workflow_->ClearActiveLabelForCurrentSample(
-            roster_->snapshot(),
-            target_resolution));
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::UndoLastLabelWrite()
-{
-    SourceCollectionSessionAction action;
-    ApplyWorkflowCommandResult(action, workflow_->UndoLastLabelWrite(roster_->snapshot()));
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::ClearFilters()
-{
-    SourceCollectionSessionAction action = workflow_->ClearFilters(roster_->snapshot());
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::AddFilterSource(std::string source_id)
-{
-    return workflow_->AddFilterSource(roster_->snapshot(), std::move(source_id));
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RemoveFilterSource(std::string source_id)
-{
-    SourceCollectionSessionAction action =
-        workflow_->RemoveFilterSource(roster_->snapshot(), std::move(source_id));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetFilterValueSelected(
-    std::string source_id,
-    std::string value_key,
-    bool selected)
-{
-    SourceCollectionSessionAction action = workflow_->SetFilterValueSelected(
-        roster_->snapshot(),
-        std::move(source_id),
-        std::move(value_key),
-        selected);
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::ClearSampleSorting()
-{
-    SourceCollectionSessionAction action = workflow_->ClearSampleSorting(roster_->snapshot());
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::AddSampleSortSource(std::string source_id)
-{
-    SourceCollectionSessionAction action =
-        workflow_->AddSampleSortSource(roster_->snapshot(), std::move(source_id));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::RemoveSampleSortSource(std::string source_id)
-{
-    SourceCollectionSessionAction action =
-        workflow_->RemoveSampleSortSource(roster_->snapshot(), std::move(source_id));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetSampleSortSource(std::string source_id)
-{
-    SourceCollectionSessionAction action =
-        workflow_->SetSampleSortSource(roster_->snapshot(), std::move(source_id));
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
-SourceCollectionSessionAction SourceCollectionSession::SetSampleSortDirection(
-    SampleNavigationSortDirection direction)
-{
-    SourceCollectionSessionAction action =
-        workflow_->SetSampleSortDirection(roster_->snapshot(), direction);
-    MergeSourceCollectionSessionAction(action, EnsureSnapshotMatchesNavigation());
-    return action;
-}
-
 std::vector<BackgroundRetirementHandle>
 SourceCollectionSession::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
@@ -1474,28 +1174,6 @@ bool SourceCollectionSession::FlushStateCaches()
         source_session_state_->Flush(SavedSourcesWithAnnotations(), roster_->current_source_index());
     const bool workflow_saved = workflow_->FlushStateCaches();
     return source_session_saved && workflow_saved;
-}
-
-SourceCollectionSessionAction
-SourceCollectionSession::EnsureSnapshotMatchesNavigation()
-{
-    SourceCollectionSessionAction action =
-        workflow_->SyncKnownActiveSource(
-            roster_->current_source_key(),
-            roster_->snapshot());
-    const std::optional<std::size_t> pending_index = workflow_->pending_sample_index();
-    const std::optional<std::size_t> navigation_index = pending_index
-        ? pending_index
-        : workflow_->current_index();
-    const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
-    if (navigation_index && snapshot && snapshot->collection.spectrum_count > 0 &&
-        snapshot->collection.current_index != *navigation_index) {
-        pending_background_spectrum_index_ = *navigation_index;
-        action.navigation_inputs_changed = true;
-        return action;
-    }
-    action.navigation_inputs_changed = true;
-    return action;
 }
 
 std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWithAnnotations() const
@@ -1549,20 +1227,6 @@ SourceCollectionSession::TakeViewRetirement()
     return std::exchange(
         pending_session_view_retirement_,
         {});
-}
-
-void SourceCollectionSession::PreserveRequiredBackgroundSnapshotLoad()
-{
-    if (const std::optional<std::size_t> pending_index = workflow_->pending_sample_index()) {
-        pending_background_spectrum_index_ = *pending_index;
-        return;
-    }
-    const std::optional<std::size_t> navigation_index = workflow_->current_index();
-    const SpectrumSnapshotHandle& snapshot = roster_->snapshot();
-    if (navigation_index && snapshot && snapshot->collection.spectrum_count > 0 &&
-        snapshot->collection.current_index != *navigation_index) {
-        pending_background_spectrum_index_ = *navigation_index;
-    }
 }
 
 void SourceCollectionSession::PrepareDeferredSourceSessionRestore()
@@ -1623,19 +1287,25 @@ void SourceCollectionSession::AppendPendingBackgroundRetirement(
     pending_background_retirement_.clear();
 }
 
-void SourceCollectionSession::ApplyWorkflowCommandResult(
-    SourceCollectionSessionAction& action,
-    const SampleWorkflowCommandResult& command_result,
-    SampleNavigationResult* navigation_result)
+void SourceCollectionSession::ApplyWorkflowTransitionOutcome(
+    SourceCollectionSessionResult& result,
+    SampleWorkflowTransitionOutcome outcome)
 {
-    if (navigation_result != nullptr) {
-        *navigation_result = command_result.navigation;
+    MergeSourceCollectionSessionAction(
+        result.action,
+        outcome.action);
+    result.navigation = std::move(outcome.navigation);
+    result.changed = result.changed || outcome.changed;
+    result.loaded = result.loaded || outcome.loaded;
+    result.view_invalidated =
+        result.view_invalidated ||
+        outcome.invalidate_view;
+    if (!outcome.message.empty()) {
+        result.message = std::move(outcome.message);
     }
-    MergeSourceCollectionSessionAction(action, command_result.action);
-    if (command_result.snapshot_index_to_load) {
+    if (outcome.snapshot_index_to_load) {
         pending_background_spectrum_index_ =
-            *command_result.snapshot_index_to_load;
-        action.navigation_inputs_changed = true;
+            *outcome.snapshot_index_to_load;
     }
 }
 

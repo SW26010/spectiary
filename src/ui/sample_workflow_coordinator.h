@@ -9,6 +9,7 @@
 #include "ui/source_collection_session_types.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -23,12 +24,28 @@ namespace specforge {
 
 struct PreparedSampleWorkflowState;
 struct SampleWorkflowPreparationCacheBundle;
+struct SourceCollectionIntent;
+struct SampleNavigationIntent;
+struct ActiveSampleWorkflowIntent;
+struct SampleFilteringIntent;
+struct SampleSortingIntent;
 
-struct SampleWorkflowCommandResult {
+struct SampleWorkflowTransitionOutcome {
     SourceCollectionSessionAction action;
     SampleNavigationResult navigation;
+    // When true, snapshot_index_to_load replaces an earlier composed target;
+    // nullopt explicitly clears that target.
+    bool snapshot_target_updated = false;
     std::optional<std::size_t> snapshot_index_to_load;
+    bool changed = false;
+    bool loaded = false;
+    bool invalidate_view = false;
+    std::string message;
 };
+
+void MergeSampleWorkflowTransitionOutcome(
+    SampleWorkflowTransitionOutcome& target,
+    SampleWorkflowTransitionOutcome source);
 
 struct PreparedSampleWorkflowActivationResult {
     SourceCollectionSessionAction action;
@@ -60,7 +77,25 @@ public:
         SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
         WorkflowStateCacheLoader workflow_state_cache_loader);
 
-    [[nodiscard]] SourceCollectionSessionAction SyncActiveSource(
+    [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
+        SourceCollectionIntent intent,
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
+        SampleNavigationIntent intent,
+        const SpectrumSnapshotHandle& snapshot,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
+        ActiveSampleWorkflowIntent intent,
+        const SpectrumSnapshotHandle& snapshot,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
+        SampleFilteringIntent intent,
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
+        SampleSortingIntent intent,
+        const SpectrumSnapshotHandle& snapshot);
+
+    [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] PreparedSampleWorkflowActivationResult SyncPreparedActiveSource(
@@ -71,7 +106,7 @@ public:
     [[nodiscard]] bool CanReusePreparedKnownSource(
         std::optional<std::string> source_key,
         const SourceCollectionIdentity& identity) const;
-    [[nodiscard]] SourceCollectionSessionAction SyncReusedPreparedKnownSource(
+    [[nodiscard]] SampleWorkflowTransitionOutcome SyncReusedPreparedKnownSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
         const SourceCollectionIdentity& identity);
@@ -84,10 +119,10 @@ public:
         std::string_view source_identity);
     [[nodiscard]] std::optional<SampleLabelingSourceState> LabelingStateForSourceIdentity(
         std::string_view source_identity);
-    [[nodiscard]] SourceCollectionSessionAction SyncKnownActiveSource(
+    [[nodiscard]] SampleWorkflowTransitionOutcome SyncKnownActiveSource(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction ClearActiveWorkflow();
+    [[nodiscard]] SampleWorkflowTransitionOutcome ClearActiveWorkflow();
     void BeginRestoringSourceSession();
     void EndRestoringSourceSession();
     [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
@@ -101,85 +136,12 @@ public:
     [[nodiscard]] std::optional<std::size_t> pending_sample_index() const;
     [[nodiscard]] std::optional<PendingSampleNavigation> pending_sample_navigation() const;
 
-    [[nodiscard]] SampleWorkflowCommandResult RequestSampleNavigation(
-        const SampleNavigationRequest& request,
-        const SpectrumSnapshotHandle& snapshot,
-        std::optional<std::size_t> deferred_base_index = std::nullopt,
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction AddReadOnlyAnnotationToActiveSource(
-        const std::filesystem::path& path,
-        bool* loaded = nullptr,
-        std::string* message = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction RemoveReadOnlyAnnotationFromActiveSource(
-        const std::filesystem::path& path);
-    [[nodiscard]] SourceCollectionSessionAction RenameAnnotationDisplayNameForActiveSource(
-        std::filesystem::path path,
-        std::string display_name);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSourceKey(
         std::string_view source_key) const;
     [[nodiscard]] std::unordered_map<std::string, std::vector<std::filesystem::path>>
         AnnotationPathsBySourceKey() const;
-    [[nodiscard]] SourceCollectionSessionAction SetSampleNameQuery(std::string query);
-    [[nodiscard]] SampleWorkflowCommandResult CommitSampleNameSelection(
-        std::size_t target_row,
-        std::string matched_name,
-        const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction StartOrResumeTemporaryLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction ActivateLabelingTaskFromAnnotation(
-        std::filesystem::path annotation_path);
-    [[nodiscard]] SourceCollectionSessionAction DeleteActiveLabelingTask();
-    [[nodiscard]] SourceCollectionSessionAction UpsertActiveLabel(
-        SampleLabelDefinition label,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction UpdateActiveLabel(
-        int original_code,
-        SampleLabelDefinition label,
-        bool allow_used_code_change,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction RemoveActiveLabel(
-        int code,
-        bool* changed = nullptr);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingAutoAdvance(bool enabled);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
-    [[nodiscard]] SourceCollectionSessionAction SetActiveLabelingOutputPath(std::filesystem::path output_path);
-    [[nodiscard]] SourceCollectionSessionAction DeactivateActiveLabelingTask();
-    [[nodiscard]] SampleWorkflowCommandResult AssignActiveLabelToCurrentSample(
-        const SpectrumSnapshotHandle& snapshot,
-        int code,
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SampleWorkflowCommandResult ClearActiveLabelForCurrentSample(
-        const SpectrumSnapshotHandle& snapshot,
-        NavigationTargetResolutionReport* target_resolution = nullptr);
-    [[nodiscard]] SampleWorkflowCommandResult UndoLastLabelWrite(
-        const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction ClearFilters(const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction AddFilterSource(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction RemoveFilterSource(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetFilterValueSelected(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id,
-        std::string value_key,
-        bool selected);
-    [[nodiscard]] SourceCollectionSessionAction ClearSampleSorting(const SpectrumSnapshotHandle& snapshot);
-    [[nodiscard]] SourceCollectionSessionAction AddSampleSortSource(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction RemoveSampleSortSource(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetSampleSortSource(
-        const SpectrumSnapshotHandle& snapshot,
-        std::string source_id);
-    [[nodiscard]] SourceCollectionSessionAction SetSampleSortDirection(
-        const SpectrumSnapshotHandle& snapshot,
-        SampleNavigationSortDirection direction);
-
     [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionFilterView BuildFilterView(
@@ -188,7 +150,6 @@ public:
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] bool can_add_read_only_annotation() const;
     [[nodiscard]] std::optional<std::size_t> current_index() const;
-    [[nodiscard]] std::uint64_t presentation_revision() const;
     [[nodiscard]] std::vector<std::size_t> AdjacentNavigationRows(
         SampleNavigationDirection direction,
         SampleNavigationPrefetchPolicy policy = {}) const;
@@ -198,11 +159,85 @@ public:
     [[nodiscard]] bool FlushStateCaches();
 
 private:
-    [[nodiscard]] SourceCollectionSessionAction SyncActiveSourceWithContext(
+    [[nodiscard]] SampleWorkflowTransitionOutcome CompleteTransition(
+        SampleWorkflowTransitionOutcome outcome,
+        const SpectrumSnapshotHandle& snapshot,
+        std::uint64_t presentation_revision_before,
+        bool align_snapshot_target = false) const;
+    [[nodiscard]] SampleWorkflowTransitionOutcome SyncActiveSourceWithContext(
         std::optional<std::string> source_key,
         const SpectrumSnapshotHandle& snapshot,
         SourceCollectionContext context,
         std::optional<std::size_t> prepared_index);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RequestSampleNavigation(
+        const SampleNavigationRequest& request,
+        const SpectrumSnapshotHandle& snapshot,
+        std::optional<std::size_t> deferred_base_index = std::nullopt,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SampleWorkflowTransitionOutcome AddReadOnlyAnnotationToActiveSource(
+        const std::filesystem::path& path);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RemoveReadOnlyAnnotationFromActiveSource(
+        const std::filesystem::path& path);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RenameAnnotationDisplayNameForActiveSource(
+        std::filesystem::path path,
+        std::string display_name);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetSampleNameQuery(std::string query);
+    [[nodiscard]] SampleWorkflowTransitionOutcome CommitSampleNameSelection(
+        std::size_t target_row,
+        std::string matched_name,
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome StartOrResumeTemporaryLabelingTask();
+    [[nodiscard]] SampleWorkflowTransitionOutcome ActivateLabelingTaskFromAnnotation(
+        std::filesystem::path annotation_path);
+    [[nodiscard]] SampleWorkflowTransitionOutcome DeleteActiveLabelingTask();
+    [[nodiscard]] SampleWorkflowTransitionOutcome UpsertActiveLabel(
+        SampleLabelDefinition label);
+    [[nodiscard]] SampleWorkflowTransitionOutcome UpdateActiveLabel(
+        int original_code,
+        SampleLabelDefinition label,
+        bool allow_used_code_change);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RemoveActiveLabel(int code);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetActiveLabelingAutoAdvance(bool enabled);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetActiveLabelingOutputPath(
+        std::filesystem::path output_path);
+    [[nodiscard]] SampleWorkflowTransitionOutcome DeactivateActiveLabelingTask();
+    [[nodiscard]] SampleWorkflowTransitionOutcome AssignActiveLabelToCurrentSample(
+        const SpectrumSnapshotHandle& snapshot,
+        int code,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SampleWorkflowTransitionOutcome ClearActiveLabelForCurrentSample(
+        const SpectrumSnapshotHandle& snapshot,
+        NavigationTargetResolutionReport* target_resolution = nullptr);
+    [[nodiscard]] SampleWorkflowTransitionOutcome UndoLastLabelWrite(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome ClearFilters(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome AddFilterSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RemoveFilterSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetFilterValueSelected(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id,
+        std::string value_key,
+        bool selected);
+    [[nodiscard]] SampleWorkflowTransitionOutcome ClearSampleSorting(
+        const SpectrumSnapshotHandle& snapshot);
+    [[nodiscard]] SampleWorkflowTransitionOutcome AddSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RemoveSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetSampleSortSource(
+        const SpectrumSnapshotHandle& snapshot,
+        std::string source_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome SetSampleSortDirection(
+        const SpectrumSnapshotHandle& snapshot,
+        SampleNavigationSortDirection direction);
 
     struct NavigationInputReconcileRequest {
         bool workflow_changed = false;
@@ -213,6 +248,7 @@ private:
     struct NavigationInputReconcileEffects {
         bool workflow_changed = false;
         bool navigation_inputs_changed = false;
+        bool snapshot_target_updated = false;
         std::optional<std::size_t> snapshot_index_to_load;
     };
 
@@ -236,10 +272,7 @@ private:
         const SpectrumSnapshotHandle& snapshot,
         NavigationInputReconcileRequest request);
     static void ApplyNavigationInputEffects(
-        SourceCollectionSessionAction& action,
-        const NavigationInputReconcileEffects& effects);
-    static void ApplyNavigationInputEffects(
-        SampleWorkflowCommandResult& result,
+        SampleWorkflowTransitionOutcome& outcome,
         const NavigationInputReconcileEffects& effects);
     std::optional<std::size_t> ApplySampleFilters(const SpectrumSnapshotHandle& snapshot);
     std::optional<std::size_t> ApplySampleSorting(const SpectrumSnapshotHandle& snapshot);
@@ -258,7 +291,7 @@ private:
     void MarkActiveWorkflowStateDirty();
     [[nodiscard]] bool SaveWorkflowStateCache();
     [[nodiscard]] bool FlushWorkflowStateCache();
-    [[nodiscard]] SampleWorkflowCommandResult ApplyLabelWriteResult(
+    [[nodiscard]] SampleWorkflowTransitionOutcome ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
         const SampleLabelWriteResult& result,
         NavigationTargetResolutionReport* target_resolution = nullptr,

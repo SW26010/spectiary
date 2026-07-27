@@ -3,6 +3,7 @@
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
 #include "ui/sample_workflow_coordinator.h"
+#include "ui/source_collection_session.h"
 
 #include <chrono>
 #include <cstdint>
@@ -664,9 +665,10 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
         source_identity = coordinator.ActiveSourceIdentity()->id;
         coordinator.SetDeferredSampleNavigation(true);
 
-        specforge::SampleWorkflowCommandResult navigation =
-            coordinator.RequestSampleNavigation(
-                specforge::SampleNavigationRequest::LocateRow(1),
+        specforge::SampleWorkflowTransitionOutcome navigation =
+            coordinator.Apply(
+                specforge::SampleNavigationIntent::Move(
+                    specforge::SampleNavigationRequest::LocateRow(1)),
                 snapshot);
         Require(
             navigation.snapshot_index_to_load == 1 &&
@@ -689,8 +691,9 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
                     .last_indices_by_source_identity.at(source_identity) == 1,
             "coordinator maintenance should persist the committed row");
 
-        navigation = coordinator.RequestSampleNavigation(
-            specforge::SampleNavigationRequest::LocateRow(2),
+        navigation = coordinator.Apply(
+            specforge::SampleNavigationIntent::Move(
+                specforge::SampleNavigationRequest::LocateRow(2)),
             snapshot);
         Require(
             navigation.snapshot_index_to_load == 2 &&

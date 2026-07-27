@@ -367,6 +367,9 @@ private:
                 result.action,
                 follow_up.action);
             result.loaded = result.loaded || follow_up.loaded;
+            result.view_invalidated =
+                result.view_invalidated ||
+                follow_up.view_invalidated;
             if (!follow_up.message.empty()) {
                 result.message = std::move(follow_up.message);
             }
@@ -825,6 +828,7 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(open_action.snapshot_changed, "opening a source should change the displayed snapshot");
     Require(open_action.workflow_changed, "opening a source should activate a workflow identity");
     Require(open_action.navigation_inputs_changed, "opening a source should refresh navigation inputs");
+    Require(open_result.view_invalidated, "opening a source should report session-view invalidation");
     Require(session.View().sources.size() == 1, "opening a source should add one source entry");
     const specforge::SourceCollectionSourceView& source =
         session.View().sources.front();
@@ -847,6 +851,7 @@ void TestNavigationReloadsSnapshotAndRemembersLabelingPosition()
     Require(next_result.navigation.current_index == 1, "next navigation should move to row 1");
     Require(next_result.action.snapshot_changed, "moving to another sample should reload the snapshot");
     Require(next_result.action.navigation_inputs_changed, "moving should refresh navigation inputs");
+    Require(next_result.view_invalidated, "navigation should report its complete view-invalidating outcome");
     Require(session.View().snapshot->collection.current_index == 1, "session should expose the reloaded snapshot");
 
     const specforge::SourceCollectionLabelingView active_labeling = session.View().labeling;
@@ -866,7 +871,11 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
-    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    const specforge::SourceCollectionSessionResult workflow_result =
+        Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        workflow_result.view_invalidated,
+        "starting a labeling task should report its complete view-invalidating outcome");
     Require(
         Submit(
             session,
@@ -1128,6 +1137,9 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(filter_view.available_sources[0].id == source_id, "available source should use the annotation id");
 
     specforge::SourceCollectionSessionResult result = Submit(session, AddSampleFilterSource(source_id));
+    Require(
+        result.view_invalidated,
+        "adding a filter source should report its complete view-invalidating outcome");
     filter_view = session.View().filter;
     Require(filter_view.sources.size() == 1, "added annotation should become a sample filter source");
     Require(filter_view.available_sources.empty(), "added annotation should leave the add-source list");
@@ -1143,6 +1155,9 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     result = Submit(
         session,
         SetFilterValueSelected(source_id, "2", true));
+    Require(
+        result.view_invalidated,
+        "filter reconciliation should report its complete view-invalidating outcome");
     filter_view = session.View().filter;
     specforge::SourceCollectionNavigationView navigation_view = session.View().navigation;
     Require(navigation_view.filter_active, "annotation condition should activate navigation filtering");
@@ -1518,6 +1533,9 @@ void TestSampleSortingIntentAppliesNavigationSequence()
     Require(HasSortSource(session.View().sorting, "sample-name"), "sample names should be available as a sort source");
 
     result = Submit(session, SetSampleSortSource("sample-name"));
+    Require(
+        result.view_invalidated,
+        "sorting should report its complete view-invalidating outcome");
     Require(session.View().sorting.active, "selecting sample-name sorting should activate sorting view state");
     Require(session.View().navigation.sequence_count == 3, "sample-name sorting should keep all rows in the sequence");
     Require(!session.View().navigation.row_location_available, "sorted sequence should disable ordinary row locate");
@@ -3714,6 +3732,204 @@ void TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics(
         "label auto-advance should upgrade the matching filter pending request to remember row 1");
 }
 
+void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_deferred_local_label_filter.npy");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_deferred_local_label_filter_result.npy");
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "deferred-local-label-filter",
+        "source",
+        "source-fingerprint",
+        "context",
+        3,
+    };
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred local label filter fixture should load");
+
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+            .changed,
+        "deferred local label filter fixture should add its label");
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+
+    const std::string filter_source_id =
+        "labeling:temporary-labeling-task";
+    (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    const specforge::SourceCollectionSessionResult filtered =
+        Submit(
+            session,
+            SetFilterValueSelected(
+                filter_source_id,
+                std::to_string(
+                    specforge::kUnlabeledSampleLabelCode),
+                true));
+    Require(
+        !filtered.follow_up_spectrum_index &&
+            session.View().navigation.sequence_count == 3,
+        "unlabeled filter should initially retain visible row 0");
+
+    (void)Submit(session, SetActiveLabelingAutoAdvance(true));
+    const specforge::SourceCollectionSessionResult labeled =
+        Submit(session, AssignActiveLabelToCurrentSample(1));
+    Require(
+        labeled.follow_up_spectrum_index == 1,
+        "label filtering should preserve the newly required row 1 follow-up when auto-advance reuses it");
+    Require(
+        session.View().current_sample_snapshot == initial_snapshot &&
+            session.View().labeling.current_index == 0 &&
+            session.View().labeling.current_code == 1,
+        "the committed row 0 presentation should remain complete while filtered row 1 loads");
+
+    const specforge::SpectrumSnapshotHandle next_snapshot =
+        MakeSnapshot(source_path, 3, 1);
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   next_snapshot,
+                   specforge::PreparedSourceCollectionReuse{
+                       identity})
+            .loaded,
+        "the preserved row 1 follow-up should commit");
+    Require(
+        session.View().navigation.current_index == 1 &&
+            session.View().current_sample_snapshot == next_snapshot,
+        "the complete presentation should land on filtered row 1");
+}
+
+void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_deferred_local_label_undo_filter.npy");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_deferred_local_label_undo_filter_result.npy");
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+
+    const specforge::SpectrumSnapshotHandle row_zero_snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "deferred-local-label-undo-filter",
+        "source",
+        "source-fingerprint",
+        "context",
+        3,
+    };
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(row_zero_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   row_zero_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred local label undo filter fixture should load");
+
+    (void)Submit(session, StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{1, "accepted", 'a'}))
+            .changed,
+        "deferred local label undo filter fixture should add its label");
+
+    Require(
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::LocateRow(1)))
+                .follow_up_spectrum_index == 1,
+        "undo fixture should request row 1");
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   MakeSnapshot(source_path, 3, 1),
+                   specforge::PreparedSourceCollectionReuse{
+                       identity})
+            .loaded,
+        "undo fixture should commit row 1");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+
+    Require(
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::LocateRow(0)))
+                .follow_up_spectrum_index == 0,
+        "undo fixture should request row 0");
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   row_zero_snapshot,
+                   specforge::PreparedSourceCollectionReuse{
+                       identity})
+            .loaded,
+        "undo fixture should commit row 0");
+    (void)Submit(session, AssignActiveLabelToCurrentSample(1));
+    (void)Submit(session, SetActiveLabelingOutputPath(output_path));
+
+    const std::string filter_source_id =
+        "labeling:temporary-labeling-task";
+    (void)Submit(session, AddSampleFilterSource(filter_source_id));
+    const specforge::SourceCollectionSessionResult filtered =
+        Submit(
+            session,
+            SetFilterValueSelected(
+                filter_source_id,
+                "1",
+                true));
+    Require(
+        !filtered.follow_up_spectrum_index &&
+            session.View().navigation.sequence_count == 2,
+        "label-one filter should initially retain visible row 0");
+
+    const specforge::SourceCollectionSessionResult undone =
+        Submit(session, UndoLastLabelWrite());
+    Require(
+        !undone.follow_up_spectrum_index,
+        "undo restore to the visible row should clear the superseded filter follow-up");
+    Require(
+        session.View().current_sample_snapshot ==
+                row_zero_snapshot &&
+            session.View().labeling.current_index == 0 &&
+            session.View().labeling.current_code ==
+                specforge::kUnlabeledSampleLabelCode &&
+            !session.View().navigation.current_sample_in_filter,
+        "undo should keep the complete restored row 0 presentation outside the active filter");
+    Require(
+        !session.CancelActivePendingSampleNavigation(),
+        "undo restore to the visible row should leave no pending navigation");
+}
+
 void TestPreparedPlanReconciliationKeepsPreviousCompletePresentationUntilFinalRow()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_plan_reconcile.npy");
@@ -4474,6 +4690,9 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         command_result.action.navigation_inputs_changed,
         "sample-name query should report a projection mutation");
     Require(
+        command_result.view_invalidated,
+        "a mutating session transition should report view invalidation");
+    Require(
         loaded_view.navigation.exact_sample_name.empty(),
         "session should retain the prior command projection until the frame ends");
     const specforge::SourceCollectionSessionView& command_view =
@@ -4509,6 +4728,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         !repeated_query_result.action.snapshot_changed &&
             !repeated_query_result.action.workflow_changed &&
             !repeated_query_result.action.navigation_inputs_changed &&
+            !repeated_query_result.view_invalidated &&
             &session.View() == &command_view &&
             session.TakeViewRetirement().empty(),
         "a repeated query must not invalidate or rebuild the projection");
@@ -4522,6 +4742,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
                             Previous())));
     Require(
         !boundary_navigation_result.navigation.moved &&
+            !boundary_navigation_result.view_invalidated &&
             &session.View() == &command_view &&
             session.TakeViewRetirement().empty(),
         "boundary navigation must not invalidate or rebuild the projection");
@@ -4533,7 +4754,8 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
                     specforge::ActiveSampleWorkflowIntent::
                         StartOrResumeTemporaryLabelingTask()));
     Require(
-        workflow_result.action.workflow_changed,
+        workflow_result.action.workflow_changed &&
+            workflow_result.view_invalidated,
         "maintenance fixture should create a temporary task");
     const specforge::SourceCollectionSessionView*
         maintenance_view_before = &session.View();
@@ -5570,6 +5792,8 @@ void RunAllTests()
     TestPreparedRestoreDoesNotExposeSnapshotForAReconciledDifferentRow();
     TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase();
     TestDeferredLabelAutoAdvanceUpgradesMatchingFilterPendingPositionSemantics();
+    TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp();
+    TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp();
     TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresentation();
     TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation();
     TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits();
