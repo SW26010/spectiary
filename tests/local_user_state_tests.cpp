@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -162,8 +163,9 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath()
     }
 
     const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
-    const std::filesystem::path package_path =
-        runtime_paths.package_root / "package-relative-display-test" / "source.npy";
+    const std::filesystem::path relative_path =
+        std::filesystem::path("package-relative-display-test") / "source.npy";
+    const std::filesystem::path package_path = runtime_paths.package_root / relative_path;
     const std::string package_display = specforge::UserPathDisplayText(package_path);
     Require(
         package_display.find(PathToUtf8(runtime_paths.package_root)) == std::string::npos,
@@ -175,11 +177,69 @@ void TestUserPathDisplayTextUsesPackageRelativePortablePath()
         package_display.find("source.npy") != std::string::npos,
         "package-contained user paths should display their file name");
 
+    const specforge::JsonValue package_reference = specforge::PersistedPathReferenceJson(package_path);
+    Require(
+        specforge::ReadJsonStringMember(package_reference, "path_kind").value_or("") == "package_relative",
+        "nonexistent package-contained paths should persist as package-relative");
+    Require(
+        specforge::ReadJsonStringMember(package_reference, "path").value_or("") == PathToUtf8(relative_path),
+        "package-relative persistence should keep the lexical suffix");
+
+    Require(
+        specforge::UserPathDisplayText(runtime_paths.package_root) == ".",
+        "the package root should display as the current package-relative directory");
+    const specforge::JsonValue package_root_reference =
+        specforge::PersistedPathReferenceJson(runtime_paths.package_root);
+    Require(
+        specforge::ReadJsonStringMember(package_root_reference, "path_kind").value_or("") == "package_relative",
+        "the package root should persist as package-relative");
+    Require(
+        specforge::ReadJsonStringMember(package_root_reference, "path").value_or("") == ".",
+        "the package root should persist with a dot path");
+    const std::optional<std::filesystem::path> round_tripped_package_root =
+        specforge::ReadPersistedPathReference(package_root_reference);
+    Require(
+        round_tripped_package_root.has_value() &&
+            *round_tripped_package_root == runtime_paths.package_root,
+        "the persisted package root should read back to the current package root");
+
     const std::filesystem::path external_path =
         std::filesystem::temp_directory_path() / "specforge_external_display_test" / "source.npy";
     Require(
         specforge::UserPathDisplayText(external_path) == PathToUtf8(external_path),
-        "external user paths should keep their absolute display text");
+        "nonexistent external user paths should keep their absolute display text");
+    Require(
+        specforge::ReadJsonStringMember(specforge::PersistedPathReferenceJson(external_path), "path_kind")
+                .value_or("") == "absolute",
+        "nonexistent external paths should persist as absolute");
+
+    std::wstring differently_cased_root_text = runtime_paths.package_root.native();
+    for (wchar_t& character : differently_cased_root_text) {
+        if (character >= L'a' && character <= L'z') {
+            character = static_cast<wchar_t>(character - L'a' + L'A');
+        } else if (character >= L'A' && character <= L'Z') {
+            character = static_cast<wchar_t>(character - L'A' + L'a');
+        }
+    }
+    const std::filesystem::path differently_cased_package_path =
+        std::filesystem::path(differently_cased_root_text) / relative_path;
+    Require(
+        specforge::UserPathDisplayText(differently_cased_package_path) == PathToUtf8(relative_path),
+        "package root matching should use case-insensitive Windows path semantics");
+
+    const std::filesystem::path package_root_other =
+        runtime_paths.package_root.parent_path() /
+        std::filesystem::path(runtime_paths.package_root.filename().native() + L"-other") /
+        "source.npy";
+    Require(
+        specforge::UserPathDisplayText(package_root_other) == PathToUtf8(package_root_other),
+        "a sibling whose name starts with the package root name should remain external");
+
+    const std::filesystem::path escaping_path =
+        runtime_paths.package_root / "nested" / ".." / ".." / "escaped.npy";
+    Require(
+        specforge::UserPathDisplayText(escaping_path) == PathToUtf8(escaping_path),
+        "a lexical path that escapes the package root should remain external");
 }
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()

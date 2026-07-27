@@ -3,15 +3,22 @@
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 
-#include <algorithm>
-#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <ostream>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 
 namespace specforge {
 namespace {
@@ -39,9 +46,25 @@ std::filesystem::path NormalizedAbsolutePath(const std::filesystem::path& path)
 {
     std::error_code error;
     const std::filesystem::path absolute_path = path.is_absolute() ? path : std::filesystem::absolute(path, error);
-    const std::filesystem::path candidate = error ? path : absolute_path;
-    const std::filesystem::path canonical = std::filesystem::weakly_canonical(candidate, error);
-    return (error ? candidate : canonical).lexically_normal();
+    return (error ? path : absolute_path).lexically_normal();
+}
+
+bool WindowsPathComponentEquals(
+    const std::filesystem::path& left,
+    const std::filesystem::path& right)
+{
+    const std::wstring& left_text = left.native();
+    const std::wstring& right_text = right.native();
+    if (left_text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        right_text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return left_text == right_text;
+    }
+    return CompareStringOrdinal(
+               left_text.data(),
+               static_cast<int>(left_text.size()),
+               right_text.data(),
+               static_cast<int>(right_text.size()),
+               TRUE) == CSTR_EQUAL;
 }
 
 bool IsDotDot(const std::filesystem::path& path)
@@ -71,13 +94,26 @@ bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesyst
 
     const std::filesystem::path package_root = NormalizedAbsolutePath(runtime_paths.package_root);
     const std::filesystem::path absolute_path = NormalizedAbsolutePath(path);
-    std::error_code error;
-    std::filesystem::path candidate = std::filesystem::relative(absolute_path, package_root, error);
-    if (error || !IsSafePackageRelativePath(candidate)) {
+
+    auto path_part = absolute_path.begin();
+    for (auto package_part = package_root.begin(); package_part != package_root.end(); ++package_part, ++path_part) {
+        if (path_part == absolute_path.end() || !WindowsPathComponentEquals(*path_part, *package_part)) {
+            return false;
+        }
+    }
+
+    std::filesystem::path candidate;
+    for (; path_part != absolute_path.end(); ++path_part) {
+        candidate /= *path_part;
+    }
+    if (candidate.empty()) {
+        candidate = ".";
+    }
+    if (!IsSafePackageRelativePath(candidate)) {
         return false;
     }
 
-    relative_path = candidate.lexically_normal();
+    relative_path = std::move(candidate);
     return true;
 }
 
@@ -161,6 +197,9 @@ std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue&
         const std::filesystem::path relative_path = PathFromUtf8(*path_text);
         if (!IsSafePackageRelativePath(relative_path)) {
             return std::nullopt;
+        }
+        if (relative_path == ".") {
+            return DefaultRuntimePaths().package_root;
         }
         return DefaultRuntimePaths().package_root / relative_path;
     }
