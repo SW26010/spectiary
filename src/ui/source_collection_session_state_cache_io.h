@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace specforge {
@@ -14,9 +15,15 @@ struct SourceCollectionSessionStateCache {
     std::optional<std::size_t> active_source_index;
 };
 
+struct SourceCollectionSessionStateCacheLoadResult {
+    SourceCollectionSessionStateCache cache;
+    std::string warning;
+};
+
 [[nodiscard]] std::filesystem::path DefaultSourceCollectionSessionStateCachePath();
 
-[[nodiscard]] SourceCollectionSessionStateCache LoadSourceCollectionSessionStateCache(
+[[nodiscard]] SourceCollectionSessionStateCacheLoadResult
+LoadSourceCollectionSessionStateCache(
     const std::filesystem::path& path);
 
 [[nodiscard]] bool SaveSourceCollectionSessionStateCache(

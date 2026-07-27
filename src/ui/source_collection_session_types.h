@@ -184,6 +184,32 @@ struct SourceCollectionDeferredRestorePlan {
     std::optional<std::size_t> active_source_index;
 };
 
+enum class SourceCollectionPersistenceHealthKind {
+    Healthy,
+    Warning,
+    Retrying,
+    Recovered,
+};
+
+struct SourceCollectionPersistenceHealthView {
+    SourceCollectionPersistenceHealthKind kind =
+        SourceCollectionPersistenceHealthKind::Healthy;
+    std::vector<std::string> messages;
+};
+
+struct SourceCollectionStateFlushResult {
+    bool source_session_saved = true;
+    bool navigation_saved = true;
+    bool labeling_saved = true;
+    bool workflow_saved = true;
+
+    [[nodiscard]] bool all_saved() const
+    {
+        return source_session_saved && navigation_saved &&
+               labeling_saved && workflow_saved;
+    }
+};
+
 struct SourceCollectionSessionView {
     SpectrumSnapshotHandle snapshot;
     SpectrumSnapshotHandle current_sample_snapshot;
@@ -194,6 +220,7 @@ struct SourceCollectionSessionView {
     SourceCollectionLabelingView labeling;
     SourceCollectionFilterView filter;
     SourceCollectionSampleSortingView sorting;
+    SourceCollectionPersistenceHealthView persistence;
 };
 
 }  // namespace specforge

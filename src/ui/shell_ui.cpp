@@ -99,7 +99,8 @@ std::string NarrowPath(const std::filesystem::path& path)
 bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
-    std::string_view source_load_error)
+    std::string_view source_load_error,
+    const SourceCollectionPersistenceHealthView& persistence)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -111,10 +112,36 @@ bool RenderTopBarStatus(
         std::max(0.0f, right_x - menu_end_x - style.ItemSpacing.x * 2.0f);
 
     const bool operation_error = !source_load_error.empty();
-    const bool operation_important = operation_error || source_load_active;
-    const std::string operation_text = operation_error
-        ? "Load failed"
-        : (source_load_active ? "Loading source..." : "Ready");
+    const bool persistence_retrying =
+        persistence.kind ==
+        SourceCollectionPersistenceHealthKind::Retrying;
+    const bool persistence_warning =
+        persistence.kind ==
+        SourceCollectionPersistenceHealthKind::Warning;
+    const bool persistence_recovered =
+        persistence.kind ==
+        SourceCollectionPersistenceHealthKind::Recovered;
+    const bool persistence_important =
+        persistence_retrying || persistence_warning ||
+        persistence_recovered;
+    const bool show_persistence =
+        !operation_error && !source_load_active &&
+        persistence_important;
+    const bool operation_important =
+        operation_error || source_load_active ||
+        persistence_important;
+    std::string operation_text = "Ready";
+    if (operation_error) {
+        operation_text = "Load failed";
+    } else if (source_load_active) {
+        operation_text = "Loading source...";
+    } else if (persistence_retrying) {
+        operation_text = "State save retrying";
+    } else if (persistence_warning) {
+        operation_text = "State warning";
+    } else if (persistence_recovered) {
+        operation_text = "State recovered";
+    }
     const std::string frame_text =
         "Frame " + std::to_string(static_cast<unsigned long long>(status.frame_index));
     const std::string dimensions_text =
@@ -192,8 +219,14 @@ bool RenderTopBarStatus(
         const float operation_start_x = cursor_x;
         draw_text(
             operation_text,
-            ImGui::GetColorU32(
-                source_load_active ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+            show_persistence
+                ? (persistence_recovered
+                       ? IM_COL32(76, 175, 80, 255)
+                       : IM_COL32(245, 166, 35, 255))
+                : ImGui::GetColorU32(
+                      source_load_active
+                          ? ImGuiCol_Text
+                          : ImGuiCol_TextDisabled));
         operation_rect = ImRect(
             ImVec2(operation_start_x, text_y),
             ImVec2(cursor_x, text_y + text_height));
@@ -235,6 +268,23 @@ bool RenderTopBarStatus(
             "Load failed (click to dismiss):\n%.*s",
             static_cast<int>(source_load_error.size()),
             source_load_error.data());
+    }
+    if (layout.show_operation && show_persistence &&
+        IsTopBarStatusHoverTarget(
+            operation_rect.Min,
+            operation_rect.Max)) {
+        std::string tooltip;
+        for (const std::string& message : persistence.messages) {
+            if (!tooltip.empty()) {
+                tooltip.push_back('\n');
+            }
+            tooltip += message;
+        }
+        ImGui::SetTooltip(
+            "%s",
+            tooltip.empty()
+                ? operation_text.c_str()
+                : tooltip.c_str());
     }
     if (layout.show_profile &&
         IsTopBarStatusHoverTarget(profile_rect.Min, profile_rect.Max) &&
@@ -698,9 +748,37 @@ ShellUi::ShellUi(
 ShellUi::~ShellUi()
 {
     if (persist_local_state_) {
-        (void)application_settings_.Flush();
-        (void)session_.FlushStateCaches();
-        (void)spectral_lines_panel_.Flush();
+        const bool settings_saved =
+            application_settings_.Flush();
+        const SourceCollectionStateFlushResult session_flush =
+            session_.FlushStateCachesWithStatus();
+        const bool spectral_lines_saved =
+            spectral_lines_panel_.Flush();
+        if (!settings_saved || !session_flush.all_saved() ||
+            !spectral_lines_saved) {
+            std::string message =
+                "SpecForge: local state flush incomplete:";
+            if (!settings_saved) {
+                message += " application-settings";
+            }
+            if (!session_flush.source_session_saved) {
+                message += " source-session";
+            }
+            if (!session_flush.navigation_saved) {
+                message += " navigation";
+            }
+            if (!session_flush.labeling_saved) {
+                message += " labeling";
+            }
+            if (!session_flush.workflow_saved) {
+                message += " workflow";
+            }
+            if (!spectral_lines_saved) {
+                message += " spectral-lines";
+            }
+            message.push_back('\n');
+            OutputDebugStringA(message.c_str());
+        }
     }
 }
 
@@ -1205,7 +1283,8 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
     if (RenderTopBarStatus(
             status,
             activation_status.loading,
-            activation_status.error_message)) {
+            activation_status.error_message,
+            SessionView().persistence)) {
         source_activation_.AcknowledgeLoadFailures();
     }
 

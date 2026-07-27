@@ -267,12 +267,13 @@ void SampleNavigationController::ActivateSource(
     }
     session.sample_name_query = previous_query;
     if (session.spectrum_count > 0) {
-        const auto persisted = state_cache_.last_indices_by_source_identity.find(identity.id);
+        const std::optional<std::size_t> persisted =
+            CachedIndex(identity.id);
         if (prepared_index && *prepared_index < session.spectrum_count) {
             session.current_index = *prepared_index;
-        } else if (new_session && persisted != state_cache_.last_indices_by_source_identity.end() &&
-            persisted->second < session.spectrum_count) {
-            session.current_index = persisted->second;
+        } else if (new_session && persisted &&
+                   *persisted < session.spectrum_count) {
+            session.current_index = *persisted;
         } else if (new_session) {
             session.current_index = std::min(snapshot->collection.current_index, session.spectrum_count - 1);
         } else if (previous_index) {
@@ -349,6 +350,34 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     active_source_key_ = identity.id;
     ++active_context_generation_;
     return retired_session;
+}
+
+BackgroundRetirementHandle
+SampleNavigationController::AdoptPreparedStateCache(
+    std::shared_ptr<const SampleNavigationStateCacheLoadResult>
+        cache_snapshot)
+{
+    if (!cache_snapshot ||
+        cache_snapshot == state_cache_snapshot_) {
+        return {};
+    }
+    const bool first_load = !state_cache_loaded_;
+    std::shared_ptr<const SampleNavigationStateCacheLoadResult>
+        retired = std::exchange(
+            state_cache_snapshot_,
+            std::move(cache_snapshot));
+    state_cache_loaded_ = true;
+    if (first_load) {
+        state_cache_load_warning_ =
+            state_cache_snapshot_->warning;
+    }
+    return retired;
+}
+
+BackgroundRetirementHandle
+SampleNavigationController::ReleaseBackgroundResourcesForShutdown()
+{
+    return std::move(state_cache_snapshot_);
 }
 
 std::optional<SourceCollectionIdentity> SampleNavigationController::ActivateKnownSource(
@@ -1027,9 +1056,13 @@ void SampleNavigationController::RunMaintenance(LocalUserStateSaveScheduler::Tim
         return;
     }
     if (SaveStateCache()) {
-        state_cache_save_scheduler_.MarkSaveSucceeded();
+        state_cache_load_warning_.clear();
+        state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
     } else {
-        state_cache_save_scheduler_.MarkSaveFailedAt(now);
+        state_cache_save_scheduler_.MarkSaveFailedAt(
+            now,
+            state_cache_save_status_,
+            "Could not save sample navigation state.");
     }
 }
 
@@ -1045,11 +1078,25 @@ bool SampleNavigationController::FlushStateCache()
         return true;
     }
     if (SaveStateCache()) {
-        state_cache_save_scheduler_.MarkSaveSucceeded();
+        state_cache_load_warning_.clear();
+        state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
         return true;
     }
-    state_cache_save_scheduler_.MarkSaveFailed();
+    state_cache_save_scheduler_.MarkSaveFailed(
+        state_cache_save_status_,
+        "Could not save sample navigation state.");
     return false;
+}
+
+LocalUserStatePersistenceStatus
+SampleNavigationController::PersistenceStatus() const
+{
+    return {
+        .retrying = state_cache_save_status_.failed(),
+        .recovered = state_cache_save_status_.recovered(),
+        .load_warning = state_cache_load_warning_,
+        .save_message = state_cache_save_status_.message(),
+    };
 }
 
 std::unordered_map<std::string, std::vector<std::filesystem::path>>
@@ -1246,7 +1293,35 @@ void SampleNavigationController::EnsureStateCacheLoaded()
         return;
     }
     state_cache_loaded_ = true;
-    state_cache_ = LoadSampleNavigationStateCache(state_cache_path_);
+    SampleNavigationStateCacheLoadResult result =
+        LoadSampleNavigationStateCache(state_cache_path_);
+    state_cache_ = std::move(result.cache);
+    state_cache_load_warning_ = std::move(result.warning);
+}
+
+std::optional<std::size_t>
+SampleNavigationController::CachedIndex(
+    std::string_view source_identity) const
+{
+    const auto live =
+        state_cache_.last_indices_by_source_identity.find(
+            std::string{source_identity});
+    if (live !=
+        state_cache_.last_indices_by_source_identity.end()) {
+        return live->second;
+    }
+    if (!state_cache_snapshot_) {
+        return std::nullopt;
+    }
+    const auto persisted =
+        state_cache_snapshot_->cache
+            .last_indices_by_source_identity.find(
+                std::string{source_identity});
+    return persisted ==
+            state_cache_snapshot_->cache
+                .last_indices_by_source_identity.end()
+        ? std::nullopt
+        : std::optional<std::size_t>{persisted->second};
 }
 
 void SampleNavigationController::PersistActiveIndex()
@@ -1258,13 +1333,22 @@ void SampleNavigationController::PersistActiveIndex()
     }
     state_cache_.last_indices_by_source_identity[session->source_collection_identity] = *session->current_index;
     if (!state_cache_path_.empty()) {
+        state_cache_save_status_.ClearRecovered();
         state_cache_save_scheduler_.MarkDirty();
     }
 }
 
 bool SampleNavigationController::SaveStateCache()
 {
-    return SaveSampleNavigationStateCache(state_cache_path_, state_cache_);
+    SampleNavigationStateCache merged =
+        state_cache_snapshot_
+        ? state_cache_snapshot_->cache
+        : SampleNavigationStateCache{};
+    for (const auto& [identity, index] :
+         state_cache_.last_indices_by_source_identity) {
+        merged.last_indices_by_source_identity[identity] = index;
+    }
+    return SaveSampleNavigationStateCache(state_cache_path_, merged);
 }
 
 void SampleNavigationController::RecomputeMatches(SourceSession& session)

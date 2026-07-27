@@ -2157,7 +2157,8 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
 
     const specforge::SourceCollectionSessionStateCache saved_cache =
         specforge::LoadSourceCollectionSessionStateCache(
-            cache_paths.source_session);
+            cache_paths.source_session)
+            .cache;
     Require(
         saved_cache.sources.size() == 3 &&
             saved_cache.active_source_index &&
@@ -2293,7 +2294,8 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
         "restored source-session cache should flush successfully");
     const specforge::SourceCollectionSessionStateCache flushed_cache =
         specforge::LoadSourceCollectionSessionStateCache(
-            cache_paths.source_session);
+            cache_paths.source_session)
+            .cache;
     Require(
         flushed_cache.active_source_index &&
             *flushed_cache.active_source_index < flushed_cache.sources.size() &&

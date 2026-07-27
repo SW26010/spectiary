@@ -93,6 +93,11 @@ public:
         const SourceCollectionIdentity& identity,
         SourceCollectionManifest manifest,
         PreparedSampleWorkflowState prepared);
+    [[nodiscard]] BackgroundRetirementHandle AdoptPreparedStateCache(
+        std::shared_ptr<const SampleNavigationStateCacheLoadResult>
+            cache_snapshot);
+    [[nodiscard]] BackgroundRetirementHandle
+        ReleaseBackgroundResourcesForShutdown();
     [[nodiscard]] std::optional<SourceCollectionIdentity> ActivateKnownSource(
         std::string_view source_key);
     [[nodiscard]] std::optional<SourceCollectionIdentity> KnownSourceIdentity(
@@ -152,6 +157,7 @@ public:
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
+    [[nodiscard]] LocalUserStatePersistenceStatus PersistenceStatus() const;
 
 private:
     struct SourceSession {
@@ -201,6 +207,8 @@ private:
         const std::filesystem::path& path,
         std::string* message = nullptr);
     void EnsureStateCacheLoaded();
+    [[nodiscard]] std::optional<std::size_t>
+        CachedIndex(std::string_view source_identity) const;
     void PersistActiveIndex();
     bool SaveStateCache();
     static void RecomputeMatches(SourceSession& session);
@@ -208,8 +216,12 @@ private:
     std::unordered_map<std::string, SourceSession> sessions_;
     std::unordered_map<std::string, std::string> source_key_to_session_key_;
     SampleNavigationStateCache state_cache_;
+    std::shared_ptr<const SampleNavigationStateCacheLoadResult>
+        state_cache_snapshot_;
     std::filesystem::path state_cache_path_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
+    LocalUserStateSaveStatus state_cache_save_status_;
+    std::string state_cache_load_warning_;
     std::optional<std::string> active_source_key_;
     std::uint64_t active_context_generation_ = 0;
     bool state_cache_loaded_ = false;

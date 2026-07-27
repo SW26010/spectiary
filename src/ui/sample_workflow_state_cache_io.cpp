@@ -379,11 +379,11 @@ std::filesystem::path DefaultSampleWorkflowStateCachePath()
     return DefaultLocalUserStatePath("sample-workflow-state.json");
 }
 
-SampleWorkflowStateCache LoadSampleWorkflowStateCache(
+SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint)
 {
-    SampleWorkflowStateCache cache;
+    SampleWorkflowStateCacheLoadResult load;
     VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(
             path,
@@ -392,12 +392,13 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(
             "sample workflow state cache",
             cancellation_checkpoint);
     if (!result.document) {
-        return cache;
+        load.warning = std::move(result.warning);
+        return load;
     }
 
     const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
     if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
-        return cache;
+        return load;
     }
     for (const JsonValue& source_object : sources->array) {
         if (cancellation_checkpoint) {
@@ -420,7 +421,7 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(
         state.annotation_display_names = ParseAnnotationDisplayNames(source_object);
         ParseSortState(source_object, state);
         if (HasState(state)) {
-            cache.sources_by_identity.emplace(
+            load.cache.sources_by_identity.emplace(
                 NormalizePersistedSourceCollectionIdentity(std::move(*identity)),
                 std::move(state));
         }
@@ -428,7 +429,7 @@ SampleWorkflowStateCache LoadSampleWorkflowStateCache(
     if (cancellation_checkpoint) {
         cancellation_checkpoint();
     }
-    return cache;
+    return load;
 }
 
 bool SaveSampleWorkflowStateCache(

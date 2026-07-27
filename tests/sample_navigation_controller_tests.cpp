@@ -163,17 +163,18 @@ void TestNavigationStateCacheRoundTrip()
     cache.last_indices_by_source_identity.emplace("source-b", 0);
     Require(specforge::SaveSampleNavigationStateCache(cache_path, cache), "navigation cache should save");
 
-    const specforge::SampleNavigationStateCache loaded =
+    const specforge::SampleNavigationStateCacheLoadResult loaded =
         specforge::LoadSampleNavigationStateCache(cache_path);
     Require(
-        loaded.last_indices_by_source_identity.size() == 2,
+        loaded.cache.last_indices_by_source_identity.size() == 2,
         "navigation cache should restore all source indices");
     Require(
-        loaded.last_indices_by_source_identity.at("source-a") == 2,
+        loaded.cache.last_indices_by_source_identity.at("source-a") == 2,
         "navigation cache should restore source-a index");
     Require(
-        loaded.last_indices_by_source_identity.at("source-b") == 0,
+        loaded.cache.last_indices_by_source_identity.at("source-b") == 0,
         "navigation cache should restore source-b index");
+    Require(loaded.warning.empty(), "valid navigation cache should load without warning");
 }
 
 void TestNavigationStateCacheIgnoresCorruptJson()
@@ -182,11 +183,12 @@ void TestNavigationStateCacheIgnoresCorruptJson()
         std::filesystem::temp_directory_path() / "specforge_nav_adapter_corrupt.json";
     WriteTextFile(cache_path, "{ invalid json");
 
-    const specforge::SampleNavigationStateCache loaded =
+    const specforge::SampleNavigationStateCacheLoadResult loaded =
         specforge::LoadSampleNavigationStateCache(cache_path);
     Require(
-        loaded.last_indices_by_source_identity.empty(),
+        loaded.cache.last_indices_by_source_identity.empty(),
         "corrupt navigation cache should be ignored");
+    Require(!loaded.warning.empty(), "corrupt navigation cache should report a warning");
 }
 
 void TestNavigationStateCacheIgnoresUnsupportedSchema()
@@ -203,11 +205,12 @@ void TestNavigationStateCacheIgnoresUnsupportedSchema()
         "  ]\n"
         "}\n");
 
-    const specforge::SampleNavigationStateCache loaded =
+    const specforge::SampleNavigationStateCacheLoadResult loaded =
         specforge::LoadSampleNavigationStateCache(cache_path);
     Require(
-        loaded.last_indices_by_source_identity.empty(),
+        loaded.cache.last_indices_by_source_identity.empty(),
         "unsupported navigation cache schema should be ignored");
+    Require(!loaded.warning.empty(), "unsupported navigation cache should report a warning");
 }
 
 void TestControllerOwnsNavigationState()
@@ -556,6 +559,7 @@ void TestControllerDebouncesNavigationStatePersistence()
     controller.RunMaintenance(*activation_deadline);
     Require(
         specforge::LoadSampleNavigationStateCache(cache_path)
+                .cache
                 .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
         "maintenance should persist the activated row");
 
@@ -564,6 +568,7 @@ void TestControllerDebouncesNavigationStatePersistence()
     Require(result.current_index == 1, "fixture should navigate to row 1");
     Require(
         specforge::LoadSampleNavigationStateCache(cache_path)
+                .cache
                 .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
         "navigation should not synchronously rewrite the cache");
 
@@ -572,11 +577,13 @@ void TestControllerDebouncesNavigationStatePersistence()
     controller.RunMaintenance(*navigation_deadline - 1ms);
     Require(
         specforge::LoadSampleNavigationStateCache(cache_path)
+                .cache
                 .last_indices_by_source_identity.at(std::string{kIdentity}) == 0,
         "maintenance before the debounce deadline should not save");
     controller.RunMaintenance(*navigation_deadline);
     Require(
         specforge::LoadSampleNavigationStateCache(cache_path)
+                .cache
                 .last_indices_by_source_identity.at(std::string{kIdentity}) == 1,
         "maintenance at the debounce deadline should save the latest row");
 }
@@ -617,6 +624,9 @@ void TestControllerCoalescesNavigationStateAndRetriesFailure()
 
     const auto retry_deadline = controller.NextMaintenanceDeadline();
     Require(
+        controller.PersistenceStatus().retrying,
+        "failed navigation save should expose retrying status");
+    Require(
         retry_deadline && *retry_deadline >= *debounce_deadline + 2s,
         "a failed save should remain dirty and schedule the existing retry backoff");
 
@@ -628,9 +638,77 @@ void TestControllerCoalescesNavigationStateAndRetriesFailure()
         "maintenance before the retry deadline should not save");
     controller.RunMaintenance(*retry_deadline);
     Require(
+        controller.PersistenceStatus().recovered,
+        "successful navigation retry should expose recovered status");
+    Require(
         specforge::LoadSampleNavigationStateCache(cache_path)
+                .cache
                 .last_indices_by_source_identity.at(std::string{kIdentity}) == 3,
         "retry should persist only the final coalesced row");
+
+    (void)controller.Navigate(
+        specforge::SampleNavigationRequest::LocateRow(2));
+    Require(
+        !controller.PersistenceStatus().recovered,
+        "the next navigation mutation should clear recovered status");
+}
+
+void TestControllerAdoptsAndMergesPreparedNavigationCache()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_prepared_cache_merge.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+
+    auto prepared =
+        std::make_shared<
+            specforge::SampleNavigationStateCacheLoadResult>();
+    prepared->cache.last_indices_by_source_identity.emplace(
+        "prepared-source",
+        2);
+    prepared->cache.last_indices_by_source_identity.emplace(
+        "unrelated-source",
+        7);
+
+    specforge::SampleNavigationController controller(
+        cache_path);
+    (void)controller.AdoptPreparedStateCache(prepared);
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/prepared-navigation.npy",
+            "prepared-navigation",
+            4,
+            0),
+        specforge::SourceCollectionIdentity{
+            .id = "prepared-source",
+            .source_name = "prepared-navigation",
+            .source_fingerprint = "source-v1",
+            .context_fingerprint = "context-v1",
+            .spectrum_count = 4,
+        },
+        {});
+    Require(
+        controller.current_index() &&
+            *controller.current_index() == 2,
+        "prepared navigation cache should restore the active source index");
+
+    (void)controller.Navigate(
+        specforge::SampleNavigationRequest::LocateRow(3));
+    Require(
+        controller.FlushStateCache(),
+        "prepared navigation cache should flush after a live update");
+    const specforge::SampleNavigationStateCacheLoadResult loaded =
+        specforge::LoadSampleNavigationStateCache(cache_path);
+    Require(
+        loaded.cache.last_indices_by_source_identity.at(
+            "prepared-source") == 3,
+        "live navigation should override its prepared snapshot entry");
+    Require(
+        loaded.cache.last_indices_by_source_identity.at(
+            "unrelated-source") == 7,
+        "saving a prepared navigation snapshot must preserve unrelated entries");
 }
 
 void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
@@ -688,6 +766,7 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
             "coordinator maintenance should reach the navigation deadline");
         Require(
             specforge::LoadSampleNavigationStateCache(navigation_cache)
+                    .cache
                     .last_indices_by_source_identity.at(source_identity) == 1,
             "coordinator maintenance should persist the committed row");
 
@@ -701,6 +780,7 @@ void TestCoordinatorMaintainsFlushesAndRestoresNavigationState()
             "coordinator should commit the final deferred row");
         Require(
             specforge::LoadSampleNavigationStateCache(navigation_cache)
+                    .cache
                     .last_indices_by_source_identity.at(source_identity) == 1,
             "the final row should remain memory-only until flush");
         Require(coordinator.FlushStateCaches(), "normal shutdown flush should save navigation state");
@@ -1245,6 +1325,7 @@ int main()
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerDebouncesNavigationStatePersistence();
     TestControllerCoalescesNavigationStateAndRetriesFailure();
+    TestControllerAdoptsAndMergesPreparedNavigationCache();
     TestCoordinatorMaintainsFlushesAndRestoresNavigationState();
     TestControllerLoadsLongFolderIdentityState();
     TestRemoveSourceUsesExternalSourceKey();

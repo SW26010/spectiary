@@ -41,3 +41,23 @@ labeling window to both inspect every annotation and edit the active task. Those
 choices would couple workflow recovery to one file format, create conflicting
 sources of truth, and make shortcut ownership and write safety harder to reason
 about.
+
+## Local persistence failure semantics
+
+Source-session, navigation, labeling, and workflow state remain four
+independently validated, independently written versioned JSON caches. Their
+codecs continue to own schema support and field validation; the session only
+aggregates owner-reported health.
+
+| Condition | User signal | Continue? | Clear condition |
+| --- | --- | --- | --- |
+| Missing cache | None; use defaults | Yes | Not applicable |
+| Corrupt cache | Non-blocking owner warning | Yes, with defaults | That owner successfully writes valid replacement state |
+| Unsupported schema | Non-blocking owner warning | Yes, without reading unsupported state | That owner successfully writes state after a user mutation |
+| Partial save | Overall `retrying` health naming each failed owner while retries remain scheduled | Yes; attempt every other dirty cache | Each failed owner succeeds independently |
+| Retrying | Overall `retrying` health; existing retry deadline remains active | Yes | First successful retry |
+| Recovered | Overall recovery health | Yes | Next user mutation owned by the recovered cache |
+
+There is no cross-file transaction: a failure in one cache must not suppress
+attempts for the other caches. Normal shutdown consumes a per-owner flush
+result so an incomplete flush is not reduced to an ignored aggregate boolean.

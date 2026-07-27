@@ -12,9 +12,15 @@ struct SampleNavigationStateCache {
     std::unordered_map<std::string, std::size_t> last_indices_by_source_identity;
 };
 
+struct SampleNavigationStateCacheLoadResult {
+    SampleNavigationStateCache cache;
+    std::string warning;
+};
+
 [[nodiscard]] std::filesystem::path DefaultSampleNavigationStateCachePath();
 
-[[nodiscard]] SampleNavigationStateCache LoadSampleNavigationStateCache(const std::filesystem::path& path);
+[[nodiscard]] SampleNavigationStateCacheLoadResult
+LoadSampleNavigationStateCache(const std::filesystem::path& path);
 
 [[nodiscard]] bool SaveSampleNavigationStateCache(
     const std::filesystem::path& path,

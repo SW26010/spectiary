@@ -31,9 +31,15 @@ struct SampleWorkflowStateCache {
     std::unordered_map<std::string, SampleWorkflowSourceState> sources_by_identity;
 };
 
+struct SampleWorkflowStateCacheLoadResult {
+    SampleWorkflowStateCache cache;
+    std::string warning;
+};
+
 [[nodiscard]] std::filesystem::path DefaultSampleWorkflowStateCachePath();
 
-[[nodiscard]] SampleWorkflowStateCache LoadSampleWorkflowStateCache(
+[[nodiscard]] SampleWorkflowStateCacheLoadResult
+LoadSampleWorkflowStateCache(
     const std::filesystem::path& path,
     const std::function<void()>& cancellation_checkpoint = {});
 

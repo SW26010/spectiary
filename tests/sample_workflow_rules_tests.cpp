@@ -606,8 +606,10 @@ void TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys()
             "legacy mapped-key regression fixture should remain pinned to schema v2");
     }
 
-    const specforge::SampleWorkflowStateCache loaded =
+    const specforge::SampleWorkflowStateCacheLoadResult load =
         specforge::LoadSampleWorkflowStateCache(cache_path);
+    Require(load.warning.empty(), "valid workflow cache should load without warning");
+    const specforge::SampleWorkflowStateCache& loaded = load.cache;
     std::filesystem::remove(cache_path, cleanup_error);
     const auto restored = loaded.sources_by_identity.find("legacy-mapped-source");
     Require(

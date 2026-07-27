@@ -11,6 +11,13 @@ namespace specforge {
 
 struct JsonValue;
 
+struct LocalUserStatePersistenceStatus {
+    bool retrying = false;
+    bool recovered = false;
+    std::string load_warning;
+    std::string save_message;
+};
+
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
 [[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
 [[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value);
@@ -21,14 +28,18 @@ void WritePersistedPathReference(std::ostream& stream, const std::filesystem::pa
 class LocalUserStateSaveStatus {
 public:
     void Clear();
+    void ClearRecovered();
     void MarkFailed(std::string message);
+    void MarkSaveSucceeded();
 
     [[nodiscard]] bool failed() const;
+    [[nodiscard]] bool recovered() const;
     [[nodiscard]] const std::string& message() const;
     [[nodiscard]] std::string_view message_view() const;
 
 private:
     bool failed_ = false;
+    bool recovered_ = false;
     std::string message_;
 };
 

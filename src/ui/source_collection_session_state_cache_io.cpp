@@ -21,26 +21,30 @@ std::filesystem::path DefaultSourceCollectionSessionStateCachePath()
     return DefaultLocalUserStatePath("source-session.json");
 }
 
-SourceCollectionSessionStateCache LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
+SourceCollectionSessionStateCacheLoadResult
+LoadSourceCollectionSessionStateCache(const std::filesystem::path& path)
 {
-    SourceCollectionSessionStateCache state;
+    SourceCollectionSessionStateCacheLoadResult load;
     VersionedJsonCacheLoadResult result = LoadVersionedJsonCacheFile(
         path,
         kSourceSessionStateFormatKind,
         {1, kSourceSessionStateSchemaVersion},
         "source session state cache");
     if (!result.document) {
-        return state;
+        load.warning = std::move(result.warning);
+        return load;
     }
 
-    state.active_source_index = ReadJsonSizeMember(result.document->root, "active_source_index");
+    load.cache.active_source_index =
+        ReadJsonSizeMember(result.document->root, "active_source_index");
     const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
     if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
-        return state;
+        return load;
     }
 
     for (const JsonValue& source_object : sources->array) {
-        if (source_object.kind != JsonValue::Kind::Object || state.sources.size() >= kMaxRestoredSources) {
+        if (source_object.kind != JsonValue::Kind::Object ||
+            load.cache.sources.size() >= kMaxRestoredSources) {
             continue;
         }
         const JsonValue* path_value = JsonObjectMember(source_object, "path");
@@ -67,9 +71,9 @@ SourceCollectionSessionStateCache LoadSourceCollectionSessionStateCache(const st
                 source.annotation_paths.push_back(std::move(*annotation_path));
             }
         }
-        state.sources.push_back(std::move(source));
+        load.cache.sources.push_back(std::move(source));
     }
-    return state;
+    return load;
 }
 
 bool SaveSourceCollectionSessionStateCache(

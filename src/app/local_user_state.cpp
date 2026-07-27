@@ -251,18 +251,42 @@ void WritePersistedPathReference(std::ostream& stream, const std::filesystem::pa
 void LocalUserStateSaveStatus::Clear()
 {
     failed_ = false;
+    recovered_ = false;
     message_.clear();
+}
+
+void LocalUserStateSaveStatus::ClearRecovered()
+{
+    recovered_ = false;
+    if (!failed_) {
+        message_.clear();
+    }
 }
 
 void LocalUserStateSaveStatus::MarkFailed(std::string message)
 {
     failed_ = true;
+    recovered_ = false;
     message_ = std::move(message);
+}
+
+void LocalUserStateSaveStatus::MarkSaveSucceeded()
+{
+    recovered_ = failed_;
+    failed_ = false;
+    if (!recovered_) {
+        message_.clear();
+    }
 }
 
 bool LocalUserStateSaveStatus::failed() const
 {
     return failed_;
+}
+
+bool LocalUserStateSaveStatus::recovered() const
+{
+    return recovered_;
 }
 
 const std::string& LocalUserStateSaveStatus::message() const
@@ -311,7 +335,7 @@ void LocalUserStateSaveScheduler::MarkSaveSucceeded()
 void LocalUserStateSaveScheduler::MarkSaveSucceeded(LocalUserStateSaveStatus& status)
 {
     MarkSaveSucceeded();
-    status.Clear();
+    status.MarkSaveSucceeded();
 }
 
 void LocalUserStateSaveScheduler::MarkSaveFailed()

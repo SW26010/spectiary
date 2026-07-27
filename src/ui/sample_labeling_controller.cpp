@@ -153,8 +153,7 @@ void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& id
 
 BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
     const SourceCollectionIdentity& identity,
-    std::optional<SourceState> prepared_state,
-    std::string state_load_warning)
+    std::optional<SourceState> prepared_state)
 {
     if (identity.id.empty() || identity.spectrum_count == 0) {
         BackgroundRetirementHandle retired;
@@ -190,9 +189,6 @@ BackgroundRetirementHandle SampleLabelingController::ActivatePreparedSource(
     state.source_fingerprint = identity.source_fingerprint;
     state.context_fingerprint = identity.context_fingerprint;
     active_source_identity_ = identity.id;
-    if (state_cache_load_warning_.empty() && !state_load_warning.empty()) {
-        state_cache_load_warning_ = std::move(state_load_warning);
-    }
     if (std::any_of(state.tasks.begin(), state.tasks.end(), ShouldRetryOutputSave)) {
         QueueOutputRetry();
     }
@@ -209,10 +205,11 @@ BackgroundRetirementHandle SampleLabelingController::AdoptPreparedStateCache(
     if (!cache_snapshot || cache_snapshot == state_cache_snapshot_) {
         return {};
     }
+    const bool first_load = !state_cache_loaded_;
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> retired =
         std::exchange(state_cache_snapshot_, std::move(cache_snapshot));
     state_cache_loaded_ = true;
-    if (state_cache_load_warning_.empty()) {
+    if (first_load) {
         state_cache_load_warning_ = state_cache_snapshot_->warning;
     }
     Touch();
@@ -905,7 +902,7 @@ void SampleLabelingController::EnsureStateCacheLoaded()
 void SampleLabelingController::QueueStateSave()
 {
     state_cache_save_scheduler_.MarkDirty();
-    state_cache_save_status_.Clear();
+    state_cache_save_status_.ClearRecovered();
 }
 
 void SampleLabelingController::QueueOutputRetry()
@@ -996,6 +993,7 @@ bool SampleLabelingController::TrySaveStateCache()
     const bool saved = SaveSampleLabelingStateCache(state_cache_path_, cache);
     if (saved) {
         normalize_saved_states(sources_);
+        state_cache_load_warning_.clear();
         state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
     } else {
         state_cache_save_scheduler_.MarkDirty();
@@ -1061,6 +1059,17 @@ std::string_view SampleLabelingController::state_save_error() const
 std::string_view SampleLabelingController::state_load_warning() const
 {
     return state_cache_load_warning_;
+}
+
+LocalUserStatePersistenceStatus
+SampleLabelingController::PersistenceStatus() const
+{
+    return {
+        .retrying = state_cache_save_status_.failed(),
+        .recovered = state_cache_save_status_.recovered(),
+        .load_warning = state_cache_load_warning_,
+        .save_message = state_cache_save_status_.message(),
+    };
 }
 
 }  // namespace specforge

@@ -311,6 +311,8 @@ public:
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] SourceCollectionStateFlushResult
+        FlushStateCachesWithStatus();
     [[nodiscard]] std::vector<BackgroundRetirementHandle>
         TakeViewRetirement();
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
@@ -323,6 +325,7 @@ private:
         std::vector<BackgroundRetirementHandle>& background_retirement,
         std::optional<std::filesystem::path>* canceled_source_follow_up_path);
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
+    [[nodiscard]] SourceCollectionPersistenceHealthView PersistenceHealth() const;
     void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
     void InvalidateView();

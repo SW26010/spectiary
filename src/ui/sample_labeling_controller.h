@@ -69,8 +69,7 @@ public:
     void ActivateSource(const SourceCollectionIdentity& identity);
     [[nodiscard]] BackgroundRetirementHandle ActivatePreparedSource(
         const SourceCollectionIdentity& identity,
-        std::optional<SourceState> prepared_state,
-        std::string state_load_warning = {});
+        std::optional<SourceState> prepared_state);
     [[nodiscard]] BackgroundRetirementHandle AdoptPreparedStateCache(
         std::shared_ptr<const SampleLabelingStateCacheLoadResult> cache_snapshot);
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
@@ -119,6 +118,7 @@ public:
     [[nodiscard]] bool state_save_failed() const;
     [[nodiscard]] std::string_view state_save_error() const;
     [[nodiscard]] std::string_view state_load_warning() const;
+    [[nodiscard]] LocalUserStatePersistenceStatus PersistenceStatus() const;
 
     [[nodiscard]] SampleLabelingWriteOperationResult AssignLabel(std::size_t sample_index, int code);
     [[nodiscard]] SampleLabelingWriteOperationResult ClearLabel(std::size_t sample_index);

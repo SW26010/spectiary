@@ -486,7 +486,13 @@ void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
     scheduler.MarkSaveSucceeded(status);
     Require(!scheduler.dirty(), "successful status save should clear pending state");
     Require(!status.failed(), "successful status save should clear failure state");
-    Require(status.message().empty(), "successful status save should clear the error message");
+    Require(status.recovered(), "successful retry should expose recovery");
+    Require(
+        status.message() == "could not write state",
+        "recovery should retain the previous failure for diagnostics");
+    status.ClearRecovered();
+    Require(!status.recovered(), "a later state mutation should clear recovery");
+    Require(status.message().empty(), "clearing recovery should clear the previous failure");
 
     scheduler.MarkSaveFailedAt(start + 10ms, status, "retry later");
     Require(status.failed(), "retry failure should expose failure state");

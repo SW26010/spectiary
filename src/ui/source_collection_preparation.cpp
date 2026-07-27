@@ -125,6 +125,7 @@ SourceCollectionPreparationAdapters DefaultAdapters()
     adapters.workflow_cache_paths = {
         DefaultSampleLabelingStateCachePath(),
         DefaultSampleWorkflowStateCachePath(),
+        DefaultSampleNavigationStateCachePath(),
     };
     return adapters;
 }
@@ -173,6 +174,14 @@ void FillMissingAdapters(
             std::move(
                 defaults.workflow_cache_paths
                     .workflow_state_cache_path);
+    }
+    if (adapters.workflow_cache_paths
+            .navigation_state_cache_path.empty()) {
+        adapters.workflow_cache_paths
+            .navigation_state_cache_path =
+            std::move(
+                defaults.workflow_cache_paths
+                    .navigation_state_cache_path);
     }
 }
 

@@ -23,18 +23,20 @@ std::filesystem::path DefaultSampleNavigationStateCachePath()
     return DefaultLocalUserStatePath("sample-navigation-state.json");
 }
 
-SampleNavigationStateCache LoadSampleNavigationStateCache(const std::filesystem::path& path)
+SampleNavigationStateCacheLoadResult
+LoadSampleNavigationStateCache(const std::filesystem::path& path)
 {
-    SampleNavigationStateCache cache;
+    SampleNavigationStateCacheLoadResult load;
     VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "sample navigation state cache");
     if (!result.document) {
-        return cache;
+        load.warning = std::move(result.warning);
+        return load;
     }
 
     const JsonValue* sources = JsonObjectMember(result.document->root, "sources");
     if (sources == nullptr || sources->kind != JsonValue::Kind::Array) {
-        return cache;
+        return load;
     }
     for (const JsonValue& source_object : sources->array) {
         if (source_object.kind != JsonValue::Kind::Object) {
@@ -43,10 +45,11 @@ SampleNavigationStateCache LoadSampleNavigationStateCache(const std::filesystem:
         const std::optional<std::string> identity = ReadJsonStringMember(source_object, "identity");
         const std::optional<std::size_t> index = ReadJsonSizeMember(source_object, "last_index");
         if (identity && !identity->empty() && index) {
-            cache.last_indices_by_source_identity[NormalizePersistedSourceCollectionIdentity(*identity)] = *index;
+            load.cache.last_indices_by_source_identity[
+                NormalizePersistedSourceCollectionIdentity(*identity)] = *index;
         }
     }
-    return cache;
+    return load;
 }
 
 bool SaveSampleNavigationStateCache(

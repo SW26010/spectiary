@@ -5,6 +5,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/sample_navigation_sequence.h"
+#include "ui/sample_navigation_state_cache_io.h"
 #include "ui/sample_workflow_state_cache_io.h"
 #include "ui/source_collection_session_types.h"
 
@@ -22,11 +23,14 @@ namespace specforge {
 struct SampleWorkflowPreparationPaths {
     std::filesystem::path labeling_state_cache_path;
     std::filesystem::path workflow_state_cache_path;
+    std::filesystem::path navigation_state_cache_path;
 };
 
 struct SampleWorkflowPreparationCacheBundle {
     SampleLabelingStateCacheLoadResult labeling;
     SampleWorkflowStateCache workflow;
+    std::string workflow_warning;
+    SampleNavigationStateCacheLoadResult navigation;
 };
 
 [[nodiscard]] SampleWorkflowPreparationCacheBundle LoadSampleWorkflowPreparationCacheBundle(
@@ -38,7 +42,6 @@ struct PreparedSampleWorkflowState {
     // them as an in-memory base without reopening either cache file.
     std::shared_ptr<const SampleWorkflowPreparationCacheBundle> preparation_cache;
     std::optional<SampleLabelingSourceState> labeling_source_state;
-    std::string labeling_state_warning;
     SampleWorkflowSourceState workflow_source_state;
     SampleFilterEvaluation filter_evaluation;
     std::optional<SampleNavigationSortChoice> sort_choice;

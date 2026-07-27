@@ -38,16 +38,21 @@ PreparedSampleWorkflowState PrepareSampleWorkflowState(
     const SampleWorkflowPreparationPaths& paths,
     const std::function<void()>& cancellation_checkpoint)
 {
-    SampleWorkflowPreparationCacheBundle cache =
-        LoadSampleWorkflowPreparationCacheBundle(paths, cancellation_checkpoint);
-    return PrepareSampleWorkflowStateFromCache(
+    auto cache = std::make_shared<const SampleWorkflowPreparationCacheBundle>(
+        LoadSampleWorkflowPreparationCacheBundle(
+            paths,
+            cancellation_checkpoint));
+    PreparedSampleWorkflowState prepared =
+        PrepareSampleWorkflowStateFromCache(
         snapshot,
         context,
         prepared_index,
-        cache,
+        *cache,
         nullptr,
         nullptr,
         cancellation_checkpoint);
+    prepared.preparation_cache = std::move(cache);
+    return prepared;
 }
 
 SampleWorkflowPreparationCacheBundle LoadSampleWorkflowPreparationCacheBundle(
@@ -59,8 +64,16 @@ SampleWorkflowPreparationCacheBundle LoadSampleWorkflowPreparationCacheBundle(
     bundle.labeling =
         LoadSampleLabelingStateCache(paths.labeling_state_cache_path, cancellation_checkpoint);
     Checkpoint(cancellation_checkpoint);
-    bundle.workflow =
-        LoadSampleWorkflowStateCache(paths.workflow_state_cache_path, cancellation_checkpoint);
+    SampleWorkflowStateCacheLoadResult workflow =
+        LoadSampleWorkflowStateCache(
+            paths.workflow_state_cache_path,
+            cancellation_checkpoint);
+    bundle.workflow = std::move(workflow.cache);
+    bundle.workflow_warning = std::move(workflow.warning);
+    Checkpoint(cancellation_checkpoint);
+    bundle.navigation =
+        LoadSampleNavigationStateCache(
+            paths.navigation_state_cache_path);
     Checkpoint(cancellation_checkpoint);
     return bundle;
 }
@@ -82,13 +95,11 @@ PreparedSampleWorkflowState PrepareSampleWorkflowStateFromCache(
 
     if (labeling_state_override != nullptr) {
         prepared.labeling_source_state = *labeling_state_override;
-    } else {
-        prepared.labeling_state_warning = cache.labeling.warning;
     }
     if (!prepared.labeling_source_state) {
         const auto source = cache.labeling.cache.sources.find(context.identity.id);
         if (source != cache.labeling.cache.sources.end()) {
-        prepared.labeling_source_state = source->second;
+            prepared.labeling_source_state = source->second;
         }
     }
     if (prepared.labeling_source_state) {

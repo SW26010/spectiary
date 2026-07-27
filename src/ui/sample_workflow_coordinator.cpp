@@ -201,7 +201,9 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           std::move(labeling_state_cache_path),
           std::move(workflow_state_cache_path),
           [](const std::filesystem::path& path) { return LoadSampleLabelingStateCache(path); },
-          [](const std::filesystem::path& path) { return LoadSampleWorkflowStateCache(path); })
+          [](const std::filesystem::path& path) {
+              return LoadSampleWorkflowStateCache(path);
+          })
 {
 }
 
@@ -512,8 +514,7 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     }
     if (BackgroundRetirementHandle retired_labeling = labeling_.ActivatePreparedSource(
             identity,
-            std::move(prepared_workflow.labeling_source_state),
-            std::move(prepared_workflow.labeling_state_warning))) {
+            std::move(prepared_workflow.labeling_source_state))) {
         result.background_retirement.push_back(std::move(retired_labeling));
     }
     result.background_retirement.push_back(
@@ -738,6 +739,10 @@ std::vector<BackgroundRetirementHandle> SampleWorkflowCoordinator::ReleaseBackgr
 {
     std::vector<BackgroundRetirementHandle> resources =
         labeling_.ReleaseBackgroundResourcesForShutdown();
+    if (BackgroundRetirementHandle navigation =
+            navigation_.ReleaseBackgroundResourcesForShutdown()) {
+        resources.push_back(std::move(navigation));
+    }
     if (workflow_state_cache_snapshot_) {
         resources.push_back(std::move(workflow_state_cache_snapshot_));
     }
@@ -1665,9 +1670,14 @@ bool SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::Time
                labeling_revision_before;
     }
     if (SaveWorkflowStateCache()) {
-        workflow_state_save_scheduler_.MarkSaveSucceeded();
+        workflow_state_load_warning_.clear();
+        workflow_state_save_scheduler_.MarkSaveSucceeded(
+            workflow_state_save_status_);
     } else {
-        workflow_state_save_scheduler_.MarkSaveFailed();
+        workflow_state_save_scheduler_.MarkSaveFailedAt(
+            now,
+            workflow_state_save_status_,
+            "Could not save sample workflow state.");
     }
     return labeling_.View().revision !=
            labeling_revision_before;
@@ -1692,10 +1702,32 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator:
 
 bool SampleWorkflowCoordinator::FlushStateCaches()
 {
-    const bool navigation_saved = navigation_.FlushStateCache();
-    const bool labeling_saved = labeling_.FlushStateCache();
-    const bool workflow_saved = FlushWorkflowStateCache();
-    return navigation_saved && labeling_saved && workflow_saved;
+    return FlushStateCachesWithStatus().all_saved();
+}
+
+SampleWorkflowStateFlushResult
+SampleWorkflowCoordinator::FlushStateCachesWithStatus()
+{
+    SampleWorkflowStateFlushResult result;
+    result.navigation_saved = navigation_.FlushStateCache();
+    result.labeling_saved = labeling_.FlushStateCache();
+    result.workflow_saved = FlushWorkflowStateCache();
+    return result;
+}
+
+SampleWorkflowPersistenceStatus
+SampleWorkflowCoordinator::PersistenceStatus() const
+{
+    return {
+        .navigation = navigation_.PersistenceStatus(),
+        .labeling = labeling_.PersistenceStatus(),
+        .workflow = {
+            .retrying = workflow_state_save_status_.failed(),
+            .recovered = workflow_state_save_status_.recovered(),
+            .load_warning = workflow_state_load_warning_,
+            .save_message = workflow_state_save_status_.message(),
+        },
+    };
 }
 
 void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
@@ -1868,7 +1900,10 @@ void SampleWorkflowCoordinator::EnsureWorkflowStateCacheLoaded()
         return;
     }
     workflow_state_cache_loaded_ = true;
-    workflow_state_cache_ = workflow_state_cache_loader_(workflow_state_cache_path_);
+    SampleWorkflowStateCacheLoadResult result =
+        workflow_state_cache_loader_(workflow_state_cache_path_);
+    workflow_state_cache_ = std::move(result.cache);
+    workflow_state_load_warning_ = std::move(result.warning);
 }
 
 void SampleWorkflowCoordinator::AdoptPreparedCache(
@@ -1878,12 +1913,25 @@ void SampleWorkflowCoordinator::AdoptPreparedCache(
     if (!cache) {
         return;
     }
+    const bool first_workflow_load =
+        !workflow_state_cache_loaded_;
+    std::shared_ptr<const SampleNavigationStateCacheLoadResult>
+        navigation_cache(cache, &cache->navigation);
+    if (BackgroundRetirementHandle retired =
+            navigation_.AdoptPreparedStateCache(
+                std::move(navigation_cache))) {
+        background_retirement.push_back(std::move(retired));
+    }
     std::shared_ptr<const SampleWorkflowStateCache> workflow_cache(cache, &cache->workflow);
     if (workflow_cache != workflow_state_cache_snapshot_) {
         if (workflow_state_cache_snapshot_) {
             background_retirement.push_back(workflow_state_cache_snapshot_);
         }
         workflow_state_cache_snapshot_ = std::move(workflow_cache);
+        if (first_workflow_load) {
+            workflow_state_load_warning_ =
+                cache->workflow_warning;
+        }
     }
     workflow_state_cache_loaded_ = true;
 
@@ -1945,6 +1993,7 @@ void SampleWorkflowCoordinator::MarkActiveWorkflowStateDirty()
 {
     StoreActiveWorkflowState();
     if (!workflow_state_cache_path_.empty()) {
+        workflow_state_save_status_.ClearRecovered();
         workflow_state_save_scheduler_.MarkDirty();
     }
 }
@@ -1969,10 +2018,14 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
         return true;
     }
     if (SaveWorkflowStateCache()) {
-        workflow_state_save_scheduler_.MarkSaveSucceeded();
+        workflow_state_load_warning_.clear();
+        workflow_state_save_scheduler_.MarkSaveSucceeded(
+            workflow_state_save_status_);
         return true;
     }
-    workflow_state_save_scheduler_.MarkSaveFailed();
+    workflow_state_save_scheduler_.MarkSaveFailed(
+        workflow_state_save_status_,
+        "Could not save sample workflow state.");
     return false;
 }
 

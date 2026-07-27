@@ -58,10 +58,27 @@ struct PendingSampleNavigation {
     bool remember_labeling_position = false;
 };
 
+struct SampleWorkflowPersistenceStatus {
+    LocalUserStatePersistenceStatus navigation;
+    LocalUserStatePersistenceStatus labeling;
+    LocalUserStatePersistenceStatus workflow;
+};
+
+struct SampleWorkflowStateFlushResult {
+    bool navigation_saved = true;
+    bool labeling_saved = true;
+    bool workflow_saved = true;
+
+    [[nodiscard]] bool all_saved() const
+    {
+        return navigation_saved && labeling_saved && workflow_saved;
+    }
+};
+
 class SampleWorkflowCoordinator {
 public:
     using WorkflowStateCacheLoader =
-        std::function<SampleWorkflowStateCache(const std::filesystem::path&)>;
+        std::function<SampleWorkflowStateCacheLoadResult(const std::filesystem::path&)>;
     SampleWorkflowCoordinator();
     SampleWorkflowCoordinator(
         std::filesystem::path navigation_state_cache_path,
@@ -157,6 +174,9 @@ public:
     [[nodiscard]] bool RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
+    [[nodiscard]] SampleWorkflowStateFlushResult
+        FlushStateCachesWithStatus();
+    [[nodiscard]] SampleWorkflowPersistenceStatus PersistenceStatus() const;
 
 private:
     [[nodiscard]] SampleWorkflowTransitionOutcome CompleteTransition(
@@ -312,6 +332,8 @@ private:
     std::unordered_set<std::string> workflow_state_tombstones_;
     WorkflowStateCacheLoader workflow_state_cache_loader_;
     LocalUserStateSaveScheduler workflow_state_save_scheduler_;
+    LocalUserStateSaveStatus workflow_state_save_status_;
+    std::string workflow_state_load_warning_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
     bool deferred_sample_navigation_ = false;

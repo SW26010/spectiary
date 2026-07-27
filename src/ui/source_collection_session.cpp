@@ -46,12 +46,15 @@ public:
     {
     }
 
-    [[nodiscard]] SourceCollectionSessionStateCache Load() const
+    [[nodiscard]] SourceCollectionSessionStateCache Load()
     {
         if (cache_path_.empty()) {
             return {};
         }
-        return LoadSourceCollectionSessionStateCache(cache_path_);
+        SourceCollectionSessionStateCacheLoadResult result =
+            LoadSourceCollectionSessionStateCache(cache_path_);
+        load_warning_ = std::move(result.warning);
+        return std::move(result.cache);
     }
 
     void BeginRestore()
@@ -64,6 +67,7 @@ public:
         restoring_ = false;
         if (dirty_after_restore_ && !cache_path_.empty()) {
             dirty_after_restore_ = false;
+            save_status_.ClearRecovered();
             save_scheduler_.MarkDirty();
         }
     }
@@ -71,6 +75,7 @@ public:
     void MarkDirty()
     {
         if (!restoring_ && !cache_path_.empty()) {
+            save_status_.ClearRecovered();
             save_scheduler_.MarkDirty();
         }
     }
@@ -84,9 +89,13 @@ public:
             return;
         }
         if (Save(sources, active_source_index)) {
-            save_scheduler_.MarkSaveSucceeded();
+            load_warning_.clear();
+            save_scheduler_.MarkSaveSucceeded(save_status_);
         } else {
-            save_scheduler_.MarkSaveFailed();
+            save_scheduler_.MarkSaveFailedAt(
+                now,
+                save_status_,
+                "Could not save source session state.");
         }
     }
 
@@ -98,6 +107,7 @@ public:
         if (restoring_) {
             dirty_after_restore_ = true;
         } else {
+            save_status_.ClearRecovered();
             save_scheduler_.MarkDirty();
         }
     }
@@ -113,19 +123,37 @@ public:
     {
         if (dirty_after_restore_) {
             if (!Save(sources, active_source_index)) {
+                save_scheduler_.MarkSaveFailed(
+                    save_status_,
+                    "Could not save source session state.");
                 return false;
             }
+            load_warning_.clear();
+            save_scheduler_.MarkSaveSucceeded(save_status_);
             dirty_after_restore_ = false;
         }
         if (!save_scheduler_.dirty()) {
             return true;
         }
         if (Save(sources, active_source_index)) {
-            save_scheduler_.MarkSaveSucceeded();
+            load_warning_.clear();
+            save_scheduler_.MarkSaveSucceeded(save_status_);
             return true;
         }
-        save_scheduler_.MarkSaveFailed();
+        save_scheduler_.MarkSaveFailed(
+            save_status_,
+            "Could not save source session state.");
         return false;
+    }
+
+    [[nodiscard]] LocalUserStatePersistenceStatus PersistenceStatus() const
+    {
+        return {
+            .retrying = save_status_.failed(),
+            .recovered = save_status_.recovered(),
+            .load_warning = load_warning_,
+            .save_message = save_status_.message(),
+        };
     }
 
 private:
@@ -141,6 +169,8 @@ private:
 
     std::filesystem::path cache_path_;
     LocalUserStateSaveScheduler save_scheduler_;
+    LocalUserStateSaveStatus save_status_;
+    std::string load_warning_;
     bool restoring_ = false;
     bool dirty_after_restore_ = false;
 };
@@ -660,6 +690,7 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
     view.labeling = workflow_->LabelingView(view.current_sample_snapshot);
     view.filter = workflow_->BuildFilterView(snapshot);
     view.sorting = workflow_->BuildSortingView(snapshot);
+    view.persistence = PersistenceHealth();
     session_view_cache_ =
         std::make_shared<SourceCollectionSessionView>(
             std::move(view));
@@ -1147,8 +1178,16 @@ std::vector<BackgroundRetirementHandle>
 SourceCollectionSession::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
 {
+    const SourceCollectionPersistenceHealthView persistence_before =
+        PersistenceHealth();
     source_session_state_->RunMaintenance(now, SavedSourcesWithAnnotations(), roster_->current_source_index());
     if (workflow_->RunMaintenance(now)) {
+        InvalidateView();
+    }
+    const SourceCollectionPersistenceHealthView persistence_after =
+        PersistenceHealth();
+    if (persistence_before.kind != persistence_after.kind ||
+        persistence_before.messages != persistence_after.messages) {
         InvalidateView();
     }
     std::vector<BackgroundRetirementHandle> retirement;
@@ -1170,10 +1209,74 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> SourceCollectionSession::N
 
 bool SourceCollectionSession::FlushStateCaches()
 {
-    const bool source_session_saved =
-        source_session_state_->Flush(SavedSourcesWithAnnotations(), roster_->current_source_index());
-    const bool workflow_saved = workflow_->FlushStateCaches();
-    return source_session_saved && workflow_saved;
+    return FlushStateCachesWithStatus().all_saved();
+}
+
+SourceCollectionStateFlushResult
+SourceCollectionSession::FlushStateCachesWithStatus()
+{
+    const SourceCollectionPersistenceHealthView persistence_before =
+        PersistenceHealth();
+    SourceCollectionStateFlushResult result;
+    result.source_session_saved =
+        source_session_state_->Flush(
+            SavedSourcesWithAnnotations(),
+            roster_->current_source_index());
+    const SampleWorkflowStateFlushResult workflow =
+        workflow_->FlushStateCachesWithStatus();
+    result.navigation_saved = workflow.navigation_saved;
+    result.labeling_saved = workflow.labeling_saved;
+    result.workflow_saved = workflow.workflow_saved;
+    const SourceCollectionPersistenceHealthView persistence_after =
+        PersistenceHealth();
+    if (persistence_before.kind != persistence_after.kind ||
+        persistence_before.messages != persistence_after.messages) {
+        InvalidateView();
+    }
+    return result;
+}
+
+SourceCollectionPersistenceHealthView
+SourceCollectionSession::PersistenceHealth() const
+{
+    SourceCollectionPersistenceHealthView health;
+    bool has_load_warning = false;
+    bool retrying = false;
+    bool recovered = false;
+    const auto append = [&](std::string_view area,
+                            const LocalUserStatePersistenceStatus& status) {
+        if (!status.load_warning.empty()) {
+            has_load_warning = true;
+            health.messages.push_back(
+                std::string{area} + ": " + status.load_warning);
+        }
+        if (status.retrying) {
+            retrying = true;
+            health.messages.push_back(
+                std::string{area} + ": " + status.save_message +
+                " Retrying.");
+        } else if (status.recovered) {
+            recovered = true;
+            health.messages.push_back(
+                std::string{area} + ": persistence recovered.");
+        }
+    };
+
+    append("Source session", source_session_state_->PersistenceStatus());
+    const SampleWorkflowPersistenceStatus workflow =
+        workflow_->PersistenceStatus();
+    append("Navigation", workflow.navigation);
+    append("Labeling", workflow.labeling);
+    append("Workflow", workflow.workflow);
+
+    if (retrying) {
+        health.kind = SourceCollectionPersistenceHealthKind::Retrying;
+    } else if (has_load_warning) {
+        health.kind = SourceCollectionPersistenceHealthKind::Warning;
+    } else if (recovered) {
+        health.kind = SourceCollectionPersistenceHealthKind::Recovered;
+    }
+    return health;
 }
 
 std::vector<SourceCollectionSavedSource> SourceCollectionSession::SavedSourcesWithAnnotations() const

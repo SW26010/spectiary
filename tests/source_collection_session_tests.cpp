@@ -173,6 +173,18 @@ bool HasAvailableSortSource(
     });
 }
 
+bool HasPersistenceMessage(
+    const specforge::SourceCollectionPersistenceHealthView& health,
+    std::string_view text)
+{
+    return std::any_of(
+        health.messages.begin(),
+        health.messages.end(),
+        [text](const std::string& message) {
+            return message.find(text) != std::string::npos;
+        });
+}
+
 const specforge::SourceCollectionSampleSortSourceView* FindSortSource(
     const specforge::SourceCollectionSampleSortingView& view,
     std::string_view source_id)
@@ -248,6 +260,7 @@ using SnapshotLoader = std::function<specforge::SpectrumSnapshotHandle(
 
 specforge::SourceCollectionPreparationAdapters PreparationAdapters(
     SnapshotLoader loader,
+    const std::filesystem::path& navigation_cache,
     const std::filesystem::path& labeling_cache,
     const std::filesystem::path& workflow_cache)
 {
@@ -275,6 +288,7 @@ specforge::SourceCollectionPreparationAdapters PreparationAdapters(
     adapters.workflow_cache_paths = {
         labeling_cache,
         workflow_cache,
+        navigation_cache,
     };
     return adapters;
 }
@@ -294,6 +308,7 @@ public:
               workflow_cache),
           preparation_(PreparationAdapters(
               std::move(loader),
+              navigation_cache,
               labeling_cache,
               workflow_cache))
     {
@@ -2873,7 +2888,8 @@ void TestSourceSessionStateCacheRoundTrip()
         "source session cache should save");
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(loaded.sources.size() == 2, "source session cache should restore all sources");
     Require(loaded.sources[0].path == first_source_path, "first source path should round-trip");
     Require(loaded.sources[0].last_spectrum_index == 2, "first source index should round-trip");
@@ -2924,7 +2940,8 @@ void TestSourceSessionStateCacheStoresPackageRelativePaths()
         "package-relative source session cache should not store a Windows absolute path");
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(loaded.sources.size() == 1, "package-relative source should load");
     Require(loaded.sources[0].path == source_path, "package-relative source should resolve under package root");
     Require(loaded.sources[0].annotation_paths.size() == 1, "package-relative annotation should load");
@@ -2975,7 +2992,8 @@ void TestSourceSessionStateCacheRebasesLegacyMovedPortablePath()
     stream.close();
 
     const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(loaded.sources.size() == 1, "legacy moved portable source should load");
     Require(
         loaded.sources[0].path == source_path,
@@ -3036,7 +3054,8 @@ void TestSampleWorkflowStateCacheStoresPackageRelativeAnnotationSourceIds()
         "package-relative workflow cache should not store the package root");
 
     const specforge::SampleWorkflowStateCache loaded =
-        specforge::LoadSampleWorkflowStateCache(workflow_cache);
+        specforge::LoadSampleWorkflowStateCache(workflow_cache)
+            .cache;
     const auto source = loaded.sources_by_identity.find("source-identity");
     Require(source != loaded.sources_by_identity.end(), "workflow source state should load");
     Require(
@@ -3067,10 +3086,48 @@ void TestSourceSessionStateCacheIgnoresCorruptJson()
     const std::filesystem::path source_session_cache = UniqueTempPath("_adapter_corrupt_sources.json");
     WriteTextFile(source_session_cache, "{ invalid json");
 
-    const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
-    Require(loaded.sources.empty(), "corrupt source session cache should be ignored");
-    Require(!loaded.active_source_index, "corrupt source session cache should not restore an active source");
+    const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache);
+    Require(loaded.cache.sources.empty(), "corrupt source session cache should be ignored");
+    Require(
+        !loaded.cache.active_source_index,
+        "corrupt source session cache should not restore an active source");
+    Require(
+        !loaded.warning.empty(),
+        "corrupt source session cache should retain its non-blocking warning");
+}
+
+void TestMissingPersistenceCachesAreHealthyDefaults()
+{
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath("_missing_source_session.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_missing_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_missing_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_missing_workflow.json");
+
+    Require(
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache)
+            .warning.empty(),
+        "missing source-session cache should be a healthy default");
+    Require(
+        specforge::LoadSampleNavigationStateCache(
+            navigation_cache)
+            .warning.empty(),
+        "missing navigation cache should be a healthy default");
+    Require(
+        specforge::LoadSampleLabelingStateCache(labeling_cache)
+            .warning.empty(),
+        "missing labeling cache should be a healthy default");
+    Require(
+        specforge::LoadSampleWorkflowStateCache(
+            workflow_cache)
+            .warning.empty(),
+        "missing workflow cache should be a healthy default");
 }
 
 void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
@@ -3085,12 +3142,479 @@ void TestSourceSessionStateCacheIgnoresUnsupportedSchema()
         "  \"sources\": []\n"
         "}\n");
 
-    const specforge::SourceCollectionSessionStateCache loaded =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
-    Require(loaded.sources.empty(), "unsupported source session cache schema should be ignored");
+    const specforge::SourceCollectionSessionStateCacheLoadResult loaded =
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache);
+    Require(loaded.cache.sources.empty(), "unsupported source session cache schema should be ignored");
     Require(
-        !loaded.active_source_index,
+        !loaded.cache.active_source_index,
         "unsupported source session cache schema should not restore an active source");
+    Require(
+        !loaded.warning.empty(),
+        "unsupported source session cache should retain its non-blocking warning");
+}
+
+void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
+{
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath("_health_source_session.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_health_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_health_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_health_workflow.json");
+    const std::filesystem::path source_path =
+        UniqueTempPath("_health_source.npy");
+    const std::filesystem::path second_source_path =
+        UniqueTempPath("_health_second_source.npy");
+    TouchFile(source_path);
+    TouchFile(second_source_path);
+    WriteTextFile(source_session_cache, "{ invalid json");
+    WriteTextFile(
+        navigation_cache,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": []\n"
+        "}\n");
+    WriteTextFile(labeling_cache, "{ invalid json");
+    WriteTextFile(
+        workflow_cache,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_workflow_state.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": []\n"
+        "}\n");
+
+    PreparedSession session(
+        [source_path, second_source_path](
+            const std::filesystem::path& path,
+            std::size_t index) {
+            Require(
+                path == source_path ||
+                    path == second_source_path,
+                "health fixture should open one of its sources");
+            return MakeSnapshot(path, 3, index);
+        },
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    const specforge::SourceCollectionSessionResult opened =
+        session.Open(source_path);
+    Require(opened.loaded, "cache warnings must not block source opening");
+
+    const specforge::SourceCollectionPersistenceHealthView& health =
+        session.View().persistence;
+    Require(
+        health.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Warning,
+        "corrupt and unsupported caches should produce overall warning health");
+    std::string health_messages;
+    for (const std::string& message : health.messages) {
+        health_messages += "\n" + message;
+    }
+    Require(
+        health.messages.size() == 4,
+        std::string{"all four independent cache warnings should be retained; got "} +
+            std::to_string(health.messages.size()) + health_messages);
+    Require(
+        HasPersistenceMessage(health, "Source session:"),
+        "source-session warning should reach the session view");
+    Require(
+        HasPersistenceMessage(health, "Navigation:") &&
+            HasPersistenceMessage(health, "unsupported"),
+        "navigation unsupported-schema warning should reach the session view");
+    Require(
+        HasPersistenceMessage(health, "Labeling:"),
+        "labeling warning should remain part of overall health");
+    Require(
+        HasPersistenceMessage(health, "Workflow:") &&
+            HasPersistenceMessage(health, "unsupported"),
+        "workflow unsupported-schema warning should reach the session view");
+
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+    (void)session.SubmitAndService(
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::LocateRow(1)));
+    (void)Submit(
+        session,
+        specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
+            specforge::SampleFilteringIntent::Clear()));
+    const specforge::SourceCollectionStateFlushResult flush =
+        session.FlushStateCachesWithStatus();
+    Require(
+        flush.all_saved(),
+        "healthy cache paths should rewrite all independently loaded states");
+    Require(
+        session.View().persistence.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+        "a successful save of each warned owner should clear all load warnings");
+    Require(
+        session.Open(second_source_path).loaded,
+        "the repaired-cache fixture should open another source");
+    Require(
+        session.View().persistence.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+        "adopting the same prepared cache snapshot must not resurrect cleared warnings");
+}
+
+void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
+{
+    const std::filesystem::path warning_navigation_cache =
+        UniqueTempPath("_direct_health_navigation.json");
+    const std::filesystem::path warning_labeling_cache =
+        UniqueTempPath("_direct_health_labeling.json");
+    const std::filesystem::path warning_workflow_cache =
+        UniqueTempPath("_direct_health_workflow.json");
+    const std::filesystem::path warning_source =
+        UniqueTempPath("_direct_health_source.npy");
+    TouchFile(warning_source);
+    WriteTextFile(
+        warning_navigation_cache,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_navigation_state.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": []\n"
+        "}\n");
+    WriteTextFile(warning_labeling_cache, "{ invalid json");
+    WriteTextFile(
+        warning_workflow_cache,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_workflow_state.cache\",\n"
+        "  \"schema_version\": 999,\n"
+        "  \"sources\": []\n"
+        "}\n");
+
+    const specforge::SpectrumSnapshotHandle warning_snapshot =
+        MakeSnapshot(warning_source, 3, 0);
+    specforge::SourceCollectionContext warning_context;
+    warning_context.identity =
+        specforge::BuildSourceCollectionIdentity(*warning_snapshot);
+    warning_context.manifest.sample_names = {"a", "b", "c"};
+    specforge::PreparedSampleWorkflowState warning_prepared =
+        specforge::PrepareSampleWorkflowState(
+            *warning_snapshot,
+            warning_context,
+            0,
+            {
+                warning_labeling_cache,
+                warning_workflow_cache,
+                warning_navigation_cache,
+            });
+    Require(
+        warning_prepared.preparation_cache != nullptr,
+        "the direct preparation helper should retain its loaded cache bundle");
+
+    specforge::SourceCollectionSession warning_session(
+        {},
+        warning_navigation_cache,
+        warning_labeling_cache,
+        warning_workflow_cache);
+    Require(
+        warning_session.OpenPreparedSource(
+                           warning_source,
+                           0,
+                           warning_snapshot,
+                           std::move(warning_context),
+                           std::move(warning_prepared))
+            .loaded,
+        "the direct prepared source should open despite cache warnings");
+    const specforge::SourceCollectionPersistenceHealthView warning_health =
+        warning_session.View().persistence;
+    Require(
+        warning_health.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Warning,
+        "direct preparation cache warnings should reach Session health");
+    Require(
+        HasPersistenceMessage(warning_health, "Navigation:") &&
+            HasPersistenceMessage(warning_health, "Labeling:") &&
+            HasPersistenceMessage(warning_health, "Workflow:"),
+        "direct preparation should adopt every owner warning");
+
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_direct_base_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_direct_base_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_direct_base_workflow.json");
+    const std::filesystem::path source =
+        UniqueTempPath("_direct_base_source.npy");
+    TouchFile(source);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+    context.manifest.sample_names = {"a", "b", "c"};
+    const specforge::SourceCollectionIdentity identity = context.identity;
+
+    specforge::SampleNavigationStateCache navigation_fixture;
+    navigation_fixture.last_indices_by_source_identity.emplace(
+        "unrelated-source",
+        2);
+    Require(
+        specforge::SaveSampleNavigationStateCache(
+            navigation_cache,
+            navigation_fixture),
+        "the direct navigation base fixture should save");
+    specforge::PreparedSampleWorkflowState prepared =
+        specforge::PrepareSampleWorkflowState(
+            *snapshot,
+            context,
+            0,
+            {
+                labeling_cache,
+                workflow_cache,
+                navigation_cache,
+            });
+
+    specforge::SourceCollectionSession session(
+        {},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    Require(
+        session.OpenPreparedSource(
+                   source,
+                   0,
+                   snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "the direct navigation-base source should open");
+    const specforge::SourceCollectionSessionResult pending =
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::LocateRow(1)));
+    Require(
+        pending.follow_up_spectrum_index == 1,
+        "the direct navigation-base fixture should request row 1");
+    Require(
+        session.OpenPreparedSource(
+                   source,
+                   1,
+                   MakeSnapshot(source, 3, 1),
+                   specforge::PreparedSourceCollectionReuse{identity})
+            .loaded,
+        "the direct navigation-base row should commit without another cache load");
+    Require(
+        session.FlushStateCachesWithStatus().all_saved(),
+        "the direct navigation-base fixture should flush");
+
+    const specforge::SampleNavigationStateCache restored =
+        specforge::LoadSampleNavigationStateCache(navigation_cache).cache;
+    Require(
+        restored.last_indices_by_source_identity.at("unrelated-source") == 2,
+        "direct preparation should preserve an unrelated navigation entry");
+    Require(
+        restored.last_indices_by_source_identity.at(identity.id) == 1,
+        "direct preparation should merge the live navigation position");
+}
+
+void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
+{
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_stale_warning_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_stale_warning_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_stale_warning_workflow.json");
+    const std::filesystem::path source_a =
+        UniqueTempPath("_stale_warning_a.npy");
+    const std::filesystem::path source_b =
+        UniqueTempPath("_stale_warning_b.npy");
+    const std::filesystem::path source_c =
+        UniqueTempPath("_stale_warning_c.npy");
+    TouchFile(source_a);
+    TouchFile(source_b);
+    TouchFile(source_c);
+
+    const specforge::SpectrumSnapshotHandle snapshot_a =
+        MakeSnapshot(source_a, 3, 0);
+    const specforge::SpectrumSnapshotHandle snapshot_b =
+        MakeSnapshot(source_b, 3, 0);
+    const specforge::SpectrumSnapshotHandle snapshot_c =
+        MakeSnapshot(source_c, 3, 0);
+    specforge::SourceCollectionContext context_a;
+    context_a.identity = {
+        "stale-warning-a",
+        "a",
+        "a-source",
+        "a-context",
+        3,
+    };
+    context_a.manifest.sample_names = {"a0", "a1", "a2"};
+    specforge::SourceCollectionContext context_b;
+    context_b.identity = {
+        "stale-warning-b",
+        "b",
+        "b-source",
+        "b-context",
+        3,
+    };
+    context_b.manifest.sample_names = {"b0", "b1", "b2"};
+    const specforge::SourceCollectionIdentity identity_b =
+        context_b.identity;
+    specforge::SourceCollectionContext context_c;
+    context_c.identity = {
+        "stale-warning-c",
+        "c",
+        "c-source",
+        "c-context",
+        3,
+    };
+    context_c.manifest.sample_names = {"c0", "c1", "c2"};
+
+    auto shared_cache =
+        std::make_shared<specforge::SampleWorkflowPreparationCacheBundle>();
+    shared_cache->navigation.warning =
+        "stale navigation cache warning";
+    shared_cache->labeling.warning =
+        "stale labeling cache warning";
+    shared_cache->workflow_warning =
+        "stale workflow cache warning";
+    auto distinct_stale_cache =
+        std::make_shared<specforge::SampleWorkflowPreparationCacheBundle>(
+            *shared_cache);
+
+    specforge::PreparedSampleWorkflowState prepared_a =
+        specforge::PrepareSampleWorkflowStateFromCache(
+            *snapshot_a,
+            context_a,
+            0,
+            *shared_cache);
+    prepared_a.preparation_cache = shared_cache;
+    specforge::PreparedSampleWorkflowState prepared_b =
+        specforge::PrepareSampleWorkflowStateFromCache(
+            *snapshot_b,
+            context_b,
+            0,
+            *shared_cache);
+    prepared_b.preparation_cache = shared_cache;
+    specforge::PreparedSampleWorkflowState prepared_c =
+        specforge::PrepareSampleWorkflowStateFromCache(
+            *snapshot_c,
+            context_c,
+            0,
+            *distinct_stale_cache);
+    prepared_c.preparation_cache = distinct_stale_cache;
+
+    PreparedSession session(
+        [source_a, source_b, source_c](
+            const std::filesystem::path& path,
+            std::size_t index) {
+            Require(
+                path == source_a ||
+                    path == source_b ||
+                    path == source_c,
+                "the stale-warning fixture should open one of its sources");
+            return MakeSnapshot(path, 3, index);
+        },
+        {},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    Require(
+        session.OpenPreparedSource(
+                   source_a,
+                   0,
+                   snapshot_a,
+                   std::move(context_a),
+                   std::move(prepared_a))
+            .loaded,
+        "the first stale-warning source should open");
+    Require(
+        session.View().persistence.messages.size() == 3,
+        "the first cache bundle should surface all three owner warnings");
+
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+    (void)Submit(
+        session,
+        specforge::SourceCollectionSessionIntent::ApplySampleFiltering(
+            specforge::SampleFilteringIntent::Clear()));
+    Require(
+        session.FlushStateCachesWithStatus().all_saved(),
+        "labeling and workflow repairs should save independently");
+    const specforge::SourceCollectionPersistenceHealthView
+        navigation_warning = session.View().persistence;
+    Require(
+        navigation_warning.kind ==
+                specforge::SourceCollectionPersistenceHealthKind::Warning &&
+            navigation_warning.messages.size() == 1 &&
+            HasPersistenceMessage(
+                navigation_warning,
+                "Navigation:"),
+        "only the navigation warning should remain before its first save");
+
+    Require(
+        session.OpenPreparedSource(
+                   source_b,
+                   0,
+                   snapshot_b,
+                   std::move(context_b),
+                   std::move(prepared_b))
+            .loaded,
+        "the same-batch stale source should open");
+    const specforge::SourceCollectionPersistenceHealthView
+        same_batch_health = session.View().persistence;
+    Require(
+        same_batch_health.messages.size() == 1 &&
+            HasPersistenceMessage(
+                same_batch_health,
+                "Navigation:") &&
+            !HasPersistenceMessage(
+                same_batch_health,
+                "Labeling:") &&
+            !HasPersistenceMessage(
+                same_batch_health,
+                "Workflow:"),
+        "same-batch activation must not resurrect repaired owner warnings");
+
+    specforge::SourceCollectionSession& base_session = session;
+    const specforge::SourceCollectionSessionResult moved =
+        base_session.Submit(
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::LocateRow(1)));
+    Require(
+        moved.follow_up_spectrum_index == 1,
+        "the navigation repair should request its prepared row");
+    Require(
+        session.OpenPreparedSource(
+                   source_b,
+                   1,
+                   MakeSnapshot(source_b, 3, 1),
+                   specforge::PreparedSourceCollectionReuse{identity_b})
+            .loaded,
+        "the navigation repair should commit its prepared row");
+    Require(
+        session.FlushStateCachesWithStatus().all_saved(),
+        "the navigation repair should save");
+    Require(
+        session.View().persistence.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+        "all repaired cache owners should become healthy");
+
+    Require(
+        session.OpenPreparedSource(
+                   source_c,
+                   0,
+                   snapshot_c,
+                   std::move(context_c),
+                   std::move(prepared_c))
+            .loaded,
+        "the distinct stale-bundle source should open");
+    Require(
+        session.View().persistence.kind ==
+                specforge::SourceCollectionPersistenceHealthKind::Healthy &&
+            session.View().persistence.messages.empty(),
+        "a distinct pre-repair bundle must not resurrect cleared warnings");
 }
 
 void TestSourceSessionSkipsMissingSourcePathsOnRestore()
@@ -3223,7 +3747,8 @@ void TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction()
             specforge::SourceCollectionIntent::Remove(0)));
     Require(session.FlushStateCaches(), "user mutation after deferred restore should persist");
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(persisted.sources.size() == 1, "unresolved deferred source intent should remain persisted");
     Require(
         persisted.sources.front().path == unavailable_path,
@@ -3280,7 +3805,8 @@ void TestSupersededDeferredRestorePreservesPersistedSourceIntents()
     Require(session.FlushStateCaches(), "new explicit source should flush the source-session cache");
 
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(persisted.sources.size() == 3, "superseding restore must preserve A and B while adding D");
     const auto find_source = [&persisted](const std::filesystem::path& path) {
         return std::find_if(persisted.sources.begin(), persisted.sources.end(), [&path](const auto& source) {
@@ -3341,7 +3867,8 @@ void TestForgettingUnavailableDeferredSourcePersistsDuringRestore()
         "closing during deferred restore must flush an explicit Forget immediately");
 
     const specforge::SourceCollectionSessionStateCache persisted =
-        specforge::LoadSourceCollectionSessionStateCache(source_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_cache)
+            .cache;
     Require(persisted.sources.size() == 1, "forgotten unavailable source must not return on restart");
     Require(persisted.sources.front().path == unavailable_b, "unrelated unresolved source B must remain persisted");
 }
@@ -4532,7 +5059,7 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
         },
         [&workflow_cache_loads](const std::filesystem::path&) {
             ++workflow_cache_loads;
-            return specforge::SampleWorkflowStateCache{};
+            return specforge::SampleWorkflowStateCacheLoadResult{};
         });
 
     const std::filesystem::path source_a = UniqueTempPath("_prepared_cache_a.npy");
@@ -5703,7 +6230,27 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     (void)Submit(session, OpenSourceCollection(source_path, 0));
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
-    Require(!session.FlushStateCaches(), "flush should fail when the source cache path is blocked by a file");
+    const specforge::SourceCollectionStateFlushResult failed_flush =
+        session.FlushStateCachesWithStatus();
+    Require(
+        !failed_flush.source_session_saved,
+        "blocked source-session path should report its exact failed owner");
+    Require(
+        failed_flush.navigation_saved &&
+            failed_flush.labeling_saved &&
+            failed_flush.workflow_saved,
+        "source-session failure must not block the other three cache flushes");
+    const specforge::SourceCollectionPersistenceHealthView failed_health =
+        session.View().persistence;
+    Require(
+        failed_health.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Retrying,
+        "a save failure should expose retrying overall health");
+    Require(
+        HasPersistenceMessage(
+            failed_health,
+            "Source session: Could not save source session state."),
+        "retrying health should identify the failed cache owner");
     {
         std::vector<LoadedSourceSnapshot> reloaded_snapshots;
         PreparedSession reloaded(
@@ -5724,12 +6271,27 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
-    Require(session.FlushStateCaches(), "flush should retry dirty source state after the path is fixed");
+    const specforge::SourceCollectionStateFlushResult recovered_flush =
+        session.FlushStateCachesWithStatus();
+    Require(
+        recovered_flush.all_saved(),
+        "flush should retry dirty source state after the path is fixed");
+    Require(
+        session.View().persistence.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Recovered,
+        "the first successful retry should expose recovered health");
 
     const specforge::SourceCollectionSessionStateCache restored_state =
-        specforge::LoadSourceCollectionSessionStateCache(source_session_cache);
+        specforge::LoadSourceCollectionSessionStateCache(source_session_cache)
+            .cache;
     Require(restored_state.sources.size() == 1, "retry flush should write the source session cache");
     Require(restored_state.sources[0].path == source_path, "retry flush should persist the source path");
+
+    (void)Submit(session, RemoveSourceCollection(0));
+    Require(
+        session.View().persistence.kind ==
+            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+        "the next source-session mutation should clear recovered health");
 }
 
 }  // namespace
@@ -5783,7 +6345,11 @@ void RunAllTests()
     TestSourceSessionStateCacheRebasesLegacyMovedPortablePath();
     TestSampleWorkflowStateCacheStoresPackageRelativeAnnotationSourceIds();
     TestSourceSessionStateCacheIgnoresCorruptJson();
+    TestMissingPersistenceCachesAreHealthyDefaults();
     TestSourceSessionStateCacheIgnoresUnsupportedSchema();
+    TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen();
+    TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase();
+    TestStalePreparedCacheWarningsDoNotReappearAfterRepair();
     TestSourceSessionSkipsMissingSourcePathsOnRestore();
     TestSourceSessionRestoresAtMostThirtyTwoSources();
     TestDeferredSourceSessionRestoreDoesNotInvokeLoaderOnConstruction();
