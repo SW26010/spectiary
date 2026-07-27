@@ -67,7 +67,15 @@ void TestFileFixtures()
         {"invalid-toolchain-format.json",
          specforge::BuildMetadataStatus::Unavailable},
         {"working-tree-nonempty-revision.json",
-         specforge::BuildMetadataStatus::Mismatch},
+         specforge::BuildMetadataStatus::Unavailable},
+        {"unknown-source-mode.json",
+         specforge::BuildMetadataStatus::Unavailable},
+        {"head-null-revision.json",
+         specforge::BuildMetadataStatus::Unavailable},
+        {"head-short-revision.json",
+         specforge::BuildMetadataStatus::Unavailable},
+        {"head-invalid-revision.json",
+         specforge::BuildMetadataStatus::Unavailable},
     };
 
     for (const Case& test_case : cases) {
@@ -142,9 +150,6 @@ void TestEveryCoreIdentityMismatch()
              value.source_mode = "head";
              value.source_revision =
                  "0123456789abcdef0123456789abcdef01234567";
-         }},
-        {"source revision", [](specforge::BuildIdentity& value) {
-             value.source_revision = "unexpected";
          }},
     };
 

@@ -96,6 +96,27 @@ std::optional<std::optional<std::string>> ReadNullableStringMember(
     return member->string_value;
 }
 
+bool IsValidSidecarSourceTuple(
+    std::string_view source_mode,
+    const std::optional<std::string>& source_revision)
+{
+    if (source_mode == "working_tree") {
+        return !source_revision;
+    }
+    if (source_mode != "head" ||
+        !source_revision ||
+        source_revision->size() != 40U) {
+        return false;
+    }
+    for (const char character : *source_revision) {
+        if (!((character >= '0' && character <= '9') ||
+              (character >= 'a' && character <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool MatchesSourceRevision(
     const std::optional<std::string>& actual_revision,
     const BuildIdentity& expected_identity)
@@ -178,6 +199,9 @@ BuildMetadataReadResult ReadBuildMetadata(
              **windows_sdk_version,
              2U,
              3U))) {
+        return {};
+    }
+    if (!IsValidSidecarSourceTuple(*source_mode, *source_revision)) {
         return {};
     }
 
