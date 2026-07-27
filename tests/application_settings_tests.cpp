@@ -54,6 +54,7 @@ specforge::ApplicationSettingsStorage MakeStorage(
 {
     return {
         .language_settings_path = root / "ui-language.json",
+        .ui_scale_settings_path = root / "ui-scale.json",
         .profile_settings_path = root / "profile-settings.json",
         .panel_visibility_path = root / "panel-visibility.json",
         .default_profile_output_directory = root / "profiles",
@@ -74,6 +75,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         initial.language == specforge::UiLanguage::English,
         "missing language settings should default to English");
     Require(
+        initial.ui_scale_percentage == 100,
+        "missing UI scale settings should default to 100%");
+    Require(
         initial.profile_output_directory ==
             storage.default_profile_output_directory,
         "missing profile settings should use the default directory");
@@ -85,6 +89,13 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         language_result.applied(),
         "language intent should apply");
+
+    const auto ui_scale_result = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetUiScale(125),
+        {});
+    Require(
+        ui_scale_result.applied(),
+        "UI scale intent should apply");
 
     const std::filesystem::path custom_directory =
         temporary.path() / "custom profiles";
@@ -103,6 +114,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         reloaded_view.language ==
             specforge::UiLanguage::SimplifiedChinese,
         "language should reload through the application settings owner");
+    Require(
+        reloaded_view.ui_scale_percentage == 125,
+        "UI scale should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory == custom_directory,
         "profile directory should reload through the application settings owner");
@@ -136,6 +150,7 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
 
     specforge::ApplicationSettings settings({
         .language_settings_path = blocker / "ui-language.json",
+        .ui_scale_settings_path = blocker / "ui-scale.json",
         .profile_settings_path = blocker / "profile-settings.json",
         .panel_visibility_path = blocker / "panel-visibility.json",
         .default_profile_output_directory =
@@ -167,6 +182,124 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
         "save failure should remain visible on the owner view");
 }
 
+void TestUiScaleValidationAndPersistenceFirstBehavior()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    specforge::ApplicationSettings settings(storage);
+
+    const auto unchanged = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetUiScale(100),
+        {});
+    Require(
+        unchanged.outcome ==
+                specforge::ApplicationSettingsOutcome::Unchanged &&
+            unchanged.setting ==
+                specforge::ApplicationSetting::UiScale,
+        "unchanged UI scale intent should be typed");
+
+    for (const int percentage : {80, 100, 150}) {
+        const auto result = settings.Apply(
+            specforge::ApplicationSettingsIntent::SetUiScale(
+                percentage),
+            {});
+        Require(
+            result.outcome ==
+                    specforge::ApplicationSettingsOutcome::Applied ||
+                result.outcome ==
+                    specforge::ApplicationSettingsOutcome::Unchanged,
+            "supported UI scale should apply");
+        const specforge::ApplicationSettings reloaded(storage);
+        Require(
+            reloaded.View().ui_scale_percentage == percentage,
+            "supported UI scale should round-trip");
+    }
+
+    const auto rejected = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetUiScale(151),
+        {});
+    Require(
+        rejected.outcome ==
+                specforge::ApplicationSettingsOutcome::Rejected &&
+            settings.View().ui_scale_percentage == 150,
+        "out-of-range UI scale should be rejected without changing state");
+
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block UI scale settings directory creation";
+    }
+    auto failing_storage = MakeStorage(temporary.path());
+    failing_storage.ui_scale_settings_path =
+        blocker / "ui-scale.json";
+    specforge::ApplicationSettings failing_settings(
+        failing_storage);
+    const auto failure = failing_settings.Apply(
+        specforge::ApplicationSettingsIntent::SetUiScale(125),
+        {});
+    const specforge::ApplicationSettingsView failed_view =
+        failing_settings.View();
+    Require(
+        failure.outcome ==
+                specforge::ApplicationSettingsOutcome::
+                    PersistenceFailed &&
+            failed_view.ui_scale_percentage == 100,
+        "UI scale save failure should retain the previous runtime value");
+    Require(
+        failed_view.StatusFor(
+                specforge::ApplicationSetting::UiScale)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError,
+        "UI scale save failure should remain visible");
+}
+
+void TestUiScaleResetRepairsDamagedFallbackState()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.ui_scale_settings_path);
+        stream << R"({"format_kind":)";
+    }
+
+    specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsView fallback =
+        settings.View();
+    Require(
+        fallback.ui_scale_percentage == 100 &&
+            fallback.StatusFor(
+                    specforge::ApplicationSetting::UiScale)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning,
+        "damaged UI scale settings should establish a warned 100% fallback");
+
+    const auto repair = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetUiScale(100),
+        {});
+    Require(
+        repair.outcome ==
+                specforge::ApplicationSettingsOutcome::Applied &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::UiScale)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "resetting the warned fallback should rewrite and clear its status");
+
+    const specforge::ApplicationSettings reloaded(storage);
+    Require(
+        reloaded.View().ui_scale_percentage == 100 &&
+            reloaded.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::UiScale)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "the repaired 100% UI scale should reload without warning");
+}
+
 void TestLoadWarningAndEnvironmentOverrideAreTyped()
 {
     TemporaryDirectory temporary;
@@ -175,6 +308,10 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
         temporary.path() / "environment profiles");
     {
         std::ofstream stream(storage.language_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
+        std::ofstream stream(storage.ui_scale_settings_path);
         stream << R"({"format_kind":)";
     }
 
@@ -189,6 +326,16 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
             language_status.setting ==
                 specforge::ApplicationSetting::Language,
         "damaged language settings should produce a typed load warning");
+    const specforge::ApplicationSettingsStatus& ui_scale_status =
+        loaded.StatusFor(specforge::ApplicationSetting::UiScale);
+    Require(
+        loaded.ui_scale_percentage == 100 &&
+            ui_scale_status.kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning &&
+            ui_scale_status.setting ==
+                specforge::ApplicationSetting::UiScale,
+        "damaged UI scale settings should fall back with a typed load warning");
     Require(
         loaded.profile_output_directory_source ==
             specforge::ProfileOutputDirectorySource::Environment,
@@ -365,6 +512,8 @@ int main()
 {
     TestSettingsIntentsPersistAndReloadThroughOneOwner();
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
+    TestUiScaleValidationAndPersistenceFirstBehavior();
+    TestUiScaleResetRepairsDamagedFallbackState();
     TestLoadWarningAndEnvironmentOverrideAreTyped();
     TestPanelVisibilitySharesTheSettingsLifecycle();
     TestProfileDirectoryChangeIsRejectedWhileRecording();

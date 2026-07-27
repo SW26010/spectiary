@@ -842,6 +842,18 @@ bool ShellUi::TakeProfileRecordingToggleRequest()
     return settings_panel_ui_.TakeProfileRecordingToggleRequest();
 }
 
+std::optional<int> ShellUi::TakeAppliedUiScalePercentage()
+{
+    return std::exchange(
+        applied_ui_scale_percentage_,
+        std::nullopt);
+}
+
+int ShellUi::ui_scale_percentage() const
+{
+    return application_settings_.View().ui_scale_percentage;
+}
+
 std::filesystem::path ShellUi::profile_output_directory() const
 {
     return application_settings_.View().profile_output_directory;
@@ -1511,9 +1523,16 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
     if (std::optional<ApplicationSettingsIntent> intent =
             settings_panel_ui_.
                 TakeApplicationSettingsIntent()) {
-        (void)application_settings_.Apply(
+        const ApplicationSettingsResult result =
+            application_settings_.Apply(
             std::move(*intent),
             runtime);
+        if (result.applied() &&
+            result.setting == ApplicationSetting::UiScale) {
+            applied_ui_scale_percentage_ =
+                application_settings_.View().
+                    ui_scale_percentage;
+        }
     }
     if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
         if (std::optional<std::filesystem::path> directory =

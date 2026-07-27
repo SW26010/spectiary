@@ -65,7 +65,10 @@ private:
     static void PostSourceLoadCompletionReady(HWND hwnd) noexcept;
     void RequestMessageRender() noexcept;
     void ApplyPendingResize();
-    void ApplyUiScale(float dpi_scale);
+    void ApplyUiScale(
+        float system_dpi_scale,
+        int user_scale_percentage);
+    void WriteDpiConfiguration(std::string_view reason);
     void ToggleFullscreen();
     void EnterFullscreen();
     void ExitFullscreen();
@@ -113,7 +116,10 @@ private:
     bool window_visible_ = true;
     bool uncapped_pan_active_ = false;
     ImGuiStyle base_imgui_style_;
-    float ui_dpi_scale_ = 1.0f;
+    float system_dpi_scale_ = 1.0f;
+    float user_ui_scale_ = 1.0f;
+    float effective_ui_scale_ = 1.0f;
+    int user_ui_scale_percentage_ = 100;
     std::optional<PendingResize> pending_resize_;
     std::optional<WindowedPlacement> fullscreen_restore_;
     bool immersive_plot_entered_fullscreen_ = false;

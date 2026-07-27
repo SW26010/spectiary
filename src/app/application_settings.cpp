@@ -46,6 +46,15 @@ ApplicationSettingsIntent ApplicationSettingsIntent::SetLanguage(
     };
 }
 
+ApplicationSettingsIntent ApplicationSettingsIntent::SetUiScale(
+    int percentage)
+{
+    return {
+        .kind = ApplicationSettingsIntentKind::SetUiScale,
+        .ui_scale_percentage = percentage,
+    };
+}
+
 ApplicationSettingsIntent
 ApplicationSettingsIntent::SetProfileOutputDirectory(
     std::filesystem::path directory)
@@ -99,6 +108,7 @@ ApplicationSettingsStorage DefaultApplicationSettingsStorage()
     const RuntimePaths paths = DefaultRuntimePaths();
     return {
         .language_settings_path = DefaultUiLanguageSettingsPath(),
+        .ui_scale_settings_path = DefaultUiScaleSettingsPath(),
         .profile_settings_path = DefaultProfileSettingsPath(),
         .panel_visibility_path =
             DefaultPanelVisibilityStateCachePath(),
@@ -143,6 +153,16 @@ ApplicationSettings::ApplicationSettings(
             std::move(language_settings.warning));
     }
 
+    UiScaleSettingsLoadResult ui_scale_settings =
+        LoadUiScaleSettings(storage_.ui_scale_settings_path);
+    ui_scale_percentage_ = ui_scale_settings.percentage;
+    if (!ui_scale_settings.warning.empty()) {
+        SetStatus(
+            ApplicationSettingsStatusKind::LoadWarning,
+            ApplicationSetting::UiScale,
+            std::move(ui_scale_settings.warning));
+    }
+
     profile_output_directory_ = ResolveProfileOutputDirectory(
         LoadProfileSettings(storage_.profile_settings_path),
         storage_.default_profile_output_directory,
@@ -154,6 +174,7 @@ ApplicationSettingsView ApplicationSettings::View() const
 {
     return {
         .language = language_,
+        .ui_scale_percentage = ui_scale_percentage_,
         .profile_output_directory =
             profile_output_directory_.directory,
         .default_profile_output_directory =
@@ -172,6 +193,8 @@ ApplicationSettingsResult ApplicationSettings::Apply(
     switch (intent.kind) {
     case ApplicationSettingsIntentKind::SetLanguage:
         return ApplyLanguage(intent.language);
+    case ApplicationSettingsIntentKind::SetUiScale:
+        return ApplyUiScale(intent.ui_scale_percentage);
     case ApplicationSettingsIntentKind::SetProfileOutputDirectory:
         return ApplyProfileOutputDirectory(
             std::move(intent.directory),
@@ -239,6 +262,59 @@ bool ApplicationSettings::Flush()
         ApplicationSetting::PanelVisibility,
         "Could not save panel visibility.");
     return false;
+}
+
+ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
+    int percentage)
+{
+    constexpr ApplicationSetting kSetting =
+        ApplicationSetting::UiScale;
+    if (percentage == ui_scale_percentage_ &&
+        statuses_[static_cast<std::size_t>(kSetting)].kind ==
+            ApplicationSettingsStatusKind::Ready) {
+        return {
+            .outcome = ApplicationSettingsOutcome::Unchanged,
+            .setting = kSetting,
+        };
+    }
+    if (!IsValidUiScalePercentage(percentage)) {
+        const std::string detail =
+            "The UI scale must be from 80% through 150%.";
+        SetStatus(
+            ApplicationSettingsStatusKind::Rejected,
+            kSetting,
+            detail);
+        return {
+            .outcome = ApplicationSettingsOutcome::Rejected,
+            .setting = kSetting,
+            .detail = detail,
+        };
+    }
+
+    std::string error;
+    if (storage_.persistent &&
+        !SaveUiScaleSettings(
+            storage_.ui_scale_settings_path,
+            percentage,
+            &error)) {
+        SetStatus(
+            ApplicationSettingsStatusKind::PersistenceError,
+            kSetting,
+            error);
+        return {
+            .outcome =
+                ApplicationSettingsOutcome::PersistenceFailed,
+            .setting = kSetting,
+            .detail = std::move(error),
+        };
+    }
+
+    ui_scale_percentage_ = percentage;
+    ClearStatus(kSetting);
+    return {
+        .outcome = ApplicationSettingsOutcome::Applied,
+        .setting = kSetting,
+    };
 }
 
 ApplicationSettingsResult ApplicationSettings::ApplyLanguage(

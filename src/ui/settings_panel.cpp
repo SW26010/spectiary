@@ -3,6 +3,7 @@
 #include "app/runtime_paths.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
+#include "ui/ui_scale_settings.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -217,6 +218,7 @@ void SettingsPanelUi::Open()
     if (!open_) {
         action_failed_ = false;
         action_status_.clear();
+        ui_scale_draft_percentage_.reset();
     }
     open_ = true;
     focus_requested_ = true;
@@ -230,12 +232,32 @@ void SettingsPanelUi::Render(
         return;
     }
 
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const ImVec2 initial_size(kInitialSettingsWidth, kInitialSettingsHeight);
+    const ImGuiViewport* viewport =
+        settings_viewport_id_ != 0
+        ? ImGui::FindViewportByID(settings_viewport_id_)
+        : nullptr;
+    if (viewport == nullptr) {
+        viewport = ImGui::GetMainViewport();
+    }
+    const float user_scale =
+        static_cast<float>(settings.ui_scale_percentage) /
+        static_cast<float>(kDefaultUiScalePercentage);
+    const ImVec2 preferred_size(
+        kInitialSettingsWidth * user_scale,
+        kInitialSettingsHeight * user_scale);
+    const ImVec2 maximum_size(
+        std::max(1.0f, viewport->WorkSize.x),
+        std::max(1.0f, viewport->WorkSize.y));
+    const ImVec2 initial_size(
+        std::min(preferred_size.x, maximum_size.x),
+        std::min(preferred_size.y, maximum_size.y));
     const ImVec2 initial_position(
         viewport->WorkPos.x + std::max(0.0f, viewport->WorkSize.x - initial_size.x) * 0.5f,
         viewport->WorkPos.y + std::max(0.0f, viewport->WorkSize.y - initial_size.y) * 0.5f);
     ImGui::SetNextWindowSize(initial_size, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(
+        initial_size,
+        maximum_size);
     ImGui::SetNextWindowPos(
         initial_position,
         ImGuiCond_FirstUseEver);
@@ -246,10 +268,13 @@ void SettingsPanelUi::Render(
 
     const std::string settings_window =
         SettingsWindowLabel(settings.language);
-    if (!ImGui::Begin(
+    const bool contents_visible = ImGui::Begin(
             settings_window.c_str(),
             &open_,
-            ImGuiWindowFlags_NoCollapse)) {
+            ImGuiWindowFlags_NoCollapse);
+    settings_viewport_id_ =
+        ImGui::GetWindowViewport()->ID;
+    if (!contents_visible) {
         ImGui::End();
         return;
     }
@@ -314,6 +339,10 @@ void SettingsPanelUi::RenderNavigation(UiLanguage language)
         const bool selected = selected_section_ == section;
         const std::string label = SectionLabel(section, language);
         if (ImGui::Selectable(label.c_str(), selected)) {
+            if (selected_section_ == SettingsSection::Appearance &&
+                section != SettingsSection::Appearance) {
+                ui_scale_draft_percentage_.reset();
+            }
             selected_section_ = section;
             content_scroll_reset_requested_ = true;
             action_status_.clear();
@@ -330,7 +359,7 @@ void SettingsPanelUi::RenderSelectedSection(
         RenderGeneral();
         return;
     case SettingsSection::Appearance:
-        RenderAppearance();
+        RenderAppearance(settings);
         return;
     case SettingsSection::Language:
         RenderLanguage(settings);
@@ -361,19 +390,90 @@ void SettingsPanelUi::RenderGeneral()
     RenderUnavailableNote("Session restoration is currently managed automatically.");
 }
 
-void SettingsPanelUi::RenderAppearance()
+void SettingsPanelUi::RenderAppearance(
+    const ApplicationSettingsView& settings)
 {
     RenderSectionHeading("Appearance", "Adjust the application theme without changing scientific plot semantics.");
 
     int theme = 2;
-    float ui_scale = 100.0f;
     float accent_color[3] = {0.24f, 0.55f, 0.86f};
     ImGui::BeginDisabled();
     ImGui::Combo("Theme", &theme, "Follow system\0Light\0Dark\0");
     ImGui::ColorEdit3("Accent color", accent_color, ImGuiColorEditFlags_NoInputs);
-    ImGui::SliderFloat("UI scale", &ui_scale, 80.0f, 150.0f, "%.0f%%", ImGuiSliderFlags_None);
     ImGui::EndDisabled();
-    RenderUnavailableNote("The current UI uses the built-in dark style.");
+    RenderUnavailableNote(
+        "The current UI uses the built-in dark style.");
+
+    ImGui::Spacing();
+    int ui_scale = ui_scale_draft_percentage_.value_or(
+        settings.ui_scale_percentage);
+    const bool ui_scale_changed = ImGui::SliderInt(
+        "UI scale",
+        &ui_scale,
+        kMinimumUiScalePercentage,
+        kMaximumUiScalePercentage,
+        "%d%%");
+    const bool ui_scale_active = ImGui::IsItemActive();
+    const bool ui_scale_edit_finished =
+        ImGui::IsItemDeactivatedAfterEdit();
+    if (ui_scale_changed || ui_scale_active) {
+        ui_scale_draft_percentage_ = ui_scale;
+    }
+    if (ui_scale_edit_finished) {
+        ui_scale_draft_percentage_.reset();
+        if (ui_scale != settings.ui_scale_percentage) {
+            SetUiScalePercentage(ui_scale);
+        }
+    } else if (!ui_scale_active) {
+        ui_scale_draft_percentage_.reset();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##UiScale")) {
+        ui_scale_draft_percentage_.reset();
+        SetUiScalePercentage(kDefaultUiScalePercentage);
+    }
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "100%% follows Windows display scaling. This setting "
+        "adds an application-specific multiplier.");
+    ImGui::PopTextWrapPos();
+
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(ApplicationSetting::UiScale);
+    if (setting_status.kind ==
+        ApplicationSettingsStatusKind::Ready) {
+        return;
+    }
+
+    ImGui::Spacing();
+    const bool warning =
+        setting_status.kind ==
+        ApplicationSettingsStatusKind::LoadWarning;
+    const ImVec4 feedback_color = warning
+        ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
+        : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+    ImGui::PushTextWrapPos();
+    ImGui::TextColored(
+        feedback_color,
+        "%s",
+        warning
+            ? "The saved UI scale could not be loaded; using 100%."
+            : (setting_status.kind ==
+                    ApplicationSettingsStatusKind::Rejected
+                ? "The requested UI scale is not supported."
+                : "The UI scale could not be saved."));
+    if (!setting_status.detail.empty()) {
+        ImGui::TextDisabled(
+            "%s",
+            setting_status.detail.c_str());
+    }
+    ImGui::PopTextWrapPos();
+}
+
+void SettingsPanelUi::SetUiScalePercentage(int percentage)
+{
+    application_settings_intent_ =
+        ApplicationSettingsIntent::SetUiScale(percentage);
 }
 
 void SettingsPanelUi::RenderLanguage(

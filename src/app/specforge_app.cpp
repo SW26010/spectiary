@@ -5,6 +5,7 @@
 #include "profile/profile_recording_status.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
+#include "ui/ui_scale_settings.h"
 
 #include <dwmapi.h>
 #include <imgui.h>
@@ -396,6 +397,8 @@ void SpecForgeApp::InitializeUiBackends()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    io.ConfigDpiScaleFonts = true;
+    io.ConfigDpiScaleViewports = true;
     io.ConfigViewportsNoDecoration = true;
     const UiFontSelection ui_fonts = AddUiFonts(io);
     ui_.SetSpectralLineLabelFont(ui_fonts.spectral_label_font);
@@ -409,12 +412,20 @@ void SpecForgeApp::InitializeUiBackends()
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
     base_imgui_style_ = ImGui::GetStyle();
-    ApplyUiScale(ImGui_ImplWin32_GetDpiScaleForHwnd(window_.hwnd()));
+    ApplyUiScale(
+        ImGui_ImplWin32_GetDpiScaleForHwnd(window_.hwnd()),
+        ui_.ui_scale_percentage());
     profile_.WriteEvent("dpi_config", {
-                                           ProfileSink::Field::Number("dpi_scale", std::to_string(ui_dpi_scale_)),
+                                           ProfileSink::Field::Number("dpi_scale", std::to_string(system_dpi_scale_)),
+                                           ProfileSink::Field::Number("system_dpi_scale", std::to_string(system_dpi_scale_)),
+                                           ProfileSink::Field::Number("user_scale", std::to_string(user_ui_scale_)),
+                                           ProfileSink::Field::Number("effective_scale", std::to_string(effective_ui_scale_)),
                                            ProfileSink::Field::Number(
                                                "font_scale_dpi",
                                                std::to_string(ImGui::GetStyle().FontScaleDpi)),
+                                           ProfileSink::Field::Number(
+                                               "font_scale_main",
+                                               std::to_string(ImGui::GetStyle().FontScaleMain)),
                                            ProfileSink::Field::String(
                                                "ui_font",
                                                ui_font_path ? PathToUtf8(*ui_font_path) : "imgui_default"),
@@ -502,6 +513,11 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     } profile_frame_finalization{profile_};
 
     ApplyPendingResize();
+    if (const std::optional<int> percentage =
+            ui_.TakeAppliedUiScalePercentage()) {
+        ApplyUiScale(system_dpi_scale_, *percentage);
+        WriteDpiConfiguration("user_scale_changed");
+    }
 
     ++frame_index_;
 
@@ -809,14 +825,60 @@ void SpecForgeApp::ApplyPendingResize()
     LogDisplayEnvironment("resize");
 }
 
-void SpecForgeApp::ApplyUiScale(float dpi_scale)
+void SpecForgeApp::ApplyUiScale(
+    float system_dpi_scale,
+    int user_scale_percentage)
 {
-    ui_dpi_scale_ = NormalizeDpiScale(dpi_scale);
+    const UiScaleFactors scales =
+        CalculateUiScaleFactors(
+            NormalizeDpiScale(system_dpi_scale),
+            user_scale_percentage);
+    system_dpi_scale_ = scales.system;
+    user_ui_scale_ = scales.user;
+    effective_ui_scale_ = scales.effective;
+    user_ui_scale_percentage_ =
+        IsValidUiScalePercentage(user_scale_percentage)
+        ? user_scale_percentage
+        : kDefaultUiScalePercentage;
 
-    ImGuiStyle& style = ImGui::GetStyle();
-    style = base_imgui_style_;
-    style.ScaleAllSizes(ui_dpi_scale_);
-    style.FontScaleDpi = ui_dpi_scale_;
+    ApplyUiScaleToImGuiStyle(
+        ImGui::GetStyle(),
+        base_imgui_style_,
+        scales);
+}
+
+void SpecForgeApp::WriteDpiConfiguration(
+    std::string_view reason)
+{
+    if (!profile_.is_open() ||
+        ImGui::GetCurrentContext() == nullptr) {
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    profile_.WriteEvent("dpi_config", {
+                                           ProfileSink::Field::String(
+                                               "reason",
+                                               std::string(reason)),
+                                           ProfileSink::Field::Number(
+                                               "dpi_scale",
+                                               std::to_string(system_dpi_scale_)),
+                                           ProfileSink::Field::Number(
+                                               "system_dpi_scale",
+                                               std::to_string(system_dpi_scale_)),
+                                           ProfileSink::Field::Number(
+                                               "user_scale",
+                                               std::to_string(user_ui_scale_)),
+                                           ProfileSink::Field::Number(
+                                               "effective_scale",
+                                               std::to_string(effective_ui_scale_)),
+                                           ProfileSink::Field::Number(
+                                               "font_scale_dpi",
+                                               std::to_string(style.FontScaleDpi)),
+                                           ProfileSink::Field::Number(
+                                               "font_scale_main",
+                                               std::to_string(style.FontScaleMain)),
+                                       });
 }
 
 void SpecForgeApp::ToggleFullscreen()
@@ -968,6 +1030,7 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     profile_status_message_ = "Recording performance diagnostics.";
     LogProfileRecordingStarted(trigger, "recording_started");
+    WriteDpiConfiguration("recording_started");
     profile_.WriteEvent("compositor_clock", {
                                                   ProfileSink::Field::String("action", "recording_snapshot"),
                                                   ProfileSink::Field::Bool(
@@ -1787,7 +1850,9 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         break;
     case WM_DPICHANGED:
         if (imgui_initialized_) {
-            ApplyUiScale(DpiScaleFromWParam(wparam));
+            ApplyUiScale(
+                DpiScaleFromWParam(wparam),
+                user_ui_scale_percentage_);
         }
         if (lparam != 0) {
             const auto* suggested_rect = reinterpret_cast<const RECT*>(lparam);
@@ -1802,7 +1867,10 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         }
         profile_.WriteEvent("dpi_changed", {
                                                 ProfileSink::Field::Number("dpi", std::to_string(HIWORD(wparam))),
-                                                ProfileSink::Field::Number("dpi_scale", std::to_string(ui_dpi_scale_)),
+                                                ProfileSink::Field::Number("dpi_scale", std::to_string(system_dpi_scale_)),
+                                                ProfileSink::Field::Number("system_dpi_scale", std::to_string(system_dpi_scale_)),
+                                                ProfileSink::Field::Number("user_scale", std::to_string(user_ui_scale_)),
+                                                ProfileSink::Field::Number("effective_scale", std::to_string(effective_ui_scale_)),
         });
         LogDisplayEnvironment("dpi_changed");
         SchedulePresentationTargetRefresh(hwnd);

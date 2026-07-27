@@ -61,6 +61,9 @@ public:
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
     [[nodiscard]] bool TakeProfileRecordingToggleRequest();
+    [[nodiscard]] std::optional<int>
+    TakeAppliedUiScalePercentage();
+    [[nodiscard]] int ui_scale_percentage() const;
     [[nodiscard]] std::filesystem::path profile_output_directory() const;
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
@@ -139,6 +142,7 @@ private:
     SampleWorkflowPanelUi sample_workflow_panel_ui_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
+    std::optional<int> applied_ui_scale_percentage_;
 };
 
 }  // namespace specforge

@@ -57,9 +57,21 @@ struct SettingsPanelUiTestAccess {
     {
         panel.selected_section_ = section;
     }
+    static void SetViewportId(
+        SettingsPanelUi& panel,
+        unsigned int viewport_id)
+    {
+        panel.settings_viewport_id_ = viewport_id;
+    }
     static void ResetProfileOutputDirectory(SettingsPanelUi& panel)
     {
         panel.ResetProfileOutputDirectory();
+    }
+    static void SetUiScalePercentage(
+        SettingsPanelUi& panel,
+        int percentage)
+    {
+        panel.SetUiScalePercentage(percentage);
     }
 };
 
@@ -140,6 +152,11 @@ struct LanguageRenderObservation {
     ImVec2 popup_content_start;
 };
 
+struct UiScaleRenderObservation {
+    bool slider_hovered = false;
+    bool slider_active = false;
+};
+
 LanguageRenderObservation RenderLanguageFrame(
     specforge::SettingsPanelUi& panel,
     specforge::UiLanguage language)
@@ -174,6 +191,34 @@ LanguageRenderObservation RenderLanguageFrame(
                     "Simplified Chinese###"
                     "SpecForgeUiLanguageSimplifiedChinese");
         }
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
+UiScaleRenderObservation RenderUiScaleFrame(
+    specforge::SettingsPanelUi& panel,
+    int percentage = 100)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.ui_scale_percentage = percentage;
+    panel.Render(settings);
+
+    UiScaleRenderObservation observation;
+    for (ImGuiWindow* window : GImGui->Windows) {
+        const ImGuiID slider_id =
+            window->GetID("UI scale");
+        observation.slider_hovered =
+            observation.slider_hovered ||
+            GImGui->HoveredId == slider_id;
+        observation.slider_active =
+            observation.slider_active ||
+            GImGui->ActiveId == slider_id;
     }
     ImGui::EndFrame();
     return observation;
@@ -358,6 +403,110 @@ void TestProfileResetEmitsOneShotSettingsIntent()
     Require(
         !panel.TakeApplicationSettingsIntent(),
         "profile reset intent should be consumed once");
+}
+
+void TestUiScaleControlEmitsOneShotSettingsIntent()
+{
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::
+        SetUiScalePercentage(panel, 125);
+
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetUiScale &&
+            intent->ui_scale_percentage == 125,
+        "UI scale control should emit the selected percentage");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "UI scale intent should be consumed once");
+
+    specforge::SettingsPanelUiTestAccess::
+        SetUiScalePercentage(panel, 100);
+    const std::optional<specforge::ApplicationSettingsIntent>
+        reset_intent = panel.TakeApplicationSettingsIntent();
+    Require(
+        reset_intent &&
+            reset_intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetUiScale &&
+            reset_intent->ui_scale_percentage == 100,
+        "UI scale reset should emit 100%");
+}
+
+void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::Appearance);
+    panel.Open();
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    UiScaleRenderObservation observation =
+        RenderUiScaleFrame(panel);
+
+    ImVec2 slider_position(700.0f, 0.0f);
+    for (float y = 260.0f;
+         y <= 520.0f && !observation.slider_hovered;
+         y += 2.0f) {
+        slider_position.y = y;
+        ImGui::GetIO().AddMousePosEvent(
+            slider_position.x,
+            slider_position.y);
+        observation = RenderUiScaleFrame(panel);
+    }
+    Require(
+        observation.slider_hovered,
+        "fixture should locate the UI scale slider");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    observation = RenderUiScaleFrame(panel);
+    Require(
+        observation.slider_active,
+        "pressing the UI scale slider should begin an active edit");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "pressing the active slider should not submit a setting");
+
+    ImGui::GetIO().AddMousePosEvent(
+        slider_position.x + 120.0f,
+        slider_position.y);
+    observation = RenderUiScaleFrame(panel);
+    Require(
+        observation.slider_active,
+        "dragging should keep the UI scale slider active");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "dragging should retain only a panel-local draft");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    observation = RenderUiScaleFrame(panel);
+    Require(
+        !observation.slider_active,
+        "releasing should deactivate the UI scale slider");
+
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetUiScale &&
+            intent->ui_scale_percentage > 100 &&
+            intent->ui_scale_percentage <= 150,
+        "releasing an edited slider should submit its final draft once");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "the released UI scale intent should be consumed once");
 }
 
 void TestLanguageSelectorEmitsOneShotIntent()
@@ -549,6 +698,86 @@ void TestRenderSmoke()
     }
 }
 
+void TestSettingsWindowMinimumSizeTracksUiScale()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    panel.Open();
+
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.ui_scale_percentage = 150;
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    panel.Render(settings);
+    ImGuiWindow* window = ImGui::FindWindowByName(
+        "Settings###SpecForgeSettingsV1");
+    Require(
+        window != nullptr &&
+            window->Size.x >= 1290.0f &&
+            window->Size.y >= 840.0f,
+        "150% UI scale should enlarge the Settings window minimum size");
+    ImGui::EndFrame();
+}
+
+void TestSettingsWindowConstraintsFollowCurrentViewport()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    panel.Open();
+
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.ui_scale_percentage = 150;
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    panel.Render(settings);
+    ImGuiWindow* window = ImGui::FindWindowByName(
+        "Settings###SpecForgeSettingsV1");
+    Require(
+        window != nullptr &&
+            window->Size.x >= 1290.0f &&
+            window->Size.y >= 840.0f,
+        "fixture should begin with the 150% main-viewport size");
+    ImGui::EndFrame();
+
+    ImGuiViewportP secondary_viewport;
+    secondary_viewport.ID =
+        ImHashStr("SpecForgeSettingsSecondaryViewport");
+    secondary_viewport.Pos =
+        ImVec2(2000.0f, 100.0f);
+    secondary_viewport.Size =
+        ImVec2(700.0f, 500.0f);
+    secondary_viewport.WorkPos =
+        secondary_viewport.Pos;
+    secondary_viewport.WorkSize =
+        secondary_viewport.Size;
+    secondary_viewport.DpiScale = 1.0f;
+    secondary_viewport.Idx = GImGui->Viewports.Size;
+
+    ImGui::NewFrame();
+    GImGui->Viewports.push_back(
+        &secondary_viewport);
+    specforge::SettingsPanelUiTestAccess::SetViewportId(
+        panel,
+        secondary_viewport.ID);
+    panel.Render(settings);
+    Require(
+        window->Size.x <=
+                secondary_viewport.WorkSize.x &&
+            window->Size.y <=
+                secondary_viewport.WorkSize.y,
+        "Settings constraints should fit its current viewport work area");
+    ImGui::EndFrame();
+    GImGui->Viewports.pop_back();
+}
+
 }  // namespace
 
 int main()
@@ -560,9 +789,13 @@ int main()
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();
+    TestUiScaleControlEmitsOneShotSettingsIntent();
+    TestUiScaleSliderCommitsOnlyAfterEditDeactivation();
     TestLanguageSelectorEmitsOneShotIntent();
     TestLanguageRenderKeepsStableImGuiIds();
     TestRenderSmoke();
+    TestSettingsWindowMinimumSizeTracksUiScale();
+    TestSettingsWindowConstraintsFollowCurrentViewport();
     std::cout << "settings panel tests passed\n";
     return 0;
 }

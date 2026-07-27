@@ -2,6 +2,7 @@
 
 #include "profile/profile_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
+#include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
 
 #include <array>
@@ -16,6 +17,7 @@ enum class ApplicationSetting {
     None,
     Language,
     ProfileOutputDirectory,
+    UiScale,
     PanelVisibility,
 };
 
@@ -39,6 +41,7 @@ struct ApplicationSettingsStatus {
 
 struct ApplicationSettingsView {
     UiLanguage language = UiLanguage::English;
+    int ui_scale_percentage = kDefaultUiScalePercentage;
     std::filesystem::path profile_output_directory;
     std::filesystem::path default_profile_output_directory;
     ProfileOutputDirectorySource profile_output_directory_source =
@@ -70,6 +73,7 @@ enum class ApplicationPanel {
 
 enum class ApplicationSettingsIntentKind {
     SetLanguage,
+    SetUiScale,
     SetProfileOutputDirectory,
     RestoreDefaultProfileOutputDirectory,
     SetPanelVisibility,
@@ -81,12 +85,15 @@ struct ApplicationSettingsIntent {
     ApplicationSettingsIntentKind kind =
         ApplicationSettingsIntentKind::SetLanguage;
     UiLanguage language = UiLanguage::English;
+    int ui_scale_percentage = kDefaultUiScalePercentage;
     std::filesystem::path directory;
     ApplicationPanel panel = ApplicationPanel::Files;
     bool visible = true;
 
     [[nodiscard]] static ApplicationSettingsIntent SetLanguage(
         UiLanguage language);
+    [[nodiscard]] static ApplicationSettingsIntent SetUiScale(
+        int percentage);
     [[nodiscard]] static ApplicationSettingsIntent SetProfileOutputDirectory(
         std::filesystem::path directory);
     [[nodiscard]] static ApplicationSettingsIntent
@@ -124,6 +131,7 @@ struct ApplicationSettingsRuntimeState {
 
 struct ApplicationSettingsStorage {
     std::filesystem::path language_settings_path;
+    std::filesystem::path ui_scale_settings_path;
     std::filesystem::path profile_settings_path;
     std::filesystem::path panel_visibility_path;
     std::filesystem::path default_profile_output_directory;
@@ -151,6 +159,8 @@ public:
 private:
     [[nodiscard]] ApplicationSettingsResult ApplyLanguage(
         UiLanguage language);
+    [[nodiscard]] ApplicationSettingsResult ApplyUiScale(
+        int percentage);
     [[nodiscard]] ApplicationSettingsResult ApplyProfileOutputDirectory(
         std::optional<std::filesystem::path> directory,
         const ApplicationSettingsRuntimeState& runtime);
@@ -166,6 +176,7 @@ private:
 
     ApplicationSettingsStorage storage_;
     UiLanguage language_ = UiLanguage::English;
+    int ui_scale_percentage_ = kDefaultUiScalePercentage;
     ProfileOutputDirectoryResolution profile_output_directory_;
     PanelVisibilityStatePersistence panel_visibility_persistence_;
     PanelVisibilityState panel_visibility_;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.4.1 LANGUAGES CXX)
+project(SpecForge VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -311,6 +311,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectrum_view_session.cpp
     src/ui/ui_font.cpp
     src/ui/ui_language_settings.cpp
+    src/ui/ui_scale_settings.cpp
     src/ui/ui_text.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
@@ -680,6 +681,17 @@ specforge_add_test(
     specforge_ui_language_settings_tests
     tests/ui_language_settings_tests.cpp
     specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_ui_scale_settings_tests
+    tests/ui_scale_settings_tests.cpp
+    specforge_desktop_ui
+)
+add_test(
+    NAME specforge_ui_scale_runtime_architecture_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/ui_scale_runtime_architecture_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 specforge_add_test(
     specforge_spectrum_view_session_tests

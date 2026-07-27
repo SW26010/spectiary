@@ -73,7 +73,8 @@ private:
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
     void RenderGeneral();
-    void RenderAppearance();
+    void RenderAppearance(
+        const ApplicationSettingsView& settings);
     void RenderLanguage(const ApplicationSettingsView& settings);
     void RenderInput();
     void RenderDataAndRecovery();
@@ -82,6 +83,7 @@ private:
         const SettingsPanelStatus& status);
     void RenderAbout(const ApplicationSettingsView& settings);
     void ResetProfileOutputDirectory();
+    void SetUiScalePercentage(int percentage);
 
     void OpenDirectory(const std::filesystem::path& path, const char* label);
     void CopyPath(const std::filesystem::path& path, const char* label);
@@ -96,9 +98,11 @@ private:
     bool action_failed_ = false;
     bool profile_recording_toggle_requested_ = false;
     bool profile_output_directory_selection_requested_ = false;
+    unsigned int settings_viewport_id_ = 0;
     std::string action_status_;
     std::optional<ApplicationSettingsIntent>
         application_settings_intent_;
+    std::optional<int> ui_scale_draft_percentage_;
 
     friend struct SettingsPanelUiTestAccess;
 };
