@@ -1,9 +1,0 @@
-#pragma once
-
-namespace specforge::build_info {
-
-inline constexpr char kDearImGuiVersion[] = "@SPECFORGE_IMGUI_VERSION@";
-inline constexpr char kImPlotVersion[] = "@SPECFORGE_IMPLOT_VERSION@";
-inline constexpr char kZlibVersion[] = "@SPECFORGE_ZLIB_VERSION@";
-
-}  // namespace specforge::build_info

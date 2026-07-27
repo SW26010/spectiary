@@ -49,6 +49,15 @@ guarantee. The packaged artifact SHA-256 remains the final artifact identity.
 CI build numbers, Windows `VERSIONINFO`, signing, SBOM data, and tag gates
 remain separate release contracts.
 
+The executable embeds the schema 3 core tuple: product version, release
+profile, build configuration, normalized target architecture, source mode, and
+source revision. About treats that embedded tuple as authoritative and reads
+the adjacent metadata once. It exposes toolchain and dependency versions only
+when every core field matches. Missing, malformed, unsupported, or incomplete
+metadata is unavailable; valid metadata with a different core tuple is a
+mismatch. This is best-effort accidental-mix detection, not authentication or
+strict one-to-one artifact binding.
+
 The initial delivery sequence is Portable first. Installed remains a defined
 release profile so the storage decision stays explicit, but the v1 deliverable
 is the Portable artifact rather than an installer.

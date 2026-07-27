@@ -18,6 +18,14 @@
 #error "SPECFORGE_EXPECTED_SOURCE_MODE must be provided by the build configuration."
 #endif
 
+#ifndef SPECFORGE_EXPECTED_CONFIGURATION
+#error "SPECFORGE_EXPECTED_CONFIGURATION must be provided by the build configuration."
+#endif
+
+#ifndef SPECFORGE_EXPECTED_ARCHITECTURE
+#error "SPECFORGE_EXPECTED_ARCHITECTURE must be provided by the build configuration."
+#endif
+
 #ifndef SPECFORGE_EXPECTED_SOURCE_REVISION
 #error "SPECFORGE_EXPECTED_SOURCE_REVISION must be provided by the build configuration."
 #endif
@@ -104,6 +112,8 @@ specforge::SettingsPanelUi MakePanel()
     return specforge::SettingsPanelUi({
         .version = "test",
         .release_profile = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "x64",
         .build_source = {
             .mode = "working_tree",
             .revision = "",
@@ -181,6 +191,12 @@ void TestDefaultEnvironmentDescribesThisBuild()
         !environment.release_profile.empty(),
         "settings should expose the release profile");
     Require(
+        environment.configuration == SPECFORGE_EXPECTED_CONFIGURATION,
+        "settings should expose the actual build configuration");
+    Require(
+        environment.target_architecture == SPECFORGE_EXPECTED_ARCHITECTURE,
+        "settings should expose the target architecture");
+    Require(
         environment.build_source.mode ==
             SPECFORGE_EXPECTED_SOURCE_MODE,
         "settings should expose the configured build source mode");
@@ -198,6 +214,8 @@ void TestWorkingTreeBuildSourcePresentation()
     const specforge::SettingsPanelEnvironment environment = {
         .version = "test-version",
         .release_profile = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "x64",
         .build_source = {
             .mode = "working_tree",
             .revision = "",
@@ -234,6 +252,8 @@ void TestHeadBuildSourcePresentation()
     const specforge::SettingsPanelEnvironment environment = {
         .version = "test-version",
         .release_profile = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "x64",
         .build_source = {
             .mode = "head",
             .revision = kRevision,
@@ -262,6 +282,24 @@ void TestHeadBuildSourcePresentation()
             "Data directory: Data\n"
             "Log directory: Data/logs",
         "HEAD diagnostics should include the mode and full revision");
+}
+
+void TestBuildMetadataStatusPresentation()
+{
+    Require(
+        specforge::FormatBuildMetadataStatusForAbout(
+            specforge::BuildMetadataStatus::Available).empty(),
+        "available metadata should not render a fallback status");
+    Require(
+        specforge::FormatBuildMetadataStatusForAbout(
+            specforge::BuildMetadataStatus::Unavailable) ==
+            "Build metadata unavailable",
+        "unavailable metadata should render its fallback status");
+    Require(
+        specforge::FormatBuildMetadataStatusForAbout(
+            specforge::BuildMetadataStatus::Mismatch) ==
+            "Build metadata mismatch",
+        "mismatched metadata should render its fallback status");
 }
 
 void TestOpenIsIdempotent()
@@ -518,6 +556,7 @@ int main()
     TestDefaultEnvironmentDescribesThisBuild();
     TestWorkingTreeBuildSourcePresentation();
     TestHeadBuildSourcePresentation();
+    TestBuildMetadataStatusPresentation();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();

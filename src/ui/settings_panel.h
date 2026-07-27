@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/application_settings.h"
+#include "app/build_metadata_reader.h"
 
 #include <filesystem>
 #include <optional>
@@ -27,7 +28,10 @@ struct BuildSourceIdentity {
 struct SettingsPanelEnvironment {
     std::string version;
     std::string release_profile;
+    std::string configuration;
+    std::string target_architecture;
     BuildSourceIdentity build_source;
+    BuildMetadataReadResult build_metadata;
     std::filesystem::path data_directory;
 };
 
@@ -41,6 +45,8 @@ struct SettingsPanelStatus {
 [[nodiscard]] SettingsPanelEnvironment DefaultSettingsPanelEnvironment();
 [[nodiscard]] std::string FormatBuildSourceForAbout(
     const BuildSourceIdentity& build_source);
+[[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
+    BuildMetadataStatus status);
 [[nodiscard]] std::string FormatDiagnosticInformation(
     const SettingsPanelEnvironment& environment,
     const std::filesystem::path& profile_output_directory);

@@ -220,8 +220,7 @@ checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` �
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt`。
 缺少任一发布文档时打包脚本会失败。
 
-第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。About 编译时使用
-`build\<preset>\generated\specforge\third_party_versions.h`。构建成功后，
+第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。构建成功后，
 CMake 将包含 SpecForge 版本、release profile、configuration、第三方版本、构建来源和
 若干构建环境诊断维度的 schema 3 `specforge_build_metadata.json` 复制到实际 EXE 旁。字段为
 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
@@ -239,8 +238,16 @@ MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 只校验并原样
 而不是发布过期版本声明。
 
 同一组 CMake build-source 变量还生成
-`build\<preset>\generated\specforge\specforge_build_identity.h` 并编译进 EXE。
-About 对 working-tree 构建显示 `Source: Working tree`，对 HEAD 构建显示完整
+按实际配置生成的
+`build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
+并编译进 EXE。该身份还包含产品版本、release profile、configuration 和目标架构。
+About 以这些 EXE 内字段为权威；它只读取一次 EXE 同目录的 schema 3 metadata，
+且仅在版本、profile、configuration、架构、source mode/revision 全部匹配时显示
+compiler、CMake、generator、Windows SDK 和依赖版本。文件缺失或无效显示
+`Build metadata unavailable`，核心字段不同显示 `Build metadata mismatch`，两者都不
+混合展示 sidecar 详情。所有必填字符串必须非空且没有首尾空白，working-tree 的
+`source_revision` 必须严格为 JSON `null`。About 对 working-tree 构建显示
+`Source: Working tree`，对 HEAD 构建显示完整
 revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
 40 位 revision。因此 EXE 脱离 Portable sidecar 后仍能说明源码来源，而
 working-tree 构建不会声称任何 commit。

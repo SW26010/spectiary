@@ -3,7 +3,6 @@
 #include "app/runtime_paths.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
-#include "specforge/third_party_versions.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -16,10 +15,6 @@
 #include <string>
 #include <system_error>
 #include <utility>
-
-#ifndef SPECFORGE_VERSION
-#define SPECFORGE_VERSION "development"
-#endif
 
 namespace specforge {
 namespace {
@@ -140,12 +135,15 @@ SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
 {
     const RuntimePaths paths = DefaultRuntimePaths();
     return {
-        .version = SPECFORGE_VERSION,
-        .release_profile = ReleaseProfileName(paths.release_profile),
+        .version = build_info::kSpecForgeVersion,
+        .release_profile = build_info::kReleaseProfile,
+        .configuration = build_info::kBuildConfiguration,
+        .target_architecture = build_info::kTargetArchitecture,
         .build_source = {
             .mode = build_info::kBuildSourceMode,
             .revision = build_info::kBuildSourceRevision,
         },
+        .build_metadata = DefaultBuildMetadata(),
         .data_directory = paths.local_user_state_root,
     };
 }
@@ -164,6 +162,20 @@ std::string FormatBuildSourceForAbout(
                 kDisplayedRevisionLength);
     }
     return "Source: " + build_source.mode;
+}
+
+std::string_view FormatBuildMetadataStatusForAbout(
+    BuildMetadataStatus status)
+{
+    switch (status) {
+    case BuildMetadataStatus::Available:
+        return {};
+    case BuildMetadataStatus::Unavailable:
+        return "Build metadata unavailable";
+    case BuildMetadataStatus::Mismatch:
+        return "Build metadata mismatch";
+    }
+    return "Build metadata unavailable";
 }
 
 std::string FormatDiagnosticInformation(
@@ -677,18 +689,65 @@ void SettingsPanelUi::RenderAbout(
     ImGui::Spacing();
     RenderReadOnlyValue("Version", environment_.version.c_str());
     RenderReadOnlyValue("Release profile", environment_.release_profile.c_str());
+    RenderReadOnlyValue("Configuration", environment_.configuration.c_str());
+    RenderReadOnlyValue(
+        "Architecture",
+        environment_.target_architecture.c_str());
     const std::string source_text =
         FormatBuildSourceForAbout(environment_.build_source);
     ImGui::TextUnformatted(source_text.c_str());
     RenderReadOnlyValue("Graphics", "Direct3D 11 / SDR");
 
     ImGui::Spacing();
+    ImGui::SeparatorText("Build details");
+    const std::string_view metadata_status_text =
+        FormatBuildMetadataStatusForAbout(
+            environment_.build_metadata.status);
+    if (!metadata_status_text.empty()) {
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(metadata_status_text.size()),
+            metadata_status_text.data());
+    } else if (
+        environment_.build_metadata.status ==
+            BuildMetadataStatus::Available &&
+        environment_.build_metadata.metadata) {
+        const BuildMetadata& metadata =
+            *environment_.build_metadata.metadata;
+        const std::string compiler =
+            metadata.compiler_id + " " + metadata.compiler_version;
+        RenderReadOnlyValue("Compiler", compiler.c_str());
+        RenderReadOnlyValue("CMake", metadata.cmake_version.c_str());
+        RenderReadOnlyValue("Generator", metadata.generator.c_str());
+        RenderReadOnlyValue(
+            "Windows SDK",
+            metadata.windows_sdk_version
+                ? metadata.windows_sdk_version->c_str()
+                : "Not reported");
+    }
+
+    ImGui::Spacing();
     ImGui::SeparatorText("Third-party components");
-    ImGui::BulletText(
-        "Dear ImGui %s (docking / Win32 / DirectX 11) - MIT License",
-        build_info::kDearImGuiVersion);
-    ImGui::BulletText("ImPlot %s - MIT License", build_info::kImPlotVersion);
-    ImGui::BulletText("zlib %s - zlib License", build_info::kZlibVersion);
+    if (environment_.build_metadata.status ==
+            BuildMetadataStatus::Available &&
+        environment_.build_metadata.metadata) {
+        const BuildMetadata& metadata =
+            *environment_.build_metadata.metadata;
+        ImGui::BulletText(
+            "Dear ImGui %s (docking / Win32 / DirectX 11) - MIT License",
+            metadata.dear_imgui_version.c_str());
+        ImGui::BulletText(
+            "ImPlot %s - MIT License",
+            metadata.implot_version.c_str());
+        ImGui::BulletText(
+            "zlib %s - zlib License",
+            metadata.zlib_version.c_str());
+    } else {
+        ImGui::BulletText(
+            "Dear ImGui (docking / Win32 / DirectX 11) - MIT License");
+        ImGui::BulletText("ImPlot - MIT License");
+        ImGui::BulletText("zlib - zlib License");
+    }
     ImGui::BulletText("Modified stb headers bundled with Dear ImGui - MIT License");
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled("Full terms: Legal/EULA.txt and Legal/THIRD_PARTY_NOTICES.txt.");

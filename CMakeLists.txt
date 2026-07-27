@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.4.0 LANGUAGES CXX)
+project(SpecForge VERSION 0.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -132,14 +132,15 @@ configure_file(
     @ONLY
 )
 configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/third_party_versions.h.in"
-    "${CMAKE_BINARY_DIR}/generated/specforge/third_party_versions.h"
+    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
     @ONLY
 )
-configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h"
-    @ONLY
+file(GENERATE
+    OUTPUT
+        "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/specforge/specforge_build_identity.h"
+    INPUT
+        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
 )
 configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/specforge_build_metadata.json.in"
@@ -224,6 +225,7 @@ function(specforge_configure_production_target target_name)
 endfunction()
 
 add_library(specforge_core STATIC
+    src/app/build_metadata_reader.cpp
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
     src/app/pan_pacing.cpp
@@ -260,6 +262,9 @@ add_library(specforge_core STATIC
     src/profile/source_load_latency_trace.cpp
 )
 specforge_configure_production_target(specforge_core)
+target_include_directories(specforge_core PRIVATE
+    "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
+)
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
 target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB bcrypt)
@@ -309,9 +314,8 @@ add_library(specforge_desktop_ui STATIC
     src/ui/ui_text.cpp
 )
 specforge_configure_production_target(specforge_desktop_ui)
-target_include_directories(specforge_desktop_ui PRIVATE "${CMAKE_BINARY_DIR}/generated")
-target_compile_definitions(specforge_desktop_ui PRIVATE
-    SPECFORGE_VERSION="${PROJECT_VERSION}"
+target_include_directories(specforge_desktop_ui BEFORE PRIVATE
+    "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
 )
 target_link_libraries(specforge_desktop_ui
     PUBLIC
@@ -483,12 +487,22 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_build_metadata_reader_tests
+    tests/build_metadata_reader_tests.cpp
+    specforge_core
+)
+target_compile_definitions(specforge_build_metadata_reader_tests PRIVATE
+    SPECFORGE_BUILD_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
+)
+specforge_add_test(
     specforge_settings_panel_tests
     tests/settings_panel_tests.cpp
     specforge_desktop_ui
 )
 target_compile_definitions(specforge_settings_panel_tests PRIVATE
     SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+    SPECFORGE_EXPECTED_CONFIGURATION="$<CONFIG>"
+    SPECFORGE_EXPECTED_ARCHITECTURE="${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
     SPECFORGE_EXPECTED_SOURCE_MODE="${SPECFORGE_BUILD_SOURCE_MODE}"
     SPECFORGE_EXPECTED_SOURCE_REVISION="${SPECFORGE_BUILD_SOURCE_REVISION}"
 )
@@ -521,6 +535,8 @@ add_test(
         -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
         -BuiltExecutable "$<TARGET_FILE:specforge_native>"
         -GeneratedManifest "${SPECFORGE_MANIFEST}"
+        -GeneratedBuildIdentity
+            "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/specforge/specforge_build_identity.h"
         -SpecForgeVersion "${PROJECT_VERSION}"
         -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"

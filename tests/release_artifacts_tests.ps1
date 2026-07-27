@@ -19,6 +19,9 @@ param(
     [string]$GeneratedManifest,
 
     [Parameter(Mandatory = $true)]
+    [string]$GeneratedBuildIdentity,
+
+    [Parameter(Mandatory = $true)]
     [string]$SpecForgeVersion,
 
     [Parameter(Mandatory = $true)]
@@ -294,6 +297,10 @@ function Assert-BuildIdentityHeader {
         [Parameter(Mandatory = $true)] [string]$OutputPath,
         [Parameter(Mandatory = $true)] [string]$Mode,
         [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Revision,
+        [Parameter(Mandatory = $true)] [string]$Version,
+        [Parameter(Mandatory = $true)] [string]$ReleaseProfile,
+        [Parameter(Mandatory = $true)] [string]$Configuration,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
         [Parameter(Mandatory = $true)] [string]$Description
     )
 
@@ -302,6 +309,10 @@ function Assert-BuildIdentityHeader {
         "-DOUTPUT=$OutputPath" `
         "-DEXPECTED_MODE=$Mode" `
         "-DEXPECTED_REVISION=$Revision" `
+        "-DEXPECTED_VERSION=$Version" `
+        "-DEXPECTED_RELEASE_PROFILE=$ReleaseProfile" `
+        "-DEXPECTED_CONFIGURATION=$Configuration" `
+        "-DEXPECTED_ARCHITECTURE=$Architecture" `
         -P $FixturePath
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed."
@@ -416,7 +427,8 @@ foreach ($requiredPath in @(
     $buildSourceContractPath,
     $buildIdentityFixturePath,
     $manifestTemplatePath,
-    $GeneratedManifest
+    $GeneratedManifest,
+    $GeneratedBuildIdentity
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required release source is missing: $requiredPath"
@@ -607,8 +619,12 @@ Assert-NotContains $packageScript `
     'Portable packaging script'
 Assert-Contains $cmakeSource 'specforge_build_metadata.json' 'CMake build metadata'
 Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
+Assert-NotContains `
+    $cmakeSource `
+    'third_party_versions.h.in' `
+    'CMake obsolete compile-time dependency versions'
 Assert-Contains $cmakeSource `
-    'generated/specforge/specforge_build_identity.h' `
+    'generated/$<CONFIG>/specforge/specforge_build_identity.h' `
     'CMake generated build identity'
 Assert-Contains $cmakeSource `
     'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
@@ -644,6 +660,18 @@ foreach ($propertyName in @(
     Assert-Contains $buildMetadataTemplate "`"$propertyName`"" 'Build metadata template'
 }
 Assert-Contains $buildIdentityTemplate `
+    '@PROJECT_VERSION@' `
+    'Build identity header template'
+Assert-Contains $buildIdentityTemplate `
+    '@SPECFORGE_RELEASE_PROFILE@' `
+    'Build identity header template'
+Assert-Contains $buildIdentityTemplate `
+    '$<CONFIG>' `
+    'Build identity header template'
+Assert-Contains $buildIdentityTemplate `
+    '@SPECFORGE_BUILD_TARGET_ARCHITECTURE@' `
+    'Build identity header template'
+Assert-Contains $buildIdentityTemplate `
     '@SPECFORGE_BUILD_SOURCE_MODE@' `
     'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
@@ -655,9 +683,28 @@ Assert-Contains $aboutSource `
 Assert-Contains $aboutSource `
     'build_info::kBuildSourceRevision' `
     'About build source revision'
-Assert-Contains $aboutSource 'build_info::kDearImGuiVersion' 'About Dear ImGui version'
-Assert-Contains $aboutSource 'build_info::kImPlotVersion' 'About ImPlot version'
-Assert-Contains $aboutSource 'build_info::kZlibVersion' 'About zlib version'
+Assert-Contains $aboutSource 'metadata.dear_imgui_version' 'About Dear ImGui metadata version'
+Assert-Contains $aboutSource 'metadata.implot_version' 'About ImPlot metadata version'
+Assert-Contains $aboutSource 'metadata.zlib_version' 'About zlib metadata version'
+
+$generatedBuildIdentityText = Get-Content -Raw -LiteralPath $GeneratedBuildIdentity
+foreach ($expectedIdentityText in @(
+    "kSpecForgeVersion[] = `"$SpecForgeVersion`"",
+    "kReleaseProfile[] = `"$ReleaseProfile`"",
+    "kBuildConfiguration[] = `"$Configuration`"",
+    "kTargetArchitecture[] = `"$TargetArchitecture`"",
+    "kBuildSourceMode[] = `"$SourceMode`"",
+    "kBuildSourceRevision[] = `"$SourceRevision`""
+)) {
+    Assert-Contains `
+        $generatedBuildIdentityText `
+        $expectedIdentityText `
+        'Generated build identity'
+}
+Assert-NotContains `
+    $generatedBuildIdentityText `
+    '$<CONFIG>' `
+    'Generated build identity'
 foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
     Assert-Contains $packageScript $documentName 'Portable packaging script'
     Assert-Contains $aboutSource "Legal/$documentName" 'About panel'
@@ -688,6 +735,10 @@ try {
         -OutputPath (Join-Path $testRoot 'working-tree-build-identity.h') `
         -Mode 'working_tree' `
         -Revision '' `
+        -Version $SpecForgeVersion `
+        -ReleaseProfile $ReleaseProfile `
+        -Configuration $Configuration `
+        -Architecture $TargetArchitecture `
         -Description 'Working-tree compile-time build identity'
     Assert-BuildIdentityHeader `
         -FixturePath $buildIdentityFixturePath `
@@ -695,6 +746,10 @@ try {
         -OutputPath (Join-Path $testRoot 'head-build-identity.h') `
         -Mode 'head' `
         -Revision $headRevision `
+        -Version $SpecForgeVersion `
+        -ReleaseProfile $ReleaseProfile `
+        -Configuration $Configuration `
+        -Architecture $TargetArchitecture `
         -Description 'HEAD compile-time build identity'
     Assert-ScriptFails `
         -ScriptPath $packageScriptPath `
