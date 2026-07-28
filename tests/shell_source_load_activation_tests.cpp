@@ -2814,6 +2814,40 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
     std::filesystem::remove(path);
 }
 
+void TestShellFlushResultNamesEveryFailedOwner()
+{
+    specforge::ShellLocalStateFlushResult result;
+    Require(
+        result.all_saved() &&
+            result.FailureMessage().empty(),
+        "a complete shell flush should not produce a warning");
+
+    result.application_settings_saved = false;
+    result.source_collection.navigation_saved = false;
+    result.source_collection.workflow_saved = false;
+    result.spectral_lines_saved = false;
+    const std::string message = result.FailureMessage();
+    Require(
+        !result.all_saved(),
+        "any failed owner should make the shell flush incomplete");
+    Require(
+        message.find("Application settings") !=
+                std::string::npos &&
+            message.find("Sample navigation") !=
+                std::string::npos &&
+            message.find("Sample workflow") !=
+                std::string::npos &&
+            message.find("Spectral-line state") !=
+                std::string::npos,
+        "the shutdown warning should name every failed owner");
+    Require(
+        message.find("Source session") ==
+                std::string::npos &&
+            message.find("Sample labeling") ==
+                std::string::npos,
+        "the shutdown warning should omit successful owners");
+}
+
 }  // namespace
 
 int main()
@@ -2838,6 +2872,7 @@ int main()
         TestIdlePrefetchIsConsumedBySecondForwardNavigation();
         TestPublishedPrefetchBecomesStaleAfterQueryInput();
         TestCanceledPrefetchReportsOnlyAfterWorkerExit();
+        TestShellFlushResultNamesEveryFailedOwner();
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

@@ -319,6 +319,23 @@ int SpecForgeApp::Run(
             next_maintenance_deadline()));
     }
 
+    const ShellLocalStateFlushResult local_state_flush =
+        ui_.FlushLocalState();
+    if (!local_state_flush.all_saved()) {
+        const std::string failure_message =
+            local_state_flush.FailureMessage();
+        if (runtime_resource_workload_) {
+            runtime_resource_workload_->
+                RecordLocalStateFlushFailure(
+                    failure_message);
+        } else {
+            MessageBoxA(
+                nullptr,
+                failure_message.c_str(),
+                "SpecForge - Local state warning",
+                MB_OK | MB_ICONWARNING);
+        }
+    }
     Shutdown();
     if (runtime_resource_workload_) {
         return runtime_resource_workload_->exit_code();

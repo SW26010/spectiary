@@ -180,6 +180,28 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
                 specforge::ApplicationSetting::Language &&
             !language_status.detail.empty(),
         "save failure should remain visible on the owner view");
+    Require(
+        !settings
+             .PersistenceStatus(
+                 specforge::ApplicationSetting::Language)
+             .save_message.empty(),
+        "application persistence health should retain a failed setting save");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::SimplifiedChinese),
+            {})
+            .applied(),
+        "the failed language save should succeed after repairing its path");
+    Require(
+        settings
+            .PersistenceStatus(
+                specforge::ApplicationSetting::Language)
+            .recovered,
+        "a successful setting retry should expose recovery");
 }
 
 void TestUiScaleValidationAndPersistenceFirstBehavior()
@@ -263,7 +285,6 @@ void TestUiScaleResetRepairsDamagedFallbackState()
         std::ofstream stream(storage.ui_scale_settings_path);
         stream << R"({"format_kind":)";
     }
-
     specforge::ApplicationSettings settings(storage);
     const specforge::ApplicationSettingsView fallback =
         settings.View();
@@ -300,6 +321,83 @@ void TestUiScaleResetRepairsDamagedFallbackState()
         "the repaired 100% UI scale should reload without warning");
 }
 
+void TestLanguageAndProfileFallbacksCanBeReapplied()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.language_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
+        std::ofstream stream(storage.profile_settings_path);
+        stream << R"({"format_kind":)";
+    }
+
+    specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsView fallback =
+        settings.View();
+    Require(
+        fallback.language == specforge::UiLanguage::English &&
+            fallback.StatusFor(
+                    specforge::ApplicationSetting::Language)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning,
+        "damaged language settings should establish a warned English fallback");
+    Require(
+        fallback.profile_output_directory ==
+                storage.default_profile_output_directory &&
+            fallback.StatusFor(
+                    specforge::ApplicationSetting::
+                        ProfileOutputDirectory)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning,
+        "damaged profile settings should establish a warned default fallback");
+
+    const auto language_repair = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetLanguage(
+            specforge::UiLanguage::English),
+        {});
+    const auto profile_repair = settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            RestoreDefaultProfileOutputDirectory(),
+        {});
+    Require(
+        language_repair.applied() &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::Language)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "reapplying the warned language fallback should rewrite and clear its status");
+    Require(
+        profile_repair.applied() &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::
+                            ProfileOutputDirectory)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "restoring the warned profile fallback should rewrite and clear its status");
+
+    const specforge::ApplicationSettings reloaded(storage);
+    Require(
+        reloaded.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::Language)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready &&
+            reloaded.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::
+                            ProfileOutputDirectory)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "repaired language and profile defaults should reload without warning");
+}
+
 void TestLoadWarningAndEnvironmentOverrideAreTyped()
 {
     TemporaryDirectory temporary;
@@ -312,6 +410,14 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
     }
     {
         std::ofstream stream(storage.ui_scale_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
+        std::ofstream stream(storage.profile_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
+        std::ofstream stream(storage.panel_visibility_path);
         stream << R"({"format_kind":)";
     }
 
@@ -336,6 +442,38 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
             ui_scale_status.setting ==
                 specforge::ApplicationSetting::UiScale,
         "damaged UI scale settings should fall back with a typed load warning");
+    Require(
+        loaded
+                .StatusFor(
+                    specforge::ApplicationSetting::
+                        ProfileOutputDirectory)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::
+                LoadWarning,
+        "damaged profile settings should produce a typed load warning");
+    Require(
+        !settings
+             .PersistenceStatus(
+                 specforge::ApplicationSetting::
+                     ProfileOutputDirectory)
+             .load_warning.empty(),
+        "profile load warning should reach application persistence health");
+    Require(
+        loaded
+                .StatusFor(
+                    specforge::ApplicationSetting::
+                        PanelVisibility)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::
+                LoadWarning,
+        "damaged panel visibility should produce a typed load warning");
+    Require(
+        !settings
+             .PersistenceStatus(
+                 specforge::ApplicationSetting::
+                     PanelVisibility)
+             .load_warning.empty(),
+        "panel visibility warning should reach application persistence health");
     Require(
         loaded.profile_output_directory_source ==
             specforge::ProfileOutputDirectorySource::Environment,
@@ -514,6 +652,7 @@ int main()
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestUiScaleValidationAndPersistenceFirstBehavior();
     TestUiScaleResetRepairsDamagedFallbackState();
+    TestLanguageAndProfileFallbacksCanBeReapplied();
     TestLoadWarningAndEnvironmentOverrideAreTyped();
     TestPanelVisibilitySharesTheSettingsLifecycle();
     TestProfileDirectoryChangeIsRejectedWhileRecording();

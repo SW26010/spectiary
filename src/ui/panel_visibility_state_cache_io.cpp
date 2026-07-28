@@ -4,6 +4,7 @@
 #include "app/local_user_state_paths.h"
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace specforge {
@@ -20,26 +21,58 @@ std::filesystem::path DefaultPanelVisibilityStateCachePath()
         local_user_state_paths::kPanelVisibilityState);
 }
 
-PanelVisibilityState LoadPanelVisibilityStateCache(const std::filesystem::path& path)
+PanelVisibilityStateCacheLoadResult
+LoadPanelVisibilityStateCache(
+    const std::filesystem::path& path)
 {
-    PanelVisibilityState state;
-    const VersionedJsonCacheLoadResult result =
+    PanelVisibilityStateCacheLoadResult loaded;
+    VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(path, kStateFormatKind, {kStateSchemaVersion}, "panel visibility state cache");
+    loaded.warning = std::move(result.warning);
     if (!result.document) {
-        return state;
+        return loaded;
     }
 
     const JsonValue& root = result.document->root;
-    state.files = ReadJsonBoolMember(root, "files", state.files);
-    state.navigation = ReadJsonBoolMember(root, "navigation", state.navigation);
-    state.annotations = ReadJsonBoolMember(root, "annotations", state.annotations);
-    state.labeling = ReadJsonBoolMember(root, "labeling", state.labeling);
-    state.filters = ReadJsonBoolMember(root, "filters", state.filters);
-    state.sorting = ReadJsonBoolMember(root, "sorting", state.sorting);
-    state.smoothing = ReadJsonBoolMember(root, "smoothing", state.smoothing);
-    state.information = ReadJsonBoolMember(root, "information", state.information);
-    state.spectral_lines = ReadJsonBoolMember(root, "spectral_lines", state.spectral_lines);
-    return state;
+    PanelVisibilityState& state = loaded.state;
+    std::string invalid_fields;
+    const auto read_visibility =
+        [&root, &invalid_fields](
+            std::string_view key,
+            bool& visible) {
+            const JsonValue* member =
+                JsonObjectMember(root, key);
+            if (member == nullptr) {
+                return;
+            }
+            if (member->kind != JsonValue::Kind::Bool) {
+                if (!invalid_fields.empty()) {
+                    invalid_fields += ", ";
+                }
+                invalid_fields += "'";
+                invalid_fields += key;
+                invalid_fields += "'";
+                return;
+            }
+            visible = member->bool_value;
+        };
+    read_visibility("files", state.files);
+    read_visibility("navigation", state.navigation);
+    read_visibility("annotations", state.annotations);
+    read_visibility("labeling", state.labeling);
+    read_visibility("filters", state.filters);
+    read_visibility("sorting", state.sorting);
+    read_visibility("smoothing", state.smoothing);
+    read_visibility("information", state.information);
+    read_visibility("spectral_lines", state.spectral_lines);
+    if (!invalid_fields.empty()) {
+        loaded.warning =
+            "Panel visibility state cache member(s) " +
+            invalid_fields +
+            " must be boolean; defaults were used for "
+            "those members.";
+    }
+    return loaded;
 }
 
 bool SavePanelVisibilityStateCache(
@@ -83,9 +116,12 @@ PanelVisibilityStatePersistence::PanelVisibilityStatePersistence(
 {
 }
 
-PanelVisibilityState PanelVisibilityStatePersistence::Load() const
+PanelVisibilityState PanelVisibilityStatePersistence::Load()
 {
-    return LoadPanelVisibilityStateCache(cache_path_);
+    PanelVisibilityStateCacheLoadResult loaded =
+        LoadPanelVisibilityStateCache(cache_path_);
+    load_warning_ = std::move(loaded.warning);
+    return std::move(loaded.state);
 }
 
 void PanelVisibilityStatePersistence::MarkDirtyIfChanged(
@@ -93,6 +129,7 @@ void PanelVisibilityStatePersistence::MarkDirtyIfChanged(
     const PanelVisibilityState& current)
 {
     if (!(current == previous)) {
+        save_status_.ClearRecovered();
         save_scheduler_.MarkDirty();
     }
 }
@@ -105,10 +142,13 @@ std::optional<bool> PanelVisibilityStatePersistence::RunMaintenance(
         return std::nullopt;
     }
     if (SavePanelVisibilityStateCache(cache_path_, state)) {
-        save_scheduler_.MarkSaveSucceeded();
+        load_warning_.clear();
+        save_scheduler_.MarkSaveSucceeded(save_status_);
         return true;
     }
-    save_scheduler_.MarkSaveFailed();
+    save_scheduler_.MarkSaveFailed(
+        save_status_,
+        "Could not save panel visibility.");
     return false;
 }
 
@@ -124,11 +164,25 @@ bool PanelVisibilityStatePersistence::Flush(const PanelVisibilityState& state)
         return true;
     }
     if (SavePanelVisibilityStateCache(cache_path_, state)) {
-        save_scheduler_.MarkSaveSucceeded();
+        load_warning_.clear();
+        save_scheduler_.MarkSaveSucceeded(save_status_);
         return true;
     }
-    save_scheduler_.MarkSaveFailed();
+    save_scheduler_.MarkSaveFailed(
+        save_status_,
+        "Could not save panel visibility.");
     return false;
+}
+
+LocalUserStatePersistenceStatus
+PanelVisibilityStatePersistence::PersistenceStatus() const
+{
+    return {
+        .retrying = save_status_.failed(),
+        .recovered = save_status_.recovered(),
+        .load_warning = load_warning_,
+        .save_message = save_status_.message(),
+    };
 }
 
 }  // namespace specforge

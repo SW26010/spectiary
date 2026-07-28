@@ -255,12 +255,34 @@ void TestDeterministicSuccessfulLifecycle()
         "terminal service must not duplicate the close request");
 }
 
+void TestLocalStateFlushFailureBecomesRunnerFailure()
+{
+    specforge::RuntimeResourceWorkloadConfiguration
+        configuration;
+    configuration.status_path =
+        L"C:\\fixtures\\status.json";
+    configuration.source_paths = {
+        L"C:\\fixtures\\baseline.csv",
+        L"C:\\fixtures\\stress.csv",
+    };
+    Workload workload(std::move(configuration));
+
+    workload.RecordLocalStateFlushFailure(
+        "Panel visibility: save failed.");
+
+    Require(
+        WorkloadAccess::StateName(workload) == "failed" &&
+            workload.exit_code() == 2,
+        "local-state flush failure should fail the non-interactive runner without requiring a dialog");
+}
+
 }  // namespace
 
 int main()
 {
     try {
         TestDeterministicSuccessfulLifecycle();
+        TestLocalStateFlushFailureBecomesRunnerFailure();
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

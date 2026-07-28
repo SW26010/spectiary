@@ -182,6 +182,23 @@ std::string_view FormatBuildMetadataStatusForAbout(
     return "Build metadata unavailable";
 }
 
+std::string_view FormatProfileOutputDirectoryStatus(
+    ApplicationSettingsStatusKind kind)
+{
+    switch (kind) {
+    case ApplicationSettingsStatusKind::Ready:
+        return {};
+    case ApplicationSettingsStatusKind::LoadWarning:
+        return "The saved profile output directory could not "
+               "be loaded; using the current fallback directory.";
+    case ApplicationSettingsStatusKind::PersistenceError:
+        return "The profile output directory could not be saved.";
+    case ApplicationSettingsStatusKind::Rejected:
+        return "The profile output directory could not be changed.";
+    }
+    return {};
+}
+
 std::string FormatDiagnosticInformation(
     const SettingsPanelEnvironment& environment,
     const std::filesystem::path& profile_output_directory)
@@ -478,6 +495,8 @@ void SettingsPanelUi::RenderLanguage(
     const ApplicationSettingsView& settings)
 {
     const UiLanguage language = settings.language;
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(ApplicationSetting::Language);
     RenderSectionHeading(
         UiText(language, UiTextId::Language),
         UiText(language, UiTextId::LanguagePageDescription));
@@ -501,8 +520,12 @@ void SettingsPanelUi::RenderLanguage(
                 candidate == UiLanguage::English
                     ? "SpecForgeUiLanguageEnglish"
                     : "SpecForgeUiLanguageSimplifiedChinese");
-            if (ImGui::Selectable(option_label.c_str(), selected) &&
-                !selected) {
+            if (ImGui::Selectable(
+                    option_label.c_str(),
+                    selected) &&
+                ShouldSubmitLanguageSelection(
+                    settings,
+                    candidate)) {
                 application_settings_intent_ =
                     ApplicationSettingsIntent::SetLanguage(
                         candidate);
@@ -524,8 +547,6 @@ void SettingsPanelUi::RenderLanguage(
         coverage.data());
     ImGui::PopTextWrapPos();
 
-    const ApplicationSettingsStatus& setting_status =
-        settings.StatusFor(ApplicationSetting::Language);
     if (setting_status.kind ==
         ApplicationSettingsStatusKind::Ready) {
         return;
@@ -672,6 +693,9 @@ void SettingsPanelUi::RenderDiagnostics(
     ImGui::SeparatorText("Profile output directory");
     const std::string output_path =
         PathToUtf8(settings.profile_output_directory);
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(
+            ApplicationSetting::ProfileOutputDirectory);
     ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(output_path.c_str());
     ImGui::PopTextWrapPos();
@@ -705,9 +729,9 @@ void SettingsPanelUi::RenderDiagnostics(
 
     ImGui::SameLine();
     const bool reset_disabled =
-        directory_editing_disabled ||
-        settings.profile_output_directory_source !=
-            ProfileOutputDirectorySource::UserSetting;
+        !CanRestoreProfileOutputDirectory(
+            settings,
+            status);
     if (reset_disabled) {
         ImGui::BeginDisabled();
     }
@@ -744,15 +768,22 @@ void SettingsPanelUi::RenderDiagnostics(
         ImGui::PopTextWrapPos();
     }
 
-    const ApplicationSettingsStatus& setting_status =
-        settings.StatusFor(
-            ApplicationSetting::ProfileOutputDirectory);
     if (setting_status.kind !=
         ApplicationSettingsStatusKind::Ready) {
         ImGui::Spacing();
+        const bool warning =
+            setting_status.kind ==
+            ApplicationSettingsStatusKind::LoadWarning;
+        const std::string_view feedback =
+            FormatProfileOutputDirectoryStatus(
+                setting_status.kind);
         ImGui::TextColored(
-            ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
-            "Could not update the profile output directory.");
+            warning
+                ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
+                : ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+            "%.*s",
+            static_cast<int>(feedback.size()),
+            feedback.data());
         if (!setting_status.detail.empty()) {
             ImGui::TextDisabled(
                 "%s",
@@ -888,6 +919,37 @@ void SettingsPanelUi::ResetProfileOutputDirectory()
     application_settings_intent_ =
         ApplicationSettingsIntent::
             RestoreDefaultProfileOutputDirectory();
+}
+
+bool SettingsPanelUi::ShouldSubmitLanguageSelection(
+    const ApplicationSettingsView& settings,
+    UiLanguage candidate)
+{
+    return candidate != settings.language ||
+        settings
+                .StatusFor(ApplicationSetting::Language)
+                .kind !=
+            ApplicationSettingsStatusKind::Ready;
+}
+
+bool SettingsPanelUi::CanRestoreProfileOutputDirectory(
+    const ApplicationSettingsView& settings,
+    const SettingsPanelStatus& status)
+{
+    if (status.profile_open ||
+        status.profile_stopping ||
+        settings.profile_output_directory_source ==
+            ProfileOutputDirectorySource::Environment) {
+        return false;
+    }
+    return settings.profile_output_directory_source ==
+               ProfileOutputDirectorySource::UserSetting ||
+        settings
+                .StatusFor(
+                    ApplicationSetting::
+                        ProfileOutputDirectory)
+                .kind !=
+            ApplicationSettingsStatusKind::Ready;
 }
 
 void SettingsPanelUi::OpenDirectory(const std::filesystem::path& path, const char* label)

@@ -73,6 +73,24 @@ struct SettingsPanelUiTestAccess {
     {
         panel.SetUiScalePercentage(percentage);
     }
+    static bool ShouldSubmitLanguageSelection(
+        const ApplicationSettingsView& settings,
+        UiLanguage candidate)
+    {
+        return SettingsPanelUi::
+            ShouldSubmitLanguageSelection(
+                settings,
+                candidate);
+    }
+    static bool CanRestoreProfileOutputDirectory(
+        const ApplicationSettingsView& settings,
+        const SettingsPanelStatus& status = {})
+    {
+        return SettingsPanelUi::
+            CanRestoreProfileOutputDirectory(
+                settings,
+                status);
+    }
 };
 
 }  // namespace specforge
@@ -404,6 +422,54 @@ void TestProfileResetEmitsOneShotSettingsIntent()
     Require(
         !panel.TakeApplicationSettingsIntent(),
         "profile reset intent should be consumed once");
+}
+
+void TestWarnedFallbacksRemainDirectlyRepairable()
+{
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.statuses[static_cast<std::size_t>(
+        specforge::ApplicationSetting::Language)] = {
+        .kind =
+            specforge::ApplicationSettingsStatusKind::
+                LoadWarning,
+        .setting = specforge::ApplicationSetting::Language,
+    };
+    settings.statuses[static_cast<std::size_t>(
+        specforge::ApplicationSetting::
+            ProfileOutputDirectory)] = {
+        .kind =
+            specforge::ApplicationSettingsStatusKind::
+                LoadWarning,
+        .setting =
+            specforge::ApplicationSetting::
+                ProfileOutputDirectory,
+    };
+
+    Require(
+        specforge::SettingsPanelUiTestAccess::
+            ShouldSubmitLanguageSelection(
+                settings,
+                specforge::UiLanguage::English),
+        "the selected warned language fallback should remain directly selectable for repair");
+    Require(
+        specforge::SettingsPanelUiTestAccess::
+            CanRestoreProfileOutputDirectory(settings),
+        "the warned default profile fallback should keep Restore Default enabled");
+    Require(
+        specforge::FormatProfileOutputDirectoryStatus(
+            specforge::ApplicationSettingsStatusKind::
+                LoadWarning)
+                .find("could not be loaded") !=
+            std::string_view::npos,
+        "profile load warnings should describe fallback loading rather than an update failure");
+    Require(
+        specforge::FormatProfileOutputDirectoryStatus(
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError)
+                .find("could not be saved") !=
+            std::string_view::npos,
+        "profile persistence failures should retain distinct save wording");
 }
 
 void TestUiScaleControlEmitsOneShotSettingsIntent()
@@ -790,6 +856,7 @@ int main()
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();
+    TestWarnedFallbacksRemainDirectlyRepairable();
     TestUiScaleControlEmitsOneShotSettingsIntent();
     TestUiScaleSliderCommitsOnlyAfterEditDeactivation();
     TestLanguageSelectorEmitsOneShotIntent();

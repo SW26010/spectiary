@@ -49,6 +49,9 @@ SettingsPanelEnvironmentForStartup(
     const BuildSourceIdentity& build_source);
 [[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
     BuildMetadataStatus status);
+[[nodiscard]] std::string_view
+FormatProfileOutputDirectoryStatus(
+    ApplicationSettingsStatusKind kind);
 [[nodiscard]] std::string FormatDiagnosticInformation(
     const SettingsPanelEnvironment& environment,
     const std::filesystem::path& profile_output_directory);
@@ -85,6 +88,13 @@ private:
     void RenderAbout(const ApplicationSettingsView& settings);
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
+    [[nodiscard]] static bool ShouldSubmitLanguageSelection(
+        const ApplicationSettingsView& settings,
+        UiLanguage candidate);
+    [[nodiscard]] static bool
+    CanRestoreProfileOutputDirectory(
+        const ApplicationSettingsView& settings,
+        const SettingsPanelStatus& status);
 
     void OpenDirectory(const std::filesystem::path& path, const char* label);
     void CopyPath(const std::filesystem::path& path, const char* label);

@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <string>
 #include <utility>
 
 namespace specforge {
@@ -22,9 +23,16 @@ struct PanelVisibilityState {
     [[nodiscard]] bool operator==(const PanelVisibilityState&) const = default;
 };
 
+struct PanelVisibilityStateCacheLoadResult {
+    PanelVisibilityState state;
+    std::string warning;
+};
+
 [[nodiscard]] std::filesystem::path DefaultPanelVisibilityStateCachePath();
 
-[[nodiscard]] PanelVisibilityState LoadPanelVisibilityStateCache(const std::filesystem::path& path);
+[[nodiscard]] PanelVisibilityStateCacheLoadResult
+LoadPanelVisibilityStateCache(
+    const std::filesystem::path& path);
 
 [[nodiscard]] bool SavePanelVisibilityStateCache(
     const std::filesystem::path& path,
@@ -37,7 +45,7 @@ public:
         LocalUserStateSaveScheduler::Duration debounce = std::chrono::milliseconds(500),
         LocalUserStateSaveScheduler::Duration retry = std::chrono::seconds(2));
 
-    [[nodiscard]] PanelVisibilityState Load() const;
+    [[nodiscard]] PanelVisibilityState Load();
     void MarkDirtyIfChanged(
         const PanelVisibilityState& previous,
         const PanelVisibilityState& current);
@@ -46,10 +54,14 @@ public:
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool Flush(const PanelVisibilityState& state);
+    [[nodiscard]] LocalUserStatePersistenceStatus
+        PersistenceStatus() const;
 
 private:
     std::filesystem::path cache_path_;
     LocalUserStateSaveScheduler save_scheduler_;
+    LocalUserStateSaveStatus save_status_;
+    std::string load_warning_;
 };
 
 }  // namespace specforge

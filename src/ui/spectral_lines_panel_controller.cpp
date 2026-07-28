@@ -592,7 +592,7 @@ CatalogUserStateView SpectralLinesPanelController::View() const
     result.catalog_id = catalog_identity_.id;
     result.catalog_display_name = catalog_identity_.display_name;
     result.catalog_load_error = catalog_.load_error;
-    result.warning = cache_save_status_.failed() ? cache_save_status_.message() : load_warning_;
+    result.persistence = PersistenceStatus();
     result.grouping_view_search = grouping_view_search_;
     result.marker_labels_visible = marker_labels_visible_;
     result.has_catalog_grouping_view = catalog_grouping_view_.has_value();
@@ -678,6 +678,17 @@ SpectralLinePlotView SpectralLinesPanelController::PlotView(
         }
     }
     return result;
+}
+
+LocalUserStatePersistenceStatus
+SpectralLinesPanelController::PersistenceStatus() const
+{
+    return {
+        .retrying = cache_save_status_.failed(),
+        .recovered = cache_save_status_.recovered(),
+        .load_warning = load_warning_,
+        .save_message = cache_save_status_.message(),
+    };
 }
 
 void SpectralLinesPanelController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
@@ -846,6 +857,7 @@ std::string SpectralLinesPanelController::NextUserGroupId()
 
 void SpectralLinesPanelController::MarkCacheDirty()
 {
+    cache_save_status_.ClearRecovered();
     cache_save_scheduler_.MarkDirty();
 }
 

@@ -12,6 +12,11 @@ struct ProfileSettings {
     [[nodiscard]] bool operator==(const ProfileSettings&) const = default;
 };
 
+struct ProfileSettingsLoadResult {
+    ProfileSettings settings;
+    std::string warning;
+};
+
 enum class ProfileOutputDirectorySource {
     Default,
     UserSetting,
@@ -27,7 +32,8 @@ struct ProfileOutputDirectoryResolution {
 };
 
 [[nodiscard]] std::filesystem::path DefaultProfileSettingsPath();
-[[nodiscard]] ProfileSettings LoadProfileSettings(const std::filesystem::path& path);
+[[nodiscard]] ProfileSettingsLoadResult LoadProfileSettings(
+    const std::filesystem::path& path);
 [[nodiscard]] bool SaveProfileSettings(
     const std::filesystem::path& path,
     const ProfileSettings& settings,

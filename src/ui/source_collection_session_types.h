@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/local_user_state.h"
 #include "domain/sample_filter.h"
 #include "domain/sample_labeling.h"
 #include "domain/spectrum_snapshot.h"
@@ -184,19 +185,6 @@ struct SourceCollectionDeferredRestorePlan {
     std::optional<std::size_t> active_source_index;
 };
 
-enum class SourceCollectionPersistenceHealthKind {
-    Healthy,
-    Warning,
-    Retrying,
-    Recovered,
-};
-
-struct SourceCollectionPersistenceHealthView {
-    SourceCollectionPersistenceHealthKind kind =
-        SourceCollectionPersistenceHealthKind::Healthy;
-    std::vector<std::string> messages;
-};
-
 struct SourceCollectionStateFlushResult {
     bool source_session_saved = true;
     bool navigation_saved = true;
@@ -220,7 +208,7 @@ struct SourceCollectionSessionView {
     SourceCollectionLabelingView labeling;
     SourceCollectionFilterView filter;
     SourceCollectionSampleSortingView sorting;
-    SourceCollectionPersistenceHealthView persistence;
+    LocalUserStateHealthView persistence;
 };
 
 }  // namespace specforge

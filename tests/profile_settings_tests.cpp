@@ -103,8 +103,14 @@ void TestMissingSettingsUseDefaultDirectory()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path default_directory = temporary.path() / "default-logs";
-    const specforge::ProfileSettings settings =
-        specforge::LoadProfileSettings(temporary.path() / "missing.json");
+    const specforge::ProfileSettingsLoadResult loaded =
+        specforge::LoadProfileSettings(
+            temporary.path() / "missing.json");
+    const specforge::ProfileSettings& settings =
+        loaded.settings;
+    Require(
+        loaded.warning.empty(),
+        "missing profile settings should be a healthy default");
     const specforge::ProfileOutputDirectoryResolution resolution =
         specforge::ResolveProfileOutputDirectory(settings, default_directory, std::nullopt);
 
@@ -139,7 +145,8 @@ void TestCustomDirectoryRoundTrips()
             ReadFile(settings_path) == stable_output,
         "profile settings output should be byte-stable");
     Require(
-        specforge::LoadProfileSettings(settings_path) == expected,
+        specforge::LoadProfileSettings(settings_path).settings ==
+            expected,
         "custom profile output directory should round-trip as Unicode");
 }
 
@@ -153,7 +160,7 @@ void TestLegacyCompactSettingsRemainReadable()
         R"({"format_kind":"specforge.profile_settings","schema_version":1,"output_directory":{"path_kind":"absolute","path":"C:/legacy/profiles"}})");
     Require(
         specforge::LoadProfileSettings(settings_path)
-                .output_directory ==
+                .settings.output_directory ==
             std::optional<std::filesystem::path>{
                 "C:/legacy/profiles"},
         "legacy compact profile settings should remain readable");
@@ -173,7 +180,7 @@ void TestResetToDefaultRoundTrips()
         "reset profile settings should save explicitly");
 
     const specforge::ProfileSettings loaded =
-        specforge::LoadProfileSettings(settings_path);
+        specforge::LoadProfileSettings(settings_path).settings;
     Require(!loaded.output_directory, "reset settings should restore the default directory");
 }
 
@@ -222,9 +229,14 @@ void TestMalformedSettingsAreIgnored()
         stream << R"({"format_kind":"specforge.profile_settings","schema_version":1,"output_directory":42})";
     }
 
-    const specforge::ProfileSettings loaded =
+    const specforge::ProfileSettingsLoadResult loaded =
         specforge::LoadProfileSettings(settings_path);
-    Require(!loaded.output_directory, "malformed output directory should fall back safely");
+    Require(
+        !loaded.settings.output_directory,
+        "malformed output directory should fall back safely");
+    Require(
+        !loaded.warning.empty(),
+        "present but invalid profile settings should report a load warning");
 }
 
 void TestCorruptSettingsAreIgnored()
@@ -233,10 +245,14 @@ void TestCorruptSettingsAreIgnored()
     const std::filesystem::path settings_path =
         temporary.path() / "profile-settings.json";
     WriteFile(settings_path, "{ invalid json");
+    const specforge::ProfileSettingsLoadResult loaded =
+        specforge::LoadProfileSettings(settings_path);
     Require(
-        !specforge::LoadProfileSettings(settings_path)
-             .output_directory,
+        !loaded.settings.output_directory,
         "corrupt profile settings should fall back safely");
+    Require(
+        !loaded.warning.empty(),
+        "corrupt profile settings should report a warning");
 }
 
 }  // namespace

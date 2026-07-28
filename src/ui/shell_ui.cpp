@@ -100,7 +100,7 @@ bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
     std::string_view source_load_error,
-    const SourceCollectionPersistenceHealthView& persistence)
+    const LocalUserStateHealthView& persistence)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -114,13 +114,13 @@ bool RenderTopBarStatus(
     const bool operation_error = !source_load_error.empty();
     const bool persistence_retrying =
         persistence.kind ==
-        SourceCollectionPersistenceHealthKind::Retrying;
+        LocalUserStateHealthKind::Retrying;
     const bool persistence_warning =
         persistence.kind ==
-        SourceCollectionPersistenceHealthKind::Warning;
+        LocalUserStateHealthKind::Warning;
     const bool persistence_recovered =
         persistence.kind ==
-        SourceCollectionPersistenceHealthKind::Recovered;
+        LocalUserStateHealthKind::Recovered;
     const bool persistence_important =
         persistence_retrying || persistence_warning ||
         persistence_recovered;
@@ -730,6 +730,38 @@ SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
 
 }  // namespace
 
+std::string ShellLocalStateFlushResult::FailureMessage() const
+{
+    if (all_saved()) {
+        return {};
+    }
+    std::string message =
+        "SpecForge could not save all local state before exiting.\n\n"
+        "Unsaved areas:";
+    if (!application_settings_saved) {
+        message += "\n- Application settings";
+    }
+    if (!source_collection.source_session_saved) {
+        message += "\n- Source session";
+    }
+    if (!source_collection.navigation_saved) {
+        message += "\n- Sample navigation";
+    }
+    if (!source_collection.labeling_saved) {
+        message += "\n- Sample labeling";
+    }
+    if (!source_collection.workflow_saved) {
+        message += "\n- Sample workflow";
+    }
+    if (!spectral_lines_saved) {
+        message += "\n- Spectral-line state";
+    }
+    message +=
+        "\n\nChanges in these areas may not be restored "
+        "the next time SpecForge starts.";
+    return message;
+}
+
 ShellUi::ShellUi(
     const SpecForgeStartup& startup,
     PlotTouchpadGestureSource* touchpad_gestures)
@@ -787,39 +819,35 @@ ShellUi::ShellUi(
 
 ShellUi::~ShellUi()
 {
-    if (persist_local_state_) {
-        const bool settings_saved =
-            application_settings_.Flush();
-        const SourceCollectionStateFlushResult session_flush =
-            session_.FlushStateCachesWithStatus();
-        const bool spectral_lines_saved =
-            spectral_lines_panel_.Flush();
-        if (!settings_saved || !session_flush.all_saved() ||
-            !spectral_lines_saved) {
-            std::string message =
-                "SpecForge: local state flush incomplete:";
-            if (!settings_saved) {
-                message += " application-settings";
-            }
-            if (!session_flush.source_session_saved) {
-                message += " source-session";
-            }
-            if (!session_flush.navigation_saved) {
-                message += " navigation";
-            }
-            if (!session_flush.labeling_saved) {
-                message += " labeling";
-            }
-            if (!session_flush.workflow_saved) {
-                message += " workflow";
-            }
-            if (!spectral_lines_saved) {
-                message += " spectral-lines";
-            }
+    const ShellLocalStateFlushResult result =
+        FlushLocalState();
+    if (!result.all_saved()) {
+        std::string message = result.FailureMessage();
+        if (!message.empty()) {
             message.push_back('\n');
             OutputDebugStringA(message.c_str());
         }
     }
+}
+
+ShellLocalStateFlushResult ShellUi::FlushLocalState()
+{
+    if (local_state_flush_result_) {
+        return *local_state_flush_result_;
+    }
+
+    ShellLocalStateFlushResult result;
+    if (persist_local_state_) {
+        result.application_settings_saved =
+            application_settings_.Flush();
+        result.source_collection =
+            session_.FlushStateCachesWithStatus();
+        result.spectral_lines_saved =
+            spectral_lines_panel_.Flush();
+    }
+    persist_local_state_ = false;
+    local_state_flush_result_ = result;
+    return result;
 }
 
 void ShellUi::Render(const ShellStatus& status)
@@ -1115,6 +1143,37 @@ const SourceCollectionSessionView& ShellUi::SessionView()
     return session_.View();
 }
 
+LocalUserStateHealthView ShellUi::PersistenceHealth()
+{
+    LocalUserStateHealthView health =
+        SessionView().persistence;
+    const auto append_setting = [&](
+                                    std::string_view area,
+                                    ApplicationSetting setting) {
+        AppendLocalUserStateHealth(
+            health,
+            area,
+            application_settings_.PersistenceStatus(setting));
+    };
+    append_setting(
+        "Language settings",
+        ApplicationSetting::Language);
+    append_setting(
+        "UI scale settings",
+        ApplicationSetting::UiScale);
+    append_setting(
+        "Profile settings",
+        ApplicationSetting::ProfileOutputDirectory);
+    append_setting(
+        "Panel visibility",
+        ApplicationSetting::PanelVisibility);
+    AppendLocalUserStateHealth(
+        health,
+        "Spectral lines",
+        spectral_lines_panel_.PersistenceStatus());
+    return health;
+}
+
 SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
     SourceCollectionSessionIntent command,
     std::optional<
@@ -1347,11 +1406,13 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
 
     const SourceCollectionActivationTransaction::Status
         activation_status = source_activation_.status();
+    const LocalUserStateHealthView persistence =
+        PersistenceHealth();
     if (RenderTopBarStatus(
             status,
             activation_status.loading,
             activation_status.error_message,
-            SessionView().persistence)) {
+            persistence)) {
         source_activation_.AcknowledgeLoadFailures();
     }
 

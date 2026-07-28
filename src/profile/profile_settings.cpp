@@ -22,25 +22,36 @@ std::filesystem::path DefaultProfileSettingsPath()
         local_user_state_paths::kProfileSettings);
 }
 
-ProfileSettings LoadProfileSettings(const std::filesystem::path& path)
+ProfileSettingsLoadResult LoadProfileSettings(
+    const std::filesystem::path& path)
 {
-    ProfileSettings settings;
-    const VersionedJsonCacheLoadResult result =
+    ProfileSettingsLoadResult loaded;
+    VersionedJsonCacheLoadResult result =
         LoadVersionedJsonCacheFile(
             path,
             kSettingsFormatKind,
             {kSettingsSchemaVersion},
             "performance profile settings");
+    loaded.warning = std::move(result.warning);
     if (!result.document) {
-        return settings;
+        return loaded;
     }
 
     const JsonValue* output_directory =
         JsonObjectMember(result.document->root, "output_directory");
     if (output_directory != nullptr && output_directory->kind != JsonValue::Kind::Null) {
-        settings.output_directory = ReadPersistedPathReference(*output_directory);
+        std::optional<std::filesystem::path> parsed =
+            ReadPersistedPathReference(*output_directory);
+        if (!parsed) {
+            loaded.warning =
+                "Performance profile settings member "
+                "'output_directory' is invalid and was "
+                "ignored.";
+            return loaded;
+        }
+        loaded.settings.output_directory = std::move(parsed);
     }
-    return settings;
+    return loaded;
 }
 
 bool SaveProfileSettings(

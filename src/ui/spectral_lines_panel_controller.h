@@ -159,7 +159,7 @@ struct CatalogUserStateView {
     std::string catalog_id;
     std::string catalog_display_name;
     std::string catalog_load_error;
-    std::string warning;
+    LocalUserStatePersistenceStatus persistence;
     std::string grouping_view_search;
     bool marker_labels_visible = true;
     bool has_catalog_grouping_view = false;
@@ -194,6 +194,8 @@ public:
     [[nodiscard]] CatalogUserStateView View() const;
     [[nodiscard]] SpectralLinePlotView PlotView(
         const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] LocalUserStatePersistenceStatus
+        PersistenceStatus() const;
 
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;

@@ -145,28 +145,32 @@ ApplicationSettings::ApplicationSettings(
     UiLanguageSettingsLoadResult language_settings =
         LoadUiLanguageSettings(storage_.language_settings_path);
     language_ = language_settings.language;
-    if (!language_settings.warning.empty()) {
-        SetStatus(
-            ApplicationSettingsStatusKind::LoadWarning,
-            ApplicationSetting::Language,
-            std::move(language_settings.warning));
-    }
+    AdoptLoadWarning(
+        ApplicationSetting::Language,
+        std::move(language_settings.warning));
 
     UiScaleSettingsLoadResult ui_scale_settings =
         LoadUiScaleSettings(storage_.ui_scale_settings_path);
     ui_scale_percentage_ = ui_scale_settings.percentage;
-    if (!ui_scale_settings.warning.empty()) {
-        SetStatus(
-            ApplicationSettingsStatusKind::LoadWarning,
-            ApplicationSetting::UiScale,
-            std::move(ui_scale_settings.warning));
-    }
+    AdoptLoadWarning(
+        ApplicationSetting::UiScale,
+        std::move(ui_scale_settings.warning));
 
+    ProfileSettingsLoadResult profile_settings =
+        LoadProfileSettings(storage_.profile_settings_path);
     profile_output_directory_ = ResolveProfileOutputDirectory(
-        LoadProfileSettings(storage_.profile_settings_path),
+        profile_settings.settings,
         storage_.default_profile_output_directory,
         storage_.profile_output_environment_override);
+    AdoptLoadWarning(
+        ApplicationSetting::ProfileOutputDirectory,
+        std::move(profile_settings.warning));
     panel_visibility_ = panel_visibility_persistence_.Load();
+    AdoptLoadWarning(
+        ApplicationSetting::PanelVisibility,
+        panel_visibility_persistence_
+            .PersistenceStatus()
+            .load_warning);
 }
 
 ApplicationSettingsView ApplicationSettings::View() const
@@ -253,7 +257,11 @@ bool ApplicationSettings::Flush()
         return true;
     }
     if (panel_visibility_persistence_.Flush(panel_visibility_)) {
-        ClearStatus(ApplicationSetting::PanelVisibility);
+        if (panel_visibility_persistence_
+                .PersistenceStatus()
+                .load_warning.empty()) {
+            ClearStatus(ApplicationSetting::PanelVisibility);
+        }
         return true;
     }
     SetStatus(
@@ -261,6 +269,27 @@ bool ApplicationSettings::Flush()
         ApplicationSetting::PanelVisibility,
         "Could not save panel visibility.");
     return false;
+}
+
+LocalUserStatePersistenceStatus
+ApplicationSettings::PersistenceStatus(
+    ApplicationSetting setting) const
+{
+    if (setting == ApplicationSetting::PanelVisibility) {
+        return panel_visibility_persistence_.PersistenceStatus();
+    }
+    const std::size_t index =
+        static_cast<std::size_t>(setting);
+    if (index >= kApplicationSettingCount) {
+        return {};
+    }
+    const LocalUserStateSaveStatus& save_status =
+        save_statuses_[index];
+    return {
+        .recovered = save_status.recovered(),
+        .load_warning = load_warnings_[index],
+        .save_message = save_status.message(),
+    };
 }
 
 ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
@@ -291,15 +320,13 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
     }
 
     std::string error;
+    PrepareSave(kSetting);
     if (storage_.persistent &&
         !SaveUiScaleSettings(
             storage_.ui_scale_settings_path,
             percentage,
             &error)) {
-        SetStatus(
-            ApplicationSettingsStatusKind::PersistenceError,
-            kSetting,
-            error);
+        MarkSaveFailed(kSetting, error);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -309,7 +336,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
     }
 
     ui_scale_percentage_ = percentage;
-    ClearStatus(kSetting);
+    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -320,7 +347,9 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     UiLanguage language)
 {
     constexpr ApplicationSetting kSetting = ApplicationSetting::Language;
-    if (language == language_) {
+    if (language == language_ &&
+        statuses_[static_cast<std::size_t>(kSetting)].kind ==
+            ApplicationSettingsStatusKind::Ready) {
         return {
             .outcome = ApplicationSettingsOutcome::Unchanged,
             .setting = kSetting,
@@ -341,15 +370,13 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     }
 
     std::string error;
+    PrepareSave(kSetting);
     if (storage_.persistent &&
         !SaveUiLanguageSettings(
             storage_.language_settings_path,
             language,
             &error)) {
-        SetStatus(
-            ApplicationSettingsStatusKind::PersistenceError,
-            kSetting,
-            error);
+        MarkSaveFailed(kSetting, error);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -359,7 +386,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     }
 
     language_ = language;
-    ClearStatus(kSetting);
+    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -421,7 +448,9 @@ ApplicationSettings::ApplyProfileOutputDirectory(
             settings,
             storage_.default_profile_output_directory,
             std::nullopt);
-    if (requested == profile_output_directory_) {
+    if (requested == profile_output_directory_ &&
+        statuses_[static_cast<std::size_t>(kSetting)].kind ==
+            ApplicationSettingsStatusKind::Ready) {
         return {
             .outcome = ApplicationSettingsOutcome::Unchanged,
             .setting = kSetting,
@@ -429,15 +458,13 @@ ApplicationSettings::ApplyProfileOutputDirectory(
     }
 
     std::string error;
+    PrepareSave(kSetting);
     if (storage_.persistent &&
         !SaveProfileSettings(
             storage_.profile_settings_path,
             settings,
             &error)) {
-        SetStatus(
-            ApplicationSettingsStatusKind::PersistenceError,
-            kSetting,
-            error);
+        MarkSaveFailed(kSetting, error);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -447,7 +474,7 @@ ApplicationSettings::ApplyProfileOutputDirectory(
     }
 
     profile_output_directory_ = requested;
-    ClearStatus(kSetting);
+    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -525,6 +552,50 @@ void ApplicationSettings::ClearStatus(ApplicationSetting setting)
     statuses_[static_cast<std::size_t>(setting)] = {
         .setting = setting,
     };
+}
+
+void ApplicationSettings::AdoptLoadWarning(
+    ApplicationSetting setting,
+    std::string warning)
+{
+    const std::size_t index =
+        static_cast<std::size_t>(setting);
+    load_warnings_[index] = std::move(warning);
+    if (!load_warnings_[index].empty()) {
+        SetStatus(
+            ApplicationSettingsStatusKind::LoadWarning,
+            setting,
+            load_warnings_[index]);
+    }
+}
+
+void ApplicationSettings::PrepareSave(
+    ApplicationSetting setting)
+{
+    save_statuses_[static_cast<std::size_t>(setting)]
+        .ClearRecovered();
+}
+
+void ApplicationSettings::MarkSaveFailed(
+    ApplicationSetting setting,
+    const std::string& message)
+{
+    save_statuses_[static_cast<std::size_t>(setting)]
+        .MarkFailed(message);
+    SetStatus(
+        ApplicationSettingsStatusKind::PersistenceError,
+        setting,
+        message);
+}
+
+void ApplicationSettings::MarkSaveSucceeded(
+    ApplicationSetting setting)
+{
+    const std::size_t index =
+        static_cast<std::size_t>(setting);
+    load_warnings_[index].clear();
+    save_statuses_[index].MarkSaveSucceeded();
+    ClearStatus(setting);
 }
 
 }  // namespace specforge

@@ -325,7 +325,7 @@ private:
         std::vector<BackgroundRetirementHandle>& background_retirement,
         std::optional<std::filesystem::path>* canceled_source_follow_up_path);
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSourcesWithAnnotations() const;
-    [[nodiscard]] SourceCollectionPersistenceHealthView PersistenceHealth() const;
+    [[nodiscard]] LocalUserStateHealthView PersistenceHealth() const;
     void PrepareDeferredSourceSessionRestore();
     void MarkSourceSessionCacheDirty();
     void InvalidateView();

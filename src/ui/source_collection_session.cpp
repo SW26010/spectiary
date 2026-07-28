@@ -1178,13 +1178,13 @@ std::vector<BackgroundRetirementHandle>
 SourceCollectionSession::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
 {
-    const SourceCollectionPersistenceHealthView persistence_before =
+    const LocalUserStateHealthView persistence_before =
         PersistenceHealth();
     source_session_state_->RunMaintenance(now, SavedSourcesWithAnnotations(), roster_->current_source_index());
     if (workflow_->RunMaintenance(now)) {
         InvalidateView();
     }
-    const SourceCollectionPersistenceHealthView persistence_after =
+    const LocalUserStateHealthView persistence_after =
         PersistenceHealth();
     if (persistence_before.kind != persistence_after.kind ||
         persistence_before.messages != persistence_after.messages) {
@@ -1215,7 +1215,7 @@ bool SourceCollectionSession::FlushStateCaches()
 SourceCollectionStateFlushResult
 SourceCollectionSession::FlushStateCachesWithStatus()
 {
-    const SourceCollectionPersistenceHealthView persistence_before =
+    const LocalUserStateHealthView persistence_before =
         PersistenceHealth();
     SourceCollectionStateFlushResult result;
     result.source_session_saved =
@@ -1227,7 +1227,7 @@ SourceCollectionSession::FlushStateCachesWithStatus()
     result.navigation_saved = workflow.navigation_saved;
     result.labeling_saved = workflow.labeling_saved;
     result.workflow_saved = workflow.workflow_saved;
-    const SourceCollectionPersistenceHealthView persistence_after =
+    const LocalUserStateHealthView persistence_after =
         PersistenceHealth();
     if (persistence_before.kind != persistence_after.kind ||
         persistence_before.messages != persistence_after.messages) {
@@ -1236,30 +1236,13 @@ SourceCollectionSession::FlushStateCachesWithStatus()
     return result;
 }
 
-SourceCollectionPersistenceHealthView
+LocalUserStateHealthView
 SourceCollectionSession::PersistenceHealth() const
 {
-    SourceCollectionPersistenceHealthView health;
-    bool has_load_warning = false;
-    bool retrying = false;
-    bool recovered = false;
+    LocalUserStateHealthView health;
     const auto append = [&](std::string_view area,
                             const LocalUserStatePersistenceStatus& status) {
-        if (!status.load_warning.empty()) {
-            has_load_warning = true;
-            health.messages.push_back(
-                std::string{area} + ": " + status.load_warning);
-        }
-        if (status.retrying) {
-            retrying = true;
-            health.messages.push_back(
-                std::string{area} + ": " + status.save_message +
-                " Retrying.");
-        } else if (status.recovered) {
-            recovered = true;
-            health.messages.push_back(
-                std::string{area} + ": persistence recovered.");
-        }
+        AppendLocalUserStateHealth(health, area, status);
     };
 
     append("Source session", source_session_state_->PersistenceStatus());
@@ -1269,13 +1252,6 @@ SourceCollectionSession::PersistenceHealth() const
     append("Labeling", workflow.labeling);
     append("Workflow", workflow.workflow);
 
-    if (retrying) {
-        health.kind = SourceCollectionPersistenceHealthKind::Retrying;
-    } else if (has_load_warning) {
-        health.kind = SourceCollectionPersistenceHealthKind::Warning;
-    } else if (recovered) {
-        health.kind = SourceCollectionPersistenceHealthKind::Recovered;
-    }
     return health;
 }
 

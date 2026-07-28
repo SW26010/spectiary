@@ -72,6 +72,7 @@ public:
         const D3D11LiveObjectReport& report,
         const ShellUi& ui);
     void RecordRenderTargetResize() noexcept;
+    void RecordLocalStateFlushFailure(std::string message);
     void Fail(std::string message);
 
     [[nodiscard]] std::optional<TimePoint>

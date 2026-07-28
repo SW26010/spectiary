@@ -814,6 +814,27 @@ void RuntimeResourceWorkload::
     ++render_target_resize_count_;
 }
 
+void RuntimeResourceWorkload::RecordLocalStateFlushFailure(
+    std::string message)
+{
+    const std::string diagnostic =
+        "SpecForge local state flush failure: " +
+        message + "\n";
+    OutputDebugStringA(diagnostic.c_str());
+
+    if (!failure_message_.empty()) {
+        message =
+            failure_message_ +
+            " Shutdown local state flush also failed: " +
+            message;
+    } else {
+        message =
+            "Shutdown local state flush failed: " +
+            message;
+    }
+    Fail(std::move(message));
+}
+
 void RuntimeResourceWorkload::Fail(std::string message)
 {
     failure_message_ = std::move(message);

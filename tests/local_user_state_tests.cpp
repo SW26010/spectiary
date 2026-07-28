@@ -531,6 +531,49 @@ void TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess()
     Require(scheduler.ShouldAttemptSave(start + 130ms), "retry failure should flush after backoff");
 }
 
+void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
+{
+    specforge::LocalUserStateHealthView health;
+    specforge::AppendLocalUserStateHealth(
+        health,
+        "Profile settings",
+        {.save_message = "Could not save profile settings."});
+    Require(
+        health.kind ==
+            specforge::LocalUserStateHealthKind::Warning,
+        "a non-retrying save failure should produce warning health");
+    Require(
+        health.messages.size() == 1 &&
+            health.messages[0].starts_with(
+                "Profile settings:"),
+        "health messages should retain their owner");
+
+    specforge::AppendLocalUserStateHealth(
+        health,
+        "Spectral lines",
+        {.recovered = true});
+    Require(
+        health.kind ==
+            specforge::LocalUserStateHealthKind::Warning,
+        "recovery must not hide an outstanding warning");
+
+    specforge::AppendLocalUserStateHealth(
+        health,
+        "Panel visibility",
+        {
+            .retrying = true,
+            .save_message =
+                "Could not save panel visibility.",
+        });
+    Require(
+        health.kind ==
+            specforge::LocalUserStateHealthKind::Retrying,
+        "retrying should outrank warning and recovery");
+    Require(
+        health.messages.back().ends_with("Retrying."),
+        "retrying health should explain the scheduled retry");
+}
+
 void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
 {
     using Scheduler = specforge::LocalUserStateSaveScheduler;
@@ -626,7 +669,8 @@ void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
         specforge::SavePanelVisibilityStateCache(path, state) &&
             ReadTextFile(path) == stable_output,
         "panel visibility output should be byte-stable");
-    const specforge::PanelVisibilityState loaded = specforge::LoadPanelVisibilityStateCache(path);
+    const specforge::PanelVisibilityState loaded =
+        specforge::LoadPanelVisibilityStateCache(path).state;
     Require(!loaded.files, "files panel hidden state should persist");
     Require(loaded.navigation, "navigation panel visible state should persist");
     Require(loaded.annotations, "annotations panel visible state should persist");
@@ -650,10 +694,14 @@ void TestPanelVisibilityStateCacheIgnoresCorruptJson()
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::create_directories(root);
     WriteTextFile(path, "{ invalid json");
+    const specforge::PanelVisibilityStateCacheLoadResult loaded =
+        specforge::LoadPanelVisibilityStateCache(path);
     Require(
-        specforge::LoadPanelVisibilityStateCache(path) ==
-            specforge::PanelVisibilityState{},
+        loaded.state == specforge::PanelVisibilityState{},
         "corrupt panel visibility cache should use defaults");
+    Require(
+        !loaded.warning.empty(),
+        "corrupt panel visibility cache should report a warning");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -673,7 +721,8 @@ void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
         "  \"files\": false\n"
         "}\n");
 
-    const specforge::PanelVisibilityState loaded = specforge::LoadPanelVisibilityStateCache(path);
+    const specforge::PanelVisibilityState loaded =
+        specforge::LoadPanelVisibilityStateCache(path).state;
     Require(!loaded.files, "loaded panel visibility should apply present fields");
     Require(loaded.navigation, "missing navigation visibility should default to visible");
     Require(loaded.annotations, "missing annotations visibility should default to visible");
@@ -683,6 +732,36 @@ void TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible()
     Require(loaded.smoothing, "missing smoothing visibility should default to visible");
     Require(loaded.information, "missing information visibility should default to visible");
     Require(loaded.spectral_lines, "missing spectral lines visibility should default to visible");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_panel_visibility_invalid_field_tests";
+    const std::filesystem::path path =
+        root / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    WriteTextFile(
+        path,
+        "{\n"
+        "  \"format_kind\": \"specforge.panel_visibility.cache\",\n"
+        "  \"schema_version\": 1,\n"
+        "  \"files\": false,\n"
+        "  \"navigation\": \"visible\"\n"
+        "}\n");
+
+    const specforge::PanelVisibilityStateCacheLoadResult loaded =
+        specforge::LoadPanelVisibilityStateCache(path);
+    Require(
+        !loaded.state.files && loaded.state.navigation,
+        "valid fields should load while invalid fields use defaults");
+    Require(
+        !loaded.warning.empty(),
+        "present but non-boolean panel visibility fields should report a load warning");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -734,6 +813,57 @@ void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
     Require(std::filesystem::exists(path), "panel visibility should save exactly at its deadline");
     Require(!persistence.NextMaintenanceDeadline(), "successful maintenance should clear the deadline");
 
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestPanelVisibilityPersistenceReportsRetryAndRecovery()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_panel_visibility_recovery_tests";
+    const std::filesystem::path blocker =
+        root / "not-a-directory";
+    const std::filesystem::path path =
+        blocker / "panel-visibility.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    WriteTextFile(blocker, "block cache directory creation");
+
+    specforge::PanelVisibilityStatePersistence persistence(
+        path,
+        30ms,
+        120ms);
+    specforge::PanelVisibilityState current =
+        persistence.Load();
+    current.files = false;
+    persistence.MarkDirtyIfChanged(
+        specforge::PanelVisibilityState{},
+        current);
+    Require(
+        !persistence.Flush(current),
+        "blocked panel visibility path should fail to flush");
+    Require(
+        persistence.PersistenceStatus().retrying &&
+            !persistence.PersistenceStatus()
+                 .save_message.empty(),
+        "failed panel visibility flush should expose retrying status");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    Require(
+        persistence.Flush(current),
+        "panel visibility flush should retry after the path is repaired");
+    Require(
+        persistence.PersistenceStatus().recovered,
+        "successful panel visibility retry should expose recovery");
+
+    specforge::PanelVisibilityState next = current;
+    next.files = true;
+    persistence.MarkDirtyIfChanged(current, next);
+    Require(
+        !persistence.PersistenceStatus().recovered,
+        "a later panel visibility mutation should clear recovery");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -789,6 +919,7 @@ int main()
         TestVersionedJsonCacheShellRejectsUnsupportedSchema();
         TestSortedCacheKeysReturnsStableOrder();
         TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
+        TestLocalUserStateHealthUsesSharedPriorityAndMessages();
         TestLocalUserStateSaveSchedulerDebouncesAndRetries();
         TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain();
         TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
@@ -796,8 +927,10 @@ int main()
         TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
         TestPanelVisibilityStateCacheIgnoresCorruptJson();
         TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
+        TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes();
         TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
         TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
+        TestPanelVisibilityPersistenceReportsRetryAndRecovery();
         TestCancelableTextStreamReadStopsBetweenChunks();
         return 0;
     } catch (const std::exception& error) {

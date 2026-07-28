@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace specforge {
 
@@ -17,6 +18,24 @@ struct LocalUserStatePersistenceStatus {
     std::string load_warning;
     std::string save_message;
 };
+
+enum class LocalUserStateHealthKind {
+    Healthy,
+    Warning,
+    Retrying,
+    Recovered,
+};
+
+struct LocalUserStateHealthView {
+    LocalUserStateHealthKind kind =
+        LocalUserStateHealthKind::Healthy;
+    std::vector<std::string> messages;
+};
+
+void AppendLocalUserStateHealth(
+    LocalUserStateHealthView& health,
+    std::string_view area,
+    const LocalUserStatePersistenceStatus& status);
 
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
 [[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);

@@ -563,6 +563,95 @@ void TestModificationSelectionAndPersistenceRoundTrip()
     RemoveTestCache(path);
 }
 
+void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_catalog_user_state_health";
+    const std::filesystem::path blocker =
+        root / "not-a-directory";
+    const std::filesystem::path path =
+        blocker / "catalog-user-state.json";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path warning_path =
+        root / "corrupt-catalog-user-state.json";
+    {
+        std::ofstream stream(warning_path);
+        stream << "{ invalid json";
+    }
+    {
+        specforge::SpectralLinesPanelController warned(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            warning_path);
+        Require(
+            !warned.View()
+                 .persistence.load_warning.empty(),
+            "spectral-line view should expose a cache load warning");
+    }
+    specforge::SpectralLinesPanelController session(
+        GroupedCatalog(),
+        specforge::PublicSpectralLineCatalogIdentity(),
+        path);
+    RequireApplied(
+        session.Submit(
+            specforge::CatalogUserStateIntent::
+                SetMarkerVisibility(
+                    "h_alpha",
+                    false)),
+        "spectral-line state mutation should become dirty");
+    Require(
+        session.Flush(),
+        "the recovery fixture should establish an initial cache");
+    std::filesystem::remove_all(blocker, error);
+    {
+        std::ofstream stream(blocker);
+        stream << "block cache directory creation";
+    }
+    RequireApplied(
+        session.Submit(
+            specforge::CatalogUserStateIntent::
+                SetMarkerVisibility(
+                    "h_alpha",
+                    true)),
+        "a second spectral-line mutation should become dirty");
+    Require(
+        !session.Flush(),
+        "blocked spectral-line cache path should fail to flush");
+    Require(
+        session.View().persistence.retrying &&
+            !session.View()
+                 .persistence.save_message.empty(),
+        "spectral-line view should expose a retrying save failure");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    Require(
+        session.Flush(),
+        "spectral-line cache should retry after repairing its path");
+    Require(
+        session.View().persistence.recovered,
+        "spectral-line view should expose successful recovery");
+
+    RequireApplied(
+        session.Submit(
+            specforge::CatalogUserStateIntent::
+                SetMarkerVisibility(
+                    "h_alpha",
+                    false)),
+        "a later spectral-line mutation should apply");
+    Require(
+        !session.View().persistence.recovered,
+        "a later spectral-line mutation should clear recovery");
+    Require(
+        session.Flush(),
+        "the final spectral-line state should flush");
+
+    std::filesystem::remove_all(root, error);
+}
+
 }  // namespace
 
 int main()
@@ -572,5 +661,6 @@ int main()
     TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers();
     TestPersistentIntentUsesDomainCanonicalizationForSelection();
     TestModificationSelectionAndPersistenceRoundTrip();
+    TestPersistenceViewReportsLoadWarningRetryAndRecovery();
     return 0;
 }

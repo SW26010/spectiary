@@ -158,6 +158,8 @@ public:
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint>
     NextMaintenanceDeadline() const;
     [[nodiscard]] bool Flush();
+    [[nodiscard]] LocalUserStatePersistenceStatus
+        PersistenceStatus(ApplicationSetting setting) const;
 
 private:
     [[nodiscard]] ApplicationSettingsResult ApplyLanguage(
@@ -176,6 +178,14 @@ private:
         ApplicationSetting setting,
         std::string detail = {});
     void ClearStatus(ApplicationSetting setting);
+    void AdoptLoadWarning(
+        ApplicationSetting setting,
+        std::string warning);
+    void PrepareSave(ApplicationSetting setting);
+    void MarkSaveFailed(
+        ApplicationSetting setting,
+        const std::string& message);
+    void MarkSaveSucceeded(ApplicationSetting setting);
 
     ApplicationSettingsStorage storage_;
     UiLanguage language_ = UiLanguage::English;
@@ -187,6 +197,12 @@ private:
         ApplicationSettingsStatus,
         kApplicationSettingCount>
         statuses_;
+    std::array<std::string, kApplicationSettingCount>
+        load_warnings_;
+    std::array<
+        LocalUserStateSaveStatus,
+        kApplicationSettingCount>
+        save_statuses_;
 };
 
 }  // namespace specforge

@@ -105,8 +105,23 @@ void SpectralLinesPanelUi::Render(
     } else if (state.catalog_marker_count == 0) {
         ImGui::TextDisabled("No public catalog markers loaded.");
     }
-    if (!state.warning.empty()) {
-        RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), state.warning);
+    if (!state.persistence.load_warning.empty()) {
+        RenderWrappedStatusText(
+            SeverityColor(SpectrumDiagnosticSeverity::Warning),
+            state.persistence.load_warning);
+    }
+    if (state.persistence.retrying) {
+        RenderWrappedStatusText(
+            SeverityColor(SpectrumDiagnosticSeverity::Warning),
+            state.persistence.save_message + " Retrying.");
+    } else if (state.persistence.recovered) {
+        RenderWrappedStatusText(
+            ImVec4(0.30f, 0.69f, 0.31f, 1.0f),
+            "Spectral-line state persistence recovered.");
+    } else if (!state.persistence.save_message.empty()) {
+        RenderWrappedStatusText(
+            SeverityColor(SpectrumDiagnosticSeverity::Warning),
+            state.persistence.save_message);
     }
 
     if (ImGui::InputTextWithHint(

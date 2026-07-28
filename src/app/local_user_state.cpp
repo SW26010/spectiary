@@ -255,6 +255,50 @@ void LocalUserStateSaveStatus::Clear()
     message_.clear();
 }
 
+void AppendLocalUserStateHealth(
+    LocalUserStateHealthView& health,
+    std::string_view area,
+    const LocalUserStatePersistenceStatus& status)
+{
+    const auto promote = [&](LocalUserStateHealthKind kind) {
+        const auto priority = [](LocalUserStateHealthKind value) {
+            switch (value) {
+            case LocalUserStateHealthKind::Healthy:
+                return 0;
+            case LocalUserStateHealthKind::Recovered:
+                return 1;
+            case LocalUserStateHealthKind::Warning:
+                return 2;
+            case LocalUserStateHealthKind::Retrying:
+                return 3;
+            }
+            return 0;
+        };
+        if (priority(kind) > priority(health.kind)) {
+            health.kind = kind;
+        }
+    };
+    const auto append_message = [&](std::string_view message) {
+        health.messages.push_back(
+            std::string{area} + ": " + std::string{message});
+    };
+
+    if (!status.load_warning.empty()) {
+        promote(LocalUserStateHealthKind::Warning);
+        append_message(status.load_warning);
+    }
+    if (status.retrying) {
+        promote(LocalUserStateHealthKind::Retrying);
+        append_message(status.save_message + " Retrying.");
+    } else if (status.recovered) {
+        promote(LocalUserStateHealthKind::Recovered);
+        append_message("persistence recovered.");
+    } else if (!status.save_message.empty()) {
+        promote(LocalUserStateHealthKind::Warning);
+        append_message(status.save_message);
+    }
+}
+
 void LocalUserStateSaveStatus::ClearRecovered()
 {
     recovered_ = false;

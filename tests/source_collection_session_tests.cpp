@@ -172,7 +172,7 @@ bool HasAvailableSortSource(
 }
 
 bool HasPersistenceMessage(
-    const specforge::SourceCollectionPersistenceHealthView& health,
+    const specforge::LocalUserStateHealthView& health,
     std::string_view text)
 {
     return std::any_of(
@@ -3025,11 +3025,11 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         session.Open(source_path);
     Require(opened.loaded, "cache warnings must not block source opening");
 
-    const specforge::SourceCollectionPersistenceHealthView& health =
+    const specforge::LocalUserStateHealthView& health =
         session.View().persistence;
     Require(
         health.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Warning,
+            specforge::LocalUserStateHealthKind::Warning,
         "corrupt and unsupported caches should produce overall warning health");
     std::string health_messages;
     for (const std::string& message : health.messages) {
@@ -3071,14 +3071,14 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         "healthy cache paths should rewrite all independently loaded states");
     Require(
         session.View().persistence.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+            specforge::LocalUserStateHealthKind::Healthy,
         "a successful save of each warned owner should clear all load warnings");
     Require(
         session.Open(second_source_path).loaded,
         "the repaired-cache fixture should open another source");
     Require(
         session.View().persistence.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+            specforge::LocalUserStateHealthKind::Healthy,
         "adopting the same prepared cache snapshot must not resurrect cleared warnings");
 }
 
@@ -3143,11 +3143,11 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
                            std::move(warning_prepared))
             .loaded,
         "the direct prepared source should open despite cache warnings");
-    const specforge::SourceCollectionPersistenceHealthView warning_health =
+    const specforge::LocalUserStateHealthView warning_health =
         warning_session.View().persistence;
     Require(
         warning_health.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Warning,
+            specforge::LocalUserStateHealthKind::Warning,
         "direct preparation cache warnings should reach Session health");
     Require(
         HasPersistenceMessage(warning_health, "Navigation:") &&
@@ -3362,11 +3362,11 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
     Require(
         session.FlushStateCachesWithStatus().all_saved(),
         "labeling and workflow repairs should save independently");
-    const specforge::SourceCollectionPersistenceHealthView
+    const specforge::LocalUserStateHealthView
         navigation_warning = session.View().persistence;
     Require(
         navigation_warning.kind ==
-                specforge::SourceCollectionPersistenceHealthKind::Warning &&
+                specforge::LocalUserStateHealthKind::Warning &&
             navigation_warning.messages.size() == 1 &&
             HasPersistenceMessage(
                 navigation_warning,
@@ -3382,7 +3382,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
                    std::move(prepared_b))
             .loaded,
         "the same-batch stale source should open");
-    const specforge::SourceCollectionPersistenceHealthView
+    const specforge::LocalUserStateHealthView
         same_batch_health = session.View().persistence;
     Require(
         same_batch_health.messages.size() == 1 &&
@@ -3418,7 +3418,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "the navigation repair should save");
     Require(
         session.View().persistence.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+            specforge::LocalUserStateHealthKind::Healthy,
         "all repaired cache owners should become healthy");
 
     Require(
@@ -3432,7 +3432,7 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         "the distinct stale-bundle source should open");
     Require(
         session.View().persistence.kind ==
-                specforge::SourceCollectionPersistenceHealthKind::Healthy &&
+                specforge::LocalUserStateHealthKind::Healthy &&
             session.View().persistence.messages.empty(),
         "a distinct pre-repair bundle must not resurrect cleared warnings");
 }
@@ -6064,11 +6064,11 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
             failed_flush.labeling_saved &&
             failed_flush.workflow_saved,
         "source-session failure must not block the other three cache flushes");
-    const specforge::SourceCollectionPersistenceHealthView failed_health =
+    const specforge::LocalUserStateHealthView failed_health =
         session.View().persistence;
     Require(
         failed_health.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Retrying,
+            specforge::LocalUserStateHealthKind::Retrying,
         "a save failure should expose retrying overall health");
     Require(
         HasPersistenceMessage(
@@ -6102,7 +6102,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
         "flush should retry dirty source state after the path is fixed");
     Require(
         session.View().persistence.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Recovered,
+            specforge::LocalUserStateHealthKind::Recovered,
         "the first successful retry should expose recovered health");
 
     const specforge::SourceCollectionSessionStateCache restored_state =
@@ -6114,7 +6114,7 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     (void)Submit(session, RemoveSourceCollection(0));
     Require(
         session.View().persistence.kind ==
-            specforge::SourceCollectionPersistenceHealthKind::Healthy,
+            specforge::LocalUserStateHealthKind::Healthy,
         "the next source-session mutation should clear recovered health");
 }
 

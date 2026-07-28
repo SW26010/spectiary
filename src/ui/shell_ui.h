@@ -60,6 +60,21 @@ struct ShellRuntimeResourceObservation {
     }
 };
 
+struct ShellLocalStateFlushResult {
+    bool application_settings_saved = true;
+    SourceCollectionStateFlushResult source_collection;
+    bool spectral_lines_saved = true;
+
+    [[nodiscard]] bool all_saved() const noexcept
+    {
+        return application_settings_saved &&
+               source_collection.all_saved() &&
+               spectral_lines_saved;
+    }
+
+    [[nodiscard]] std::string FailureMessage() const;
+};
+
 class ShellUi {
 public:
     ShellUi(
@@ -70,6 +85,7 @@ public:
     void Render(const ShellStatus& status);
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
+    [[nodiscard]] ShellLocalStateFlushResult FlushLocalState();
     void RegisterSourceLoadCompletionReadyCallback(
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
@@ -128,6 +144,7 @@ private:
     void QueueSampleWorkflowShortcut(SampleWorkflowShortcut shortcut);
     void HandleSampleWorkflowShortcut();
     [[nodiscard]] const SourceCollectionSessionView& SessionView();
+    [[nodiscard]] LocalUserStateHealthView PersistenceHealth();
     [[nodiscard]] SourceCollectionSessionResult SubmitSessionCommand(
         SourceCollectionSessionIntent command,
         std::optional<
@@ -166,6 +183,8 @@ private:
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
     std::optional<int> applied_ui_scale_percentage_;
+    std::optional<ShellLocalStateFlushResult>
+        local_state_flush_result_;
 };
 
 }  // namespace specforge
