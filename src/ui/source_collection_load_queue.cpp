@@ -357,7 +357,8 @@ private:
         auto finished = std::make_shared<std::atomic_bool>(false);
         const std::filesystem::path failure_path = request.path;
         const std::size_t failure_spectrum_index = request.spectrum_index;
-        NavigationLatencyAttemptHandle failure_latency_attempt = request.latency_attempt;
+        LoadLatencyAttemptHandle failure_latency_attempt =
+            request.latency_attempt;
         std::shared_ptr<BatchState> failure_batch = batch;
         std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
         const bool wait_at_runtime_resource_checkpoint =
@@ -656,7 +657,7 @@ private:
                 task.request.spectrum_index;
             canceled_completion.canceled = true;
             canceled_completion.worker_terminal_at =
-                NavigationLatencyTrace::Now();
+                LoadLatencyClock::now();
             completion =
                 std::move(canceled_completion);
         }

@@ -20,9 +20,9 @@ void Require(bool condition, std::string_view message)
     }
 }
 
-specforge::NavigationLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
+specforge::LoadLatencyTimePoint AtMilliseconds(std::int64_t milliseconds)
 {
-    return specforge::NavigationLatencyTimePoint(
+    return specforge::LoadLatencyTimePoint(
         std::chrono::milliseconds(milliseconds));
 }
 
@@ -49,7 +49,7 @@ void TestPresentedSourceLoadCapturesAcceptedToPresentPhases()
         2,
         specforge::SourceLoadLatencyRequestKind::ExplicitOpen,
         AtMilliseconds(1));
-    const specforge::NavigationLatencyAttemptHandle attempt =
+    const specforge::LoadLatencyAttemptHandle attempt =
         trace.BeginLoadAttempt(2, AtMilliseconds(2));
     attempt->MarkSourceTaskId(71);
     attempt->MarkWorkerStarted(AtMilliseconds(3));
@@ -175,7 +175,7 @@ void TestRetargetedSourceLoadAggregatesAttemptsAndRounds()
         specforge::SourceLoadLatencyRequestKind::ExplicitOpen,
         AtMilliseconds(1));
     const auto finish_attempt =
-        [](const specforge::NavigationLatencyAttemptHandle& attempt,
+        [](const specforge::LoadLatencyAttemptHandle& attempt,
            std::uint64_t task_id,
            std::int64_t base_ms,
            std::int64_t decode_end_ms) {
@@ -200,11 +200,11 @@ void TestRetargetedSourceLoadAggregatesAttemptsAndRounds()
                 AtMilliseconds(decode_end_ms + 6));
         };
 
-    const specforge::NavigationLatencyAttemptHandle first =
+    const specforge::LoadLatencyAttemptHandle first =
         trace.BeginLoadAttempt(1, AtMilliseconds(2));
     finish_attempt(first, 101, 2, 6);
     trace.SetTargetIndex(2);
-    const specforge::NavigationLatencyAttemptHandle second =
+    const specforge::LoadLatencyAttemptHandle second =
         trace.BeginLoadAttempt(2, AtMilliseconds(13));
     finish_attempt(second, 102, 13, 18);
     trace.MarkSnapshotActivated(50, AtMilliseconds(25));

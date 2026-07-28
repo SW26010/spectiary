@@ -559,7 +559,7 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     CancelSnapshotPrefetch();
     std::optional<SourceCollectionLoadHint> hint =
         session_.LoadHintForSource(path, spectrum_index);
-    NavigationLatencyAttemptHandle latency_attempt;
+    LoadLatencyAttemptHandle latency_attempt;
     if (navigation_trace) {
         navigation_trace->SetTargetIndex(spectrum_index);
         latency_attempt =

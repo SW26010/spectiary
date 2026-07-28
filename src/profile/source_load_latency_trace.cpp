@@ -36,14 +36,14 @@ std::string DurationMilliseconds(std::int64_t begin_ns, std::int64_t end_ns)
 
 template <typename TimestampGetter>
 std::string AttemptDurationSum(
-    const std::vector<NavigationLatencyAttemptReport>& attempts,
+    const std::vector<LoadLatencyAttemptReport>& attempts,
     TimestampGetter&& timestamps)
 {
     if (attempts.empty()) {
         return "null";
     }
     std::int64_t total_ns = 0;
-    for (const NavigationLatencyAttemptReport& attempt : attempts) {
+    for (const LoadLatencyAttemptReport& attempt : attempts) {
         const auto [begin_ns, end_ns] = timestamps(attempt);
         if (begin_ns <= 0 || end_ns < begin_ns) {
             return "null";
@@ -55,14 +55,14 @@ std::string AttemptDurationSum(
 
 template <typename TimestampGetter>
 std::string PreparationDurationSum(
-    const NavigationLatencyAttemptReport& attempt,
+    const LoadLatencyAttemptReport& attempt,
     TimestampGetter&& timestamps)
 {
     if (attempt.preparation_rounds.empty()) {
         return "null";
     }
     std::int64_t total_ns = 0;
-    for (const NavigationLatencyPreparationRoundReport& round :
+    for (const LoadLatencyPreparationRoundReport& round :
          attempt.preparation_rounds) {
         const auto [begin_ns, end_ns] = timestamps(round);
         if (begin_ns <= 0 || end_ns < begin_ns) {
@@ -75,18 +75,18 @@ std::string PreparationDurationSum(
 
 template <typename TimestampGetter>
 std::string AttemptPreparationDurationSum(
-    const std::vector<NavigationLatencyAttemptReport>& attempts,
+    const std::vector<LoadLatencyAttemptReport>& attempts,
     TimestampGetter&& timestamps)
 {
     if (attempts.empty()) {
         return "null";
     }
     std::int64_t total_ns = 0;
-    for (const NavigationLatencyAttemptReport& attempt : attempts) {
+    for (const LoadLatencyAttemptReport& attempt : attempts) {
         if (attempt.preparation_rounds.empty()) {
             return "null";
         }
-        for (const NavigationLatencyPreparationRoundReport& round :
+        for (const LoadLatencyPreparationRoundReport& round :
              attempt.preparation_rounds) {
             const auto [begin_ns, end_ns] = timestamps(round);
             if (begin_ns <= 0 || end_ns < begin_ns) {
@@ -99,7 +99,7 @@ std::string AttemptPreparationDurationSum(
 }
 
 std::string RetargetGapMilliseconds(
-    const std::vector<NavigationLatencyAttemptReport>& attempts)
+    const std::vector<LoadLatencyAttemptReport>& attempts)
 {
     std::int64_t total_ns = 0;
     for (std::size_t index = 1; index < attempts.size(); ++index) {
@@ -114,21 +114,21 @@ std::string RetargetGapMilliseconds(
 }
 
 std::size_t PreparationRoundCount(
-    const std::vector<NavigationLatencyAttemptReport>& attempts)
+    const std::vector<LoadLatencyAttemptReport>& attempts)
 {
     std::size_t count = 0;
-    for (const NavigationLatencyAttemptReport& attempt : attempts) {
+    for (const LoadLatencyAttemptReport& attempt : attempts) {
         count += attempt.preparation_rounds.size();
     }
     return count;
 }
 
 std::size_t ListingScanCount(
-    const std::vector<NavigationLatencyAttemptReport>& attempts)
+    const std::vector<LoadLatencyAttemptReport>& attempts)
 {
     std::size_t count = 0;
-    for (const NavigationLatencyAttemptReport& attempt : attempts) {
-        for (const NavigationLatencyPreparationRoundReport& round :
+    for (const LoadLatencyAttemptReport& attempt : attempts) {
+        for (const LoadLatencyPreparationRoundReport& round :
              attempt.preparation_rounds) {
             count += round.listing_scan_performed ? 1 : 0;
         }
@@ -139,8 +139,8 @@ std::size_t ListingScanCount(
 bool WritePreparationRoundEvent(
     ProfileSink& sink,
     std::uint64_t source_load_id,
-    const NavigationLatencyAttemptReport& attempt,
-    const NavigationLatencyPreparationRoundReport& round)
+    const LoadLatencyAttemptReport& attempt,
+    const LoadLatencyPreparationRoundReport& round)
 {
     return sink.WriteEvent("source_load_latency_preparation_round", {
         ProfileSink::Field::Number(
@@ -218,10 +218,10 @@ bool WritePreparationRoundEvent(
 bool WriteAttemptEvent(
     ProfileSink& sink,
     std::uint64_t source_load_id,
-    const NavigationLatencyAttemptReport& attempt)
+    const LoadLatencyAttemptReport& attempt)
 {
     bool accepted = true;
-    for (const NavigationLatencyPreparationRoundReport& round :
+    for (const LoadLatencyPreparationRoundReport& round :
          attempt.preparation_rounds) {
         accepted =
             WritePreparationRoundEvent(sink, source_load_id, attempt, round) &&
@@ -354,116 +354,79 @@ SourceLoadLatencyTrace::SourceLoadLatencyTrace(
     std::uint64_t source_load_id,
     std::size_t target_index,
     SourceLoadLatencyRequestKind request_kind,
-    NavigationLatencyTimePoint accepted_at)
+    LoadLatencyTimePoint accepted_at)
     : source_load_id_(source_load_id),
       request_kind_(request_kind),
-      accepted_ns_(ToNanoseconds(accepted_at)),
-      target_index_(target_index)
+      accepted_ns_(LoadLatencyNanoseconds(accepted_at)),
+      terminal_presentation_(target_index)
 {
-}
-
-std::int64_t SourceLoadLatencyTrace::ToNanoseconds(
-    NavigationLatencyTimePoint at) noexcept
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               at.time_since_epoch())
-        .count();
 }
 
 void SourceLoadLatencyTrace::SetTargetIndex(std::size_t target_index) noexcept
 {
-    target_index_.store(target_index, std::memory_order_relaxed);
+    terminal_presentation_.SetTargetIndex(target_index);
 }
 
-NavigationLatencyAttemptHandle SourceLoadLatencyTrace::BeginLoadAttempt(
+LoadLatencyAttemptHandle SourceLoadLatencyTrace::BeginLoadAttempt(
     std::size_t target_index,
-    NavigationLatencyTimePoint at)
+    LoadLatencyTimePoint at)
 {
-    std::lock_guard lock(attempts_mutex_);
-    auto attempt = std::shared_ptr<NavigationLatencyAttempt>(
-        new NavigationLatencyAttempt(attempts_.size(), target_index, at));
-    attempts_.push_back(attempt);
-    return attempt;
+    return load_attempts_.Begin(target_index, at);
 }
 
 void SourceLoadLatencyTrace::MarkSnapshotActivated(
     std::uint64_t frame_index,
-    NavigationLatencyTimePoint at) noexcept
+    LoadLatencyTimePoint at) noexcept
 {
-    snapshot_activated_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-    std::lock_guard lock(terminal_mutex_);
-    activation_frame_ = frame_index;
+    terminal_presentation_.MarkSnapshotActivated(frame_index, at);
 }
 
 void SourceLoadLatencyTrace::MarkUiUpdated(
-    NavigationLatencyTimePoint at) noexcept
+    LoadLatencyTimePoint at) noexcept
 {
-    ui_updated_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
+    terminal_presentation_.MarkUiUpdated(at);
 }
 
 bool SourceLoadLatencyTrace::MarkPresentedForViewport(
     std::uint64_t frame_index,
     unsigned int viewport_id,
-    NavigationLatencyTimePoint at) noexcept
+    LoadLatencyTimePoint at) noexcept
 {
-    std::lock_guard lock(terminal_mutex_);
-    if (outcome_ != SourceLoadLatencyOutcome::Pending || activation_frame_ == 0 ||
-        frame_index < activation_frame_ || viewport_id == 0) {
-        return false;
-    }
-    presentation_viewport_id_ = viewport_id;
-    first_present_ns_ = ToNanoseconds(at);
-    terminal_ns_ = first_present_ns_;
-    outcome_ = SourceLoadLatencyOutcome::Presented;
-    return true;
+    return terminal_presentation_.MarkPresentedForViewport(
+        frame_index,
+        viewport_id,
+        at);
 }
 
 bool SourceLoadLatencyTrace::MarkTerminal(
     SourceLoadLatencyOutcome outcome,
-    NavigationLatencyTimePoint at) noexcept
+    LoadLatencyTimePoint at) noexcept
 {
-    if (outcome == SourceLoadLatencyOutcome::Pending ||
-        outcome == SourceLoadLatencyOutcome::Presented) {
-        return false;
-    }
-    std::lock_guard lock(terminal_mutex_);
-    if (outcome_ != SourceLoadLatencyOutcome::Pending) {
-        return false;
-    }
-    outcome_ = outcome;
-    terminal_ns_ = ToNanoseconds(at);
-    return true;
+    return terminal_presentation_.MarkTerminal(outcome, at);
 }
 
 std::optional<SourceLoadLatencyReport>
 SourceLoadLatencyTrace::TerminalReport() const noexcept
 {
+    const auto lifecycle = terminal_presentation_.TerminalSnapshot();
+    if (!lifecycle) {
+        return std::nullopt;
+    }
+
     SourceLoadLatencyReport report;
-    {
-        std::lock_guard lock(terminal_mutex_);
-        if (outcome_ == SourceLoadLatencyOutcome::Pending) {
-            return std::nullopt;
-        }
-        report.activation_frame = activation_frame_;
-        report.presentation_viewport_id = presentation_viewport_id_;
-        report.outcome = outcome_;
-        report.first_present_ns = first_present_ns_;
-        report.terminal_ns = terminal_ns_;
-    }
-
     report.source_load_id = source_load_id_;
-    report.target_index = target_index_.load(std::memory_order_relaxed);
+    report.activation_frame = lifecycle->activation_frame;
+    report.presentation_viewport_id =
+        lifecycle->presentation_viewport_id;
+    report.target_index = lifecycle->target_index;
     report.request_kind = request_kind_;
+    report.outcome = lifecycle->outcome;
     report.accepted_ns = accepted_ns_;
-    report.snapshot_activated_ns =
-        snapshot_activated_ns_.load(std::memory_order_relaxed);
-    report.ui_updated_ns = ui_updated_ns_.load(std::memory_order_relaxed);
-
-    std::lock_guard lock(attempts_mutex_);
-    report.attempts.reserve(attempts_.size());
-    for (const NavigationLatencyAttemptHandle& attempt : attempts_) {
-        report.attempts.push_back(attempt->Report());
-    }
+    report.snapshot_activated_ns = lifecycle->snapshot_activated_ns;
+    report.ui_updated_ns = lifecycle->ui_updated_ns;
+    report.first_present_ns = lifecycle->first_present_ns;
+    report.terminal_ns = lifecycle->terminal_ns;
+    report.attempts = load_attempts_.Reports();
     return report;
 }
 
@@ -500,7 +463,7 @@ bool WriteSourceLoadLatencyProfileEvent(
     const SourceLoadLatencyReport& report)
 {
     bool accepted = true;
-    for (const NavigationLatencyAttemptReport& attempt : report.attempts) {
+    for (const LoadLatencyAttemptReport& attempt : report.attempts) {
         accepted =
             WriteAttemptEvent(sink, report.source_load_id, attempt) && accepted;
     }
@@ -530,7 +493,7 @@ bool WriteSourceLoadLatencyProfileEvent(
     const auto sum = [&report](auto begin, auto end) {
         return AttemptDurationSum(
             report.attempts,
-            [begin, end](const NavigationLatencyAttemptReport& attempt) {
+            [begin, end](const LoadLatencyAttemptReport& attempt) {
                 return std::pair{begin(attempt), end(attempt)};
             });
     };

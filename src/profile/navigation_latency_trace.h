@@ -1,21 +1,27 @@
 #pragma once
 
+#include "profile/load_latency_trace_lifecycle.h"
+
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <vector>
 
 namespace specforge {
 
 class ProfileSink;
-class SourceLoadLatencyTrace;
 
-using NavigationLatencyClock = std::chrono::steady_clock;
-using NavigationLatencyTimePoint = NavigationLatencyClock::time_point;
+using NavigationLatencyClock = LoadLatencyClock;
+using NavigationLatencyTimePoint = LoadLatencyTimePoint;
+using NavigationLatencyFolderListingObservation =
+    LoadLatencyFolderListingObservation;
+using NavigationLatencyPreparationRoundReport =
+    LoadLatencyPreparationRoundReport;
+using NavigationLatencyAttemptReport = LoadLatencyAttemptReport;
+using NavigationLatencyAttempt = LoadLatencyAttempt;
+using NavigationLatencyAttemptHandle = LoadLatencyAttemptHandle;
 
 enum class NavigationLatencyInputKind : std::uint8_t {
     KeyboardPrevious,
@@ -39,112 +45,6 @@ enum class NavigationSnapshotCacheKind : std::uint8_t {
     History,
     Prefetch,
 };
-
-struct NavigationLatencyFolderListingObservation {
-    bool hint_present = false;
-    bool generation_current_at_start = false;
-    bool listing_scan_performed = false;
-};
-
-struct NavigationLatencyPreparationRoundReport {
-    std::size_t round_index = 0;
-    bool source_is_folder = false;
-    bool hint_present = false;
-    bool generation_current_at_start = false;
-    bool listing_scan_performed = false;
-    bool context_reused = false;
-    bool revalidation_succeeded = false;
-    std::int64_t preparation_started_ns = 0;
-    std::int64_t snapshot_load_started_ns = 0;
-    std::int64_t snapshot_load_finished_ns = 0;
-    std::int64_t context_prepared_ns = 0;
-    std::int64_t source_revalidated_ns = 0;
-};
-
-struct NavigationLatencyAttemptReport {
-    std::size_t attempt_index = 0;
-    std::size_t target_index = 0;
-    std::uint64_t source_task_id = 0;
-    bool source_is_folder = false;
-    bool workflow_reused = false;
-    bool context_reused = false;
-
-    std::int64_t load_enqueued_ns = 0;
-    std::int64_t worker_started_ns = 0;
-    std::int64_t snapshot_load_started_ns = 0;
-    std::int64_t snapshot_load_finished_ns = 0;
-    std::int64_t context_prepared_ns = 0;
-    std::int64_t source_revalidated_ns = 0;
-    std::int64_t worker_prepared_ns = 0;
-    std::int64_t completion_ready_ns = 0;
-    std::int64_t completion_published_ns = 0;
-    std::int64_t completion_drained_ns = 0;
-    std::vector<NavigationLatencyPreparationRoundReport> preparation_rounds;
-};
-
-class NavigationLatencyAttempt {
-public:
-    void MarkSourceTaskId(std::uint64_t task_id) noexcept;
-    void MarkWorkerStarted(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkSnapshotLoadStarted(
-        bool source_is_folder,
-        NavigationLatencyTimePoint at = NavigationLatencyClock::now());
-    void MarkFolderSnapshotLoadStarted(
-        NavigationLatencyFolderListingObservation observation,
-        NavigationLatencyTimePoint at = NavigationLatencyClock::now());
-    void MarkFolderListingScanPerformed() noexcept;
-    void MarkSnapshotLoadFinished(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkContextPrepared(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkContextPrepared(
-        bool context_reused,
-        NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkSourceRevalidated(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkSourceRevalidated(
-        bool succeeded,
-        NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkWorkflowReused(bool reused) noexcept;
-    void MarkWorkerPrepared(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkCompletionReady(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkCompletionPublished(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-    void MarkCompletionDrained(NavigationLatencyTimePoint at = NavigationLatencyClock::now()) noexcept;
-
-    [[nodiscard]] NavigationLatencyAttemptReport Report() const noexcept;
-
-private:
-    friend class NavigationLatencyTrace;
-    friend class SourceLoadLatencyTrace;
-
-    NavigationLatencyAttempt(
-        std::size_t attempt_index,
-        std::size_t target_index,
-        NavigationLatencyTimePoint load_enqueued_at);
-    [[nodiscard]] static std::int64_t ToNanoseconds(NavigationLatencyTimePoint at) noexcept;
-    void MarkSnapshotLoadStarted(
-        bool source_is_folder,
-        NavigationLatencyFolderListingObservation observation,
-        NavigationLatencyTimePoint at);
-
-    std::size_t attempt_index_ = 0;
-    std::size_t target_index_ = 0;
-    std::int64_t load_enqueued_ns_ = 0;
-    std::atomic_uint64_t source_task_id_ = 0;
-    std::atomic_bool source_is_folder_ = false;
-    std::atomic_bool workflow_reused_ = false;
-    std::atomic_bool context_reused_ = false;
-    std::atomic_int64_t worker_started_ns_ = 0;
-    std::atomic_int64_t snapshot_load_started_ns_ = 0;
-    std::atomic_int64_t snapshot_load_finished_ns_ = 0;
-    std::atomic_int64_t context_prepared_ns_ = 0;
-    std::atomic_int64_t source_revalidated_ns_ = 0;
-    std::atomic_int64_t worker_prepared_ns_ = 0;
-    std::atomic_int64_t completion_ready_ns_ = 0;
-    std::atomic_int64_t completion_published_ns_ = 0;
-    std::atomic_int64_t completion_drained_ns_ = 0;
-    mutable std::mutex preparation_rounds_mutex_;
-    std::vector<NavigationLatencyPreparationRoundReport> preparation_rounds_;
-};
-
-using NavigationLatencyAttemptHandle = std::shared_ptr<NavigationLatencyAttempt>;
 
 struct NavigationLatencyPresentation {
     unsigned int viewport_id = 0;
@@ -226,8 +126,6 @@ public:
     [[nodiscard]] std::optional<NavigationLatencyReport> TerminalReport() const noexcept;
 
 private:
-    [[nodiscard]] static std::int64_t ToNanoseconds(NavigationLatencyTimePoint at) noexcept;
-
     std::uint64_t navigation_id_ = 0;
     std::size_t from_index_ = 0;
     NavigationLatencyInputKind input_kind_ = NavigationLatencyInputKind::UiNext;
@@ -238,19 +136,10 @@ private:
     std::int64_t requested_ns_ = 0;
     std::int64_t target_resolved_ns_ = 0;
 
-    std::atomic_size_t target_index_ = 0;
-    std::atomic_int64_t snapshot_activated_ns_ = 0;
-    std::atomic_int64_t ui_updated_ns_ = 0;
-
-    mutable std::mutex attempts_mutex_;
-    std::vector<NavigationLatencyAttemptHandle> attempts_;
-
-    mutable std::mutex terminal_mutex_;
-    NavigationLatencyOutcome outcome_ = NavigationLatencyOutcome::Pending;
-    std::uint64_t activation_frame_ = 0;
-    unsigned int presentation_viewport_id_ = 0;
-    std::int64_t first_present_ns_ = 0;
-    std::int64_t terminal_ns_ = 0;
+    LoadLatencyAttemptLifecycle load_attempts_;
+    profile_internal::LoadLatencyTerminalPresentationLifecycle<
+        NavigationLatencyOutcome>
+        terminal_presentation_;
 };
 
 using NavigationLatencyTraceHandle = std::shared_ptr<NavigationLatencyTrace>;

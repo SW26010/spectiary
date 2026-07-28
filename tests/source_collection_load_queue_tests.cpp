@@ -518,7 +518,7 @@ void TestPrefetchNeverBlocksForegroundPublication()
             canceled_prefetch.front()
                     .worker_terminal_at !=
                 specforge::
-                    NavigationLatencyTimePoint{},
+                    LoadLatencyTimePoint{},
         "a canceled prefetch should publish one worker-terminal marker");
     Require(
         prefetch_priority.load(

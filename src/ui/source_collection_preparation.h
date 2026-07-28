@@ -2,7 +2,7 @@
 
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
-#include "profile/navigation_latency_trace.h"
+#include "profile/load_latency_trace_lifecycle.h"
 #include "ui/sample_navigation_sequence.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_folder_listing_generation.h"
@@ -70,7 +70,7 @@ struct SourceCollectionLoadRequest {
     // Prefetch requests may only publish a snapshot under an already-proven
     // context. They never materialize or publish workflow state.
     bool snapshot_only = false;
-    NavigationLatencyAttemptHandle latency_attempt;
+    LoadLatencyAttemptHandle latency_attempt;
 };
 
 struct PreparedSourceCollection {

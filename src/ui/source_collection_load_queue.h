@@ -1,6 +1,6 @@
 #pragma once
 
-#include "profile/navigation_latency_trace.h"
+#include "profile/load_latency_trace_lifecycle.h"
 #include "ui/background_retirement.h"
 #include "ui/source_collection_preparation.h"
 
@@ -28,8 +28,8 @@ struct SourceCollectionLoadCompletion {
     // Only speculative requests publish a cancellation marker. Foreground
     // cancellation continues to suppress completion entirely.
     bool canceled = false;
-    NavigationLatencyTimePoint worker_terminal_at;
-    NavigationLatencyAttemptHandle latency_attempt;
+    LoadLatencyTimePoint worker_terminal_at;
+    LoadLatencyAttemptHandle latency_attempt;
 };
 
 struct SourceCollectionLoadActivitySnapshot {

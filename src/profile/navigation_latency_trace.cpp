@@ -205,181 +205,6 @@ bool WriteAttemptEvent(
 
 }  // namespace
 
-NavigationLatencyAttempt::NavigationLatencyAttempt(
-    std::size_t attempt_index,
-    std::size_t target_index,
-    NavigationLatencyTimePoint load_enqueued_at)
-    : attempt_index_(attempt_index),
-      target_index_(target_index),
-      load_enqueued_ns_(ToNanoseconds(load_enqueued_at))
-{
-    preparation_rounds_.reserve(2);
-}
-
-std::int64_t NavigationLatencyAttempt::ToNanoseconds(NavigationLatencyTimePoint at) noexcept
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
-}
-
-void NavigationLatencyAttempt::MarkSourceTaskId(std::uint64_t task_id) noexcept
-{
-    source_task_id_.store(task_id, std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkWorkerStarted(NavigationLatencyTimePoint at) noexcept
-{
-    worker_started_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkSnapshotLoadStarted(
-    bool source_is_folder,
-    NavigationLatencyTimePoint at)
-{
-    MarkSnapshotLoadStarted(source_is_folder, {}, at);
-}
-
-void NavigationLatencyAttempt::MarkFolderSnapshotLoadStarted(
-    NavigationLatencyFolderListingObservation observation,
-    NavigationLatencyTimePoint at)
-{
-    MarkSnapshotLoadStarted(true, observation, at);
-}
-
-void NavigationLatencyAttempt::MarkSnapshotLoadStarted(
-    bool source_is_folder,
-    NavigationLatencyFolderListingObservation observation,
-    NavigationLatencyTimePoint at)
-{
-    const std::int64_t started_ns = ToNanoseconds(at);
-    source_is_folder_.store(source_is_folder, std::memory_order_relaxed);
-    std::int64_t missing = 0;
-    (void)snapshot_load_started_ns_.compare_exchange_strong(
-        missing,
-        started_ns,
-        std::memory_order_relaxed);
-    std::lock_guard lock(preparation_rounds_mutex_);
-    const std::int64_t preparation_started_ns = preparation_rounds_.empty()
-        ? worker_started_ns_.load(std::memory_order_relaxed)
-        : preparation_rounds_.back().source_revalidated_ns;
-    preparation_rounds_.push_back({
-        .round_index = preparation_rounds_.size(),
-        .source_is_folder = source_is_folder,
-        .hint_present = observation.hint_present,
-        .generation_current_at_start =
-            observation.generation_current_at_start,
-        .listing_scan_performed = observation.listing_scan_performed,
-        .preparation_started_ns = preparation_started_ns,
-        .snapshot_load_started_ns = started_ns,
-    });
-}
-
-void NavigationLatencyAttempt::MarkFolderListingScanPerformed() noexcept
-{
-    std::lock_guard lock(preparation_rounds_mutex_);
-    if (!preparation_rounds_.empty() &&
-        preparation_rounds_.back().source_is_folder) {
-        preparation_rounds_.back().listing_scan_performed = true;
-    }
-}
-
-void NavigationLatencyAttempt::MarkSnapshotLoadFinished(NavigationLatencyTimePoint at) noexcept
-{
-    const std::int64_t finished_ns = ToNanoseconds(at);
-    snapshot_load_finished_ns_.store(finished_ns, std::memory_order_relaxed);
-    std::lock_guard lock(preparation_rounds_mutex_);
-    if (!preparation_rounds_.empty()) {
-        preparation_rounds_.back().snapshot_load_finished_ns = finished_ns;
-    }
-}
-
-void NavigationLatencyAttempt::MarkContextPrepared(NavigationLatencyTimePoint at) noexcept
-{
-    MarkContextPrepared(false, at);
-}
-
-void NavigationLatencyAttempt::MarkContextPrepared(
-    bool context_reused,
-    NavigationLatencyTimePoint at) noexcept
-{
-    const std::int64_t prepared_ns = ToNanoseconds(at);
-    context_reused_.store(context_reused, std::memory_order_relaxed);
-    context_prepared_ns_.store(prepared_ns, std::memory_order_relaxed);
-    std::lock_guard lock(preparation_rounds_mutex_);
-    if (!preparation_rounds_.empty()) {
-        preparation_rounds_.back().context_reused = context_reused;
-        preparation_rounds_.back().context_prepared_ns = prepared_ns;
-    }
-}
-
-void NavigationLatencyAttempt::MarkSourceRevalidated(NavigationLatencyTimePoint at) noexcept
-{
-    MarkSourceRevalidated(true, at);
-}
-
-void NavigationLatencyAttempt::MarkSourceRevalidated(
-    bool succeeded,
-    NavigationLatencyTimePoint at) noexcept
-{
-    const std::int64_t revalidated_ns = ToNanoseconds(at);
-    source_revalidated_ns_.store(revalidated_ns, std::memory_order_relaxed);
-    std::lock_guard lock(preparation_rounds_mutex_);
-    if (!preparation_rounds_.empty()) {
-        preparation_rounds_.back().source_revalidated_ns = revalidated_ns;
-        preparation_rounds_.back().revalidation_succeeded = succeeded;
-    }
-}
-
-void NavigationLatencyAttempt::MarkWorkflowReused(bool reused) noexcept
-{
-    workflow_reused_.store(reused, std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkWorkerPrepared(NavigationLatencyTimePoint at) noexcept
-{
-    worker_prepared_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkCompletionReady(NavigationLatencyTimePoint at) noexcept
-{
-    completion_ready_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkCompletionPublished(NavigationLatencyTimePoint at) noexcept
-{
-    completion_published_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-}
-
-void NavigationLatencyAttempt::MarkCompletionDrained(NavigationLatencyTimePoint at) noexcept
-{
-    completion_drained_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-}
-
-NavigationLatencyAttemptReport NavigationLatencyAttempt::Report() const noexcept
-{
-    NavigationLatencyAttemptReport report;
-    report.attempt_index = attempt_index_;
-    report.target_index = target_index_;
-    report.source_task_id = source_task_id_.load(std::memory_order_relaxed);
-    report.source_is_folder = source_is_folder_.load(std::memory_order_relaxed);
-    report.workflow_reused = workflow_reused_.load(std::memory_order_relaxed);
-    report.context_reused = context_reused_.load(std::memory_order_relaxed);
-    report.load_enqueued_ns = load_enqueued_ns_;
-    report.worker_started_ns = worker_started_ns_.load(std::memory_order_relaxed);
-    report.snapshot_load_started_ns = snapshot_load_started_ns_.load(std::memory_order_relaxed);
-    report.snapshot_load_finished_ns = snapshot_load_finished_ns_.load(std::memory_order_relaxed);
-    report.context_prepared_ns = context_prepared_ns_.load(std::memory_order_relaxed);
-    report.source_revalidated_ns = source_revalidated_ns_.load(std::memory_order_relaxed);
-    report.worker_prepared_ns = worker_prepared_ns_.load(std::memory_order_relaxed);
-    report.completion_ready_ns = completion_ready_ns_.load(std::memory_order_relaxed);
-    report.completion_published_ns = completion_published_ns_.load(std::memory_order_relaxed);
-    report.completion_drained_ns = completion_drained_ns_.load(std::memory_order_relaxed);
-    {
-        std::lock_guard lock(preparation_rounds_mutex_);
-        report.preparation_rounds = preparation_rounds_;
-    }
-    return report;
-}
-
 NavigationLatencyTrace::NavigationLatencyTrace(
     std::uint64_t navigation_id,
     std::size_t from_index,
@@ -392,11 +217,11 @@ NavigationLatencyTrace::NavigationLatencyTrace(
     : navigation_id_(navigation_id),
       from_index_(from_index),
       input_kind_(input_kind),
-      input_ns_(ToNanoseconds(input_at)),
-      requested_ns_(ToNanoseconds(requested_at)),
-      target_resolved_ns_(ToNanoseconds(target_resolved_at)),
+      input_ns_(LoadLatencyNanoseconds(input_at)),
+      requested_ns_(LoadLatencyNanoseconds(requested_at)),
+      target_resolved_ns_(LoadLatencyNanoseconds(target_resolved_at)),
       target_resolution_(std::move(target_resolution)),
-      target_index_(target_index)
+      terminal_presentation_(target_index)
 {
     const std::int64_t measured_ns = target_resolved_ns_ - requested_ns_;
     const std::int64_t attributed_ns =
@@ -414,14 +239,9 @@ NavigationLatencyTimePoint NavigationLatencyTrace::Now() noexcept
     return NavigationLatencyClock::now();
 }
 
-std::int64_t NavigationLatencyTrace::ToNanoseconds(NavigationLatencyTimePoint at) noexcept
-{
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
-}
-
 void NavigationLatencyTrace::SetTargetIndex(std::size_t target_index) noexcept
 {
-    target_index_.store(target_index, std::memory_order_relaxed);
+    terminal_presentation_.SetTargetIndex(target_index);
 }
 
 void NavigationLatencyTrace::SetCacheHit(bool cache_hit) noexcept
@@ -441,25 +261,19 @@ NavigationLatencyAttemptHandle NavigationLatencyTrace::BeginLoadAttempt(
     std::size_t target_index,
     NavigationLatencyTimePoint at)
 {
-    std::lock_guard lock(attempts_mutex_);
-    auto attempt = std::shared_ptr<NavigationLatencyAttempt>(
-        new NavigationLatencyAttempt(attempts_.size(), target_index, at));
-    attempts_.push_back(attempt);
-    return attempt;
+    return load_attempts_.Begin(target_index, at);
 }
 
 void NavigationLatencyTrace::MarkSnapshotActivated(
     std::uint64_t frame_index,
     NavigationLatencyTimePoint at) noexcept
 {
-    snapshot_activated_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
-    std::lock_guard lock(terminal_mutex_);
-    activation_frame_ = frame_index;
+    terminal_presentation_.MarkSnapshotActivated(frame_index, at);
 }
 
 void NavigationLatencyTrace::MarkUiUpdated(NavigationLatencyTimePoint at) noexcept
 {
-    ui_updated_ns_.store(ToNanoseconds(at), std::memory_order_relaxed);
+    terminal_presentation_.MarkUiUpdated(at);
 }
 
 bool NavigationLatencyTrace::MarkPresentedForViewport(
@@ -467,53 +281,35 @@ bool NavigationLatencyTrace::MarkPresentedForViewport(
     unsigned int viewport_id,
     NavigationLatencyTimePoint at) noexcept
 {
-    std::lock_guard lock(terminal_mutex_);
-    if (outcome_ != NavigationLatencyOutcome::Pending || activation_frame_ == 0 ||
-        frame_index < activation_frame_ || viewport_id == 0) {
-        return false;
-    }
-    presentation_viewport_id_ = viewport_id;
-    first_present_ns_ = ToNanoseconds(at);
-    terminal_ns_ = first_present_ns_;
-    outcome_ = NavigationLatencyOutcome::Presented;
-    return true;
+    return terminal_presentation_.MarkPresentedForViewport(
+        frame_index,
+        viewport_id,
+        at);
 }
 
 bool NavigationLatencyTrace::MarkTerminal(
     NavigationLatencyOutcome outcome,
     NavigationLatencyTimePoint at) noexcept
 {
-    if (outcome == NavigationLatencyOutcome::Pending || outcome == NavigationLatencyOutcome::Presented) {
-        return false;
-    }
-    std::lock_guard lock(terminal_mutex_);
-    if (outcome_ != NavigationLatencyOutcome::Pending) {
-        return false;
-    }
-    outcome_ = outcome;
-    terminal_ns_ = ToNanoseconds(at);
-    return true;
+    return terminal_presentation_.MarkTerminal(outcome, at);
 }
 
 std::optional<NavigationLatencyReport> NavigationLatencyTrace::TerminalReport() const noexcept
 {
-    NavigationLatencyReport report;
-    {
-        std::lock_guard lock(terminal_mutex_);
-        if (outcome_ == NavigationLatencyOutcome::Pending) {
-            return std::nullopt;
-        }
-        report.activation_frame = activation_frame_;
-        report.presentation_viewport_id = presentation_viewport_id_;
-        report.outcome = outcome_;
-        report.first_present_ns = first_present_ns_;
-        report.terminal_ns = terminal_ns_;
+    const auto lifecycle = terminal_presentation_.TerminalSnapshot();
+    if (!lifecycle) {
+        return std::nullopt;
     }
 
+    NavigationLatencyReport report;
     report.navigation_id = navigation_id_;
+    report.activation_frame = lifecycle->activation_frame;
+    report.presentation_viewport_id =
+        lifecycle->presentation_viewport_id;
     report.from_index = from_index_;
-    report.target_index = target_index_.load(std::memory_order_relaxed);
+    report.target_index = lifecycle->target_index;
     report.input_kind = input_kind_;
+    report.outcome = lifecycle->outcome;
     report.cache_kind =
         cache_kind_.load(std::memory_order_relaxed);
     report.cache_hit =
@@ -522,14 +318,11 @@ std::optional<NavigationLatencyReport> NavigationLatencyTrace::TerminalReport() 
     report.input_ns = input_ns_;
     report.requested_ns = requested_ns_;
     report.target_resolved_ns = target_resolved_ns_;
-    report.snapshot_activated_ns = snapshot_activated_ns_.load(std::memory_order_relaxed);
-    report.ui_updated_ns = ui_updated_ns_.load(std::memory_order_relaxed);
-
-    std::lock_guard lock(attempts_mutex_);
-    report.attempts.reserve(attempts_.size());
-    for (const NavigationLatencyAttemptHandle& attempt : attempts_) {
-        report.attempts.push_back(attempt->Report());
-    }
+    report.snapshot_activated_ns = lifecycle->snapshot_activated_ns;
+    report.ui_updated_ns = lifecycle->ui_updated_ns;
+    report.first_present_ns = lifecycle->first_present_ns;
+    report.terminal_ns = lifecycle->terminal_ns;
+    report.attempts = load_attempts_.Reports();
     return report;
 }
 
