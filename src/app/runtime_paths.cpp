@@ -1,5 +1,7 @@
 #include "app/runtime_paths.h"
 
+#include "app/local_user_state_paths.h"
+
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -87,6 +89,46 @@ RuntimeResourceUserStateRootOverride()
 #endif
 }
 
+void SetLocalUserStatePaths(
+    RuntimePaths& paths,
+    std::filesystem::path root)
+{
+    paths.local_user_state_root = std::move(root);
+    paths.profile_log_directory =
+        paths.local_user_state_root /
+        local_user_state_paths::kProfileLogDirectory;
+    paths.imgui_ini_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kImGuiIni;
+    paths.ui_language_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kUiLanguageSettings;
+    paths.ui_scale_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kUiScaleSettings;
+    paths.profile_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kProfileSettings;
+    paths.panel_visibility_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kPanelVisibilityState;
+    paths.source_session_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSourceSessionState;
+    paths.sample_navigation_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSampleNavigationState;
+    paths.sample_labeling_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSampleLabelingState;
+    paths.sample_workflow_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSampleWorkflowState;
+    paths.spectral_line_user_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSpectralLineUserState;
+}
+
 }  // namespace
 
 std::filesystem::path CurrentExecutablePath()
@@ -147,43 +189,93 @@ RuntimePaths RuntimePathsForDeployment(
 
     switch (deployment.storage_profile) {
     case StorageProfile::Portable:
-        paths.local_user_state_root = paths.package_root / "Data";
+        SetLocalUserStatePaths(
+            paths,
+            paths.package_root / "Data");
         break;
     case StorageProfile::LocalAppData:
-        paths.local_user_state_root = std::move(local_app_data_root);
+        SetLocalUserStatePaths(
+            paths,
+            std::move(local_app_data_root));
         break;
     }
 
-    paths.profile_log_directory = paths.local_user_state_root / "logs";
-    paths.imgui_ini_path = paths.local_user_state_root / "specforge-imgui-v2.ini";
+    if (inputs.local_user_state_root_override) {
+        SetLocalUserStatePaths(
+            paths,
+            std::move(
+                *inputs.local_user_state_root_override));
+    }
     return paths;
 }
 
-RuntimePaths DefaultRuntimePaths()
+SpecForgeStartup::SpecForgeStartup(
+    RuntimePaths runtime_paths,
+    SpecForgeMetadataReadResult metadata)
+    : runtime_paths_(std::move(runtime_paths)),
+      metadata_(std::move(metadata))
 {
-    const SpecForgeMetadataReadResult& metadata =
-        DefaultSpecForgeMetadata();
+}
+
+const RuntimePaths& SpecForgeStartup::runtime_paths() const noexcept
+{
+    return runtime_paths_;
+}
+
+const SpecForgeMetadataReadResult& SpecForgeStartup::metadata()
+    const noexcept
+{
+    return metadata_;
+}
+
+RuntimePathInputs CurrentProcessRuntimePathInputs(
+    std::filesystem::path executable_path)
+{
+    return {
+        .executable_path = std::move(executable_path),
+        .local_app_data_user_state_root =
+            DefaultLocalAppDataUserStateRoot(),
+        .local_user_state_root_override =
+            RuntimeResourceUserStateRootOverride(),
+    };
+}
+
+SpecForgeStartup PrepareSpecForgeStartup(
+    RuntimePathInputs inputs)
+{
+    if (inputs.executable_path.empty()) {
+        throw std::invalid_argument(
+            "The executable path is required for startup.");
+    }
+
+    SpecForgeMetadataReadResult metadata =
+        ReadAdjacentSpecForgeMetadata(
+            inputs.executable_path.parent_path(),
+            CompiledBuildIdentity());
     if (metadata.startup_error) {
         throw std::runtime_error(*metadata.startup_error);
     }
 
-    RuntimePathInputs inputs;
-    inputs.executable_path = CurrentExecutablePath();
-    inputs.local_app_data_user_state_root =
-        DefaultLocalAppDataUserStateRoot();
     RuntimePaths paths = RuntimePathsForDeployment(
         metadata.deployment,
         std::move(inputs));
-    if (std::optional<std::filesystem::path> state_root =
-            RuntimeResourceUserStateRootOverride()) {
-        paths.local_user_state_root = std::move(*state_root);
-        paths.profile_log_directory =
-            paths.local_user_state_root / "logs";
-        paths.imgui_ini_path =
-            paths.local_user_state_root /
-            "specforge-imgui-v2.ini";
-    }
-    return paths;
+    return SpecForgeStartup(
+        std::move(paths),
+        std::move(metadata));
+}
+
+const SpecForgeStartup& DefaultSpecForgeStartup()
+{
+    static const SpecForgeStartup startup =
+        PrepareSpecForgeStartup(
+            CurrentProcessRuntimePathInputs(
+                CurrentExecutablePath()));
+    return startup;
+}
+
+RuntimePaths DefaultRuntimePaths()
+{
+    return DefaultSpecForgeStartup().runtime_paths();
 }
 
 }  // namespace specforge

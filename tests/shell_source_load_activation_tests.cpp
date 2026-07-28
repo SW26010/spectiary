@@ -394,6 +394,7 @@ specforge::SourceCollectionPreparationAdapters MakeFixtureLoadDependencies(
     dependencies.workflow_cache_paths = {
         cache_paths.labeling,
         cache_paths.workflow,
+        cache_paths.navigation,
     };
     return dependencies;
 }

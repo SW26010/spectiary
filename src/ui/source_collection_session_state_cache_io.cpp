@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <ostream>
 #include <optional>
@@ -18,7 +19,8 @@ constexpr std::size_t kMaxRestoredSources = 32;
 
 std::filesystem::path DefaultSourceCollectionSessionStateCachePath()
 {
-    return DefaultLocalUserStatePath("source-session.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kSourceSessionState);
 }
 
 SourceCollectionSessionStateCacheLoadResult

@@ -62,7 +62,9 @@ struct ShellRuntimeResourceObservation {
 
 class ShellUi {
 public:
-    explicit ShellUi(PlotTouchpadGestureSource* touchpad_gestures = nullptr);
+    ShellUi(
+        const SpecForgeStartup& startup,
+        PlotTouchpadGestureSource* touchpad_gestures = nullptr);
     ~ShellUi();
 
     void Render(const ShellStatus& status);

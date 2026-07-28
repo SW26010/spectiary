@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 #include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
@@ -20,7 +21,8 @@ constexpr int kStateSchemaVersion = 1;
 
 std::filesystem::path DefaultSampleNavigationStateCachePath()
 {
-    return DefaultLocalUserStatePath("sample-navigation-state.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kSampleNavigationState);
 }
 
 SampleNavigationStateCacheLoadResult

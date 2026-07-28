@@ -205,6 +205,12 @@ void ApplyTitleBarTheme(HWND hwnd)
 
 }  // namespace
 
+SpecForgeApp::SpecForgeApp(const SpecForgeStartup& startup)
+    : startup_(startup),
+      ui_(startup_, &touchpad_gestures_)
+{
+}
+
 SpecForgeApp::~SpecForgeApp()
 {
     Shutdown();
@@ -436,7 +442,8 @@ void SpecForgeApp::InitializeUiBackends()
     ImPlot::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
-    const RuntimePaths runtime_paths = DefaultRuntimePaths();
+    const RuntimePaths& runtime_paths =
+        startup_.runtime_paths();
     std::error_code data_directory_error;
     std::filesystem::create_directories(runtime_paths.local_user_state_root, data_directory_error);
     if (data_directory_error) {
@@ -1173,7 +1180,8 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
     if (!profile_.is_open()) {
         return;
     }
-    const RuntimePaths runtime_paths = DefaultRuntimePaths();
+    const RuntimePaths& runtime_paths =
+        startup_.runtime_paths();
     const SpectrumSnapshotHandle snapshot = ui_.current_snapshot();
     const std::string source_type(
         snapshot ? MetadataValue(snapshot->source.metadata, "source_type") : std::string_view{});

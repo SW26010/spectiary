@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <imgui.h>
 
@@ -108,7 +109,8 @@ void ApplyUiScaleToImGuiStyle(
 
 std::filesystem::path DefaultUiScaleSettingsPath()
 {
-    return DefaultLocalUserStatePath("ui-scale.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kUiScaleSettings);
 }
 
 UiScaleSettingsLoadResult LoadUiScaleSettings(

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/application_settings.h"
-#include "app/specforge_metadata.h"
+#include "app/runtime_paths.h"
 
 #include <filesystem>
 #include <optional>
@@ -42,7 +42,9 @@ struct SettingsPanelStatus {
     std::string_view profile_status_message;
 };
 
-[[nodiscard]] SettingsPanelEnvironment DefaultSettingsPanelEnvironment();
+[[nodiscard]] SettingsPanelEnvironment
+SettingsPanelEnvironmentForStartup(
+    const SpecForgeStartup& startup);
 [[nodiscard]] std::string FormatBuildSourceForAbout(
     const BuildSourceIdentity& build_source);
 [[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
@@ -53,7 +55,6 @@ struct SettingsPanelStatus {
 
 class SettingsPanelUi {
 public:
-    SettingsPanelUi();
     explicit SettingsPanelUi(SettingsPanelEnvironment environment);
 
     void Open();

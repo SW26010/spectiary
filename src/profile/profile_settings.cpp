@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <cstdlib>
 #include <memory>
@@ -17,7 +18,8 @@ constexpr int kSettingsSchemaVersion = 1;
 
 std::filesystem::path DefaultProfileSettingsPath()
 {
-    return DefaultLocalUserStatePath("profile-settings.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kProfileSettings);
 }
 
 ProfileSettings LoadProfileSettings(const std::filesystem::path& path)

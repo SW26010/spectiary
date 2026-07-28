@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <optional>
 #include <string>
@@ -33,7 +34,8 @@ std::string_view StableLanguageValue(UiLanguage language)
 
 std::filesystem::path DefaultUiLanguageSettingsPath()
 {
-    return DefaultLocalUserStatePath("ui-language.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kUiLanguageSettings);
 }
 
 UiLanguageSettingsLoadResult LoadUiLanguageSettings(

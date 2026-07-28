@@ -260,9 +260,18 @@ CatalogUserStateIntent CatalogUserStateIntent::SetMarkerVisibility(std::string m
 SpectralLinesPanelController::SpectralLinesPanelController(
     std::filesystem::path packaged_catalog_path)
     : SpectralLinesPanelController(
+          std::move(packaged_catalog_path),
+          DefaultCatalogUserStateCachePath())
+{
+}
+
+SpectralLinesPanelController::SpectralLinesPanelController(
+    std::filesystem::path packaged_catalog_path,
+    std::filesystem::path user_state_cache_path)
+    : SpectralLinesPanelController(
           LoadPackagedPublicSpectralLineCatalog(packaged_catalog_path),
           PublicSpectralLineCatalogIdentity(),
-          DefaultCatalogUserStateCachePath())
+          std::move(user_state_cache_path))
 {
 }
 

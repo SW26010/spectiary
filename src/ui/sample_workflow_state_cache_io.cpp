@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 #include "domain/source_collection_identity_digest.h"
 
 #include <algorithm>
@@ -376,7 +377,8 @@ void ParseSortState(const JsonValue& source_object, SampleWorkflowSourceState& s
 
 std::filesystem::path DefaultSampleWorkflowStateCachePath()
 {
-    return DefaultLocalUserStatePath("sample-workflow-state.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kSampleWorkflowState);
 }
 
 SampleWorkflowStateCacheLoadResult LoadSampleWorkflowStateCache(

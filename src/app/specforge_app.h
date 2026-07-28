@@ -2,6 +2,7 @@
 
 #include "app/pan_pacing.h"
 #include "app/render_wake_scheduler.h"
+#include "app/runtime_paths.h"
 #include "app/runtime_resource_workload.h"
 #include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
@@ -25,7 +26,7 @@ namespace specforge {
 
 class SpecForgeApp {
 public:
-    SpecForgeApp() = default;
+    explicit SpecForgeApp(const SpecForgeStartup& startup);
     ~SpecForgeApp();
 
     SpecForgeApp(const SpecForgeApp&) = delete;
@@ -99,6 +100,7 @@ private:
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     void LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam);
 
+    SpecForgeStartup startup_;
     Win32Window window_;
     D3D11Renderer renderer_;
     D3D11ImGuiViewportRenderer viewport_renderer_;
@@ -108,7 +110,7 @@ private:
     Win32CompositorClock compositor_clock_;
     Win32MessageRenderObserver message_render_observer_;
     RenderWakeScheduler render_wake_scheduler_;
-    ShellUi ui_{&touchpad_gestures_};
+    ShellUi ui_;
     PanPacingConfiguration pan_pacing_;
 
     std::string imgui_ini_path_utf8_;

@@ -1,12 +1,15 @@
 #include "app/specforge_metadata.h"
+#include "app/runtime_paths.h"
 
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -503,6 +506,75 @@ void TestMetadataNames()
         "storage profile names should match schema 4 values");
 }
 
+void TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction()
+{
+    static_assert(
+        !std::is_default_constructible_v<
+            specforge::SpecForgeStartup>);
+
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-startup-preflight-tests";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+
+    const std::filesystem::path executable_path =
+        root / "SpecForge.exe";
+    const std::filesystem::path state_root =
+        root / "local-user-state";
+    WriteTextFile(
+        root / "specforge_metadata.json",
+        "{ invalid metadata");
+
+    bool startup_rejected = false;
+    try {
+        (void)specforge::PrepareSpecForgeStartup({
+            .executable_path = executable_path,
+            .local_app_data_user_state_root = state_root,
+        });
+    } catch (const std::runtime_error&) {
+        startup_rejected = true;
+    }
+
+    Require(
+        startup_rejected,
+        "invalid adjacent metadata must not produce validated "
+        "startup facts");
+    Require(
+        !std::filesystem::exists(state_root),
+        "startup preflight must not enter local-state "
+        "construction");
+
+    std::filesystem::remove(
+        root / "specforge_metadata.json",
+        cleanup_error);
+    const specforge::SpecForgeStartup startup =
+        specforge::PrepareSpecForgeStartup({
+            .executable_path = executable_path,
+            .local_app_data_user_state_root = state_root,
+        });
+    Require(
+        startup.runtime_paths().executable_path ==
+                executable_path &&
+            startup.runtime_paths().local_user_state_root ==
+                state_root &&
+            startup.runtime_paths().source_session_state_path ==
+                state_root / "source-session.json" &&
+            startup.runtime_paths().sample_workflow_state_path ==
+                state_root / "sample-workflow-state.json" &&
+            startup.runtime_paths().spectral_line_user_state_path ==
+                state_root /
+                    "spectral-line-grouping-views.json",
+        "validated startup facts should retain the one resolved "
+        "executable and complete state-path decision");
+    Require(
+        !std::filesystem::exists(state_root),
+        "preflight should decide paths without materializing "
+        "local state");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
 }  // namespace
 
 int main()
@@ -515,6 +587,7 @@ int main()
     TestBuildProvenanceDoesNotControlDeployment();
     TestAdjacentMetadataSelectionAndLegacyFallback();
     TestMetadataNames();
+    TestStartupPreflightRejectsInvalidMetadataBeforeStateConstruction();
     std::cout << "SpecForge metadata tests passed\n";
     return 0;
 }

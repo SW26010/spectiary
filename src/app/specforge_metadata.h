@@ -73,7 +73,6 @@ struct SpecForgeMetadataReadResult {
     const std::filesystem::path& package_root,
     const BuildIdentity& expected_identity);
 
-[[nodiscard]] const SpecForgeMetadataReadResult& DefaultSpecForgeMetadata();
-[[nodiscard]] const BuildMetadataReadResult& DefaultBuildMetadata();
+[[nodiscard]] BuildIdentity CompiledBuildIdentity();
 
 }  // namespace specforge

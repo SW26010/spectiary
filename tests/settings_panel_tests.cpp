@@ -227,7 +227,8 @@ UiScaleRenderObservation RenderUiScaleFrame(
 void TestDefaultEnvironmentDescribesThisBuild()
 {
     const specforge::SettingsPanelEnvironment environment =
-        specforge::DefaultSettingsPanelEnvironment();
+        specforge::SettingsPanelEnvironmentForStartup(
+            specforge::DefaultSpecForgeStartup());
 
     Require(
         environment.version == SPECFORGE_EXPECTED_VERSION,

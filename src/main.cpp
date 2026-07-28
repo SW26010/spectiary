@@ -107,11 +107,9 @@ void ReportStartupError(std::string_view message)
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     try {
-        // Deployment metadata controls every default state path. Resolve and
-        // validate it before constructing objects that may load or persist
-        // user state.
-        (void)specforge::DefaultRuntimePaths();
-        specforge::SpecForgeApp app;
+        const specforge::SpecForgeStartup& startup =
+            specforge::DefaultSpecForgeStartup();
+        specforge::SpecForgeApp app(startup);
         return app.Run(instance, show_command, InitialSourceFromCommandLine());
     } catch (const std::exception& error) {
         ReportStartupError(error.what());

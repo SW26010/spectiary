@@ -1,5 +1,6 @@
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 #include "app/runtime_paths.h"
 #include "platform/atomic_file.h"
 #include "platform/atomic_file_internal.h"
@@ -29,6 +30,56 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+void RequireCompleteLocalUserStatePathMapping(
+    const specforge::RuntimePaths& paths,
+    const std::filesystem::path& root)
+{
+    using namespace specforge::local_user_state_paths;
+    Require(
+        paths.profile_log_directory ==
+            root / kProfileLogDirectory,
+        "profile log directory should use the canonical name");
+    Require(
+        paths.imgui_ini_path == root / kImGuiIni,
+        "ImGui settings should use the canonical name");
+    Require(
+        paths.ui_language_settings_path ==
+            root / kUiLanguageSettings,
+        "language settings should use the canonical name");
+    Require(
+        paths.ui_scale_settings_path ==
+            root / kUiScaleSettings,
+        "UI scale settings should use the canonical name");
+    Require(
+        paths.profile_settings_path ==
+            root / kProfileSettings,
+        "profile settings should use the canonical name");
+    Require(
+        paths.panel_visibility_state_path ==
+            root / kPanelVisibilityState,
+        "panel visibility should use the canonical name");
+    Require(
+        paths.source_session_state_path ==
+            root / kSourceSessionState,
+        "source session state should use the canonical name");
+    Require(
+        paths.sample_navigation_state_path ==
+            root / kSampleNavigationState,
+        "navigation state should use the canonical name");
+    Require(
+        paths.sample_labeling_state_path ==
+            root / kSampleLabelingState,
+        "labeling state should use the canonical name");
+    Require(
+        paths.sample_workflow_state_path ==
+            root / kSampleWorkflowState,
+        "workflow state should use the canonical name");
+    Require(
+        paths.spectral_line_user_state_path ==
+            root / kSpectralLineUserState,
+        "spectral-line state should use the canonical name");
 }
 
 std::string ReadTextFile(const std::filesystem::path& path)
@@ -105,10 +156,9 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
             package_root / "config" / "spectral_lines.public.tsv",
         "packaged spectral-line catalog should resolve from the package root");
     Require(portable_paths.local_user_state_root == package_root / "Data", "portable state should live under Data");
-    Require(portable_paths.profile_log_directory == package_root / "Data" / "logs", "portable logs should live under Data/logs");
-    Require(
-        portable_paths.imgui_ini_path == package_root / "Data" / "specforge-imgui-v2.ini",
-        "portable ImGui ini should live under Data");
+    RequireCompleteLocalUserStatePathMapping(
+        portable_paths,
+        package_root / "Data");
 
     const specforge::RuntimePaths installed_paths =
         specforge::RuntimePathsForDeployment(
@@ -124,10 +174,9 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
             package_root / "config" / "spectral_lines.public.tsv",
         "installed profile should use the same package resource root");
     Require(installed_paths.local_user_state_root == installed_root, "installed state should use local app data root");
-    Require(installed_paths.profile_log_directory == installed_root / "logs", "installed logs should live under installed state root");
-    Require(
-        installed_paths.imgui_ini_path == installed_root / "specforge-imgui-v2.ini",
-        "installed ImGui ini should live under installed state root");
+    RequireCompleteLocalUserStatePathMapping(
+        installed_paths,
+        installed_root);
     Require(
         portable_paths.local_user_state_root != installed_paths.local_user_state_root,
         "portable and installed state roots should stay distinct");

@@ -878,6 +878,18 @@ SourceCollectionLoadQueue::SourceCollectionLoadQueue()
 }
 
 SourceCollectionLoadQueue::SourceCollectionLoadQueue(
+    SampleWorkflowPreparationPaths workflow_cache_paths)
+    : SourceCollectionLoadQueue(
+          [&workflow_cache_paths]() {
+              SourceCollectionPreparationAdapters adapters;
+              adapters.workflow_cache_paths =
+                  std::move(workflow_cache_paths);
+              return adapters;
+          }())
+{
+}
+
+SourceCollectionLoadQueue::SourceCollectionLoadQueue(
     SourceCollectionPreparationAdapters adapters)
     : impl_(std::make_unique<Impl>(std::move(adapters)))
 {

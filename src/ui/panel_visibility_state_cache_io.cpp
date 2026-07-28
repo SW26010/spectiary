@@ -1,6 +1,7 @@
 #include "ui/panel_visibility_state_cache_io.h"
 
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <string>
 #include <utility>
@@ -15,7 +16,8 @@ constexpr int kStateSchemaVersion = 1;
 
 std::filesystem::path DefaultPanelVisibilityStateCachePath()
 {
-    return DefaultLocalUserStatePath("panel-visibility.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kPanelVisibilityState);
 }
 
 PanelVisibilityState LoadPanelVisibilityStateCache(const std::filesystem::path& path)

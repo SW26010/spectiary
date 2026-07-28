@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -262,7 +263,8 @@ std::vector<std::string> SortedSetValues(const std::unordered_set<std::string>& 
 
 std::filesystem::path DefaultCatalogUserStateCachePath()
 {
-    return DefaultLocalUserStatePath("spectral-line-grouping-views.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kSpectralLineUserState);
 }
 
 CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem::path& path)

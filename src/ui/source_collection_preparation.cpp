@@ -87,7 +87,24 @@ bool SourceCollectionBaseIdentitiesMatch(
            left.spectrum_count == right.spectrum_count;
 }
 
-SourceCollectionPreparationAdapters DefaultAdapters()
+bool AllWorkflowCachePathsEmpty(
+    const SampleWorkflowPreparationPaths& paths)
+{
+    return paths.labeling_state_cache_path.empty() &&
+           paths.workflow_state_cache_path.empty() &&
+           paths.navigation_state_cache_path.empty();
+}
+
+bool AllWorkflowCachePathsPresent(
+    const SampleWorkflowPreparationPaths& paths)
+{
+    return !paths.labeling_state_cache_path.empty() &&
+           !paths.workflow_state_cache_path.empty() &&
+           !paths.navigation_state_cache_path.empty();
+}
+
+SourceCollectionPreparationAdapters DefaultAdapters(
+    SampleWorkflowPreparationPaths workflow_cache_paths)
 {
     SourceCollectionPreparationAdapters adapters;
     adapters.snapshot_loader =
@@ -122,19 +139,32 @@ SourceCollectionPreparationAdapters DefaultAdapters()
                 listing,
                 checkpoint);
         };
-    adapters.workflow_cache_paths = {
-        DefaultSampleLabelingStateCachePath(),
-        DefaultSampleWorkflowStateCachePath(),
-        DefaultSampleNavigationStateCachePath(),
-    };
+    if (AllWorkflowCachePathsEmpty(workflow_cache_paths)) {
+        workflow_cache_paths = {
+            DefaultSampleLabelingStateCachePath(),
+            DefaultSampleWorkflowStateCachePath(),
+            DefaultSampleNavigationStateCachePath(),
+        };
+    }
+    adapters.workflow_cache_paths =
+        std::move(workflow_cache_paths);
     return adapters;
 }
 
 void FillMissingAdapters(
     SourceCollectionPreparationAdapters& adapters)
 {
+    if (!AllWorkflowCachePathsEmpty(
+            adapters.workflow_cache_paths) &&
+        !AllWorkflowCachePathsPresent(
+            adapters.workflow_cache_paths)) {
+        throw std::invalid_argument(
+            "Workflow cache paths must be either all empty "
+            "or all explicit.");
+    }
+
     SourceCollectionPreparationAdapters defaults =
-        DefaultAdapters();
+        DefaultAdapters(adapters.workflow_cache_paths);
     if (!adapters.snapshot_loader) {
         adapters.snapshot_loader =
             std::move(defaults.snapshot_loader);
@@ -159,30 +189,8 @@ void FillMissingAdapters(
         adapters.folder_context_builder =
             std::move(defaults.folder_context_builder);
     }
-    if (adapters.workflow_cache_paths
-            .labeling_state_cache_path.empty()) {
-        adapters.workflow_cache_paths
-            .labeling_state_cache_path =
-            std::move(
-                defaults.workflow_cache_paths
-                    .labeling_state_cache_path);
-    }
-    if (adapters.workflow_cache_paths
-            .workflow_state_cache_path.empty()) {
-        adapters.workflow_cache_paths
-            .workflow_state_cache_path =
-            std::move(
-                defaults.workflow_cache_paths
-                    .workflow_state_cache_path);
-    }
-    if (adapters.workflow_cache_paths
-            .navigation_state_cache_path.empty()) {
-        adapters.workflow_cache_paths
-            .navigation_state_cache_path =
-            std::move(
-                defaults.workflow_cache_paths
-                    .navigation_state_cache_path);
-    }
+    adapters.workflow_cache_paths =
+        std::move(defaults.workflow_cache_paths);
 }
 
 }  // namespace

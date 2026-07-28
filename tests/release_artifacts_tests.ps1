@@ -810,17 +810,6 @@ Assert-NotContains `
     $generatedBuildIdentityText `
     '$<CONFIG>' `
     'Generated build identity'
-$preflightIndex = $mainSource.IndexOf(
-    '(void)specforge::DefaultRuntimePaths();',
-    [StringComparison]::Ordinal)
-$appConstructionIndex = $mainSource.IndexOf(
-    'specforge::SpecForgeApp app;',
-    [StringComparison]::Ordinal)
-if ($preflightIndex -lt 0 -or
-    $appConstructionIndex -lt 0 -or
-    $preflightIndex -ge $appConstructionIndex) {
-    throw 'Deployment metadata must be validated before SpecForgeApp construction.'
-}
 foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
     Assert-Contains $packageScript $documentName 'Portable packaging script'
     Assert-Contains $aboutSource "Legal/$documentName" 'About panel'

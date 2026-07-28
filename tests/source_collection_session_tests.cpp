@@ -5392,6 +5392,10 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
     const std::filesystem::path source_a = UniqueTempPath("_prepared_a.npy");
     const std::filesystem::path source_b = UniqueTempPath("_prepared_b.npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_prepared_filter.npy");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_prepared_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_prepared_labeling.json");
     const std::filesystem::path workflow_cache = UniqueTempPath("_prepared_workflow.json");
     const std::string annotation_source_id = AnnotationSourceId(annotation_path);
     SaveLabelResultFixture(
@@ -5414,8 +5418,8 @@ void TestSwitchingPreparedSourceReusesItsInMemoryContext()
             return MakeSnapshot(path, 3, spectrum_index);
         },
         {},
-        {},
-        {},
+        navigation_cache,
+        labeling_cache,
         workflow_cache);
     (void)session.Open(
         source_a,

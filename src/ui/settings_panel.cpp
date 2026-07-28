@@ -132,9 +132,10 @@ void RenderReadOnlyValue(const char* label, const char* value)
 
 }  // namespace
 
-SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
+SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
+    const SpecForgeStartup& startup)
 {
-    const RuntimePaths paths = DefaultRuntimePaths();
+    const RuntimePaths& paths = startup.runtime_paths();
     return {
         .version = build_info::kSpecForgeVersion,
         .distribution =
@@ -145,7 +146,8 @@ SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
             .mode = build_info::kBuildSourceMode,
             .revision = build_info::kBuildSourceRevision,
         },
-        .build_metadata = DefaultBuildMetadata(),
+        .build_metadata =
+            startup.metadata().build_metadata,
         .data_directory = paths.local_user_state_root,
     };
 }
@@ -202,11 +204,6 @@ std::string FormatDiagnosticInformation(
     diagnostics += "\nLog directory: ";
     diagnostics += PathToUtf8(profile_output_directory);
     return diagnostics;
-}
-
-SettingsPanelUi::SettingsPanelUi()
-    : SettingsPanelUi(DefaultSettingsPanelEnvironment())
-{
 }
 
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)

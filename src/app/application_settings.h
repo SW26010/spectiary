@@ -13,6 +13,8 @@
 
 namespace specforge {
 
+struct RuntimePaths;
+
 enum class ApplicationSetting {
     None,
     Language,
@@ -139,11 +141,12 @@ struct ApplicationSettingsStorage {
     bool persistent = true;
 };
 
-[[nodiscard]] ApplicationSettingsStorage DefaultApplicationSettingsStorage();
+[[nodiscard]] ApplicationSettingsStorage
+ApplicationSettingsStorageForRuntimePaths(
+    const RuntimePaths& paths);
 
 class ApplicationSettings {
 public:
-    ApplicationSettings();
     explicit ApplicationSettings(ApplicationSettingsStorage storage);
 
     [[nodiscard]] ApplicationSettingsView View() const;

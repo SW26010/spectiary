@@ -49,6 +49,26 @@ void WriteFixture(
     stream << contents;
 }
 
+void TestPartialWorkflowCachePathsAreRejected()
+{
+    specforge::SourceCollectionPreparationAdapters adapters;
+    adapters.workflow_cache_paths.labeling_state_cache_path =
+        "labeling-state.json";
+
+    bool rejected = false;
+    try {
+        (void)specforge::SourceCollectionPreparation(
+            std::move(adapters));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+
+    Require(
+        rejected,
+        "partial workflow cache paths must not mix explicit "
+        "and process-default state roots");
+}
+
 specforge::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_index = 0,
@@ -1121,6 +1141,7 @@ void TestCanceledBlockedRegistrationStopsOnDestruction()
 
 int main()
 {
+    TestPartialWorkflowCachePathsAreRejected();
     TestKnownFileReusesVerifiedContext();
     TestVerifiedResidentSnapshotSkipsDecode();
     TestStaleResidentSnapshotFallsBackToDecode();

@@ -179,6 +179,9 @@ public:
     explicit SpectralLinesPanelController(
         std::filesystem::path packaged_catalog_path);
     SpectralLinesPanelController(
+        std::filesystem::path packaged_catalog_path,
+        std::filesystem::path user_state_cache_path);
+    SpectralLinesPanelController(
         SpectralLineCatalog catalog,
         CatalogIdentity catalog_identity,
         std::filesystem::path user_state_cache_path);

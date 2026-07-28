@@ -103,25 +103,24 @@ ApplicationSettingsIntent ApplicationSettingsIntent::ShowAllPanels()
     };
 }
 
-ApplicationSettingsStorage DefaultApplicationSettingsStorage()
+ApplicationSettingsStorage
+ApplicationSettingsStorageForRuntimePaths(
+    const RuntimePaths& paths)
 {
-    const RuntimePaths paths = DefaultRuntimePaths();
     return {
-        .language_settings_path = DefaultUiLanguageSettingsPath(),
-        .ui_scale_settings_path = DefaultUiScaleSettingsPath(),
-        .profile_settings_path = DefaultProfileSettingsPath(),
+        .language_settings_path =
+            paths.ui_language_settings_path,
+        .ui_scale_settings_path =
+            paths.ui_scale_settings_path,
+        .profile_settings_path =
+            paths.profile_settings_path,
         .panel_visibility_path =
-            DefaultPanelVisibilityStateCachePath(),
+            paths.panel_visibility_state_path,
         .default_profile_output_directory =
             paths.profile_log_directory,
         .profile_output_environment_override =
             ProfileOutputDirectoryEnvironmentOverride(),
     };
-}
-
-ApplicationSettings::ApplicationSettings()
-    : ApplicationSettings(DefaultApplicationSettingsStorage())
-{
 }
 
 ApplicationSettings::ApplicationSettings(

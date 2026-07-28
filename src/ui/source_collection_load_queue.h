@@ -61,6 +61,8 @@ public:
     using CompletionReadyCallback = std::function<void()>;
 
     SourceCollectionLoadQueue();
+    explicit SourceCollectionLoadQueue(
+        SampleWorkflowPreparationPaths workflow_cache_paths);
     ~SourceCollectionLoadQueue();
 
     SourceCollectionLoadQueue(SourceCollectionLoadQueue&&) noexcept;

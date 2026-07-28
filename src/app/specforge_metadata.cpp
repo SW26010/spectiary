@@ -1,7 +1,6 @@
 #include "app/specforge_metadata.h"
 
 #include "app/local_user_state_json.h"
-#include "app/runtime_paths.h"
 #include "specforge/specforge_build_identity.h"
 
 #include <cctype>
@@ -495,27 +494,18 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
     return MissingMetadataResult();
 }
 
-const SpecForgeMetadataReadResult& DefaultSpecForgeMetadata()
+BuildIdentity CompiledBuildIdentity()
 {
-    static const SpecForgeMetadataReadResult result =
-        ReadAdjacentSpecForgeMetadata(
-            CurrentExecutablePath().parent_path(),
-            {
-                .product_name = "SpecForge",
-                .specforge_version = build_info::kSpecForgeVersion,
-                .configuration = build_info::kBuildConfiguration,
-                .target_architecture =
-                    build_info::kTargetArchitecture,
-                .source_mode = build_info::kBuildSourceMode,
-                .source_revision =
-                    build_info::kBuildSourceRevision,
-            });
-    return result;
-}
-
-const BuildMetadataReadResult& DefaultBuildMetadata()
-{
-    return DefaultSpecForgeMetadata().build_metadata;
+    return {
+        .product_name = "SpecForge",
+        .specforge_version = build_info::kSpecForgeVersion,
+        .configuration = build_info::kBuildConfiguration,
+        .target_architecture =
+            build_info::kTargetArchitecture,
+        .source_mode = build_info::kBuildSourceMode,
+        .source_revision =
+            build_info::kBuildSourceRevision,
+    };
 }
 
 }  // namespace specforge

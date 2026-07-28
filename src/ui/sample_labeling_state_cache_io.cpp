@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
+#include "app/local_user_state_paths.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_identity_digest.h"
 
@@ -272,7 +273,8 @@ std::optional<SampleLabelingTask> ParseTask(
 
 std::filesystem::path DefaultSampleLabelingStateCachePath()
 {
-    return DefaultLocalUserStatePath("sample-labeling-tasks.json");
+    return DefaultLocalUserStatePath(
+        local_user_state_paths::kSampleLabelingState);
 }
 
 SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(

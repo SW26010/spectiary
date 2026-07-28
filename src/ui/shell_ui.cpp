@@ -705,16 +705,53 @@ void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
     }
 }
 
+SourceCollectionSession SourceCollectionSessionForRuntimePaths(
+    const RuntimePaths& paths)
+{
+    return SourceCollectionSession(
+        paths.source_session_state_path,
+        paths.sample_navigation_state_path,
+        paths.sample_labeling_state_path,
+        paths.sample_workflow_state_path);
+}
+
+SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
+    const RuntimePaths& paths)
+{
+    return SourceCollectionLoadQueue({
+        .labeling_state_cache_path =
+            paths.sample_labeling_state_path,
+        .workflow_state_cache_path =
+            paths.sample_workflow_state_path,
+        .navigation_state_cache_path =
+            paths.sample_navigation_state_path,
+    });
+}
+
 }  // namespace
 
-ShellUi::ShellUi(PlotTouchpadGestureSource* touchpad_gestures)
-    : session_(),
-      source_activation_(session_),
+ShellUi::ShellUi(
+    const SpecForgeStartup& startup,
+    PlotTouchpadGestureSource* touchpad_gestures)
+    : session_(SourceCollectionSessionForRuntimePaths(
+          startup.runtime_paths())),
+      source_activation_(
+          session_,
+          SourceCollectionLoadQueueForRuntimePaths(
+              startup.runtime_paths())),
       panel_session_interaction_(
           session_,
           source_activation_),
       spectral_lines_panel_(
-          DefaultRuntimePaths().public_spectral_line_catalog_path),
+          startup.runtime_paths()
+              .public_spectral_line_catalog_path,
+          startup.runtime_paths()
+              .spectral_line_user_state_path),
+      settings_panel_ui_(
+          SettingsPanelEnvironmentForStartup(startup)),
+      application_settings_(
+          ApplicationSettingsStorageForRuntimePaths(
+              startup.runtime_paths())),
       touchpad_gestures_(touchpad_gestures)
 {
     BindSourceCollectionActivationPresentationLifecycle(
@@ -735,7 +772,10 @@ ShellUi::ShellUi(
           session_,
           source_activation_),
       spectral_lines_panel_(
-          DefaultRuntimePaths().public_spectral_line_catalog_path),
+          std::filesystem::path{},
+          std::filesystem::path{}),
+      settings_panel_ui_(
+          SettingsPanelEnvironment{}),
       application_settings_(
           ApplicationSettingsStorage{.persistent = false}),
       persist_local_state_(false)
