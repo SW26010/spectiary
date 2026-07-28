@@ -137,7 +137,8 @@ SettingsPanelEnvironment DefaultSettingsPanelEnvironment()
     const RuntimePaths paths = DefaultRuntimePaths();
     return {
         .version = build_info::kSpecForgeVersion,
-        .release_profile = build_info::kReleaseProfile,
+        .distribution =
+            DistributionName(paths.distribution),
         .configuration = build_info::kBuildConfiguration,
         .target_architecture = build_info::kTargetArchitecture,
         .build_source = {
@@ -187,8 +188,8 @@ std::string FormatDiagnosticInformation(
     diagnostics.reserve(320);
     diagnostics += "SpecForge ";
     diagnostics += environment.version;
-    diagnostics += "\nRelease profile: ";
-    diagnostics += environment.release_profile;
+    diagnostics += "\nDistribution: ";
+    diagnostics += environment.distribution;
     diagnostics += "\nSource mode: ";
     diagnostics += environment.build_source.mode;
     if (environment.build_source.mode == "head") {
@@ -680,7 +681,7 @@ void SettingsPanelUi::RenderDiagnostics(
 
     switch (settings.profile_output_directory_source) {
     case ProfileOutputDirectorySource::Default:
-        ImGui::TextDisabled("Source: release-profile default");
+        ImGui::TextDisabled("Source: storage-profile default");
         break;
     case ProfileOutputDirectorySource::UserSetting:
         ImGui::TextDisabled("Source: saved setting");
@@ -788,7 +789,9 @@ void SettingsPanelUi::RenderAbout(
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     RenderReadOnlyValue("Version", environment_.version.c_str());
-    RenderReadOnlyValue("Release profile", environment_.release_profile.c_str());
+    RenderReadOnlyValue(
+        "Distribution",
+        environment_.distribution.c_str());
     RenderReadOnlyValue("Configuration", environment_.configuration.c_str());
     RenderReadOnlyValue(
         "Architecture",

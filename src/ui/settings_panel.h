@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/application_settings.h"
-#include "app/build_metadata_reader.h"
+#include "app/specforge_metadata.h"
 
 #include <filesystem>
 #include <optional>
@@ -27,7 +27,7 @@ struct BuildSourceIdentity {
 
 struct SettingsPanelEnvironment {
     std::string version;
-    std::string release_profile;
+    std::string distribution;
     std::string configuration;
     std::string target_architecture;
     BuildSourceIdentity build_source;

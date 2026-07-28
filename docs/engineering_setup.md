@@ -22,7 +22,7 @@ session restore 并行准备后分别按提交顺序、保存顺序发布结果�
 - Windows 10/11 SDK。
 - CMake 3.24 或更新版本。
 - vcpkg。
-- Ninja，可选，仅用于 `ninja-msvc-portable-debug` preset。
+- Ninja，可选，仅用于 `ninja-msvc-debug` preset。
 
 ## vcpkg
 
@@ -123,7 +123,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 Visual Studio configure check：
 
 ```powershell
-cmake --preset vs2022-x64-portable-debug
+cmake --preset vs2022-x64-debug
 ```
 
 Configure success 验证依赖和生成文件，build success 验证 native shell target。
@@ -136,11 +136,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 
 ### Ninja/MSVC 卡住排查
 
-`ninja-msvc-portable-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
-里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-portable-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
+`ninja-msvc-debug` preset 依赖 MSVC developer environment 和 vcpkg manifest mode。不要在普通 PowerShell
+里裸跑 `ninja` 或 `cmake --build --preset ninja-msvc-debug`；`cl.exe` 可能找不到标准库头，例如 `cstddef`。
 
 在 Codex 或其它只允许写仓库目录的受限环境里，configure/build 需要用同一套 `vcvars64.bat` 命令形态并允许写
-workspace 外缓存。`cmake --preset ninja-msvc-portable-debug` 会调用 vcpkg，并可能写入
+workspace 外缓存。`cmake --preset ninja-msvc-debug` 会调用 vcpkg，并可能写入
 `$env:VCPKG_ROOT\buildtrees\0.vcpkg_dep_info.cmake`、`buildtrees/`、`packages/`、下载缓存或 MSVC
 工具链缓存；如果沙箱拦住这些 workspace 外写入，表现可能是 configure 失败或后续 build 看起来卡住。
 
@@ -176,13 +176,13 @@ Stop-Process -Id <cmakeId>,<ninjaId> -Force
 生成程序位于：
 
 ```text
-build/ninja-msvc-portable-debug/SpecForge.exe
+build/ninja-msvc-debug/SpecForge.exe
 ```
 
-Portable build 的 ImGui layout 写入可执行文件旁的 `Data/specforge-imgui-v2.ini`，panel 显示/隐藏状态写入
-`Data/panel-visibility.json`。Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，并可选择
-profile 输出目录；选择结果持久化到 `Data/profile-settings.json`。设置 `SPECFORGE_PROFILE=1` 则从启动阶段
-自动录制。profile JSONL 默认写入 `Data/logs/`；`SPECFORGE_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
+普通构建输出的 `specforge_metadata.json` 不含 deployment，因此 EXE 作为 Standalone 运行，ImGui layout、
+panel 显示状态、profile 设置和默认日志分别写入 `%LOCALAPPDATA%\SpecForge` 下的对应文件或目录。
+Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，并可选择 profile 输出目录。
+设置 `SPECFORGE_PROFILE=1` 则从启动阶段自动录制；`SPECFORGE_PROFILE_DIR` 仍可为自动化流程覆盖 UI 设置。
 录制器使用有界异步写入，单次 5 分钟或 100 MiB 自动停止；分析前检查
 `profile_recorder_summary.dropped_events == 0`。`scripts/analyze-profile.ps1` 默认强制检查 summary 位于日志
 末尾、停止原因有效且没有丢事件；旧格式日志只有显式传入 `-AllowLegacyIncompleteRecording` 才可继续分析。
@@ -190,7 +190,7 @@ profile 输出目录；选择结果持久化到 `Data/profile-settings.json`。�
 ## Portable release
 
 第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe`、
-`specforge_build_metadata.json`、`Data\` 和 `Legal\`。直接从当前工作区文件构建：
+`specforge_metadata.json`、`Data\` 和 `Legal\`。直接从当前工作区文件构建：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
@@ -206,32 +206,40 @@ HEAD 脚本先解析并冻结完整 `HEAD` object ID，再用 `git archive` 将�
 展开到经过校验的临时目录，并调用快照内同一份 `build-portable.ps1`。成功或失败都会
 清理临时源码和 build 目录，不修改当前工作区或 Git index。
 
-两个脚本都直接调用 CMake 和 Visual Studio portable release preset，预期在正常开发 shell
-或已批准的非沙箱 agent 运行中执行；它们不复用 Ninja debug wrapper 的日志、timeout 和
-preflight 形态。
+当前工作区 builder 直接调用 CMake 和当前统一的 Visual Studio release preset。HEAD
+包装器不把工作区的 preset 或 configuration 默认值下传到快照；这些默认值以及 metadata
+和包内容校验均由快照内 builder 按其自身代际负责。外层只确认子进程成功且 package
+目录、ZIP 和 SHA-256 文件存在，避免工作区脚本解释旧代 schema。两个入口都预期在正常
+开发 shell 或已批准的非沙箱 agent 运行中执行；它们不复用 Ninja debug wrapper 的日志、
+timeout 和 preflight 形态。
 
 Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
 `dist\head\SpecForge-portable`。各自的 ZIP 和 `.sha256` 位于对应输出目录，HEAD
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
-目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_build_metadata.json`、
+目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_metadata.json`、
 `Data\` 和 `Legal\`；`Legal\` 必须包含 `EULA.txt`、
 `THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt`。
 缺少任一发布文档时打包脚本会失败。
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。构建成功后，
-CMake 将包含 SpecForge 版本、release profile、configuration、第三方版本、构建来源和
-若干构建环境诊断维度的 schema 3 `specforge_build_metadata.json` 复制到实际 EXE 旁。字段为
+CMake 将 schema 4 `specforge_metadata.json` 复制到实际 EXE 旁；`product`、`build` 和可选
+`deployment` 是独立维度。普通 build 输出只含 product/build，因此运行身份为 Standalone，数据目录为
+`%LOCALAPPDATA%\SpecForge`。`build` 中的构建环境字段为
 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
 `target_architecture` 和 `windows_sdk_version`。这些值来自实际配置当前 target 的 CMake；
+其中制品 ISA 统一记录为 `amd64`，Visual Studio platform、vcpkg triplet 和 preset 中仍保留工具原生的
+`x64` 拼写。
 若生成器没有提供权威的 Windows SDK 选择（例如 Ninja），开发构建写入
 `windows_sdk_version: null`，不会从 SDK 工具安装路径猜测。正式 Portable 打包仍要求
-MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 只校验并原样复制 metadata，
-不会从调用 shell 的环境重复推导构建信息。共同打包脚本接受两种
+MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 不会从调用 shell 的环境重复推导构建信息。
+Portable 打包阶段只为复制出的 metadata 增加
+`deployment: { distribution: "portable", storage_profile: "portable" }`，并比较 build 输出与包内
+`SpecForge.exe` 的 SHA-256；EXE 本身不含渠道或存储 profile 差异。共同打包脚本接受两种
 严格组合：`working_tree` 必须使用 JSON `null` revision；`head` 必须显式携带完整
 40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口负责
-解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，按字节复制到 Portable 根目录，
+解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，将 build provenance 原样保留到 Portable metadata，
 并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态
 目录 `Data\`。仅重新 configure 不会改变可打包 EXE
 对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包必须失败，
@@ -240,20 +248,22 @@ MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 只校验并原样
 同一组 CMake build-source 变量还生成
 按实际配置生成的
 `build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
-并编译进 EXE。该身份还包含产品版本、release profile、configuration 和目标架构。
-About 以这些 EXE 内字段为权威；它只读取一次 EXE 同目录的 schema 3 metadata，
-且仅在版本、profile、configuration、架构、source mode/revision 全部匹配时显示
+并编译进 EXE。该身份包含产品版本、configuration、目标架构和构建来源，不包含 distribution 或
+storage profile。About 以这些 EXE 内字段为 build provenance 权威；它只读取一次 EXE 同目录 metadata，
+且仅在版本、configuration、架构、source mode/revision 全部匹配时显示
 compiler、CMake、generator、Windows SDK 和依赖版本。文件缺失或无效显示
 `Build metadata unavailable`，核心字段不同显示 `Build metadata mismatch`，两者都不
 混合展示 sidecar 详情。所有必填字符串必须非空且没有首尾空白，working-tree 的
 `source_revision` 必须严格为 JSON `null`。About 对 working-tree 构建显示
 `Source: Working tree`，对 HEAD 构建显示完整
 revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
-40 位 revision。因此 EXE 脱离 Portable sidecar 后仍能说明源码来源，而
-working-tree 构建不会声称任何 commit。
+40 位 revision。About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
+无 metadata 或 schema 4 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
+仅兼容映射到 `portable|local_app_data` 存储。合法 storage selection 不受 build provenance mismatch 影响；
+deployment 存在但字段缺失、类型错误或值未知时，`wWinMain` 在构造任何应用状态对象前明确失败。
 
 metadata 有意不记录构建时间：configure、link 与 package 时间尚未形成稳定语义，直接嵌入
-当前时间也会破坏受控构建输入下的二进制可复现性。这些 schema 3 字段只用于诊断和比较，
+当前时间也会破坏受控构建输入下的二进制可复现性。这些 schema 4 build 字段只用于诊断和比较，
 不是完整 artifact identity 或可复现性保证；最终 Portable ZIP 由 SHA-256 标识。CI build
 number、artifact manifest 和 Windows `VERSIONINFO` 分别属于后续独立契约。
 

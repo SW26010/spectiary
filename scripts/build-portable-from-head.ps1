@@ -1,7 +1,5 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    [string]$Preset = 'vs2022-x64-portable-release-static',
-    [string]$Configuration = 'Release',
     [string]$PackageName = 'SpecForge-portable'
 )
 
@@ -78,8 +76,6 @@ try {
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File $snapshotPackageScript `
-        -Preset $Preset `
-        -Configuration $Configuration `
         -PackageName $PackageName `
         -DistRoot $headDistRoot `
         -SourceMode head `
@@ -88,20 +84,20 @@ try {
         throw "Portable HEAD snapshot build failed with exit code $LASTEXITCODE."
     }
 
-    $packageMetadataPath = Join-Path `
-        (Join-Path $headDistRoot $PackageName) `
-        'specforge_build_metadata.json'
-    if (-not (Test-Path -LiteralPath $packageMetadataPath -PathType Leaf)) {
-        throw "Portable HEAD package metadata is missing: $packageMetadataPath"
+    $headPackageRoot = Join-Path $headDistRoot $PackageName
+    $headZipPath = Join-Path $headDistRoot "$PackageName.zip"
+    $headHashPath = "$headZipPath.sha256"
+    if (-not (Test-Path -LiteralPath $headPackageRoot -PathType Container)) {
+        throw "Portable HEAD package root is missing: $headPackageRoot"
     }
-    $packageMetadata = Get-Content -Raw -LiteralPath $packageMetadataPath | ConvertFrom-Json
-    if ($packageMetadata.source_mode -cne 'head' -or
-        $packageMetadata.source_revision -cne $sourceRevision) {
-        throw "Portable HEAD package metadata does not match revision $sourceRevision."
+    foreach ($artifactPath in @($headZipPath, $headHashPath)) {
+        if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
+            throw "Portable HEAD artifact is missing: $artifactPath"
+        }
     }
 
     Write-Host "HEAD revision: $sourceRevision"
-    Write-Host "HEAD package root: $(Join-Path $headDistRoot $PackageName)"
+    Write-Host "HEAD package root: $headPackageRoot"
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {

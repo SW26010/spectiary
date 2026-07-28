@@ -7,7 +7,6 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -57,12 +56,6 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view text)
     Require(stream.good(), "could not write text file");
 }
 
-std::string PathToUtf8(const std::filesystem::path& path)
-{
-    const auto utf8 = path.u8string();
-    return std::string(utf8.begin(), utf8.end());
-}
-
 void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
 {
     const std::filesystem::path path = specforge::DefaultLocalUserStatePath("nested/state.json");
@@ -71,15 +64,15 @@ void TestDefaultLocalUserStatePathUsesSpecForgeRoot()
     Require(path.parent_path().filename() == "nested", "default local state path should keep relative subdirectories");
     Require(
         path == runtime_paths.local_user_state_root / "nested" / "state.json",
-        "default local state path should live under the selected release profile root");
-    if (runtime_paths.release_profile == specforge::ReleaseProfile::Portable) {
+        "default local state path should live under the selected storage root");
+    if (runtime_paths.storage_profile == specforge::StorageProfile::Portable) {
         Require(
             path.parent_path().parent_path().filename() == "Data",
             "portable local state path should live under the package Data root");
     } else {
         Require(
             path.parent_path().parent_path().filename() == "SpecForge",
-            "installed local state path should live under the SpecForge local app data root");
+            "LocalAppData state path should live under the SpecForge root");
     }
 }
 
@@ -92,10 +85,15 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
 
     specforge::RuntimePathInputs inputs;
     inputs.executable_path = package_root / "SpecForge.exe";
-    inputs.installed_local_user_state_root = installed_root;
+    inputs.local_app_data_user_state_root = installed_root;
 
     const specforge::RuntimePaths portable_paths =
-        specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Portable, inputs);
+        specforge::RuntimePathsForDeployment(
+            {
+                .distribution = specforge::Distribution::Portable,
+                .storage_profile = specforge::StorageProfile::Portable,
+            },
+            inputs);
     Require(portable_paths.package_root == package_root, "portable package root should be the executable directory");
     Require(
         portable_paths.public_spectral_line_catalog_path ==
@@ -108,7 +106,13 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
         "portable ImGui ini should live under Data");
 
     const specforge::RuntimePaths installed_paths =
-        specforge::RuntimePathsForProfile(specforge::ReleaseProfile::Installed, inputs);
+        specforge::RuntimePathsForDeployment(
+            {
+                .distribution = specforge::Distribution::Installer,
+                .storage_profile =
+                    specforge::StorageProfile::LocalAppData,
+            },
+            inputs);
     Require(installed_paths.package_root == package_root, "installed package root should still be the executable directory");
     Require(
         installed_paths.public_spectral_line_catalog_path ==
@@ -122,124 +126,22 @@ void TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct()
     Require(
         portable_paths.local_user_state_root != installed_paths.local_user_state_root,
         "portable and installed state roots should stay distinct");
-}
 
-void TestPortableDefaultStateWriteCreatesDataFile()
-{
-    if (specforge::BuildReleaseProfile() != specforge::ReleaseProfile::Portable) {
-        return;
-    }
-
-    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
-    const std::filesystem::path path = specforge::DefaultLocalUserStatePath("portable-default-write-smoke.txt");
-    std::error_code cleanup_error;
-    std::filesystem::remove(path, cleanup_error);
-
-    specforge::AtomicFileWriteOptions options;
-    options.target_description = "portable default state smoke file";
-    std::string error;
-    Require(
-        specforge::WriteFileAtomically(
-            path,
-            options,
-            [](std::ostream& stream, std::string&) {
-                stream << "portable";
-                return true;
+    const specforge::RuntimePaths winget_paths =
+        specforge::RuntimePathsForDeployment(
+            {
+                .distribution = specforge::Distribution::WinGet,
+                .storage_profile =
+                    specforge::StorageProfile::LocalAppData,
             },
-            &error),
-        error.empty() ? "portable default state write failed" : error);
-
-    Require(path.parent_path() == runtime_paths.local_user_state_root, "portable default write should target Data");
-    Require(path.parent_path().filename() == "Data", "portable default write parent should be Data");
-    Require(std::filesystem::exists(path), "portable default write should create the file under Data");
-    Require(ReadTextFile(path) == "portable", "portable default write should persist content");
-    std::filesystem::remove(path, cleanup_error);
-}
-
-void TestUserPathDisplayTextUsesPackageRelativePortablePath()
-{
-    if (specforge::BuildReleaseProfile() != specforge::ReleaseProfile::Portable) {
-        return;
-    }
-
-    const specforge::RuntimePaths runtime_paths = specforge::DefaultRuntimePaths();
-    const std::filesystem::path relative_path =
-        std::filesystem::path("package-relative-display-test") / "source.npy";
-    const std::filesystem::path package_path = runtime_paths.package_root / relative_path;
-    const std::string package_display = specforge::UserPathDisplayText(package_path);
+            inputs);
     Require(
-        package_display.find(PathToUtf8(runtime_paths.package_root)) == std::string::npos,
-        "package-contained user paths should display without the package root");
+        winget_paths.distribution == specforge::Distribution::WinGet,
+        "WinGet identity should be retained for About");
     Require(
-        package_display.find("package-relative-display-test") != std::string::npos,
-        "package-contained user paths should display their package-relative directory");
-    Require(
-        package_display.find("source.npy") != std::string::npos,
-        "package-contained user paths should display their file name");
-
-    const specforge::JsonValue package_reference = specforge::PersistedPathReferenceJson(package_path);
-    Require(
-        specforge::ReadJsonStringMember(package_reference, "path_kind").value_or("") == "package_relative",
-        "nonexistent package-contained paths should persist as package-relative");
-    Require(
-        specforge::ReadJsonStringMember(package_reference, "path").value_or("") == PathToUtf8(relative_path),
-        "package-relative persistence should keep the lexical suffix");
-
-    Require(
-        specforge::UserPathDisplayText(runtime_paths.package_root) == ".",
-        "the package root should display as the current package-relative directory");
-    const specforge::JsonValue package_root_reference =
-        specforge::PersistedPathReferenceJson(runtime_paths.package_root);
-    Require(
-        specforge::ReadJsonStringMember(package_root_reference, "path_kind").value_or("") == "package_relative",
-        "the package root should persist as package-relative");
-    Require(
-        specforge::ReadJsonStringMember(package_root_reference, "path").value_or("") == ".",
-        "the package root should persist with a dot path");
-    const std::optional<std::filesystem::path> round_tripped_package_root =
-        specforge::ReadPersistedPathReference(package_root_reference);
-    Require(
-        round_tripped_package_root.has_value() &&
-            *round_tripped_package_root == runtime_paths.package_root,
-        "the persisted package root should read back to the current package root");
-
-    const std::filesystem::path external_path =
-        std::filesystem::temp_directory_path() / "specforge_external_display_test" / "source.npy";
-    Require(
-        specforge::UserPathDisplayText(external_path) == PathToUtf8(external_path),
-        "nonexistent external user paths should keep their absolute display text");
-    Require(
-        specforge::ReadJsonStringMember(specforge::PersistedPathReferenceJson(external_path), "path_kind")
-                .value_or("") == "absolute",
-        "nonexistent external paths should persist as absolute");
-
-    std::wstring differently_cased_root_text = runtime_paths.package_root.native();
-    for (wchar_t& character : differently_cased_root_text) {
-        if (character >= L'a' && character <= L'z') {
-            character = static_cast<wchar_t>(character - L'a' + L'A');
-        } else if (character >= L'A' && character <= L'Z') {
-            character = static_cast<wchar_t>(character - L'A' + L'a');
-        }
-    }
-    const std::filesystem::path differently_cased_package_path =
-        std::filesystem::path(differently_cased_root_text) / relative_path;
-    Require(
-        specforge::UserPathDisplayText(differently_cased_package_path) == PathToUtf8(relative_path),
-        "package root matching should use case-insensitive Windows path semantics");
-
-    const std::filesystem::path package_root_other =
-        runtime_paths.package_root.parent_path() /
-        std::filesystem::path(runtime_paths.package_root.filename().native() + L"-other") /
-        "source.npy";
-    Require(
-        specforge::UserPathDisplayText(package_root_other) == PathToUtf8(package_root_other),
-        "a sibling whose name starts with the package root name should remain external");
-
-    const std::filesystem::path escaping_path =
-        runtime_paths.package_root / "nested" / ".." / ".." / "escaped.npy";
-    Require(
-        specforge::UserPathDisplayText(escaping_path) == PathToUtf8(escaping_path),
-        "a lexical path that escapes the package root should remain external");
+        winget_paths.local_user_state_root ==
+            installed_paths.local_user_state_root,
+        "WinGet distribution should not override LocalAppData storage");
 }
 
 void TestAtomicWriteCreatesParentAndReplacesExistingFile()
@@ -747,8 +649,6 @@ int main()
 {
     TestDefaultLocalUserStatePathUsesSpecForgeRoot();
     TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
-    TestPortableDefaultStateWriteCreatesDataFile();
-    TestUserPathDisplayTextUsesPackageRelativePortablePath();
     TestAtomicWriteCreatesParentAndReplacesExistingFile();
     TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
     TestVersionedJsonCacheShellRoundTripsDocument();

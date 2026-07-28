@@ -25,20 +25,6 @@
       }
     },
     {
-      "name": "portable-profile",
-      "hidden": true,
-      "cacheVariables": {
-        "SPECFORGE_RELEASE_PROFILE": "Portable"
-      }
-    },
-    {
-      "name": "installed-profile",
-      "hidden": true,
-      "cacheVariables": {
-        "SPECFORGE_RELEASE_PROFILE": "Installed"
-      }
-    },
-    {
       "name": "static-release-base",
       "hidden": true,
       "cacheVariables": {
@@ -48,45 +34,31 @@
       }
     },
     {
-      "name": "vs2022-x64-portable-debug",
-      "displayName": "Visual Studio 2022 x64 Portable Debug",
+      "name": "vs2022-x64-debug",
+      "displayName": "Visual Studio 2022 x64 Debug",
       "inherits": [
         "base",
-        "dynamic-deps-base",
-        "portable-profile"
+        "dynamic-deps-base"
       ],
       "generator": "Visual Studio 17 2022",
       "architecture": "x64"
     },
     {
-      "name": "vs2022-x64-installed-debug",
-      "displayName": "Visual Studio 2022 x64 Installed Debug",
+      "name": "vs2022-x64-release-static",
+      "displayName": "Visual Studio 2022 x64 Static Release",
       "inherits": [
         "base",
-        "dynamic-deps-base",
-        "installed-profile"
-      ],
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64"
-    },
-    {
-      "name": "vs2022-x64-portable-release-static",
-      "displayName": "Visual Studio 2022 x64 Portable Static Release",
-      "inherits": [
-        "base",
-        "portable-profile",
         "static-release-base"
       ],
       "generator": "Visual Studio 17 2022",
       "architecture": "x64"
     },
     {
-      "name": "ninja-msvc-portable-debug",
-      "displayName": "Ninja MSVC Portable Debug",
+      "name": "ninja-msvc-debug",
+      "displayName": "Ninja MSVC Debug",
       "inherits": [
         "base",
-        "dynamic-deps-base",
-        "portable-profile"
+        "dynamic-deps-base"
       ],
       "generator": "Ninja",
       "cacheVariables": {
@@ -94,24 +66,10 @@
       }
     },
     {
-      "name": "ninja-msvc-installed-debug",
-      "displayName": "Ninja MSVC Installed Debug",
+      "name": "ninja-msvc-release-static",
+      "displayName": "Ninja MSVC Static Release",
       "inherits": [
         "base",
-        "dynamic-deps-base",
-        "installed-profile"
-      ],
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
-    },
-    {
-      "name": "ninja-msvc-portable-release-static",
-      "displayName": "Ninja MSVC Portable Static Release",
-      "inherits": [
-        "base",
-        "portable-profile",
         "static-release-base"
       ],
       "generator": "Ninja",
@@ -122,31 +80,22 @@
   ],
   "buildPresets": [
     {
-      "name": "vs2022-x64-portable-debug",
-      "configurePreset": "vs2022-x64-portable-debug",
+      "name": "vs2022-x64-debug",
+      "configurePreset": "vs2022-x64-debug",
       "configuration": "Debug"
     },
     {
-      "name": "vs2022-x64-installed-debug",
-      "configurePreset": "vs2022-x64-installed-debug",
-      "configuration": "Debug"
-    },
-    {
-      "name": "vs2022-x64-portable-release-static",
-      "configurePreset": "vs2022-x64-portable-release-static",
+      "name": "vs2022-x64-release-static",
+      "configurePreset": "vs2022-x64-release-static",
       "configuration": "Release"
     },
     {
-      "name": "ninja-msvc-portable-debug",
-      "configurePreset": "ninja-msvc-portable-debug"
+      "name": "ninja-msvc-debug",
+      "configurePreset": "ninja-msvc-debug"
     },
     {
-      "name": "ninja-msvc-installed-debug",
-      "configurePreset": "ninja-msvc-installed-debug"
-    },
-    {
-      "name": "ninja-msvc-portable-release-static",
-      "configurePreset": "ninja-msvc-portable-release-static"
+      "name": "ninja-msvc-release-static",
+      "configurePreset": "ninja-msvc-release-static"
     }
   ]
 }

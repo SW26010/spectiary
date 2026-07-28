@@ -1125,8 +1125,11 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
                                                 "pan_pacing_recognized",
                                                 pan_pacing_.recognized),
                                             ProfileSink::Field::String(
-                                                "release_profile",
-                                                ReleaseProfileName(runtime_paths.release_profile)),
+                                                "distribution",
+                                                DistributionName(runtime_paths.distribution)),
+                                            ProfileSink::Field::String(
+                                                "storage_profile",
+                                                StorageProfileName(runtime_paths.storage_profile)),
                                             ProfileSink::Field::String(
                                                 "package_root",
                                                 PathToUtf8(runtime_paths.package_root)),

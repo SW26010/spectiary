@@ -1,7 +1,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [switch]$Configure,
-    [string]$Preset = 'ninja-msvc-portable-debug',
+    [string]$Preset = 'ninja-msvc-debug',
     [string[]]$Target = @(),
     [int]$TimeoutSec = 120,
     [switch]$Explain,

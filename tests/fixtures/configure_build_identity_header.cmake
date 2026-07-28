@@ -4,7 +4,6 @@ foreach(required_variable IN ITEMS
     EXPECTED_MODE
     EXPECTED_REVISION
     EXPECTED_VERSION
-    EXPECTED_RELEASE_PROFILE
     EXPECTED_CONFIGURATION
     EXPECTED_ARCHITECTURE
 )
@@ -16,7 +15,6 @@ endforeach()
 set(SPECFORGE_BUILD_SOURCE_MODE "${EXPECTED_MODE}")
 set(SPECFORGE_BUILD_SOURCE_REVISION "${EXPECTED_REVISION}")
 set(PROJECT_VERSION "${EXPECTED_VERSION}")
-set(SPECFORGE_RELEASE_PROFILE "${EXPECTED_RELEASE_PROFILE}")
 set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "${EXPECTED_ARCHITECTURE}")
 include("${SOURCE_ROOT}/cmake/specforge_build_source.cmake")
 
@@ -37,7 +35,6 @@ file(WRITE "${OUTPUT}" "${generated_header}")
 file(READ "${OUTPUT}" generated_header)
 foreach(expected_text IN ITEMS
     "kSpecForgeVersion[] = \"${EXPECTED_VERSION}\""
-    "kReleaseProfile[] = \"${EXPECTED_RELEASE_PROFILE}\""
     "kBuildConfiguration[] = \"${EXPECTED_CONFIGURATION}\""
     "kTargetArchitecture[] = \"${EXPECTED_ARCHITECTURE}\""
     "kBuildSourceMode[] = \"${EXPECTED_MODE}\""

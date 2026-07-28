@@ -1,16 +1,9 @@
 #include "app/runtime_paths.h"
 
 #include <filesystem>
+#include <stdexcept>
 #include <system_error>
 #include <utility>
-
-#if defined(SPECFORGE_RELEASE_PROFILE_PORTABLE) && defined(SPECFORGE_RELEASE_PROFILE_INSTALLED)
-#error "SpecForge must be compiled with exactly one release profile definition."
-#endif
-
-#if !defined(SPECFORGE_RELEASE_PROFILE_PORTABLE) && !defined(SPECFORGE_RELEASE_PROFILE_INSTALLED)
-#error "SpecForge must be compiled with a release profile definition."
-#endif
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -49,27 +42,6 @@ std::filesystem::path PackageRootForExecutable(const std::filesystem::path& exec
 
 }  // namespace
 
-const char* ReleaseProfileName(ReleaseProfile profile)
-{
-    switch (profile) {
-    case ReleaseProfile::Portable:
-        return "Portable";
-    case ReleaseProfile::Installed:
-        return "Installed";
-    }
-
-    return "Unknown";
-}
-
-ReleaseProfile BuildReleaseProfile()
-{
-#if defined(SPECFORGE_RELEASE_PROFILE_PORTABLE)
-    return ReleaseProfile::Portable;
-#elif defined(SPECFORGE_RELEASE_PROFILE_INSTALLED)
-    return ReleaseProfile::Installed;
-#endif
-}
-
 std::filesystem::path CurrentExecutablePath()
 {
 #ifdef _WIN32
@@ -90,7 +62,7 @@ std::filesystem::path CurrentExecutablePath()
     return FallbackExecutablePath();
 }
 
-std::filesystem::path DefaultInstalledLocalUserStateRoot()
+std::filesystem::path DefaultLocalAppDataUserStateRoot()
 {
 #ifdef _WIN32
     PWSTR local_app_data_path = nullptr;
@@ -109,25 +81,29 @@ std::filesystem::path DefaultInstalledLocalUserStateRoot()
     return std::filesystem::temp_directory_path() / "SpecForge";
 }
 
-RuntimePaths RuntimePathsForProfile(ReleaseProfile profile, RuntimePathInputs inputs)
+RuntimePaths RuntimePathsForDeployment(
+    DeploymentMetadata deployment,
+    RuntimePathInputs inputs)
 {
     RuntimePaths paths;
-    paths.release_profile = profile;
+    paths.distribution = deployment.distribution;
+    paths.storage_profile = deployment.storage_profile;
     paths.executable_path = inputs.executable_path.empty() ? CurrentExecutablePath() : std::move(inputs.executable_path);
     paths.package_root = PackageRootForExecutable(paths.executable_path);
     paths.public_spectral_line_catalog_path =
         paths.package_root / "config" / "spectral_lines.public.tsv";
 
-    std::filesystem::path installed_root = inputs.installed_local_user_state_root.empty()
-                                               ? DefaultInstalledLocalUserStateRoot()
-                                               : std::move(inputs.installed_local_user_state_root);
+    std::filesystem::path local_app_data_root =
+        inputs.local_app_data_user_state_root.empty()
+        ? DefaultLocalAppDataUserStateRoot()
+        : std::move(inputs.local_app_data_user_state_root);
 
-    switch (profile) {
-    case ReleaseProfile::Portable:
+    switch (deployment.storage_profile) {
+    case StorageProfile::Portable:
         paths.local_user_state_root = paths.package_root / "Data";
         break;
-    case ReleaseProfile::Installed:
-        paths.local_user_state_root = std::move(installed_root);
+    case StorageProfile::LocalAppData:
+        paths.local_user_state_root = std::move(local_app_data_root);
         break;
     }
 
@@ -138,10 +114,19 @@ RuntimePaths RuntimePathsForProfile(ReleaseProfile profile, RuntimePathInputs in
 
 RuntimePaths DefaultRuntimePaths()
 {
+    const SpecForgeMetadataReadResult& metadata =
+        DefaultSpecForgeMetadata();
+    if (metadata.startup_error) {
+        throw std::runtime_error(*metadata.startup_error);
+    }
+
     RuntimePathInputs inputs;
     inputs.executable_path = CurrentExecutablePath();
-    inputs.installed_local_user_state_root = DefaultInstalledLocalUserStateRoot();
-    return RuntimePathsForProfile(BuildReleaseProfile(), std::move(inputs));
+    inputs.local_app_data_user_state_root =
+        DefaultLocalAppDataUserStateRoot();
+    return RuntimePathsForDeployment(
+        metadata.deployment,
+        std::move(inputs));
 }
 
 }  // namespace specforge

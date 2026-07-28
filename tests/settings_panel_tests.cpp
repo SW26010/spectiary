@@ -123,9 +123,9 @@ specforge::SettingsPanelUi MakePanel()
 {
     return specforge::SettingsPanelUi({
         .version = "test",
-        .release_profile = "Portable",
+        .distribution = "Portable",
         .configuration = "Debug",
-        .target_architecture = "x64",
+        .target_architecture = "amd64",
         .build_source = {
             .mode = "working_tree",
             .revision = "",
@@ -233,8 +233,8 @@ void TestDefaultEnvironmentDescribesThisBuild()
         environment.version == SPECFORGE_EXPECTED_VERSION,
         "settings should expose the CMake project version");
     Require(
-        !environment.release_profile.empty(),
-        "settings should expose the release profile");
+        !environment.distribution.empty(),
+        "settings should expose the distribution");
     Require(
         environment.configuration == SPECFORGE_EXPECTED_CONFIGURATION,
         "settings should expose the actual build configuration");
@@ -258,9 +258,9 @@ void TestWorkingTreeBuildSourcePresentation()
 {
     const specforge::SettingsPanelEnvironment environment = {
         .version = "test-version",
-        .release_profile = "Portable",
+        .distribution = "Portable",
         .configuration = "Debug",
-        .target_architecture = "x64",
+        .target_architecture = "amd64",
         .build_source = {
             .mode = "working_tree",
             .revision = "",
@@ -281,7 +281,7 @@ void TestWorkingTreeBuildSourcePresentation()
     Require(
         diagnostics ==
             "SpecForge test-version\n"
-            "Release profile: Portable\n"
+            "Distribution: Portable\n"
             "Source mode: working_tree\n"
             "Graphics: Direct3D 11 / SDR\n"
             "Data directory: Data\n"
@@ -296,9 +296,9 @@ void TestHeadBuildSourcePresentation()
         "0123456789abcdef0123456789abcdef01234567";
     const specforge::SettingsPanelEnvironment environment = {
         .version = "test-version",
-        .release_profile = "Portable",
+        .distribution = "Portable",
         .configuration = "Debug",
-        .target_architecture = "x64",
+        .target_architecture = "amd64",
         .build_source = {
             .mode = "head",
             .revision = kRevision,
@@ -319,7 +319,7 @@ void TestHeadBuildSourcePresentation()
     Require(
         diagnostics ==
             "SpecForge test-version\n"
-            "Release profile: Portable\n"
+            "Distribution: Portable\n"
             "Source mode: head\n"
             "Source revision: "
             "0123456789abcdef0123456789abcdef01234567\n"

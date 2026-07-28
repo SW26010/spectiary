@@ -1,4 +1,5 @@
 #include "app/specforge_app.h"
+#include "app/runtime_paths.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -35,6 +36,10 @@ std::optional<std::filesystem::path> InitialSourceFromCommandLine()
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     try {
+        // Deployment metadata controls every default state path. Resolve and
+        // validate it before constructing objects that may load or persist
+        // user state.
+        (void)specforge::DefaultRuntimePaths();
         specforge::SpecForgeApp app;
         return app.Run(instance, show_command, InitialSourceFromCommandLine());
     } catch (const std::exception& error) {

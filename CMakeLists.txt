@@ -1,21 +1,15 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.5.1 LANGUAGES CXX)
+project(SpecForge VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
-set(SPECFORGE_RELEASE_PROFILE "" CACHE STRING "SpecForge release profile: Portable or Installed.")
-set_property(CACHE SPECFORGE_RELEASE_PROFILE PROPERTY STRINGS Portable Installed)
 set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
 set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
 set(SPECFORGE_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
-
-if(NOT SPECFORGE_RELEASE_PROFILE MATCHES "^(Portable|Installed)$")
-    message(FATAL_ERROR "SPECFORGE_RELEASE_PROFILE must be exactly Portable or Installed.")
-endif()
 
 include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")
 
@@ -38,8 +32,8 @@ string(TOLOWER
     "${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
     SPECFORGE_BUILD_TARGET_ARCHITECTURE
 )
-if(SPECFORGE_BUILD_TARGET_ARCHITECTURE MATCHES "^(amd64|x86_64)$")
-    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "x64")
+if(SPECFORGE_BUILD_TARGET_ARCHITECTURE MATCHES "^(amd64|x64|x86_64)$")
+    set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "amd64")
 elseif(SPECFORGE_BUILD_TARGET_ARCHITECTURE MATCHES "^(win32|i[3-6]86)$")
     set(SPECFORGE_BUILD_TARGET_ARCHITECTURE "x86")
 elseif(SPECFORGE_BUILD_TARGET_ARCHITECTURE STREQUAL "aarch64")
@@ -143,15 +137,15 @@ file(GENERATE
         "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
 )
 configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/specforge_build_metadata.json.in"
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_metadata.json.in"
+    "${CMAKE_SOURCE_DIR}/cmake/specforge_metadata.json.in"
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_metadata.json.in"
     @ONLY
 )
 file(GENERATE
     OUTPUT
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
     INPUT
-        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_metadata.json.in"
+        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_metadata.json.in"
 )
 
 if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
@@ -188,18 +182,7 @@ function(specforge_use_embedded_resources target_name)
     endif()
 endfunction()
 
-function(specforge_apply_release_profile target_name)
-    if(SPECFORGE_RELEASE_PROFILE STREQUAL "Portable")
-        target_compile_definitions(${target_name} PRIVATE SPECFORGE_RELEASE_PROFILE_PORTABLE)
-    elseif(SPECFORGE_RELEASE_PROFILE STREQUAL "Installed")
-        target_compile_definitions(${target_name} PRIVATE SPECFORGE_RELEASE_PROFILE_INSTALLED)
-    else()
-        message(FATAL_ERROR "Unknown SPECFORGE_RELEASE_PROFILE: ${SPECFORGE_RELEASE_PROFILE}")
-    endif()
-endfunction()
-
 function(specforge_use_runtime_paths target_name)
-    specforge_apply_release_profile(${target_name})
     if(WIN32)
         target_link_libraries(${target_name} PRIVATE ole32 shell32)
     endif()
@@ -225,12 +208,12 @@ function(specforge_configure_production_target target_name)
 endfunction()
 
 add_library(specforge_core STATIC
-    src/app/build_metadata_reader.cpp
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
     src/app/pan_pacing.cpp
     src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
+    src/app/specforge_metadata.cpp
     src/domain/fits_file_reader.cpp
     src/domain/fits_spectrum_loader.cpp
     src/domain/npy_array_io.cpp
@@ -352,7 +335,6 @@ add_executable(specforge_native WIN32
     ${SPECFORGE_MANIFEST}
 )
 specforge_configure_production_target(specforge_native)
-specforge_apply_release_profile(specforge_native)
 target_link_libraries(specforge_native PRIVATE
     specforge_desktop_ui
     specforge_renderer
@@ -383,16 +365,16 @@ if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     )
 endif()
 
-add_custom_target(specforge_build_metadata
+add_custom_target(specforge_metadata
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/specforge_build_metadata.json"
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/specforge_metadata.json"
     DEPENDS
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_build_metadata.json"
-    COMMENT "Synchronizing SpecForge build metadata"
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+    COMMENT "Synchronizing SpecForge metadata"
     VERBATIM
 )
-add_dependencies(specforge_native specforge_build_metadata)
+add_dependencies(specforge_native specforge_metadata)
 
 set(SPECFORGE_RELEASE_DOCUMENT_OUTPUTS)
 set(SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS)
@@ -426,11 +408,68 @@ add_dependencies(specforge_native specforge_release_documents)
 
 enable_testing()
 
+set(SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY
+    "${CMAKE_BINARY_DIR}/portable-tests/$<CONFIG>"
+)
+set(SPECFORGE_PORTABLE_TEST_METADATA
+    "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/specforge_metadata.json"
+)
+add_custom_target(specforge_portable_test_metadata
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DINPUT=${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+        "-DOUTPUT=${SPECFORGE_PORTABLE_TEST_METADATA}"
+        -P "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
+    DEPENDS
+        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+        "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
+    COMMENT "Preparing Portable runtime metadata for deterministic tests"
+    VERBATIM
+)
+
 function(specforge_add_test target_name source_file production_target)
     add_executable(${target_name} ${source_file})
     target_link_libraries(${target_name} PRIVATE ${production_target})
     specforge_enable_warnings(${target_name})
     add_test(NAME ${target_name} COMMAND ${target_name})
+endfunction()
+
+function(specforge_add_portable_only_test target_name source_file production_target)
+    add_executable(${target_name} ${source_file})
+    target_link_libraries(${target_name} PRIVATE ${production_target})
+    specforge_enable_warnings(${target_name})
+    set(portable_fixture_target
+        "${target_name}_portable_fixture"
+    )
+    set(portable_executable
+        "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}/$<TARGET_FILE_NAME:${target_name}>"
+    )
+    add_custom_target(${portable_fixture_target} ALL
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:${target_name}>"
+            "${portable_executable}"
+        DEPENDS ${target_name}
+        COMMENT "Preparing Portable runtime fixture for ${target_name}"
+        VERBATIM
+    )
+    add_dependencies(
+        ${portable_fixture_target}
+        specforge_portable_test_metadata
+    )
+    add_test(
+        NAME "${target_name}"
+        COMMAND "${portable_executable}"
+    )
+    set_tests_properties(
+        "${target_name}"
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${target_name}>"
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:${target_name}>"
+    )
 endfunction()
 
 specforge_add_test(
@@ -443,6 +482,11 @@ target_link_libraries(specforge_sdr_swap_chain_tests PRIVATE imgui::imgui)
 specforge_add_test(
     specforge_local_user_state_tests
     tests/local_user_state_tests.cpp
+    specforge_sessions
+)
+specforge_add_portable_only_test(
+    specforge_portable_runtime_state_tests
+    tests/portable_runtime_state_tests.cpp
     specforge_sessions
 )
 specforge_add_test(
@@ -488,12 +532,12 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
-    specforge_build_metadata_reader_tests
-    tests/build_metadata_reader_tests.cpp
+    specforge_metadata_tests
+    tests/specforge_metadata_tests.cpp
     specforge_core
 )
-target_compile_definitions(specforge_build_metadata_reader_tests PRIVATE
-    SPECFORGE_BUILD_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
+target_compile_definitions(specforge_metadata_tests PRIVATE
+    SPECFORGE_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
 )
 specforge_add_test(
     specforge_settings_panel_tests
@@ -539,7 +583,6 @@ add_test(
         -GeneratedBuildIdentity
             "${CMAKE_BINARY_DIR}/generated/$<CONFIG>/specforge/specforge_build_identity.h"
         -SpecForgeVersion "${PROJECT_VERSION}"
-        -ReleaseProfile "${SPECFORGE_RELEASE_PROFILE}"
         -Configuration "$<CONFIG>"
         -SourceMode "${SPECFORGE_BUILD_SOURCE_MODE}"
         -SourceRevision "${SPECFORGE_BUILD_SOURCE_REVISION}"

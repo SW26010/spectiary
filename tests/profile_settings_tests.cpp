@@ -110,7 +110,7 @@ void TestMissingSettingsUseDefaultDirectory()
 
     Require(
         resolution.directory == default_directory,
-        "missing settings should retain the release-profile default directory");
+        "missing settings should retain the storage-profile default directory");
     Require(
         resolution.source == specforge::ProfileOutputDirectorySource::Default,
         "missing settings should identify the default source");

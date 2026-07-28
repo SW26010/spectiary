@@ -107,13 +107,13 @@ powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -BudgetM
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\build-ninja-msvc-debug.ps1 `
   -Configure `
-  -Preset ninja-msvc-portable-release-static `
+  -Preset ninja-msvc-release-static `
   -Target specforge_native `
   -TimeoutSec 1200
 
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts\build-ninja-msvc-debug.ps1 `
-  -Preset ninja-msvc-portable-release-static `
+  -Preset ninja-msvc-release-static `
   -Target specforge_native `
   -TimeoutSec 1200
 ```
@@ -121,7 +121,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 第一条配置 preset，第二条构建同一 preset 的 `specforge_native`。然后分别运行：
 
 ```powershell
-$exe = ".\build\ninja-msvc-portable-release-static\SpecForge.exe"
+$exe = ".\build\ninja-msvc-release-static\SpecForge.exe"
 $source = "C:\path\to\same-real-source.npy"
 
 powershell -NoProfile -ExecutionPolicy Bypass `

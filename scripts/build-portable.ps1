@@ -1,6 +1,6 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    [string]$Preset = 'vs2022-x64-portable-release-static',
+    [string]$Preset = 'vs2022-x64-release-static',
     [string]$Configuration = 'Release',
     [string]$PackageName = 'SpecForge-portable',
     [string]$BuildRoot,
@@ -10,7 +10,8 @@ param(
     [Parameter(DontShow = $true)]
     [AllowEmptyString()]
     [string]$SourceRevision = '',
-    [switch]$SkipBuild
+    [Parameter(DontShow = $true)]
+    [switch]$PackageUnverifiedTestFixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +49,20 @@ function Assert-DirectChildPath {
     return $childFullPath
 }
 
+function Test-PathIsWithinRoot {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Path,
+        [Parameter(Mandatory = $true)] [string]$Root
+    )
+
+    $fullPath = Get-NormalizedFullPath -Path $Path
+    $fullRoot = Get-NormalizedFullPath -Path $Root
+    $rootPrefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    return $fullPath.StartsWith(
+        $rootPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Assert-SingleNoticeHeading {
     param(
         [Parameter(Mandatory = $true)] [AllowEmptyString()] [string[]]$Lines,
@@ -76,6 +91,20 @@ function Get-RequiredMetadataString {
     }
     if ($property.Value -cne $property.Value.Trim()) {
         throw "Build metadata '$PropertyName' must not have leading or trailing whitespace."
+    }
+    return $property.Value
+}
+
+function Get-RequiredMetadataObject {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [string]$PropertyName
+    )
+
+    $property = $Metadata.PSObject.Properties[$PropertyName]
+    if ($null -eq $property -or $null -eq $property.Value -or
+        $property.Value -isnot [pscustomobject]) {
+        throw "SpecForge metadata is missing object '$PropertyName'."
     }
     return $property.Value
 }
@@ -112,6 +141,15 @@ if ([string]::IsNullOrWhiteSpace($DistRoot)) {
 else {
     $DistRoot = Get-NormalizedFullPath -Path $DistRoot
 }
+if ($PackageUnverifiedTestFixture) {
+    # Release-artifact tests intentionally mutate sidecars without rebuilding the
+    # EXE. Keep that unverified seam outside every repository artifact directory.
+    $temporaryRoot = Get-NormalizedFullPath -Path ([System.IO.Path]::GetTempPath())
+    if (-not (Test-PathIsWithinRoot -Path $BuildRoot -Root $temporaryRoot) -or
+        -not (Test-PathIsWithinRoot -Path $DistRoot -Root $temporaryRoot)) {
+        throw 'PackageUnverifiedTestFixture is reserved for release-artifact tests and may only use BuildRoot and DistRoot beneath the system temporary directory.'
+    }
+}
 $packageRoot = Join-Path $distRoot $PackageName
 $zipPath = Join-Path $distRoot "$PackageName.zip"
 $releaseDocumentSourceRoot = Join-Path $repoRoot 'legal'
@@ -122,7 +160,7 @@ $releaseDocumentNames = @(
     'DATA_SOURCES.txt'
 )
 
-if (-not $SkipBuild) {
+if (-not $PackageUnverifiedTestFixture) {
     Write-Host 'build-portable.ps1 invokes CMake directly; run it from a normal developer shell or an approved unsandboxed agent run.'
     Push-Location -LiteralPath $repoRoot
     try {
@@ -157,15 +195,43 @@ if (-not $sourceExecutable) {
 }
 
 $sourceExecutableDirectory = Split-Path -Parent $sourceExecutable
-$buildMetadataPath = Join-Path $sourceExecutableDirectory 'specforge_build_metadata.json'
-if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
-    throw "Build metadata was not found beside SpecForge.exe: $buildMetadataPath"
+$sourceMetadataPath = Join-Path $sourceExecutableDirectory 'specforge_metadata.json'
+if (-not (Test-Path -LiteralPath $sourceMetadataPath -PathType Leaf)) {
+    throw "SpecForge metadata was not found beside SpecForge.exe: $sourceMetadataPath"
 }
-$buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
+$sourceMetadata = Get-Content -Raw -LiteralPath $sourceMetadataPath | ConvertFrom-Json
+$schemaVersionProperty =
+    $sourceMetadata.PSObject.Properties['schema_version']
+if ($null -eq $schemaVersionProperty -or
+    $sourceMetadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
+    throw 'SpecForge metadata schema_version must be the integer 4.'
+}
+$schemaVersion = $schemaVersionProperty.Value
+if (($schemaVersion -isnot [int] -and
+     $schemaVersion -isnot [long]) -or
+    $schemaVersion -ne 4) {
+    throw 'SpecForge metadata schema_version must be the integer 4.'
+}
+if ($sourceMetadata.PSObject.Properties.Name -ccontains 'deployment') {
+    throw 'Build-output SpecForge metadata must not contain deployment; the packaging flow owns distribution identity.'
+}
+$productMetadata = Get-RequiredMetadataObject `
+    -Metadata $sourceMetadata `
+    -PropertyName 'product'
+$buildMetadata = Get-RequiredMetadataObject `
+    -Metadata $sourceMetadata `
+    -PropertyName 'build'
+$productName = Get-RequiredMetadataString `
+    -Metadata $productMetadata `
+    -PropertyName 'name'
+[void](Get-RequiredMetadataString `
+    -Metadata $productMetadata `
+    -PropertyName 'version')
+if ($productName -cne 'SpecForge') {
+    throw "SpecForge metadata has product name '$productName'; expected 'SpecForge'."
+}
 foreach ($propertyName in @(
     'source_mode',
-    'specforge_version',
-    'release_profile',
     'configuration',
     'compiler_id',
     'compiler_version',
@@ -181,23 +247,27 @@ foreach ($propertyName in @(
         -Metadata $buildMetadata `
         -PropertyName $propertyName)
 }
-if ($buildMetadata.schema_version -ne 3) {
-    throw "Unsupported build metadata schema version '$($buildMetadata.schema_version)'."
-}
 if ($buildMetadata.source_mode -cne $SourceMode) {
-    throw "Build metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
+    throw "SpecForge metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
 }
-if (-not ($buildMetadata.PSObject.Properties.Name -ccontains 'source_revision')) {
+$sourceRevisionProperty =
+    $buildMetadata.PSObject.Properties['source_revision']
+if ($null -eq $sourceRevisionProperty -or
+    $buildMetadata.PSObject.Properties.Name -cnotcontains 'source_revision') {
     throw "Build metadata is missing 'source_revision'."
 }
-if ($SourceMode -ceq 'working_tree' -and $null -ne $buildMetadata.source_revision) {
-    throw "Working-tree build metadata must use null source_revision."
+if ($SourceMode -ceq 'working_tree') {
+    if ($null -ne $sourceRevisionProperty.Value) {
+        throw "Working-tree build metadata must use null source_revision."
+    }
 }
-if ($SourceMode -ceq 'head' -and $buildMetadata.source_revision -cne $SourceRevision) {
-    throw "Head build metadata has source revision '$($buildMetadata.source_revision)'; expected '$SourceRevision'."
-}
-if ($buildMetadata.release_profile -cne 'Portable') {
-    throw "SpecForge.exe has release profile '$($buildMetadata.release_profile)'; expected 'Portable'."
+else {
+    if ($sourceRevisionProperty.Value -isnot [string]) {
+        throw 'Head build metadata must use a single string source_revision.'
+    }
+    if ($sourceRevisionProperty.Value -cne $SourceRevision) {
+        throw "Head build metadata has source revision '$($sourceRevisionProperty.Value)'; expected '$SourceRevision'."
+    }
 }
 if ($buildMetadata.configuration -cne $Configuration) {
     throw "SpecForge.exe has configuration '$($buildMetadata.configuration)'; expected '$Configuration'."
@@ -214,8 +284,8 @@ if ($buildMetadata.cmake_version -cnotmatch '^[0-9]+(?:\.[0-9]+){2,3}$') {
 if ($buildMetadata.generator -match '[\x00-\x1f]') {
     throw "Build metadata has invalid generator '$($buildMetadata.generator)'."
 }
-if ($buildMetadata.target_architecture -cne 'x64') {
-    throw "SpecForge.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'x64'."
+if ($buildMetadata.target_architecture -cne 'amd64') {
+    throw "SpecForge.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'amd64'."
 }
 if ($buildMetadata.windows_sdk_version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
     throw "Build metadata has invalid windows_sdk_version '$($buildMetadata.windows_sdk_version)'."
@@ -260,10 +330,37 @@ New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-
 $releaseDocumentPackageRoot = Join-Path $packageRoot $releaseDocumentDirectoryName
 New-Item -ItemType Directory -Path $releaseDocumentPackageRoot -Force | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot 'SpecForge.exe') -Force
-Copy-Item `
-    -LiteralPath $buildMetadataPath `
-    -Destination (Join-Path $packageRoot 'specforge_build_metadata.json') `
-    -Force
+$sourceExecutableHash = (
+    Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
+).Hash.ToLowerInvariant()
+$packagedExecutableHash = (
+    Get-FileHash `
+        -Algorithm SHA256 `
+        -LiteralPath (Join-Path $packageRoot 'SpecForge.exe')
+).Hash.ToLowerInvariant()
+if ($sourceExecutableHash -cne $packagedExecutableHash) {
+    throw "Packaged SpecForge.exe hash '$packagedExecutableHash' does not match source executable hash '$sourceExecutableHash'."
+}
+$packageMetadataPath = Join-Path $packageRoot 'specforge_metadata.json'
+$portableMetadata = $sourceMetadata |
+    ConvertTo-Json -Depth 10 |
+    ConvertFrom-Json
+$portableMetadata |
+    Add-Member `
+        -MemberType NoteProperty `
+        -Name deployment `
+        -Value ([ordered]@{
+            distribution = 'portable'
+            storage_profile = 'portable'
+        })
+$portableMetadataJson = (
+    $portableMetadata |
+        ConvertTo-Json -Depth 10
+) + [Environment]::NewLine
+[IO.File]::WriteAllText(
+    $packageMetadataPath,
+    $portableMetadataJson,
+    (New-Object Text.UTF8Encoding($false)))
 foreach ($documentName in $releaseDocumentNames) {
     Copy-Item `
         -LiteralPath (Join-Path $releaseDocumentSourceRoot $documentName) `
@@ -289,8 +386,8 @@ try {
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $archive,
-            (Join-Path $packageRoot 'specforge_build_metadata.json'),
-            'specforge_build_metadata.json',
+            $packageMetadataPath,
+            'specforge_metadata.json',
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [void]$archive.CreateEntry('Data/')
         [void]$archive.CreateEntry("$releaseDocumentDirectoryName/")
@@ -316,3 +413,4 @@ Set-Content -LiteralPath $hashPath -Value ("{0}  {1}" -f $hash.Hash.ToLowerInvar
 Write-Host "Portable package: $packageRoot"
 Write-Host "Portable zip: $zipPath"
 Write-Host "SHA256: $hashPath"
+Write-Host "SpecForge.exe SHA256: $packagedExecutableHash"

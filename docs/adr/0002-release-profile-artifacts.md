@@ -1,5 +1,12 @@
 # Release Profiles Are Separate Artifacts
 
+Status: Superseded by
+[ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md).
+
+This document records the former compile-time release-profile decision. It is
+retained as decision history; ADR 0003 replaces its artifact-identity and
+storage-selection rules.
+
 SpecForge treats Portable and Installed builds as a release-variant build
 contract, not as a runtime setting. The build artifact decides the local user
 state root before any user state is loaded: Installed builds use the Windows

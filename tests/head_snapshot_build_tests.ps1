@@ -111,8 +111,6 @@ exit 1
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File (Join-Path $fixtureScriptsRoot 'build-portable-from-head.ps1') `
-        -Preset 'head-snapshot-test' `
-        -Configuration 'Test' `
         -PackageName 'SpecForge-portable'
     if ($LASTEXITCODE -ne 0) {
         throw "HEAD snapshot integration fixture failed with exit code $LASTEXITCODE."
@@ -123,14 +121,30 @@ exit 1
         throw 'HEAD wrapper did not invoke the child builder inside the snapshot.'
     }
     $invocation = Get-Content -Raw -LiteralPath $invocationPath | ConvertFrom-Json
-    if ($invocation.source_mode -cne 'head' -or
+    if ($invocation.source_mode -isnot [string] -or
+        $invocation.source_mode -cne 'head' -or
+        $invocation.source_revision -isnot [string] -or
         $invocation.source_revision -cne $fixtureRevision) {
         throw 'HEAD wrapper did not pass the frozen HEAD source contract to its child.'
     }
-    if ($invocation.preset -cne 'head-snapshot-test' -or
-        $invocation.configuration -cne 'Test' -or
+    if ($invocation.preset_was_bound -ne $false -or
+        $invocation.configuration_was_bound -ne $false -or
+        $invocation.preset -cne 'snapshot-owned-portable-preset' -or
+        $invocation.configuration -cne 'SnapshotRelease' -or
         $invocation.package_name -cne 'SpecForge-portable') {
-        throw 'HEAD wrapper did not preserve child build arguments.'
+        throw 'HEAD wrapper did not leave preset and configuration defaults to the snapshot-owned builder.'
+    }
+    $legacyMetadataPath = Join-Path `
+        $testRoot `
+        'dist\head\SpecForge-portable\specforge_build_metadata.json'
+    if (-not (Test-Path -LiteralPath $legacyMetadataPath -PathType Leaf) -or
+        $invocation.child_schema_version -ne 3) {
+        throw 'HEAD wrapper did not accept the child builder generation-owned legacy output.'
+    }
+    if (Test-Path -LiteralPath (
+        Join-Path $testRoot 'dist\head\SpecForge-portable\specforge_metadata.json'
+    )) {
+        throw 'HEAD snapshot fixture unexpectedly produced current-generation metadata.'
     }
     if ($invocation.tracked_value -cne 'committed') {
         throw 'HEAD wrapper child did not observe committed tracked content.'

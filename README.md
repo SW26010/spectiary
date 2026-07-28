@@ -62,7 +62,7 @@ Required tools:
 - Visual Studio 2022 Build Tools with the C++ desktop workload
 - Windows 10/11 SDK with DirectX 11 headers and libraries
 - CMake 3.24 or newer
-- Ninja, if using the `ninja-msvc-portable-debug` preset
+- Ninja, if using the `ninja-msvc-debug` preset
 - vcpkg
 
 Set `VCPKG_ROOT` to your vcpkg checkout:
@@ -78,7 +78,7 @@ Open a new terminal after setting it.
 > [!IMPORTANT]
 > For Ninja/MSVC configure and build operations, use
 > `scripts/build-ninja-msvc-debug.ps1`. Do not run `ninja` or
-> `cmake --build --preset ninja-msvc-portable-debug` directly from an ordinary
+> `cmake --build --preset ninja-msvc-debug` directly from an ordinary
 > PowerShell or a restricted agent shell. Restricted agents must run the wrapper
 > with tool escalation. See
 > [Ninja/MSVC troubleshooting](docs/engineering_setup.md#ninjamsvc-卡住排查).
@@ -92,7 +92,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-deb
 Or use the Visual Studio generator preset:
 
 ```powershell
-cmake --preset vs2022-x64-portable-debug
+cmake --preset vs2022-x64-debug
 ```
 
 Configure success verifies the dependency stack and generated build files.
@@ -109,14 +109,16 @@ The wrapper performs a process-kill preflight and refuses to start CMake if the 
 shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
 
 The executable is written under
-`build/ninja-msvc-portable-debug/SpecForge.exe`. Portable runtime state is
-owned by the executable directory's `Data` folder: ImGui layout is
-`Data/specforge-imgui-v2.ini`. Release builds can start or stop a performance
+`build/ninja-msvc-debug/SpecForge.exe`. A build output has no deployment
+declaration and therefore runs as Standalone, with SpecForge-owned state under
+`%LOCALAPPDATA%\SpecForge`. The ImGui layout is
+`%LOCALAPPDATA%\SpecForge\specforge-imgui-v2.ini`. Release builds can start or
+stop a performance
 diagnostic recording from `Settings > Diagnostics`, where users can also choose
-the output directory. That choice is saved in `Data/profile-settings.json`.
-JSONL output defaults to `Data/logs/`; resolution order is
+the output directory. That choice is saved under the selected data root.
+JSONL output defaults to its `logs/` child; resolution order is
 `SPECFORGE_PROFILE_DIR` environment override, saved user setting, then the
-release-profile default. `SPECFORGE_PROFILE=1` remains available for scripted
+storage-profile default. `SPECFORGE_PROFILE=1` remains available for scripted
 startup capture.
 Recording uses a bounded asynchronous writer and stops automatically after five
 minutes or 100 MiB. Stopping from Settings drains in the background; completed
@@ -126,20 +128,28 @@ zero dropped events.
 ## Portable Package
 
 The first portable package is a no-launcher zip with `SpecForge.exe`,
-`specforge_build_metadata.json`, `Data/`, and `Legal/` at the zip root.
-`specforge_build_metadata.json` identifies whether a package came from current
-workspace files or an isolated committed `HEAD` snapshot. Schema 3 also records
-selected build-environment dimensions for diagnostics and comparison: compiler,
-CMake, generator, target architecture, and, when the generator exposes an
-authoritative selection, the Windows SDK. Ninja and other configurations
-without such a CMake value record `windows_sdk_version: null`; formal Portable
-packaging requires a non-null SDK version. CMake is the sole source of these
-values, and packaging does not re-derive them from the PowerShell environment.
-This tuple is not an artifact identity or a reproducibility guarantee; the
-packaged ZIP SHA-256 identifies the final artifact. Immutable build metadata
-stays outside the mutable `Data/` user-state directory. `Legal/` contains the
-SpecForge EULA, complete third-party software notices, and scientific data
-attribution.
+`specforge_metadata.json`, `Data/`, and `Legal/` at the zip root. Schema 4 keeps
+product, build provenance, and deployment separate. The Portable packager adds
+`deployment.distribution: "portable"` and
+`deployment.storage_profile: "portable"` to the build-output metadata without
+modifying the EXE; it verifies that the pre-package and packaged EXE SHA-256
+values match. The same EXE without metadata or without `deployment` is
+Standalone and uses `%LOCALAPPDATA%\SpecForge`. A structurally invalid
+deployment declaration fails during startup before application state objects
+are constructed. Build-provenance mismatch is still reported in About but does
+not override a valid storage declaration. Legacy schema 3
+`specforge_build_metadata.json` files remain readable so an old Portable folder
+can receive only a new EXE without losing sight of its `Data/` state.
+
+Build provenance identifies whether a package came from current workspace
+files or an isolated committed `HEAD` snapshot and records compiler, CMake,
+generator, target architecture, Windows SDK, and dependency versions. Ninja and
+other configurations without an authoritative CMake SDK value record
+`windows_sdk_version: null`; formal Portable packaging requires a non-null SDK
+version. The executable architecture is recorded as `amd64`; Visual Studio,
+vcpkg, and preset inputs retain their native `x64` spelling. This tuple is
+diagnostic, not an artifact identity or reproducibility guarantee; the packaged
+ZIP SHA-256 identifies the final artifact.
 
 Build current workspace files without claiming a Git revision:
 
@@ -153,11 +163,14 @@ Build the exact local `HEAD` commit from a temporary `git archive` snapshot:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable-from-head.ps1
 ```
 
-Both scripts invoke CMake directly with the Visual Studio portable release
-preset, so run them from a normal developer shell or an approved unsandboxed
-agent run. The shared builder's source-mode parameters are an internal contract
-between these entrypoints: `head` mode is rejected when the builder is running
-from a Git checkout instead of an exported snapshot.
+The working-tree builder invokes CMake directly with the current unified Visual
+Studio release preset. The HEAD wrapper delegates preset selection,
+configuration defaults, and package validation to the builder stored in the
+snapshot, so it remains compatible across build-script generations. Run either
+entrypoint from a normal developer shell or an approved unsandboxed agent run.
+The snapshot builder's source-mode parameters are an internal contract between
+these entrypoints: `head` mode is rejected when the builder is running from a
+Git checkout instead of an exported snapshot.
 
 Working-tree output uses `dist\SpecForge-portable`; isolated HEAD output uses
 `dist\head\SpecForge-portable`. Each package has a matching ZIP and `.sha256`
@@ -166,7 +179,7 @@ file in its own output directory.
 Launch with a spectrum source path to smoke-test the real-data loader:
 
 ```powershell
-.\build\ninja-msvc-portable-debug\SpecForge.exe C:\path\to\spectrum_source.fits
+.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
 ```
 
 Inside the app, the Files panel `Add file...` button opens source files through

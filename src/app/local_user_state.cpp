@@ -88,7 +88,7 @@ bool IsSafePackageRelativePath(const std::filesystem::path& path)
 bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesystem::path& relative_path)
 {
     const RuntimePaths runtime_paths = DefaultRuntimePaths();
-    if (runtime_paths.release_profile != ReleaseProfile::Portable || runtime_paths.package_root.empty()) {
+    if (runtime_paths.storage_profile != StorageProfile::Portable || runtime_paths.package_root.empty()) {
         return false;
     }
 
@@ -120,7 +120,7 @@ bool TryMakePackageRelativePath(const std::filesystem::path& path, std::filesyst
 std::optional<std::filesystem::path> TryRebaseLegacyPackagePath(const std::filesystem::path& path)
 {
     const RuntimePaths runtime_paths = DefaultRuntimePaths();
-    if (runtime_paths.release_profile != ReleaseProfile::Portable || runtime_paths.package_root.empty()) {
+    if (runtime_paths.storage_profile != StorageProfile::Portable || runtime_paths.package_root.empty()) {
         return std::nullopt;
     }
 

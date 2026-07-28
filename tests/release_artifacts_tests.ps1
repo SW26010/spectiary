@@ -25,9 +25,6 @@ param(
     [string]$SpecForgeVersion,
 
     [Parameter(Mandatory = $true)]
-    [string]$ReleaseProfile,
-
-    [Parameter(Mandatory = $true)]
     [string]$Configuration,
 
     [Parameter(Mandatory = $true)]
@@ -83,6 +80,25 @@ function Assert-NotContains {
     }
 }
 
+function Assert-SchemaVersionFour {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $property = $Metadata.PSObject.Properties['schema_version']
+    if ($null -eq $property -or
+        $Metadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
+        throw "$Description schema_version must be the integer 4."
+    }
+    $schemaVersion = $property.Value
+    if (($schemaVersion -isnot [int] -and
+         $schemaVersion -isnot [long]) -or
+        $schemaVersion -ne 4) {
+        throw "$Description schema_version must be the integer 4."
+    }
+}
+
 function Assert-FilesMatch {
     param(
         [Parameter(Mandatory = $true)] [string]$ExpectedPath,
@@ -109,11 +125,16 @@ function Assert-BuildSourceContract {
         [Parameter(Mandatory = $true)] [string]$Description
     )
 
-    if ($Metadata.source_mode -cne $ExpectedMode) {
+    $sourceModeProperty = $Metadata.PSObject.Properties['source_mode']
+    if ($null -eq $sourceModeProperty -or
+        $Metadata.PSObject.Properties.Name -cnotcontains 'source_mode' -or
+        $sourceModeProperty.Value -isnot [string] -or
+        $sourceModeProperty.Value -cne $ExpectedMode) {
         throw "$Description source_mode expected '$ExpectedMode'; found '$($Metadata.source_mode)'."
     }
     $sourceRevisionProperty = $Metadata.PSObject.Properties['source_revision']
-    if ($null -eq $sourceRevisionProperty) {
+    if ($null -eq $sourceRevisionProperty -or
+        $Metadata.PSObject.Properties.Name -cnotcontains 'source_revision') {
         throw "$Description is missing 'source_revision'."
     }
     if ($ExpectedMode -ceq 'working_tree') {
@@ -121,8 +142,13 @@ function Assert-BuildSourceContract {
             throw "$Description working-tree source_revision must be null."
         }
     }
-    elseif ($sourceRevisionProperty.Value -cne $ExpectedRevision) {
-        throw "$Description source_revision expected '$ExpectedRevision'; found '$($sourceRevisionProperty.Value)'."
+    else {
+        if ($sourceRevisionProperty.Value -isnot [string]) {
+            throw "$Description head source_revision must be a single string."
+        }
+        if ($sourceRevisionProperty.Value -cne $ExpectedRevision) {
+            throw "$Description source_revision expected '$ExpectedRevision'; found '$($sourceRevisionProperty.Value)'."
+        }
     }
 }
 
@@ -156,7 +182,7 @@ function Assert-BuildToolchainContract {
 
 function Assert-PortablePackage {
     param(
-        [Parameter(Mandatory = $true)] [string]$ExpectedMetadataPath,
+        [Parameter(Mandatory = $true)] [string]$ExpectedExecutablePath,
         [Parameter(Mandatory = $true)] [string]$PackageRoot,
         [Parameter(Mandatory = $true)] [string]$ZipPath,
         [Parameter(Mandatory = $true)] [string]$Description
@@ -166,7 +192,7 @@ function Assert-PortablePackage {
         'Data',
         'Legal',
         'SpecForge.exe',
-        'specforge_build_metadata.json'
+        'specforge_metadata.json'
     )
     $actualPackageEntries = @(
         Get-ChildItem -LiteralPath $PackageRoot |
@@ -177,9 +203,37 @@ function Assert-PortablePackage {
         throw "$Description package root entries are wrong: $($actualPackageEntries -join ', ')."
     }
     Assert-FilesMatch `
-        -ExpectedPath $ExpectedMetadataPath `
-        -ActualPath (Join-Path $PackageRoot 'specforge_build_metadata.json') `
-        -Description "$Description packaged build metadata"
+        -ExpectedPath $ExpectedExecutablePath `
+        -ActualPath (Join-Path $PackageRoot 'SpecForge.exe') `
+        -Description "$Description packaged executable"
+    $packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
+    $packageMetadata = Get-Content -Raw -LiteralPath $packageMetadataPath |
+        ConvertFrom-Json
+    Assert-SchemaVersionFour `
+        -Metadata $packageMetadata `
+        -Description "$Description package metadata"
+    $deploymentProperty =
+        $packageMetadata.PSObject.Properties['deployment']
+    if ($null -eq $deploymentProperty -or
+        $packageMetadata.PSObject.Properties.Name -cnotcontains 'deployment' -or
+        $deploymentProperty.Value -isnot [pscustomobject]) {
+        throw "$Description package metadata does not declare Portable deployment."
+    }
+    $deployment = $deploymentProperty.Value
+    $distributionProperty =
+        $deployment.PSObject.Properties['distribution']
+    $storageProfileProperty =
+        $deployment.PSObject.Properties['storage_profile']
+    if ($null -eq $distributionProperty -or
+        $deployment.PSObject.Properties.Name -cnotcontains 'distribution' -or
+        $distributionProperty.Value -isnot [string] -or
+        $distributionProperty.Value -cne 'portable' -or
+        $null -eq $storageProfileProperty -or
+        $deployment.PSObject.Properties.Name -cnotcontains 'storage_profile' -or
+        $storageProfileProperty.Value -isnot [string] -or
+        $storageProfileProperty.Value -cne 'portable') {
+        throw "$Description package metadata does not declare Portable deployment."
+    }
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -192,16 +246,16 @@ function Assert-PortablePackage {
             'Legal/EULA.txt',
             'Legal/THIRD_PARTY_NOTICES.txt',
             'SpecForge.exe',
-            'specforge_build_metadata.json'
+            'specforge_metadata.json'
         )
         $actualZipEntries = @($archive.Entries.FullName | Sort-Object)
         if (($actualZipEntries -join "`n") -cne (($expectedZipEntries | Sort-Object) -join "`n")) {
             throw "$Description ZIP entries are wrong: $($actualZipEntries -join ', ')."
         }
 
-        $metadataEntry = $archive.GetEntry('specforge_build_metadata.json')
+        $metadataEntry = $archive.GetEntry('specforge_metadata.json')
         if ($null -eq $metadataEntry) {
-            throw "$Description ZIP is missing specforge_build_metadata.json."
+            throw "$Description ZIP is missing specforge_metadata.json."
         }
         $metadataStream = $metadataEntry.Open()
         try {
@@ -218,9 +272,34 @@ function Assert-PortablePackage {
             $metadataStream.Dispose()
         }
         $expectedMetadataBytes = [Convert]::ToBase64String(
-            [IO.File]::ReadAllBytes($ExpectedMetadataPath))
+            [IO.File]::ReadAllBytes($packageMetadataPath))
         if ($zipMetadataBytes -cne $expectedMetadataBytes) {
-            throw "$Description ZIP metadata does not byte-match executable-adjacent metadata."
+            throw "$Description ZIP metadata does not byte-match package metadata."
+        }
+
+        $executableEntry = $archive.GetEntry('SpecForge.exe')
+        if ($null -eq $executableEntry) {
+            throw "$Description ZIP is missing SpecForge.exe."
+        }
+        $executableStream = $executableEntry.Open()
+        try {
+            $memoryStream = [IO.MemoryStream]::new()
+            try {
+                $executableStream.CopyTo($memoryStream)
+                $zipExecutableBytes = [Convert]::ToBase64String(
+                    $memoryStream.ToArray())
+            }
+            finally {
+                $memoryStream.Dispose()
+            }
+        }
+        finally {
+            $executableStream.Dispose()
+        }
+        $expectedExecutableBytes = [Convert]::ToBase64String(
+            [IO.File]::ReadAllBytes($ExpectedExecutablePath))
+        if ($zipExecutableBytes -cne $expectedExecutableBytes) {
+            throw "$Description ZIP executable does not byte-match the build output."
         }
     }
     finally {
@@ -298,7 +377,6 @@ function Assert-BuildIdentityHeader {
         [Parameter(Mandatory = $true)] [string]$Mode,
         [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Revision,
         [Parameter(Mandatory = $true)] [string]$Version,
-        [Parameter(Mandatory = $true)] [string]$ReleaseProfile,
         [Parameter(Mandatory = $true)] [string]$Configuration,
         [Parameter(Mandatory = $true)] [string]$Architecture,
         [Parameter(Mandatory = $true)] [string]$Description
@@ -310,7 +388,6 @@ function Assert-BuildIdentityHeader {
         "-DEXPECTED_MODE=$Mode" `
         "-DEXPECTED_REVISION=$Revision" `
         "-DEXPECTED_VERSION=$Version" `
-        "-DEXPECTED_RELEASE_PROFILE=$ReleaseProfile" `
         "-DEXPECTED_CONFIGURATION=$Configuration" `
         "-DEXPECTED_ARCHITECTURE=$Architecture" `
         -P $FixturePath
@@ -354,17 +431,20 @@ function Assert-NoticeSectionContains {
 $resolvedBuiltExecutable = (Resolve-Path -LiteralPath $BuiltExecutable).Path
 $buildMetadataPath = Join-Path `
     (Split-Path -Parent $resolvedBuiltExecutable) `
-    'specforge_build_metadata.json'
+    'specforge_metadata.json'
 if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
     throw "Built executable metadata is missing beside SpecForge.exe: $buildMetadataPath"
 }
 
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
-if ($buildMetadata.schema_version -ne 3) {
-    throw "Built executable metadata has unsupported schema version '$($buildMetadata.schema_version)'."
+Assert-SchemaVersionFour `
+    -Metadata $buildMetadata `
+    -Description 'Built executable metadata'
+if ($buildMetadata.PSObject.Properties.Name -ccontains 'deployment') {
+    throw 'Build-output metadata must not contain a deployment declaration.'
 }
 Assert-BuildSourceContract `
-    -Metadata $buildMetadata `
+    -Metadata $buildMetadata.build `
     -ExpectedMode $SourceMode `
     -ExpectedRevision $SourceRevision `
     -Description 'Built executable metadata'
@@ -382,22 +462,24 @@ $expectedToolchainMetadata = [ordered]@{
     }
 }
 Assert-BuildToolchainContract `
-    -Metadata $buildMetadata `
+    -Metadata $buildMetadata.build `
     -Expected $expectedToolchainMetadata `
     -Description 'Built executable metadata'
 $expectedBuildMetadata = [ordered]@{
-    specforge_version = $SpecForgeVersion
-    release_profile = $ReleaseProfile
     configuration = $Configuration
     dear_imgui = $DearImGuiVersion
     implot = $ImPlotVersion
     zlib = $ZlibVersion
 }
 foreach ($expectedProperty in $expectedBuildMetadata.GetEnumerator()) {
-    $actualValue = [string]$buildMetadata.($expectedProperty.Key)
+    $actualValue = [string]$buildMetadata.build.($expectedProperty.Key)
     if ($actualValue -cne [string]$expectedProperty.Value) {
         throw "Built executable metadata '$($expectedProperty.Key)' expected '$($expectedProperty.Value)'; found '$actualValue'."
     }
+}
+if ($buildMetadata.product.name -cne 'SpecForge' -or
+    $buildMetadata.product.version -cne $SpecForgeVersion) {
+    throw "Built executable product metadata does not match SpecForge $SpecForgeVersion."
 }
 
 $legalRoot = Join-Path $RepoRoot 'legal'
@@ -407,8 +489,9 @@ $dataSourcesPath = Join-Path $legalRoot 'DATA_SOURCES.txt'
 $catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.tsv'
 $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
+$mainSourcePath = Join-Path $RepoRoot 'src\main.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
-$buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_metadata.json.in'
+$buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_metadata.json.in'
 $buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
@@ -421,6 +504,7 @@ foreach ($requiredPath in @(
     $catalogPath,
     $packageScriptPath,
     $aboutSourcePath,
+    $mainSourcePath,
     $cmakeSourcePath,
     $buildMetadataTemplatePath,
     $buildIdentityTemplatePath,
@@ -544,6 +628,7 @@ if ($baRows.Count -ne 2) {
 
 $packageScript = Get-Content -Raw -LiteralPath $packageScriptPath
 $aboutSource = Get-Content -Raw -LiteralPath $aboutSourcePath
+$mainSource = Get-Content -Raw -LiteralPath $mainSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
 $buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath
 $buildIdentityTemplate = Get-Content -Raw -LiteralPath $buildIdentityTemplatePath
@@ -612,12 +697,27 @@ Assert-Contains $packageScript `
     '"-DSPECFORGE_BUILD_SOURCE_REVISION=$SourceRevision"' `
     'Portable packaging source-revision binding'
 Assert-Contains $packageScript `
-    "Join-Path `$sourceExecutableDirectory 'specforge_build_metadata.json'" `
+    "Join-Path `$sourceExecutableDirectory 'specforge_metadata.json'" `
     'Portable packaging metadata binding'
+Assert-Contains $packageScript `
+    "distribution = 'portable'" `
+    'Portable deployment identity'
+Assert-Contains $packageScript `
+    "storage_profile = 'portable'" `
+    'Portable storage selection'
+Assert-Contains $packageScript `
+    'Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable' `
+    'Portable executable hash verification'
+Assert-NotContains $packageScript `
+    '[switch]$SkipBuild' `
+    'Portable packaging public parameters'
+Assert-Contains $packageScript `
+    '[switch]$PackageUnverifiedTestFixture' `
+    'Portable packaging test seam'
 Assert-NotContains $packageScript `
     "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
     'Portable packaging script'
-Assert-Contains $cmakeSource 'specforge_build_metadata.json' 'CMake build metadata'
+Assert-Contains $cmakeSource 'specforge_metadata.json' 'CMake metadata'
 Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
 Assert-NotContains `
     $cmakeSource `
@@ -639,13 +739,15 @@ Assert-Contains $cmakeSource `
     'add_dependencies(specforge_native specforge_release_documents)' `
     'CMake executable release-document dependency'
 Assert-Contains $cmakeSource `
-    'add_dependencies(specforge_native specforge_build_metadata)' `
-    'CMake executable build-metadata dependency'
+    'add_dependencies(specforge_native specforge_metadata)' `
+    'CMake executable metadata dependency'
 foreach ($propertyName in @(
+    'product',
+    'name',
+    'version',
+    'build',
     'source_mode',
     'source_revision',
-    'specforge_version',
-    'release_profile',
     'configuration',
     'compiler_id',
     'compiler_version',
@@ -659,11 +761,11 @@ foreach ($propertyName in @(
 )) {
     Assert-Contains $buildMetadataTemplate "`"$propertyName`"" 'Build metadata template'
 }
+Assert-NotContains $buildMetadataTemplate '"deployment"' 'Build-output metadata template'
+Assert-NotContains $cmakeSource 'SPECFORGE_RELEASE_PROFILE' 'CMake unified executable'
+Assert-NotContains $buildIdentityTemplate 'ReleaseProfile' 'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
     '@PROJECT_VERSION@' `
-    'Build identity header template'
-Assert-Contains $buildIdentityTemplate `
-    '@SPECFORGE_RELEASE_PROFILE@' `
     'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
     '$<CONFIG>' `
@@ -690,7 +792,6 @@ Assert-Contains $aboutSource 'metadata.zlib_version' 'About zlib metadata versio
 $generatedBuildIdentityText = Get-Content -Raw -LiteralPath $GeneratedBuildIdentity
 foreach ($expectedIdentityText in @(
     "kSpecForgeVersion[] = `"$SpecForgeVersion`"",
-    "kReleaseProfile[] = `"$ReleaseProfile`"",
     "kBuildConfiguration[] = `"$Configuration`"",
     "kTargetArchitecture[] = `"$TargetArchitecture`"",
     "kBuildSourceMode[] = `"$SourceMode`"",
@@ -703,8 +804,23 @@ foreach ($expectedIdentityText in @(
 }
 Assert-NotContains `
     $generatedBuildIdentityText `
+    'ReleaseProfile' `
+    'Generated build identity'
+Assert-NotContains `
+    $generatedBuildIdentityText `
     '$<CONFIG>' `
     'Generated build identity'
+$preflightIndex = $mainSource.IndexOf(
+    '(void)specforge::DefaultRuntimePaths();',
+    [StringComparison]::Ordinal)
+$appConstructionIndex = $mainSource.IndexOf(
+    'specforge::SpecForgeApp app;',
+    [StringComparison]::Ordinal)
+if ($preflightIndex -lt 0 -or
+    $appConstructionIndex -lt 0 -or
+    $preflightIndex -ge $appConstructionIndex) {
+    throw 'Deployment metadata must be validated before SpecForgeApp construction.'
+}
 foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
     Assert-Contains $packageScript $documentName 'Portable packaging script'
     Assert-Contains $aboutSource "Legal/$documentName" 'About panel'
@@ -736,7 +852,6 @@ try {
         -Mode 'working_tree' `
         -Revision '' `
         -Version $SpecForgeVersion `
-        -ReleaseProfile $ReleaseProfile `
         -Configuration $Configuration `
         -Architecture $TargetArchitecture `
         -Description 'Working-tree compile-time build identity'
@@ -747,14 +862,24 @@ try {
         -Mode 'head' `
         -Revision $headRevision `
         -Version $SpecForgeVersion `
-        -ReleaseProfile $ReleaseProfile `
         -Configuration $Configuration `
         -Architecture $TargetArchitecture `
         -Description 'HEAD compile-time build identity'
     Assert-ScriptFails `
         -ScriptPath $packageScriptPath `
         -Arguments @(
-            '-SkipBuild',
+            '-PackageUnverifiedTestFixture',
+            '-BuildRoot',
+            (Join-Path $RepoRoot 'build\unverified-fixture'),
+            '-DistRoot',
+            (Join-Path $RepoRoot 'dist\unverified-fixture')
+        ) `
+        -ExpectedMessage 'reserved for release-artifact tests' `
+        -Description 'Unverified package fixture outside the temporary directory'
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments @(
+            '-PackageUnverifiedTestFixture',
             '-BuildRoot',
             (Join-Path $testRoot 'direct-head-build'),
             '-DistRoot',
@@ -809,21 +934,21 @@ try {
             -Destination (Join-Path $fixtureBuildRoot 'SpecForge.exe')
 
         $fixtureMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
-        $fixtureMetadata.source_mode = $fixture.Mode
-        $fixtureMetadata.source_revision = if ($fixture.Mode -ceq 'working_tree') {
+        $fixtureMetadata.build.source_mode = $fixture.Mode
+        $fixtureMetadata.build.source_revision = if ($fixture.Mode -ceq 'working_tree') {
             $null
         }
         else {
             $fixture.Revision
         }
-        $fixtureMetadata.windows_sdk_version = $packageWindowsSdkVersion
-        $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'specforge_build_metadata.json'
+        $fixtureMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
+        $fixtureMetadataPath = Join-Path $fixtureBuildRoot 'specforge_metadata.json'
         $fixtureMetadata |
             ConvertTo-Json -Depth 10 |
             Set-Content -LiteralPath $fixtureMetadataPath -Encoding UTF8
 
         & $fixturePackageScriptPath `
-            -SkipBuild `
+            -PackageUnverifiedTestFixture `
             -Configuration $Configuration `
             -PackageName $fixture.PackageName `
             -BuildRoot $fixtureBuildRoot `
@@ -834,31 +959,53 @@ try {
         $fixturePackageRoot = Join-Path $testDistRoot $fixture.PackageName
         $fixtureZipPath = Join-Path $testDistRoot "$($fixture.PackageName).zip"
         Assert-PortablePackage `
-            -ExpectedMetadataPath $fixtureMetadataPath `
+            -ExpectedExecutablePath $resolvedBuiltExecutable `
             -PackageRoot $fixturePackageRoot `
             -ZipPath $fixtureZipPath `
             -Description "$($fixture.Mode) Portable fixture"
         $packagedMetadata = Get-Content -Raw `
-            -LiteralPath (Join-Path $fixturePackageRoot 'specforge_build_metadata.json') |
+            -LiteralPath (Join-Path $fixturePackageRoot 'specforge_metadata.json') |
             ConvertFrom-Json
         Assert-BuildSourceContract `
-            -Metadata $packagedMetadata `
+            -Metadata $packagedMetadata.build `
             -ExpectedMode $fixture.Mode `
             -ExpectedRevision $fixture.Revision `
             -Description "$($fixture.Mode) packaged metadata"
         Assert-BuildToolchainContract `
-            -Metadata $packagedMetadata `
+            -Metadata $packagedMetadata.build `
             -Expected $expectedPackageToolchainMetadata `
             -Description "$($fixture.Mode) packaged metadata"
     }
 
     $invalidMetadataCases = @(
         [pscustomobject]@{
+            Description = 'Metadata schema as string'
+            PropertyName = 'schema_version'
+            Remove = $false
+            Value = '4'
+            ExpectedMessage = 'schema_version must be the integer 4'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata schema as decimal'
+            PropertyName = 'schema_version'
+            Remove = $false
+            Value = 4
+            RawSchemaJson = '4.0'
+            ExpectedMessage = 'schema_version must be the integer 4'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata schema as array'
+            PropertyName = 'schema_version'
+            Remove = $false
+            Value = @(4)
+            ExpectedMessage = 'schema_version must be the integer 4'
+        },
+        [pscustomobject]@{
             Description = 'Metadata legacy schema'
             PropertyName = 'schema_version'
             Remove = $false
             Value = 2
-            ExpectedMessage = 'Unsupported build metadata schema version'
+            ExpectedMessage = 'schema_version must be the integer 4'
         },
         [pscustomobject]@{
             Description = 'Metadata missing compiler ID'
@@ -900,7 +1047,7 @@ try {
             PropertyName = 'target_architecture'
             Remove = $false
             Value = 'arm64'
-            ExpectedMessage = "expected 'x64'"
+            ExpectedMessage = "expected 'amd64'"
         },
         [pscustomobject]@{
             Description = 'Metadata missing Windows SDK version'
@@ -915,6 +1062,13 @@ try {
             Remove = $false
             Value = 'current'
             ExpectedMessage = 'invalid windows_sdk_version'
+        },
+        [pscustomobject]@{
+            Description = 'Working-tree revision as null array'
+            PropertyName = 'source_revision'
+            Remove = $false
+            Value = @($null)
+            ExpectedMessage = 'must use null source_revision'
         }
     )
     foreach ($invalidCase in $invalidMetadataCases) {
@@ -927,22 +1081,38 @@ try {
             -Destination (Join-Path $invalidBuildRoot 'SpecForge.exe')
         $invalidMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
             ConvertFrom-Json
-        $invalidMetadata.windows_sdk_version = $packageWindowsSdkVersion
-        if ($invalidCase.Remove) {
-            $invalidMetadata.PSObject.Properties.Remove($invalidCase.PropertyName)
+        $invalidMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
+        $metadataContainer = if ($invalidCase.PropertyName -ceq 'schema_version') {
+            $invalidMetadata
         }
         else {
-            $invalidMetadata.($invalidCase.PropertyName) = $invalidCase.Value
+            $invalidMetadata.build
         }
-        $invalidMetadata |
-            ConvertTo-Json -Depth 10 |
-            Set-Content `
-                -LiteralPath (Join-Path $invalidBuildRoot 'specforge_build_metadata.json') `
-                -Encoding UTF8
+        if ($invalidCase.Remove) {
+            $metadataContainer.PSObject.Properties.Remove($invalidCase.PropertyName)
+        }
+        else {
+            $metadataContainer.($invalidCase.PropertyName) = $invalidCase.Value
+        }
+        $invalidMetadataJson =
+            $invalidMetadata |
+            ConvertTo-Json -Depth 10
+        $rawSchemaJsonProperty =
+            $invalidCase.PSObject.Properties['RawSchemaJson']
+        if ($null -ne $rawSchemaJsonProperty) {
+            $invalidMetadataJson = [regex]::Replace(
+                $invalidMetadataJson,
+                '(?m)("schema_version"\s*:\s*)4(?=\s*,)',
+                '${1}' + $rawSchemaJsonProperty.Value)
+        }
+        Set-Content `
+            -LiteralPath (Join-Path $invalidBuildRoot 'specforge_metadata.json') `
+            -Value $invalidMetadataJson `
+            -Encoding UTF8
         Assert-ScriptFails `
             -ScriptPath $packageScriptPath `
             -Arguments @(
-                '-SkipBuild',
+                '-PackageUnverifiedTestFixture',
                 '-BuildRoot',
                 $invalidBuildRoot,
                 '-DistRoot',
@@ -956,8 +1126,55 @@ try {
             -Description $invalidCase.Description
     }
 
+    $invalidHeadRevisionBuildRoot = Join-Path `
+        $testRoot `
+        'invalid-head-revision-array'
+    New-Item `
+        -ItemType Directory `
+        -Path $invalidHeadRevisionBuildRoot `
+        -Force |
+        Out-Null
+    Copy-Item `
+        -LiteralPath $resolvedBuiltExecutable `
+        -Destination (Join-Path $invalidHeadRevisionBuildRoot 'SpecForge.exe')
+    $invalidHeadRevisionMetadata =
+        Get-Content -Raw -LiteralPath $buildMetadataPath |
+        ConvertFrom-Json
+    $invalidHeadRevisionMetadata.build.source_mode = 'head'
+    $invalidHeadRevisionMetadata.build.source_revision = @($headRevision)
+    $invalidHeadRevisionMetadata.build.windows_sdk_version =
+        $packageWindowsSdkVersion
+    $invalidHeadRevisionMetadata |
+        ConvertTo-Json -Depth 10 |
+        Set-Content `
+            -LiteralPath (
+                Join-Path `
+                    $invalidHeadRevisionBuildRoot `
+                    'specforge_metadata.json'
+            ) `
+            -Encoding UTF8
+    Assert-ScriptFails `
+        -ScriptPath $snapshotPackageScriptPath `
+        -Arguments @(
+            '-PackageUnverifiedTestFixture',
+            '-BuildRoot',
+            $invalidHeadRevisionBuildRoot,
+            '-DistRoot',
+            $testDistRoot,
+            '-PackageName',
+            'SpecForge-portable-invalid-head-revision-array',
+            '-Configuration',
+            $Configuration,
+            '-SourceMode',
+            'head',
+            '-SourceRevision',
+            $headRevision
+        ) `
+        -ExpectedMessage 'must use a single string source_revision' `
+        -Description 'Head revision as array'
+
     $invalidBaseArguments = @(
-        '-SkipBuild',
+        '-PackageUnverifiedTestFixture',
         '-BuildRoot',
         (Join-Path $testRoot 'invalid-build'),
         '-DistRoot',
