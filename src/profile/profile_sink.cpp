@@ -156,9 +156,18 @@ ProfileSink& ProfileSink::operator=(ProfileSink&& other) noexcept
 ProfileSink ProfileSink::CreateDefault(
     const std::filesystem::path& output_directory)
 {
+    return CreateDefault(output_directory, Limits{});
+}
+
+ProfileSink ProfileSink::CreateDefault(
+    const std::filesystem::path& output_directory,
+    Limits limits)
+{
     ProfileSink sink;
     if (IsProfileEnabled()) {
-        (void)sink.StartDefault(output_directory);
+        (void)sink.StartDefault(
+            output_directory,
+            limits);
     }
     return sink;
 }
@@ -183,6 +192,13 @@ const char* ProfileSink::StopReasonName(StopReason reason) noexcept
 bool ProfileSink::StartDefault(
     const std::filesystem::path& output_directory)
 {
+    return StartDefault(output_directory, Limits{});
+}
+
+bool ProfileSink::StartDefault(
+    const std::filesystem::path& output_directory,
+    Limits limits)
+{
     Stop();
     error_message_.clear();
     const std::string stem = "specforge-profile-" + TimestampForFileName();
@@ -197,7 +213,7 @@ bool ProfileSink::StartDefault(
         error_message_ = "Could not inspect the profile output directory: " + exists_error.message();
         return false;
     }
-    return Start(std::move(path));
+    return Start(std::move(path), limits);
 }
 
 bool ProfileSink::Start(std::filesystem::path path)

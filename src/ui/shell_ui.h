@@ -43,6 +43,23 @@ struct ShellStatus {
     std::uint64_t frame_index = 0;
 };
 
+struct ShellRuntimeResourceObservation {
+    SourceCollectionLoadActivitySnapshot load_activity;
+    SourceCollectionActivationTransaction::
+        PresentedSourceLoadObservation
+            presented_source_load;
+    std::size_t pending_load_count = 0;
+    std::filesystem::path active_source_path;
+    std::string load_error;
+
+    [[nodiscard]] bool idle() const noexcept
+    {
+        return load_activity.load_idle() &&
+               load_activity.retirement_idle() &&
+               pending_load_count == 0;
+    }
+};
+
 class ShellUi {
 public:
     explicit ShellUi(PlotTouchpadGestureSource* touchpad_gestures = nullptr);
@@ -55,6 +72,8 @@ public:
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
+    [[nodiscard]] bool
+    ArmRuntimeResourceCancellationCheckpoint();
     void RefreshSystemColors();
     void SetSpectralLineLabelFont(ImFont* font);
     void EnterImmersivePlotMode();
@@ -68,6 +87,8 @@ public:
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
     [[nodiscard]] SpectrumSnapshotHandle current_snapshot() const;
+    [[nodiscard]] ShellRuntimeResourceObservation
+    runtime_resource_observation() const;
     void RecordNavigationKeyInput(
         NavigationLatencyInputKind kind,
         NavigationLatencyTimePoint at = NavigationLatencyTrace::Now());

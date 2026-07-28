@@ -328,6 +328,7 @@ target_link_libraries(specforge_renderer
 )
 
 add_executable(specforge_native WIN32
+    src/app/runtime_resource_workload.cpp
     src/app/specforge_app.cpp
     src/main.cpp
     src/platform/win32_touchpad_gesture_source.cpp
@@ -569,6 +570,47 @@ add_test(
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_source_load_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-source-load-profile.ps1"
+)
+add_executable(
+    specforge_runtime_resource_workload_tests
+    tests/runtime_resource_workload_tests.cpp
+    src/app/runtime_resource_workload.cpp
+)
+specforge_configure_production_target(
+    specforge_runtime_resource_workload_tests
+)
+target_link_libraries(
+    specforge_runtime_resource_workload_tests
+    PRIVATE
+        specforge_desktop_ui
+        dwmapi
+)
+add_test(
+    NAME specforge_runtime_resource_workload_tests
+    COMMAND specforge_runtime_resource_workload_tests
+)
+add_test(
+    NAME specforge_runtime_resource_stability_runner_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/runtime_resource_stability_runner_tests.ps1"
+        -Runner "${CMAKE_SOURCE_DIR}/scripts/test-runtime-resource-stability.ps1"
+        -Executable "$<TARGET_FILE:specforge_native>"
+)
+add_test(
+    NAME specforge_runtime_resource_stability
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/scripts/test-runtime-resource-stability.ps1"
+        -Executable "$<TARGET_FILE:specforge_native>"
+        -OutputDirectory "${CMAKE_BINARY_DIR}/runtime-resource-stability"
+        -CTestIntegration
+)
+set_tests_properties(
+    specforge_runtime_resource_stability
+    PROPERTIES
+        LABELS "resource-stability;periodic"
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 125
+        TIMEOUT 1900
 )
 add_test(
     NAME specforge_release_artifacts_tests

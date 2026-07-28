@@ -32,6 +32,30 @@ struct SourceCollectionLoadCompletion {
     NavigationLatencyAttemptHandle latency_attempt;
 };
 
+struct SourceCollectionLoadActivitySnapshot {
+    std::size_t active_task_count = 0;
+    std::size_t completed_count = 0;
+    std::size_t worker_count = 0;
+    std::size_t retirement_queued_count = 0;
+    std::size_t retirement_in_flight_count = 0;
+    std::uint64_t cancellation_request_count = 0;
+    std::uint64_t successful_cancellation_count = 0;
+    std::uint64_t retired_prepared_count = 0;
+    std::uint64_t retired_resource_count = 0;
+    bool runtime_resource_cancellation_checkpoint_waiting = false;
+
+    [[nodiscard]] bool load_idle() const noexcept
+    {
+        return active_task_count == 0 && completed_count == 0;
+    }
+
+    [[nodiscard]] bool retirement_idle() const noexcept
+    {
+        return retirement_queued_count == 0 &&
+               retirement_in_flight_count == 0;
+    }
+};
+
 class SourceCollectionLoadQueue {
 public:
     using CompletionReadyCallback = std::function<void()>;
@@ -57,6 +81,12 @@ public:
     bool Cancel(std::uint64_t task_id);
     [[nodiscard]] std::vector<SourceCollectionLoadCompletion> TakeCompleted();
     [[nodiscard]] bool NeedsService() const;
+    [[nodiscard]] SourceCollectionLoadActivitySnapshot ActivitySnapshot() const;
+    // One-shot test-workload handshake. The next foreground worker stops
+    // before preparation until that task is canceled or the queue shuts down.
+    // Arming is accepted only while the load queue is idle.
+    [[nodiscard]] bool
+    ArmRuntimeResourceCancellationCheckpoint();
 
     // The callback runs on the publishing thread after the queue mutex has
     // been released. It is invoked only when the published completion queue

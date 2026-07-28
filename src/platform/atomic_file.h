@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <ios>
@@ -9,9 +11,16 @@
 
 namespace specforge {
 
+struct AtomicFileReplaceRetryPolicy {
+    std::size_t maximum_attempts = 1;
+    std::chrono::milliseconds initial_retry_delay{0};
+    std::chrono::milliseconds maximum_retry_delay{0};
+};
+
 struct AtomicFileWriteOptions {
     std::ios::openmode open_mode = std::ios::trunc;
     std::string_view target_description = "file";
+    AtomicFileReplaceRetryPolicy replace_retry_policy;
 };
 
 using AtomicFileWriter = std::function<bool(std::ostream& stream, std::string& error)>;
@@ -21,7 +30,8 @@ using AtomicFileWriter = std::function<bool(std::ostream& stream, std::string& e
     const std::filesystem::path& temporary_path,
     const std::filesystem::path& target_path,
     std::string* error_message = nullptr,
-    std::string_view target_description = "file");
+    std::string_view target_description = "file",
+    AtomicFileReplaceRetryPolicy retry_policy = {});
 [[nodiscard]] bool WriteFileAtomically(
     const std::filesystem::path& target_path,
     const AtomicFileWriteOptions& options,

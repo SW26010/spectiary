@@ -2,6 +2,7 @@
 
 #include "app/pan_pacing.h"
 #include "app/render_wake_scheduler.h"
+#include "app/runtime_resource_workload.h"
 #include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
@@ -102,6 +103,7 @@ private:
     D3D11Renderer renderer_;
     D3D11ImGuiViewportRenderer viewport_renderer_;
     ProfileSink profile_;
+    ProfileSink::Limits profile_limits_;
     Win32TouchpadGestureSource touchpad_gestures_;
     Win32CompositorClock compositor_clock_;
     Win32MessageRenderObserver message_render_observer_;
@@ -123,10 +125,13 @@ private:
     std::optional<PendingResize> pending_resize_;
     std::optional<WindowedPlacement> fullscreen_restore_;
     bool immersive_plot_entered_fullscreen_ = false;
+    bool shutdown_complete_ = false;
     ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     std::string profile_status_message_ =
         "Use Settings > Diagnostics to record.";
     std::uint64_t frame_index_ = 0;
+    std::optional<RuntimeResourceWorkload>
+        runtime_resource_workload_;
 };
 
 }  // namespace specforge

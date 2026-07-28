@@ -65,6 +65,8 @@ public:
         std::size_t batch_index = 0;
         std::shared_ptr<BatchCompletionSlot> ordered_completion;
         bool prefetch = false;
+        bool wait_at_runtime_resource_cancellation_checkpoint =
+            false;
     };
 
     struct Worker {
@@ -188,12 +190,25 @@ public:
 
     bool Cancel(std::uint64_t task_id)
     {
-        std::lock_guard lock(mutex_);
-        const auto match = cancellation_.find(task_id);
-        if (match == cancellation_.end()) {
-            return false;
+        bool found = false;
+        {
+            std::lock_guard lock(mutex_);
+            ++cancellation_request_count_;
+            const auto match = cancellation_.find(task_id);
+            if (match == cancellation_.end()) {
+                return false;
+            }
+            if (!match->second->exchange(
+                    true,
+                    std::memory_order_relaxed)) {
+                ++successful_cancellation_count_;
+            }
+            found = true;
         }
-        match->second->store(true, std::memory_order_relaxed);
+        if (found) {
+            runtime_resource_cancellation_condition_
+                .notify_all();
+        }
         return true;
     }
 
@@ -217,6 +232,42 @@ public:
     {
         std::lock_guard lock(mutex_);
         return active_task_count_ > 0 || !completed_.empty();
+    }
+
+    SourceCollectionLoadActivitySnapshot ActivitySnapshot() const
+    {
+        std::lock_guard lock(mutex_);
+        return {
+            .active_task_count = active_task_count_,
+            .completed_count = completed_.size(),
+            .worker_count = workers_.size(),
+            .retirement_queued_count =
+                retired_prepared_.size() + retired_resources_.size(),
+            .retirement_in_flight_count =
+                retirement_in_flight_count_,
+            .cancellation_request_count =
+                cancellation_request_count_,
+            .successful_cancellation_count =
+                successful_cancellation_count_,
+            .retired_prepared_count = retired_prepared_count_,
+            .retired_resource_count = retired_resource_count_,
+            .runtime_resource_cancellation_checkpoint_waiting =
+                runtime_resource_cancellation_checkpoint_waiting_,
+        };
+    }
+
+    bool ArmRuntimeResourceCancellationCheckpoint()
+    {
+        std::lock_guard lock(mutex_);
+        if (active_task_count_ != 0 ||
+            !completed_.empty() ||
+            runtime_resource_cancellation_checkpoint_armed_ ||
+            runtime_resource_cancellation_checkpoint_waiting_) {
+            return false;
+        }
+        runtime_resource_cancellation_checkpoint_armed_ =
+            true;
+        return true;
     }
 
     void RegisterCompletionReadyCallback(CompletionReadyCallback callback)
@@ -309,6 +360,13 @@ private:
         NavigationLatencyAttemptHandle failure_latency_attempt = request.latency_attempt;
         std::shared_ptr<BatchState> failure_batch = batch;
         std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
+        const bool wait_at_runtime_resource_checkpoint =
+            !prefetch &&
+            runtime_resource_cancellation_checkpoint_armed_;
+        if (wait_at_runtime_resource_checkpoint) {
+            runtime_resource_cancellation_checkpoint_armed_ =
+                false;
+        }
         Task task{
             id,
             std::move(request),
@@ -318,6 +376,7 @@ private:
             batch_index,
             std::move(ordered_completion),
             prefetch,
+            wait_at_runtime_resource_checkpoint,
         };
         cancellation_.emplace(id, canceled);
         ++active_task_count_;
@@ -409,6 +468,7 @@ private:
             }
             workers_.clear();
         }
+        runtime_resource_cancellation_condition_.notify_all();
     }
 
     SourceCollectionCancellationCheckpoint CheckpointFor(
@@ -694,6 +754,21 @@ private:
         if (task.request.latency_attempt) {
             task.request.latency_attempt->MarkWorkerStarted();
         }
+        if (task
+                .wait_at_runtime_resource_cancellation_checkpoint) {
+            std::unique_lock lock(mutex_);
+            runtime_resource_cancellation_checkpoint_waiting_ =
+                true;
+            (void)runtime_resource_cancellation_condition_.wait(
+                lock,
+                stop_token,
+                [&task]() {
+                    return task.canceled->load(
+                        std::memory_order_relaxed);
+                });
+            runtime_resource_cancellation_checkpoint_waiting_ =
+                false;
+        }
         if (task.canceled->load(std::memory_order_relaxed)) {
             FinishCanceledTask(task);
             return;
@@ -742,11 +817,25 @@ private:
                     retired_prepared.swap(retired_prepared_);
                     retired_resources.swap(retired_resources_);
                 }
+                retirement_in_flight_count_ +=
+                    retired_prepared.size() +
+                    retired_resources.size();
             }
 
             // Destruction happens here, outside the mutex and off the UI thread.
+            const std::size_t prepared_count =
+                retired_prepared.size();
+            const std::size_t resource_count =
+                retired_resources.size();
             retired_prepared.clear();
             retired_resources.clear();
+            {
+                std::lock_guard lock(mutex_);
+                retirement_in_flight_count_ -=
+                    prepared_count + resource_count;
+                retired_prepared_count_ += prepared_count;
+                retired_resource_count_ += resource_count;
+            }
             if (stop_token.stop_requested()) {
                 return;
             }
@@ -756,6 +845,8 @@ private:
     SourceCollectionPreparation preparation_;
     mutable std::mutex mutex_;
     std::condition_variable_any retirement_condition_;
+    std::condition_variable_any
+        runtime_resource_cancellation_condition_;
     std::mutex completion_callback_mutex_;
     std::condition_variable completion_callback_idle_;
     CompletionReadyCallback completion_ready_callback_;
@@ -768,6 +859,15 @@ private:
     std::uint64_t next_task_id_ = 1;
     std::size_t active_task_count_ = 0;
     std::size_t active_prefetch_task_count_ = 0;
+    std::size_t retirement_in_flight_count_ = 0;
+    std::uint64_t cancellation_request_count_ = 0;
+    std::uint64_t successful_cancellation_count_ = 0;
+    std::uint64_t retired_prepared_count_ = 0;
+    std::uint64_t retired_resource_count_ = 0;
+    bool runtime_resource_cancellation_checkpoint_armed_ =
+        false;
+    bool runtime_resource_cancellation_checkpoint_waiting_ =
+        false;
     std::vector<Worker> workers_;
     std::jthread retirement_worker_;
 };
@@ -818,6 +918,19 @@ std::vector<SourceCollectionLoadCompletion> SourceCollectionLoadQueue::TakeCompl
 bool SourceCollectionLoadQueue::NeedsService() const
 {
     return impl_->NeedsService();
+}
+
+SourceCollectionLoadActivitySnapshot
+SourceCollectionLoadQueue::ActivitySnapshot() const
+{
+    return impl_->ActivitySnapshot();
+}
+
+bool SourceCollectionLoadQueue::
+    ArmRuntimeResourceCancellationCheckpoint()
+{
+    return impl_->
+        ArmRuntimeResourceCancellationCheckpoint();
 }
 
 void SourceCollectionLoadQueue::RegisterCompletionReadyCallback(

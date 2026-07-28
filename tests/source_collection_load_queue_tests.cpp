@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -772,6 +773,12 @@ void TestCancelSuppressesCompletion()
     });
     const std::uint64_t task_id = queue.Enqueue({.path = path});
     Require(entered.wait_for(2s) == std::future_status::ready, "cancel test loader should start");
+    const specforge::SourceCollectionLoadActivitySnapshot active =
+        queue.ActivitySnapshot();
+    Require(
+        active.active_task_count == 1 &&
+            active.worker_count == 1,
+        "activity snapshot should expose the live source worker");
     queue.Cancel(task_id);
     Require(
         WaitUntil([&]() { return !queue.NeedsService(); }),
@@ -780,6 +787,78 @@ void TestCancelSuppressesCompletion()
     Require(
         notifications.load(std::memory_order_relaxed) == 0,
         "a canceled task with no activatable completion must not notify");
+    const specforge::SourceCollectionLoadActivitySnapshot canceled =
+        queue.ActivitySnapshot();
+    Require(
+        canceled.cancellation_request_count == 1 &&
+            canceled.successful_cancellation_count == 1,
+        "activity snapshot should retain successful cancellation evidence");
+    Require(
+        canceled.load_idle(),
+        "activity snapshot should become load-idle after cancellation");
+    std::filesystem::remove(path);
+}
+
+void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_resident_cancel_race.csv");
+    WriteFixture(path);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(path, 0);
+    const specforge::SourceCollectionContextReuseProof proof =
+        MakeFileReuseProof(*snapshot);
+    specforge::SourceCollectionResidentSnapshot resident{
+        .spectrum_index = 0,
+        .snapshot = snapshot,
+        .context_reuse_proof = proof,
+    };
+    std::atomic_int decoder_calls = 0;
+    specforge::SourceCollectionLoadQueue queue =
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            Dependencies(
+                [&decoder_calls](
+                    const auto& source,
+                    std::size_t index,
+                    const auto&) {
+                    ++decoder_calls;
+                    return MakeSnapshot(source, index);
+                }));
+
+    Require(
+        queue.ArmRuntimeResourceCancellationCheckpoint(),
+        "an idle queue should arm the runtime-resource cancellation checkpoint");
+    const std::uint64_t task_id = queue.Enqueue({
+        .path = path,
+        .reuse =
+            specforge::SourceCollectionReuseCandidate::Verified(
+                proof,
+                0,
+                {},
+                std::move(resident)),
+    });
+    Require(
+        WaitUntil([&queue]() {
+            return queue.ActivitySnapshot()
+                .runtime_resource_cancellation_checkpoint_waiting;
+        }),
+        "the fast resident request should stop at the deterministic cancellation checkpoint");
+
+    Require(
+        queue.Cancel(task_id),
+        "the checkpointed resident request should remain cancelable");
+    Require(
+        WaitUntil([&queue]() {
+            (void)queue.TakeCompleted();
+            return !queue.NeedsService();
+        }),
+        "the canceled checkpointed request should terminate");
+    const specforge::SourceCollectionLoadActivitySnapshot
+        activity = queue.ActivitySnapshot();
+    Require(
+        activity.successful_cancellation_count == 1 &&
+            decoder_calls.load(std::memory_order_relaxed) == 0,
+        "the cancellation race fixture should use the fast resident path");
     std::filesystem::remove(path);
 }
 
@@ -990,25 +1069,39 @@ void TestRetirementRunsOnWorker()
         destroyed.wait_for(2s) == std::future_status::ready,
         "retired resource should be released promptly");
     Require(destroyed.get() != caller, "retired resource should not be destroyed on the UI caller");
+    Require(
+        WaitUntil([&queue]() {
+            const auto activity =
+                queue.ActivitySnapshot();
+            return activity.retirement_idle() &&
+                   activity.retired_resource_count == 1;
+        }),
+        "activity snapshot should become retirement-idle after destruction");
 }
 
 }  // namespace
 
 int main()
 {
-    TestEnqueueReturnsBeforeLoaderCompletes();
-    TestBatchLoadsWorkflowCachesOnce();
-    TestSourcesUseIndependentThreads();
-    TestIndividualLoadsPublishInRequestOrder();
-    TestPrefetchNeverBlocksForegroundPublication();
-    TestBatchPublishesInRequestOrder();
-    TestCompletionReadyNotificationCoalescesUntilDrain();
-    TestBufferedBatchCompletionCanBeCanceled();
-    TestCancelSuppressesCompletion();
-    TestCompletionReadyCallbackIsReentrantAndUnregistersSafely();
-    TestCancelStopsOnlyItsSourceThread();
-    TestFailureIsReported();
-    TestDestructionStopsEverySourceThread();
-    TestRetirementRunsOnWorker();
-    return 0;
+    try {
+        TestEnqueueReturnsBeforeLoaderCompletes();
+        TestBatchLoadsWorkflowCachesOnce();
+        TestSourcesUseIndependentThreads();
+        TestIndividualLoadsPublishInRequestOrder();
+        TestPrefetchNeverBlocksForegroundPublication();
+        TestBatchPublishesInRequestOrder();
+        TestCompletionReadyNotificationCoalescesUntilDrain();
+        TestBufferedBatchCompletionCanBeCanceled();
+        TestCancelSuppressesCompletion();
+        TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse();
+        TestCompletionReadyCallbackIsReentrantAndUnregistersSafely();
+        TestCancelStopsOnlyItsSourceThread();
+        TestFailureIsReported();
+        TestDestructionStopsEverySourceThread();
+        TestRetirementRunsOnWorker();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

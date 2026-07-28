@@ -732,7 +732,8 @@ bool WriteVersionedJsonCacheDocument(
     int schema_version,
     std::string_view description,
     const JsonValue& body,
-    std::string* error_message)
+    std::string* error_message,
+    AtomicFileReplaceRetryPolicy replace_retry_policy)
 {
     if (body.kind != JsonValue::Kind::Object) {
         if (error_message != nullptr) {
@@ -752,6 +753,7 @@ bool WriteVersionedJsonCacheDocument(
 
     AtomicFileWriteOptions options;
     options.target_description = description;
+    options.replace_retry_policy = replace_retry_policy;
     return WriteFileAtomically(
         path,
         options,

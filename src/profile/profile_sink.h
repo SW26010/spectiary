@@ -30,6 +30,7 @@ public:
     struct Limits {
         std::size_t max_queue_bytes = 4U * 1024U * 1024U;
         std::uint64_t max_file_bytes = 100ULL * 1024ULL * 1024ULL;
+        // Zero delegates duration enforcement to an external controller.
         std::chrono::steady_clock::duration max_duration = std::chrono::minutes(5);
     };
 
@@ -61,10 +62,16 @@ public:
 
     static ProfileSink CreateDefault(
         const std::filesystem::path& output_directory);
+    static ProfileSink CreateDefault(
+        const std::filesystem::path& output_directory,
+        Limits limits);
     static const char* StopReasonName(StopReason reason) noexcept;
 
     [[nodiscard]] bool StartDefault(
         const std::filesystem::path& output_directory);
+    [[nodiscard]] bool StartDefault(
+        const std::filesystem::path& output_directory,
+        Limits limits);
     [[nodiscard]] bool Start(std::filesystem::path path);
     [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
     void SetStateChangeCallback(StateChangeCallback callback);

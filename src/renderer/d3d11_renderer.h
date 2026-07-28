@@ -8,9 +8,21 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace specforge {
+
+struct D3D11LiveObjectReport {
+    bool requested = false;
+    bool available = false;
+    std::uint64_t allowed_live_object_messages = 0;
+    std::uint64_t unexpected_live_object_messages = 0;
+    std::string detail;
+    std::vector<std::string> unexpected_messages;
+};
 
 class D3D11Renderer {
 public:
@@ -23,7 +35,8 @@ public:
     HRESULT Initialize(
         HWND hwnd,
         D3D11CompositionPolicy composition_policy =
-            D3D11CompositionPolicy::Prefer);
+            D3D11CompositionPolicy::Prefer,
+        bool enable_debug_layer = false);
     void Shutdown();
 
     HRESULT Resize(UINT width, UINT height);
@@ -65,15 +78,25 @@ public:
     {
         return presentation_.composition_statistics_available();
     }
+    [[nodiscard]] const D3D11LiveObjectReport&
+    live_object_report() const noexcept
+    {
+        return live_object_report_;
+    }
 
 private:
     HRESULT RecordFailure(std::string_view operation, HRESULT result) noexcept;
+    void CollectLiveObjectReport();
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> device_context_;
     Microsoft::WRL::ComPtr<IDXGIFactory2> factory_;
     D3D11WindowPresentation presentation_;
     std::string_view last_error_operation_;
+    bool debug_layer_requested_ = false;
+    bool debug_layer_enabled_ = false;
+    HRESULT debug_layer_enable_result_ = S_OK;
+    D3D11LiveObjectReport live_object_report_;
 };
 
 }  // namespace specforge

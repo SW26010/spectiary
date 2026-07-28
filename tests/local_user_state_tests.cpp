@@ -2,16 +2,21 @@
 #include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 #include "platform/atomic_file.h"
+#include "platform/atomic_file_internal.h"
 #include "ui/panel_visibility_state_cache_io.h"
+
+#include <Windows.h>
 
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sstream>
 #include <thread>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -219,6 +224,81 @@ void TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure()
     Require(ReadTextFile(path) == "stable", "failed atomic write should preserve the existing target");
     Require(!HasTemporarySibling(path), "failed atomic write should clean the temporary sibling");
     std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestAtomicReplaceRetriesTransientSharingViolation()
+{
+    const std::filesystem::path temporary = "temporary";
+    const std::filesystem::path target = "target";
+    std::size_t operation_count = 0;
+    std::vector<std::chrono::milliseconds> waits;
+    specforge::AtomicFileReplaceRetryPolicy retry_policy;
+    retry_policy.maximum_attempts = 5;
+    retry_policy.initial_retry_delay = 5ms;
+    retry_policy.maximum_retry_delay = 40ms;
+
+    std::string error;
+    Require(
+        specforge::ReplaceFileAtomicallyWithOperation(
+            temporary,
+            target,
+            retry_policy,
+            [&](const std::filesystem::path& observed_temporary,
+                const std::filesystem::path& observed_target) {
+                Require(
+                    observed_temporary == temporary &&
+                        observed_target == target,
+                    "atomic replacement should preserve operation paths");
+                ++operation_count;
+                if (operation_count == 1) {
+                    return std::error_code(
+                        ERROR_SHARING_VIOLATION,
+                        std::system_category());
+                }
+                return std::error_code{};
+            },
+            [&](std::chrono::milliseconds delay) {
+                waits.push_back(delay);
+            },
+            &error,
+            "sharing retry fixture"),
+        error.empty()
+            ? "atomic replacement should retry a transient sharing violation"
+            : error);
+    Require(
+        operation_count == 2,
+        "transient sharing violation should use one retry");
+    Require(
+        waits == std::vector<std::chrono::milliseconds>{5ms},
+        "first atomic replacement retry should use configured delay");
+}
+
+void TestAtomicReplaceDoesNotRetryByDefault()
+{
+    std::size_t operation_count = 0;
+    std::size_t wait_count = 0;
+    std::string error;
+    Require(
+        !specforge::ReplaceFileAtomicallyWithOperation(
+            "temporary",
+            "target",
+            {},
+            [&](const std::filesystem::path&,
+                const std::filesystem::path&) {
+                ++operation_count;
+                return std::error_code(
+                    ERROR_SHARING_VIOLATION,
+                    std::system_category());
+            },
+            [&](std::chrono::milliseconds) {
+                ++wait_count;
+            },
+            &error,
+            "single-attempt fixture"),
+        "default atomic replacement should preserve single-attempt behavior");
+    Require(
+        operation_count == 1 && wait_count == 0,
+        "default atomic replacement should not retry or wait");
 }
 
 void TestVersionedJsonCacheShellRoundTripsDocument()
@@ -647,25 +727,32 @@ void TestCancelableTextStreamReadStopsBetweenChunks()
 
 int main()
 {
-    TestDefaultLocalUserStatePathUsesSpecForgeRoot();
-    TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
-    TestAtomicWriteCreatesParentAndReplacesExistingFile();
-    TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
-    TestVersionedJsonCacheShellRoundTripsDocument();
-    TestStructuredJsonCacheRejectsInvalidBody();
-    TestVersionedJsonCacheShellReportsCorruptCacheWarning();
-    TestVersionedJsonCacheShellRejectsUnsupportedSchema();
-    TestSortedCacheKeysReturnsStableOrder();
-    TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
-    TestLocalUserStateSaveSchedulerDebouncesAndRetries();
-    TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain();
-    TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
-    TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported();
-    TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
-    TestPanelVisibilityStateCacheIgnoresCorruptJson();
-    TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
-    TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
-    TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
-    TestCancelableTextStreamReadStopsBetweenChunks();
-    return 0;
+    try {
+        TestDefaultLocalUserStatePathUsesSpecForgeRoot();
+        TestRuntimePathPoliciesKeepPortableAndInstalledRootsDistinct();
+        TestAtomicWriteCreatesParentAndReplacesExistingFile();
+        TestAtomicWriteCleansTemporaryAndPreservesExistingFileOnWriterFailure();
+        TestAtomicReplaceRetriesTransientSharingViolation();
+        TestAtomicReplaceDoesNotRetryByDefault();
+        TestVersionedJsonCacheShellRoundTripsDocument();
+        TestStructuredJsonCacheRejectsInvalidBody();
+        TestVersionedJsonCacheShellReportsCorruptCacheWarning();
+        TestVersionedJsonCacheShellRejectsUnsupportedSchema();
+        TestSortedCacheKeysReturnsStableOrder();
+        TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
+        TestLocalUserStateSaveSchedulerDebouncesAndRetries();
+        TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain();
+        TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
+        TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported();
+        TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
+        TestPanelVisibilityStateCacheIgnoresCorruptJson();
+        TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
+        TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
+        TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
+        TestCancelableTextStreamReadStopsBetweenChunks();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

@@ -972,6 +972,33 @@ SpectrumSnapshotHandle ShellUi::current_snapshot() const
     return session_.CurrentSampleSnapshot();
 }
 
+bool ShellUi::ArmRuntimeResourceCancellationCheckpoint()
+{
+    return source_activation_.load_queue_
+        .ArmRuntimeResourceCancellationCheckpoint();
+}
+
+ShellRuntimeResourceObservation
+ShellUi::runtime_resource_observation() const
+{
+    const SpectrumSnapshotHandle snapshot =
+        session_.CurrentSourceSnapshot();
+    return {
+        .load_activity =
+            source_activation_.load_queue_.ActivitySnapshot(),
+        .presented_source_load =
+            source_activation_.
+                presented_source_load_observation(),
+        .pending_load_count =
+            source_activation_.PendingLoadCount(),
+        .active_source_path =
+            snapshot ? snapshot->source.path
+                     : std::filesystem::path{},
+        .load_error =
+            std::string(source_activation_.ErrorMessage()),
+    };
+}
+
 void ShellUi::RecordNavigationKeyInput(
     NavigationLatencyInputKind kind,
     NavigationLatencyTimePoint at)

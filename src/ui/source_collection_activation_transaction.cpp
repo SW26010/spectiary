@@ -413,6 +413,32 @@ SourceCollectionActivationTransaction::
             ++trace;
             continue;
         }
+        if (report->outcome ==
+                SourceLoadLatencyOutcome::Presented &&
+            matching_draw_submission &&
+            spectrum_draw_submission_->snapshot &&
+            report->target_index ==
+                spectrum_draw_submission_->snapshot
+                    ->collection.current_index) {
+            const SpectrumSnapshot& snapshot =
+                *spectrum_draw_submission_->snapshot;
+            presented_source_load_observation_ = {
+                .sequence =
+                    presented_source_load_observation_
+                        .sequence +
+                    1,
+                .source_load_id =
+                    report->source_load_id,
+                .activation_frame =
+                    report->activation_frame,
+                .viewport_id =
+                    report->presentation_viewport_id,
+                .source_id = snapshot.source.id,
+                .source_path = snapshot.source.path,
+                .spectrum_index =
+                    snapshot.collection.current_index,
+            };
+        }
         reports.push_back(std::move(*report));
         if (trace->second ==
             presentable_source_load_trace_) {
@@ -455,6 +481,14 @@ SourceCollectionActivationTransaction::status() const
         .loading = NeedsService(),
         .error_message = ErrorMessage(),
     };
+}
+
+const SourceCollectionActivationTransaction::
+    PresentedSourceLoadObservation&
+SourceCollectionActivationTransaction::
+    presented_source_load_observation() const noexcept
+{
+    return presented_source_load_observation_;
 }
 
 bool SourceCollectionActivationTransaction::NeedsService() const

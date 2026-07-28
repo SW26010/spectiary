@@ -218,6 +218,19 @@ int SpecForgeApp::Run(
     Initialize(instance, show_command, initial_source);
 
     MSG message = {};
+    const auto next_maintenance_deadline = [this]() {
+        auto deadline = ui_.NextMaintenanceDeadline();
+        if (!runtime_resource_workload_) {
+            return deadline;
+        }
+        const auto workload_deadline =
+            runtime_resource_workload_->next_deadline();
+        if (workload_deadline &&
+            (!deadline || *workload_deadline < *deadline)) {
+            deadline = workload_deadline;
+        }
+        return deadline;
+    };
     while (running_) {
         while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
             if (message.message == WM_QUIT) {
@@ -249,9 +262,16 @@ int SpecForgeApp::Run(
         }
 
         auto now = RenderWakeScheduler::Clock::now();
-        const auto maintenance_deadline = ui_.NextMaintenanceDeadline();
+        auto maintenance_deadline =
+            next_maintenance_deadline();
         if (maintenance_deadline && now >= *maintenance_deadline) {
             ui_.RunMaintenance(now);
+            if (runtime_resource_workload_) {
+                runtime_resource_workload_->Service(
+                    ui_,
+                    window_.hwnd(),
+                    now);
+            }
             now = RenderWakeScheduler::Clock::now();
             render_wake_scheduler_.RequestFrame();
         }
@@ -290,10 +310,13 @@ int SpecForgeApp::Run(
 
         (void)WaitForWin32MessageOrDeadline(render_wake_scheduler_.NextWakeDeadline(
             window_renderable,
-            ui_.NextMaintenanceDeadline()));
+            next_maintenance_deadline()));
     }
 
     Shutdown();
+    if (runtime_resource_workload_) {
+        return runtime_resource_workload_->exit_code();
+    }
     return static_cast<int>(message.wParam);
 }
 
@@ -302,18 +325,38 @@ void SpecForgeApp::Initialize(
     int show_command,
     const std::optional<std::filesystem::path>& initial_source)
 {
+    const RuntimeResourceWorkloadConfigurationLoadResult
+        workload_configuration =
+            LoadRuntimeResourceWorkloadConfigurationFromEnvironment();
+    if (!workload_configuration.error_message.empty()) {
+        throw std::runtime_error(
+            workload_configuration.error_message);
+    }
+    if (workload_configuration.configuration) {
+        runtime_resource_workload_.emplace(
+            *workload_configuration.configuration);
+        profile_limits_.max_duration =
+            std::chrono::steady_clock::duration::zero();
+    }
+
     pan_pacing_ = ResolvePanPacingEnvironment();
     if (initial_source) {
         ui_.OpenSource(*initial_source);
     }
 
     profile_ = ProfileSink::CreateDefault(
-        ui_.profile_output_directory());
+        ui_.profile_output_directory(),
+        profile_limits_);
     if (profile_.is_open()) {
         profile_status_message_ = "Recording started by SPECFORGE_PROFILE.";
         LogProfileRecordingStarted("environment", "startup");
     } else if (!profile_.error_message().empty()) {
         profile_status_message_ = "Could not start recording: " + profile_.error_message();
+    }
+    if (runtime_resource_workload_ &&
+        !profile_.is_open()) {
+        throw std::runtime_error(
+            "Runtime resource workload requires SPECFORGE_PROFILE=1 and a writable profile output directory.");
     }
 
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -342,7 +385,10 @@ void SpecForgeApp::Initialize(
         window_.hwnd(),
         pan_pacing_.effective == PanPacingMode::Uncapped
             ? D3D11CompositionPolicy::Disabled
-            : D3D11CompositionPolicy::Prefer);
+            : D3D11CompositionPolicy::Prefer,
+        runtime_resource_workload_ &&
+            runtime_resource_workload_->
+                graphics_debug_requested());
     if (FAILED(renderer_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), renderer_result));
     }
@@ -375,6 +421,12 @@ void SpecForgeApp::Initialize(
     LogDisplayEnvironment("startup");
     LogPresentationUpdates();
     WritePanPacingState("startup", false);
+    if (runtime_resource_workload_) {
+        runtime_resource_workload_->Start(
+            GetCurrentProcessId(),
+            ui_);
+        render_wake_scheduler_.RequestFrame();
+    }
 }
 
 void SpecForgeApp::InitializeUiBackends()
@@ -457,6 +509,9 @@ void SpecForgeApp::InitializeUiBackends()
 
 void SpecForgeApp::Shutdown()
 {
+    if (shutdown_complete_) {
+        return;
+    }
     ui_.UnregisterSourceLoadCompletionReadyCallback();
     if (window_.hwnd() != nullptr) {
         KillTimer(window_.hwnd(), kPresentationRefreshTimer);
@@ -495,6 +550,12 @@ void SpecForgeApp::Shutdown()
     }
 
     renderer_.Shutdown();
+    if (runtime_resource_workload_) {
+        runtime_resource_workload_->
+            RecordGraphicsDiagnostics(
+                renderer_.live_object_report(),
+                ui_);
+    }
     pending_resize_.reset();
     fullscreen_restore_.reset();
     immersive_plot_entered_fullscreen_ = false;
@@ -502,6 +563,7 @@ void SpecForgeApp::Shutdown()
     profile_.Stop();
     window_.ClearMessageHandler();
     window_.Destroy();
+    shutdown_complete_ = true;
 }
 
 RenderFrameOutcome SpecForgeApp::RenderFrame()
@@ -817,6 +879,10 @@ void SpecForgeApp::ApplyPendingResize()
     if (FAILED(resize_result)) {
         throw std::runtime_error(HResultMessage(renderer_.last_error_operation(), resize_result));
     }
+    if (runtime_resource_workload_) {
+        runtime_resource_workload_->
+            RecordRenderTargetResize();
+    }
 
     profile_.WriteEvent("render_target_resize", {
                                                     ProfileSink::Field::Number("width", std::to_string(resize.width)),
@@ -1021,7 +1087,8 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
         return;
     }
     if (!profile_.StartDefault(
-            ui_.profile_output_directory())) {
+            ui_.profile_output_directory(),
+            profile_limits_)) {
         profile_status_message_ = "Could not start recording: " + profile_.error_message();
         displayed_profile_stop_reason_ = ProfileSink::StopReason::WriteFailure;
         return;
@@ -1082,21 +1149,20 @@ void SpecForgeApp::LogProfileRecordingStarted(
     if (!profile_.is_open()) {
         return;
     }
-    const ProfileSink::Limits limits;
     profile_.WriteEvent("profile_recording", {
                                                    ProfileSink::Field::String("action", "start"),
                                                    ProfileSink::Field::String("trigger", std::string(trigger)),
                                                    ProfileSink::Field::String("writer", "bounded_async_jsonl"),
                                                    ProfileSink::Field::Number(
                                                        "max_queue_bytes",
-                                                       std::to_string(limits.max_queue_bytes)),
+                                                       std::to_string(profile_limits_.max_queue_bytes)),
                                                    ProfileSink::Field::Number(
                                                        "max_file_bytes",
-                                                       std::to_string(limits.max_file_bytes)),
+                                                       std::to_string(profile_limits_.max_file_bytes)),
                                                    ProfileSink::Field::Number(
                                                        "max_duration_seconds",
                                                        std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-                                                                          limits.max_duration)
+                                                                          profile_limits_.max_duration)
                                                                           .count())),
                                                });
     WriteRuntimeConfiguration(configuration_reason);

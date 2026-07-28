@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/atomic_file.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
@@ -115,6 +117,7 @@ using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string
     int schema_version,
     std::string_view description,
     const JsonValue& body,
-    std::string* error_message = nullptr);
+    std::string* error_message = nullptr,
+    AtomicFileReplaceRetryPolicy replace_retry_policy = {});
 
 }  // namespace specforge

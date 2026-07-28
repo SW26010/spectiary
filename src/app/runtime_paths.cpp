@@ -1,7 +1,10 @@
 #include "app/runtime_paths.h"
 
+#include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -38,6 +41,50 @@ std::filesystem::path PackageRootForExecutable(const std::filesystem::path& exec
     std::error_code error;
     std::filesystem::path current = std::filesystem::current_path(error);
     return error ? std::filesystem::temp_directory_path() : current;
+}
+
+std::optional<std::filesystem::path>
+RuntimeResourceUserStateRootOverride()
+{
+#ifdef _WIN32
+    wchar_t* workload_path = nullptr;
+    std::size_t workload_path_size = 0;
+    if (_wdupenv_s(
+            &workload_path,
+            &workload_path_size,
+            L"SPECFORGE_RUNTIME_RESOURCE_WORKLOAD") != 0 ||
+        workload_path == nullptr ||
+        workload_path[0] == L'\0') {
+        std::free(workload_path);
+        return std::nullopt;
+    }
+    std::free(workload_path);
+
+    wchar_t* state_root = nullptr;
+    std::size_t state_root_size = 0;
+    if (_wdupenv_s(
+            &state_root,
+            &state_root_size,
+            L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR") != 0 ||
+        state_root == nullptr ||
+        state_root[0] == L'\0') {
+        std::free(state_root);
+        return std::nullopt;
+    }
+    std::filesystem::path result(state_root);
+    std::free(state_root);
+    return result;
+#else
+    const char* workload_path =
+        std::getenv("SPECFORGE_RUNTIME_RESOURCE_WORKLOAD");
+    const char* state_root =
+        std::getenv("SPECFORGE_RUNTIME_RESOURCE_STATE_DIR");
+    if (workload_path == nullptr || *workload_path == '\0' ||
+        state_root == nullptr || *state_root == '\0') {
+        return std::nullopt;
+    }
+    return std::filesystem::path(state_root);
+#endif
 }
 
 }  // namespace
@@ -124,9 +171,19 @@ RuntimePaths DefaultRuntimePaths()
     inputs.executable_path = CurrentExecutablePath();
     inputs.local_app_data_user_state_root =
         DefaultLocalAppDataUserStateRoot();
-    return RuntimePathsForDeployment(
+    RuntimePaths paths = RuntimePathsForDeployment(
         metadata.deployment,
         std::move(inputs));
+    if (std::optional<std::filesystem::path> state_root =
+            RuntimeResourceUserStateRootOverride()) {
+        paths.local_user_state_root = std::move(*state_root);
+        paths.profile_log_directory =
+            paths.local_user_state_root / "logs";
+        paths.imgui_ini_path =
+            paths.local_user_state_root /
+            "specforge-imgui-v2.ini";
+    }
+    return paths;
 }
 
 }  // namespace specforge

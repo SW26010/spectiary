@@ -251,6 +251,29 @@ void TestDurationLimitStopsAnIdleRecording()
     sink.Stop();
 }
 
+void TestZeroDurationDelegatesToExternalLifetime()
+{
+    TemporaryDirectory temporary;
+    specforge::ProfileSink::Limits limits =
+        GenerousLimits();
+    limits.max_duration =
+        std::chrono::steady_clock::duration::zero();
+    specforge::ProfileSink sink(
+        temporary.path() / "externally-bounded.jsonl",
+        limits);
+
+    std::this_thread::sleep_for(40ms);
+    Require(
+        sink.is_open() &&
+            sink.WriteEvent("external_timeout_owned"),
+        "a zero duration limit should remain open for an external controller");
+    sink.Stop();
+    Require(
+        sink.stop_reason() ==
+            specforge::ProfileSink::StopReason::Explicit,
+        "external shutdown should retain the explicit stop reason");
+}
+
 void TestStoppedSinkCanStartASecondSession()
 {
     TemporaryDirectory temporary;
@@ -476,6 +499,7 @@ int main()
         TestNormalCapacityDoesNotDropOnWriterContention();
         TestFileLimitStopsRecording();
         TestDurationLimitStopsAnIdleRecording();
+        TestZeroDurationDelegatesToExternalLifetime();
         TestStoppedSinkCanStartASecondSession();
         TestBackgroundStopCanBeFinalizedWithoutBlockingTheRequest();
         TestFrameFinalizationKeepsSameFrameTailBeforeSummary();

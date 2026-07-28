@@ -1,10 +1,13 @@
 #include "platform/atomic_file.h"
+#include "platform/atomic_file_internal.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -38,6 +41,18 @@ void RemoveTemporaryFile(const std::filesystem::path& temporary_path)
     std::filesystem::remove(temporary_path, remove_error);
 }
 
+bool IsTransientReplaceError(const std::error_code& error)
+{
+#ifdef _WIN32
+    return error.category() == std::system_category() &&
+           (error.value() == ERROR_SHARING_VIOLATION ||
+            error.value() == ERROR_ACCESS_DENIED);
+#else
+    (void)error;
+    return false;
+#endif
+}
+
 }  // namespace
 
 std::filesystem::path TemporarySiblingPath(const std::filesystem::path& target_path)
@@ -55,35 +70,98 @@ std::filesystem::path TemporarySiblingPath(const std::filesystem::path& target_p
     return temporary;
 }
 
-bool ReplaceFileAtomically(
+bool ReplaceFileAtomicallyWithOperation(
     const std::filesystem::path& temporary_path,
     const std::filesystem::path& target_path,
+    AtomicFileReplaceRetryPolicy retry_policy,
+    const AtomicFileReplaceOperation& replace_operation,
+    const AtomicFileRetryWait& retry_wait,
     std::string* error_message,
     std::string_view target_description)
 {
-#ifdef _WIN32
-    if (MoveFileExW(
-            temporary_path.c_str(),
-            target_path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
-        return true;
+    const std::size_t maximum_attempts =
+        std::max<std::size_t>(
+            retry_policy.maximum_attempts,
+            1);
+    auto retry_delay =
+        std::max(
+            retry_policy.initial_retry_delay,
+            std::chrono::milliseconds::zero());
+    const auto maximum_retry_delay =
+        std::max(
+            retry_policy.maximum_retry_delay,
+            retry_delay);
+
+    std::error_code replace_error;
+    for (std::size_t attempt = 0;
+         attempt < maximum_attempts;
+         ++attempt) {
+        replace_error =
+            replace_operation(temporary_path, target_path);
+        if (!replace_error) {
+            return true;
+        }
+        if (!IsTransientReplaceError(replace_error) ||
+            attempt + 1 >= maximum_attempts) {
+            break;
+        }
+        if (retry_delay > std::chrono::milliseconds::zero()) {
+            retry_wait(retry_delay);
+        }
+        retry_delay +=
+            std::min(
+                retry_delay,
+                maximum_retry_delay - retry_delay);
     }
     SetError(
         error_message,
         "could not replace " + DescriptionText(target_description) + ": " +
-            std::system_category().message(GetLastError()));
+            replace_error.message());
     return false;
+}
+
+bool ReplaceFileAtomically(
+    const std::filesystem::path& temporary_path,
+    const std::filesystem::path& target_path,
+    std::string* error_message,
+    std::string_view target_description,
+    AtomicFileReplaceRetryPolicy retry_policy)
+{
+    const AtomicFileReplaceOperation replace_operation =
+        [](const std::filesystem::path& source,
+           const std::filesystem::path& destination) {
+#ifdef _WIN32
+            if (MoveFileExW(
+                    source.c_str(),
+                    destination.c_str(),
+                    MOVEFILE_REPLACE_EXISTING |
+                        MOVEFILE_WRITE_THROUGH) != 0) {
+                return std::error_code{};
+            }
+            return std::error_code(
+                static_cast<int>(GetLastError()),
+                std::system_category());
 #else
-    std::error_code rename_error;
-    std::filesystem::rename(temporary_path, target_path, rename_error);
-    if (!rename_error) {
-        return true;
-    }
-    SetError(
-        error_message,
-        "could not replace " + DescriptionText(target_description) + ": " + rename_error.message());
-    return false;
+            std::error_code rename_error;
+            std::filesystem::rename(
+                source,
+                destination,
+                rename_error);
+            return rename_error;
 #endif
+        };
+    const AtomicFileRetryWait retry_wait =
+        [](std::chrono::milliseconds delay) {
+            std::this_thread::sleep_for(delay);
+        };
+    return ReplaceFileAtomicallyWithOperation(
+        temporary_path,
+        target_path,
+        retry_policy,
+        replace_operation,
+        retry_wait,
+        error_message,
+        target_description);
 }
 
 bool WriteFileAtomically(
@@ -143,7 +221,12 @@ bool WriteFileAtomically(
         return false;
     }
 
-    if (!ReplaceFileAtomically(temporary_path, target_path, error_message, description)) {
+    if (!ReplaceFileAtomically(
+            temporary_path,
+            target_path,
+            error_message,
+            description,
+            options.replace_retry_policy)) {
         RemoveTemporaryFile(temporary_path);
         return false;
     }

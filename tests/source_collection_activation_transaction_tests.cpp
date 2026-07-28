@@ -815,10 +815,6 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
                 snapshot->source.path == path &&
                 !activation.status().loading;
         });
-    activation.RecordSpectrumDrawSubmission(
-        23,
-        7,
-        session.CurrentSampleSnapshot());
     const specforge::NavigationLatencyPresentation
         presentation{
             7,
@@ -826,6 +822,28 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
     activation.PresentFrame(
         23,
         std::span(&presentation, 1));
+    const std::uint64_t sequence_without_draw =
+        activation.presented_source_load_observation()
+            .sequence;
+    activation.RecordSpectrumDrawSubmission(
+        23,
+        7,
+        session.CurrentSampleSnapshot());
+    const specforge::NavigationLatencyPresentation
+        wrong_viewport_presentation{
+            8,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        23,
+        std::span(&wrong_viewport_presentation, 1));
+    const std::uint64_t sequence_after_wrong_viewport =
+        activation.presented_source_load_observation()
+            .sequence;
+    activation.PresentFrame(
+        23,
+        std::span(&presentation, 1));
+    const auto presented =
+        activation.presented_source_load_observation();
     profile.Stop();
     const std::string profile_text =
         ReadText(profile_path);
@@ -835,6 +853,18 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
     Require(
         activated,
         "open -> prepare -> commit should publish the source snapshot");
+    Require(
+        sequence_without_draw == 0 &&
+            sequence_after_wrong_viewport == 0,
+        "missing or mismatched Present evidence must not advance the source-load presentation observation");
+    Require(
+        presented.sequence == 1 &&
+            presented.source_load_id > 0 &&
+            presented.activation_frame > 0 &&
+            presented.viewport_id == 7 &&
+            presented.source_path == path &&
+            presented.spectrum_index == 0,
+        "the exact drawn snapshot and successful viewport Present should publish one identity-bearing observation");
     Require(
         profile_text.find(
             "\"event\":\"source_load_latency\"") !=

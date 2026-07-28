@@ -472,6 +472,33 @@ void TestRealSwapChainInitializationColorSpaceAndResize()
         "resize should reapply the explicit P709 SDR color space");
 }
 
+void TestRendererDebugLayerRequestFallsBackAndReportsAvailability()
+{
+    SwapChainTestWindow window;
+    specforge::D3D11Renderer renderer;
+    Require(
+        SUCCEEDED(renderer.Initialize(
+            window.hwnd(),
+            specforge::D3D11CompositionPolicy::Disabled,
+            true)),
+        "requesting live-object diagnostics should fall back to the ordinary device when Graphics Tools are unavailable");
+    renderer.Shutdown();
+
+    const specforge::D3D11LiveObjectReport& report =
+        renderer.live_object_report();
+    Require(
+        report.requested,
+        "the renderer should retain that live-object diagnostics were requested");
+    Require(
+        report.available || !report.detail.empty(),
+        "the renderer should either produce a report or explain why the debug layer was unavailable");
+    if (report.available) {
+        Require(
+            report.unexpected_live_object_messages == 0,
+            "a clean renderer shutdown should not retain unexpected D3D11 objects");
+    }
+}
+
 void TestImGuiViewportSwapChainLifecycle()
 {
     SwapChainTestWindow window;
@@ -557,6 +584,7 @@ int main()
     TestDisplayRefreshDurationPolicy();
     TestInvalidArgumentsPreserveDiagnosticStage();
     TestRealSwapChainInitializationColorSpaceAndResize();
+    TestRendererDebugLayerRequestFallsBackAndReportsAvailability();
     TestWindowPresentationLifecycleAndDeterministicFallback();
     TestImGuiViewportSwapChainLifecycle();
     TestImGuiViewportFixtureCleansUpDuringExceptionUnwind();

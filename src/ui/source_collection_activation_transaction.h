@@ -42,6 +42,16 @@ public:
         std::string_view error_message;
     };
 
+    struct PresentedSourceLoadObservation {
+        std::uint64_t sequence = 0;
+        std::uint64_t source_load_id = 0;
+        std::uint64_t activation_frame = 0;
+        unsigned int viewport_id = 0;
+        std::string source_id;
+        std::filesystem::path source_path;
+        std::size_t spectrum_index = 0;
+    };
+
     SourceCollectionActivationTransaction(
         SourceCollectionSession& session,
         SourceCollectionLoadQueue load_queue =
@@ -84,6 +94,8 @@ public:
             presentations);
 
     [[nodiscard]] Status status() const;
+    [[nodiscard]] const PresentedSourceLoadObservation&
+    presented_source_load_observation() const noexcept;
     // Hides the currently failed generations from the UI projection while
     // retaining their terminal outcomes.
     void AcknowledgeLoadFailures();
@@ -327,6 +339,8 @@ private:
     std::uint64_t next_source_load_trace_id_ = 1;
     std::optional<SpectrumDrawSubmission>
         spectrum_draw_submission_;
+    PresentedSourceLoadObservation
+        presented_source_load_observation_;
     NavigationLatencyTraceHandle
         presentable_navigation_trace_;
     SpectrumSnapshotHandle
