@@ -858,7 +858,7 @@ void SettingsPanelUi::RenderLanguage(
     ImGui::Spacing();
     ImGui::PushTextWrapPos();
     const std::string_view coverage =
-        UiText(language, UiTextId::LocalizationInProgress);
+        UiText(language, UiTextId::ApplicationLanguageScope);
     ImGui::TextDisabled(
         "%.*s",
         static_cast<int>(coverage.size()),

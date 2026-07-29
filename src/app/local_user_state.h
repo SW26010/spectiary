@@ -17,6 +17,8 @@ struct LocalUserStatePersistenceStatus {
     bool recovered = false;
     std::string load_warning;
     std::string save_message;
+    std::string load_diagnostic_detail;
+    std::string save_diagnostic_detail;
 };
 
 enum class LocalUserStateHealthKind {
@@ -26,18 +28,51 @@ enum class LocalUserStateHealthKind {
     Recovered,
 };
 
+enum class LocalUserStateArea {
+    SourceSession,
+    SampleNavigation,
+    SampleLabeling,
+    SampleWorkflow,
+    Language,
+    UiScale,
+    ProfileOutputDirectory,
+    PanelVisibility,
+    SpectralLines,
+};
+
+enum class LocalUserStateHealthMessageKind {
+    LoadWarning,
+    SaveWarning,
+    SaveRetrying,
+    Recovered,
+};
+
+struct LocalUserStateHealthMessage {
+    LocalUserStateArea area =
+        LocalUserStateArea::SourceSession;
+    LocalUserStateHealthMessageKind kind =
+        LocalUserStateHealthMessageKind::LoadWarning;
+    std::string diagnostic_detail;
+
+    [[nodiscard]] bool operator==(
+        const LocalUserStateHealthMessage&) const =
+        default;
+};
+
 struct LocalUserStateHealthView {
     LocalUserStateHealthKind kind =
         LocalUserStateHealthKind::Healthy;
-    std::vector<std::string> messages;
+    std::vector<LocalUserStateHealthMessage> messages;
 };
 
 void AppendLocalUserStateHealth(
     LocalUserStateHealthView& health,
-    std::string_view area,
+    LocalUserStateArea area,
     const LocalUserStatePersistenceStatus& status);
 
 [[nodiscard]] std::filesystem::path DefaultLocalUserStatePath(std::filesystem::path relative_path);
+[[nodiscard]] std::string LocalUserStatePathToUtf8(
+    const std::filesystem::path& path);
 [[nodiscard]] std::string UserPathDisplayText(const std::filesystem::path& path);
 [[nodiscard]] std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value);
 [[nodiscard]] JsonValue PersistedPathReferenceJson(

@@ -17,6 +17,11 @@ namespace specforge {
 
 class SpectralLinesPanelController;
 
+enum class CatalogUserRenameEditState {
+    Unedited,
+    Edited,
+};
+
 struct CatalogUserStateIntent {
     [[nodiscard]] static CatalogUserStateIntent SetGroupingViewSearch(std::string query);
     [[nodiscard]] static CatalogUserStateIntent SetMarkerLabelsVisible(bool visible);
@@ -26,7 +31,8 @@ struct CatalogUserStateIntent {
     [[nodiscard]] static CatalogUserStateIntent DuplicateGroupingView(std::string view_id);
     [[nodiscard]] static CatalogUserStateIntent RenameUserGroupingView(
         std::string view_id,
-        std::string name);
+        std::string name,
+        CatalogUserRenameEditState edit_state);
     [[nodiscard]] static CatalogUserStateIntent DeleteUserGroupingView(std::string view_id);
     [[nodiscard]] static CatalogUserStateIntent AddUserGroup(std::string view_id);
     [[nodiscard]] static CatalogUserStateIntent MoveMarkerReferenceToNewGroup(
@@ -40,7 +46,8 @@ struct CatalogUserStateIntent {
     [[nodiscard]] static CatalogUserStateIntent RenameUserGroup(
         std::string view_id,
         std::string group_id,
-        std::string name);
+        std::string name,
+        CatalogUserRenameEditState edit_state);
     [[nodiscard]] static CatalogUserStateIntent DeleteUserGroup(
         std::string view_id,
         std::string group_id);
@@ -110,6 +117,8 @@ private:
     std::string marker_id_;
     std::string text_;
     bool enabled_ = false;
+    CatalogUserRenameEditState rename_edit_state_ =
+        CatalogUserRenameEditState::Unedited;
 };
 
 enum class CatalogUserStateResultStatus {
@@ -138,6 +147,7 @@ struct SpectralLineMarkerReferenceView {
 struct SpectralLineGroupView {
     std::string id;
     std::string name;
+    GeneratedNameMetadata generated_name;
     bool is_unassigned = false;
     bool expanded = false;
     bool dimmed_by_search = false;
@@ -148,6 +158,7 @@ struct SpectralLineGroupView {
 struct SpectralLineGroupingView {
     std::string id;
     std::string name;
+    GeneratedNameMetadata generated_name;
     bool editable = false;
     bool active = false;
     bool selection_requested = false;
@@ -155,11 +166,27 @@ struct SpectralLineGroupingView {
     std::vector<SpectralLineGroupView> groups;
 };
 
+enum class SpectralLineCacheLoadIssueKind {
+    None,
+    ReadFailed,
+    InvalidDocument,
+    UnsupportedFormatOrSchema,
+};
+
+struct SpectralLinePersistenceView {
+    bool retrying = false;
+    bool recovered = false;
+    SpectralLineCacheLoadIssueKind load_issue =
+        SpectralLineCacheLoadIssueKind::None;
+    std::string load_diagnostic_detail;
+    std::string save_diagnostic_detail;
+};
+
 struct CatalogUserStateView {
     std::string catalog_id;
     std::string catalog_display_name;
     std::string catalog_load_error;
-    LocalUserStatePersistenceStatus persistence;
+    SpectralLinePersistenceView persistence;
     std::string grouping_view_search;
     bool marker_labels_visible = true;
     bool has_catalog_grouping_view = false;
@@ -228,7 +255,10 @@ private:
     std::filesystem::path user_state_cache_path_;
     LocalUserStateSaveScheduler cache_save_scheduler_;
     LocalUserStateSaveStatus cache_save_status_;
+    SpectralLineCacheLoadIssueKind load_issue_kind_ =
+        SpectralLineCacheLoadIssueKind::None;
     std::string load_warning_;
+    std::string load_diagnostic_detail_;
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;

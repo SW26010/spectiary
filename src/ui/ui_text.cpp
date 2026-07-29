@@ -1,5 +1,6 @@
 #include "ui/ui_text.h"
 
+#include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "ui/source_collection_session_types.h"
@@ -22,14 +23,14 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Settings", "设置"},
     UiTextEntry{"Language", "语言"},
     UiTextEntry{
-        "Choose the language used by the application shell and Settings.",
-        "选择应用壳层与“设置”所使用的语言。"},
+        "Choose the language used throughout SpecForge.",
+        "选择 SpecForge 全应用所使用的语言。"},
     UiTextEntry{"Application language", "应用语言"},
     UiTextEntry{"English", "英语"},
     UiTextEntry{"Simplified Chinese", "简体中文"},
     UiTextEntry{
-        "The application shell and Settings use the selected language. Specialized scientific tools may still remain in English.",
-        "应用壳层与“设置”使用所选语言；部分专业科学工具可能仍保持英文。"},
+        "UI controls and application-authored messages use the selected language. Scientific names, catalog content, file paths, and diagnostic details remain unchanged.",
+        "界面控件与应用生成的消息使用所选语言；科学名称、目录内容、文件路径和诊断详情保持不变。"},
     UiTextEntry{
         "The saved application language could not be loaded. English is being used.",
         "无法加载已保存的应用语言，当前使用英语。"},
@@ -93,6 +94,8 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"PNG via synchronous GPU readback.", "通过同步 GPU 回读写入 PNG。"},
     UiTextEntry{"Output directory", "输出目录"},
     UiTextEntry{"unknown", "未知"},
+    UiTextEntry{"file", "文件"},
+    UiTextEntry{"folder", "文件夹"},
     UiTextEntry{"none", "无"},
     UiTextEntry{"error", "错误"},
     UiTextEntry{"loaded", "已加载"},
@@ -122,6 +125,21 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Sample name matches", "样本名称匹配"},
     UiTextEntry{"Ready", "就绪"},
     UiTextEntry{"Load failed", "加载失败"},
+    UiTextEntry{
+        "Background source loading failed.",
+        "后台源加载失败。"},
+    UiTextEntry{
+        "The prepared source result is no longer applicable.",
+        "已准备的源加载结果已不再适用。"},
+    UiTextEntry{
+        "The prepared source reuse target is no longer available.",
+        "已准备源的复用目标已不可用。"},
+    UiTextEntry{
+        "The prepared known-source plan is no longer current.",
+        "已准备的已知源加载计划已过期。"},
+    UiTextEntry{
+        "Prepared navigation no longer has a selectable final spectrum.",
+        "已准备的导航已无可选择的最终光谱。"},
     UiTextEntry{"Loading source...", "正在加载源…"},
     UiTextEntry{"State save retrying", "正在重试保存状态"},
     UiTextEntry{"State warning", "状态警告"},
@@ -677,6 +695,98 @@ constexpr std::array kTextCatalog = {
         "No comparable sort sources",
         "无可比较的排序源"},
     UiTextEntry{"Unlabeled", "未标注"},
+    UiTextEntry{"Public catalog", "公共目录"},
+    UiTextEntry{
+        "Current snapshot does not expose a wavelength axis for spectral-line overlays.",
+        "当前快照未提供可用于谱线叠加的波长轴。"},
+    UiTextEntry{
+        "Wavelength frame is unknown; rest-frame overlays are reference-only.",
+        "波长参考系未知；静止系叠加仅供参考。"},
+    UiTextEntry{"Catalog", "目录"},
+    UiTextEntry{"Catalog load failed: ", "目录加载失败："},
+    UiTextEntry{
+        "No public catalog markers loaded.",
+        "未加载公共目录标记。"},
+    UiTextEntry{
+        "Could not read spectral-line grouping cache.",
+        "无法读取谱线分组缓存。"},
+    UiTextEntry{
+        "Ignored invalid spectral-line grouping cache.",
+        "已忽略无效的谱线分组缓存。"},
+    UiTextEntry{
+        "Ignored unsupported spectral-line grouping cache.",
+        "已忽略不受支持的谱线分组缓存。"},
+    UiTextEntry{
+        "Could not save spectral-line grouping cache. Retrying.",
+        "无法保存谱线分组缓存，正在重试。"},
+    UiTextEntry{
+        "Spectral-line state persistence recovered.",
+        "谱线状态持久化已恢复。"},
+    UiTextEntry{"Search", "搜索"},
+    UiTextEntry{
+        "id, label, catalog group, or plot label",
+        "ID、名称、目录分组或绘图标签"},
+    UiTextEntry{"Duplicate", "创建副本"},
+    UiTextEntry{
+        "Duplicate as user view",
+        "复制为用户视图"},
+    UiTextEntry{"Rename", "重命名"},
+    UiTextEntry{"Rename grouping view", "重命名分组视图"},
+    UiTextEntry{"Delete grouping view", "删除分组视图"},
+    UiTextEntry{
+        "Delete grouping view \"%s\"?",
+        "删除分组视图“%s”？"},
+    UiTextEntry{
+        "Catalog markers and marker visibility are not deleted.",
+        "不会删除目录标记及其可见性设置。"},
+    UiTextEntry{
+        "This catalog has no catalog grouping view.",
+        "此目录没有目录分组视图。"},
+    UiTextEntry{"+ New grouping view", "+ 新建分组视图"},
+    UiTextEntry{
+        "New user grouping view",
+        "新建用户分组视图"},
+    UiTextEntry{"Catalog grouping view", "目录分组视图"},
+    UiTextEntry{"Grouping ", "分组视图 "},
+    UiTextEntry{" copy", " 副本"},
+    UiTextEntry{"+ Group", "+ 分组"},
+    UiTextEntry{
+        "%zu plot-visible / %zu catalog markers",
+        "绘图中可见 %zu 个 / 目录共 %zu 个标记"},
+    UiTextEntry{
+        "No groups in this view.",
+        "此视图中没有分组。"},
+    UiTextEntry{
+        "Search is filtering this group; bulk visibility is disabled.",
+        "搜索正在筛选此分组；批量可见性已禁用。"},
+    UiTextEntry{
+        "No resolved markers in this group.",
+        "此分组中没有已解析的标记。"},
+    UiTextEntry{
+        "Show or hide all resolved markers in this group.",
+        "显示或隐藏此分组中的所有已解析标记。"},
+    UiTextEntry{
+        "Shared marker reference: this marker also appears in another group in this view.",
+        "共享标记引用：此标记也出现在该视图的其他分组中。"},
+    UiTextEntry{"Drop: copy", "拖放：复制"},
+    UiTextEntry{
+        "Drop: move, Ctrl+drop: copy",
+        "拖放：移动，按住 Ctrl 拖放：复制"},
+    UiTextEntry{
+        "Drop between groups to reorder",
+        "拖放到分组之间以重新排序"},
+    UiTextEntry{"Disband group", "解散分组"},
+    UiTextEntry{"Show on plot", "在绘图中显示"},
+    UiTextEntry{"unresolved", "未解析"},
+    UiTextEntry{
+        "Unresolved marker references are not plotted.",
+        "未解析的标记引用不会绘制。"},
+    UiTextEntry{"Copy to group", "复制到分组"},
+    UiTextEntry{"No other groups", "没有其他分组"},
+    UiTextEntry{"Remove from this group", "从此分组中移除"},
+    UiTextEntry{"Rename group", "重命名分组"},
+    UiTextEntry{"Unassigned", "未分组"},
+    UiTextEntry{"Group ", "分组 "},
 };
 
 static_assert(kTextCatalog.size() == kUiTextCount);
@@ -708,6 +818,105 @@ std::string StableUiLabel(
     label += "###";
     label += stable_id;
     return label;
+}
+
+std::string_view SourceTypeDisplayText(
+    UiLanguage language,
+    std::string_view source_type) noexcept
+{
+    if (source_type == "file") {
+        return UiText(
+            language,
+            UiTextId::FileSourceType);
+    }
+    if (source_type == "folder") {
+        return UiText(
+            language,
+            UiTextId::FolderSourceType);
+    }
+    return source_type;
+}
+
+std::string_view UiText(
+    UiLanguage language,
+    SourceCollectionLoadErrorKind error_kind) noexcept
+{
+    switch (error_kind) {
+    case SourceCollectionLoadErrorKind::
+        BackgroundLoadingFailed:
+        return UiText(
+            language,
+            UiTextId::
+                BackgroundSourceLoadingFailed);
+    case SourceCollectionLoadErrorKind::
+        PreparedResultNotApplicable:
+        return UiText(
+            language,
+            UiTextId::
+                PreparedSourceResultNotApplicable);
+    case SourceCollectionLoadErrorKind::
+        PreparedReuseTargetUnavailable:
+        return UiText(
+            language,
+            UiTextId::
+                PreparedSourceReuseTargetUnavailable);
+    case SourceCollectionLoadErrorKind::
+        PreparedKnownSourcePlanStale:
+        return UiText(
+            language,
+            UiTextId::
+                PreparedKnownSourcePlanStale);
+    case SourceCollectionLoadErrorKind::
+        PreparedNavigationUnavailable:
+        return UiText(
+            language,
+            UiTextId::
+                PreparedNavigationUnavailable);
+    case SourceCollectionLoadErrorKind::None:
+        break;
+    }
+    return {};
+}
+
+std::string FormatSourceCollectionLoadFailures(
+    UiLanguage language,
+    std::span<const SourceCollectionLoadFailure>
+        failures)
+{
+    const std::string_view separator =
+        language == UiLanguage::SimplifiedChinese
+            ? std::string_view{"："}
+            : std::string_view{": "};
+    std::string result;
+    for (const SourceCollectionLoadFailure& failure :
+         failures) {
+        if (!result.empty()) {
+            result += "\n\n";
+        }
+        const auto source_path =
+            failure.source_path.u8string();
+        if (!source_path.empty()) {
+            result.append(
+                reinterpret_cast<const char*>(
+                    source_path.data()),
+                source_path.size());
+            result += separator;
+        }
+        result += UiText(
+            language,
+            failure.error.kind);
+        if (!failure.error
+                 .diagnostic_detail.empty()) {
+            result.push_back('\n');
+            result += UiText(
+                language,
+                UiTextId::DiagnosticDetails);
+            result += separator;
+            result += failure.error
+                          .diagnostic_detail;
+        }
+    }
+    return result;
 }
 
 std::string_view UiText(
@@ -770,6 +979,82 @@ std::string_view UiText(
     default:
         return {};
     }
+}
+
+std::string_view UiText(
+    UiLanguage language,
+    LocalUserStateArea area) noexcept
+{
+    switch (area) {
+    case LocalUserStateArea::SourceSession:
+        return UiText(
+            language,
+            UiTextId::SourceSessionArea);
+    case LocalUserStateArea::SampleNavigation:
+        return UiText(
+            language,
+            UiTextId::SampleNavigationArea);
+    case LocalUserStateArea::SampleLabeling:
+        return UiText(
+            language,
+            UiTextId::SampleLabelingArea);
+    case LocalUserStateArea::SampleWorkflow:
+        return UiText(
+            language,
+            UiTextId::SampleWorkflowArea);
+    case LocalUserStateArea::Language:
+        return UiText(language, UiTextId::Language);
+    case LocalUserStateArea::UiScale:
+        return UiText(language, UiTextId::UiScale);
+    case LocalUserStateArea::ProfileOutputDirectory:
+        return UiText(
+            language,
+            UiTextId::ProfileOutputDirectory);
+    case LocalUserStateArea::PanelVisibility:
+        return UiText(
+            language,
+            UiTextId::PanelVisibility);
+    case LocalUserStateArea::SpectralLines:
+        return UiText(
+            language,
+            UiTextId::SpectralLineStateArea);
+    }
+    return {};
+}
+
+std::string FormatLocalUserStateHealthMessage(
+    UiLanguage language,
+    const LocalUserStateHealthMessage& message)
+{
+    UiTextId state_text = UiTextId::StateWarning;
+    switch (message.kind) {
+    case LocalUserStateHealthMessageKind::LoadWarning:
+    case LocalUserStateHealthMessageKind::SaveWarning:
+        break;
+    case LocalUserStateHealthMessageKind::SaveRetrying:
+        state_text = UiTextId::StateSaveRetrying;
+        break;
+    case LocalUserStateHealthMessageKind::Recovered:
+        state_text = UiTextId::StateRecovered;
+        break;
+    }
+
+    const std::string_view separator =
+        language == UiLanguage::SimplifiedChinese
+            ? std::string_view{"："}
+            : std::string_view{": "};
+    std::string result(UiText(language, message.area));
+    result += separator;
+    result += UiText(language, state_text);
+    if (!message.diagnostic_detail.empty()) {
+        result.push_back('\n');
+        result += UiText(
+            language,
+            UiTextId::DiagnosticDetails);
+        result += separator;
+        result += message.diagnostic_detail;
+    }
+    return result;
 }
 
 }  // namespace specforge

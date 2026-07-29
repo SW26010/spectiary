@@ -86,9 +86,19 @@ struct VersionedJsonCacheDocument {
     int schema_version = 0;
 };
 
+enum class VersionedJsonCacheLoadIssueKind {
+    None,
+    ReadFailed,
+    InvalidDocument,
+    UnsupportedFormatOrSchema,
+};
+
 struct VersionedJsonCacheLoadResult {
     std::optional<VersionedJsonCacheDocument> document;
     std::string warning;
+    VersionedJsonCacheLoadIssueKind issue_kind =
+        VersionedJsonCacheLoadIssueKind::None;
+    std::string diagnostic_detail;
 };
 
 using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string& error)>;

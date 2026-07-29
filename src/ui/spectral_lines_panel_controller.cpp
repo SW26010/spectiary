@@ -17,6 +17,24 @@ using namespace std::chrono_literals;
 constexpr auto kSaveDebounce = 500ms;
 constexpr auto kSaveRetry = 10s;
 
+SpectralLineCacheLoadIssueKind SpectralLineLoadIssueKind(
+    CatalogUserStateCacheLoadIssueKind issue_kind)
+{
+    switch (issue_kind) {
+    case CatalogUserStateCacheLoadIssueKind::ReadFailed:
+        return SpectralLineCacheLoadIssueKind::ReadFailed;
+    case CatalogUserStateCacheLoadIssueKind::InvalidDocument:
+        return SpectralLineCacheLoadIssueKind::InvalidDocument;
+    case CatalogUserStateCacheLoadIssueKind::
+        UnsupportedFormatOrSchema:
+        return SpectralLineCacheLoadIssueKind::
+            UnsupportedFormatOrSchema;
+    case CatalogUserStateCacheLoadIssueKind::None:
+        break;
+    }
+    return SpectralLineCacheLoadIssueKind::None;
+}
+
 std::string TrimWhitespace(std::string_view value)
 {
     const auto is_space = [](unsigned char character) {
@@ -107,11 +125,13 @@ CatalogUserStateIntent CatalogUserStateIntent::DuplicateGroupingView(std::string
 
 CatalogUserStateIntent CatalogUserStateIntent::RenameUserGroupingView(
     std::string view_id,
-    std::string name)
+    std::string name,
+    CatalogUserRenameEditState edit_state)
 {
     CatalogUserStateIntent intent(Kind::RenameUserGroupingView);
     intent.view_id_ = std::move(view_id);
     intent.text_ = std::move(name);
+    intent.rename_edit_state_ = edit_state;
     return intent;
 }
 
@@ -156,12 +176,14 @@ CatalogUserStateIntent CatalogUserStateIntent::CopyMarkerReferenceToNewGroup(
 CatalogUserStateIntent CatalogUserStateIntent::RenameUserGroup(
     std::string view_id,
     std::string group_id,
-    std::string name)
+    std::string name,
+    CatalogUserRenameEditState edit_state)
 {
     CatalogUserStateIntent intent(Kind::RenameUserGroup);
     intent.view_id_ = std::move(view_id);
     intent.group_id_ = std::move(group_id);
     intent.text_ = std::move(name);
+    intent.rename_edit_state_ = edit_state;
     return intent;
 }
 
@@ -286,8 +308,21 @@ SpectralLinesPanelController::SpectralLinesPanelController(
       cache_save_scheduler_(kSaveDebounce, kSaveRetry)
 {
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
+    const bool loaded_cache_requires_save =
+        load_result.requires_save;
+    const bool loaded_cache_can_rewrite =
+        load_result.issue_kind ==
+        CatalogUserStateCacheLoadIssueKind::None;
     user_state_cache_ = std::move(load_result.cache);
-    load_warning_ = std::move(load_result.warning);
+    load_issue_kind_ =
+        SpectralLineLoadIssueKind(
+            load_result.issue_kind);
+    load_diagnostic_detail_ =
+        std::move(load_result.diagnostic_detail);
+    load_warning_ =
+        load_diagnostic_detail_.empty()
+            ? std::move(load_result.warning)
+            : load_diagnostic_detail_;
     user_state_ = EnsureCatalogUserState(user_state_cache_, catalog_identity_);
     panel_state_ = EnsureCatalogPanelState(user_state_cache_, catalog_identity_);
     const CatalogUserStateCanonicalizationResult canonicalization =
@@ -300,7 +335,9 @@ SpectralLinesPanelController::SpectralLinesPanelController(
     if (canonicalization.active_view_changed) {
         RequestGroupingViewSelection();
     }
-    if (canonicalization.changed) {
+    if (loaded_cache_can_rewrite &&
+        (canonicalization.changed ||
+         loaded_cache_requires_save)) {
         MarkCacheDirty();
     }
     next_view_index_ = static_cast<int>(user_state_.grouping_views.size()) + 1;
@@ -350,9 +387,21 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
 
     case CatalogUserStateIntent::Kind::CreateUserGroupingView: {
         const std::string id = NextGroupingViewId();
-        const std::string name = "Grouping " + std::to_string(user_state_.grouping_views.size() + 1);
+        const std::size_t ordinal =
+            user_state_.grouping_views.size() + 1;
+        const std::string name =
+            "Grouping " + std::to_string(ordinal);
+        GeneratedNameMetadata generated_name;
+        generated_name.source =
+            GeneratedNameSource::DefaultGroupingView;
+        generated_name.ordinal = ordinal;
         user_state_.grouping_views.push_back(
-            CreateUserGroupingViewFromCatalog(catalog_, catalog_identity_, id, name));
+            CreateUserGroupingViewFromCatalog(
+                catalog_,
+                catalog_identity_,
+                id,
+                name,
+                std::move(generated_name)));
         user_state_.active_view_id = id;
         RequestGroupingViewSelection();
         return Applied(true);
@@ -378,10 +427,22 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         if (view == nullptr || name.empty()) {
             return Rejected("Editable grouping view identity and a non-empty name are required.");
         }
-        if (view->name == name) {
+        if (intent.rename_edit_state_ ==
+            CatalogUserRenameEditState::Unedited) {
             return NoChange();
         }
-        view->name = name;
+        const bool name_changed =
+            view->name != name;
+        const bool metadata_changed =
+            !(view->generated_name ==
+              GeneratedNameMetadata{});
+        if (!name_changed && !metadata_changed) {
+            return NoChange();
+        }
+        if (name_changed) {
+            view->name = name;
+        }
+        view->generated_name = {};
         return Applied(true);
     }
 
@@ -414,8 +475,20 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return Rejected("Editable grouping view identity does not belong to this catalog user state.");
         }
         const std::string group_id = NextUserGroupId();
-        const std::string group_name = "Group " + group_id.substr(std::string("group-").size());
-        if (!AddUserGroup(*view, group_id, group_name)) {
+        const std::size_t ordinal =
+            static_cast<std::size_t>(
+                next_group_index_ - 1);
+        const std::string group_name =
+            "Group " + std::to_string(ordinal);
+        GeneratedNameMetadata generated_name;
+        generated_name.source =
+            GeneratedNameSource::DefaultGroup;
+        generated_name.ordinal = ordinal;
+        if (!AddUserGroup(
+                *view,
+                group_id,
+                group_name,
+                std::move(generated_name))) {
             return Rejected("The user group could not be added without violating grouping view invariants.");
         }
         return Applied(true);
@@ -438,8 +511,20 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         }
 
         const std::string group_id = NextUserGroupId();
-        const std::string group_name = "Group " + group_id.substr(std::string("group-").size());
-        if (!AddUserGroup(*view, group_id, group_name)) {
+        const std::size_t ordinal =
+            static_cast<std::size_t>(
+                next_group_index_ - 1);
+        const std::string group_name =
+            "Group " + std::to_string(ordinal);
+        GeneratedNameMetadata generated_name;
+        generated_name.source =
+            GeneratedNameSource::DefaultGroup;
+        generated_name.ordinal = ordinal;
+        if (!AddUserGroup(
+                *view,
+                group_id,
+                group_name,
+                std::move(generated_name))) {
             return Rejected("The user group could not be added without violating grouping view invariants.");
         }
         const bool changed = copy
@@ -469,10 +554,22 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         if (group == nullptr || group->is_unassigned || group->id == UnassignedUserGroupId() || name.empty()) {
             return Rejected("Editable user group identities and a non-empty name are required.");
         }
-        if (group->name == name) {
+        if (intent.rename_edit_state_ ==
+            CatalogUserRenameEditState::Unedited) {
             return NoChange();
         }
-        group->name = name;
+        const bool name_changed =
+            group->name != name;
+        const bool metadata_changed =
+            !(group->generated_name ==
+              GeneratedNameMetadata{});
+        if (!name_changed && !metadata_changed) {
+            return NoChange();
+        }
+        if (name_changed) {
+            group->name = name;
+        }
+        group->generated_name = {};
         return Applied(true);
     }
 
@@ -592,7 +689,16 @@ CatalogUserStateView SpectralLinesPanelController::View() const
     result.catalog_id = catalog_identity_.id;
     result.catalog_display_name = catalog_identity_.display_name;
     result.catalog_load_error = catalog_.load_error;
-    result.persistence = PersistenceStatus();
+    result.persistence.retrying =
+        cache_save_status_.failed();
+    result.persistence.recovered =
+        cache_save_status_.recovered();
+    result.persistence.load_issue =
+        load_issue_kind_;
+    result.persistence.load_diagnostic_detail =
+        load_diagnostic_detail_;
+    result.persistence.save_diagnostic_detail =
+        cache_save_status_.message();
     result.grouping_view_search = grouping_view_search_;
     result.marker_labels_visible = marker_labels_visible_;
     result.has_catalog_grouping_view = catalog_grouping_view_.has_value();
@@ -604,6 +710,8 @@ CatalogUserStateView SpectralLinesPanelController::View() const
         SpectralLineGroupingView grouping_view;
         grouping_view.id = view.id;
         grouping_view.name = view.name;
+        grouping_view.generated_name =
+            view.generated_name;
         grouping_view.editable = editable;
         grouping_view.active = user_state_.active_view_id == view.id;
         grouping_view.selection_requested = grouping_view.active && grouping_view_selection_requested_;
@@ -616,6 +724,8 @@ CatalogUserStateView SpectralLinesPanelController::View() const
             SpectralLineGroupView group_view;
             group_view.id = group.id;
             group_view.name = group.name;
+            group_view.generated_name =
+                group.generated_name;
             group_view.is_unassigned = group.is_unassigned || group.id == UnassignedUserGroupId();
             group_view.expanded =
                 panel_state_.expanded_group_ids.contains(GroupExpansionKey(view.id, group.id));
@@ -642,7 +752,6 @@ CatalogUserStateView SpectralLinesPanelController::View() const
                     marker_view.notes = marker->notes;
                 } else {
                     marker_view.label = reference.marker_id;
-                    marker_view.wavelength_text = "unresolved";
                 }
                 group_view.marker_references.push_back(std::move(marker_view));
             }
@@ -688,6 +797,10 @@ SpectralLinesPanelController::PersistenceStatus() const
         .recovered = cache_save_status_.recovered(),
         .load_warning = load_warning_,
         .save_message = cache_save_status_.message(),
+        .load_diagnostic_detail =
+            load_diagnostic_detail_,
+        .save_diagnostic_detail =
+            cache_save_status_.message(),
     };
 }
 
@@ -715,10 +828,13 @@ bool SpectralLinesPanelController::Flush()
     if (!SaveCatalogUserStateCache(user_state_cache_path_, user_state_cache_, error)) {
         cache_save_scheduler_.MarkSaveFailed(
             cache_save_status_,
-            "Could not save spectral-line grouping cache: " + error);
+            std::move(error));
         return false;
     }
+    load_issue_kind_ =
+        SpectralLineCacheLoadIssueKind::None;
     load_warning_.clear();
+    load_diagnostic_detail_.clear();
     cache_save_scheduler_.MarkSaveSucceeded(cache_save_status_);
     return true;
 }

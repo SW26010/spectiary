@@ -479,6 +479,7 @@ SourceCollectionActivationTransaction::status() const
 {
     return {
         .loading = NeedsService(),
+        .failures = visible_failures_,
         .error_message = ErrorMessage(),
     };
 }
@@ -524,7 +525,7 @@ void SourceCollectionActivationTransaction::
     for (auto& [path_key, outcome] :
          terminal_outcomes_) {
         (void)path_key;
-        if (outcome.error_message) {
+        if (outcome.error) {
             outcome.failure_acknowledged = true;
         }
     }
@@ -724,9 +725,14 @@ void SourceCollectionActivationTransaction::DrainCompletions(
         if (!completion.prepared) {
             RecordTerminalOutcome(
                 ticket,
-                completion.error_message.empty()
-                    ? "Background source loading failed."
-                    : std::move(completion.error_message));
+                SourceCollectionLoadError{
+                    .kind =
+                        SourceCollectionLoadErrorKind::
+                            BackgroundLoadingFailed,
+                    .diagnostic_detail =
+                        std::move(
+                            completion.error_message),
+                });
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
@@ -840,11 +846,19 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             result.loaded &&
             ticket.purpose == Purpose::ExplicitOpen;
         if (!result.loaded) {
+            SourceCollectionLoadError load_error =
+                std::move(result.load_error);
+            if (load_error.kind ==
+                SourceCollectionLoadErrorKind::None) {
+                load_error.kind =
+                    SourceCollectionLoadErrorKind::
+                        PreparedResultNotApplicable;
+                load_error.diagnostic_detail =
+                    std::move(result.message);
+            }
             RecordTerminalOutcome(
                 ticket,
-                result.message.empty()
-                    ? "The prepared source result was no longer applicable."
-                    : std::move(result.message));
+                std::move(load_error));
             if (CancelFailedPendingSampleNavigation(
                     session_,
                     ticket)) {
@@ -1557,7 +1571,7 @@ void SourceCollectionActivationTransaction::
 void SourceCollectionActivationTransaction::
     RecordTerminalOutcome(
         const Ticket& ticket,
-        std::optional<std::string> error_message)
+        std::optional<SourceCollectionLoadError> error)
 {
     const auto existing =
         terminal_outcomes_.find(ticket.path_key);
@@ -1570,7 +1584,7 @@ void SourceCollectionActivationTransaction::
         TerminalOutcome{
             .path = ticket.path,
             .generation = ticket.generation,
-            .error_message = std::move(error_message),
+            .error = std::move(error),
             .failure_acknowledged = false,
         });
     RebuildErrorMessage();
@@ -1579,14 +1593,20 @@ void SourceCollectionActivationTransaction::
 void SourceCollectionActivationTransaction::
     RebuildErrorMessage()
 {
+    visible_failures_.clear();
     error_message_.clear();
     for (const auto& [path_key, outcome] :
          terminal_outcomes_) {
         (void)path_key;
-        if (!outcome.error_message ||
+        if (!outcome.error ||
             outcome.failure_acknowledged) {
             continue;
         }
+        visible_failures_.push_back(
+            SourceCollectionLoadFailure{
+                .source_path = outcome.path,
+                .error = *outcome.error,
+            });
         if (!error_message_.empty()) {
             error_message_ += '\n';
         }
@@ -1594,9 +1614,16 @@ void SourceCollectionActivationTransaction::
             PathToUtf8(outcome.path);
         if (!source_name.empty()) {
             error_message_ += source_name;
-            error_message_ += ": ";
         }
-        error_message_ += *outcome.error_message;
+        if (!outcome.error
+                 ->diagnostic_detail.empty()) {
+            if (!source_name.empty()) {
+                error_message_ += ": ";
+            }
+            error_message_ +=
+                outcome.error
+                    ->diagnostic_detail;
+        }
     }
 }
 

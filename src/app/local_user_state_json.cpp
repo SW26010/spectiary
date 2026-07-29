@@ -1,5 +1,6 @@
 #include "app/local_user_state_json.h"
 
+#include "app/local_user_state.h"
 #include "platform/atomic_file.h"
 
 #include <algorithm>
@@ -664,18 +665,39 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     }
 
     std::error_code exists_error;
-    if (!std::filesystem::exists(path, exists_error) || exists_error) {
+    const bool exists =
+        std::filesystem::exists(path, exists_error);
+    if (exists_error) {
+        result.warning =
+            "Could not read " +
+            std::string(description) + ".";
+        result.issue_kind =
+            VersionedJsonCacheLoadIssueKind::ReadFailed;
+        result.diagnostic_detail =
+            LocalUserStatePathToUtf8(path) + ": " +
+            exists_error.message();
+        return result;
+    }
+    if (!exists) {
         return result;
     }
 
     std::ifstream stream(path);
     if (!stream.good()) {
         result.warning = "Could not read " + std::string(description) + ".";
+        result.issue_kind =
+            VersionedJsonCacheLoadIssueKind::ReadFailed;
+        result.diagnostic_detail =
+            LocalUserStatePathToUtf8(path);
         return result;
     }
     std::string contents;
     if (!ReadTextStreamCancelable(stream, contents, cancellation_checkpoint)) {
         result.warning = "Could not read " + std::string(description) + ".";
+        result.issue_kind =
+            VersionedJsonCacheLoadIssueKind::ReadFailed;
+        result.diagnostic_detail =
+            LocalUserStatePathToUtf8(path);
         return result;
     }
 
@@ -683,6 +705,12 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     std::optional<JsonValue> root = ParseJson(contents, parse_error, cancellation_checkpoint);
     if (!root || root->kind != JsonValue::Kind::Object) {
         result.warning = "Ignored " + std::string(description) + ": " + parse_error;
+        result.issue_kind =
+            VersionedJsonCacheLoadIssueKind::InvalidDocument;
+        result.diagnostic_detail =
+            parse_error.empty()
+                ? "expected a JSON object root"
+                : std::move(parse_error);
         return result;
     }
 
@@ -691,6 +719,24 @@ VersionedJsonCacheLoadResult LoadVersionedJsonCacheFile(
     if (!parsed_format_kind || *parsed_format_kind != format_kind || !schema_version ||
         !SupportsSchema(*schema_version, supported_schema_versions)) {
         result.warning = "Ignored unsupported " + std::string(description) + ".";
+        result.issue_kind =
+            VersionedJsonCacheLoadIssueKind::
+                UnsupportedFormatOrSchema;
+        std::ostringstream detail;
+        detail << "format_kind=";
+        if (parsed_format_kind) {
+            detail << *parsed_format_kind;
+        } else {
+            detail << "<missing>";
+        }
+        detail << ", schema_version=";
+        if (schema_version) {
+            detail << *schema_version;
+        } else {
+            detail << "<missing>";
+        }
+        result.diagnostic_detail =
+            std::move(detail).str();
         return result;
     }
 

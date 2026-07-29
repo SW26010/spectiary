@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -353,12 +354,112 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     return observation;
 }
 
+struct SortingPopupFrameObservation {
+    int submission_count = 0;
+    bool popup_open = false;
+    ImGuiID add_source_button_id = 0;
+    ImGuiID localized_sample_name_item_id = 0;
+};
+
+SortingPopupFrameObservation RenderSortingPopupFrame(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view)
+{
+    BeginFrame();
+    ImGui::SetNextWindowPos(
+        ImVec2(20.0f, 20.0f),
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        ImVec2(520.0f, 500.0f),
+        ImGuiCond_Always);
+    bool open = true;
+    SortingPopupFrameObservation observation;
+    specforge::PanelSessionInteraction interaction(
+        [&](
+            specforge::SourceCollectionSessionIntent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            ++observation.submission_count;
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    panel.RenderSorting(
+        interaction,
+        specforge::UiLanguage::SimplifiedChinese,
+        &open);
+    if (ImGuiWindow* window = ImGui::FindWindowByName(
+            specforge::SampleWorkflowPanelUi::
+                SortingWindowName())) {
+        observation.add_source_button_id =
+            window->GetID("+##AddSampleSortSource");
+    }
+    observation.popup_open = ImGui::IsPopupOpen(
+        nullptr,
+        ImGuiPopupFlags_AnyPopupId |
+            ImGuiPopupFlags_AnyPopupLevel);
+    if (!GImGui->OpenPopupStack.empty()) {
+        if (ImGuiWindow* popup_window =
+                GImGui->OpenPopupStack.back().Window) {
+            const ImGuiID source_id =
+                popup_window->GetID("sample-name");
+            const std::string_view localized_name =
+                specforge::UiText(
+                    specforge::UiLanguage::
+                        SimplifiedChinese,
+                    specforge::UiTextId::
+                        SampleNameSortSource);
+            observation.localized_sample_name_item_id =
+                ImHashStr(
+                    localized_name.data(),
+                    localized_name.size(),
+                    source_id);
+        }
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
 void TestShortcutDisplayUsesKeyboardLegends()
 {
     Require(specforge::FormatSampleLabelShortcut('q') == "Q", "lowercase shortcut should display as Q");
     Require(specforge::FormatSampleLabelShortcut('Q') == "Q", "uppercase input should display canonically");
     Require(specforge::FormatSampleLabelShortcut('3') == "3", "digit shortcut should retain its legend");
     Require(specforge::FormatSampleLabelShortcut('\0') == "None", "unbound shortcut should display as None");
+}
+
+void TestAddSortSourcePopupLocalizesBuiltInSampleName()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view;
+    view.sorting.has_active_source = true;
+    view.sorting.available_sources.push_back(
+        {
+            .id = "sample-name",
+            .name = "Sample name",
+        });
+
+    SortingPopupFrameObservation observation =
+        RenderSortingPopupFrame(panel, view);
+    Require(
+        observation.add_source_button_id != 0,
+        "integration fixture should find the add-sort-source button");
+    ImGui::ActivateItemByID(
+        observation.add_source_button_id);
+    observation = RenderSortingPopupFrame(panel, view);
+    Require(
+        observation.popup_open &&
+            observation.localized_sample_name_item_id != 0,
+        "integration fixture should open the add-sort-source popup");
+
+    ImGui::ActivateItemByID(
+        observation.localized_sample_name_item_id);
+    observation = RenderSortingPopupFrame(panel, view);
+    Require(
+        observation.submission_count == 1,
+        "the Chinese add-sort-source popup should expose the built-in sample-name item as 样本名称");
 }
 
 void TestShortcutCaptureAcceptsLettersAndKeypadDigits()
@@ -838,6 +939,7 @@ void TestTabStillMovesControlFocus()
 int main()
 {
     TestShortcutDisplayUsesKeyboardLegends();
+    TestAddSortSourcePopupLocalizesBuiltInSampleName();
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();
     TestShortcutCaptureRejectsModifiedAndReservedKeys();
     TestShortcutCaptureSupportsClearAndCancel();

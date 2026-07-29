@@ -146,6 +146,7 @@ bool SameReferenceValue(const MarkerReference& left, const MarkerReference& righ
 bool SameGroupValue(const UserGroup& left, const UserGroup& right)
 {
     return left.id == right.id && left.name == right.name &&
+           left.generated_name == right.generated_name &&
            left.is_unassigned == right.is_unassigned &&
            left.marker_references.size() == right.marker_references.size() &&
            std::equal(
@@ -158,6 +159,7 @@ bool SameGroupValue(const UserGroup& left, const UserGroup& right)
 bool SameGroupingViewValue(const GroupingView& left, const GroupingView& right)
 {
     return left.id == right.id && left.name == right.name &&
+           left.generated_name == right.generated_name &&
            left.read_only == right.read_only &&
            left.groups.size() == right.groups.size() &&
            std::equal(
@@ -173,6 +175,7 @@ UserGroup& EnsureUnassignedGroup(GroupingView& view)
         if (group.is_unassigned || group.id == kUnassignedUserGroupId) {
             group.id = kUnassignedUserGroupId;
             group.name = "Unassigned";
+            group.generated_name = {};
             group.is_unassigned = true;
             return group;
         }
@@ -184,6 +187,62 @@ UserGroup& EnsureUnassignedGroup(GroupingView& view)
     group.is_unassigned = true;
     view.groups.push_back(std::move(group));
     return view.groups.back();
+}
+
+GeneratedNameMetadata CanonicalGroupingViewGeneratedName(
+    const GeneratedNameMetadata& source)
+{
+    GeneratedNameMetadata result = source;
+    if (result.copy_count >
+        kMaximumGeneratedNameCopyCount) {
+        return {};
+    }
+    if (result.source == GeneratedNameSource::DefaultGroup ||
+        (result.source == GeneratedNameSource::DefaultGroupingView &&
+         result.ordinal == 0)) {
+        return {};
+    }
+    if (result.source == GeneratedNameSource::None) {
+        result.ordinal = 0;
+        if (result.copy_count == 0) {
+            result.copy_base_name.clear();
+        } else if (result.copy_base_name.empty()) {
+            return {};
+        }
+    } else {
+        result.copy_base_name.clear();
+    }
+    return result;
+}
+
+GeneratedNameMetadata CanonicalUserGroupGeneratedName(
+    const GeneratedNameMetadata& source)
+{
+    if (source.source != GeneratedNameSource::DefaultGroup ||
+        source.ordinal == 0 ||
+        source.copy_count != 0 ||
+        !source.copy_base_name.empty()) {
+        return {};
+    }
+    return source;
+}
+
+GeneratedNameMetadata DuplicateGeneratedName(
+    std::string_view source_name,
+    const GeneratedNameMetadata& source)
+{
+    GeneratedNameMetadata result =
+        CanonicalGroupingViewGeneratedName(source);
+    if (result.source == GeneratedNameSource::None &&
+        result.copy_count == 0) {
+        result.copy_base_name = source_name;
+    }
+    if (result.copy_count >=
+        kMaximumGeneratedNameCopyCount) {
+        return {};
+    }
+    ++result.copy_count;
+    return result;
 }
 
 bool ContainsReferenceInOrdinaryGroups(const GroupingView& view, const MarkerReference& target)
@@ -319,6 +378,8 @@ std::optional<GroupingView> BuildCatalogGroupingView(
     GroupingView view;
     view.id = kCatalogGroupingViewId;
     view.name = "Catalog grouping view";
+    view.generated_name.source =
+        GeneratedNameSource::CatalogGroupingView;
     view.read_only = true;
     std::unordered_set<std::string> group_ids;
     for (auto& [group_name, references] : grouped_references) {
@@ -335,11 +396,14 @@ GroupingView CreateUserGroupingViewFromCatalog(
     const SpectralLineCatalog& catalog,
     const CatalogIdentity& identity,
     std::string id,
-    std::string name)
+    std::string name,
+    GeneratedNameMetadata generated_name)
 {
     GroupingView view;
     view.id = std::move(id);
     view.name = std::move(name);
+    view.generated_name =
+        CanonicalGroupingViewGeneratedName(generated_name);
     view.read_only = false;
 
     UserGroup unassigned;
@@ -364,6 +428,10 @@ GroupingView DuplicateGroupingView(
     GroupingView view = source;
     view.id = std::move(id);
     view.name = std::move(name);
+    view.generated_name =
+        DuplicateGeneratedName(
+            source.name,
+            source.generated_name);
     view.read_only = false;
     return EffectiveUserGroupingView(view, catalog, identity);
 }
@@ -449,9 +517,18 @@ CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
         GroupingView normalized_view;
         normalized_view.id = source_view.id;
         normalized_view.name = TrimWhitespace(source_view.name);
+        normalized_view.generated_name =
+            CanonicalGroupingViewGeneratedName(
+                source_view.generated_name);
         if (normalized_view.name.empty()) {
+            const std::size_t ordinal =
+                normalized_views.size() + 1;
             normalized_view.name =
-                "Grouping " + std::to_string(normalized_views.size() + 1);
+                "Grouping " + std::to_string(ordinal);
+            normalized_view.generated_name.source =
+                GeneratedNameSource::DefaultGroupingView;
+            normalized_view.generated_name.ordinal =
+                ordinal;
         }
         normalized_view.read_only = false;
 
@@ -490,8 +567,19 @@ CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
             UserGroup group;
             group.id = source_group.id;
             group.name = TrimWhitespace(source_group.name);
+            group.generated_name =
+                CanonicalUserGroupGeneratedName(
+                    source_group.generated_name);
             if (group.name.empty()) {
-                group.name = "Group";
+                const std::size_t ordinal =
+                    normalized_view.groups.size() + 1;
+                group.name =
+                    "Group " +
+                    std::to_string(ordinal);
+                group.generated_name.source =
+                    GeneratedNameSource::DefaultGroup;
+                group.generated_name.ordinal =
+                    ordinal;
             }
             std::unordered_set<std::string> marker_ids;
             for (const MarkerReference& reference :
@@ -690,7 +778,11 @@ bool IsSharedMarkerReference(
     return match != counts.end() && match->second > 1;
 }
 
-bool AddUserGroup(GroupingView& view, std::string id, std::string name)
+bool AddUserGroup(
+    GroupingView& view,
+    std::string id,
+    std::string name,
+    GeneratedNameMetadata generated_name)
 {
     if (id.empty() || name.empty() || FindGroup(view, id) != nullptr) {
         return false;
@@ -699,6 +791,8 @@ bool AddUserGroup(GroupingView& view, std::string id, std::string name)
     UserGroup group;
     group.id = std::move(id);
     group.name = std::move(name);
+    group.generated_name =
+        CanonicalUserGroupGeneratedName(generated_name);
 
     const auto unassigned = std::find_if(view.groups.begin(), view.groups.end(), [](const auto& existing) {
         return existing.is_unassigned || existing.id == kUnassignedUserGroupId;

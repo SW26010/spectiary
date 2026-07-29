@@ -173,13 +173,19 @@ bool HasAvailableSortSource(
 
 bool HasPersistenceMessage(
     const specforge::LocalUserStateHealthView& health,
-    std::string_view text)
+    specforge::LocalUserStateArea area,
+    std::optional<
+        specforge::LocalUserStateHealthMessageKind>
+        kind = std::nullopt)
 {
     return std::any_of(
         health.messages.begin(),
         health.messages.end(),
-        [text](const std::string& message) {
-            return message.find(text) != std::string::npos;
+        [area, kind](
+            const specforge::
+                LocalUserStateHealthMessage& message) {
+            return message.area == area &&
+                   (!kind || message.kind == *kind);
         });
 }
 
@@ -3031,27 +3037,45 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         health.kind ==
             specforge::LocalUserStateHealthKind::Warning,
         "corrupt and unsupported caches should produce overall warning health");
-    std::string health_messages;
-    for (const std::string& message : health.messages) {
-        health_messages += "\n" + message;
-    }
     Require(
         health.messages.size() == 4,
         std::string{"all four independent cache warnings should be retained; got "} +
-            std::to_string(health.messages.size()) + health_messages);
+            std::to_string(health.messages.size()));
     Require(
-        HasPersistenceMessage(health, "Source session:"),
+        HasPersistenceMessage(
+            health,
+            specforge::LocalUserStateArea::
+                SourceSession,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    LoadWarning),
         "source-session warning should reach the session view");
     Require(
-        HasPersistenceMessage(health, "Navigation:") &&
-            HasPersistenceMessage(health, "unsupported"),
+        HasPersistenceMessage(
+            health,
+            specforge::LocalUserStateArea::
+                SampleNavigation,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    LoadWarning),
         "navigation unsupported-schema warning should reach the session view");
     Require(
-        HasPersistenceMessage(health, "Labeling:"),
+        HasPersistenceMessage(
+            health,
+            specforge::LocalUserStateArea::
+                SampleLabeling,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    LoadWarning),
         "labeling warning should remain part of overall health");
     Require(
-        HasPersistenceMessage(health, "Workflow:") &&
-            HasPersistenceMessage(health, "unsupported"),
+        HasPersistenceMessage(
+            health,
+            specforge::LocalUserStateArea::
+                SampleWorkflow,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    LoadWarning),
         "workflow unsupported-schema warning should reach the session view");
 
     (void)Submit(
@@ -3150,9 +3174,18 @@ void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
             specforge::LocalUserStateHealthKind::Warning,
         "direct preparation cache warnings should reach Session health");
     Require(
-        HasPersistenceMessage(warning_health, "Navigation:") &&
-            HasPersistenceMessage(warning_health, "Labeling:") &&
-            HasPersistenceMessage(warning_health, "Workflow:"),
+        HasPersistenceMessage(
+            warning_health,
+            specforge::LocalUserStateArea::
+                SampleNavigation) &&
+            HasPersistenceMessage(
+                warning_health,
+                specforge::LocalUserStateArea::
+                    SampleLabeling) &&
+            HasPersistenceMessage(
+                warning_health,
+                specforge::LocalUserStateArea::
+                    SampleWorkflow),
         "direct preparation should adopt every owner warning");
 
     const std::filesystem::path navigation_cache =
@@ -3370,7 +3403,8 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
             navigation_warning.messages.size() == 1 &&
             HasPersistenceMessage(
                 navigation_warning,
-                "Navigation:"),
+                specforge::LocalUserStateArea::
+                    SampleNavigation),
         "only the navigation warning should remain before its first save");
 
     Require(
@@ -3388,13 +3422,16 @@ void TestStalePreparedCacheWarningsDoNotReappearAfterRepair()
         same_batch_health.messages.size() == 1 &&
             HasPersistenceMessage(
                 same_batch_health,
-                "Navigation:") &&
+                specforge::LocalUserStateArea::
+                    SampleNavigation) &&
             !HasPersistenceMessage(
                 same_batch_health,
-                "Labeling:") &&
+                specforge::LocalUserStateArea::
+                    SampleLabeling) &&
             !HasPersistenceMessage(
                 same_batch_health,
-                "Workflow:"),
+                specforge::LocalUserStateArea::
+                    SampleWorkflow),
         "same-batch activation must not resurrect repaired owner warnings");
 
     specforge::SourceCollectionSession& base_session = session;
@@ -5286,6 +5323,13 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
         specforge::PreparedSourceCollectionReuse{{"reuse-a", "a", "a-source", "a-context", 3}});
     Require(!rejected.loaded, "reuse for a removed source must be rejected");
     Require(
+        rejected.message.empty() &&
+            rejected.load_error.kind ==
+                specforge::
+                    SourceCollectionLoadErrorKind::
+                        PreparedReuseTargetUnavailable,
+        "prepared-source rejection should expose a stable semantic instead of application-authored English");
+    Require(
         rejected.background_retirement.size() == 1,
         "a rejected reuse must hand its decoded snapshot to the background reclaimer");
     Require(
@@ -5307,6 +5351,13 @@ void TestRemovedPreparedReuseTargetIsRejectedWithoutMutatingTheSession()
             std::move(stale_workflow),
             stale_plan_hint->reuse.live_workflow_revision()});
     Require(!rejected_plan.loaded, "a late full plan for a removed source must be rejected");
+    Require(
+        rejected_plan.message.empty() &&
+            rejected_plan.load_error.kind ==
+                specforge::
+                    SourceCollectionLoadErrorKind::
+                        PreparedKnownSourcePlanStale,
+        "stale prepared-plan rejection should expose a stable semantic instead of English diagnostic text");
     Require(
         rejected_plan.background_retirement.size() >= 2,
         "a rejected full plan should retire its decoded snapshot and prepared payload");
@@ -6073,7 +6124,11 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
     Require(
         HasPersistenceMessage(
             failed_health,
-            "Source session: Could not save source session state."),
+            specforge::LocalUserStateArea::
+                SourceSession,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    SaveRetrying),
         "retrying health should identify the failed cache owner");
     {
         std::vector<LoadedSourceSnapshot> reloaded_snapshots;

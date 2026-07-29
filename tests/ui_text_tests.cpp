@@ -1,10 +1,12 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "ui/source_collection_session_types.h"
+#include "ui/spectral_lines_name_localization.h"
 #include "ui/ui_text.h"
 
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -179,12 +181,12 @@ void TestRepresentativeMappingsAreExact()
             "简体中文",
         "Chinese name in Chinese");
     Require(
-        UiText(UiLanguage::English, UiTextId::LocalizationInProgress) ==
-            "The application shell and Settings use the selected language. Specialized scientific tools may still remain in English.",
+        UiText(UiLanguage::English, UiTextId::ApplicationLanguageScope) ==
+            "UI controls and application-authored messages use the selected language. Scientific names, catalog content, file paths, and diagnostic details remain unchanged.",
         "English scope notice should be exact");
     Require(
-        UiText(UiLanguage::SimplifiedChinese, UiTextId::LocalizationInProgress) ==
-            "应用壳层与“设置”使用所选语言；部分专业科学工具可能仍保持英文。",
+        UiText(UiLanguage::SimplifiedChinese, UiTextId::ApplicationLanguageScope) ==
+            "界面控件与应用生成的消息使用所选语言；科学名称、目录内容、文件路径和诊断详情保持不变。",
         "Chinese scope notice should be exact");
     Require(
         UiText(UiLanguage::SimplifiedChinese, UiTextId::LanguageSaveError) ==
@@ -214,6 +216,26 @@ void TestRepresentativeMappingsAreExact()
             UiTextId::FrameCaptureOutputDirectory) ==
             "输出目录",
         "Chinese frame capture output label should be exact");
+    Require(
+        specforge::SourceTypeDisplayText(
+            UiLanguage::English,
+            "folder") == "folder",
+        "English folder source type should retain its semantic label");
+    Require(
+        specforge::SourceTypeDisplayText(
+            UiLanguage::SimplifiedChinese,
+            "folder") == "文件夹",
+        "Chinese folder source type should be localized");
+    Require(
+        specforge::SourceTypeDisplayText(
+            UiLanguage::SimplifiedChinese,
+            "file") == "文件",
+        "Chinese file source type should be localized");
+    Require(
+        specforge::SourceTypeDisplayText(
+            UiLanguage::SimplifiedChinese,
+            "fits.gz") == "fits.gz",
+        "scientific format names should remain unchanged");
 }
 
 void TestShellAndSettingsMappingsAreExact()
@@ -797,7 +819,8 @@ void TestSampleWorkflowMappingsAreExact()
             UiTextId::AnnotationMetadataFileIgnored) +
             1);
     static_assert(
-        static_cast<std::size_t>(UiTextId::Count) ==
+        static_cast<std::size_t>(
+            UiTextId::PublicSpectralLineCatalog) ==
         static_cast<std::size_t>(
             UiTextId::UnlabeledValue) +
             1);
@@ -816,6 +839,376 @@ void TestSampleWorkflowMappingsAreExact()
             "SpecForgeResetSampleSorting") ==
             "重置排序###SpecForgeResetSampleSorting",
         "localized sample-sorting controls should retain stable IDs");
+}
+
+void TestSpectralLineMappingsAreExact()
+{
+    using specforge::StableUiLabel;
+    using specforge::UiLanguage;
+    using specforge::UiText;
+    using specforge::UiTextId;
+
+    struct ExpectedText {
+        UiTextId text_id;
+        std::string_view english;
+        std::string_view simplified_chinese;
+    };
+    constexpr std::array kExpectedTexts = {
+        ExpectedText{
+            UiTextId::PublicSpectralLineCatalog,
+            "Public catalog",
+            "公共目录"},
+        ExpectedText{
+            UiTextId::CurrentSnapshotHasNoWavelengthAxis,
+            "Current snapshot does not expose a wavelength axis for spectral-line overlays.",
+            "当前快照未提供可用于谱线叠加的波长轴。"},
+        ExpectedText{
+            UiTextId::UnknownWavelengthFrameWarning,
+            "Wavelength frame is unknown; rest-frame overlays are reference-only.",
+            "波长参考系未知；静止系叠加仅供参考。"},
+        ExpectedText{UiTextId::Catalog, "Catalog", "目录"},
+        ExpectedText{
+            UiTextId::CatalogLoadFailed,
+            "Catalog load failed: ",
+            "目录加载失败："},
+        ExpectedText{
+            UiTextId::NoPublicCatalogMarkers,
+            "No public catalog markers loaded.",
+            "未加载公共目录标记。"},
+        ExpectedText{
+            UiTextId::SpectralLineCacheReadFailed,
+            "Could not read spectral-line grouping cache.",
+            "无法读取谱线分组缓存。"},
+        ExpectedText{
+            UiTextId::SpectralLineCacheInvalid,
+            "Ignored invalid spectral-line grouping cache.",
+            "已忽略无效的谱线分组缓存。"},
+        ExpectedText{
+            UiTextId::SpectralLineCacheUnsupported,
+            "Ignored unsupported spectral-line grouping cache.",
+            "已忽略不受支持的谱线分组缓存。"},
+        ExpectedText{
+            UiTextId::SpectralLinePersistenceRetrying,
+            "Could not save spectral-line grouping cache. Retrying.",
+            "无法保存谱线分组缓存，正在重试。"},
+        ExpectedText{
+            UiTextId::SpectralLinePersistenceRecovered,
+            "Spectral-line state persistence recovered.",
+            "谱线状态持久化已恢复。"},
+        ExpectedText{UiTextId::Search, "Search", "搜索"},
+        ExpectedText{
+            UiTextId::SpectralLineSearchHint,
+            "id, label, catalog group, or plot label",
+            "ID、名称、目录分组或绘图标签"},
+        ExpectedText{UiTextId::Duplicate, "Duplicate", "创建副本"},
+        ExpectedText{
+            UiTextId::DuplicateAsUserView,
+            "Duplicate as user view",
+            "复制为用户视图"},
+        ExpectedText{UiTextId::Rename, "Rename", "重命名"},
+        ExpectedText{
+            UiTextId::RenameGroupingView,
+            "Rename grouping view",
+            "重命名分组视图"},
+        ExpectedText{
+            UiTextId::DeleteGroupingView,
+            "Delete grouping view",
+            "删除分组视图"},
+        ExpectedText{
+            UiTextId::DeleteGroupingViewQuestion,
+            "Delete grouping view \"%s\"?",
+            "删除分组视图“%s”？"},
+        ExpectedText{
+            UiTextId::CatalogMarkersRemainAfterViewDeletion,
+            "Catalog markers and marker visibility are not deleted.",
+            "不会删除目录标记及其可见性设置。"},
+        ExpectedText{
+            UiTextId::NoCatalogGroupingView,
+            "This catalog has no catalog grouping view.",
+            "此目录没有目录分组视图。"},
+        ExpectedText{
+            UiTextId::NewGroupingView,
+            "+ New grouping view",
+            "+ 新建分组视图"},
+        ExpectedText{
+            UiTextId::NewUserGroupingView,
+            "New user grouping view",
+            "新建用户分组视图"},
+        ExpectedText{
+            UiTextId::CatalogGroupingView,
+            "Catalog grouping view",
+            "目录分组视图"},
+        ExpectedText{
+            UiTextId::DefaultGroupingViewPrefix,
+            "Grouping ",
+            "分组视图 "},
+        ExpectedText{UiTextId::CopySuffix, " copy", " 副本"},
+        ExpectedText{UiTextId::AddGroup, "+ Group", "+ 分组"},
+        ExpectedText{
+            UiTextId::PlotVisibleCatalogMarkerCount,
+            "%zu plot-visible / %zu catalog markers",
+            "绘图中可见 %zu 个 / 目录共 %zu 个标记"},
+        ExpectedText{
+            UiTextId::NoGroupsInView,
+            "No groups in this view.",
+            "此视图中没有分组。"},
+        ExpectedText{
+            UiTextId::SearchFilteredGroupVisibility,
+            "Search is filtering this group; bulk visibility is disabled.",
+            "搜索正在筛选此分组；批量可见性已禁用。"},
+        ExpectedText{
+            UiTextId::NoResolvedMarkersInGroup,
+            "No resolved markers in this group.",
+            "此分组中没有已解析的标记。"},
+        ExpectedText{
+            UiTextId::ToggleGroupMarkerVisibility,
+            "Show or hide all resolved markers in this group.",
+            "显示或隐藏此分组中的所有已解析标记。"},
+        ExpectedText{
+            UiTextId::SharedMarkerReference,
+            "Shared marker reference: this marker also appears in another group in this view.",
+            "共享标记引用：此标记也出现在该视图的其他分组中。"},
+        ExpectedText{
+            UiTextId::DragDropCopy,
+            "Drop: copy",
+            "拖放：复制"},
+        ExpectedText{
+            UiTextId::DragDropMoveOrCopy,
+            "Drop: move, Ctrl+drop: copy",
+            "拖放：移动，按住 Ctrl 拖放：复制"},
+        ExpectedText{
+            UiTextId::DropBetweenGroupsToReorder,
+            "Drop between groups to reorder",
+            "拖放到分组之间以重新排序"},
+        ExpectedText{UiTextId::DisbandGroup, "Disband group", "解散分组"},
+        ExpectedText{UiTextId::ShowOnPlot, "Show on plot", "在绘图中显示"},
+        ExpectedText{UiTextId::Unresolved, "unresolved", "未解析"},
+        ExpectedText{
+            UiTextId::UnresolvedMarkerNotPlotted,
+            "Unresolved marker references are not plotted.",
+            "未解析的标记引用不会绘制。"},
+        ExpectedText{UiTextId::CopyToGroup, "Copy to group", "复制到分组"},
+        ExpectedText{UiTextId::NoOtherGroups, "No other groups", "没有其他分组"},
+        ExpectedText{
+            UiTextId::RemoveFromThisGroup,
+            "Remove from this group",
+            "从此分组中移除"},
+        ExpectedText{UiTextId::RenameGroup, "Rename group", "重命名分组"},
+        ExpectedText{UiTextId::UnassignedGroup, "Unassigned", "未分组"},
+        ExpectedText{UiTextId::DefaultGroupPrefix, "Group ", "分组 "},
+    };
+
+    constexpr std::size_t kFirstSpectralLineText =
+        static_cast<std::size_t>(
+            UiTextId::PublicSpectralLineCatalog);
+    static_assert(
+        kExpectedTexts.size() ==
+        static_cast<std::size_t>(
+            UiTextId::DefaultGroupPrefix) +
+            1 -
+            kFirstSpectralLineText);
+
+    for (std::size_t index = 0;
+         index < kExpectedTexts.size();
+         ++index) {
+        const ExpectedText& expected =
+            kExpectedTexts[index];
+        Require(
+            static_cast<std::size_t>(
+                expected.text_id) ==
+                kFirstSpectralLineText + index,
+            "spectral-line text table should cover every appended ID in order");
+        Require(
+            UiText(
+                UiLanguage::English,
+                expected.text_id) == expected.english,
+            "English spectral-line text should be exact");
+        Require(
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                expected.text_id) ==
+                expected.simplified_chinese,
+            "Chinese spectral-line text should be exact");
+    }
+
+    static_assert(
+        static_cast<std::size_t>(
+            UiTextId::Count) ==
+        static_cast<std::size_t>(
+            UiTextId::DefaultGroupPrefix) +
+            1);
+    Require(
+        StableUiLabel(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::Search,
+            "SpecForgeSpectralLineSearch") ==
+            "搜索###SpecForgeSpectralLineSearch",
+        "localized spectral-line controls should retain stable IDs");
+    Require(
+        StableUiLabel(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::RenameGroup,
+            "SpecForgeRenameUserGroupPopup") ==
+            "重命名分组###SpecForgeRenameUserGroupPopup",
+        "localized spectral-line popups should retain stable IDs");
+}
+
+void TestGeneratedSpectralLineNamesUseExplicitMetadata()
+{
+    using specforge::GeneratedNameMetadata;
+    using specforge::GeneratedNameSource;
+    using specforge::LocalizedSpectralLineName;
+    using specforge::ResolveSpectralLineRenameSubmission;
+    using specforge::UiLanguage;
+
+    GeneratedNameMetadata default_view;
+    default_view.source =
+        GeneratedNameSource::DefaultGroupingView;
+    default_view.ordinal = 1;
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::English,
+            "Grouping 1",
+            default_view) == "Grouping 1",
+        "generated grouping view names should render in English");
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Grouping 1",
+            default_view) == "分组视图 1",
+        "language switching should localize generated grouping view names by metadata");
+
+    GeneratedNameMetadata catalog_copy;
+    catalog_copy.source =
+        GeneratedNameSource::CatalogGroupingView;
+    catalog_copy.copy_count = 1;
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Catalog grouping view copy",
+            catalog_copy) ==
+            "目录分组视图 副本",
+        "a migrated catalog grouping-view copy should localize its base name and copy suffix");
+
+    GeneratedNameMetadata default_group;
+    default_group.source =
+        GeneratedNameSource::DefaultGroup;
+    default_group.ordinal = 1;
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Group 1",
+            default_group) == "分组 1",
+        "generated group names should localize by metadata");
+
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Grouping 7",
+            {}) == "Grouping 7",
+        "same-shaped user grouping names must remain verbatim");
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Group 7",
+            {}) == "Group 7",
+        "same-shaped user group names must remain verbatim");
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Draft copy",
+            {}) == "Draft copy",
+        "user names ending in copy must not be inferred as generated");
+
+    GeneratedNameMetadata copied_user_name;
+    copied_user_name.copy_count = 1;
+    copied_user_name.copy_base_name = "Draft";
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Draft copy",
+            copied_user_name) == "Draft 副本",
+        "explicit generated-copy metadata should localize the suffix");
+
+    default_view.copy_count = 1;
+    Require(
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            "Grouping 1 copy",
+            default_view) == "分组视图 1 副本",
+        "generated copies should preserve their structured source across language changes");
+
+    Require(
+        ResolveSpectralLineRenameSubmission(
+            "分组视图 1",
+            "Grouping 1",
+            false) == "Grouping 1",
+        "confirming an unedited localized grouping name should submit the stored name");
+    Require(
+        ResolveSpectralLineRenameSubmission(
+            "研究分组",
+            "Grouping 1",
+            true) == "研究分组",
+        "a real grouping rename should submit the edited display text");
+    Require(
+        ResolveSpectralLineRenameSubmission(
+            "分组 1",
+            "Group 1",
+            false) == "Group 1",
+        "confirming an unedited localized group name should submit the stored name");
+
+    const std::string long_copy_base(121, 'A');
+    GeneratedNameMetadata long_copy;
+    long_copy.copy_count = 1;
+    long_copy.copy_base_name = long_copy_base;
+    const std::string long_stored_name =
+        long_copy_base + " copy";
+    const std::string long_localized_name =
+        LocalizedSpectralLineName(
+            UiLanguage::SimplifiedChinese,
+            long_stored_name,
+            long_copy);
+    Require(
+        long_localized_name.size() == 128,
+        "the long localized-copy fixture should reach the legacy rename buffer boundary");
+    std::array<char, 128> truncated_name = {};
+    std::snprintf(
+        truncated_name.data(),
+        truncated_name.size(),
+        "%s",
+        long_localized_name.c_str());
+    Require(
+        ResolveSpectralLineRenameSubmission(
+            truncated_name.data(),
+            long_stored_name,
+            false) == long_stored_name,
+        "an unedited long localized copy must not persist a truncated UTF-8 display name");
+}
+
+void TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches()
+{
+    const std::string english =
+        specforge::SpectralLineCatalogOptionLabel(
+            specforge::UiText(
+                specforge::UiLanguage::English,
+                specforge::UiTextId::
+                    PublicSpectralLineCatalog),
+            "specforge.public");
+    const std::string chinese =
+        specforge::SpectralLineCatalogOptionLabel(
+            specforge::UiText(
+                specforge::UiLanguage::
+                    SimplifiedChinese,
+                specforge::UiTextId::
+                    PublicSpectralLineCatalog),
+            "specforge.public");
+
+    Require(
+        english ==
+                "Public catalog###specforge.public" &&
+            chinese ==
+                "公共目录###specforge.public",
+        "the spectral-line catalog option should keep its catalog identity while localizing visible text");
 }
 
 void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
@@ -870,6 +1263,106 @@ void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
         "system error details should remain outside the localized catalog");
 }
 
+void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
+{
+    specforge::LocalUserStateHealthMessage retrying{
+        .area =
+            specforge::LocalUserStateArea::
+                SourceSession,
+        .kind =
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    SaveRetrying,
+        .diagnostic_detail =
+            "CreateFile: access denied",
+    };
+    const std::string chinese_retrying =
+        specforge::FormatLocalUserStateHealthMessage(
+            specforge::UiLanguage::
+                SimplifiedChinese,
+            retrying);
+    Require(
+        chinese_retrying ==
+            "源会话：正在重试保存状态\n"
+            "诊断详情：CreateFile: access denied",
+        "Chinese persistence health should localize the area and status while preserving raw diagnostics");
+    Require(
+        chinese_retrying.find("Source session") ==
+                std::string::npos &&
+            chinese_retrying.find("Retrying") ==
+                std::string::npos,
+        "Chinese persistence health must not leak application-authored English wrappers");
+
+    const specforge::LocalUserStateHealthMessage
+        recovered{
+            .area =
+                specforge::LocalUserStateArea::
+                    SampleNavigation,
+            .kind =
+                specforge::
+                    LocalUserStateHealthMessageKind::
+                        Recovered,
+        };
+    Require(
+        specforge::
+                FormatLocalUserStateHealthMessage(
+                    specforge::UiLanguage::
+                        SimplifiedChinese,
+                    recovered) ==
+            "样本导航：状态已恢复",
+        "Chinese recovery health should be formatted from semantic state");
+}
+
+void TestSourceLoadFailuresAreLocalizedAtTheUiBoundary()
+{
+    const std::array failures{
+        specforge::SourceCollectionLoadFailure{
+            .source_path =
+                std::filesystem::path{
+                    L"C:\\data\\sample.npy"},
+            .error = {
+                .kind =
+                    specforge::
+                        SourceCollectionLoadErrorKind::
+                            PreparedReuseTargetUnavailable,
+            },
+        },
+        specforge::SourceCollectionLoadFailure{
+            .source_path =
+                std::filesystem::path{
+                    L"C:\\data\\broken.csv"},
+            .error = {
+                .kind =
+                    specforge::
+                        SourceCollectionLoadErrorKind::
+                            BackgroundLoadingFailed,
+                .diagnostic_detail =
+                    "CreateFile: access denied",
+            },
+        },
+    };
+    const std::string chinese =
+        specforge::
+            FormatSourceCollectionLoadFailures(
+                specforge::UiLanguage::
+                    SimplifiedChinese,
+                failures);
+    Require(
+        chinese ==
+            "C:\\data\\sample.npy：已准备源的复用目标已不可用。\n\n"
+            "C:\\data\\broken.csv：后台源加载失败。\n"
+            "诊断详情：CreateFile: access denied",
+        "Chinese source-load failures should localize semantic messages while preserving paths and raw diagnostics");
+    Require(
+        chinese.find(
+            "prepared source") ==
+                std::string::npos &&
+            chinese.find(
+                "Background source") ==
+                std::string::npos,
+        "Chinese source-load failures must not leak application-authored English wrappers");
+}
+
 void TestInvalidLanguageFallsBackToEnglish()
 {
     constexpr std::array kInvalidLanguages = {
@@ -915,7 +1408,12 @@ int main()
         TestAppearanceMappingsAreExact();
         TestSourceInspectionMappingsAreExact();
         TestSampleWorkflowMappingsAreExact();
+        TestSpectralLineMappingsAreExact();
+        TestGeneratedSpectralLineNamesUseExplicitMetadata();
+        TestSpectralLineCatalogOptionIdsSurviveLanguageSwitches();
         TestSessionSemanticsAreLocalizedAtTheUiBoundary();
+        TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary();
+        TestSourceLoadFailuresAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();
         TestCountSentinelIsNotDisplayable();
         return 0;

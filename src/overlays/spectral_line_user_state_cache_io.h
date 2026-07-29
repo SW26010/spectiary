@@ -7,9 +7,20 @@
 
 namespace specforge {
 
+enum class CatalogUserStateCacheLoadIssueKind {
+    None,
+    ReadFailed,
+    InvalidDocument,
+    UnsupportedFormatOrSchema,
+};
+
 struct CatalogUserStateCacheLoadResult {
     CatalogUserStateCache cache;
     std::string warning;
+    bool requires_save = false;
+    CatalogUserStateCacheLoadIssueKind issue_kind =
+        CatalogUserStateCacheLoadIssueKind::None;
+    std::string diagnostic_detail;
 };
 
 [[nodiscard]] std::filesystem::path DefaultCatalogUserStateCachePath();

@@ -126,7 +126,8 @@ std::string_view LabelValueSeparator(UiLanguage language)
 bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
-    std::string_view source_load_error,
+    std::span<const SourceCollectionLoadFailure>
+        source_load_failures,
     const LocalUserStateHealthView& persistence,
     UiLanguage language)
 {
@@ -139,7 +140,8 @@ bool RenderTopBarStatus(
     const float available_width =
         std::max(0.0f, right_x - menu_end_x - style.ItemSpacing.x * 2.0f);
 
-    const bool operation_error = !source_load_error.empty();
+    const bool operation_error =
+        !source_load_failures.empty();
     const bool persistence_retrying =
         persistence.kind ==
         LocalUserStateHealthKind::Retrying;
@@ -255,7 +257,7 @@ bool RenderTopBarStatus(
     };
 
     draw_list->PushClipRect(menu_clip_rect.Min, menu_clip_rect.Max, true);
-    if (!source_load_error.empty()) {
+    if (operation_error) {
         if (layout.show_operation) {
             const float operation_start_x = cursor_x;
             draw_text(operation_text, IM_COL32(242, 89, 77, 255));
@@ -309,29 +311,37 @@ bool RenderTopBarStatus(
             ImVec2(cursor_x, text_y + text_height));
     }
     draw_list->PopClipRect();
-
     if (layout.show_operation && operation_error &&
-        IsTopBarStatusHoverTarget(operation_rect.Min, operation_rect.Max)) {
+        IsTopBarStatusHoverTarget(
+            operation_rect.Min,
+            operation_rect.Max)) {
         const std::string_view dismiss_hint = UiText(
             language,
             UiTextId::LoadFailedDismissHint);
+        const std::string source_load_error =
+            FormatSourceCollectionLoadFailures(
+                language,
+                source_load_failures);
         ImGui::SetTooltip(
-            "%.*s\n%.*s",
+            "%.*s\n%s",
             static_cast<int>(dismiss_hint.size()),
             dismiss_hint.data(),
-            static_cast<int>(source_load_error.size()),
-            source_load_error.data());
+            source_load_error.c_str());
     }
     if (layout.show_operation && show_persistence &&
         IsTopBarStatusHoverTarget(
             operation_rect.Min,
             operation_rect.Max)) {
         std::string tooltip;
-        for (const std::string& message : persistence.messages) {
+        for (const LocalUserStateHealthMessage& message :
+             persistence.messages) {
             if (!tooltip.empty()) {
                 tooltip.push_back('\n');
             }
-            tooltip += message;
+            tooltip +=
+                FormatLocalUserStateHealthMessage(
+                    language,
+                    message);
         }
         ImGui::SetTooltip(
             "%s",
@@ -1350,12 +1360,10 @@ const SourceCollectionSessionView& ShellUi::SessionView()
 
 LocalUserStateHealthView ShellUi::PersistenceHealth()
 {
-    const UiLanguage language =
-        application_settings_.View().language;
     LocalUserStateHealthView health =
         SessionView().persistence;
     const auto append_setting = [&](
-                                    std::string_view area,
+                                    LocalUserStateArea area,
                                     ApplicationSetting setting) {
         AppendLocalUserStateHealth(
             health,
@@ -1363,22 +1371,21 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
             application_settings_.PersistenceStatus(setting));
     };
     append_setting(
-        UiText(language, UiTextId::Language),
+        LocalUserStateArea::Language,
         ApplicationSetting::Language);
     append_setting(
-        UiText(language, UiTextId::UiScale),
+        LocalUserStateArea::UiScale,
         ApplicationSetting::UiScale);
     append_setting(
-        UiText(
-            language,
-            UiTextId::ProfileOutputDirectory),
+        LocalUserStateArea::
+            ProfileOutputDirectory,
         ApplicationSetting::ProfileOutputDirectory);
     append_setting(
-        UiText(language, UiTextId::PanelVisibility),
+        LocalUserStateArea::PanelVisibility,
         ApplicationSetting::PanelVisibility);
     AppendLocalUserStateHealth(
         health,
-        UiText(language, UiTextId::SpectralLines),
+        LocalUserStateArea::SpectralLines,
         spectral_lines_panel_.PersistenceStatus());
     return health;
 }
@@ -1713,7 +1720,7 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
     if (RenderTopBarStatus(
             status,
             activation_status.loading,
-            activation_status.error_message,
+            activation_status.failures,
             persistence,
             language)) {
         source_activation_.AcknowledgeLoadFailures();

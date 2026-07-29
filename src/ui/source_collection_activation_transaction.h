@@ -39,6 +39,10 @@ public:
 
     struct Status {
         bool loading = false;
+        std::span<const SourceCollectionLoadFailure>
+            failures;
+        // Diagnostic-only aggregate retained for runtime instrumentation and
+        // non-UI lifecycle tests. Shell UI consumes failures instead.
         std::string_view error_message;
     };
 
@@ -133,7 +137,7 @@ private:
     struct TerminalOutcome {
         std::filesystem::path path;
         std::uint64_t generation = 0;
-        std::optional<std::string> error_message;
+        std::optional<SourceCollectionLoadError> error;
         bool failure_acknowledged = false;
     };
 
@@ -297,7 +301,7 @@ private:
     void EraseDeferredRestoreTask(std::uint64_t task_id);
     void RecordTerminalOutcome(
         const Ticket& ticket,
-        std::optional<std::string> error_message);
+        std::optional<SourceCollectionLoadError> error);
     void RebuildErrorMessage();
     static void MarkTicketSuperseded(const Ticket& ticket);
 
@@ -327,6 +331,8 @@ private:
     bool deferred_restore_active_ = false;
     std::map<std::string, TerminalOutcome>
         terminal_outcomes_;
+    std::vector<SourceCollectionLoadFailure>
+        visible_failures_;
     std::string error_message_;
     mutable std::optional<
         LocalUserStateSaveScheduler::TimePoint>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -7,7 +8,11 @@ namespace specforge {
 
 enum class SampleAnnotationWorkflowRelationship;
 enum class SampleLabelSaveMessageKind;
+enum class SourceCollectionLoadErrorKind;
 enum class SourceCollectionSourceState;
+enum class LocalUserStateArea;
+struct LocalUserStateHealthMessage;
+struct SourceCollectionLoadFailure;
 
 enum class UiLanguage {
     English,
@@ -22,7 +27,7 @@ enum class UiTextId {
     ApplicationLanguage,
     EnglishLanguageName,
     SimplifiedChineseLanguageName,
-    LocalizationInProgress,
+    ApplicationLanguageScope,
     LanguageLoadWarning,
     LanguageSaveError,
     Appearance,
@@ -54,6 +59,8 @@ enum class UiTextId {
     FrameCaptureReadbackNote,
     FrameCaptureOutputDirectory,
     UnknownSourceType,
+    FileSourceType,
+    FolderSourceType,
     SourceStateUnavailable,
     SourceStateError,
     SourceStateLoaded,
@@ -83,6 +90,11 @@ enum class UiTextId {
     SampleNameMatches,
     Ready,
     LoadFailed,
+    BackgroundSourceLoadingFailed,
+    PreparedSourceResultNotApplicable,
+    PreparedSourceReuseTargetUnavailable,
+    PreparedKnownSourcePlanStale,
+    PreparedNavigationUnavailable,
     LoadingSource,
     StateSaveRetrying,
     StateWarning,
@@ -404,6 +416,52 @@ enum class UiTextId {
     SampleNameSortSource,
     NoComparableSortSources,
     UnlabeledValue,
+    PublicSpectralLineCatalog,
+    CurrentSnapshotHasNoWavelengthAxis,
+    UnknownWavelengthFrameWarning,
+    Catalog,
+    CatalogLoadFailed,
+    NoPublicCatalogMarkers,
+    SpectralLineCacheReadFailed,
+    SpectralLineCacheInvalid,
+    SpectralLineCacheUnsupported,
+    SpectralLinePersistenceRetrying,
+    SpectralLinePersistenceRecovered,
+    Search,
+    SpectralLineSearchHint,
+    Duplicate,
+    DuplicateAsUserView,
+    Rename,
+    RenameGroupingView,
+    DeleteGroupingView,
+    DeleteGroupingViewQuestion,
+    CatalogMarkersRemainAfterViewDeletion,
+    NoCatalogGroupingView,
+    NewGroupingView,
+    NewUserGroupingView,
+    CatalogGroupingView,
+    DefaultGroupingViewPrefix,
+    CopySuffix,
+    AddGroup,
+    PlotVisibleCatalogMarkerCount,
+    NoGroupsInView,
+    SearchFilteredGroupVisibility,
+    NoResolvedMarkersInGroup,
+    ToggleGroupMarkerVisibility,
+    SharedMarkerReference,
+    DragDropCopy,
+    DragDropMoveOrCopy,
+    DropBetweenGroupsToReorder,
+    DisbandGroup,
+    ShowOnPlot,
+    Unresolved,
+    UnresolvedMarkerNotPlotted,
+    CopyToGroup,
+    NoOtherGroups,
+    RemoveFromThisGroup,
+    RenameGroup,
+    UnassignedGroup,
+    DefaultGroupPrefix,
     Count,  // Non-display sentinel.
 };
 
@@ -412,6 +470,15 @@ enum class UiTextId {
     UiLanguage language,
     UiTextId text_id,
     std::string_view stable_id);
+[[nodiscard]] std::string_view SourceTypeDisplayText(
+    UiLanguage language,
+    std::string_view source_type) noexcept;
+[[nodiscard]] std::string_view UiText(
+    UiLanguage language,
+    SourceCollectionLoadErrorKind error_kind) noexcept;
+[[nodiscard]] std::string FormatSourceCollectionLoadFailures(
+    UiLanguage language,
+    std::span<const SourceCollectionLoadFailure> failures);
 [[nodiscard]] std::string_view UiText(
     UiLanguage language,
     SourceCollectionSourceState state) noexcept;
@@ -421,5 +488,11 @@ enum class UiTextId {
 [[nodiscard]] std::string_view UiText(
     UiLanguage language,
     SampleLabelSaveMessageKind message_kind) noexcept;
+[[nodiscard]] std::string_view UiText(
+    UiLanguage language,
+    LocalUserStateArea area) noexcept;
+[[nodiscard]] std::string FormatLocalUserStateHealthMessage(
+    UiLanguage language,
+    const LocalUserStateHealthMessage& message);
 
 }  // namespace specforge

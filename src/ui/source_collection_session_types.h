@@ -18,6 +18,28 @@
 
 namespace specforge {
 
+enum class SourceCollectionLoadErrorKind {
+    None,
+    BackgroundLoadingFailed,
+    PreparedResultNotApplicable,
+    PreparedReuseTargetUnavailable,
+    PreparedKnownSourcePlanStale,
+    PreparedNavigationUnavailable,
+};
+
+struct SourceCollectionLoadError {
+    SourceCollectionLoadErrorKind kind =
+        SourceCollectionLoadErrorKind::None;
+    // Parser, operating-system, and other source-specific diagnostics are
+    // intentionally kept separate from the application-authored semantic.
+    std::string diagnostic_detail;
+};
+
+struct SourceCollectionLoadFailure {
+    std::filesystem::path source_path;
+    SourceCollectionLoadError error;
+};
+
 struct SourceCollectionSessionAction {
     bool source_roster_changed = false;
     bool snapshot_changed = false;

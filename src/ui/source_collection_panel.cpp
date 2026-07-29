@@ -464,7 +464,9 @@ void SourceCollectionPanelUi::RenderFiles(
 
             ImGui::TableSetColumnIndex(1);
             const std::string_view type = entry.type
-                ? std::string_view{*entry.type}
+                ? SourceTypeDisplayText(
+                      language,
+                      *entry.type)
                 : UiText(language, UiTextId::UnknownSourceType);
             if (TableCellTextButton("type", type, ImGui::GetColorU32(ImGuiCol_Text))) {
                 (void)interaction.Submit(

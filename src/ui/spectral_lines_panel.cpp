@@ -1,11 +1,12 @@
 #include "ui/spectral_lines_panel.h"
+#include "ui/spectral_lines_name_localization.h"
 
 #include <imgui.h>
+#include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cstdio>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -13,15 +14,28 @@
 namespace specforge {
 namespace {
 
-constexpr const char* kSpectralLinesWindow = "Spectral Lines###SpecForgeSpectralLinesV2";
-constexpr const char* kRenameGroupingViewPopup = "Rename grouping view###SpecForgeRenameGroupingViewPopup";
-constexpr const char* kDeleteGroupingViewPopup = "Delete grouping view###SpecForgeDeleteGroupingViewPopup";
+constexpr const char* kSpectralLinesWindow =
+    "Spectral Lines###SpecForgeSpectralLinesV2";
 
 bool HasNonWhitespace(std::string_view text)
 {
     return std::any_of(text.begin(), text.end(), [](unsigned char character) {
         return std::isspace(character) == 0;
     });
+}
+
+std::string LocalizedCatalogName(
+    UiLanguage language,
+    const CatalogUserStateView& state)
+{
+    if (state.catalog_id ==
+        PublicSpectralLineCatalogIdentity().id) {
+        return std::string(
+            UiText(
+                language,
+                UiTextId::PublicSpectralLineCatalog));
+    }
+    return state.catalog_display_name;
 }
 
 void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
@@ -44,6 +58,25 @@ ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
     default:
         return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
     }
+}
+
+void RenderLocalizedDiagnosticStatus(
+    UiLanguage language,
+    UiTextId message_id,
+    std::string_view diagnostic_detail)
+{
+    std::string message(
+        UiText(
+            language,
+            message_id));
+    if (!diagnostic_detail.empty()) {
+        message += "\n";
+        message += diagnostic_detail;
+    }
+    RenderWrappedStatusText(
+        SeverityColor(
+            SpectrumDiagnosticSeverity::Warning),
+        message);
 }
 
 }  // namespace
@@ -89,21 +122,54 @@ void SpectralLinesPanelUi::Render(
         ImGui::End();
         return;
     }
-    ImGui::TextUnformatted("Spectral Lines");
+    const std::string_view heading =
+        UiText(
+            language,
+            UiTextId::SpectralLines);
+    ImGui::TextUnformatted(
+        heading.data(),
+        heading.data() + heading.size());
     ImGui::Separator();
 
     const bool can_show_lines = snapshot && snapshot->capabilities.can_show_spectral_lines;
     if (!can_show_lines) {
-        ImGui::TextWrapped("Current snapshot does not expose a wavelength axis for spectral-line overlays.");
+        const std::string_view unavailable =
+            UiText(
+                language,
+                UiTextId::CurrentSnapshotHasNoWavelengthAxis);
+        ImGui::TextWrapped(
+            "%.*s",
+            static_cast<int>(unavailable.size()),
+            unavailable.data());
     } else if (snapshot->capabilities.requires_rest_frame_warning) {
+        const std::string_view warning =
+            UiText(
+                language,
+                UiTextId::UnknownWavelengthFrameWarning);
         ImGui::TextColored(
             SeverityColor(SpectrumDiagnosticSeverity::Warning),
-            "Wavelength frame is unknown; rest-frame overlays are reference-only.");
+            "%.*s",
+            static_cast<int>(warning.size()),
+            warning.data());
     }
 
-    const char* selected_catalog = state.catalog_display_name.c_str();
-    if (ImGui::BeginCombo("Catalog", selected_catalog)) {
-        ImGui::Selectable(selected_catalog, true);
+    const std::string selected_catalog =
+        LocalizedCatalogName(language, state);
+    const std::string catalog_label =
+        StableUiLabel(
+            language,
+            UiTextId::Catalog,
+            "SpecForgeSpectralLineCatalog");
+    if (ImGui::BeginCombo(
+            catalog_label.c_str(),
+            selected_catalog.c_str())) {
+        const std::string catalog_option_label =
+            SpectralLineCatalogOptionLabel(
+                selected_catalog,
+                state.catalog_id);
+        ImGui::Selectable(
+            catalog_option_label.c_str(),
+            true);
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered()) {
@@ -111,39 +177,83 @@ void SpectralLinesPanelUi::Render(
     }
     ImGui::SameLine();
     bool marker_labels_visible = state.marker_labels_visible;
-    if (ImGui::Checkbox("Labels", &marker_labels_visible)) {
+    const std::string labels_label =
+        StableUiLabel(
+            language,
+            UiTextId::Labels,
+            "SpecForgeSpectralLineLabels");
+    if (ImGui::Checkbox(
+            labels_label.c_str(),
+            &marker_labels_visible)) {
         (void)panel.Submit(CatalogUserStateIntent::SetMarkerLabelsVisible(marker_labels_visible));
     }
 
     ImGui::Spacing();
     if (!state.catalog_load_error.empty()) {
-        const std::string error = "Catalog load failed: " + state.catalog_load_error;
+        const std::string error =
+            std::string(
+                UiText(
+                    language,
+                    UiTextId::CatalogLoadFailed)) +
+            state.catalog_load_error;
         RenderWrappedStatusText(SeverityColor(SpectrumDiagnosticSeverity::Warning), error);
     } else if (state.catalog_marker_count == 0) {
-        ImGui::TextDisabled("No public catalog markers loaded.");
+        const std::string_view no_markers =
+            UiText(
+                language,
+                UiTextId::NoPublicCatalogMarkers);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(no_markers.size()),
+            no_markers.data());
     }
-    if (!state.persistence.load_warning.empty()) {
-        RenderWrappedStatusText(
-            SeverityColor(SpectrumDiagnosticSeverity::Warning),
-            state.persistence.load_warning);
+    switch (state.persistence.load_issue) {
+    case SpectralLineCacheLoadIssueKind::ReadFailed:
+        RenderLocalizedDiagnosticStatus(
+            language,
+            UiTextId::SpectralLineCacheReadFailed,
+            state.persistence.load_diagnostic_detail);
+        break;
+    case SpectralLineCacheLoadIssueKind::InvalidDocument:
+        RenderLocalizedDiagnosticStatus(
+            language,
+            UiTextId::SpectralLineCacheInvalid,
+            state.persistence.load_diagnostic_detail);
+        break;
+    case SpectralLineCacheLoadIssueKind::
+        UnsupportedFormatOrSchema:
+        RenderLocalizedDiagnosticStatus(
+            language,
+            UiTextId::SpectralLineCacheUnsupported,
+            state.persistence.load_diagnostic_detail);
+        break;
+    case SpectralLineCacheLoadIssueKind::None:
+        break;
     }
     if (state.persistence.retrying) {
-        RenderWrappedStatusText(
-            SeverityColor(SpectrumDiagnosticSeverity::Warning),
-            state.persistence.save_message + " Retrying.");
+        RenderLocalizedDiagnosticStatus(
+            language,
+            UiTextId::SpectralLinePersistenceRetrying,
+            state.persistence.save_diagnostic_detail);
     } else if (state.persistence.recovered) {
         RenderWrappedStatusText(
             ImVec4(0.30f, 0.69f, 0.31f, 1.0f),
-            "Spectral-line state persistence recovered.");
-    } else if (!state.persistence.save_message.empty()) {
-        RenderWrappedStatusText(
-            SeverityColor(SpectrumDiagnosticSeverity::Warning),
-            state.persistence.save_message);
+            UiText(
+                language,
+                UiTextId::SpectralLinePersistenceRecovered));
     }
 
+    const std::string search_label =
+        StableUiLabel(
+            language,
+            UiTextId::Search,
+            "SpecForgeSpectralLineSearch");
     if (ImGui::InputTextWithHint(
-            "Search",
-            "id, label, catalog group, or plot label",
+            search_label.c_str(),
+            UiText(
+                language,
+                UiTextId::SpectralLineSearchHint)
+                .data(),
             grouping_view_search_.data(),
             grouping_view_search_.size())) {
         (void)panel.Submit(
@@ -164,7 +274,15 @@ void SpectralLinesPanelUi::Render(
             const ImGuiTabItemFlags flags = grouping_view.selection_requested
                                                  ? ImGuiTabItemFlags_SetSelected
                                                  : ImGuiTabItemFlags_None;
-            const std::string tab_label = grouping_view.name + "###" + grouping_view.id;
+            const std::string grouping_view_display_name =
+                LocalizedSpectralLineName(
+                    language,
+                    grouping_view.name,
+                    grouping_view.generated_name);
+            const std::string tab_label =
+                grouping_view_display_name +
+                "###" +
+                grouping_view.id;
             if (ImGui::BeginTabItem(tab_label.c_str(), nullptr, flags)) {
                 if (!grouping_view.active) {
                     (void)panel.Submit(CatalogUserStateIntent::SelectGroupingView(grouping_view.id));
@@ -174,19 +292,43 @@ void SpectralLinesPanelUi::Render(
                 if (ImGui::BeginPopupContextItem(
                         grouping_view.editable ? "user_grouping_view_context"
                                                : "catalog_grouping_view_context")) {
+                    const std::string duplicate_label =
+                        StableUiLabel(
+                            language,
+                            grouping_view.editable
+                                ? UiTextId::Duplicate
+                                : UiTextId::DuplicateAsUserView,
+                            "SpecForgeDuplicateSpectralLineGroupingView");
                     if (ImGui::Selectable(
-                            grouping_view.editable ? "Duplicate" : "Duplicate as user view")) {
+                            duplicate_label.c_str())) {
                         pending_duplicate = grouping_view;
                     }
-                    if (grouping_view.editable && ImGui::Selectable("Rename")) {
+                    const std::string rename_label =
+                        StableUiLabel(
+                            language,
+                            UiTextId::Rename,
+                            "SpecForgeRenameSpectralLineGroupingView");
+                    if (grouping_view.editable &&
+                        ImGui::Selectable(rename_label.c_str())) {
                         pending_rename = grouping_view;
                     }
-                    if (grouping_view.editable && ImGui::Selectable("Delete")) {
+                    const std::string delete_label =
+                        StableUiLabel(
+                            language,
+                            UiTextId::Delete,
+                            "SpecForgeDeleteSpectralLineGroupingView");
+                    if (grouping_view.editable &&
+                        ImGui::Selectable(delete_label.c_str())) {
                         pending_delete = grouping_view;
                     }
                     ImGui::EndPopup();
                 }
-                grouping_view_ui_.Render(panel, snapshot, grouping_view, state.catalog_marker_count);
+                grouping_view_ui_.Render(
+                    panel,
+                    snapshot,
+                    grouping_view,
+                    state.catalog_marker_count,
+                    language);
                 ImGui::EndTabItem();
             }
         }
@@ -195,7 +337,14 @@ void SpectralLinesPanelUi::Render(
             create_new_view();
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("New user grouping view");
+            const std::string_view tooltip =
+                UiText(
+                    language,
+                    UiTextId::NewUserGroupingView);
+            ImGui::SetTooltip(
+                "%.*s",
+                static_cast<int>(tooltip.size()),
+                tooltip.data());
         }
         ImGui::EndTabBar();
     }
@@ -205,62 +354,146 @@ void SpectralLinesPanelUi::Render(
     }
     if (pending_rename) {
         renaming_grouping_view_id_ = pending_rename->id;
-        std::snprintf(
-            renaming_grouping_view_name_.data(),
-            renaming_grouping_view_name_.size(),
-            "%s",
-            pending_rename->name.c_str());
-        ImGui::OpenPopup(kRenameGroupingViewPopup);
+        renaming_grouping_view_original_name_ =
+            pending_rename->name;
+        renaming_grouping_view_name_ =
+            LocalizedSpectralLineName(
+                language,
+                pending_rename->name,
+                pending_rename->generated_name);
+        renaming_grouping_view_edited_ = false;
+        const std::string rename_popup =
+            StableUiLabel(
+                language,
+                UiTextId::RenameGroupingView,
+                "SpecForgeRenameGroupingViewPopup");
+        ImGui::OpenPopup(rename_popup.c_str());
     }
     if (pending_delete) {
         deleting_grouping_view_id_ = pending_delete->id;
-        deleting_grouping_view_name_ = pending_delete->name;
-        ImGui::OpenPopup(kDeleteGroupingViewPopup);
+        deleting_grouping_view_name_ =
+            LocalizedSpectralLineName(
+                language,
+                pending_delete->name,
+                pending_delete->generated_name);
+        const std::string delete_popup =
+            StableUiLabel(
+                language,
+                UiTextId::DeleteGroupingView,
+                "SpecForgeDeleteGroupingViewPopup");
+        ImGui::OpenPopup(delete_popup.c_str());
     }
-    grouping_view_ui_.RenderPendingPopups(panel);
+    grouping_view_ui_.RenderPendingPopups(
+        panel,
+        language);
 
-    if (ImGui::BeginPopupModal(kRenameGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    const std::string rename_popup =
+        StableUiLabel(
+            language,
+            UiTextId::RenameGroupingView,
+            "SpecForgeRenameGroupingViewPopup");
+    if (ImGui::BeginPopupModal(
+            rename_popup.c_str(),
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize)) {
         if (ImGui::IsWindowAppearing()) {
             ImGui::SetKeyboardFocusHere();
         }
+        const std::string name_label =
+            StableUiLabel(
+                language,
+                UiTextId::Name,
+                "SpecForgeSpectralLineGroupingViewName");
         const bool submitted = ImGui::InputText(
-            "Name",
-            renaming_grouping_view_name_.data(),
-            renaming_grouping_view_name_.size(),
+            name_label.c_str(),
+            &renaming_grouping_view_name_,
             ImGuiInputTextFlags_EnterReturnsTrue);
-        const bool valid_name = HasNonWhitespace(renaming_grouping_view_name_.data());
+        if (ImGui::IsItemEdited()) {
+            renaming_grouping_view_edited_ = true;
+        }
+        const bool valid_name =
+            HasNonWhitespace(
+                renaming_grouping_view_name_);
         const auto finish_rename = [this, &panel]() {
             if (renaming_grouping_view_id_) {
+                const std::string submitted_name =
+                    ResolveSpectralLineRenameSubmission(
+                        renaming_grouping_view_name_,
+                        renaming_grouping_view_original_name_,
+                        renaming_grouping_view_edited_);
                 (void)panel.Submit(CatalogUserStateIntent::RenameUserGroupingView(
                     *renaming_grouping_view_id_,
-                    renaming_grouping_view_name_.data()));
+                    submitted_name,
+                    renaming_grouping_view_edited_
+                        ? CatalogUserRenameEditState::Edited
+                        : CatalogUserRenameEditState::Unedited));
             }
             renaming_grouping_view_id_.reset();
-            renaming_grouping_view_name_.fill('\0');
+            renaming_grouping_view_name_.clear();
+            renaming_grouping_view_original_name_.clear();
+            renaming_grouping_view_edited_ = false;
             ImGui::CloseCurrentPopup();
         };
         if (!valid_name) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button("Rename") || (submitted && valid_name)) {
+        const std::string rename_label =
+            StableUiLabel(
+                language,
+                UiTextId::Rename,
+                "SpecForgeConfirmRenameSpectralLineGroupingView");
+        if (ImGui::Button(rename_label.c_str()) ||
+            (submitted && valid_name)) {
             finish_rename();
         }
         if (!valid_name) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) {
+        const std::string cancel_rename_label =
+            StableUiLabel(
+                language,
+                UiTextId::Cancel,
+                "SpecForgeCancelRenameSpectralLineGroupingView");
+        if (ImGui::Button(cancel_rename_label.c_str())) {
             renaming_grouping_view_id_.reset();
-            renaming_grouping_view_name_.fill('\0');
+            renaming_grouping_view_name_.clear();
+            renaming_grouping_view_original_name_.clear();
+            renaming_grouping_view_edited_ = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }
 
-    if (ImGui::BeginPopupModal(kDeleteGroupingViewPopup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Delete grouping view \"%s\"?", deleting_grouping_view_name_.c_str());
-        ImGui::TextDisabled("Catalog markers and marker visibility are not deleted.");
-        if (ImGui::Button("Delete")) {
+    const std::string delete_popup =
+        StableUiLabel(
+            language,
+            UiTextId::DeleteGroupingView,
+            "SpecForgeDeleteGroupingViewPopup");
+    if (ImGui::BeginPopupModal(
+            delete_popup.c_str(),
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text(
+            UiText(
+                language,
+                UiTextId::DeleteGroupingViewQuestion)
+                .data(),
+            deleting_grouping_view_name_.c_str());
+        const std::string_view deletion_scope =
+            UiText(
+                language,
+                UiTextId::CatalogMarkersRemainAfterViewDeletion);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(deletion_scope.size()),
+            deletion_scope.data());
+        const std::string delete_label =
+            StableUiLabel(
+                language,
+                UiTextId::Delete,
+                "SpecForgeConfirmDeleteSpectralLineGroupingView");
+        if (ImGui::Button(delete_label.c_str())) {
             if (deleting_grouping_view_id_) {
                 (void)panel.Submit(
                     CatalogUserStateIntent::DeleteUserGroupingView(*deleting_grouping_view_id_));
@@ -270,7 +503,12 @@ void SpectralLinesPanelUi::Render(
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) {
+        const std::string cancel_delete_label =
+            StableUiLabel(
+                language,
+                UiTextId::Cancel,
+                "SpecForgeCancelDeleteSpectralLineGroupingView");
+        if (ImGui::Button(cancel_delete_label.c_str())) {
             deleting_grouping_view_id_.reset();
             deleting_grouping_view_name_.clear();
             ImGui::CloseCurrentPopup();
@@ -279,8 +517,21 @@ void SpectralLinesPanelUi::Render(
     }
 
     if (!state.has_catalog_grouping_view && state.user_grouping_view_count == 0) {
-        ImGui::TextDisabled("This catalog has no catalog grouping view.");
-        if (ImGui::Button("+ New grouping view")) {
+        const std::string_view no_grouping =
+            UiText(
+                language,
+                UiTextId::NoCatalogGroupingView);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(no_grouping.size()),
+            no_grouping.data());
+        const std::string new_grouping_view_label =
+            StableUiLabel(
+                language,
+                UiTextId::NewGroupingView,
+                "SpecForgeNewSpectralLineGroupingView");
+        if (ImGui::Button(
+                new_grouping_view_label.c_str())) {
             create_new_view();
         }
     }

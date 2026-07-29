@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
@@ -122,6 +123,48 @@ void WriteNonCanonicalCache(const std::filesystem::path& path)
 })json";
 }
 
+void WriteMalformedLegacyCacheBody(
+    const std::filesystem::path& path,
+    std::string_view catalogs_json)
+{
+    std::ofstream stream(path, std::ios::binary);
+    stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalogs": )json"
+           << catalogs_json
+           << R"json(,
+  "catalog_panel_state": {}
+})json";
+}
+
+void WriteLegacyExactShapeUserNames(
+    const std::filesystem::path& path)
+{
+    std::ofstream stream(path, std::ios::binary);
+    stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "view-1",
+      "marker_visibility": {},
+      "grouping_views": [{
+        "id": "view-1",
+        "name": "Grouping 1",
+        "groups": [{
+          "id": "group-1",
+          "name": "Group 1",
+          "is_unassigned": false,
+          "marker_references": []
+        }]
+      }]
+    }
+  },
+  "catalog_panel_state": {}
+})json";
+}
+
 const specforge::SpectralLineGroupingView* FindGroupingView(
     const specforge::CatalogUserStateView& state,
     std::string_view view_id)
@@ -196,6 +239,20 @@ void RequireRejected(const specforge::CatalogUserStateResult& result, std::strin
     Require(result.status == specforge::CatalogUserStateResultStatus::Rejected, message);
     Require(!result.changed, "rejected result must not report a change");
     Require(!result.message.empty(), "rejected result should explain the invalid identity or invariant");
+}
+
+void RequireNoChange(
+    const specforge::CatalogUserStateResult& result,
+    std::string_view message)
+{
+    Require(
+        result.status ==
+            specforge::CatalogUserStateResultStatus::NoChange,
+        message);
+    Require(
+        !result.changed &&
+            !result.persistent_state_changed,
+        "no-change result must not report a persistent mutation");
 }
 
 void TestForeignIdentitiesAreRejectedWithoutPersistence()
@@ -323,7 +380,9 @@ void TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers()
         const specforge::SpectralLineMarkerReferenceView* unresolved =
             FindMarker(*group, "missing-marker");
         Require(
-            unresolved != nullptr && !unresolved->resolved,
+            unresolved != nullptr && !unresolved->resolved &&
+                unresolved->label == "missing-marker" &&
+                unresolved->wavelength_text.empty(),
             "unresolved persisted markers should survive the canonicalization path");
         Require(
             FindMarker(*group, "h_beta") == nullptr &&
@@ -398,6 +457,420 @@ void TestPersistentIntentUsesDomainCanonicalizationForSelection()
     }
 
     RemoveTestCache(path);
+}
+
+void TestGeneratedNamesPreserveStoredValuesAndOrigins()
+{
+    const std::filesystem::path path =
+        TestCachePath("generated_names");
+    RemoveTestCache(path);
+
+    std::string view_id;
+    std::string group_id;
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    CreateUserGroupingView()),
+            "generated-name fixture should create a user view");
+
+        specforge::CatalogUserStateView state =
+            session.View();
+        const specforge::SpectralLineGroupingView* view =
+            FindActiveEditableView(state);
+        Require(
+            view != nullptr &&
+                view->name == "Grouping 1" &&
+                view->generated_name.source ==
+                    specforge::GeneratedNameSource::
+                        DefaultGroupingView &&
+                view->generated_name.ordinal == 1,
+            "created grouping views should carry explicit generated-name metadata");
+        view_id = view->id;
+
+        RequireNoChange(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroupingView(
+                        view_id,
+                        view->name,
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Unedited)),
+            "confirming an unedited grouping view name should preserve the stored value");
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    AddUserGroup(view_id)),
+            "generated-name fixture should add a user group");
+        state = session.View();
+        view = FindGroupingView(state, view_id);
+        const specforge::SpectralLineGroupView* group =
+            view == nullptr || view->groups.empty()
+                ? nullptr
+                : &view->groups.front();
+        Require(
+            group != nullptr &&
+                !group->is_unassigned &&
+                group->name == "Group 1" &&
+                group->generated_name.source ==
+                    specforge::GeneratedNameSource::
+                        DefaultGroup &&
+                group->generated_name.ordinal == 1,
+            "created groups should carry explicit generated-name metadata");
+        group_id = group->id;
+
+        RequireNoChange(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroup(
+                        view_id,
+                        group_id,
+                        group->name,
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Unedited)),
+            "confirming an unedited group name should preserve the stored value");
+        Require(
+            session.Flush(),
+            "generated-name metadata should persist");
+    }
+
+    {
+        specforge::SpectralLinesPanelController restored(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        specforge::CatalogUserStateView state =
+            restored.View();
+        const specforge::SpectralLineGroupingView* view =
+            FindGroupingView(state, view_id);
+        const specforge::SpectralLineGroupView* group =
+            view == nullptr
+                ? nullptr
+                : FindGroup(*view, group_id);
+        Require(
+            view != nullptr &&
+                view->name == "Grouping 1" &&
+                view->generated_name.source ==
+                    specforge::GeneratedNameSource::
+                        DefaultGroupingView &&
+                group != nullptr &&
+                group->name == "Group 1" &&
+                group->generated_name.source ==
+                    specforge::GeneratedNameSource::
+                        DefaultGroup,
+            "generated-name metadata should survive the cache round trip");
+
+        RequireApplied(
+            restored.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroupingView(
+                        view_id,
+                        "Grouping 7",
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Edited)),
+            "same-shaped user grouping names should be accepted");
+        RequireApplied(
+            restored.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroup(
+                        view_id,
+                        group_id,
+                        "Group 7",
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Edited)),
+            "same-shaped user group names should be accepted");
+        state = restored.View();
+        view = FindGroupingView(state, view_id);
+        group =
+            view == nullptr
+                ? nullptr
+                : FindGroup(*view, group_id);
+        Require(
+            view != nullptr &&
+                view->name == "Grouping 7" &&
+                view->generated_name.source ==
+                    specforge::GeneratedNameSource::None &&
+                group != nullptr &&
+                group->name == "Group 7" &&
+                group->generated_name.source ==
+                    specforge::GeneratedNameSource::None,
+            "user renames should clear generated-name semantics even when their shape matches a default");
+
+        RequireApplied(
+            restored.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroupingView(
+                        view_id,
+                        "Draft copy",
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Edited)),
+            "user names ending in copy should be accepted verbatim");
+        RequireApplied(
+            restored.Submit(
+                specforge::CatalogUserStateIntent::
+                    DuplicateGroupingView(view_id)),
+            "duplicating a user-named view should apply");
+        state = restored.View();
+        const specforge::SpectralLineGroupingView*
+            duplicated = FindActiveEditableView(state);
+        Require(
+            duplicated != nullptr &&
+                duplicated->id != view_id &&
+                duplicated->name == "Draft copy copy" &&
+                duplicated->generated_name.source ==
+                    specforge::GeneratedNameSource::None &&
+                duplicated->generated_name.copy_count == 1 &&
+                duplicated->generated_name.copy_base_name ==
+                    "Draft copy",
+            "generated copies should carry an explicit base name instead of inferring suffixes");
+    }
+
+    RemoveTestCache(path);
+}
+
+void TestExplicitStoredValueRenamesClearGeneratedMetadata()
+{
+    const std::filesystem::path path =
+        TestCachePath("explicit_stored_value_rename");
+    RemoveTestCache(path);
+
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    CreateUserGroupingView()),
+            "explicit-rename fixture should create a user view");
+        specforge::CatalogUserStateView state =
+            session.View();
+        const specforge::SpectralLineGroupingView* view =
+            FindActiveEditableView(state);
+        Require(
+            view != nullptr,
+            "explicit-rename fixture should expose the created view");
+        const std::string view_id = view->id;
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    AddUserGroup(view_id)),
+            "explicit-rename fixture should create a group");
+        state = session.View();
+        view = FindGroupingView(state, view_id);
+        const specforge::SpectralLineGroupView* group =
+            view == nullptr || view->groups.empty()
+                ? nullptr
+                : &view->groups.front();
+        Require(
+            group != nullptr,
+            "explicit-rename fixture should expose the created group");
+        const std::string group_id = group->id;
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroupingView(
+                        view_id,
+                        "Grouping 1",
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Edited)),
+            "an explicit rename to the stored grouping-view text should clear generated-name semantics");
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::
+                    RenameUserGroup(
+                        view_id,
+                        group_id,
+                        "Group 1",
+                        specforge::
+                            CatalogUserRenameEditState::
+                                Edited)),
+            "an explicit rename to the stored group text should clear generated-name semantics");
+
+        state = session.View();
+        view = FindGroupingView(state, view_id);
+        group =
+            view == nullptr
+                ? nullptr
+                : FindGroup(*view, group_id);
+        Require(
+            view != nullptr &&
+                view->name == "Grouping 1" &&
+                view->generated_name.source ==
+                    specforge::GeneratedNameSource::None &&
+                group != nullptr &&
+                group->name == "Group 1" &&
+                group->generated_name.source ==
+                    specforge::GeneratedNameSource::None,
+            "explicit same-text renames should preserve text while clearing both generated-name markers");
+        Require(
+            session.Flush(),
+            "explicit same-text renames should be persisted");
+    }
+
+    {
+        specforge::SpectralLinesPanelController restored(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        const specforge::CatalogUserStateView state =
+            restored.View();
+        const specforge::SpectralLineGroupingView* view =
+            FindActiveEditableView(state);
+        const specforge::SpectralLineGroupView* group =
+            view == nullptr || view->groups.empty()
+                ? nullptr
+                : &view->groups.front();
+        Require(
+            view != nullptr &&
+                view->generated_name.source ==
+                    specforge::GeneratedNameSource::None &&
+                group != nullptr &&
+                group->generated_name.source ==
+                    specforge::GeneratedNameSource::None,
+            "cleared generated-name markers should survive the cache round trip");
+    }
+
+    RemoveTestCache(path);
+}
+
+void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
+{
+    const std::filesystem::path path =
+        TestCachePath("legacy_exact_shape_user_names");
+    RemoveTestCache(path);
+    WriteLegacyExactShapeUserNames(path);
+
+    const auto require_user_owned_names =
+        [](const specforge::CatalogUserStateView& state,
+           std::string_view context) {
+            const specforge::SpectralLineGroupingView* view =
+                FindGroupingView(state, "view-1");
+            const specforge::SpectralLineGroupView* group =
+                view == nullptr
+                    ? nullptr
+                    : FindGroup(*view, "group-1");
+            Require(
+                view != nullptr &&
+                    view->name == "Grouping 1" &&
+                    view->generated_name.source ==
+                        specforge::GeneratedNameSource::None &&
+                    group != nullptr &&
+                    group->name == "Group 1" &&
+                    group->generated_name.source ==
+                        specforge::GeneratedNameSource::None,
+                context);
+        };
+
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        require_user_owned_names(
+            session.View(),
+            "schema-2 exact-shape names must load as user-owned");
+    }
+
+    const std::string rewritten = ReadFile(path);
+    Require(
+        rewritten.find("\"schema_version\": 3") !=
+                std::string::npos &&
+            rewritten.find("\"name_source\"") ==
+                std::string::npos,
+        "schema rewrite must not invent generated-name provenance");
+
+    {
+        specforge::SpectralLinesPanelController restarted(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        require_user_owned_names(
+            restarted.View(),
+            "restart must preserve user ownership of exact-shape names");
+    }
+
+    RemoveTestCache(path);
+}
+
+void TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten()
+{
+    const auto require_preserved =
+        [](const std::filesystem::path& path) {
+            const std::string original =
+                ReadFile(path);
+            {
+                specforge::
+                    SpectralLinesPanelController
+                        session(
+                            GroupedCatalog(),
+                            specforge::
+                                PublicSpectralLineCatalogIdentity(),
+                            path);
+                Require(
+                    session.View()
+                            .persistence
+                            .load_issue ==
+                        specforge::
+                            SpectralLineCacheLoadIssueKind::
+                                InvalidDocument,
+                    "a malformed legacy cache body should expose an invalid-document warning");
+            }
+            Require(
+                ReadFile(path) == original,
+                "a malformed legacy cache body must remain byte-identical until an explicit user mutation");
+        };
+
+    for (const auto& [test_name, catalogs_json] :
+         std::initializer_list<
+             std::pair<std::string_view, std::string_view>>{
+             {"null_catalogs", "null"},
+             {"array_catalogs", "[]"},
+             {"non_object_catalog", R"json({"specforge.public": []})json"},
+             {"object_grouping_views",
+              R"json({"specforge.public": {"active_view_id": "", "marker_visibility": {}, "grouping_views": {}}})json"},
+             {"object_groups",
+              R"json({"specforge.public": {"active_view_id": "view-1", "marker_visibility": {}, "grouping_views": [{"id": "view-1", "name": "Grouping 1", "groups": {}}]}})json"},
+         }) {
+        const std::filesystem::path path =
+            TestCachePath(test_name);
+        RemoveTestCache(path);
+        WriteMalformedLegacyCacheBody(
+            path,
+            catalogs_json);
+        require_preserved(path);
+        RemoveTestCache(path);
+    }
+
+    const std::filesystem::path missing_path =
+        TestCachePath("missing_catalogs");
+    RemoveTestCache(missing_path);
+    {
+        std::ofstream stream(
+            missing_path,
+            std::ios::binary);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalog_panel_state": {}
+})json";
+    }
+    require_preserved(missing_path);
+    RemoveTestCache(missing_path);
 }
 
 void TestModificationSelectionAndPersistenceRoundTrip()
@@ -485,13 +958,15 @@ void TestModificationSelectionAndPersistenceRoundTrip()
         RequireApplied(
             session.Submit(specforge::CatalogUserStateIntent::RenameUserGroupingView(
                 user_view_id,
-                "Balmer review")),
+                "Balmer review",
+                specforge::CatalogUserRenameEditState::Edited)),
             "user grouping view rename should be applied");
         RequireApplied(
             session.Submit(specforge::CatalogUserStateIntent::RenameUserGroup(
                 user_view_id,
                 first_group_id,
-                "Hydrogen")),
+                "Hydrogen",
+                specforge::CatalogUserRenameEditState::Edited)),
             "user group rename should be applied");
         RequireApplied(
             session.Submit(specforge::CatalogUserStateIntent::SetGroupExpanded(
@@ -587,9 +1062,13 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
             specforge::PublicSpectralLineCatalogIdentity(),
             warning_path);
         Require(
-            !warned.View()
-                 .persistence.load_warning.empty(),
-            "spectral-line view should expose a cache load warning");
+            warned.View().persistence.load_issue ==
+                    specforge::SpectralLineCacheLoadIssueKind::
+                        InvalidDocument &&
+                !warned.View()
+                     .persistence
+                     .load_diagnostic_detail.empty(),
+            "spectral-line view should expose a typed cache load issue and parser detail");
     }
     specforge::SpectralLinesPanelController session(
         GroupedCatalog(),
@@ -623,8 +1102,14 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
     Require(
         session.View().persistence.retrying &&
             !session.View()
-                 .persistence.save_message.empty(),
-        "spectral-line view should expose a retrying save failure");
+                 .persistence
+                 .save_diagnostic_detail.empty() &&
+            session.View()
+                    .persistence
+                    .save_diagnostic_detail.find(
+                        "Could not save spectral-line grouping cache:") ==
+                std::string::npos,
+        "spectral-line view should expose retry state and raw diagnostics without an English application prefix");
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
@@ -656,11 +1141,20 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
 
 int main()
 {
-    TestForeignIdentitiesAreRejectedWithoutPersistence();
-    TestPlotViewProjectsOnlyPlotOverlayState();
-    TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers();
-    TestPersistentIntentUsesDomainCanonicalizationForSelection();
-    TestModificationSelectionAndPersistenceRoundTrip();
-    TestPersistenceViewReportsLoadWarningRetryAndRecovery();
-    return 0;
+    try {
+        TestForeignIdentitiesAreRejectedWithoutPersistence();
+        TestPlotViewProjectsOnlyPlotOverlayState();
+        TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers();
+        TestPersistentIntentUsesDomainCanonicalizationForSelection();
+        TestGeneratedNamesPreserveStoredValuesAndOrigins();
+        TestExplicitStoredValueRenamesClearGeneratedMetadata();
+        TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart();
+        TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten();
+        TestModificationSelectionAndPersistenceRoundTrip();
+        TestPersistenceViewReportsLoadWarningRetryAndRecovery();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "FAILED: " << error.what() << '\n';
+        return 1;
+    }
 }

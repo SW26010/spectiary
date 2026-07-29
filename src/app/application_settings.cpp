@@ -287,10 +287,20 @@ ApplicationSettings::PersistenceStatus(
     }
     const LocalUserStateSaveStatus& save_status =
         save_statuses_[index];
+    const ApplicationSettingsStatus& status =
+        statuses_[index];
     return {
         .recovered = save_status.recovered(),
         .load_warning = load_warnings_[index],
         .save_message = save_status.message(),
+        .load_diagnostic_detail =
+            status.kind ==
+                    ApplicationSettingsStatusKind::
+                        LoadWarning
+                ? status.detail
+                : std::string{},
+        .save_diagnostic_detail =
+            save_status.message(),
     };
 }
 

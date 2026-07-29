@@ -2,6 +2,7 @@
 
 #include "overlays/spectral_line_catalog.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -11,6 +12,8 @@
 #include <vector>
 
 namespace specforge {
+
+inline constexpr std::size_t kMaximumGeneratedNameCopyCount = 1024;
 
 struct CatalogIdentity {
     std::string id;
@@ -22,9 +25,26 @@ struct MarkerReference {
     std::string marker_id;
 };
 
+enum class GeneratedNameSource {
+    None,
+    CatalogGroupingView,
+    DefaultGroupingView,
+    DefaultGroup,
+};
+
+struct GeneratedNameMetadata {
+    GeneratedNameSource source = GeneratedNameSource::None;
+    std::size_t ordinal = 0;
+    std::size_t copy_count = 0;
+    std::string copy_base_name;
+
+    [[nodiscard]] bool operator==(const GeneratedNameMetadata&) const = default;
+};
+
 struct UserGroup {
     std::string id;
     std::string name;
+    GeneratedNameMetadata generated_name;
     bool is_unassigned = false;
     std::vector<MarkerReference> marker_references;
 };
@@ -32,6 +52,7 @@ struct UserGroup {
 struct GroupingView {
     std::string id;
     std::string name;
+    GeneratedNameMetadata generated_name;
     bool read_only = false;
     std::vector<UserGroup> groups;
 };
@@ -96,7 +117,8 @@ CanonicalizeCatalogUserState(
     const SpectralLineCatalog& catalog,
     const CatalogIdentity& identity,
     std::string id,
-    std::string name);
+    std::string name,
+    GeneratedNameMetadata generated_name = {});
 [[nodiscard]] GroupingView DuplicateGroupingView(
     const GroupingView& source,
     const SpectralLineCatalog& catalog,
@@ -136,7 +158,11 @@ bool SetGroupMarkerVisibility(
     const std::unordered_map<std::string, int>& counts,
     const MarkerReference& reference);
 
-bool AddUserGroup(GroupingView& view, std::string id, std::string name);
+bool AddUserGroup(
+    GroupingView& view,
+    std::string id,
+    std::string name,
+    GeneratedNameMetadata generated_name = {});
 bool RemoveUserGroup(GroupingView& view, std::string_view group_id);
 bool ReorderUserGroupBefore(
     GroupingView& view,

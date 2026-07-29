@@ -26,7 +26,9 @@ private:
     std::array<char, 96> grouping_view_search_ = {};
     bool grouping_view_search_initialized_ = false;
     std::optional<std::string> renaming_grouping_view_id_;
-    std::array<char, 128> renaming_grouping_view_name_ = {};
+    std::string renaming_grouping_view_name_;
+    std::string renaming_grouping_view_original_name_;
+    bool renaming_grouping_view_edited_ = false;
     std::optional<std::string> deleting_grouping_view_id_;
     std::string deleting_grouping_view_name_;
     SpectralLinesGroupingViewUi grouping_view_ui_;

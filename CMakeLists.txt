@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.6.0 LANGUAGES CXX)
+project(SpecForge VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -292,6 +292,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/shell_ui.cpp
     src/ui/source_collection_panel.cpp
     src/ui/spectral_lines_grouping_view.cpp
+    src/ui/spectral_lines_name_localization.cpp
     src/ui/spectral_lines_panel.cpp
     src/ui/spectrum_view_session.cpp
     src/ui/ui_font.cpp

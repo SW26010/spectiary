@@ -21,16 +21,18 @@
 #include <windows.h>
 
 namespace specforge {
-namespace {
 
-constexpr std::string_view kPathKindAbsolute = "absolute";
-constexpr std::string_view kPathKindPackageRelative = "package_relative";
-
-std::string PathToUtf8(const std::filesystem::path& path)
+std::string LocalUserStatePathToUtf8(
+    const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
 }
+
+namespace {
+
+constexpr std::string_view kPathKindAbsolute = "absolute";
+constexpr std::string_view kPathKindPackageRelative = "package_relative";
 
 std::filesystem::path PathFromUtf8(std::string_view value)
 {
@@ -168,9 +170,9 @@ std::string UserPathDisplayText(const std::filesystem::path& path)
 {
     std::filesystem::path relative_path;
     if (TryMakePackageRelativePath(path, relative_path)) {
-        return PathToUtf8(relative_path);
+        return LocalUserStatePathToUtf8(relative_path);
     }
-    return PathToUtf8(path);
+    return LocalUserStatePathToUtf8(path);
 }
 
 std::optional<std::filesystem::path> ReadPersistedPathReference(const JsonValue& value)
@@ -220,12 +222,14 @@ JsonValue PersistedPathReferenceJson(
              JsonStringValue(kPathKindPackageRelative)},
             {"path",
              JsonStringValue(
-                 PathToUtf8(relative_path))},
+                 LocalUserStatePathToUtf8(relative_path))},
         });
     }
     return JsonObjectValue({
         {"path_kind", JsonStringValue(kPathKindAbsolute)},
-        {"path", JsonStringValue(PathToUtf8(path))},
+        {"path",
+         JsonStringValue(
+             LocalUserStatePathToUtf8(path))},
     });
 }
 
@@ -236,7 +240,9 @@ void WritePersistedPathReference(std::ostream& stream, const std::filesystem::pa
         stream << "{ \"path_kind\": ";
         WriteJsonString(stream, kPathKindPackageRelative);
         stream << ", \"path\": ";
-        WriteJsonString(stream, PathToUtf8(relative_path));
+        WriteJsonString(
+            stream,
+            LocalUserStatePathToUtf8(relative_path));
         stream << " }";
         return;
     }
@@ -244,7 +250,9 @@ void WritePersistedPathReference(std::ostream& stream, const std::filesystem::pa
     stream << "{ \"path_kind\": ";
     WriteJsonString(stream, kPathKindAbsolute);
     stream << ", \"path\": ";
-    WriteJsonString(stream, PathToUtf8(path));
+    WriteJsonString(
+        stream,
+        LocalUserStatePathToUtf8(path));
     stream << " }";
 }
 
@@ -257,7 +265,7 @@ void LocalUserStateSaveStatus::Clear()
 
 void AppendLocalUserStateHealth(
     LocalUserStateHealthView& health,
-    std::string_view area,
+    LocalUserStateArea area,
     const LocalUserStatePersistenceStatus& status)
 {
     const auto promote = [&](LocalUserStateHealthKind kind) {
@@ -278,24 +286,51 @@ void AppendLocalUserStateHealth(
             health.kind = kind;
         }
     };
-    const auto append_message = [&](std::string_view message) {
-        health.messages.push_back(
-            std::string{area} + ": " + std::string{message});
+    const auto append_message = [&](
+                                    LocalUserStateHealthMessageKind kind,
+                                    std::string_view diagnostic_detail) {
+        health.messages.push_back({
+            .area = area,
+            .kind = kind,
+            .diagnostic_detail =
+                std::string(diagnostic_detail),
+        });
+    };
+    const auto diagnostic_detail = [](
+                                       std::string_view preferred,
+                                       std::string_view legacy) {
+        return preferred.empty() ? legacy : preferred;
     };
 
     if (!status.load_warning.empty()) {
         promote(LocalUserStateHealthKind::Warning);
-        append_message(status.load_warning);
+        append_message(
+            LocalUserStateHealthMessageKind::LoadWarning,
+            diagnostic_detail(
+                status.load_diagnostic_detail,
+                status.load_warning));
     }
     if (status.retrying) {
         promote(LocalUserStateHealthKind::Retrying);
-        append_message(status.save_message + " Retrying.");
+        append_message(
+            LocalUserStateHealthMessageKind::SaveRetrying,
+            diagnostic_detail(
+                status.save_diagnostic_detail,
+                status.save_message));
     } else if (status.recovered) {
         promote(LocalUserStateHealthKind::Recovered);
-        append_message("persistence recovered.");
+        append_message(
+            LocalUserStateHealthMessageKind::Recovered,
+            diagnostic_detail(
+                status.save_diagnostic_detail,
+                status.save_message));
     } else if (!status.save_message.empty()) {
         promote(LocalUserStateHealthKind::Warning);
-        append_message(status.save_message);
+        append_message(
+            LocalUserStateHealthMessageKind::SaveWarning,
+            diagnostic_detail(
+                status.save_diagnostic_detail,
+                status.save_message));
     }
 }
 

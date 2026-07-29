@@ -161,14 +161,22 @@ The cache should be normalized and versioned:
 ```json
 {
   "format_kind": "specforge.catalog_user_state.cache",
-  "schema_version": 2,
+  "schema_version": 3,
   "catalogs": {
     "specforge.public": {
       "active_view_id": "view-1",
       "marker_visibility": {
         "h_alpha": true
       },
-      "grouping_views": []
+      "grouping_views": [
+        {
+          "id": "view-1",
+          "name": "Grouping 1",
+          "name_source": "default_grouping_view",
+          "name_ordinal": 1,
+          "groups": []
+        }
+      ]
     }
   },
   "catalog_panel_state": {
@@ -180,6 +188,21 @@ The cache should be normalized and versioned:
   }
 }
 ```
+
+Schema 3 introduces explicit, writer-owned generated-name provenance. Generated
+names participate in UI localization only when a supported schema stores that
+provenance explicitly.
+
+Schema 1 and 2 do not contain immutable name provenance. Every editable grouping
+view and group name loaded from those schemas remains user-owned and is displayed
+verbatim in every language, including names shaped like `Grouping 1`, `Group 1`,
+or `Catalog grouping view copy`. Migration must not infer ownership from editable
+text, ids, or array order.
+
+The cache body is validated before migration is scheduled. A successfully loaded
+legacy cache is rewritten once using the current schema, preserving those names
+without adding generated-name provenance. An invalid body is reported and is
+never rewritten merely by opening and closing the application.
 
 The first implementation should treat this as an internal writer-owned cache,
 not as a public exchange format. Its reader exists to load SpecForge's own

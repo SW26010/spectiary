@@ -243,6 +243,7 @@ struct SourceCollectionSessionResult {
     bool changed = false;
     bool loaded = false;
     bool view_invalidated = false;
+    SourceCollectionLoadError load_error;
     std::string message;
 };
 

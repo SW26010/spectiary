@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -99,6 +100,49 @@ void TestPublicCatalogIdentityIsStable()
 {
     const specforge::CatalogIdentity& identity = specforge::PublicSpectralLineCatalogIdentity();
     Require(identity.id == "specforge.public", "public catalog identity should be fixed");
+}
+
+void TestEmptyCachedGroupNameRecoversWithGeneratedProvenance()
+{
+    const specforge::SpectralLineCatalog catalog =
+        GroupedCatalog();
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState state =
+        specforge::MakeCatalogUserState(identity);
+    specforge::GroupingView view;
+    view.id = "view-1";
+    view.name = "Review";
+    specforge::UserGroup group;
+    group.id = "group-1";
+    group.name = "   ";
+    view.groups.push_back(std::move(group));
+    state.grouping_views.push_back(std::move(view));
+    specforge::CatalogPanelState panel_state;
+
+    const specforge::CatalogUserStateCanonicalizationResult result =
+        specforge::CanonicalizeCatalogUserState(
+            state,
+            panel_state,
+            catalog,
+            identity,
+            specforge::BuildCatalogGroupingView(
+                catalog,
+                identity));
+    const specforge::UserGroup* recovered =
+        FindGroupById(
+            state.grouping_views.front(),
+            "group-1");
+
+    Require(
+        result.changed &&
+            recovered != nullptr &&
+            recovered->name == "Group 1" &&
+            recovered->generated_name.source ==
+                specforge::GeneratedNameSource::
+                    DefaultGroup &&
+            recovered->generated_name.ordinal == 1,
+        "a valid cached group with an empty name should recover through localizable generated-name provenance");
 }
 
 void TestDefaultMarkerVisibilityIsVisible()
@@ -577,13 +621,13 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
   }
 })json";
     }
-
     const specforge::CatalogUserStateCacheLoadResult loaded =
         specforge::LoadCatalogUserStateCache(path);
-    std::error_code remove_error;
-    std::filesystem::remove(path, remove_error);
 
     Require(loaded.warning.empty(), loaded.warning);
+    Require(
+        loaded.requires_save,
+        "legacy schema two should request a one-time rewrite to the current schema");
     const auto catalog =
         loaded.cache.catalogs.find("specforge.public");
     Require(
@@ -615,6 +659,154 @@ void TestCacheLoadLeavesCanonicalizationToTheDomain()
         panel != loaded.cache.catalog_panel_state.end() &&
             panel->second.expanded_group_ids.contains(""),
         "cache parsing should preserve raw panel keys");
+}
+
+void TestLegacySchemaTwoEditableNamesRemainUserOwned()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_spectral_line_user_state_legacy_generated_names_test.json";
+    {
+        std::ofstream stream(path);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 2,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "view-1",
+      "marker_visibility": {},
+      "grouping_views": [{
+        "id": "view-1",
+        "name": "Grouping 1",
+        "groups": [{
+          "id": "group-1",
+          "name": "Group 1",
+          "is_unassigned": false,
+          "marker_references": []
+        }]
+      }, {
+        "id": "view-2",
+        "name": "Grouping 1 copy",
+        "groups": [{
+          "id": "group-1",
+          "name": "Group 1",
+          "is_unassigned": false,
+          "marker_references": []
+        }]
+      }, {
+        "id": "view-3",
+        "name": "Grouping 7",
+        "groups": [{
+          "id": "group-9",
+          "name": "Group 7",
+          "is_unassigned": false,
+          "marker_references": []
+        }]
+      }, {
+        "id": "view-4",
+        "name": "Draft copy",
+        "groups": []
+      }, {
+        "id": "view-6",
+        "name": "Grouping 5",
+        "groups": []
+      }, {
+        "id": "view-7",
+        "name": "Catalog grouping view copy",
+        "groups": []
+      }]
+    }
+  },
+  "catalog_panel_state": {}
+})json";
+    }
+    const specforge::CatalogUserStateCacheLoadResult loaded =
+        specforge::LoadCatalogUserStateCache(path);
+
+    Require(loaded.warning.empty(), loaded.warning);
+    Require(
+        loaded.requires_save,
+        "legacy caches should request a one-time schema rewrite");
+    const auto catalog =
+        loaded.cache.catalogs.find("specforge.public");
+    Require(
+        catalog != loaded.cache.catalogs.end() &&
+            catalog->second.grouping_views.size() == 6,
+        "legacy generated-name fixture should load all user views");
+    const std::vector<specforge::GroupingView>& views =
+        catalog->second.grouping_views;
+    Require(
+        views[0].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[0].groups[0].generated_name.source ==
+                specforge::GeneratedNameSource::None,
+        "legacy exact-shape default view and group names must remain user-owned");
+    Require(
+        views[1].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[1].generated_name.copy_count == 0 &&
+            views[1].groups[0].generated_name.source ==
+                specforge::GeneratedNameSource::None,
+        "legacy editable copies must not acquire generated-name metadata");
+    Require(
+        views[2].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[2].groups[0].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[3].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[3].generated_name.copy_count == 0,
+        "legacy migration must not infer same-shaped custom names from editable strings alone");
+    Require(
+        views[4].generated_name.source ==
+                specforge::GeneratedNameSource::None,
+        "legacy names must remain user-owned even when their ordinal matches their old append position");
+    Require(
+        views[5].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            views[5].generated_name.copy_count == 0,
+        "legacy catalog-view copies are editable names and must remain user-owned");
+
+    std::string save_error;
+    Require(
+        specforge::SaveCatalogUserStateCache(
+            path,
+            loaded.cache,
+            save_error),
+        save_error);
+    const specforge::CatalogUserStateCacheLoadResult
+        reloaded =
+            specforge::LoadCatalogUserStateCache(
+                path);
+    Require(
+        !reloaded.requires_save,
+        "rewritten generated-name metadata should use the current cache schema");
+    const std::vector<specforge::GroupingView>&
+        reloaded_views =
+            reloaded.cache.catalogs
+                .at("specforge.public")
+                .grouping_views;
+    Require(
+        reloaded_views[0].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            reloaded_views[0].groups[0].generated_name
+                    .source ==
+                specforge::GeneratedNameSource::None &&
+            reloaded_views[1].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            reloaded_views[2].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            reloaded_views[3].generated_name
+                    .copy_count ==
+                0 &&
+            reloaded_views[4].generated_name.source ==
+                specforge::GeneratedNameSource::None &&
+            reloaded_views[5].generated_name.source ==
+                specforge::GeneratedNameSource::None,
+        "current-schema reload must preserve conservative user ownership for every legacy editable name");
+
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
 }
 
 void TestCacheSaveReplacesExistingFileWithoutLeavingTempFile()
@@ -788,6 +980,14 @@ void TestCorruptCacheIsWarningOnly()
     std::filesystem::remove(path, remove_error);
 
     Require(!loaded.warning.empty(), "corrupt cache should produce a non-blocking warning");
+    Require(
+        loaded.issue_kind ==
+                specforge::CatalogUserStateCacheLoadIssueKind::
+                    InvalidDocument &&
+            !loaded.diagnostic_detail.empty() &&
+            loaded.warning ==
+                loaded.diagnostic_detail,
+        "corrupt cache should expose typed parser detail without an English application prefix");
     Require(loaded.cache.catalogs.empty(), "corrupt cache should be ignored");
 }
 
@@ -809,32 +1009,96 @@ void TestUnsupportedCacheSchemaIsWarningOnly()
     std::filesystem::remove(path, remove_error);
 
     Require(!loaded.warning.empty(), "unsupported cache schema should produce a non-blocking warning");
+    Require(
+        loaded.issue_kind ==
+                specforge::CatalogUserStateCacheLoadIssueKind::
+                    UnsupportedFormatOrSchema &&
+            loaded.diagnostic_detail.find(
+                "schema_version=999") !=
+                std::string::npos &&
+            loaded.warning ==
+                loaded.diagnostic_detail,
+        "unsupported cache should expose typed schema detail without an English application prefix");
     Require(loaded.cache.catalogs.empty(), "unsupported cache schema should be ignored");
+}
+
+void TestSchemaThreeRejectsExcessiveGeneratedCopyCount()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_spectral_line_user_state_excessive_copy_count_test.json";
+    {
+        std::ofstream stream(path);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 3,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "view-1",
+      "marker_visibility": {},
+      "grouping_views": [{
+        "id": "view-1",
+        "name": "Grouping 1",
+        "name_source": "default_grouping_view",
+        "name_ordinal": 1,
+        "generated_copy_count": )json"
+               << (specforge::kMaximumGeneratedNameCopyCount + 1)
+               << R"json(,
+        "groups": []
+      }]
+    }
+  },
+  "catalog_panel_state": {}
+})json";
+    }
+
+    const specforge::CatalogUserStateCacheLoadResult loaded =
+        specforge::LoadCatalogUserStateCache(path);
+    std::error_code remove_error;
+    std::filesystem::remove(path, remove_error);
+
+    Require(
+        loaded.issue_kind ==
+                specforge::CatalogUserStateCacheLoadIssueKind::
+                    InvalidDocument &&
+            loaded.diagnostic_detail.find(
+                "generated_copy_count") !=
+                std::string::npos &&
+            loaded.cache.catalogs.empty(),
+        "schema-three caches must reject generated copy counts above the rendering safety limit");
 }
 
 }  // namespace
 
 int main()
 {
-    TestPublicCatalogIdentityIsStable();
-    TestDefaultMarkerVisibilityIsVisible();
-    TestSearchStateDoesNotBulkToggleMarkers();
-    TestUnresolvedReferenceIsPreserved();
-    TestReferenceIdentityMustMatchCurrentCatalog();
-    TestSharedReferencesAreDetected();
-    TestMoveAndCopyMarkerReferences();
-    TestRemoveUserGroupAndMarkerReferences();
-    TestReorderUserGroups();
-    TestMarkerVisibilityIsSharedAcrossViews();
-    TestUngroupedCatalogHasNoCatalogGroupingView();
-    TestCatalogGroupingViewUsesUniqueGroupIds();
-    TestCacheRoundTrip();
-    TestCacheLoadLeavesCanonicalizationToTheDomain();
-    TestCacheSaveReplacesExistingFileWithoutLeavingTempFile();
-    TestCacheSeparatesCatalogIdentities();
-    TestLegacyExpandedGroupsMigrateToPanelState();
-    TestCacheReadsUnicodeEscapes();
-    TestCorruptCacheIsWarningOnly();
-    TestUnsupportedCacheSchemaIsWarningOnly();
-    return 0;
+    try {
+        TestPublicCatalogIdentityIsStable();
+        TestEmptyCachedGroupNameRecoversWithGeneratedProvenance();
+        TestDefaultMarkerVisibilityIsVisible();
+        TestSearchStateDoesNotBulkToggleMarkers();
+        TestUnresolvedReferenceIsPreserved();
+        TestReferenceIdentityMustMatchCurrentCatalog();
+        TestSharedReferencesAreDetected();
+        TestMoveAndCopyMarkerReferences();
+        TestRemoveUserGroupAndMarkerReferences();
+        TestReorderUserGroups();
+        TestMarkerVisibilityIsSharedAcrossViews();
+        TestUngroupedCatalogHasNoCatalogGroupingView();
+        TestCatalogGroupingViewUsesUniqueGroupIds();
+        TestCacheRoundTrip();
+        TestCacheLoadLeavesCanonicalizationToTheDomain();
+        TestLegacySchemaTwoEditableNamesRemainUserOwned();
+        TestCacheSaveReplacesExistingFileWithoutLeavingTempFile();
+        TestCacheSeparatesCatalogIdentities();
+        TestLegacyExpandedGroupsMigrateToPanelState();
+        TestCacheReadsUnicodeEscapes();
+        TestCorruptCacheIsWarningOnly();
+        TestUnsupportedCacheSchemaIsWarningOnly();
+        TestSchemaThreeRejectsExcessiveGeneratedCopyCount();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "FAILED: " << error.what() << '\n';
+        return 1;
+    }
 }

@@ -2,8 +2,8 @@
 
 #include "domain/spectrum_snapshot.h"
 #include "ui/spectral_lines_panel_controller.h"
+#include "ui/ui_text.h"
 
-#include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -16,13 +16,18 @@ public:
         SpectralLinesPanelController& panel,
         const SpectrumSnapshotHandle& snapshot,
         const SpectralLineGroupingView& view,
-        std::size_t catalog_marker_count);
-    void RenderPendingPopups(SpectralLinesPanelController& panel);
+        std::size_t catalog_marker_count,
+        UiLanguage language);
+    void RenderPendingPopups(
+        SpectralLinesPanelController& panel,
+        UiLanguage language);
 
 private:
     std::optional<std::string> renaming_group_view_id_;
     std::optional<std::string> renaming_group_id_;
-    std::array<char, 128> renaming_group_name_ = {};
+    std::string renaming_group_name_;
+    std::string renaming_group_original_name_;
+    bool renaming_group_edited_ = false;
     bool renaming_group_popup_requested_ = false;
     std::optional<std::string> group_context_view_id_;
     std::optional<std::string> group_context_group_id_;

@@ -2558,7 +2558,11 @@ void SampleWorkflowPanelUi::RenderSorting(
         std::optional<std::string> source_to_add;
         for (const SourceCollectionSampleSortSourceView& source_view : sorting_view->available_sources) {
             ImGui::PushID(source_view.id.c_str());
-            if (ImGui::Selectable(source_view.name.c_str())) {
+            const std::string display_name =
+                SampleSortSourceDisplayName(
+                    language,
+                    source_view);
+            if (ImGui::Selectable(display_name.c_str())) {
                 source_to_add = source_view.id;
             }
             if (ImGui::IsItemHovered() && !source_view.annotation_path.empty()) {

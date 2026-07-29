@@ -467,6 +467,12 @@ void TestVersionedJsonCacheShellReportsCorruptCacheWarning()
 
     Require(!loaded.document.has_value(), "corrupt versioned cache should not load a document");
     Require(!loaded.warning.empty(), "corrupt versioned cache should report a warning");
+    Require(
+        loaded.issue_kind ==
+                specforge::VersionedJsonCacheLoadIssueKind::
+                    InvalidDocument &&
+            !loaded.diagnostic_detail.empty(),
+        "corrupt versioned cache should expose an invalid-document issue and parser detail");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -490,6 +496,44 @@ void TestVersionedJsonCacheShellRejectsUnsupportedSchema()
 
     Require(!loaded.document.has_value(), "unsupported versioned cache should not load a document");
     Require(!loaded.warning.empty(), "unsupported versioned cache should report a warning");
+    Require(
+        loaded.issue_kind ==
+                specforge::VersionedJsonCacheLoadIssueKind::
+                    UnsupportedFormatOrSchema &&
+            loaded.diagnostic_detail.find(
+                "schema_version=99") !=
+                std::string::npos,
+        "unsupported versioned cache should expose its semantic issue and schema detail");
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestVersionedJsonCacheDiagnosticsUseUtf8Paths()
+{
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_json_cache_utf8_path_tests";
+    const std::filesystem::path path =
+        root / std::filesystem::path(
+                   std::u8string(u8"用户缓存"));
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(path);
+
+    const specforge::VersionedJsonCacheLoadResult loaded =
+        specforge::LoadVersionedJsonCacheFile(
+            path,
+            "specforge.test.cache",
+            {1},
+            "test cache");
+
+    Require(
+        loaded.issue_kind ==
+                specforge::VersionedJsonCacheLoadIssueKind::
+                    ReadFailed &&
+            loaded.diagnostic_detail.find(
+                "\xE7\x94\xA8\xE6\x88\xB7\xE7\xBC\x93\xE5\xAD\x98") !=
+                std::string::npos,
+        "versioned cache diagnostics should preserve non-ASCII paths as UTF-8");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -540,30 +584,45 @@ void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
     specforge::LocalUserStateHealthView health;
     specforge::AppendLocalUserStateHealth(
         health,
-        "Profile settings",
-        {.save_message = "Could not save profile settings."});
+        specforge::LocalUserStateArea::
+            SourceSession,
+        {
+            .retrying = true,
+            .save_message = "SYSTEM_DETAIL_TOKEN",
+            .save_diagnostic_detail =
+                "SYSTEM_DETAIL_TOKEN",
+        });
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Warning,
-        "a non-retrying save failure should produce warning health");
+            specforge::LocalUserStateHealthKind::Retrying,
+        "retrying should produce retrying health");
     Require(
         health.messages.size() == 1 &&
-            health.messages[0].starts_with(
-                "Profile settings:"),
-        "health messages should retain their owner");
+            health.messages[0].area ==
+                specforge::LocalUserStateArea::
+                    SourceSession &&
+            health.messages[0].kind ==
+                specforge::
+                    LocalUserStateHealthMessageKind::
+                        SaveRetrying &&
+            health.messages[0].diagnostic_detail ==
+                "SYSTEM_DETAIL_TOKEN",
+        "health aggregation must retain only diagnostic detail instead of preformatting English area and retry text");
 
     specforge::AppendLocalUserStateHealth(
         health,
-        "Spectral lines",
+        specforge::LocalUserStateArea::
+            SpectralLines,
         {.recovered = true});
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Warning,
+            specforge::LocalUserStateHealthKind::Retrying,
         "recovery must not hide an outstanding warning");
 
     specforge::AppendLocalUserStateHealth(
         health,
-        "Panel visibility",
+        specforge::LocalUserStateArea::
+            PanelVisibility,
         {
             .retrying = true,
             .save_message =
@@ -571,11 +630,28 @@ void TestLocalUserStateHealthUsesSharedPriorityAndMessages()
         });
     Require(
         health.kind ==
-            specforge::LocalUserStateHealthKind::Retrying,
-        "retrying should outrank warning and recovery");
+                specforge::LocalUserStateHealthKind::Retrying &&
+            health.messages.back().diagnostic_detail ==
+                "Could not save panel visibility.",
+        "legacy persistence producers should retain their concrete failure as transitional diagnostic detail");
+
+    specforge::LocalUserStateHealthView explicit_detail_health;
+    specforge::AppendLocalUserStateHealth(
+        explicit_detail_health,
+        specforge::LocalUserStateArea::
+            SampleNavigation,
+        {
+            .load_warning =
+                "Legacy application wrapper.",
+            .load_diagnostic_detail =
+                "CreateFile: access denied",
+        });
     Require(
-        health.messages.back().ends_with("Retrying."),
-        "retrying health should explain the scheduled retry");
+        explicit_detail_health.messages.size() == 1 &&
+            explicit_detail_health.messages[0]
+                    .diagnostic_detail ==
+                "CreateFile: access denied",
+        "structured raw diagnostic detail must take precedence over the legacy application message");
 }
 
 void TestLocalUserStateSaveSchedulerDebouncesAndRetries()
@@ -921,6 +997,7 @@ int main()
         TestStructuredJsonCacheRejectsInvalidBody();
         TestVersionedJsonCacheShellReportsCorruptCacheWarning();
         TestVersionedJsonCacheShellRejectsUnsupportedSchema();
+        TestVersionedJsonCacheDiagnosticsUseUtf8Paths();
         TestSortedCacheKeysReturnsStableOrder();
         TestLocalUserStateSaveStatusTracksFailuresAndClearsOnSuccess();
         TestLocalUserStateHealthUsesSharedPriorityAndMessages();

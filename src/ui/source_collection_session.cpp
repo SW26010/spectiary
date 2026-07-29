@@ -923,7 +923,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             result.background_retirement.push_back(std::move(snapshot));
         }
         retire_folder_listing_generation();
-        result.message = "The prepared source reuse target is no longer available.";
+        result.load_error.kind =
+            SourceCollectionLoadErrorKind::
+                PreparedReuseTargetUnavailable;
         return result;
     }
     SpectrumSnapshotHandle previous_snapshot = roster_->snapshot();
@@ -959,7 +961,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         result.background_retirement.push_back(
             MakeBackgroundRetirementHandle(std::move(payload)));
         retire_folder_listing_generation();
-        result.message = "The prepared known-source plan is no longer current.";
+        result.load_error.kind =
+            SourceCollectionLoadErrorKind::
+                PreparedKnownSourcePlanStale;
         return result;
     }
 
@@ -1002,7 +1006,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             workflow_->CancelDeferredSampleNavigation();
             pending_background_spectrum_index_.reset();
             result.canceled_source_follow_up_path = previous_snapshot->source.path;
-            result.message = "Prepared navigation no longer has a selectable final spectrum.";
+            result.load_error.kind =
+                SourceCollectionLoadErrorKind::
+                    PreparedNavigationUnavailable;
         }
         result.view_invalidated = true;
         InvalidateView();
@@ -1240,17 +1246,25 @@ LocalUserStateHealthView
 SourceCollectionSession::PersistenceHealth() const
 {
     LocalUserStateHealthView health;
-    const auto append = [&](std::string_view area,
+    const auto append = [&](LocalUserStateArea area,
                             const LocalUserStatePersistenceStatus& status) {
         AppendLocalUserStateHealth(health, area, status);
     };
 
-    append("Source session", source_session_state_->PersistenceStatus());
+    append(
+        LocalUserStateArea::SourceSession,
+        source_session_state_->PersistenceStatus());
     const SampleWorkflowPersistenceStatus workflow =
         workflow_->PersistenceStatus();
-    append("Navigation", workflow.navigation);
-    append("Labeling", workflow.labeling);
-    append("Workflow", workflow.workflow);
+    append(
+        LocalUserStateArea::SampleNavigation,
+        workflow.navigation);
+    append(
+        LocalUserStateArea::SampleLabeling,
+        workflow.labeling);
+    append(
+        LocalUserStateArea::SampleWorkflow,
+        workflow.workflow);
 
     return health;
 }

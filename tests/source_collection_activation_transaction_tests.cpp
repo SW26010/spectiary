@@ -322,6 +322,19 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         });
     const std::string error(
         activation.status().error_message);
+    const Activation::Status status =
+        activation.status();
+    const bool structured_failure =
+        status.failures.size() == 1 &&
+        status.failures.front().source_path ==
+            path &&
+        status.failures.front().error.kind ==
+            specforge::
+                SourceCollectionLoadErrorKind::
+                    BackgroundLoadingFailed &&
+        status.failures.front()
+                .error.diagnostic_detail ==
+            "expected activation failure";
     activation.PresentFrame(11, {});
     profile.Stop();
     const std::string profile_text =
@@ -336,6 +349,9 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         error.find(path.string()) !=
             std::string::npos,
         "a single failed load should identify its source path");
+    Require(
+        structured_failure,
+        "activation status should preserve the semantic load error separately from its raw diagnostic");
     Require(
         profile_text.find(
             "\"event\":\"source_load_latency\"") !=
