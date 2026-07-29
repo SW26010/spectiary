@@ -38,12 +38,18 @@ void RefreshPendingSaveState(SampleLabelingTask& task)
     task.save_state.pending_count = task.pending_sample_indices.size();
     if (HasPendingPersistence(task)) {
         task.save_state.kind = SampleLabelSaveStateKind::Pending;
+        task.save_state.message_kind =
+            SampleLabelSaveMessageKind::None;
         task.save_state.message.clear();
     } else if (task.output_path) {
         task.save_state.kind = SampleLabelSaveStateKind::AutosavedToOutput;
+        task.save_state.message_kind =
+            SampleLabelSaveMessageKind::None;
         task.save_state.message.clear();
     } else {
         task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
+        task.save_state.message_kind =
+            SampleLabelSaveMessageKind::None;
         task.save_state.message.clear();
     }
 }
@@ -363,6 +369,8 @@ void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveState
     task.metadata_save_pending = false;
     task.save_state.pending_count = 0;
     task.save_state.kind = clean_state;
+    task.save_state.message_kind =
+        SampleLabelSaveMessageKind::None;
     task.save_state.message.clear();
 }
 
@@ -398,10 +406,18 @@ void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task)
     RefreshPendingSaveState(task);
 }
 
-void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message)
+void MarkSampleLabelTaskSaveFailed(
+    SampleLabelingTask& task,
+    std::string message,
+    SampleLabelSaveMessageKind message_kind)
 {
     task.save_state.kind = SampleLabelSaveStateKind::Failed;
     task.save_state.pending_count = task.pending_sample_indices.size();
+    if (message.empty() &&
+        message_kind == SampleLabelSaveMessageKind::SystemDetail) {
+        message_kind = SampleLabelSaveMessageKind::OutputSaveFailed;
+    }
+    task.save_state.message_kind = message_kind;
     task.save_state.message = std::move(message);
 }
 
@@ -418,9 +434,16 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     const SampleLabelResultWriteOutcome write =
         SampleAnnotationIoAdapter{}.SaveLabelResult(*task.output_path, task, source);
     if (!write.array_saved) {
-        result.message =
-            write.message.empty() ? "could not save label output" : write.message;
-        MarkSampleLabelTaskSaveFailed(task, result.message);
+        if (write.message.empty()) {
+            result.message = "could not save label output";
+            MarkSampleLabelTaskSaveFailed(
+                task,
+                {},
+                SampleLabelSaveMessageKind::OutputSaveFailed);
+        } else {
+            result.message = write.message;
+            MarkSampleLabelTaskSaveFailed(task, result.message);
+        }
         return result;
     }
 
@@ -431,9 +454,17 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     if (write.metadata_saved) {
         MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
     } else {
-        result.message =
-            write.message.empty() ? "could not save label output metadata" : write.message;
-        MarkSampleLabelTaskSaveFailed(task, result.message);
+        if (write.message.empty()) {
+            result.message =
+                "could not save label output metadata";
+            MarkSampleLabelTaskSaveFailed(
+                task,
+                {},
+                SampleLabelSaveMessageKind::OutputSaveFailed);
+        } else {
+            result.message = write.message;
+            MarkSampleLabelTaskSaveFailed(task, result.message);
+        }
     }
     return result;
 }

@@ -20,7 +20,8 @@ void AddOption(
     std::vector<SampleFilterValueOption>& options,
     std::unordered_map<std::string, std::size_t>& option_indices,
     std::string key,
-    std::string display_text)
+    std::string display_text,
+    bool represents_unlabeled_value = false)
 {
     const auto existing = option_indices.find(key);
     if (existing != option_indices.end()) {
@@ -34,6 +35,7 @@ void AddOption(
     option.key = std::move(key);
     option.display_text = std::move(display_text);
     option.sample_count = 1;
+    option.represents_unlabeled_value = represents_unlabeled_value;
     options.push_back(std::move(option));
 }
 
@@ -120,15 +122,23 @@ SampleFilterEvaluation SampleFilterController::Evaluate(
     for (const SampleFilterCondition& condition : conditions_) {
         const SampleFilterSource* source = FindSource(sources, condition.source_id);
         if (source == nullptr) {
-            evaluation.messages.push_back("Ignored a filter because its source is not loaded.");
+            evaluation.diagnostics.push_back({
+                .kind = SampleFilterDiagnosticKind::SourceNotLoaded,
+            });
             continue;
         }
         if (!source->filterable) {
-            evaluation.messages.push_back("Ignored " + source->name + " because it is not filterable.");
+            evaluation.diagnostics.push_back({
+                .kind = SampleFilterDiagnosticKind::SourceNotFilterable,
+                .source_name = source->name,
+            });
             continue;
         }
         if (source->value_keys_by_sample.size() != sample_count) {
-            evaluation.messages.push_back("Ignored " + source->name + " because its sample count changed.");
+            evaluation.diagnostics.push_back({
+                .kind = SampleFilterDiagnosticKind::SampleCountChanged,
+                .source_name = source->name,
+            });
             continue;
         }
 
@@ -192,9 +202,17 @@ SampleFilterSource BuildAnnotationFilterSource(
         const SampleAnnotationValue& value = annotation.values[index];
         const std::string key = SampleAnnotationValueKey(value);
         const std::string display_text = FormatSampleAnnotationValue(annotation, value);
+        const std::optional<int> integer_value = SampleAnnotationValueAsInt(value);
+        const bool represents_unlabeled_value = annotation.label_metadata && integer_value &&
+                                                *integer_value == annotation.label_metadata->unlabeled_sentinel;
         source.value_keys_by_sample.push_back(key);
         if (source.filterable) {
-            AddOption(source.options, option_indices, key, display_text);
+            AddOption(
+                source.options,
+                option_indices,
+                key,
+                display_text,
+                represents_unlabeled_value);
         }
     }
     if (cancellation_checkpoint) {
@@ -227,7 +245,12 @@ SampleFilterSource BuildLabelingFilterSource(
         const int value = task.values[index];
         const std::string key = std::to_string(value);
         source.value_keys_by_sample.push_back(key);
-        AddOption(source.options, option_indices, key, FormatSampleLabelValue(task.label_set, value));
+        AddOption(
+            source.options,
+            option_indices,
+            key,
+            FormatSampleLabelValue(task.label_set, value),
+            value == kUnlabeledSampleLabelCode);
     }
 
     for (const SampleLabelDefinition& label : task.label_set.labels) {
@@ -248,6 +271,7 @@ SampleFilterSource BuildLabelingFilterSource(
         option.key = unlabeled_key;
         option.display_text = FormatSampleLabelValue(task.label_set, kUnlabeledSampleLabelCode);
         option.sample_count = 0;
+        option.represents_unlabeled_value = true;
         source.options.push_back(std::move(option));
     }
 

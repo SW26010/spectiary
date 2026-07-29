@@ -623,7 +623,9 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
                OutputPathMatches(*existing.output_path, output_path);
     });
     if (conflict != state->tasks.end()) {
-        task->save_state.message = "Output path is already used by another local labeling task.";
+        task->save_state.message_kind =
+            SampleLabelSaveMessageKind::OutputPathAlreadyUsed;
+        task->save_state.message.clear();
         SampleLabelingOperationResult result =
             CompleteMutation(
                 task,
@@ -642,9 +644,25 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     if (!persist_result.output_saved) {
         task->save_state.kind = SampleLabelSaveStateKind::Failed;
         task->save_state.pending_count = candidate.save_state.pending_count;
-        task->save_state.message = persist_result.message.empty()
-            ? "Could not save labeling output."
-            : persist_result.message;
+        if (candidate.save_state.message_kind !=
+            SampleLabelSaveMessageKind::None) {
+            task->save_state.message_kind =
+                candidate.save_state.message_kind;
+        } else {
+            task->save_state.message_kind =
+                persist_result.message.empty()
+                ? SampleLabelSaveMessageKind::OutputSaveFailed
+                : SampleLabelSaveMessageKind::SystemDetail;
+        }
+        if (task->save_state.message_kind ==
+            SampleLabelSaveMessageKind::SystemDetail) {
+            task->save_state.message =
+                !candidate.save_state.message.empty()
+                ? candidate.save_state.message
+                : persist_result.message;
+        } else {
+            task->save_state.message.clear();
+        }
     } else {
         *task = std::move(candidate);
     }
@@ -964,7 +982,10 @@ bool SampleLabelingController::TrySaveStateCache()
                     task.save_state.pending_count = 0;
                     if (task.save_state.kind != SampleLabelSaveStateKind::Failed) {
                         task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
-                        task.save_state.message.clear();
+                        if (task.save_state.message_kind ==
+                            SampleLabelSaveMessageKind::None) {
+                            task.save_state.message.clear();
+                        }
                     }
                     continue;
                 }
@@ -975,6 +996,8 @@ bool SampleLabelingController::TrySaveStateCache()
                 } else if (HasPendingOutputSave(task) &&
                            task.save_state.kind != SampleLabelSaveStateKind::Failed) {
                     task.save_state.kind = SampleLabelSaveStateKind::Pending;
+                    task.save_state.message_kind =
+                        SampleLabelSaveMessageKind::None;
                     task.save_state.message.clear();
                 }
             }

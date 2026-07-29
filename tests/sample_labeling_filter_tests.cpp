@@ -4,6 +4,7 @@
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_labeling_state_cache_io.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -1153,21 +1154,65 @@ void TestOutputPathConflictIsRejectedWithinSource()
         specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path),
         cleanup_error);
 
-    specforge::SampleLabelingController controller(cache_path);
-    controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("first", "First").accepted, "first task should be created");
+    {
+        specforge::SampleLabelingController controller(cache_path);
+        controller.ActivateSource("source-identity", 3);
+        Require(controller.CreateTask("first", "First").accepted, "first task should be created");
+        Require(
+            controller.SaveActiveTemporaryTaskToOutput(output_path, "First").output_saved,
+            "first task should claim the output path");
+        Require(controller.CreateTask("second", "Second").accepted, "second task should be created");
+        Require(
+            !controller.SaveActiveTemporaryTaskToOutput(output_path, "Second").accepted,
+            "second task must not claim an already-owned output path");
+        const specforge::SampleLabelingTask* second = ActiveTask(controller);
+        Require(second != nullptr && !second->output_path, "conflicting output path should not be stored on the second task");
+        Require(
+            second != nullptr &&
+                second->save_state.message_kind ==
+                    specforge::SampleLabelSaveMessageKind::OutputPathAlreadyUsed &&
+                second->save_state.message.empty(),
+            "output conflicts should use a structured user-facing error");
+        Require(
+            controller.FlushStateCache(),
+            "structured output conflict should flush to the task record");
+    }
+
+    specforge::SampleLabelingController restored(cache_path);
+    restored.ActivateSource("source-identity", 3);
+    const specforge::SampleLabelingTask* second =
+        ActiveTask(restored);
     Require(
-        controller.SaveActiveTemporaryTaskToOutput(output_path, "First").output_saved,
-        "first task should claim the output path");
-    Require(controller.CreateTask("second", "Second").accepted, "second task should be created");
+        second != nullptr &&
+            second->save_state.message_kind ==
+                specforge::SampleLabelSaveMessageKind::OutputPathAlreadyUsed,
+        "structured output conflict should survive task-record restore");
+}
+
+void TestSampleLabelSaveMessageKindsSeparateBusinessAndSystemErrors()
+{
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "quality",
+            "Quality",
+            2);
+    specforge::MarkSampleLabelTaskSaveFailed(
+        task,
+        {});
     Require(
-        !controller.SaveActiveTemporaryTaskToOutput(output_path, "Second").accepted,
-        "second task must not claim an already-owned output path");
-    const specforge::SampleLabelingTask* second = ActiveTask(controller);
-    Require(second != nullptr && !second->output_path, "conflicting output path should not be stored on the second task");
+        task.save_state.message_kind ==
+                specforge::SampleLabelSaveMessageKind::OutputSaveFailed &&
+            task.save_state.message.empty(),
+        "missing low-level output detail should use the structured generic error");
+
+    specforge::MarkSampleLabelTaskSaveFailed(
+        task,
+        "disk full");
     Require(
-        second != nullptr && second->save_state.message.find("already used") != std::string::npos,
-        "conflicting output path should leave a user-visible message");
+        task.save_state.message_kind ==
+                specforge::SampleLabelSaveMessageKind::SystemDetail &&
+            task.save_state.message == "disk full",
+        "system error details should remain raw diagnostics");
 }
 
 void TestMissingExternalOutputRestoresFailedState()
@@ -1458,6 +1503,16 @@ void TestSampleFiltersStackCategoricalConditions()
     Require(evaluation.included_count == 2, "stacked conditions should use AND semantics");
     Require(evaluation.included_samples[1] && evaluation.included_samples[2], "label condition should match the selected label code");
     Require(label_source.options.size() == 2, "label filter should expose label code and unlabeled sentinel options");
+    const auto unlabeled_option = std::find_if(
+        label_source.options.begin(),
+        label_source.options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.represents_unlabeled_value;
+        });
+    Require(
+        unlabeled_option != label_source.options.end() &&
+            unlabeled_option->key == "-1",
+        "label filter should identify its unlabeled option semantically");
 }
 
 void TestFloatingAnnotationsAreNotFilterable()
@@ -1478,7 +1533,14 @@ void TestFloatingAnnotationsAreNotFilterable()
     const specforge::SampleFilterEvaluation evaluation = filters.Evaluate({source}, 2);
     Require(!evaluation.active, "floating annotation condition should be ignored");
     Require(evaluation.included_count == 2, "ignored floating condition should include all samples");
-    Require(!evaluation.messages.empty(), "ignored floating condition should explain why it was ignored");
+    Require(
+        evaluation.diagnostics.size() == 1 &&
+            evaluation.diagnostics[0].kind ==
+                specforge::SampleFilterDiagnosticKind::
+                    SourceNotFilterable &&
+            evaluation.diagnostics[0].source_name ==
+                source.name,
+        "ignored floating condition should explain why it was ignored");
 }
 
 }  // namespace
@@ -1508,6 +1570,7 @@ int main()
         TestExternalOutputIsResultSourceOfTruth();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();
         TestOutputPathConflictIsRejectedWithinSource();
+        TestSampleLabelSaveMessageKindsSeparateBusinessAndSystemErrors();
         TestMissingExternalOutputRestoresFailedState();
         TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues();
         TestCorruptLocalTaskRecordIsIgnored();

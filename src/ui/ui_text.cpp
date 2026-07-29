@@ -1,6 +1,7 @@
 #include "ui/ui_text.h"
 
 #include "domain/sample_annotation_io.h"
+#include "domain/sample_labeling.h"
 #include "ui/source_collection_session_types.h"
 
 #include <array>
@@ -454,6 +455,228 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Ignored metadata file %s.",
         "已忽略元数据文件 %s。"},
+    UiTextEntry{
+        "Use annotation as labeling task?",
+        "将标注用作标注任务？"},
+    UiTextEntry{
+        "Add sample filter source",
+        "添加样本筛选源"},
+    UiTextEntry{
+        "Add sample sort source",
+        "添加样本排序源"},
+    UiTextEntry{
+        "Delete labeling task?",
+        "删除标注任务？"},
+    UiTextEntry{"Delete label?", "删除标签？"},
+    UiTextEntry{
+        "Change used label code?",
+        "更改已使用的标签代码？"},
+    UiTextEntry{"Ascending", "升序"},
+    UiTextEntry{"Descending", "降序"},
+    UiTextEntry{
+        "Remove sample sorting",
+        "移除样本排序"},
+    UiTextEntry{
+        "internal autosave draft",
+        "内部自动保存草稿"},
+    UiTextEntry{
+        "autosaved to output",
+        "已自动保存到输出"},
+    UiTextEntry{"pending", "等待保存"},
+    UiTextEntry{"save failed", "保存失败"},
+    UiTextEntry{
+        "Output path is already used by another local labeling task.",
+        "该输出路径已被另一个本地标注任务使用。"},
+    UiTextEntry{
+        "Could not save labeling output.",
+        "无法保存标注输出。"},
+    UiTextEntry{
+        "State: temporary local draft; use Save to... to create a labeling annotation.",
+        "状态：临时本地草稿；使用“另存为…”创建标注结果。"},
+    UiTextEntry{
+        "State: output file and metadata sidecar are saved.",
+        "状态：输出文件与元数据附属文件均已保存。"},
+    UiTextEntry{
+        "State: output/metadata autosave is pending; close is disabled until it finishes.",
+        "状态：正在自动保存输出/元数据；完成前无法关闭任务。"},
+    UiTextEntry{
+        "State: Save to... failed; choose this or another output, or pause the recoverable draft.",
+        "状态：“另存为…”失败；请选择此输出或其他输出，或暂停此可恢复草稿。"},
+    UiTextEntry{
+        "State: output/metadata autosave failed; close is disabled until the save succeeds.",
+        "状态：自动保存输出/元数据失败；保存成功前无法关闭任务。"},
+    UiTextEntry{
+        "State: unknown save state.",
+        "状态：保存状态未知。"},
+    UiTextEntry{"Pause", "暂停"},
+    UiTextEntry{"Delete", "删除"},
+    UiTextEntry{
+        "Select labeling task",
+        "选择标注任务"},
+    UiTextEntry{
+        "New labeling task",
+        "新建标注任务"},
+    UiTextEntry{
+        "Temporary labeling task",
+        "临时标注任务"},
+    UiTextEntry{
+        "Temporary labeling draft",
+        "临时标注草稿"},
+    UiTextEntry{
+        "Resume labeling draft",
+        "继续标注草稿"},
+    UiTextEntry{
+        "Output autosave must finish before this task can be closed.",
+        "必须等待输出自动保存完成，才能关闭此任务。"},
+    UiTextEntry{
+        "Output autosave must finish before this task can be deleted.",
+        "必须等待输出自动保存完成，才能删除此任务。"},
+    UiTextEntry{
+        "Make \"%s\" editable in Labeling. Future autosaves will write to this annotation result and its metadata sidecar.",
+        "使“%s”可在“标注任务”中编辑。此后的自动保存将写入该标注结果及其元数据附属文件。"},
+    UiTextEntry{
+        "This edits the selected annotation result in place. Back up the file first if you need to preserve the original labels.",
+        "此操作会直接修改所选标注结果。若需保留原标签，请先备份文件。"},
+    UiTextEntry{
+        "No metadata sidecar is present; one will be created on save.",
+        "不存在元数据附属文件；保存时将创建。"},
+    UiTextEntry{
+        "Existing label metadata will be reused.",
+        "将复用现有标签元数据。"},
+    UiTextEntry{"Use annotation", "使用此标注"},
+    UiTextEntry{"Cancel", "取消"},
+    UiTextEntry{
+        "Delete local task \"%s\". Output files are not deleted.",
+        "删除本地任务“%s”。不会删除输出文件。"},
+    UiTextEntry{"Delete task", "删除任务"},
+    UiTextEntry{
+        "Progress: %llu labeled / %llu",
+        "进度：已标注 %llu / %llu"},
+    UiTextEntry{"Current: %s", "当前：%s"},
+    UiTextEntry{
+        "Remembered row: %llu",
+        "记忆行：%llu"},
+    UiTextEntry{"Resume", "继续"},
+    UiTextEntry{"Save: %s", "保存：%s"},
+    UiTextEntry{
+        "Local task record: %s",
+        "本地任务记录：%s"},
+    UiTextEntry{"Auto-advance", "自动前进"},
+    UiTextEntry{"Skip labeled", "跳过已标注样本"},
+    UiTextEntry{"Save to...", "另存为…"},
+    UiTextEntry{"Labels", "标签"},
+    UiTextEntry{"Add label", "添加标签"},
+    UiTextEntry{"Label %d", "标签 %d"},
+    UiTextEntry{"Code", "代码"},
+    UiTextEntry{"Shortcut", "快捷键"},
+    UiTextEntry{"Press key...", "按键…"},
+    UiTextEntry{
+        "Press A-Z or 0-9. Backspace clears the binding; Escape cancels.",
+        "按 A–Z 或 0–9。Backspace 清除绑定，Escape 取消。"},
+    UiTextEntry{
+        "Waiting for an unmodified letter or digit",
+        "正在等待不带修饰键的字母或数字"},
+    UiTextEntry{
+        "Capture a label shortcut",
+        "捕获标签快捷键"},
+    UiTextEntry{"Clear", "清除"},
+    UiTextEntry{
+        "The shortcut will be unbound when this label is saved.",
+        "保存此标签时将解除该快捷键绑定。"},
+    UiTextEntry{
+        "Only unmodified A-Z and 0-9 keys can be assigned.",
+        "只能分配不带修饰键的 A–Z 和 0–9。"},
+    UiTextEntry{
+        "Shortcut %s selected. Save the label to apply it.",
+        "已选择快捷键 %s。保存标签后生效。"},
+    UiTextEntry{
+        "Shortcut %s will move from %s when this label is saved.",
+        "保存此标签时，快捷键 %s 将从“%s”移至此处。"},
+    UiTextEntry{
+        "%s is assigned to %s. Press %s again to move it.",
+        "%s 已分配给“%s”。再次按 %s 可将其移至此处。"},
+    UiTextEntry{"Name is required", "名称不能为空"},
+    UiTextEntry{
+        "Code must be an integer",
+        "代码必须是整数"},
+    UiTextEntry{
+        "Code -1 is reserved for unlabeled samples",
+        "代码 -1 保留给未标注样本"},
+    UiTextEntry{
+        "Code %d is already used by a label or sample value",
+        "代码 %d 已被标签或样本值使用"},
+    UiTextEntry{
+        "Shortcut must be one letter or digit",
+        "快捷键必须是一个字母或数字"},
+    UiTextEntry{
+        "Changing this code rewrites %llu assigned sample value(s)",
+        "更改此代码将重写 %llu 个已分配样本值"},
+    UiTextEntry{
+        "Saving moves this shortcut from %s",
+        "保存后会将此快捷键从“%s”移至当前标签"},
+    UiTextEntry{"Save label", "保存标签"},
+    UiTextEntry{"Cancel editing", "取消编辑"},
+    UiTextEntry{"Edit label", "编辑标签"},
+    UiTextEntry{"Delete label", "删除标签"},
+    UiTextEntry{
+        "Delete label and clear %llu sample(s)",
+        "删除标签并清除 %llu 个样本"},
+    UiTextEntry{
+        "Label code %d is assigned to %llu sample(s).",
+        "标签代码 %d 已分配给 %llu 个样本。"},
+    UiTextEntry{
+        "Changing it to %d will rewrite every assigned sample value.",
+        "将其更改为 %d 会重写所有已分配的样本值。"},
+    UiTextEntry{"Change code", "更改代码"},
+    UiTextEntry{
+        "Label \"%s\" is assigned to %llu sample(s).",
+        "标签“%s”已分配给 %llu 个样本。"},
+    UiTextEntry{
+        "Deleting it will change those values to Unlabeled (-1) and remove the label definition.",
+        "删除后，这些值将改为“未标注（-1）”，并移除标签定义。"},
+    UiTextEntry{
+        "Its selected sample-filter value will also be removed, which may move the current sample.",
+        "同时还会移除其选中的样本筛选值，当前样本可能因此移动。"},
+    UiTextEntry{
+        "Add annotation sample filter",
+        "添加基于标注的样本筛选"},
+    UiTextEntry{
+        "No available annotations",
+        "无可用标注"},
+    UiTextEntry{
+        "Reset sample filters",
+        "重置样本筛选"},
+    UiTextEntry{
+        "Visible: %llu / %llu",
+        "可见：%llu / %llu"},
+    UiTextEntry{
+        "Current sample is outside the active sample filters",
+        "当前样本不在活动样本筛选范围内"},
+    UiTextEntry{
+        "Ignored a filter because its source is not loaded.",
+        "由于源未加载，已忽略一个筛选条件。"},
+    UiTextEntry{
+        "Ignored %s because it is not filterable.",
+        "由于“%s”不可筛选，已忽略该条件。"},
+    UiTextEntry{
+        "Ignored %s because its sample count changed.",
+        "由于“%s”的样本数已变化，已忽略该条件。"},
+    UiTextEntry{
+        "No sample filters",
+        "无样本筛选"},
+    UiTextEntry{
+        "Remove sample filter",
+        "移除样本筛选"},
+    UiTextEntry{
+        "Add annotation sample sorting",
+        "添加基于标注的样本排序"},
+    UiTextEntry{"Reset sorting", "重置排序"},
+    UiTextEntry{"Source order", "源顺序"},
+    UiTextEntry{"Sample name", "样本名称"},
+    UiTextEntry{
+        "No comparable sort sources",
+        "无可比较的排序源"},
+    UiTextEntry{"Unlabeled", "未标注"},
 };
 
 static_assert(kTextCatalog.size() == kUiTextCount);
@@ -527,6 +750,26 @@ std::string_view UiText(
             UiTextId::AnnotationRelationshipLocal);
     }
     return UiText(language, UiTextId::AnnotationRelationshipPlain);
+}
+
+std::string_view UiText(
+    UiLanguage language,
+    SampleLabelSaveMessageKind message_kind) noexcept
+{
+    switch (message_kind) {
+    case SampleLabelSaveMessageKind::OutputPathAlreadyUsed:
+        return UiText(
+            language,
+            UiTextId::OutputPathAlreadyUsed);
+    case SampleLabelSaveMessageKind::OutputSaveFailed:
+        return UiText(
+            language,
+            UiTextId::CouldNotSaveLabelingOutput);
+    case SampleLabelSaveMessageKind::SystemDetail:
+    case SampleLabelSaveMessageKind::None:
+    default:
+        return {};
+    }
 }
 
 }  // namespace specforge

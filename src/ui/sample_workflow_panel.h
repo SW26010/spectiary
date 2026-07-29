@@ -52,7 +52,19 @@ public:
         bool* open);
 
 private:
+    enum class LabelShortcutNoticeKind {
+        None,
+        CaptureInstructions,
+        UnboundOnSave,
+        Unsupported,
+        Selected,
+        WillMove,
+        Conflict,
+    };
+
     void ResetLabelShortcutCapture();
+    [[nodiscard]] std::string LabelShortcutNotice(
+        UiLanguage language) const;
 
     std::string active_task_id_;
     std::optional<int> editing_label_code_;
@@ -61,7 +73,10 @@ private:
     std::array<char, 2> label_shortcut_edit_buffer_ = {};
     bool label_shortcut_capture_active_ = false;
     char pending_conflicting_shortcut_ = '\0';
-    std::string label_shortcut_notice_;
+    LabelShortcutNoticeKind label_shortcut_notice_kind_ =
+        LabelShortcutNoticeKind::None;
+    std::string label_shortcut_notice_shortcut_;
+    std::string label_shortcut_notice_owner_;
     bool label_name_focus_pending_ = false;
     std::optional<int> pending_label_code_change_original_code_;
     SampleLabelDefinition pending_label_code_change_;
@@ -72,6 +87,7 @@ private:
     std::filesystem::path pending_annotation_activation_path_;
     std::string pending_annotation_activation_name_;
     std::string pending_delete_task_name_;
+    bool pending_delete_task_is_temporary_ = false;
     SampleAnnotationWorkflowRelationship pending_annotation_activation_relationship_ =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
 };

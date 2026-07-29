@@ -54,9 +54,17 @@ enum class SampleLabelSaveStateKind {
     Failed,
 };
 
+enum class SampleLabelSaveMessageKind {
+    None,
+    OutputPathAlreadyUsed,
+    OutputSaveFailed,
+    SystemDetail,
+};
+
 struct SampleLabelSaveState {
     SampleLabelSaveStateKind kind = SampleLabelSaveStateKind::InternalDraftOnly;
     std::size_t pending_count = 0;
+    SampleLabelSaveMessageKind message_kind = SampleLabelSaveMessageKind::None;
     std::string message;
 };
 
@@ -129,7 +137,11 @@ void RebuildSampleLabelingTaskStatistics(
 void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path);
 void MarkSampleLabelTaskMetadataPending(SampleLabelingTask& task);
 void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveStateKind clean_state);
-void MarkSampleLabelTaskSaveFailed(SampleLabelingTask& task, std::string message);
+void MarkSampleLabelTaskSaveFailed(
+    SampleLabelingTask& task,
+    std::string message,
+    SampleLabelSaveMessageKind message_kind =
+        SampleLabelSaveMessageKind::SystemDetail);
 [[nodiscard]] SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     SampleLabelingTask& task,
     const SampleLabelResultMetadataSource* source = nullptr);

@@ -78,6 +78,55 @@ std::string_view SaveStateKindText(SampleLabelSaveStateKind kind)
     }
 }
 
+SampleLabelSaveMessageKind ParseSaveMessageKind(
+    std::string_view text)
+{
+    if (text == "output_path_already_used") {
+        return SampleLabelSaveMessageKind::OutputPathAlreadyUsed;
+    }
+    if (text == "output_save_failed") {
+        return SampleLabelSaveMessageKind::OutputSaveFailed;
+    }
+    if (text == "system_detail") {
+        return SampleLabelSaveMessageKind::SystemDetail;
+    }
+    return SampleLabelSaveMessageKind::None;
+}
+
+SampleLabelSaveMessageKind LegacySaveMessageKind(
+    std::string_view message)
+{
+    if (message ==
+        "Output path is already used by another local labeling task.") {
+        return SampleLabelSaveMessageKind::OutputPathAlreadyUsed;
+    }
+    if (message == "Could not save labeling output." ||
+        message == "could not save label output" ||
+        message ==
+            "could not save label output metadata") {
+        return SampleLabelSaveMessageKind::OutputSaveFailed;
+    }
+    return message.empty()
+        ? SampleLabelSaveMessageKind::None
+        : SampleLabelSaveMessageKind::SystemDetail;
+}
+
+std::string_view SaveMessageKindText(
+    SampleLabelSaveMessageKind kind)
+{
+    switch (kind) {
+    case SampleLabelSaveMessageKind::OutputPathAlreadyUsed:
+        return "output_path_already_used";
+    case SampleLabelSaveMessageKind::OutputSaveFailed:
+        return "output_save_failed";
+    case SampleLabelSaveMessageKind::SystemDetail:
+        return "system_detail";
+    case SampleLabelSaveMessageKind::None:
+    default:
+        return "none";
+    }
+}
+
 void ApplyPendingValues(
     SampleLabelingTask& task,
     const JsonValue& task_object,
@@ -242,6 +291,25 @@ std::optional<SampleLabelingTask> ParseTask(
     if (const std::optional<std::string> save_message = ReadStringMember(task_object, "save_message")) {
         task.save_state.message = *save_message;
     }
+    if (const std::optional<std::string> save_message_kind =
+            ReadStringMember(
+                task_object,
+                "save_message_kind")) {
+        task.save_state.message_kind =
+            ParseSaveMessageKind(
+                *save_message_kind);
+        if (task.save_state.message_kind ==
+                SampleLabelSaveMessageKind::None &&
+            !task.save_state.message.empty()) {
+            task.save_state.message_kind =
+                LegacySaveMessageKind(
+                    task.save_state.message);
+        }
+    } else {
+        task.save_state.message_kind =
+            LegacySaveMessageKind(
+                task.save_state.message);
+    }
     task.metadata_save_pending =
         ReadBoolMember(task_object, "metadata_pending", false) || metadata_retry_pending;
     if (output_load_failed) {
@@ -250,6 +318,8 @@ std::optional<SampleLabelingTask> ParseTask(
             task.save_state.message =
                 output_load_error.empty() ? "could not read label output" : "could not read label output: " + output_load_error;
         }
+        task.save_state.message_kind =
+            SampleLabelSaveMessageKind::SystemDetail;
     } else if (metadata_load_failed) {
         task.save_state.kind = SampleLabelSaveStateKind::Failed;
         if (task.save_state.message.empty()) {
@@ -257,6 +327,8 @@ std::optional<SampleLabelingTask> ParseTask(
                 ? "could not read label output metadata"
                 : "could not read label output metadata: " + metadata_load_error;
         }
+        task.save_state.message_kind =
+            SampleLabelSaveMessageKind::SystemDetail;
     }
     task.save_state.pending_count = task.pending_sample_indices.size();
     if ((!task.pending_sample_indices.empty() || task.metadata_save_pending) &&
@@ -451,6 +523,12 @@ bool SaveSampleLabelingStateCache(
                     stream << ",\n";
                     stream << "          \"save_message\": ";
                     WriteJsonString(stream, task.save_state.message);
+                    stream << ",\n";
+                    stream << "          \"save_message_kind\": ";
+                    WriteJsonString(
+                        stream,
+                        SaveMessageKindText(
+                            task.save_state.message_kind));
                     if (task.output_path && task.metadata_save_pending) {
                         stream << ",\n";
                         stream << "          \"metadata_pending\": true";

@@ -15,6 +15,7 @@ struct SampleFilterValueOption {
     std::string key;
     std::string display_text;
     std::size_t sample_count = 0;
+    bool represents_unlabeled_value = false;
 };
 
 struct SampleFilterSource {
@@ -31,11 +32,22 @@ struct SampleFilterCondition {
     std::unordered_set<std::string> allowed_value_keys;
 };
 
+enum class SampleFilterDiagnosticKind {
+    SourceNotLoaded,
+    SourceNotFilterable,
+    SampleCountChanged,
+};
+
+struct SampleFilterDiagnostic {
+    SampleFilterDiagnosticKind kind = SampleFilterDiagnosticKind::SourceNotLoaded;
+    std::string source_name;
+};
+
 struct SampleFilterEvaluation {
     bool active = false;
     std::vector<bool> included_samples;
     std::size_t included_count = 0;
-    std::vector<std::string> messages;
+    std::vector<SampleFilterDiagnostic> diagnostics;
 };
 
 class SampleFilterController {

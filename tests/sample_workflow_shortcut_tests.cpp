@@ -346,7 +346,7 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
         if (ImGuiWindow* popup_window = GImGui->OpenPopupStack.back().Window) {
             observation.popup_content_start = popup_window->DC.CursorStartPos;
             observation.temporary_action_hovered =
-                GImGui->HoveredId == popup_window->GetID("New labeling task");
+                GImGui->HoveredId == popup_window->GetID("SpecForgeTemporaryLabelingTaskAction");
         }
     }
     ImGui::EndFrame();
