@@ -78,11 +78,13 @@ UiFontSelection AddUiFonts(ImGuiIO& io)
         L"seguisym.ttf",
         L"arial.ttf",
     };
+    // msyh.ttc's default face is regular Microsoft YaHei. Selecting
+    // Microsoft YaHei UI would require a separately validated TTC face index.
     constexpr std::array<const wchar_t*, 5> kPreferredCjkFonts = {
+        L"msyh.ttc",
         L"NotoSansSC-VF.ttf",
         L"Deng.ttf",
         L"simhei.ttf",
-        L"msyh.ttc",
         L"simsun.ttc",
     };
 

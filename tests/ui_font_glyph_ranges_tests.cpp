@@ -47,7 +47,7 @@ struct ImGuiContextDeleter {
     }
 };
 
-void TestProductionFontSelectionContainsScientificGlyphs()
+void TestProductionFontSelection()
 {
     const std::unique_ptr<ImGuiContext, ImGuiContextDeleter> context(ImGui::CreateContext());
     Require(context != nullptr, "ImGui context should be created");
@@ -55,6 +55,10 @@ void TestProductionFontSelectionContainsScientificGlyphs()
     ImGuiIO& io = ImGui::GetIO();
     const specforge::UiFontSelection selection = specforge::AddUiFonts(io);
     Require(selection.scientific_font.has_value(), "a Windows scientific fallback font should load");
+    Require(selection.cjk_font.has_value(), "a Windows CJK fallback font should load");
+    Require(
+        selection.cjk_font->filename() == L"msyh.ttc",
+        "Microsoft YaHei should be the preferred CJK font when available");
     Require(selection.spectral_label_font != nullptr, "a dedicated spectral-label font should load");
     Require(!io.Fonts->Fonts.empty(), "the primary UI font should exist");
 
@@ -64,6 +68,7 @@ void TestProductionFontSelectionContainsScientificGlyphs()
     Require(primary_font->IsGlyphInFont(0x00b9), "the selected font should contain superscript 1");
     Require(primary_font->IsGlyphInFont(0x00b2), "the selected font should contain superscript 2");
     Require(primary_font->IsGlyphInFont(0x2082), "the selected font should contain subscript 2");
+    Require(primary_font->IsGlyphInFont(0x4e2d), "the selected font should contain CJK glyphs");
     Require(selection.spectral_label_font->IsGlyphInFont('H'), "spectral labels should contain Latin H");
     Require(
         selection.spectral_label_font->IsGlyphInFont(0x03b1),
@@ -80,7 +85,7 @@ int main()
 {
     try {
         TestScientificGlyphRangesCoverSpectralLineNotation();
-        TestProductionFontSelectionContainsScientificGlyphs();
+        TestProductionFontSelection();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
