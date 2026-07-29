@@ -97,6 +97,9 @@ void SetLocalUserStatePaths(
     paths.profile_log_directory =
         paths.local_user_state_root /
         local_user_state_paths::kProfileLogDirectory;
+    paths.frame_capture_directory =
+        paths.local_user_state_root /
+        local_user_state_paths::kFrameCaptureDirectory;
     paths.imgui_ini_path =
         paths.local_user_state_root /
         local_user_state_paths::kImGuiIni;

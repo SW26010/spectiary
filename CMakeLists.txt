@@ -210,6 +210,7 @@ endfunction()
 add_library(specforge_core STATIC
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
+    src/app/on_demand_frame_capture.cpp
     src/app/pan_pacing.cpp
     src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
@@ -313,6 +314,7 @@ target_link_libraries(specforge_desktop_ui
 
 add_library(specforge_renderer STATIC
     src/renderer/d3d11_composition_swap_chain.cpp
+    src/renderer/d3d11_frame_capture.cpp
     src/renderer/d3d11_imgui_viewport_renderer.cpp
     src/renderer/d3d11_renderer.cpp
     src/renderer/d3d11_sdr_swap_chain.cpp
@@ -326,6 +328,8 @@ target_link_libraries(specforge_renderer
         dcomp
         d3d11
         dxgi
+        ole32
+        windowscodecs
 )
 
 add_executable(specforge_native WIN32
@@ -497,6 +501,11 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
+specforge_add_test(
+    specforge_on_demand_frame_capture_tests
+    tests/on_demand_frame_capture_tests.cpp
+    specforge_core
+)
 specforge_add_test(
     specforge_profile_recording_ui_state_tests
     tests/profile_recording_ui_state_tests.cpp

@@ -40,6 +40,14 @@ struct SettingsPanelStatus {
     bool profile_stopping = false;
     const std::filesystem::path* profile_path = nullptr;
     std::string_view profile_status_message;
+    bool frame_capture_enabled = false;
+    bool frame_capture_pending = false;
+    bool window_renderable = true;
+    const std::filesystem::path*
+        frame_capture_output_directory = nullptr;
+    const std::filesystem::path*
+        last_frame_capture_path = nullptr;
+    std::string_view frame_capture_status_message;
 };
 
 [[nodiscard]] SettingsPanelEnvironment
@@ -65,6 +73,7 @@ public:
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status = {});
     [[nodiscard]] bool TakeProfileRecordingToggleRequest();
+    [[nodiscard]] bool TakeFrameCaptureRequest();
     [[nodiscard]] bool TakeProfileOutputDirectorySelectionRequest();
     [[nodiscard]] std::optional<ApplicationSettingsIntent>
     TakeApplicationSettingsIntent();
@@ -108,6 +117,7 @@ private:
     bool content_scroll_reset_requested_ = false;
     bool action_failed_ = false;
     bool profile_recording_toggle_requested_ = false;
+    bool frame_capture_requested_ = false;
     bool profile_output_directory_selection_requested_ = false;
     unsigned int settings_viewport_id_ = 0;
     std::string action_status_;

@@ -68,6 +68,18 @@ void TestRepresentativeMappingsAreExact()
         UiText(UiLanguage::SimplifiedChinese, UiTextId::LanguageSaveError) ==
             "无法保存应用语言，仍继续使用此前的语言。",
         "Chinese save failure should be exact");
+    Require(
+        UiText(
+            UiLanguage::English,
+            UiTextId::CaptureNextMainFrame) ==
+            "Capture Next Main Frame",
+        "English frame capture action should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::FrameCaptureOutputDirectory) ==
+            "输出目录",
+        "Chinese frame capture output label should be exact");
 }
 
 void TestSessionSemanticsAreLocalizedAtTheUiBoundary()

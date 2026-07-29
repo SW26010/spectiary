@@ -42,6 +42,10 @@ void RequireCompleteLocalUserStatePathMapping(
             root / kProfileLogDirectory,
         "profile log directory should use the canonical name");
     Require(
+        paths.frame_capture_directory ==
+            root / kFrameCaptureDirectory,
+        "frame capture directory should use the canonical name");
+    Require(
         paths.imgui_ini_path == root / kImGuiIni,
         "ImGui settings should use the canonical name");
     Require(

@@ -988,6 +988,11 @@ bool ShellUi::TakeProfileRecordingToggleRequest()
     return settings_panel_ui_.TakeProfileRecordingToggleRequest();
 }
 
+bool ShellUi::TakeFrameCaptureRequest()
+{
+    return settings_panel_ui_.TakeFrameCaptureRequest();
+}
+
 std::optional<int> ShellUi::TakeAppliedUiScalePercentage()
 {
     return std::exchange(
@@ -1722,6 +1727,18 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
             .profile_stopping = status.profile_stopping,
             .profile_path = status.profile_path,
             .profile_status_message = status.profile_status_message,
+            .frame_capture_enabled =
+                status.frame_capture_enabled,
+            .frame_capture_pending =
+                status.frame_capture_pending,
+            .window_renderable =
+                status.window_renderable,
+            .frame_capture_output_directory =
+                status.frame_capture_output_directory,
+            .last_frame_capture_path =
+                status.last_frame_capture_path,
+            .frame_capture_status_message =
+                status.frame_capture_status_message,
         });
     const ApplicationSettingsRuntimeState runtime{
         .profile_recording_in_progress =

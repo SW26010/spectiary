@@ -136,6 +136,7 @@ void D3D11WindowPresentation::Shutdown() noexcept
     backend_ = D3D11PresentationBackend::None;
     refresh_state_ = {};
     transition_ = {};
+    frame_active_ = false;
 }
 
 HRESULT D3D11WindowPresentation::Resize(UINT width, UINT height)
@@ -148,6 +149,7 @@ HRESULT D3D11WindowPresentation::Resize(UINT width, UINT height)
     }
     width_ = width;
     height_ = height;
+    frame_active_ = false;
 
     if (backend_ == D3D11PresentationBackend::Composition) {
         const HRESULT result = composition_.Resize(
@@ -208,6 +210,7 @@ HRESULT D3D11WindowPresentation::BeginFrame(
     bool clear,
     DWORD availability_timeout_ms)
 {
+    frame_active_ = false;
     if (device_context_ == nullptr || (clear && clear_color == nullptr)) {
         return RecordFailure(
             "D3D11WindowPresentation::BeginFrame arguments",
@@ -236,9 +239,11 @@ HRESULT D3D11WindowPresentation::BeginFrame(
             if (clear) {
                 dxgi_.Clear(device_context_, clear_color);
             }
+            frame_active_ = true;
             return S_FALSE;
         }
         last_error_operation_ = {};
+        frame_active_ = true;
         return S_OK;
     }
     if (backend_ == D3D11PresentationBackend::Dxgi) {
@@ -247,6 +252,7 @@ HRESULT D3D11WindowPresentation::BeginFrame(
             dxgi_.Clear(device_context_, clear_color);
         }
         last_error_operation_ = {};
+        frame_active_ = true;
         return S_OK;
     }
     return RecordFailure("D3D11WindowPresentation::BeginFrame backend", E_FAIL);
@@ -254,6 +260,7 @@ HRESULT D3D11WindowPresentation::BeginFrame(
 
 HRESULT D3D11WindowPresentation::Present(D3D11PresentMode mode)
 {
+    frame_active_ = false;
     if (backend_ == D3D11PresentationBackend::Composition) {
         const HRESULT result = composition_.Present(device_context_);
         if (FAILED(result)) {
@@ -279,6 +286,21 @@ HRESULT D3D11WindowPresentation::Present(D3D11PresentMode mode)
         return result;
     }
     return RecordFailure("D3D11WindowPresentation::Present backend", E_FAIL);
+}
+
+ID3D11Texture2D*
+D3D11WindowPresentation::active_render_texture() const noexcept
+{
+    if (!frame_active_) {
+        return nullptr;
+    }
+    if (backend_ == D3D11PresentationBackend::Composition) {
+        return composition_.active_render_texture();
+    }
+    if (backend_ == D3D11PresentationBackend::Dxgi) {
+        return dxgi_.render_texture();
+    }
+    return nullptr;
 }
 
 D3D11PresentationTransition D3D11WindowPresentation::TakeTransition() noexcept
@@ -343,6 +365,7 @@ HRESULT D3D11WindowPresentation::ActivateDxgiFallback(
     composition_.Shutdown();
     dxgi_.Shutdown();
     backend_ = D3D11PresentationBackend::None;
+    frame_active_ = false;
 
     const HRESULT result = dxgi_.Initialize(
         factory_,

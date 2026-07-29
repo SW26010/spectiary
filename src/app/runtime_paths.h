@@ -22,6 +22,7 @@ struct RuntimePaths {
     std::filesystem::path public_spectral_line_catalog_path;
     std::filesystem::path local_user_state_root;
     std::filesystem::path profile_log_directory;
+    std::filesystem::path frame_capture_directory;
     std::filesystem::path imgui_ini_path;
     std::filesystem::path ui_language_settings_path;
     std::filesystem::path ui_scale_settings_path;

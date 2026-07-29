@@ -7,8 +7,10 @@
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
+#include <wincodec.h>
 
 #include <array>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -76,10 +78,169 @@ private:
     HWND hwnd_ = nullptr;
 };
 
+class TemporaryDirectory {
+public:
+    TemporaryDirectory()
+    {
+        path_ =
+            std::filesystem::temp_directory_path() /
+            (L"SpecForge-frame-capture-test-" +
+             std::to_wstring(GetCurrentProcessId()) +
+             L"-" +
+             std::to_wstring(GetTickCount64()));
+        std::error_code error;
+        std::filesystem::create_directories(
+            path_,
+            error);
+        Require(
+            !error,
+            "the frame-capture test should create an isolated temporary directory");
+    }
+
+    ~TemporaryDirectory()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(
+            path_,
+            ignored);
+    }
+
+    TemporaryDirectory(
+        const TemporaryDirectory&) = delete;
+    TemporaryDirectory& operator=(
+        const TemporaryDirectory&) = delete;
+
+    [[nodiscard]] const std::filesystem::path&
+    path() const noexcept
+    {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
 void Require(bool condition, std::string_view message)
 {
     if (!condition) {
         throw std::runtime_error(std::string(message));
+    }
+}
+
+bool ReadPngObservation(
+    const std::filesystem::path& path,
+    UINT& width,
+    UINT& height,
+    std::array<BYTE, 4>& first_pixel)
+{
+    const HRESULT com_result = CoInitializeEx(
+        nullptr,
+        COINIT_APARTMENTTHREADED |
+            COINIT_DISABLE_OLE1DDE);
+    const bool uninitialize = SUCCEEDED(com_result);
+    if (FAILED(com_result) &&
+        com_result != RPC_E_CHANGED_MODE) {
+        return false;
+    }
+
+    HRESULT result = E_FAIL;
+    {
+        ComPtr<IWICImagingFactory> factory;
+        result = CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(factory.GetAddressOf()));
+        ComPtr<IWICBitmapDecoder> decoder;
+        if (SUCCEEDED(result)) {
+            result = factory->CreateDecoderFromFilename(
+                path.c_str(),
+                nullptr,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnLoad,
+                decoder.GetAddressOf());
+        }
+        ComPtr<IWICBitmapFrameDecode> frame;
+        if (SUCCEEDED(result)) {
+            result = decoder->GetFrame(
+                0,
+                frame.GetAddressOf());
+        }
+        if (SUCCEEDED(result)) {
+            result = frame->GetSize(
+                &width,
+                &height);
+        }
+        ComPtr<IWICFormatConverter> converter;
+        if (SUCCEEDED(result)) {
+            result = factory->CreateFormatConverter(
+                converter.GetAddressOf());
+        }
+        if (SUCCEEDED(result)) {
+            result = converter->Initialize(
+                frame.Get(),
+                GUID_WICPixelFormat32bppRGBA,
+                WICBitmapDitherTypeNone,
+                nullptr,
+                0.0,
+                WICBitmapPaletteTypeCustom);
+        }
+        if (SUCCEEDED(result)) {
+            WICRect first_pixel_rect = {
+                0,
+                0,
+                1,
+                1,
+            };
+            result = converter->CopyPixels(
+                &first_pixel_rect,
+                static_cast<UINT>(
+                    first_pixel.size()),
+                static_cast<UINT>(
+                    first_pixel.size()),
+                first_pixel.data());
+        }
+    }
+    if (uninitialize) {
+        CoUninitialize();
+    }
+    return SUCCEEDED(result);
+}
+
+void RequirePngMatchesClientAreaAndPixel(
+    HWND hwnd,
+    const std::filesystem::path& path,
+    const std::array<BYTE, 4>& expected_pixel)
+{
+    RECT client = {};
+    Require(
+        GetClientRect(hwnd, &client) != FALSE,
+        "the capture test should query its client size");
+    UINT captured_width = 0;
+    UINT captured_height = 0;
+    std::array<BYTE, 4> first_pixel = {};
+    Require(
+        ReadPngObservation(
+            path,
+            captured_width,
+            captured_height,
+            first_pixel) &&
+            captured_width ==
+                static_cast<UINT>(
+                    client.right - client.left) &&
+            captured_height ==
+                static_cast<UINT>(
+                    client.bottom - client.top),
+        "the encoded PNG should be decodable and match the rendered client area");
+    for (std::size_t channel = 0;
+         channel < first_pixel.size();
+         ++channel) {
+        const int difference =
+            static_cast<int>(first_pixel[channel]) -
+            static_cast<int>(expected_pixel[channel]);
+        Require(
+            difference >= -1 && difference <= 1,
+            "the PNG should contain the active frame's rendered RGBA pixels");
     }
 }
 
@@ -499,6 +660,110 @@ void TestRendererDebugLayerRequestFallsBackAndReportsAvailability()
     }
 }
 
+void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
+{
+    SwapChainTestWindow window;
+    TemporaryDirectory temporary;
+    specforge::D3D11Renderer renderer;
+    Require(
+        SUCCEEDED(renderer.Initialize(
+            window.hwnd(),
+            specforge::D3D11CompositionPolicy::
+                Disabled)),
+        "the frame-capture test should initialize the DXGI renderer");
+
+    const std::filesystem::path before_frame =
+        temporary.path() / L"before-frame.png";
+    Require(
+        FAILED(renderer.CaptureFrameToPng(
+            before_frame)) &&
+            !std::filesystem::exists(before_frame),
+        "capture before BeginFrame should fail without producing an image");
+
+    constexpr std::array<float, 4> clear_color = {
+        0.25f,
+        0.50f,
+        0.75f,
+        1.0f,
+    };
+    Require(
+        SUCCEEDED(renderer.BeginFrame(clear_color)),
+        "the capture test should begin and clear a real frame");
+
+    const std::filesystem::path captured =
+        temporary.path() / L"captured.png";
+    Require(
+        SUCCEEDED(renderer.CaptureFrameToPng(
+            captured)) &&
+            std::filesystem::is_regular_file(captured),
+        "capture during the active pre-Present frame should produce a PNG");
+
+    RequirePngMatchesClientAreaAndPixel(
+        window.hwnd(),
+        captured,
+        {64, 128, 191, 255});
+
+    Require(
+        SUCCEEDED(renderer.Present(
+            specforge::D3D11PresentMode::
+                Immediate)),
+        "the captured frame should remain presentable");
+    const std::filesystem::path after_present =
+        temporary.path() / L"after-present.png";
+    Require(
+        FAILED(renderer.CaptureFrameToPng(
+            after_present)) &&
+            !std::filesystem::exists(after_present),
+        "capture after Present should reject stale frame contents without producing an image");
+}
+
+void TestRendererCapturesDefaultCompositionFrameWhenAvailable()
+{
+    SwapChainTestWindow window;
+    TemporaryDirectory temporary;
+    specforge::D3D11Renderer renderer;
+    Require(
+        SUCCEEDED(renderer.Initialize(window.hwnd())),
+        "the Composition frame-capture test should initialize the default renderer");
+    if (!PresentationApiSupported(renderer.device())) {
+        Require(
+            renderer.presentation_backend() ==
+                specforge::D3D11PresentationBackend::Dxgi,
+            "the default renderer should fall back to DXGI when Composition is unavailable");
+        return;
+    }
+    Require(
+        renderer.presentation_backend() ==
+            specforge::D3D11PresentationBackend::
+                Composition,
+        "the default renderer should select Composition when it is available");
+
+    constexpr std::array<float, 4> clear_color = {
+        0.75f,
+        0.25f,
+        0.50f,
+        1.0f,
+    };
+    Require(
+        SUCCEEDED(renderer.BeginFrame(clear_color)),
+        "the Composition capture test should begin and clear a real frame");
+
+    const std::filesystem::path captured =
+        temporary.path() / L"composition.png";
+    Require(
+        SUCCEEDED(renderer.CaptureFrameToPng(
+            captured)) &&
+            std::filesystem::is_regular_file(captured),
+        "the default Composition active texture should be capturable before Present");
+    RequirePngMatchesClientAreaAndPixel(
+        window.hwnd(),
+        captured,
+        {191, 64, 128, 255});
+    Require(
+        SUCCEEDED(renderer.Present()),
+        "the captured Composition frame should remain presentable");
+}
+
 void TestImGuiViewportSwapChainLifecycle()
 {
     SwapChainTestWindow window;
@@ -585,6 +850,8 @@ int main()
     TestInvalidArgumentsPreserveDiagnosticStage();
     TestRealSwapChainInitializationColorSpaceAndResize();
     TestRendererDebugLayerRequestFallsBackAndReportsAvailability();
+    TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng();
+    TestRendererCapturesDefaultCompositionFrameWhenAvailable();
     TestWindowPresentationLifecycleAndDeterministicFallback();
     TestImGuiViewportSwapChainLifecycle();
     TestImGuiViewportFixtureCleansUpDuringExceptionUnwind();

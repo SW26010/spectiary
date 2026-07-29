@@ -103,6 +103,7 @@ HRESULT D3D11SdrSwapChain::Initialize(
 void D3D11SdrSwapChain::Shutdown() noexcept
 {
     render_target_.Reset();
+    render_texture_.Reset();
     swap_chain_.Reset();
     color_space_ = DXGI_COLOR_SPACE_CUSTOM;
     color_space_set_ = false;
@@ -122,6 +123,7 @@ HRESULT D3D11SdrSwapChain::Resize(
 
     device_context->OMSetRenderTargets(0, nullptr, nullptr);
     render_target_.Reset();
+    render_texture_.Reset();
     const UINT flags = tearing_supported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0U;
     HRESULT result = swap_chain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, flags);
     if (FAILED(result)) {
@@ -224,13 +226,18 @@ HRESULT D3D11SdrSwapChain::CreateRenderTarget(ID3D11Device* device)
         return RecordFailure("D3D11SdrSwapChain::CreateRenderTarget arguments", E_INVALIDARG);
     }
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer;
-    HRESULT result = swap_chain_->GetBuffer(0, IID_PPV_ARGS(back_buffer.GetAddressOf()));
+    HRESULT result = swap_chain_->GetBuffer(
+        0,
+        IID_PPV_ARGS(render_texture_.GetAddressOf()));
     if (FAILED(result)) {
         return RecordFailure("IDXGISwapChain3::GetBuffer", result);
     }
-    result = device->CreateRenderTargetView(back_buffer.Get(), nullptr, render_target_.GetAddressOf());
+    result = device->CreateRenderTargetView(
+        render_texture_.Get(),
+        nullptr,
+        render_target_.GetAddressOf());
     if (FAILED(result)) {
+        render_texture_.Reset();
         return RecordFailure("ID3D11Device::CreateRenderTargetView", result);
     }
     return result;

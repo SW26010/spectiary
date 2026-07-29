@@ -38,6 +38,14 @@ struct ShellStatus {
     ProfileSink* profile = nullptr;
     const std::filesystem::path* profile_path = nullptr;
     std::string_view profile_status_message;
+    bool frame_capture_enabled = false;
+    bool frame_capture_pending = false;
+    bool window_renderable = true;
+    const std::filesystem::path*
+        frame_capture_output_directory = nullptr;
+    const std::filesystem::path*
+        last_frame_capture_path = nullptr;
+    std::string_view frame_capture_status_message;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
     std::uint64_t frame_index = 0;
@@ -98,6 +106,7 @@ public:
     void ExitImmersivePlotMode();
     [[nodiscard]] bool TakeImmersivePlotModeToggleRequest();
     [[nodiscard]] bool TakeProfileRecordingToggleRequest();
+    [[nodiscard]] bool TakeFrameCaptureRequest();
     [[nodiscard]] std::optional<int>
     TakeAppliedUiScalePercentage();
     [[nodiscard]] int ui_scale_percentage() const;

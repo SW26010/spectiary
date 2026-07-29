@@ -1,5 +1,7 @@
 #include "renderer/d3d11_renderer.h"
 
+#include "renderer/d3d11_frame_capture.h"
+
 #include <d3d11sdklayers.h>
 
 #include <cstddef>
@@ -277,6 +279,32 @@ HRESULT D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
     }
     last_error_operation_ = {};
     return result;
+}
+
+HRESULT D3D11Renderer::CaptureFrameToPng(
+    const std::filesystem::path& output_path)
+{
+    ID3D11Texture2D* source =
+        presentation_.active_render_texture();
+    if (source == nullptr) {
+        return RecordFailure(
+            "D3D11Renderer::CaptureFrameToPng without active frame",
+            DXGI_ERROR_INVALID_CALL);
+    }
+
+    const D3D11FrameCaptureResult capture =
+        CaptureD3D11TextureToPng(
+            device_.Get(),
+            device_context_.Get(),
+            source,
+            output_path);
+    if (!capture.succeeded()) {
+        return RecordFailure(
+            capture.operation,
+            capture.result);
+    }
+    last_error_operation_ = {};
+    return S_OK;
 }
 
 HRESULT D3D11Renderer::Present(D3D11PresentMode mode)

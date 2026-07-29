@@ -331,6 +331,13 @@ bool SettingsPanelUi::TakeProfileRecordingToggleRequest()
     return requested;
 }
 
+bool SettingsPanelUi::TakeFrameCaptureRequest()
+{
+    const bool requested = frame_capture_requested_;
+    frame_capture_requested_ = false;
+    return requested;
+}
+
 bool SettingsPanelUi::TakeProfileOutputDirectorySelectionRequest()
 {
     const bool requested = profile_output_directory_selection_requested_;
@@ -687,6 +694,93 @@ void SettingsPanelUi::RenderDiagnostics(
             static_cast<int>(status.profile_status_message.size()),
             status.profile_status_message.data());
         ImGui::PopTextWrapPos();
+    }
+
+    if (status.frame_capture_enabled) {
+        const UiLanguage language = settings.language;
+        ImGui::Spacing();
+        const std::string capture_heading =
+            StableUiLabel(
+                language,
+                UiTextId::ExperimentalFrameCapture,
+                "SpecForgeExperimentalFrameCapture");
+        ImGui::SeparatorText(capture_heading.c_str());
+        ImGui::PushTextWrapPos();
+        const std::string_view capture_description =
+            UiText(
+                language,
+                UiTextId::
+                    ExperimentalFrameCaptureDescription);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(
+                capture_description.size()),
+            capture_description.data());
+        ImGui::PopTextWrapPos();
+
+        const bool capture_disabled =
+            status.frame_capture_pending ||
+            !status.window_renderable;
+        if (capture_disabled) {
+            ImGui::BeginDisabled();
+        }
+        const std::string capture_button =
+            StableUiLabel(
+                language,
+                UiTextId::CaptureNextMainFrame,
+                "SpecForgeCaptureNextMainFrame");
+        if (ImGui::Button(capture_button.c_str())) {
+            frame_capture_requested_ = true;
+        }
+        if (capture_disabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const std::string_view capture_note = UiText(
+            language,
+            status.frame_capture_pending
+                ? UiTextId::FrameCaptureWaiting
+                : UiTextId::FrameCaptureReadbackNote);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(capture_note.size()),
+            capture_note.data());
+
+        if (!status.frame_capture_status_message.empty()) {
+            ImGui::PushTextWrapPos();
+            ImGui::TextDisabled(
+                "%.*s",
+                static_cast<int>(
+                    status.frame_capture_status_message
+                        .size()),
+                status.frame_capture_status_message
+                    .data());
+            ImGui::PopTextWrapPos();
+        }
+        if (status.last_frame_capture_path != nullptr) {
+            ImGui::PushTextWrapPos();
+            const std::string path = PathToUtf8(
+                *status.last_frame_capture_path);
+            ImGui::TextUnformatted(path.c_str());
+            ImGui::PopTextWrapPos();
+        } else if (
+            status.frame_capture_output_directory != nullptr) {
+            ImGui::PushTextWrapPos();
+            const std::string directory = PathToUtf8(
+                *status.frame_capture_output_directory);
+            const std::string_view output_directory_label =
+                UiText(
+                    language,
+                    UiTextId::
+                        FrameCaptureOutputDirectory);
+            ImGui::TextDisabled(
+                "%.*s: %s",
+                static_cast<int>(
+                    output_directory_label.size()),
+                output_directory_label.data(),
+                directory.c_str());
+            ImGui::PopTextWrapPos();
+        }
     }
 
     ImGui::Spacing();

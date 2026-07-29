@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/on_demand_frame_capture.h"
 #include "app/pan_pacing.h"
 #include "app/render_wake_scheduler.h"
 #include "app/runtime_paths.h"
@@ -78,6 +79,8 @@ private:
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
     void ToggleProfileRecording();
+    void RequestFrameCapture();
+    void CaptureRequestedFrame();
     void StartProfileRecording(std::string_view trigger);
     void StopProfileRecording(std::string_view trigger);
     void LogProfileRecordingStarted(std::string_view trigger, std::string_view configuration_reason);
@@ -112,6 +115,7 @@ private:
     RenderWakeScheduler render_wake_scheduler_;
     ShellUi ui_;
     PanPacingConfiguration pan_pacing_;
+    OnDemandFrameCapture frame_capture_;
 
     std::string imgui_ini_path_utf8_;
     bool imgui_initialized_ = false;

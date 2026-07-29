@@ -102,6 +102,8 @@ public:
         bool clear = true,
         DWORD availability_timeout_ms = 1'000);
     HRESULT Present(D3D11PresentMode mode);
+    [[nodiscard]] ID3D11Texture2D*
+    active_render_texture() const noexcept;
 
     [[nodiscard]] D3D11PresentationTransition TakeTransition() noexcept;
     [[nodiscard]] D3D11CompositionFeedback TakeCompositionFeedback() noexcept;
@@ -156,6 +158,7 @@ private:
     D3D11SdrSwapChain dxgi_;
     D3D11PresentationTransition transition_;
     std::string_view last_error_operation_;
+    bool frame_active_ = false;
 };
 
 }  // namespace specforge

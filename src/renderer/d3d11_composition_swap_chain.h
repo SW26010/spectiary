@@ -10,6 +10,7 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -61,6 +62,15 @@ public:
     HRESULT Present(ID3D11DeviceContext* device_context);
 
     [[nodiscard]] D3D11CompositionFeedback TakeFeedback() noexcept;
+    [[nodiscard]] ID3D11Texture2D*
+    active_render_texture() const noexcept
+    {
+        return selected_buffer_ >= 0
+                   ? buffers_[static_cast<std::size_t>(
+                         selected_buffer_)]
+                         .texture.Get()
+                   : nullptr;
+    }
     [[nodiscard]] bool initialized() const noexcept { return manager_ != nullptr; }
     [[nodiscard]] bool independent_flip_supported() const noexcept
     {

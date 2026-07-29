@@ -42,6 +42,11 @@ public:
 
     [[nodiscard]] bool GetDesc(DXGI_SWAP_CHAIN_DESC& desc) const noexcept;
     [[nodiscard]] bool GetConfiguredColorSpace(DXGI_COLOR_SPACE_TYPE& color_space) const noexcept;
+    [[nodiscard]] ID3D11Texture2D*
+    render_texture() const noexcept
+    {
+        return render_texture_.Get();
+    }
     [[nodiscard]] bool tearing_supported() const noexcept { return tearing_supported_; }
     [[nodiscard]] std::string_view last_error_operation() const noexcept { return last_error_operation_; }
 
@@ -51,6 +56,7 @@ private:
     HRESULT CreateRenderTarget(ID3D11Device* device);
 
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> render_texture_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> render_target_;
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_CUSTOM;
     bool color_space_set_ = false;

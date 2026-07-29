@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +42,8 @@ public:
 
     HRESULT Resize(UINT width, UINT height);
     HRESULT BeginFrame(const std::array<float, 4>& clear_color);
+    HRESULT CaptureFrameToPng(
+        const std::filesystem::path& output_path);
     HRESULT Present(D3D11PresentMode mode = D3D11PresentMode::DisplayVSync);
     HRESULT RefreshPresentationTarget();
 

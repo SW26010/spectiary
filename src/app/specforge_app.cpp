@@ -97,6 +97,31 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
+std::filesystem::path FrameCaptureOutputPath(
+    const std::filesystem::path& directory,
+    std::uint64_t frame_index)
+{
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+
+    std::wostringstream name;
+    name << L"SpecForge-frame-"
+         << std::setfill(L'0')
+         << std::setw(4) << now.wYear
+         << std::setw(2) << now.wMonth
+         << std::setw(2) << now.wDay
+         << L'-'
+         << std::setw(2) << now.wHour
+         << std::setw(2) << now.wMinute
+         << std::setw(2) << now.wSecond
+         << L'-'
+         << std::setw(3) << now.wMilliseconds
+         << L"-p" << GetCurrentProcessId()
+         << L"-f" << frame_index
+         << L".png";
+    return directory / name.str();
+}
+
 double RatioHz(UINT numerator, UINT denominator)
 {
     if (denominator == 0) {
@@ -283,6 +308,26 @@ int SpecForgeApp::Run(
         }
 
         const bool window_renderable = !minimized_ && window_visible_;
+        const bool capture_was_pending =
+            frame_capture_.pending();
+        frame_capture_.ObserveWindowRenderable(
+            window_renderable);
+        if (capture_was_pending &&
+            !frame_capture_.pending()) {
+            profile_.WriteEvent(
+                "frame_capture",
+                {
+                    ProfileSink::Field::String(
+                        "action",
+                        "cancel"),
+                    ProfileSink::Field::String(
+                        "reason",
+                        "window_not_renderable"),
+                    ProfileSink::Field::Bool(
+                        "image_produced",
+                        false),
+                });
+        }
         bool touchpad_active = touchpad_gestures_.NeedsContinuousUpdates();
         UpdateCompositorClockBoost(window_renderable, touchpad_active);
 
@@ -363,6 +408,8 @@ void SpecForgeApp::Initialize(
     }
 
     pan_pacing_ = ResolvePanPacingEnvironment();
+    frame_capture_ = OnDemandFrameCapture(
+        ResolveOnDemandFrameCaptureEnvironment());
     if (initial_source) {
         ui_.OpenSource(*initial_source);
     }
@@ -622,6 +669,23 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         status.profile = &profile_;
         status.profile_path = profile_.path().empty() ? nullptr : &profile_.path();
         status.profile_status_message = profile_status_message_;
+        status.frame_capture_enabled =
+            frame_capture_.enabled();
+        status.frame_capture_pending =
+            frame_capture_.pending();
+        status.window_renderable =
+            !minimized_ && window_visible_;
+        status.frame_capture_output_directory =
+            frame_capture_.enabled()
+                ? &startup_.runtime_paths()
+                       .frame_capture_directory
+                : nullptr;
+        status.last_frame_capture_path =
+            frame_capture_.last_output_path()
+                ? &*frame_capture_.last_output_path()
+                : nullptr;
+        status.frame_capture_status_message =
+            frame_capture_.status_message();
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
@@ -631,6 +695,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         }
         if (ui_.TakeProfileRecordingToggleRequest()) {
             ToggleProfileRecording();
+        }
+        if (ui_.TakeFrameCaptureRequest()) {
+            RequestFrameCapture();
         }
     }
 
@@ -651,6 +718,10 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
                 HResultMessage(renderer_.last_error_operation(), begin_result));
         }
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        if (frame_capture_.ShouldCapture(
+                frame_index_)) {
+            CaptureRequestedFrame();
+        }
 
         const ImGuiIO& io = ImGui::GetIO();
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
@@ -1105,6 +1176,153 @@ void SpecForgeApp::ToggleProfileRecording()
     render_wake_scheduler_.RequestFrame();
 }
 
+void SpecForgeApp::RequestFrameCapture()
+{
+    const OnDemandFrameCaptureRequestOutcome outcome =
+        frame_capture_.Request(
+            frame_index_,
+            !minimized_ && window_visible_);
+    profile_.WriteEvent(
+        "frame_capture",
+        {
+            ProfileSink::Field::String(
+                "action",
+                outcome ==
+                        OnDemandFrameCaptureRequestOutcome::
+                            Accepted
+                    ? "request"
+                    : "request_rejected"),
+            ProfileSink::Field::String(
+                "outcome",
+                outcome ==
+                        OnDemandFrameCaptureRequestOutcome::
+                            Accepted
+                    ? "accepted"
+                : outcome ==
+                        OnDemandFrameCaptureRequestOutcome::
+                            WindowNotRenderable
+                    ? "window_not_renderable"
+                : outcome ==
+                        OnDemandFrameCaptureRequestOutcome::
+                            AlreadyPending
+                    ? "already_pending"
+                    : "disabled"),
+            ProfileSink::Field::Number(
+                "requested_after_frame",
+                std::to_string(frame_index_)),
+            ProfileSink::Field::Bool(
+                "profile_interference",
+                true),
+        });
+    if (outcome ==
+        OnDemandFrameCaptureRequestOutcome::Accepted) {
+        render_wake_scheduler_.RequestFrame();
+    }
+}
+
+void SpecForgeApp::CaptureRequestedFrame()
+{
+    const std::filesystem::path&
+        frame_capture_directory =
+            startup_.runtime_paths()
+                .frame_capture_directory;
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        frame_capture_directory,
+        directory_error);
+    if (directory_error) {
+        frame_capture_.Fail(
+            "Frame capture failed while preparing the output directory; no image was produced.");
+        profile_.WriteEvent(
+            "frame_capture",
+            {
+                ProfileSink::Field::String(
+                    "action",
+                    "failed"),
+                ProfileSink::Field::String(
+                    "stage",
+                    "create_output_directory"),
+                ProfileSink::Field::String(
+                    "detail",
+                    directory_error.message()),
+                ProfileSink::Field::Bool(
+                    "image_produced",
+                    false),
+            });
+        render_wake_scheduler_.RequestFrame();
+        return;
+    }
+
+    const std::filesystem::path output_path =
+        FrameCaptureOutputPath(
+            frame_capture_directory,
+            frame_index_);
+    const HRESULT result =
+        renderer_.CaptureFrameToPng(output_path);
+    if (FAILED(result)) {
+        const std::string operation(
+            renderer_.last_error_operation());
+        frame_capture_.Fail(
+            "Frame capture failed at " +
+            (operation.empty()
+                 ? std::string("Direct3D/WIC capture")
+                 : operation) +
+            " (" + HResultHex(result) +
+            "); no image was produced.");
+        profile_.WriteEvent(
+            "frame_capture",
+            {
+                ProfileSink::Field::String(
+                    "action",
+                    "failed"),
+                ProfileSink::Field::String(
+                    "stage",
+                    operation),
+                ProfileSink::Field::String(
+                    "result",
+                    HResultHex(result)),
+                ProfileSink::Field::Bool(
+                    "image_produced",
+                    false),
+                ProfileSink::Field::Number(
+                    "frame",
+                    std::to_string(frame_index_)),
+            });
+        render_wake_scheduler_.RequestFrame();
+        return;
+    }
+
+    frame_capture_.Complete(output_path);
+    profile_.WriteEvent(
+        "frame_capture",
+        {
+            ProfileSink::Field::String(
+                "action",
+                "captured"),
+            ProfileSink::Field::String(
+                "scope",
+                "main_viewport"),
+            ProfileSink::Field::String(
+                "path",
+                PathToUtf8(output_path)),
+            ProfileSink::Field::Bool(
+                "image_produced",
+                true),
+            ProfileSink::Field::Number(
+                "frame",
+                std::to_string(frame_index_)),
+            ProfileSink::Field::Number(
+                "width",
+                std::to_string(
+                    window_.client_width())),
+            ProfileSink::Field::Number(
+                "height",
+                std::to_string(
+                    window_.client_height())),
+        });
+    render_wake_scheduler_.RequestFrame();
+}
+
 void SpecForgeApp::StartProfileRecording(std::string_view trigger)
 {
     if (profile_.is_open() || profile_.is_stopping()) {
@@ -1215,6 +1433,15 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
                                             ProfileSink::Field::Bool(
                                                 "pan_pacing_recognized",
                                                 pan_pacing_.recognized),
+                                            ProfileSink::Field::String(
+                                                "frame_capture_requested",
+                                                frame_capture_.configuration().requested),
+                                            ProfileSink::Field::Bool(
+                                                "frame_capture_enabled",
+                                                frame_capture_.enabled()),
+                                            ProfileSink::Field::Bool(
+                                                "frame_capture_recognized",
+                                                frame_capture_.configuration().recognized),
                                             ProfileSink::Field::String(
                                                 "distribution",
                                                 DistributionName(runtime_paths.distribution)),

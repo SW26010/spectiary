@@ -91,6 +91,16 @@ dispatch，同号消息在其他窗口仍按普通 invalidation 处理。专用 
 策略层不依赖 Win32、ImGui internal API 或刷新率，并由纯时间测试、真实 ImGui dirty timer 测试和 Win32 sent-message
 顺序测试覆盖。
 
+实验性按需画面捕获默认关闭。仅在启动进程前精确设置
+`SPECFORGE_FRAME_CAPTURE=1` 时，`Settings > Diagnostics` 才显示
+`Capture Next Main Frame`。请求会通过现有 `RenderWakeScheduler` 安排一个正常事件驱动帧，并只捕获请求帧之后
+下一次成功绘制的主 application viewport；detached viewport、桌面拼接和历史最后帧不在首版范围内。捕获点位于
+主 viewport 的 ImGui/DX11 draw 完成之后、`Present` 之前，按请求创建 D3D11 staging texture，完成 GPU→CPU
+readback 后用 Windows Imaging Component 写入 PNG。普通运行和未请求状态不执行逐帧复制，也不保留最后帧缓存。
+最小化或隐藏会明确取消尚未执行的请求，窗口恢复后不会补做。输出位于当前 storage profile 的
+`captures/`（Portable 为 `Data/captures/`，其他 profile 位于相应 local user state root）；写入先使用临时文件，
+只有完整编码成功后才发布最终 PNG。该同步 readback/编码会扰动帧时间，不应用于性能测量。
+
 `D3D11SdrSwapChain::Resize` 必须显式从 D3D11 context 解绑 render target 后再释放 back buffer；调用方不应依赖先前
 成功 `Present` 的隐含解绑行为。
 
