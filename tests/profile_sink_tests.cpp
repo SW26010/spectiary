@@ -481,12 +481,31 @@ void TestWriteFailureStatusIsNeverReportedAsSaved()
     Require(
         sink.stop_reason() == specforge::ProfileSink::StopReason::WriteFailure,
         "a failed final flush should become the recorder stop reason");
-    const std::string message = specforge::ProfileRecordingStatusMessage(
-        sink.stop_reason(),
-        sink.dropped_event_count(),
-        sink.error_message());
-    Require(message.find("failed") != std::string::npos, "a final write failure should produce an error status");
-    Require(message.find("saved") == std::string::npos, "a final write failure must never be reported as saved");
+    const specforge::ProfileRecordingStatus status =
+        specforge::DescribeProfileRecordingStop(
+            sink.stop_reason(),
+            sink.dropped_event_count(),
+            sink.error_message());
+    Require(
+        status.kind ==
+            specforge::ProfileRecordingStatusKind::Failed,
+        "a final write failure should produce a language-independent failure status");
+    Require(
+        status.detail == sink.error_message(),
+        "the status should retain the writer detail for diagnostics");
+
+    const specforge::ProfileRecordingStatus duration_status =
+        specforge::DescribeProfileRecordingStop(
+            specforge::ProfileSink::StopReason::DurationLimit,
+            3,
+            {});
+    Require(
+        duration_status.kind ==
+                specforge::ProfileRecordingStatusKind::
+                    SavedAfterDurationLimit &&
+            duration_status.dropped_events == 3 &&
+            duration_status.detail.empty(),
+        "stop descriptions should preserve semantic reason and dropped-event data without display text");
 }
 
 }  // namespace

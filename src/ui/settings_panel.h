@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/application_settings.h"
+#include "app/on_demand_frame_capture.h"
 #include "app/runtime_paths.h"
 
 #include <filesystem>
@@ -48,21 +49,33 @@ struct SettingsPanelStatus {
     const std::filesystem::path*
         last_frame_capture_path = nullptr;
     std::string_view frame_capture_status_message;
+    OnDemandFrameCaptureStatus frame_capture_status =
+        OnDemandFrameCaptureStatus::None;
+    std::string_view frame_capture_status_operation;
+    std::string_view frame_capture_status_result;
 };
 
 [[nodiscard]] SettingsPanelEnvironment
 SettingsPanelEnvironmentForStartup(
     const SpecForgeStartup& startup);
 [[nodiscard]] std::string FormatBuildSourceForAbout(
-    const BuildSourceIdentity& build_source);
+    const BuildSourceIdentity& build_source,
+    UiLanguage language = UiLanguage::English);
 [[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
-    BuildMetadataStatus status);
+    BuildMetadataStatus status,
+    UiLanguage language = UiLanguage::English);
 [[nodiscard]] std::string_view
 FormatProfileOutputDirectoryStatus(
-    ApplicationSettingsStatusKind kind);
+    ApplicationSettingsStatusKind kind,
+    UiLanguage language = UiLanguage::English);
+[[nodiscard]] std::string_view
+FormatApplicationSettingsStatusReason(
+    ApplicationSettingsStatusReason reason,
+    UiLanguage language = UiLanguage::English);
 [[nodiscard]] std::string FormatDiagnosticInformation(
     const SettingsPanelEnvironment& environment,
-    const std::filesystem::path& profile_output_directory);
+    const std::filesystem::path& profile_output_directory,
+    UiLanguage language = UiLanguage::English);
 
 class SettingsPanelUi {
 public:
@@ -88,16 +101,18 @@ private:
     AppearanceThemeLabel(UiLanguage language);
     [[nodiscard]] static std::string
     AppearanceAccentColorLabel(UiLanguage language);
+    [[nodiscard]] static float VisibleLabelWidth(
+        std::string_view label);
     void RenderNavigation(UiLanguage language);
     void RenderSelectedSection(
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
-    void RenderGeneral();
+    void RenderGeneral(UiLanguage language);
     void RenderAppearance(
         const ApplicationSettingsView& settings);
     void RenderLanguage(const ApplicationSettingsView& settings);
-    void RenderInput();
-    void RenderDataAndRecovery();
+    void RenderInput(UiLanguage language);
+    void RenderDataAndRecovery(UiLanguage language);
     void RenderDiagnostics(
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
@@ -112,10 +127,19 @@ private:
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
 
-    void OpenDirectory(const std::filesystem::path& path, const char* label);
-    void CopyPath(const std::filesystem::path& path, const char* label);
+    void OpenDirectory(
+        const std::filesystem::path& path,
+        UiLanguage language,
+        UiTextId prepare_error,
+        UiTextId open_error,
+        UiTextId opened);
+    void CopyPath(
+        const std::filesystem::path& path,
+        UiLanguage language,
+        UiTextId copied);
     void CopyDiagnosticInformation(
-        const std::filesystem::path& profile_output_directory);
+        const std::filesystem::path& profile_output_directory,
+        UiLanguage language);
 
     SettingsPanelEnvironment environment_;
     SettingsSection selected_section_ = SettingsSection::General;

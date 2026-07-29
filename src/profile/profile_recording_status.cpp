@@ -2,40 +2,37 @@
 
 namespace specforge {
 
-std::string ProfileRecordingStatusMessage(
+ProfileRecordingStatus DescribeProfileRecordingStop(
     ProfileSink::StopReason stop_reason,
     std::uint64_t dropped_events,
     std::string_view error_message)
 {
-    if (stop_reason == ProfileSink::StopReason::WriteFailure) {
-        if (!error_message.empty()) {
-            return "Recording failed: " + std::string(error_message);
-        }
-        return "Recording failed while writing the log.";
-    }
-
-    std::string message;
+    ProfileRecordingStatus status = {
+        .dropped_events = dropped_events,
+    };
     switch (stop_reason) {
+    case ProfileSink::StopReason::WriteFailure:
+        status.kind = error_message.empty()
+            ? ProfileRecordingStatusKind::FailedWhileWriting
+            : ProfileRecordingStatusKind::Failed;
+        status.detail = error_message;
+        break;
     case ProfileSink::StopReason::DurationLimit:
-        message = "Recording saved after reaching the 5-minute limit.";
+        status.kind =
+            ProfileRecordingStatusKind::SavedAfterDurationLimit;
         break;
     case ProfileSink::StopReason::FileSizeLimit:
-        message = "Recording saved after reaching the 100 MiB limit.";
+        status.kind =
+            ProfileRecordingStatusKind::SavedAfterFileSizeLimit;
         break;
     case ProfileSink::StopReason::Explicit:
-        message = "Recording saved.";
+        status.kind = ProfileRecordingStatusKind::Saved;
         break;
     case ProfileSink::StopReason::None:
-        message = "Recording stopped.";
-        break;
-    case ProfileSink::StopReason::WriteFailure:
+        status.kind = ProfileRecordingStatusKind::Stopped;
         break;
     }
-
-    if (dropped_events != 0) {
-        message += " " + std::to_string(dropped_events) + " events were dropped.";
-    }
-    return message;
+    return status;
 }
 
 }  // namespace specforge

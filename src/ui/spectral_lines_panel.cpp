@@ -58,6 +58,19 @@ void SpectralLinesPanelUi::Render(
     const SpectrumSnapshotHandle& snapshot,
     bool* open)
 {
+    Render(
+        panel,
+        snapshot,
+        UiLanguage::English,
+        open);
+}
+
+void SpectralLinesPanelUi::Render(
+    SpectralLinesPanelController& panel,
+    const SpectrumSnapshotHandle& snapshot,
+    UiLanguage language,
+    bool* open)
+{
     const CatalogUserStateView state = panel.View();
     if (!grouping_view_search_initialized_) {
         std::snprintf(
@@ -68,7 +81,11 @@ void SpectralLinesPanelUi::Render(
         grouping_view_search_initialized_ = true;
     }
 
-    if (!ImGui::Begin(kSpectralLinesWindow, open)) {
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::SpectralLines,
+        "SpecForgeSpectralLinesV2");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }

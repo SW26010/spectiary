@@ -46,6 +46,10 @@ struct ShellStatus {
     const std::filesystem::path*
         last_frame_capture_path = nullptr;
     std::string_view frame_capture_status_message;
+    OnDemandFrameCaptureStatus frame_capture_status =
+        OnDemandFrameCaptureStatus::None;
+    std::string_view frame_capture_status_operation;
+    std::string_view frame_capture_status_result;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
     std::uint64_t frame_index = 0;
@@ -80,7 +84,9 @@ struct ShellLocalStateFlushResult {
                spectral_lines_saved;
     }
 
-    [[nodiscard]] std::string FailureMessage() const;
+    [[nodiscard]] std::string FailureMessage(
+        UiLanguage language =
+            UiLanguage::English) const;
 };
 
 class ShellUi {
@@ -109,7 +115,10 @@ public:
     [[nodiscard]] bool TakeFrameCaptureRequest();
     [[nodiscard]] std::optional<int>
     TakeAppliedUiScalePercentage();
+    [[nodiscard]] std::optional<UiLanguage>
+    TakeAppliedUiLanguage();
     [[nodiscard]] int ui_scale_percentage() const;
+    [[nodiscard]] UiLanguage ui_language() const;
     [[nodiscard]] std::filesystem::path profile_output_directory() const;
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
@@ -192,6 +201,7 @@ private:
     std::optional<NavigationLatencyTimePoint> pending_keyboard_previous_at_;
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
     std::optional<int> applied_ui_scale_percentage_;
+    std::optional<UiLanguage> applied_ui_language_;
     std::optional<ShellLocalStateFlushResult>
         local_state_flush_result_;
 };

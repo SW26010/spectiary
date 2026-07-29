@@ -2,10 +2,11 @@
 
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
-#include "profile/profile_recording_status.h"
+#include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
 #include "ui/ui_scale_settings.h"
+#include "ui/ui_text.h"
 
 #include <dwmapi.h>
 #include <imgui.h>
@@ -95,6 +96,74 @@ std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
     return std::string(utf8.begin(), utf8.end());
+}
+
+std::string FormatProfileStatusMessage(
+    UiLanguage language,
+    const ProfileRecordingStatus& status)
+{
+    UiTextId text_id = UiTextId::UseDiagnosticsToRecord;
+    switch (status.kind) {
+    case ProfileRecordingStatusKind::UseDiagnosticsToRecord:
+        text_id = UiTextId::UseDiagnosticsToRecord;
+        break;
+    case ProfileRecordingStatusKind::StartedByEnvironment:
+        text_id = UiTextId::RecordingStartedByEnvironment;
+        break;
+    case ProfileRecordingStatusKind::StartFailed:
+        text_id = UiTextId::CouldNotStartRecording;
+        break;
+    case ProfileRecordingStatusKind::Recording:
+        text_id = UiTextId::RecordingPerformanceDiagnostics;
+        break;
+    case ProfileRecordingStatusKind::EventsDroppedUnderPressure:
+        text_id = UiTextId::EventsDroppedPressure;
+        break;
+    case ProfileRecordingStatusKind::Finishing:
+        text_id = UiTextId::FinishingRecording;
+        break;
+    case ProfileRecordingStatusKind::Failed:
+        text_id = UiTextId::RecordingFailed;
+        break;
+    case ProfileRecordingStatusKind::FailedWhileWriting:
+        text_id = UiTextId::RecordingFailedWhileWriting;
+        break;
+    case ProfileRecordingStatusKind::SavedAfterDurationLimit:
+        text_id = UiTextId::RecordingSavedAfterDuration;
+        break;
+    case ProfileRecordingStatusKind::SavedAfterFileSizeLimit:
+        text_id = UiTextId::RecordingSavedAfterSize;
+        break;
+    case ProfileRecordingStatusKind::Saved:
+        text_id = UiTextId::RecordingSaved;
+        break;
+    case ProfileRecordingStatusKind::Stopped:
+        text_id = UiTextId::RecordingStopped;
+        break;
+    }
+
+    std::string message;
+    if (text_id == UiTextId::EventsDroppedPressure) {
+        message = std::to_string(status.dropped_events);
+        message += UiText(language, text_id);
+        return message;
+    }
+
+    message = UiText(language, text_id);
+    if ((text_id == UiTextId::CouldNotStartRecording ||
+         text_id == UiTextId::RecordingFailed) &&
+        !status.detail.empty()) {
+        message += status.detail;
+    }
+    if (status.dropped_events != 0 &&
+        text_id != UiTextId::EventsDroppedPressure) {
+        message += " ";
+        message += std::to_string(status.dropped_events);
+        message += UiText(
+            language,
+            UiTextId::EventsDropped);
+    }
+    return message;
 }
 
 std::filesystem::path FrameCaptureOutputPath(
@@ -367,17 +436,24 @@ int SpecForgeApp::Run(
     const ShellLocalStateFlushResult local_state_flush =
         ui_.FlushLocalState();
     if (!local_state_flush.all_saved()) {
+        const UiLanguage language = ui_.ui_language();
         const std::string failure_message =
-            local_state_flush.FailureMessage();
+            local_state_flush.FailureMessage(language);
         if (runtime_resource_workload_) {
             runtime_resource_workload_->
                 RecordLocalStateFlushFailure(
                     failure_message);
         } else {
-            MessageBoxA(
+            const std::wstring wide_message =
+                Utf8ToWide(failure_message);
+            const std::wstring wide_title =
+                Utf8ToWide(UiText(
+                    language,
+                    UiTextId::LocalStateWarningTitle));
+            MessageBoxW(
                 nullptr,
-                failure_message.c_str(),
-                "SpecForge - Local state warning",
+                wide_message.c_str(),
+                wide_title.c_str(),
                 MB_OK | MB_ICONWARNING);
         }
     }
@@ -418,10 +494,14 @@ void SpecForgeApp::Initialize(
         ui_.profile_output_directory(),
         profile_limits_);
     if (profile_.is_open()) {
-        profile_status_message_ = "Recording started by SPECFORGE_PROFILE.";
+        profile_status_.kind =
+            ProfileRecordingStatusKind::StartedByEnvironment;
         LogProfileRecordingStarted("environment", "startup");
     } else if (!profile_.error_message().empty()) {
-        profile_status_message_ = "Could not start recording: " + profile_.error_message();
+        profile_status_.kind =
+            ProfileRecordingStatusKind::StartFailed;
+        profile_status_.detail =
+            profile_.error_message();
     }
     if (runtime_resource_workload_ &&
         !profile_.is_open()) {
@@ -431,9 +511,13 @@ void SpecForgeApp::Initialize(
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
+    const std::wstring window_title = Utf8ToWide(
+        UiText(
+            ui_.ui_language(),
+            UiTextId::ApplicationWindowTitle));
     const bool window_created = window_.Create(
         instance,
-        L"SpecForge",
+        window_title.c_str(),
         kInitialWidth,
         kInitialHeight,
         [this](HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -668,7 +752,12 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         status.latency_trace_recording_active = profile_state.frame_recording_active;
         status.profile = &profile_;
         status.profile_path = profile_.path().empty() ? nullptr : &profile_.path();
-        status.profile_status_message = profile_status_message_;
+        const std::string profile_status_message =
+            FormatProfileStatusMessage(
+                ui_.ui_language(),
+                profile_status_);
+        status.profile_status_message =
+            profile_status_message;
         status.frame_capture_enabled =
             frame_capture_.enabled();
         status.frame_capture_pending =
@@ -686,10 +775,19 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
                 : nullptr;
         status.frame_capture_status_message =
             frame_capture_.status_message();
+        status.frame_capture_status =
+            frame_capture_.status();
+        status.frame_capture_status_operation =
+            frame_capture_.status_operation();
+        status.frame_capture_status_result =
+            frame_capture_.status_result();
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
         ui_.Render(status);
+        if (ui_.TakeAppliedUiLanguage()) {
+            ApplyLocalizedWindowTitle();
+        }
         if (ui_.TakeImmersivePlotModeToggleRequest()) {
             ToggleImmersivePlotMode();
         }
@@ -1008,6 +1106,19 @@ void SpecForgeApp::ApplyUiScale(
         scales);
 }
 
+void SpecForgeApp::ApplyLocalizedWindowTitle()
+{
+    if (window_.hwnd() == nullptr) {
+        return;
+    }
+    const std::wstring title = Utf8ToWide(UiText(
+        ui_.ui_language(),
+        UiTextId::ApplicationWindowTitle));
+    (void)SetWindowTextW(
+        window_.hwnd(),
+        title.c_str());
+}
+
 void SpecForgeApp::WriteDpiConfiguration(
     std::string_view reason)
 {
@@ -1231,8 +1342,8 @@ void SpecForgeApp::CaptureRequestedFrame()
         frame_capture_directory,
         directory_error);
     if (directory_error) {
-        frame_capture_.Fail(
-            "Frame capture failed while preparing the output directory; no image was produced.");
+        frame_capture_.
+            FailPreparingOutputDirectory();
         profile_.WriteEvent(
             "frame_capture",
             {
@@ -1262,13 +1373,12 @@ void SpecForgeApp::CaptureRequestedFrame()
     if (FAILED(result)) {
         const std::string operation(
             renderer_.last_error_operation());
-        frame_capture_.Fail(
-            "Frame capture failed at " +
-            (operation.empty()
-                 ? std::string("Direct3D/WIC capture")
-                 : operation) +
-            " (" + HResultHex(result) +
-            "); no image was produced.");
+        frame_capture_.FailCapture(
+            operation.empty()
+                ? std::string(
+                    "Direct3D/WIC capture")
+                : operation,
+            HResultHex(result));
         profile_.WriteEvent(
             "frame_capture",
             {
@@ -1331,13 +1441,18 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
     if (!profile_.StartDefault(
             ui_.profile_output_directory(),
             profile_limits_)) {
-        profile_status_message_ = "Could not start recording: " + profile_.error_message();
+        profile_status_ = {
+            .kind = ProfileRecordingStatusKind::StartFailed,
+            .detail = profile_.error_message(),
+        };
         displayed_profile_stop_reason_ = ProfileSink::StopReason::WriteFailure;
         return;
     }
 
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
-    profile_status_message_ = "Recording performance diagnostics.";
+    profile_status_ = {
+        .kind = ProfileRecordingStatusKind::Recording,
+    };
     LogProfileRecordingStarted(trigger, "recording_started");
     WriteDpiConfiguration("recording_started");
     profile_.WriteEvent("compositor_clock", {
@@ -1378,9 +1493,11 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
                                                    ProfileSink::Field::Number(
                                                        "dropped_events",
                                                        std::to_string(profile_.dropped_event_count())),
-                                               });
+    });
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
-    profile_status_message_ = "Finishing recording...";
+    profile_status_ = {
+        .kind = ProfileRecordingStatusKind::Finishing,
+    };
     profile_.RequestStopAfterFrame();
 }
 
@@ -1490,13 +1607,20 @@ void SpecForgeApp::RefreshProfileRecordingStatus()
     (void)profile_.TryFinalizeStop();
     if (profile_.is_open()) {
         if (profile_.dropped_event_count() > 0) {
-            profile_status_message_ = std::to_string(profile_.dropped_event_count()) +
-                                      " events dropped under recorder queue pressure.";
+            profile_status_ = {
+                .kind =
+                    ProfileRecordingStatusKind::
+                        EventsDroppedUnderPressure,
+                .dropped_events =
+                    profile_.dropped_event_count(),
+            };
         }
         return;
     }
     if (profile_.is_stopping()) {
-        profile_status_message_ = "Finishing recording...";
+        profile_status_ = {
+            .kind = ProfileRecordingStatusKind::Finishing,
+        };
         return;
     }
 
@@ -1506,7 +1630,7 @@ void SpecForgeApp::RefreshProfileRecordingStatus()
     }
     displayed_profile_stop_reason_ = reason;
     if (reason != ProfileSink::StopReason::None) {
-        profile_status_message_ = ProfileRecordingStatusMessage(
+        profile_status_ = DescribeProfileRecordingStop(
             reason,
             profile_.dropped_event_count(),
             profile_.error_message());

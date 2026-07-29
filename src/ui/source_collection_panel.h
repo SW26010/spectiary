@@ -34,6 +34,11 @@ public:
         PanelSessionInteraction& interaction,
         bool* open,
         SampleWorkflowShortcut& shortcut);
+    void RenderNavigation(
+        PanelSessionInteraction& interaction,
+        UiLanguage language,
+        bool* open,
+        SampleWorkflowShortcut& shortcut);
 
     void RenderAnnotations(
         PanelSessionInteraction& interaction,
@@ -52,7 +57,8 @@ private:
         PanelSessionInteraction& interaction);
     void RenderSampleNameSearch(
         SourceCollectionNavigationView navigation,
-        PanelSessionInteraction& interaction);
+        PanelSessionInteraction& interaction,
+        UiLanguage language);
 
     std::array<char, 32> row_index_buffer_ = {};
     std::array<char, 128> sample_name_query_buffer_ = {};

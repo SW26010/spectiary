@@ -35,9 +35,22 @@ enum class ApplicationSettingsStatusKind {
     Rejected,
 };
 
+enum class ApplicationSettingsStatusReason {
+    None,
+    SavedValueUnreadable,
+    SettingsWriteFailed,
+    UnsupportedLanguage,
+    UiScaleOutOfRange,
+    EnvironmentOverrideActive,
+    RecordingInProgress,
+    EmptyProfileOutputDirectory,
+};
+
 struct ApplicationSettingsStatus {
     ApplicationSettingsStatusKind kind = ApplicationSettingsStatusKind::Ready;
     ApplicationSetting setting = ApplicationSetting::None;
+    ApplicationSettingsStatusReason reason =
+        ApplicationSettingsStatusReason::None;
     std::string detail;
 };
 
@@ -176,6 +189,7 @@ private:
     void SetStatus(
         ApplicationSettingsStatusKind kind,
         ApplicationSetting setting,
+        ApplicationSettingsStatusReason reason,
         std::string detail = {});
     void ClearStatus(ApplicationSetting setting);
     void AdoptLoadWarning(

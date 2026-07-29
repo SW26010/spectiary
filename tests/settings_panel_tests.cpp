@@ -93,6 +93,10 @@ struct SettingsPanelUiTestAccess {
         return SettingsPanelUi::
             AppearanceAccentColorLabel(language);
     }
+    static float VisibleLabelWidth(std::string_view label)
+    {
+        return SettingsPanelUi::VisibleLabelWidth(label);
+    }
     static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate)
@@ -377,6 +381,76 @@ void TestHeadBuildSourcePresentation()
         "HEAD diagnostics should include the mode and full revision");
 }
 
+void TestChineseBuildAndDiagnosticsPresentation()
+{
+    const specforge::SettingsPanelEnvironment environment = {
+        .version = "test-version",
+        .distribution = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "amd64",
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
+        .data_directory = "Data",
+    };
+
+    Require(
+        specforge::FormatBuildSourceForAbout(
+            environment.build_source,
+            specforge::UiLanguage::
+                SimplifiedChinese) ==
+            "源码：工作树",
+        "Chinese About source text should be exact");
+    Require(
+        specforge::FormatBuildMetadataStatusForAbout(
+            specforge::BuildMetadataStatus::Mismatch,
+            specforge::UiLanguage::
+                SimplifiedChinese) ==
+            "构建元数据不匹配",
+        "Chinese build metadata status should be exact");
+    Require(
+        specforge::FormatProfileOutputDirectoryStatus(
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError,
+            specforge::UiLanguage::
+                SimplifiedChinese) ==
+            "无法保存性能分析输出目录。",
+        "Chinese profile persistence status should be exact");
+    Require(
+        specforge::FormatApplicationSettingsStatusReason(
+            specforge::ApplicationSettingsStatusReason::
+                SavedValueUnreadable,
+            specforge::UiLanguage::
+                SimplifiedChinese) ==
+            "已保存的值无效或无法读取。",
+        "Chinese settings failure reason should be exact");
+    Require(
+        specforge::FormatApplicationSettingsStatusReason(
+            specforge::ApplicationSettingsStatusReason::
+                SettingsWriteFailed,
+            specforge::UiLanguage::
+                SimplifiedChinese) ==
+            "无法写入设置文件。",
+        "Chinese settings persistence reason should be exact");
+
+    const std::string diagnostics =
+        specforge::FormatDiagnosticInformation(
+            environment,
+            "Data/logs",
+            specforge::UiLanguage::
+                SimplifiedChinese);
+    Require(
+        diagnostics ==
+            "SpecForge test-version\n"
+            "分发方式：Portable\n"
+            "源码模式：working_tree\n"
+            "图形：Direct3D 11 / SDR\n"
+            "数据目录：Data\n"
+            "日志目录：Data/logs",
+        "copied diagnostics should use localized labels");
+}
+
 void TestBuildMetadataStatusPresentation()
 {
     Require(
@@ -546,15 +620,20 @@ void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
     UiScaleRenderObservation observation =
         RenderUiScaleFrame(panel);
 
-    ImVec2 slider_position(700.0f, 0.0f);
-    for (float y = 260.0f;
-         y <= 520.0f && !observation.slider_hovered;
+    ImVec2 slider_position;
+    for (float y = 220.0f;
+         y <= 780.0f && !observation.slider_hovered;
          y += 2.0f) {
-        slider_position.y = y;
-        ImGui::GetIO().AddMousePosEvent(
-            slider_position.x,
-            slider_position.y);
-        observation = RenderUiScaleFrame(panel);
+        for (float x = 520.0f;
+             x <= 1080.0f &&
+             !observation.slider_hovered;
+             x += 80.0f) {
+            slider_position = ImVec2(x, y);
+            ImGui::GetIO().AddMousePosEvent(
+                slider_position.x,
+                slider_position.y);
+            observation = RenderUiScaleFrame(panel);
+        }
     }
     Require(
         observation.slider_hovered,
@@ -628,15 +707,21 @@ void TestLocalizedUiScaleResetEmitsDefaultIntent()
             specforge::UiLanguage::SimplifiedChinese);
 
     float slider_y = 0.0f;
-    for (float y = 260.0f;
-         y <= 520.0f && !observation.slider_hovered;
+    for (float y = 220.0f;
+         y <= 780.0f && !observation.slider_hovered;
          y += 2.0f) {
-        slider_y = y;
-        ImGui::GetIO().AddMousePosEvent(700.0f, y);
-        observation = RenderUiScaleFrame(
-            panel,
-            125,
-            specforge::UiLanguage::SimplifiedChinese);
+        for (float x = 520.0f;
+             x <= 1080.0f &&
+             !observation.slider_hovered;
+             x += 80.0f) {
+            slider_y = y;
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            observation = RenderUiScaleFrame(
+                panel,
+                125,
+                specforge::UiLanguage::
+                    SimplifiedChinese);
+        }
     }
     Require(
         observation.slider_hovered,
@@ -704,16 +789,21 @@ void TestLanguageSelectorEmitsOneShotIntent()
             specforge::UiLanguage::English);
 
     ImVec2 selector_position;
-    for (float y = 100.0f;
-         y <= 280.0f && !observation.selector_hovered;
+    for (float y = 80.0f;
+         y <= 650.0f && !observation.selector_hovered;
          y += 2.0f) {
-        selector_position = ImVec2(500.0f, y);
-        ImGui::GetIO().AddMousePosEvent(
-            selector_position.x,
-            selector_position.y);
-        observation = RenderLanguageFrame(
-            panel,
-            specforge::UiLanguage::English);
+        for (float x = 360.0f;
+             x <= 1000.0f &&
+             !observation.selector_hovered;
+             x += 80.0f) {
+            selector_position = ImVec2(x, y);
+            ImGui::GetIO().AddMousePosEvent(
+                selector_position.x,
+                selector_position.y);
+            observation = RenderLanguageFrame(
+                panel,
+                specforge::UiLanguage::English);
+        }
     }
     Require(
         observation.selector_hovered,
@@ -844,6 +934,54 @@ void TestLanguageRenderKeepsStableImGuiIds()
         ImHashStr(appearance_english.c_str()) ==
             ImHashStr(appearance_chinese.c_str()),
         "localized Appearance labels should retain one ImGui ID");
+    const std::string data_and_recovery_english =
+        specforge::SettingsPanelUiTestAccess::SectionLabel(
+            specforge::SettingsSection::DataAndRecovery,
+            specforge::UiLanguage::English);
+    constexpr std::string_view kVisibleDataAndRecovery =
+        "Data & Recovery";
+    const float visible_width =
+        specforge::SettingsPanelUiTestAccess::
+            VisibleLabelWidth(data_and_recovery_english);
+    Require(
+        visible_width ==
+            ImGui::CalcTextSize(
+                kVisibleDataAndRecovery.data(),
+                kVisibleDataAndRecovery.data() +
+                    kVisibleDataAndRecovery.size())
+                .x,
+        "navigation width should measure only the visible label text");
+    Require(
+        visible_width <
+            ImGui::CalcTextSize(
+                data_and_recovery_english.c_str())
+                .x,
+        "navigation width should exclude the stable ID suffix");
+    constexpr std::array kRemainingSections = {
+        specforge::SettingsSection::General,
+        specforge::SettingsSection::Input,
+        specforge::SettingsSection::DataAndRecovery,
+        specforge::SettingsSection::Diagnostics,
+        specforge::SettingsSection::About,
+    };
+    for (const specforge::SettingsSection section :
+         kRemainingSections) {
+        const std::string english =
+            specforge::SettingsPanelUiTestAccess::
+                SectionLabel(
+                    section,
+                    specforge::UiLanguage::English);
+        const std::string chinese =
+            specforge::SettingsPanelUiTestAccess::
+                SectionLabel(
+                    section,
+                    specforge::UiLanguage::
+                        SimplifiedChinese);
+        Require(
+            ImHashStr(english.c_str()) ==
+                ImHashStr(chinese.c_str()),
+            "localized settings sections should retain stable ImGui IDs");
+    }
 
     const std::string theme_english =
         specforge::SettingsPanelUiTestAccess::
@@ -1032,8 +1170,9 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
 int main()
 {
     TestDefaultEnvironmentDescribesThisBuild();
-    TestWorkingTreeBuildSourcePresentation();
-    TestHeadBuildSourcePresentation();
+        TestWorkingTreeBuildSourcePresentation();
+        TestHeadBuildSourcePresentation();
+        TestChineseBuildAndDiagnosticsPresentation();
     TestBuildMetadataStatusPresentation();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();

@@ -2846,6 +2846,26 @@ void TestShellFlushResultNamesEveryFailedOwner()
             message.find("Sample labeling") ==
                 std::string::npos,
         "the shutdown warning should omit successful owners");
+
+    const std::string chinese_message =
+        result.FailureMessage(
+            specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        chinese_message.find("应用设置") !=
+                std::string::npos &&
+            chinese_message.find("样本导航") !=
+                std::string::npos &&
+            chinese_message.find("样本工作流") !=
+                std::string::npos &&
+            chinese_message.find("谱线状态") !=
+                std::string::npos,
+        "the Chinese shutdown warning should name every failed owner");
+    Require(
+        chinese_message.find("源会话") ==
+                std::string::npos &&
+            chinese_message.find("样本标注") ==
+                std::string::npos,
+        "the Chinese shutdown warning should omit successful owners");
 }
 
 }  // namespace

@@ -58,16 +58,28 @@ void TestRepresentativeMappingsAreExact()
         "Chinese name in Chinese");
     Require(
         UiText(UiLanguage::English, UiTextId::LocalizationInProgress) ==
-            "Localization is still in progress. Other parts of SpecForge currently remain in English.",
+            "The application shell and Settings use the selected language. Specialized scientific tools may still remain in English.",
         "English scope notice should be exact");
     Require(
         UiText(UiLanguage::SimplifiedChinese, UiTextId::LocalizationInProgress) ==
-            "本地化仍在逐步进行；SpecForge 的其它界面目前仍保持英文。",
+            "应用壳层与“设置”使用所选语言；部分专业科学工具可能仍保持英文。",
         "Chinese scope notice should be exact");
     Require(
         UiText(UiLanguage::SimplifiedChinese, UiTextId::LanguageSaveError) ==
             "无法保存应用语言，仍继续使用此前的语言。",
         "Chinese save failure should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::SettingsFileWriteFailed) ==
+            "无法写入设置文件。",
+        "Chinese structured settings failure should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::DiagnosticDetails) ==
+            "诊断详情",
+        "raw settings detail should retain a localized diagnostic label");
     Require(
         UiText(
             UiLanguage::English,
@@ -80,6 +92,82 @@ void TestRepresentativeMappingsAreExact()
             UiTextId::FrameCaptureOutputDirectory) ==
             "输出目录",
         "Chinese frame capture output label should be exact");
+}
+
+void TestShellAndSettingsMappingsAreExact()
+{
+    using specforge::StableUiLabel;
+    using specforge::UiLanguage;
+    using specforge::UiText;
+    using specforge::UiTextId;
+
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::FileMenu) == "文件",
+        "File menu should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::LoadingSource) ==
+            "正在加载源…",
+        "top-bar loading status should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::SpectralLines) == "谱线",
+        "shell window titles should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::GeneralPageDescription) ==
+            "设置 SpecForge 的启动方式与本地工作区恢复行为。",
+        "General page should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::InputBehaviorUnavailable) ==
+            "暂不可用。输入行为目前遵循内置交互模型。",
+        "Input page should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::DataAndRecovery) ==
+            "数据与恢复",
+        "Data and Recovery page should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::ProfileAutoStopNote) ==
+            "达到 5 分钟或 100 MiB 后自动停止。",
+        "Diagnostics page should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::BuildMetadataMismatch) ==
+            "构建元数据不匹配",
+        "About page should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::LocalStateWarningTitle) ==
+            "SpecForge - 本地状态警告",
+        "native warning title should be localized");
+
+    const std::string english = StableUiLabel(
+        UiLanguage::English,
+        UiTextId::OpenFile,
+        "SpecForgeOpenFile");
+    const std::string chinese = StableUiLabel(
+        UiLanguage::SimplifiedChinese,
+        UiTextId::OpenFile,
+        "SpecForgeOpenFile");
+    Require(
+        english ==
+                "Open File...###SpecForgeOpenFile" &&
+            chinese ==
+                "打开文件…###SpecForgeOpenFile",
+        "localized actions should retain their stable ID suffix");
 }
 
 void TestAppearanceMappingsAreExact()
@@ -233,6 +321,7 @@ int main()
     try {
         TestEveryDisplayTextIsPresent();
         TestRepresentativeMappingsAreExact();
+        TestShellAndSettingsMappingsAreExact();
         TestAppearanceMappingsAreExact();
         TestSessionSemanticsAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();

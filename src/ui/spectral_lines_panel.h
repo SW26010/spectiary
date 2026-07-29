@@ -3,6 +3,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_panel_controller.h"
+#include "ui/ui_text.h"
 
 #include <array>
 #include <optional>
@@ -15,6 +16,11 @@ public:
     [[nodiscard]] static const char* WindowName();
 
     void Render(SpectralLinesPanelController& panel, const SpectrumSnapshotHandle& snapshot, bool* open);
+    void Render(
+        SpectralLinesPanelController& panel,
+        const SpectrumSnapshotHandle& snapshot,
+        UiLanguage language,
+        bool* open);
 
 private:
     std::array<char, 96> grouping_view_search_ = {};

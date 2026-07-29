@@ -20,7 +20,6 @@ namespace {
 
 constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
-constexpr const char* kSampleNavigationNameMatchesWindow = "Sample name matches###SpecForgeSampleNameMatchesV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
 
@@ -282,7 +281,11 @@ void SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionPathPicker& choose_source_folder,
     const SourceCollectionPathOpener& open_source)
 {
-    if (!ImGui::Begin(kFilesWindow, open)) {
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::Files,
+        "SpecForgeFilesV2");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }
@@ -395,8 +398,25 @@ void SourceCollectionPanelUi::RenderNavigation(
     bool* open,
     SampleWorkflowShortcut& shortcut)
 {
+    RenderNavigation(
+        interaction,
+        UiLanguage::English,
+        open,
+        shortcut);
+}
+
+void SourceCollectionPanelUi::RenderNavigation(
+    PanelSessionInteraction& interaction,
+    UiLanguage language,
+    bool* open,
+    SampleWorkflowShortcut& shortcut)
+{
     shortcut = {};
-    if (!ImGui::Begin(kNavigationWindow, open)) {
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::Navigation,
+        "SpecForgeNavigationV1");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }
@@ -512,7 +532,8 @@ void SourceCollectionPanelUi::RenderNavigation(
 
     RenderSampleNameSearch(
         std::move(navigation),
-        interaction);
+        interaction,
+        language);
 
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
@@ -525,7 +546,8 @@ void SourceCollectionPanelUi::RenderNavigation(
 
 void SourceCollectionPanelUi::RenderSampleNameSearch(
     SourceCollectionNavigationView navigation,
-    PanelSessionInteraction& interaction)
+    PanelSessionInteraction& interaction,
+    UiLanguage language)
 {
     const std::size_t navigation_index = navigation.current_index.value_or(0);
     ImGui::TextUnformatted("name:");
@@ -592,7 +614,15 @@ void SourceCollectionPanelUi::RenderSampleNameSearch(
             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNavFocus;
         ImGui::SetNextWindowPos(dropdown_min, ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(sample_name_input_width, dropdown_height), ImGuiCond_Always);
-        if (ImGui::Begin(kSampleNavigationNameMatchesWindow, nullptr, dropdown_flags)) {
+        const std::string matches_window =
+            StableUiLabel(
+                language,
+                UiTextId::SampleNameMatches,
+                "SpecForgeSampleNameMatchesV1");
+        if (ImGui::Begin(
+                matches_window.c_str(),
+                nullptr,
+                dropdown_flags)) {
             sample_name_dropdown_interacting =
                 sample_name_dropdown_interacting ||
                 ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
@@ -631,7 +661,11 @@ void SourceCollectionPanelUi::RenderAnnotations(
     bool* open,
     const SourceCollectionPathPicker& choose_annotation_file)
 {
-    if (!ImGui::Begin(kAnnotationsWindow, open)) {
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::Annotations,
+        "SpecForgeAnnotationsV1");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }

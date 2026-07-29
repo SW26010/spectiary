@@ -55,6 +55,7 @@ OnDemandFrameCapture::OnDemandFrameCapture(
     : configuration_(std::move(configuration))
 {
     if (configuration_.enabled) {
+        status_ = OnDemandFrameCaptureStatus::Ready;
         status_message_ =
             "Ready. Captures are synchronous and may disturb performance measurements.";
     }
@@ -66,6 +67,9 @@ OnDemandFrameCapture::Request(
     bool window_renderable)
 {
     if (!configuration_.enabled) {
+        status_ = OnDemandFrameCaptureStatus::Disabled;
+        status_operation_.clear();
+        status_result_.clear();
         status_message_ =
             "Experimental frame capture is not enabled.";
         return OnDemandFrameCaptureRequestOutcome::Disabled;
@@ -73,6 +77,11 @@ OnDemandFrameCapture::Request(
     if (!window_renderable) {
         requested_after_frame_.reset();
         last_output_path_.reset();
+        status_ =
+            OnDemandFrameCaptureStatus::
+                WindowUnavailable;
+        status_operation_.clear();
+        status_result_.clear();
         status_message_ = kUnavailableMessage;
         return OnDemandFrameCaptureRequestOutcome::WindowNotRenderable;
     }
@@ -82,6 +91,9 @@ OnDemandFrameCapture::Request(
 
     requested_after_frame_ = current_frame;
     last_output_path_.reset();
+    status_ = OnDemandFrameCaptureStatus::Pending;
+    status_operation_.clear();
+    status_result_.clear();
     status_message_ =
         "Capture requested. Waiting for the next successfully drawn main frame.";
     return OnDemandFrameCaptureRequestOutcome::Accepted;
@@ -96,6 +108,11 @@ void OnDemandFrameCapture::ObserveWindowRenderable(
 
     requested_after_frame_.reset();
     last_output_path_.reset();
+    status_ =
+        OnDemandFrameCaptureStatus::
+            WindowUnavailable;
+    status_operation_.clear();
+    status_result_.clear();
     status_message_ = kUnavailableMessage;
 }
 
@@ -111,6 +128,9 @@ void OnDemandFrameCapture::Complete(
 {
     requested_after_frame_.reset();
     last_output_path_ = std::move(output_path);
+    status_ = OnDemandFrameCaptureStatus::Captured;
+    status_operation_.clear();
+    status_result_.clear();
     status_message_ = "Captured the requested main application frame.";
 }
 
@@ -118,10 +138,43 @@ void OnDemandFrameCapture::Fail(std::string message)
 {
     requested_after_frame_.reset();
     last_output_path_.reset();
+    status_ = OnDemandFrameCaptureStatus::Failed;
+    status_operation_.clear();
+    status_result_.clear();
     status_message_ =
         message.empty()
             ? "Frame capture failed; no image was produced."
             : std::move(message);
+}
+
+void OnDemandFrameCapture::FailPreparingOutputDirectory()
+{
+    requested_after_frame_.reset();
+    last_output_path_.reset();
+    status_ =
+        OnDemandFrameCaptureStatus::
+            FailedPreparingOutputDirectory;
+    status_operation_.clear();
+    status_result_.clear();
+    status_message_ =
+        "Frame capture failed while preparing the output directory; no image was produced.";
+}
+
+void OnDemandFrameCapture::FailCapture(
+    std::string operation,
+    std::string result)
+{
+    requested_after_frame_.reset();
+    last_output_path_.reset();
+    status_ =
+        OnDemandFrameCaptureStatus::FailedCapture;
+    status_operation_ = std::move(operation);
+    status_result_ = std::move(result);
+    status_message_ =
+        "Frame capture failed at " +
+        status_operation_ + " (" +
+        status_result_ +
+        "); no image was produced.";
 }
 
 }  // namespace specforge

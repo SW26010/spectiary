@@ -62,6 +62,11 @@ void TestRequestTargetsTheFollowingFrame()
         capture.pending(),
         "an accepted request should remain pending");
     Require(
+        capture.status() ==
+            specforge::OnDemandFrameCaptureStatus::
+                Pending,
+        "an accepted request should expose semantic pending status");
+    Require(
         !capture.ShouldCapture(41),
         "the frame in which the request was accepted should not be captured");
     Require(
@@ -74,7 +79,11 @@ void TestRequestTargetsTheFollowingFrame()
     Require(
         !capture.pending() &&
             capture.last_output_path() ==
-                output,
+                output &&
+            capture.status() ==
+                specforge::
+                    OnDemandFrameCaptureStatus::
+                        Captured,
         "completion should publish only the newly captured output");
 }
 
@@ -116,7 +125,11 @@ void TestNonRenderableWindowRejectsAndCancels()
         !capture.pending() &&
             capture.status_message().find(
                 "minimized or hidden") !=
-                std::string_view::npos,
+                std::string_view::npos &&
+            capture.status() ==
+                specforge::
+                    OnDemandFrameCaptureStatus::
+                        WindowUnavailable,
         "the rejection should have explicit unavailable semantics");
 
     Require(
@@ -133,6 +146,33 @@ void TestNonRenderableWindowRejectsAndCancels()
     Require(
         !capture.ShouldCapture(100),
         "restoring the window must not resurrect a canceled request");
+}
+
+void TestTypedFailureStatusRetainsTechnicalDetail()
+{
+    specforge::OnDemandFrameCapture capture(
+        specforge::ResolveOnDemandFrameCapture("1"));
+
+    capture.FailCapture(
+        "Direct3D/WIC capture",
+        "0x80004005");
+    Require(
+        capture.status() ==
+                specforge::
+                    OnDemandFrameCaptureStatus::
+                        FailedCapture &&
+            capture.status_operation() ==
+                "Direct3D/WIC capture" &&
+            capture.status_result() ==
+                "0x80004005",
+        "capture failure should expose semantic state and technical detail");
+
+    capture.FailPreparingOutputDirectory();
+    Require(
+        capture.status() ==
+            specforge::OnDemandFrameCaptureStatus::
+                FailedPreparingOutputDirectory,
+        "directory preparation failure should remain distinguishable");
 }
 
 void TestDisabledCaptureCannotBecomePending()
@@ -159,5 +199,6 @@ int main()
     TestDuplicateRequestDoesNotMoveTheTarget();
     TestNonRenderableWindowRejectsAndCancels();
     TestDisabledCaptureCannotBecomePending();
+    TestTypedFailureStatusRetainsTechnicalDetail();
     return 0;
 }

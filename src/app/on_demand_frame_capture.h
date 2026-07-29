@@ -27,6 +27,18 @@ enum class OnDemandFrameCaptureRequestOutcome {
     AlreadyPending,
 };
 
+enum class OnDemandFrameCaptureStatus {
+    None,
+    Ready,
+    Disabled,
+    WindowUnavailable,
+    Pending,
+    Captured,
+    FailedPreparingOutputDirectory,
+    FailedCapture,
+    Failed,
+};
+
 class OnDemandFrameCapture {
 public:
     OnDemandFrameCapture() = default;
@@ -41,6 +53,10 @@ public:
         std::uint64_t current_frame) const noexcept;
     void Complete(std::filesystem::path output_path);
     void Fail(std::string message);
+    void FailPreparingOutputDirectory();
+    void FailCapture(
+        std::string operation,
+        std::string result);
 
     [[nodiscard]] bool enabled() const noexcept
     {
@@ -59,6 +75,21 @@ public:
     {
         return status_message_;
     }
+    [[nodiscard]] OnDemandFrameCaptureStatus
+    status() const noexcept
+    {
+        return status_;
+    }
+    [[nodiscard]] std::string_view
+    status_operation() const noexcept
+    {
+        return status_operation_;
+    }
+    [[nodiscard]] std::string_view
+    status_result() const noexcept
+    {
+        return status_result_;
+    }
     [[nodiscard]] const std::optional<std::filesystem::path>&
     last_output_path() const noexcept
     {
@@ -70,6 +101,10 @@ private:
     std::optional<std::uint64_t> requested_after_frame_;
     std::optional<std::filesystem::path> last_output_path_;
     std::string status_message_;
+    OnDemandFrameCaptureStatus status_ =
+        OnDemandFrameCaptureStatus::None;
+    std::string status_operation_;
+    std::string status_result_;
 };
 
 }  // namespace specforge

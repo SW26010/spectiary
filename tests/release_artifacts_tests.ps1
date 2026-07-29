@@ -489,6 +489,7 @@ $dataSourcesPath = Join-Path $legalRoot 'DATA_SOURCES.txt'
 $catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.tsv'
 $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
+$aboutTextSourcePath = Join-Path $RepoRoot 'src\ui\ui_text.cpp'
 $mainSourcePath = Join-Path $RepoRoot 'src\main.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
 $buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_metadata.json.in'
@@ -504,6 +505,7 @@ foreach ($requiredPath in @(
     $catalogPath,
     $packageScriptPath,
     $aboutSourcePath,
+    $aboutTextSourcePath,
     $mainSourcePath,
     $cmakeSourcePath,
     $buildMetadataTemplatePath,
@@ -627,7 +629,10 @@ if ($baRows.Count -ne 2) {
 }
 
 $packageScript = Get-Content -Raw -LiteralPath $packageScriptPath
-$aboutSource = Get-Content -Raw -LiteralPath $aboutSourcePath
+$aboutSource = @(
+    Get-Content -Raw -LiteralPath $aboutSourcePath
+    Get-Content -Raw -LiteralPath $aboutTextSourcePath
+) -join "`n"
 $mainSource = Get-Content -Raw -LiteralPath $mainSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
 $buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath

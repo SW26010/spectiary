@@ -239,6 +239,7 @@ void ApplicationSettings::RunMaintenance(
     SetStatus(
         ApplicationSettingsStatusKind::PersistenceError,
         ApplicationSetting::PanelVisibility,
+        ApplicationSettingsStatusReason::SettingsWriteFailed,
         "Could not save panel visibility.");
 }
 
@@ -267,6 +268,7 @@ bool ApplicationSettings::Flush()
     SetStatus(
         ApplicationSettingsStatusKind::PersistenceError,
         ApplicationSetting::PanelVisibility,
+        ApplicationSettingsStatusReason::SettingsWriteFailed,
         "Could not save panel visibility.");
     return false;
 }
@@ -311,6 +313,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
+            ApplicationSettingsStatusReason::UiScaleOutOfRange,
             detail);
         return {
             .outcome = ApplicationSettingsOutcome::Rejected,
@@ -361,6 +364,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
+            ApplicationSettingsStatusReason::UnsupportedLanguage,
             detail);
         return {
             .outcome = ApplicationSettingsOutcome::Rejected,
@@ -408,6 +412,8 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
+            ApplicationSettingsStatusReason::
+                EnvironmentOverrideActive,
             detail);
         return {
             .outcome = ApplicationSettingsOutcome::Rejected,
@@ -421,6 +427,7 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
+            ApplicationSettingsStatusReason::RecordingInProgress,
             detail);
         return {
             .outcome = ApplicationSettingsOutcome::Rejected,
@@ -434,6 +441,8 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         SetStatus(
             ApplicationSettingsStatusKind::Rejected,
             kSetting,
+            ApplicationSettingsStatusReason::
+                EmptyProfileOutputDirectory,
             detail);
         return {
             .outcome = ApplicationSettingsOutcome::Rejected,
@@ -538,11 +547,13 @@ ApplicationSettingsResult ApplicationSettings::ShowAllPanels()
 void ApplicationSettings::SetStatus(
     ApplicationSettingsStatusKind kind,
     ApplicationSetting setting,
+    ApplicationSettingsStatusReason reason,
     std::string detail)
 {
     statuses_[static_cast<std::size_t>(setting)] = {
         .kind = kind,
         .setting = setting,
+        .reason = reason,
         .detail = std::move(detail),
     };
 }
@@ -565,6 +576,7 @@ void ApplicationSettings::AdoptLoadWarning(
         SetStatus(
             ApplicationSettingsStatusKind::LoadWarning,
             setting,
+            ApplicationSettingsStatusReason::SavedValueUnreadable,
             load_warnings_[index]);
     }
 }
@@ -585,6 +597,7 @@ void ApplicationSettings::MarkSaveFailed(
     SetStatus(
         ApplicationSettingsStatusKind::PersistenceError,
         setting,
+        ApplicationSettingsStatusReason::SettingsWriteFailed,
         message);
 }
 

@@ -709,6 +709,21 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
     SampleWorkflowShortcut& shortcut)
 {
+    RenderLabeling(
+        interaction,
+        UiLanguage::English,
+        open,
+        choose_output_path,
+        shortcut);
+}
+
+void SampleWorkflowPanelUi::RenderLabeling(
+    PanelSessionInteraction& interaction,
+    UiLanguage language,
+    bool* open,
+    const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    SampleWorkflowShortcut& shortcut)
+{
     const auto submit = [&interaction](
                             SourceCollectionSessionIntent intent) {
         return interaction.Submit(std::move(intent)).result;
@@ -719,7 +734,11 @@ void SampleWorkflowPanelUi::RenderLabeling(
             std::move(intent)).result;
     };
     shortcut = {};
-    if (!ImGui::Begin(kLabelingWindow, open)) {
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::Labeling,
+        "SpecForgeLabelingV1");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ResetLabelShortcutCapture();
         ImGui::End();
         return;
@@ -1548,7 +1567,22 @@ void SampleWorkflowPanelUi::RenderFilters(
     PanelSessionInteraction& interaction,
     bool* open)
 {
-    if (!ImGui::Begin(kFiltersWindow, open)) {
+    RenderFilters(
+        interaction,
+        UiLanguage::English,
+        open);
+}
+
+void SampleWorkflowPanelUi::RenderFilters(
+    PanelSessionInteraction& interaction,
+    UiLanguage language,
+    bool* open)
+{
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::SampleFilters,
+        "SpecForgeFiltersV1");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }
@@ -1723,7 +1757,22 @@ void SampleWorkflowPanelUi::RenderSorting(
     PanelSessionInteraction& interaction,
     bool* open)
 {
-    if (!ImGui::Begin(kSortingWindow, open)) {
+    RenderSorting(
+        interaction,
+        UiLanguage::English,
+        open);
+}
+
+void SampleWorkflowPanelUi::RenderSorting(
+    PanelSessionInteraction& interaction,
+    UiLanguage language,
+    bool* open)
+{
+    const std::string window_label = StableUiLabel(
+        language,
+        UiTextId::SampleSorting,
+        "SpecForgeSampleSortingV1");
+    if (!ImGui::Begin(window_label.c_str(), open)) {
         ImGui::End();
         return;
     }

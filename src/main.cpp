@@ -1,5 +1,8 @@
 #include "app/specforge_app.h"
 #include "app/runtime_paths.h"
+#include "platform/win32_text.h"
+#include "ui/ui_language_settings.h"
+#include "ui/ui_text.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -64,13 +67,23 @@ bool RuntimeResourceWorkloadEnabled()
         .has_value();
 }
 
-void ReportStartupError(std::string_view message)
+void ReportStartupError(
+    std::string_view message,
+    specforge::UiLanguage language)
 {
     if (!RuntimeResourceWorkloadEnabled()) {
-        MessageBoxA(
+        const std::wstring wide_message =
+            specforge::Utf8ToWide(message);
+        const std::wstring wide_title =
+            specforge::Utf8ToWide(
+                specforge::UiText(
+                    language,
+                    specforge::UiTextId::
+                        StartupErrorTitle));
+        MessageBoxW(
             nullptr,
-            std::string(message).c_str(),
-            "SpecForge startup error",
+            wide_message.c_str(),
+            wide_title.c_str(),
             MB_OK | MB_ICONERROR);
         return;
     }
@@ -106,15 +119,29 @@ void ReportStartupError(std::string_view message)
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
+    specforge::UiLanguage startup_error_language =
+        specforge::UiLanguage::English;
     try {
         const specforge::SpecForgeStartup& startup =
             specforge::DefaultSpecForgeStartup();
+        startup_error_language =
+            specforge::LoadUiLanguageSettings(
+                startup.runtime_paths()
+                    .ui_language_settings_path)
+                .language;
         specforge::SpecForgeApp app(startup);
         return app.Run(instance, show_command, InitialSourceFromCommandLine());
     } catch (const std::exception& error) {
-        ReportStartupError(error.what());
+        ReportStartupError(
+            error.what(),
+            startup_error_language);
     } catch (...) {
-        ReportStartupError("Unknown startup error.");
+        ReportStartupError(
+            specforge::UiText(
+                startup_error_language,
+                specforge::UiTextId::
+                    UnknownStartupError),
+            startup_error_language);
     }
 
     return 1;

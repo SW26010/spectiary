@@ -12,10 +12,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstdint>
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
@@ -33,17 +35,6 @@ constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::Diagnostics,
     SettingsSection::About,
 };
-
-std::string StableUiLabel(
-    UiLanguage language,
-    UiTextId text_id,
-    std::string_view stable_id)
-{
-    std::string label(UiText(language, text_id));
-    label += "###";
-    label += stable_id;
-    return label;
-}
 
 std::string SettingsWindowLabel(UiLanguage language)
 {
@@ -70,6 +61,39 @@ std::string AppearanceThemeItems(UiLanguage language)
     return items;
 }
 
+void RenderApplicationSettingsStatusReason(
+    const ApplicationSettingsStatus& status,
+    UiLanguage language)
+{
+    const std::string_view reason =
+        FormatApplicationSettingsStatusReason(
+            status.reason,
+            language);
+    if (reason.empty()) {
+        return;
+    }
+
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(reason.size()),
+        reason.data());
+    if (!status.detail.empty() && ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        const std::string_view diagnostic_label =
+            UiText(language, UiTextId::DiagnosticDetails);
+        ImGui::TextUnformatted(
+            diagnostic_label.data(),
+            diagnostic_label.data() +
+                diagnostic_label.size());
+        ImGui::Separator();
+        ImGui::PushTextWrapPos(
+            ImGui::GetFontSize() * 32.0f);
+        ImGui::TextUnformatted(status.detail.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
+
 UiTextId LanguageNameTextId(UiLanguage language)
 {
     switch (language) {
@@ -89,6 +113,92 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
+std::string_view LabelValueSeparator(UiLanguage language)
+{
+    return language == UiLanguage::SimplifiedChinese
+        ? std::string_view{"："}
+        : std::string_view{": "};
+}
+
+void AppendLabeledValue(
+    std::string& output,
+    UiLanguage language,
+    UiTextId label,
+    std::string_view value)
+{
+    output += UiText(language, label);
+    output += LabelValueSeparator(language);
+    output += value;
+}
+
+std::string FormatFrameCaptureStatus(
+    UiLanguage language,
+    const SettingsPanelStatus& status)
+{
+    UiTextId text_id = UiTextId::FrameCaptureFailed;
+    switch (status.frame_capture_status) {
+    case OnDemandFrameCaptureStatus::None:
+        return std::string(
+            status.frame_capture_status_message);
+    case OnDemandFrameCaptureStatus::Ready:
+        text_id = UiTextId::FrameCaptureReady;
+        break;
+    case OnDemandFrameCaptureStatus::Disabled:
+        text_id = UiTextId::FrameCaptureDisabled;
+        break;
+    case OnDemandFrameCaptureStatus::WindowUnavailable:
+        text_id =
+            UiTextId::FrameCaptureWindowUnavailable;
+        break;
+    case OnDemandFrameCaptureStatus::Pending:
+        text_id = UiTextId::FrameCaptureRequested;
+        break;
+    case OnDemandFrameCaptureStatus::Captured:
+        text_id = UiTextId::FrameCaptureCompleted;
+        break;
+    case OnDemandFrameCaptureStatus::
+            FailedPreparingOutputDirectory:
+        text_id =
+            UiTextId::FrameCaptureDirectoryFailed;
+        break;
+    case OnDemandFrameCaptureStatus::Failed:
+        text_id = UiTextId::FrameCaptureFailed;
+        break;
+    case OnDemandFrameCaptureStatus::FailedCapture: {
+        const std::string format(UiText(
+            language,
+            UiTextId::FrameCaptureBackendFailed));
+        const std::string operation(
+            status.frame_capture_status_operation);
+        const std::string result(
+            status.frame_capture_status_result);
+        const int required = std::snprintf(
+            nullptr,
+            0,
+            format.c_str(),
+            operation.c_str(),
+            result.c_str());
+        if (required <= 0) {
+            return std::string(UiText(
+                language,
+                UiTextId::FrameCaptureFailed));
+        }
+        std::vector<char> buffer(
+            static_cast<std::size_t>(required) + 1);
+        (void)std::snprintf(
+            buffer.data(),
+            buffer.size(),
+            format.c_str(),
+            operation.c_str(),
+            result.c_str());
+        return std::string(
+            buffer.data(),
+            static_cast<std::size_t>(required));
+    }
+    }
+    return std::string(UiText(language, text_id));
+}
+
 void RenderSectionHeading(
     std::string_view title,
     std::string_view description)
@@ -104,14 +214,6 @@ void RenderSectionHeading(
         description.data());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
-}
-
-void RenderUnavailableNote(const char* explanation)
-{
-    ImGui::Spacing();
-    ImGui::PushTextWrapPos();
-    ImGui::TextDisabled("Not available yet. %s", explanation);
-    ImGui::PopTextWrapPos();
 }
 
 void RenderReadOnlyValue(const char* label, const char* value)
@@ -144,73 +246,164 @@ SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
 }
 
 std::string FormatBuildSourceForAbout(
-    const BuildSourceIdentity& build_source)
+    const BuildSourceIdentity& build_source,
+    UiLanguage language)
 {
+    std::string formatted;
+    AppendLabeledValue(
+        formatted,
+        language,
+        UiTextId::Source,
+        build_source.mode == "working_tree"
+            ? UiText(language, UiTextId::WorkingTree)
+        : build_source.mode == "head"
+            ? UiText(language, UiTextId::Head)
+            : std::string_view{build_source.mode});
     if (build_source.mode == "working_tree") {
-        return "Source: Working tree";
+        return formatted;
     }
     if (build_source.mode == "head") {
         constexpr std::size_t kDisplayedRevisionLength = 12;
-        return "Source: HEAD " +
-            build_source.revision.substr(
-                0,
-                kDisplayedRevisionLength);
+        formatted += " ";
+        formatted += build_source.revision.substr(
+            0,
+            kDisplayedRevisionLength);
     }
-    return "Source: " + build_source.mode;
+    return formatted;
 }
 
 std::string_view FormatBuildMetadataStatusForAbout(
-    BuildMetadataStatus status)
+    BuildMetadataStatus status,
+    UiLanguage language)
 {
     switch (status) {
     case BuildMetadataStatus::Available:
         return {};
     case BuildMetadataStatus::Unavailable:
-        return "Build metadata unavailable";
+        return UiText(
+            language,
+            UiTextId::BuildMetadataUnavailable);
     case BuildMetadataStatus::Mismatch:
-        return "Build metadata mismatch";
+        return UiText(
+            language,
+            UiTextId::BuildMetadataMismatch);
     }
-    return "Build metadata unavailable";
+    return UiText(
+        language,
+        UiTextId::BuildMetadataUnavailable);
 }
 
 std::string_view FormatProfileOutputDirectoryStatus(
-    ApplicationSettingsStatusKind kind)
+    ApplicationSettingsStatusKind kind,
+    UiLanguage language)
 {
     switch (kind) {
     case ApplicationSettingsStatusKind::Ready:
         return {};
     case ApplicationSettingsStatusKind::LoadWarning:
-        return "The saved profile output directory could not "
-               "be loaded; using the current fallback directory.";
+        return UiText(
+            language,
+            UiTextId::ProfileOutputLoadWarning);
     case ApplicationSettingsStatusKind::PersistenceError:
-        return "The profile output directory could not be saved.";
+        return UiText(
+            language,
+            UiTextId::ProfileOutputSaveError);
     case ApplicationSettingsStatusKind::Rejected:
-        return "The profile output directory could not be changed.";
+        return UiText(
+            language,
+            UiTextId::ProfileOutputRejected);
+    }
+    return {};
+}
+
+std::string_view FormatApplicationSettingsStatusReason(
+    ApplicationSettingsStatusReason reason,
+    UiLanguage language)
+{
+    switch (reason) {
+    case ApplicationSettingsStatusReason::None:
+        return {};
+    case ApplicationSettingsStatusReason::SavedValueUnreadable:
+        return UiText(
+            language,
+            UiTextId::SavedSettingsValueUnreadable);
+    case ApplicationSettingsStatusReason::SettingsWriteFailed:
+        return UiText(
+            language,
+            UiTextId::SettingsFileWriteFailed);
+    case ApplicationSettingsStatusReason::UnsupportedLanguage:
+        return UiText(
+            language,
+            UiTextId::UnsupportedApplicationLanguage);
+    case ApplicationSettingsStatusReason::UiScaleOutOfRange:
+        return UiText(
+            language,
+            UiTextId::UiScaleOutsideSupportedRange);
+    case ApplicationSettingsStatusReason::
+        EnvironmentOverrideActive:
+        return UiText(
+            language,
+            UiTextId::ProfileEnvironmentOverrideActive);
+    case ApplicationSettingsStatusReason::RecordingInProgress:
+        return UiText(
+            language,
+            UiTextId::ProfileRecordingInProgress);
+    case ApplicationSettingsStatusReason::
+        EmptyProfileOutputDirectory:
+        return UiText(
+            language,
+            UiTextId::ProfileOutputDirectoryEmpty);
     }
     return {};
 }
 
 std::string FormatDiagnosticInformation(
     const SettingsPanelEnvironment& environment,
-    const std::filesystem::path& profile_output_directory)
+    const std::filesystem::path& profile_output_directory,
+    UiLanguage language)
 {
     std::string diagnostics;
     diagnostics.reserve(320);
     diagnostics += "SpecForge ";
     diagnostics += environment.version;
-    diagnostics += "\nDistribution: ";
-    diagnostics += environment.distribution;
-    diagnostics += "\nSource mode: ";
-    diagnostics += environment.build_source.mode;
+    diagnostics += "\n";
+    AppendLabeledValue(
+        diagnostics,
+        language,
+        UiTextId::Distribution,
+        environment.distribution);
+    diagnostics += "\n";
+    AppendLabeledValue(
+        diagnostics,
+        language,
+        UiTextId::SourceMode,
+        environment.build_source.mode);
     if (environment.build_source.mode == "head") {
-        diagnostics += "\nSource revision: ";
-        diagnostics += environment.build_source.revision;
+        diagnostics += "\n";
+        AppendLabeledValue(
+            diagnostics,
+            language,
+            UiTextId::SourceRevision,
+            environment.build_source.revision);
     }
-    diagnostics += "\nGraphics: Direct3D 11 / SDR";
-    diagnostics += "\nData directory: ";
-    diagnostics += PathToUtf8(environment.data_directory);
-    diagnostics += "\nLog directory: ";
-    diagnostics += PathToUtf8(profile_output_directory);
+    diagnostics += "\n";
+    AppendLabeledValue(
+        diagnostics,
+        language,
+        UiTextId::Graphics,
+        "Direct3D 11 / SDR");
+    diagnostics += "\n";
+    AppendLabeledValue(
+        diagnostics,
+        language,
+        UiTextId::DataDirectory,
+        PathToUtf8(environment.data_directory));
+    diagnostics += "\n";
+    AppendLabeledValue(
+        diagnostics,
+        language,
+        UiTextId::LogDirectory,
+        PathToUtf8(profile_output_directory));
     return diagnostics;
 }
 
@@ -220,7 +413,10 @@ std::string SettingsPanelUi::SectionLabel(
 {
     switch (section) {
     case SettingsSection::General:
-        return "General";
+        return StableUiLabel(
+            language,
+            UiTextId::General,
+            "SpecForgeSettingsGeneral");
     case SettingsSection::Appearance:
         return StableUiLabel(
             language,
@@ -232,15 +428,30 @@ std::string SettingsPanelUi::SectionLabel(
             UiTextId::Language,
             "SpecForgeSettingsLanguage");
     case SettingsSection::Input:
-        return "Input";
+        return StableUiLabel(
+            language,
+            UiTextId::Input,
+            "SpecForgeSettingsInput");
     case SettingsSection::DataAndRecovery:
-        return "Data & Recovery";
+        return StableUiLabel(
+            language,
+            UiTextId::DataAndRecovery,
+            "SpecForgeSettingsDataAndRecovery");
     case SettingsSection::Diagnostics:
-        return "Diagnostics";
+        return StableUiLabel(
+            language,
+            UiTextId::Diagnostics,
+            "SpecForgeSettingsDiagnostics");
     case SettingsSection::About:
-        return "About";
+        return StableUiLabel(
+            language,
+            UiTextId::About,
+            "SpecForgeSettingsAbout");
     }
-    return "Settings";
+    return StableUiLabel(
+        language,
+        UiTextId::Settings,
+        "SpecForgeSettingsFallback");
 }
 
 std::string SettingsPanelUi::AppearanceThemeLabel(
@@ -259,6 +470,14 @@ std::string SettingsPanelUi::AppearanceAccentColorLabel(
         language,
         UiTextId::AccentColor,
         "SpecForgeAppearanceAccentColor");
+}
+
+float SettingsPanelUi::VisibleLabelWidth(std::string_view label)
+{
+    return ImGui::CalcTextSize(
+        label.data(),
+        label.data() + label.size(),
+        true).x;
 }
 
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
@@ -338,7 +557,7 @@ void SettingsPanelUi::Render(
             settings.language);
     const float navigation_width = std::max(
         kMinimumNavigationWidth,
-        ImGui::CalcTextSize(widest_navigation_label.c_str()).x +
+        VisibleLabelWidth(widest_navigation_label) +
             ImGui::GetStyle().WindowPadding.x * 2.0f);
     if (ImGui::BeginChild("##SettingsNavigation", ImVec2(navigation_width, 0.0f), true)) {
         RenderNavigation(settings.language);
@@ -416,7 +635,7 @@ void SettingsPanelUi::RenderSelectedSection(
 {
     switch (selected_section_) {
     case SettingsSection::General:
-        RenderGeneral();
+        RenderGeneral(settings.language);
         return;
     case SettingsSection::Appearance:
         RenderAppearance(settings);
@@ -425,10 +644,10 @@ void SettingsPanelUi::RenderSelectedSection(
         RenderLanguage(settings);
         return;
     case SettingsSection::Input:
-        RenderInput();
+        RenderInput(settings.language);
         return;
     case SettingsSection::DataAndRecovery:
-        RenderDataAndRecovery();
+        RenderDataAndRecovery(settings.language);
         return;
     case SettingsSection::Diagnostics:
         RenderDiagnostics(settings, status);
@@ -439,15 +658,32 @@ void SettingsPanelUi::RenderSelectedSection(
     }
 }
 
-void SettingsPanelUi::RenderGeneral()
+void SettingsPanelUi::RenderGeneral(UiLanguage language)
 {
-    RenderSectionHeading("General", "Choose how SpecForge starts and restores your local workspace.");
+    RenderSectionHeading(
+        UiText(language, UiTextId::General),
+        UiText(language, UiTextId::GeneralPageDescription));
 
     bool restore_previous_session = true;
+    const std::string restore_label = StableUiLabel(
+        language,
+        UiTextId::RestorePreviousSession,
+        "SpecForgeRestorePreviousSession");
     ImGui::BeginDisabled();
-    ImGui::Checkbox("Restore the previous session at startup", &restore_previous_session);
+    ImGui::Checkbox(
+        restore_label.c_str(),
+        &restore_previous_session);
     ImGui::EndDisabled();
-    RenderUnavailableNote("Session restoration is currently managed automatically.");
+    const std::string_view unavailable = UiText(
+        language,
+        UiTextId::SessionRestorationUnavailable);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(unavailable.size()),
+        unavailable.data());
+    ImGui::PopTextWrapPos();
 }
 
 void SettingsPanelUi::RenderAppearance(
@@ -561,11 +797,9 @@ void SettingsPanelUi::RenderAppearance(
         "%.*s",
         static_cast<int>(feedback.size()),
         feedback.data());
-    if (!setting_status.detail.empty()) {
-        ImGui::TextDisabled(
-            "%s",
-            setting_status.detail.c_str());
-    }
+    RenderApplicationSettingsStatusReason(
+        setting_status,
+        language);
     ImGui::PopTextWrapPos();
 }
 
@@ -654,66 +888,180 @@ void SettingsPanelUi::RenderLanguage(
         "%.*s",
         static_cast<int>(feedback.size()),
         feedback.data());
-    if (!setting_status.detail.empty()) {
-        ImGui::TextDisabled(
-            "%s",
-            setting_status.detail.c_str());
-    }
+    RenderApplicationSettingsStatusReason(
+        setting_status,
+        language);
     ImGui::PopTextWrapPos();
 }
 
-void SettingsPanelUi::RenderInput()
+void SettingsPanelUi::RenderInput(UiLanguage language)
 {
-    RenderSectionHeading("Input", "Tune mouse, touchpad, and keyboard behavior for spectrum inspection.");
+    RenderSectionHeading(
+        UiText(language, UiTextId::Input),
+        UiText(language, UiTextId::InputPageDescription));
 
     float mouse_zoom_sensitivity = 1.0f;
     float touchpad_zoom_sensitivity = 1.0f;
     bool reverse_zoom_direction = false;
+    const std::string mouse_zoom_label = StableUiLabel(
+        language,
+        UiTextId::MouseZoomSensitivity,
+        "SpecForgeMouseZoomSensitivity");
+    const std::string touchpad_zoom_label = StableUiLabel(
+        language,
+        UiTextId::TouchpadZoomSensitivity,
+        "SpecForgeTouchpadZoomSensitivity");
+    const std::string reverse_zoom_label = StableUiLabel(
+        language,
+        UiTextId::ReverseZoomDirection,
+        "SpecForgeReverseZoomDirection");
+    const std::string shortcuts_label = StableUiLabel(
+        language,
+        UiTextId::ViewKeyboardShortcuts,
+        "SpecForgeViewKeyboardShortcuts");
     ImGui::BeginDisabled();
-    ImGui::SliderFloat("Mouse zoom sensitivity", &mouse_zoom_sensitivity, 0.5f, 2.0f, "%.1fx");
-    ImGui::SliderFloat("Touchpad zoom sensitivity", &touchpad_zoom_sensitivity, 0.5f, 2.0f, "%.1fx");
-    ImGui::Checkbox("Reverse zoom direction", &reverse_zoom_direction);
-    ImGui::Button("View keyboard shortcuts");
+    ImGui::SliderFloat(
+        mouse_zoom_label.c_str(),
+        &mouse_zoom_sensitivity,
+        0.5f,
+        2.0f,
+        "%.1fx");
+    ImGui::SliderFloat(
+        touchpad_zoom_label.c_str(),
+        &touchpad_zoom_sensitivity,
+        0.5f,
+        2.0f,
+        "%.1fx");
+    ImGui::Checkbox(
+        reverse_zoom_label.c_str(),
+        &reverse_zoom_direction);
+    ImGui::Button(shortcuts_label.c_str());
     ImGui::EndDisabled();
-    RenderUnavailableNote("Input behavior currently follows the built-in interaction model.");
+    const std::string_view unavailable = UiText(
+        language,
+        UiTextId::InputBehaviorUnavailable);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(unavailable.size()),
+        unavailable.data());
+    ImGui::PopTextWrapPos();
 }
 
-void SettingsPanelUi::RenderDataAndRecovery()
+void SettingsPanelUi::RenderDataAndRecovery(
+    UiLanguage language)
 {
     RenderSectionHeading(
-        "Data & Recovery",
-        "Inspect local application storage. Scientific source files and label result files remain user-owned.");
+        UiText(language, UiTextId::DataAndRecovery),
+        UiText(
+            language,
+            UiTextId::DataAndRecoveryPageDescription));
 
     const std::string data_path = PathToUtf8(environment_.data_directory);
-    ImGui::TextUnformatted("Application data");
+    const std::string_view application_data = UiText(
+        language,
+        UiTextId::ApplicationData);
+    ImGui::TextUnformatted(
+        application_data.data(),
+        application_data.data() +
+            application_data.size());
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled("%s", data_path.c_str());
     ImGui::PopTextWrapPos();
-    if (ImGui::Button("Open Data Folder")) {
-        OpenDirectory(environment_.data_directory, "data folder");
+    const std::string open_data_label = StableUiLabel(
+        language,
+        UiTextId::OpenDataFolder,
+        "SpecForgeOpenDataFolder");
+    if (ImGui::Button(open_data_label.c_str())) {
+        OpenDirectory(
+            environment_.data_directory,
+            language,
+            UiTextId::DataFolderPrepareError,
+            UiTextId::DataFolderOpenError,
+            UiTextId::DataFolderOpened);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Copy Path##Data")) {
-        CopyPath(environment_.data_directory, "Data path copied.");
+    const std::string copy_data_path_label = StableUiLabel(
+        language,
+        UiTextId::CopyPath,
+        "SpecForgeCopyDataPath");
+    if (ImGui::Button(copy_data_path_label.c_str())) {
+        CopyPath(
+            environment_.data_directory,
+            language,
+            UiTextId::DataPathCopied);
     }
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Configuration portability");
+    const std::string configuration_portability =
+        StableUiLabel(
+            language,
+            UiTextId::ConfigurationPortability,
+            "SpecForgeConfigurationPortability");
+    ImGui::SeparatorText(
+        configuration_portability.c_str());
+    const std::string import_label = StableUiLabel(
+        language,
+        UiTextId::ImportSettings,
+        "SpecForgeImportSettings");
+    const std::string export_label = StableUiLabel(
+        language,
+        UiTextId::ExportSettings,
+        "SpecForgeExportSettings");
     ImGui::BeginDisabled();
-    ImGui::Button("Import Settings...");
+    ImGui::Button(import_label.c_str());
     ImGui::SameLine();
-    ImGui::Button("Export Settings...");
+    ImGui::Button(export_label.c_str());
     ImGui::EndDisabled();
-    RenderUnavailableNote("A public, versioned settings-file format has not been defined.");
+    const std::string_view portability_unavailable = UiText(
+        language,
+        UiTextId::ConfigurationFormatUnavailable);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(
+            portability_unavailable.size()),
+        portability_unavailable.data());
+    ImGui::PopTextWrapPos();
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Recovery and reset");
+    const std::string recovery_heading = StableUiLabel(
+        language,
+        UiTextId::RecoveryAndReset,
+        "SpecForgeRecoveryAndReset");
+    ImGui::SeparatorText(recovery_heading.c_str());
+    const std::string reset_layout_label =
+        StableUiLabel(
+            language,
+            UiTextId::ResetWindowLayout,
+            "SpecForgeResetWindowLayout");
+    const std::string reset_settings_label =
+        StableUiLabel(
+            language,
+            UiTextId::ResetApplicationSettings,
+            "SpecForgeResetApplicationSettings");
+    const std::string erase_state_label =
+        StableUiLabel(
+            language,
+            UiTextId::EraseAllApplicationState,
+            "SpecForgeEraseAllApplicationState");
     ImGui::BeginDisabled();
-    ImGui::Button("Reset Window Layout");
-    ImGui::Button("Reset Application Settings");
-    ImGui::Button("Erase All Application State...");
+    ImGui::Button(reset_layout_label.c_str());
+    ImGui::Button(reset_settings_label.c_str());
+    ImGui::Button(erase_state_label.c_str());
     ImGui::EndDisabled();
-    RenderUnavailableNote("Reset operations need explicit data boundaries and confirmation behavior.");
+    const std::string_view reset_unavailable = UiText(
+        language,
+        UiTextId::ResetOperationsUnavailable);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(reset_unavailable.size()),
+        reset_unavailable.data());
+    ImGui::PopTextWrapPos();
 
     if (!action_status_.empty()) {
         ImGui::Spacing();
@@ -729,36 +1077,77 @@ void SettingsPanelUi::RenderDiagnostics(
     const ApplicationSettingsView& settings,
     const SettingsPanelStatus& status)
 {
+    const UiLanguage language = settings.language;
     RenderSectionHeading(
-        "Diagnostics",
-        "Record bounded performance profiles for investigating interaction and loading latency.");
+        UiText(language, UiTextId::Diagnostics),
+        UiText(
+            language,
+            UiTextId::DiagnosticsPageDescription));
 
     const ProfileRecordingUiPresentation presentation =
         ResolveProfileRecordingUiPresentation(
             status.profile_open,
             status.profile_stopping);
-    ImGui::TextDisabled("Performance profile");
+    const std::string_view performance_profile = UiText(
+        language,
+        UiTextId::PerformanceProfile);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(performance_profile.size()),
+        performance_profile.data());
     ImGui::SameLine();
-    ImGui::TextUnformatted(
+    const std::string_view recording_state = UiText(
+        language,
         status.profile_open
-            ? "Recording"
-            : (status.profile_stopping ? "Finishing..." : "Not recording"));
+            ? UiTextId::Recording
+            : (status.profile_stopping
+                ? UiTextId::Finishing
+                : UiTextId::NotRecording));
+    ImGui::TextUnformatted(
+        recording_state.data(),
+        recording_state.data() +
+            recording_state.size());
 
     if (!presentation.menu_action_enabled) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button(presentation.menu_action.data())) {
+    const UiTextId recording_action_id =
+        status.profile_stopping
+        ? UiTextId::FinishingRecordingAction
+        : (status.profile_open
+            ? UiTextId::StopRecording
+            : UiTextId::StartRecording);
+    const std::string recording_action_label =
+        StableUiLabel(
+            language,
+            recording_action_id,
+            "SpecForgeProfileRecordingToggle");
+    if (ImGui::Button(
+            recording_action_label.c_str())) {
         profile_recording_toggle_requested_ = true;
     }
     if (!presentation.menu_action_enabled) {
         ImGui::EndDisabled();
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Automatically stops after 5 minutes or 100 MiB.");
+    const std::string_view auto_stop = UiText(
+        language,
+        UiTextId::ProfileAutoStopNote);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(auto_stop.size()),
+        auto_stop.data());
 
     if (status.profile_path != nullptr) {
         ImGui::Spacing();
-        ImGui::TextDisabled("Current profile");
+        const std::string_view current_profile =
+            UiText(
+                language,
+                UiTextId::CurrentProfile);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(current_profile.size()),
+            current_profile.data());
         ImGui::PushTextWrapPos();
         const std::string active_path = PathToUtf8(*status.profile_path);
         ImGui::TextUnformatted(active_path.c_str());
@@ -774,7 +1163,6 @@ void SettingsPanelUi::RenderDiagnostics(
     }
 
     if (status.frame_capture_enabled) {
-        const UiLanguage language = settings.language;
         ImGui::Spacing();
         const std::string capture_heading =
             StableUiLabel(
@@ -823,15 +1211,15 @@ void SettingsPanelUi::RenderDiagnostics(
             static_cast<int>(capture_note.size()),
             capture_note.data());
 
-        if (!status.frame_capture_status_message.empty()) {
+        const std::string capture_status =
+            FormatFrameCaptureStatus(
+                language,
+                status);
+        if (!capture_status.empty()) {
             ImGui::PushTextWrapPos();
             ImGui::TextDisabled(
-                "%.*s",
-                static_cast<int>(
-                    status.frame_capture_status_message
-                        .size()),
-                status.frame_capture_status_message
-                    .data());
+                "%s",
+                capture_status.c_str());
             ImGui::PopTextWrapPos();
         }
         if (status.last_frame_capture_path != nullptr) {
@@ -861,7 +1249,13 @@ void SettingsPanelUi::RenderDiagnostics(
     }
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Profile output directory");
+    const std::string profile_output_heading =
+        StableUiLabel(
+            language,
+            UiTextId::ProfileOutputDirectory,
+            "SpecForgeProfileOutputDirectory");
+    ImGui::SeparatorText(
+        profile_output_heading.c_str());
     const std::string output_path =
         PathToUtf8(settings.profile_output_directory);
     const ApplicationSettingsStatus& setting_status =
@@ -873,13 +1267,49 @@ void SettingsPanelUi::RenderDiagnostics(
 
     switch (settings.profile_output_directory_source) {
     case ProfileOutputDirectorySource::Default:
-        ImGui::TextDisabled("Source: storage-profile default");
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::
+                        ProfileDirectorySourceDefault)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::
+                    ProfileDirectorySourceDefault)
+                .data());
         break;
     case ProfileOutputDirectorySource::UserSetting:
-        ImGui::TextDisabled("Source: saved setting");
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::
+                        ProfileDirectorySourceSaved)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::
+                    ProfileDirectorySourceSaved)
+                .data());
         break;
     case ProfileOutputDirectorySource::Environment:
-        ImGui::TextDisabled("Source: SPECFORGE_PROFILE_DIR environment override");
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::
+                        ProfileDirectorySourceEnvironment)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::
+                    ProfileDirectorySourceEnvironment)
+                .data());
         break;
     }
 
@@ -891,7 +1321,12 @@ void SettingsPanelUi::RenderDiagnostics(
     if (directory_editing_disabled) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Choose Folder...")) {
+    const std::string choose_folder_label =
+        StableUiLabel(
+            language,
+            UiTextId::ChooseFolder,
+            "SpecForgeChooseProfileOutputFolder");
+    if (ImGui::Button(choose_folder_label.c_str())) {
         profile_output_directory_selection_requested_ = true;
     }
     if (directory_editing_disabled) {
@@ -906,7 +1341,13 @@ void SettingsPanelUi::RenderDiagnostics(
     if (reset_disabled) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Restore Default")) {
+    const std::string restore_default_label =
+        StableUiLabel(
+            language,
+            UiTextId::RestoreDefault,
+            "SpecForgeRestoreProfileOutputDefault");
+    if (ImGui::Button(
+            restore_default_label.c_str())) {
         ResetProfileOutputDirectory();
     }
     if (reset_disabled) {
@@ -914,28 +1355,54 @@ void SettingsPanelUi::RenderDiagnostics(
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Open Output Folder")) {
+    const std::string open_output_label =
+        StableUiLabel(
+            language,
+            UiTextId::OpenOutputFolder,
+            "SpecForgeOpenProfileOutputFolder");
+    if (ImGui::Button(open_output_label.c_str())) {
         OpenDirectory(
             settings.profile_output_directory,
-            "profile output folder");
+            language,
+            UiTextId::ProfileFolderPrepareError,
+            UiTextId::ProfileFolderOpenError,
+            UiTextId::ProfileFolderOpened);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Copy Path##ProfileOutput")) {
+    const std::string copy_profile_path_label =
+        StableUiLabel(
+            language,
+            UiTextId::CopyPath,
+            "SpecForgeCopyProfileOutputPath");
+    if (ImGui::Button(
+            copy_profile_path_label.c_str())) {
         CopyPath(
             settings.profile_output_directory,
-            "Profile output path copied.");
+            language,
+            UiTextId::ProfilePathCopied);
     }
 
     if (settings.profile_output_directory_source ==
         ProfileOutputDirectorySource::Environment) {
         ImGui::PushTextWrapPos();
+        const std::string_view notice = UiText(
+            language,
+            UiTextId::ProfileEnvironmentOverrideNotice);
         ImGui::TextDisabled(
-            "Remove SPECFORGE_PROFILE_DIR before changing this path in Settings.");
+            "%.*s",
+            static_cast<int>(notice.size()),
+            notice.data());
         ImGui::PopTextWrapPos();
     } else if (status.profile_open || status.profile_stopping) {
         ImGui::PushTextWrapPos();
+        const std::string_view notice = UiText(
+            language,
+            UiTextId::
+                StopRecordingBeforeChangingOutput);
         ImGui::TextDisabled(
-            "Stop the current recording before changing its output directory.");
+            "%.*s",
+            static_cast<int>(notice.size()),
+            notice.data());
         ImGui::PopTextWrapPos();
     }
 
@@ -947,7 +1414,8 @@ void SettingsPanelUi::RenderDiagnostics(
             ApplicationSettingsStatusKind::LoadWarning;
         const std::string_view feedback =
             FormatProfileOutputDirectoryStatus(
-                setting_status.kind);
+                setting_status.kind,
+                language);
         ImGui::TextColored(
             warning
                 ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
@@ -955,11 +1423,9 @@ void SettingsPanelUi::RenderDiagnostics(
             "%.*s",
             static_cast<int>(feedback.size()),
             feedback.data());
-        if (!setting_status.detail.empty()) {
-            ImGui::TextDisabled(
-                "%s",
-                setting_status.detail.c_str());
-        }
+        RenderApplicationSettingsStatusReason(
+            setting_status,
+            language);
     }
 
     if (!action_status_.empty()) {
@@ -978,33 +1444,67 @@ void SettingsPanelUi::RenderDiagnostics(
 void SettingsPanelUi::RenderAbout(
     const ApplicationSettingsView& settings)
 {
-    RenderSectionHeading("About", "Version, licensing, and diagnostic information for this build.");
+    const UiLanguage language = settings.language;
+    RenderSectionHeading(
+        UiText(language, UiTextId::About),
+        UiText(language, UiTextId::AboutPageDescription));
 
     ImGui::TextUnformatted("SpecForge");
-    ImGui::TextDisabled("Local astronomical spectrum inspection and labeling.");
+    const std::string_view tagline = UiText(
+        language,
+        UiTextId::ProductTagline);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(tagline.size()),
+        tagline.data());
     ImGui::PushTextWrapPos();
-    ImGui::TextUnformatted("Copyright (c) 2026 SpecForge.");
-    ImGui::TextDisabled("Proprietary software. Use is subject to the SpecForge EULA.");
+    const std::string_view copyright_notice = UiText(
+        language,
+        UiTextId::CopyrightNotice);
+    ImGui::TextUnformatted(
+        copyright_notice.data(),
+        copyright_notice.data() +
+            copyright_notice.size());
+    const std::string_view proprietary_notice = UiText(
+        language,
+        UiTextId::ProprietarySoftwareNotice);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(proprietary_notice.size()),
+        proprietary_notice.data());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
-    RenderReadOnlyValue("Version", environment_.version.c_str());
     RenderReadOnlyValue(
-        "Distribution",
+        UiText(language, UiTextId::Version).data(),
+        environment_.version.c_str());
+    RenderReadOnlyValue(
+        UiText(language, UiTextId::Distribution).data(),
         environment_.distribution.c_str());
-    RenderReadOnlyValue("Configuration", environment_.configuration.c_str());
     RenderReadOnlyValue(
-        "Architecture",
+        UiText(language, UiTextId::Configuration).data(),
+        environment_.configuration.c_str());
+    RenderReadOnlyValue(
+        UiText(language, UiTextId::Architecture).data(),
         environment_.target_architecture.c_str());
     const std::string source_text =
-        FormatBuildSourceForAbout(environment_.build_source);
+        FormatBuildSourceForAbout(
+            environment_.build_source,
+            language);
     ImGui::TextUnformatted(source_text.c_str());
-    RenderReadOnlyValue("Graphics", "Direct3D 11 / SDR");
+    RenderReadOnlyValue(
+        UiText(language, UiTextId::Graphics).data(),
+        "Direct3D 11 / SDR");
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Build details");
+    const std::string build_details = StableUiLabel(
+        language,
+        UiTextId::BuildDetails,
+        "SpecForgeBuildDetails");
+    ImGui::SeparatorText(build_details.c_str());
     const std::string_view metadata_status_text =
         FormatBuildMetadataStatusForAbout(
-            environment_.build_metadata.status);
+            environment_.build_metadata.status,
+            language);
     if (!metadata_status_text.empty()) {
         ImGui::TextDisabled(
             "%.*s",
@@ -1018,61 +1518,165 @@ void SettingsPanelUi::RenderAbout(
             *environment_.build_metadata.metadata;
         const std::string compiler =
             metadata.compiler_id + " " + metadata.compiler_version;
-        RenderReadOnlyValue("Compiler", compiler.c_str());
-        RenderReadOnlyValue("CMake", metadata.cmake_version.c_str());
-        RenderReadOnlyValue("Generator", metadata.generator.c_str());
         RenderReadOnlyValue(
-            "Windows SDK",
+            UiText(language, UiTextId::Compiler).data(),
+            compiler.c_str());
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::CMake).data(),
+            metadata.cmake_version.c_str());
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::Generator).data(),
+            metadata.generator.c_str());
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::WindowsSdk).data(),
             metadata.windows_sdk_version
                 ? metadata.windows_sdk_version->c_str()
-                : "Not reported");
+                : UiText(
+                      language,
+                      UiTextId::NotReported)
+                      .data());
     }
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Third-party components");
+    const std::string third_party_heading =
+        StableUiLabel(
+            language,
+            UiTextId::ThirdPartyComponents,
+            "SpecForgeThirdPartyComponents");
+    ImGui::SeparatorText(
+        third_party_heading.c_str());
     if (environment_.build_metadata.status ==
             BuildMetadataStatus::Available &&
         environment_.build_metadata.metadata) {
         const BuildMetadata& metadata =
             *environment_.build_metadata.metadata;
         ImGui::BulletText(
-            "Dear ImGui %s (docking / Win32 / DirectX 11) - MIT License",
+            UiText(
+                language,
+                UiTextId::DearImGuiComponent)
+                .data(),
             metadata.dear_imgui_version.c_str());
         ImGui::BulletText(
-            "ImPlot %s - MIT License",
+            UiText(
+                language,
+                UiTextId::ImPlotComponent)
+                .data(),
             metadata.implot_version.c_str());
         ImGui::BulletText(
-            "zlib %s - zlib License",
+            UiText(
+                language,
+                UiTextId::ZlibComponent)
+                .data(),
             metadata.zlib_version.c_str());
     } else {
         ImGui::BulletText(
-            "Dear ImGui (docking / Win32 / DirectX 11) - MIT License");
-        ImGui::BulletText("ImPlot - MIT License");
-        ImGui::BulletText("zlib - zlib License");
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::
+                        DearImGuiComponentFallback)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::
+                    DearImGuiComponentFallback)
+                .data());
+        ImGui::BulletText(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::ImPlotComponentFallback)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::ImPlotComponentFallback)
+                .data());
+        ImGui::BulletText(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::ZlibComponentFallback)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::ZlibComponentFallback)
+                .data());
     }
-    ImGui::BulletText("Modified stb headers bundled with Dear ImGui - MIT License");
+    ImGui::BulletText(
+        "%.*s",
+        static_cast<int>(
+            UiText(
+                language,
+                UiTextId::ModifiedStbNotice)
+                .size()),
+        UiText(
+            language,
+            UiTextId::ModifiedStbNotice)
+            .data());
     ImGui::PushTextWrapPos();
-    ImGui::TextDisabled("Full terms: Legal/EULA.txt and Legal/THIRD_PARTY_NOTICES.txt.");
-    ImGui::TextDisabled("Scientific data attribution: Legal/DATA_SOURCES.txt.");
+    const std::string_view full_terms = UiText(
+        language,
+        UiTextId::FullTermsNotice);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(full_terms.size()),
+        full_terms.data());
+    const std::string_view data_attribution = UiText(
+        language,
+        UiTextId::DataAttributionNotice);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(data_attribution.size()),
+        data_attribution.data());
     ImGui::PopTextWrapPos();
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Diagnostics");
+    const std::string diagnostics_heading =
+        StableUiLabel(
+            language,
+            UiTextId::Diagnostics,
+            "SpecForgeAboutDiagnostics");
+    ImGui::SeparatorText(
+        diagnostics_heading.c_str());
     const std::string log_path =
         PathToUtf8(settings.profile_output_directory);
-    ImGui::TextDisabled("Performance logs");
+    const std::string_view performance_logs = UiText(
+        language,
+        UiTextId::PerformanceLogs);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(performance_logs.size()),
+        performance_logs.data());
     ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(log_path.c_str());
     ImGui::PopTextWrapPos();
-    if (ImGui::Button("Open Log Folder")) {
+    const std::string open_log_label =
+        StableUiLabel(
+            language,
+            UiTextId::OpenLogFolder,
+            "SpecForgeOpenLogFolder");
+    if (ImGui::Button(open_log_label.c_str())) {
         OpenDirectory(
             settings.profile_output_directory,
-            "log folder");
+            language,
+            UiTextId::LogFolderPrepareError,
+            UiTextId::LogFolderOpenError,
+            UiTextId::LogFolderOpened);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Copy Diagnostic Information")) {
+    const std::string copy_diagnostics_label =
+        StableUiLabel(
+            language,
+            UiTextId::CopyDiagnosticInformation,
+            "SpecForgeCopyDiagnosticInformation");
+    if (ImGui::Button(
+            copy_diagnostics_label.c_str())) {
         CopyDiagnosticInformation(
-            settings.profile_output_directory);
+            settings.profile_output_directory,
+            language);
     }
 
     if (!action_status_.empty()) {
@@ -1123,45 +1727,61 @@ bool SettingsPanelUi::CanRestoreProfileOutputDirectory(
             ApplicationSettingsStatusKind::Ready;
 }
 
-void SettingsPanelUi::OpenDirectory(const std::filesystem::path& path, const char* label)
+void SettingsPanelUi::OpenDirectory(
+    const std::filesystem::path& path,
+    UiLanguage language,
+    UiTextId prepare_error,
+    UiTextId open_error,
+    UiTextId opened)
 {
     std::error_code directory_error;
     std::filesystem::create_directories(path, directory_error);
     if (directory_error) {
         action_failed_ = true;
-        action_status_ = std::string("Could not prepare the ") + label + ".";
+        action_status_ = UiText(
+            language,
+            prepare_error);
         return;
     }
 
     const HINSTANCE result = ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     if (reinterpret_cast<std::intptr_t>(result) <= 32) {
         action_failed_ = true;
-        action_status_ = std::string("Could not open the ") + label + ".";
+        action_status_ = UiText(
+            language,
+            open_error);
         return;
     }
 
     action_failed_ = false;
-    action_status_ = std::string("Opened the ") + label + ".";
+    action_status_ = UiText(language, opened);
 }
 
-void SettingsPanelUi::CopyPath(const std::filesystem::path& path, const char* label)
+void SettingsPanelUi::CopyPath(
+    const std::filesystem::path& path,
+    UiLanguage language,
+    UiTextId copied)
 {
     const std::string path_text = PathToUtf8(path);
     ImGui::SetClipboardText(path_text.c_str());
     action_failed_ = false;
-    action_status_ = label;
+    action_status_ = UiText(language, copied);
 }
 
 void SettingsPanelUi::CopyDiagnosticInformation(
-    const std::filesystem::path& profile_output_directory)
+    const std::filesystem::path& profile_output_directory,
+    UiLanguage language)
 {
     const std::string diagnostics =
         FormatDiagnosticInformation(
             environment_,
-            profile_output_directory);
+            profile_output_directory,
+            language);
     ImGui::SetClipboardText(diagnostics.c_str());
     action_failed_ = false;
-    action_status_ = "Diagnostic information copied.";
+    action_status_ = UiText(
+        language,
+        UiTextId::DiagnosticInformationCopied);
 }
 
 }  // namespace specforge

@@ -4,6 +4,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
+#include "ui/ui_text.h"
 
 #include <array>
 #include <filesystem>
@@ -27,13 +28,27 @@ public:
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
         SampleWorkflowShortcut& shortcut);
+    void RenderLabeling(
+        PanelSessionInteraction& interaction,
+        UiLanguage language,
+        bool* open,
+        const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        SampleWorkflowShortcut& shortcut);
 
     void RenderFilters(
         PanelSessionInteraction& interaction,
         bool* open);
+    void RenderFilters(
+        PanelSessionInteraction& interaction,
+        UiLanguage language,
+        bool* open);
 
     void RenderSorting(
         PanelSessionInteraction& interaction,
+        bool* open);
+    void RenderSorting(
+        PanelSessionInteraction& interaction,
+        UiLanguage language,
         bool* open);
 
 private:

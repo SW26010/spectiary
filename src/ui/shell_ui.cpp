@@ -1,6 +1,7 @@
 #include "ui/shell_ui.h"
 
 #include "app/runtime_paths.h"
+#include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/top_bar_status_hover.h"
@@ -14,6 +15,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <optional>
@@ -29,7 +31,6 @@ using Microsoft::WRL::ComPtr;
 
 constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
-constexpr const char* kImmersivePlotWindow = "Spectrum###SpecForgeSpectrumImmersiveV1";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
@@ -100,7 +101,8 @@ bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
     std::string_view source_load_error,
-    const LocalUserStateHealthView& persistence)
+    const LocalUserStateHealthView& persistence,
+    UiLanguage language)
 {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -130,24 +132,44 @@ bool RenderTopBarStatus(
     const bool operation_important =
         operation_error || source_load_active ||
         persistence_important;
-    std::string operation_text = "Ready";
+    std::string operation_text(
+        UiText(language, UiTextId::Ready));
     if (operation_error) {
-        operation_text = "Load failed";
+        operation_text =
+            UiText(language, UiTextId::LoadFailed);
     } else if (source_load_active) {
-        operation_text = "Loading source...";
+        operation_text =
+            UiText(language, UiTextId::LoadingSource);
     } else if (persistence_retrying) {
-        operation_text = "State save retrying";
+        operation_text =
+            UiText(language, UiTextId::StateSaveRetrying);
     } else if (persistence_warning) {
-        operation_text = "State warning";
+        operation_text =
+            UiText(language, UiTextId::StateWarning);
     } else if (persistence_recovered) {
-        operation_text = "State recovered";
+        operation_text =
+            UiText(language, UiTextId::StateRecovered);
     }
     const std::string frame_text =
-        "Frame " + std::to_string(static_cast<unsigned long long>(status.frame_index));
+        std::string(UiText(language, UiTextId::Frame)) +
+        " " +
+        std::to_string(
+            static_cast<unsigned long long>(
+                status.frame_index));
     const std::string dimensions_text =
         std::to_string(status.client_width) + "x" + std::to_string(status.client_height);
-    const ProfileRecordingUiPresentation recording_presentation =
+    ProfileRecordingUiPresentation recording_presentation =
         ResolveProfileRecordingUiPresentation(status.profile_open, status.profile_stopping);
+    recording_presentation.status_text =
+        status.profile_stopping
+        ? UiText(
+            language,
+            UiTextId::FinishingRecording)
+        : (status.profile_open
+            ? UiText(
+                language,
+                UiTextId::PerformanceRecording)
+            : std::string_view{});
 
     constexpr float kRecordingIndicatorRadius = 4.0f;
     constexpr float kRecordingIndicatorSpacing = 5.0f;
@@ -264,8 +286,13 @@ bool RenderTopBarStatus(
 
     if (layout.show_operation && operation_error &&
         IsTopBarStatusHoverTarget(operation_rect.Min, operation_rect.Max)) {
+        const std::string_view dismiss_hint = UiText(
+            language,
+            UiTextId::LoadFailedDismissHint);
         ImGui::SetTooltip(
-            "Load failed (click to dismiss):\n%.*s",
+            "%.*s\n%.*s",
+            static_cast<int>(dismiss_hint.size()),
+            dismiss_hint.data(),
             static_cast<int>(source_load_error.size()),
             source_load_error.data());
     }
@@ -539,7 +566,8 @@ std::optional<std::filesystem::path> DialogResultPath(IFileDialog* dialog)
     return path;
 }
 
-std::optional<std::filesystem::path> ShowSourceFilePicker()
+std::optional<std::filesystem::path> ShowSourceFilePicker(
+    UiLanguage language)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -557,15 +585,44 @@ std::optional<std::filesystem::path> ShowSourceFilePicker()
         dialog->SetOptions(options);
     }
 
-    static constexpr COMDLG_FILTERSPEC kSourceFilters[] = {
-        {L"Spectrum sources", L"*.npy;*.csv;*.fits;*.fit;*.fts;*.fits.gz"},
-        {L"NumPy arrays", L"*.npy"},
-        {L"CSV files", L"*.csv"},
-        {L"FITS files", L"*.fits;*.fit;*.fts;*.fits.gz"},
-        {L"All files", L"*.*"},
+    const std::array<std::wstring, 5> filter_names = {
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::SpectrumSourcesFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::NumpyArraysFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::CsvFilesFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::FitsFilesFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::AllFilesFilter)),
     };
-    dialog->SetTitle(L"Add source file");
-    dialog->SetFileTypes(static_cast<UINT>(sizeof(kSourceFilters) / sizeof(kSourceFilters[0])), kSourceFilters);
+    const std::array<COMDLG_FILTERSPEC, 5>
+        source_filters = {{
+            {
+                filter_names[0].c_str(),
+                L"*.npy;*.csv;*.fits;*.fit;*.fts;*.fits.gz",
+            },
+            {filter_names[1].c_str(), L"*.npy"},
+            {filter_names[2].c_str(), L"*.csv"},
+            {
+                filter_names[3].c_str(),
+                L"*.fits;*.fit;*.fts;*.fits.gz",
+            },
+            {filter_names[4].c_str(), L"*.*"},
+        }};
+    const std::wstring title = Utf8ToWide(UiText(
+        language,
+        UiTextId::AddSourceFileDialog));
+    dialog->SetTitle(title.c_str());
+    dialog->SetFileTypes(
+        static_cast<UINT>(source_filters.size()),
+        source_filters.data());
     dialog->SetFileTypeIndex(1);
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
@@ -576,7 +633,9 @@ std::optional<std::filesystem::path> ShowSourceFilePicker()
     return DialogResultPath(dialog.Get());
 }
 
-std::optional<std::filesystem::path> ShowFolderPicker(const wchar_t* title)
+std::optional<std::filesystem::path> ShowFolderPicker(
+    UiLanguage language,
+    UiTextId title_id)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -593,7 +652,9 @@ std::optional<std::filesystem::path> ShowFolderPicker(const wchar_t* title)
         options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_PICKFOLDERS;
         dialog->SetOptions(options);
     }
-    dialog->SetTitle(title);
+    const std::wstring title = Utf8ToWide(
+        UiText(language, title_id));
+    dialog->SetTitle(title.c_str());
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {
@@ -603,12 +664,16 @@ std::optional<std::filesystem::path> ShowFolderPicker(const wchar_t* title)
     return DialogResultPath(dialog.Get());
 }
 
-std::optional<std::filesystem::path> ShowSourceFolderPicker()
+std::optional<std::filesystem::path> ShowSourceFolderPicker(
+    UiLanguage language)
 {
-    return ShowFolderPicker(L"Add source folder");
+    return ShowFolderPicker(
+        language,
+        UiTextId::AddSourceFolderDialog);
 }
 
-std::optional<std::filesystem::path> ShowAnnotationFilePicker()
+std::optional<std::filesystem::path> ShowAnnotationFilePicker(
+    UiLanguage language)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -626,14 +691,26 @@ std::optional<std::filesystem::path> ShowAnnotationFilePicker()
         dialog->SetOptions(options);
     }
 
-    static constexpr COMDLG_FILTERSPEC kAnnotationFilters[] = {
-        {L"NumPy annotation arrays", L"*.npy"},
-        {L"All files", L"*.*"},
+    const std::array<std::wstring, 2> filter_names = {
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::NumpyAnnotationArraysFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::AllFilesFilter)),
     };
-    dialog->SetTitle(L"Open annotation file");
+    const std::array<COMDLG_FILTERSPEC, 2>
+        annotation_filters = {{
+            {filter_names[0].c_str(), L"*.npy"},
+            {filter_names[1].c_str(), L"*.*"},
+        }};
+    const std::wstring title = Utf8ToWide(UiText(
+        language,
+        UiTextId::OpenAnnotationFileDialog));
+    dialog->SetTitle(title.c_str());
     dialog->SetFileTypes(
-        static_cast<UINT>(sizeof(kAnnotationFilters) / sizeof(kAnnotationFilters[0])),
-        kAnnotationFilters);
+        static_cast<UINT>(annotation_filters.size()),
+        annotation_filters.data());
     dialog->SetFileTypeIndex(1);
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
@@ -644,7 +721,8 @@ std::optional<std::filesystem::path> ShowAnnotationFilePicker()
     return DialogResultPath(dialog.Get());
 }
 
-std::optional<std::filesystem::path> ShowLabelOutputFilePicker()
+std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
+    UiLanguage language)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -662,14 +740,26 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker()
         dialog->SetOptions(options);
     }
 
-    static constexpr COMDLG_FILTERSPEC kLabelOutputFilters[] = {
-        {L"NumPy label arrays", L"*.npy"},
-        {L"All files", L"*.*"},
+    const std::array<std::wstring, 2> filter_names = {
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::NumpyLabelArraysFilter)),
+        Utf8ToWide(UiText(
+            language,
+            UiTextId::AllFilesFilter)),
     };
-    dialog->SetTitle(L"Save labeling annotation");
+    const std::array<COMDLG_FILTERSPEC, 2>
+        label_output_filters = {{
+            {filter_names[0].c_str(), L"*.npy"},
+            {filter_names[1].c_str(), L"*.*"},
+        }};
+    const std::wstring title = Utf8ToWide(UiText(
+        language,
+        UiTextId::SaveLabelingAnnotationDialog));
+    dialog->SetTitle(title.c_str());
     dialog->SetFileTypes(
-        static_cast<UINT>(sizeof(kLabelOutputFilters) / sizeof(kLabelOutputFilters[0])),
-        kLabelOutputFilters);
+        static_cast<UINT>(label_output_filters.size()),
+        label_output_filters.data());
     dialog->SetFileTypeIndex(1);
     dialog->SetDefaultExtension(L"npy");
 
@@ -730,35 +820,50 @@ SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
 
 }  // namespace
 
-std::string ShellLocalStateFlushResult::FailureMessage() const
+std::string ShellLocalStateFlushResult::FailureMessage(
+    UiLanguage language) const
 {
     if (all_saved()) {
         return {};
     }
-    std::string message =
-        "SpecForge could not save all local state before exiting.\n\n"
-        "Unsaved areas:";
+    std::string message(
+        UiText(
+            language,
+            UiTextId::LocalStateFlushIntro));
+    message += "\n\n";
+    message += UiText(
+        language,
+        UiTextId::UnsavedAreas);
+    const auto append_area = [&](
+                                 UiTextId text_id) {
+        message += "\n- ";
+        message += UiText(language, text_id);
+    };
     if (!application_settings_saved) {
-        message += "\n- Application settings";
+        append_area(
+            UiTextId::ApplicationSettingsArea);
     }
     if (!source_collection.source_session_saved) {
-        message += "\n- Source session";
+        append_area(UiTextId::SourceSessionArea);
     }
     if (!source_collection.navigation_saved) {
-        message += "\n- Sample navigation";
+        append_area(
+            UiTextId::SampleNavigationArea);
     }
     if (!source_collection.labeling_saved) {
-        message += "\n- Sample labeling";
+        append_area(UiTextId::SampleLabelingArea);
     }
     if (!source_collection.workflow_saved) {
-        message += "\n- Sample workflow";
+        append_area(UiTextId::SampleWorkflowArea);
     }
     if (!spectral_lines_saved) {
-        message += "\n- Spectral-line state";
+        append_area(
+            UiTextId::SpectralLineStateArea);
     }
-    message +=
-        "\n\nChanges in these areas may not be restored "
-        "the next time SpecForge starts.";
+    message += "\n\n";
+    message += UiText(
+        language,
+        UiTextId::LocalStateMayNotRestore);
     return message;
 }
 
@@ -822,7 +927,8 @@ ShellUi::~ShellUi()
     const ShellLocalStateFlushResult result =
         FlushLocalState();
     if (!result.all_saved()) {
-        std::string message = result.FailureMessage();
+        std::string message = result.FailureMessage(
+            application_settings_.View().language);
         if (!message.empty()) {
             message.push_back('\n');
             OutputDebugStringA(message.c_str());
@@ -1000,9 +1106,22 @@ std::optional<int> ShellUi::TakeAppliedUiScalePercentage()
         std::nullopt);
 }
 
+std::optional<UiLanguage>
+ShellUi::TakeAppliedUiLanguage()
+{
+    return std::exchange(
+        applied_ui_language_,
+        std::nullopt);
+}
+
 int ShellUi::ui_scale_percentage() const
 {
     return application_settings_.View().ui_scale_percentage;
+}
+
+UiLanguage ShellUi::ui_language() const
+{
+    return application_settings_.View().language;
 }
 
 std::filesystem::path ShellUi::profile_output_directory() const
@@ -1117,21 +1236,27 @@ void ShellUi::PresentFrame(
 
 void ShellUi::OpenSourceFromFilePicker()
 {
-    if (std::optional<std::filesystem::path> path = ShowSourceFilePicker()) {
+    if (std::optional<std::filesystem::path> path =
+            ShowSourceFilePicker(
+                application_settings_.View().language)) {
         OpenSource(*path);
     }
 }
 
 void ShellUi::OpenSourceFromFolderPicker()
 {
-    if (std::optional<std::filesystem::path> path = ShowSourceFolderPicker()) {
+    if (std::optional<std::filesystem::path> path =
+            ShowSourceFolderPicker(
+                application_settings_.View().language)) {
         OpenSource(*path);
     }
 }
 
 void ShellUi::OpenAnnotationFromFilePicker()
 {
-    if (std::optional<std::filesystem::path> path = ShowAnnotationFilePicker()) {
+    if (std::optional<std::filesystem::path> path =
+            ShowAnnotationFilePicker(
+                application_settings_.View().language)) {
         SourceCollectionSessionResult result =
             SubmitSessionCommand(SourceCollectionSessionIntent::EditSourceCollection(
                 SourceCollectionIntent::AddReadOnlyAnnotationResult(*path)));
@@ -1150,6 +1275,8 @@ const SourceCollectionSessionView& ShellUi::SessionView()
 
 LocalUserStateHealthView ShellUi::PersistenceHealth()
 {
+    const UiLanguage language =
+        application_settings_.View().language;
     LocalUserStateHealthView health =
         SessionView().persistence;
     const auto append_setting = [&](
@@ -1161,20 +1288,22 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
             application_settings_.PersistenceStatus(setting));
     };
     append_setting(
-        "Language settings",
+        UiText(language, UiTextId::Language),
         ApplicationSetting::Language);
     append_setting(
-        "UI scale settings",
+        UiText(language, UiTextId::UiScale),
         ApplicationSetting::UiScale);
     append_setting(
-        "Profile settings",
+        UiText(
+            language,
+            UiTextId::ProfileOutputDirectory),
         ApplicationSetting::ProfileOutputDirectory);
     append_setting(
-        "Panel visibility",
+        UiText(language, UiTextId::PanelVisibility),
         ApplicationSetting::PanelVisibility);
     AppendLocalUserStateHealth(
         health,
-        "Spectral lines",
+        UiText(language, UiTextId::SpectralLines),
         spectral_lines_panel_.PersistenceStatus());
     return health;
 }
@@ -1241,6 +1370,8 @@ void ShellUi::RenderDockHost(const ShellStatus& status)
 
 void ShellUi::RenderImmersivePlot(const ShellStatus& status)
 {
+    const UiLanguage language =
+        application_settings_.View().language;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
@@ -1255,7 +1386,15 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    const bool plot_visible = ImGui::Begin(kImmersivePlotWindow, nullptr, flags);
+    const std::string immersive_plot_window =
+        StableUiLabel(
+            language,
+            UiTextId::Spectrum,
+            "SpecForgeSpectrumImmersiveV1");
+    const bool plot_visible = ImGui::Begin(
+        immersive_plot_window.c_str(),
+        nullptr,
+        flags);
     ImGui::PopStyleVar(3);
     if (!plot_visible) {
         ImGui::End();
@@ -1283,8 +1422,13 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     }
 
     if (status.profile_open) {
-        constexpr const char* kRecordingLabel = "REC  Performance";
-        const ImVec2 text_size = ImGui::CalcTextSize(kRecordingLabel);
+        const std::string_view recording_label = UiText(
+            language,
+            UiTextId::PerformanceRecordingBadge);
+        const ImVec2 text_size = ImGui::CalcTextSize(
+            recording_label.data(),
+            recording_label.data() +
+                recording_label.size());
         const ImVec2 window_pos = ImGui::GetWindowPos();
         const ImVec2 window_size = ImGui::GetWindowSize();
         const ImVec2 label_min(
@@ -1297,7 +1441,14 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
             ImVec2(label_min.x + 9.0f, label_min.y + 5.0f + text_size.y * 0.5f),
             3.5f,
             IM_COL32(235, 64, 58, 255));
-        draw_list->AddText(ImVec2(label_min.x + 17.0f, label_min.y + 5.0f), IM_COL32_WHITE, kRecordingLabel);
+        draw_list->AddText(
+            ImVec2(
+                label_min.x + 17.0f,
+                label_min.y + 5.0f),
+            IM_COL32_WHITE,
+            recording_label.data(),
+            recording_label.data() +
+                recording_label.size());
     }
 
     const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -1321,18 +1472,39 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         return;
     }
 
-    if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Open File...")) {
+    const ApplicationSettingsView settings =
+        application_settings_.View();
+    const UiLanguage language = settings.language;
+    const std::string file_menu = StableUiLabel(
+        language,
+        UiTextId::FileMenu,
+        "SpecForgeFileMenu");
+    if (ImGui::BeginMenu(file_menu.c_str())) {
+        const std::string open_file = StableUiLabel(
+            language,
+            UiTextId::OpenFile,
+            "SpecForgeOpenFile");
+        if (ImGui::MenuItem(open_file.c_str())) {
             OpenSourceFromFilePicker();
         }
-        if (ImGui::MenuItem("Open Folder...")) {
+        const std::string open_folder = StableUiLabel(
+            language,
+            UiTextId::OpenFolder,
+            "SpecForgeOpenFolder");
+        if (ImGui::MenuItem(open_folder.c_str())) {
             OpenSourceFromFolderPicker();
         }
         const bool can_open_annotation = SessionView().can_add_read_only_annotation;
         if (!can_open_annotation) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::MenuItem("Open File as Annotation...")) {
+        const std::string open_annotation =
+            StableUiLabel(
+                language,
+                UiTextId::OpenFileAsAnnotation,
+                "SpecForgeOpenFileAsAnnotation");
+        if (ImGui::MenuItem(
+                open_annotation.c_str())) {
             OpenAnnotationFromFilePicker();
         }
         if (!can_open_annotation) {
@@ -1341,14 +1513,32 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         ImGui::EndMenu();
     }
 
-    if (ImGui::BeginMenu("View")) {
+    const std::string view_menu = StableUiLabel(
+        language,
+        UiTextId::ViewMenu,
+        "SpecForgeViewMenu");
+    if (ImGui::BeginMenu(view_menu.c_str())) {
         const PanelVisibilityState panel_visibility =
-            application_settings_.View().panel_visibility;
-        if (ImGui::MenuItem("Immersive Plot Mode", "F11", immersive_plot_mode_)) {
+            settings.panel_visibility;
+        const std::string immersive_plot_label =
+            StableUiLabel(
+                language,
+                UiTextId::ImmersivePlotMode,
+                "SpecForgeImmersivePlotMode");
+        if (ImGui::MenuItem(
+                immersive_plot_label.c_str(),
+                "F11",
+                immersive_plot_mode_)) {
             immersive_plot_toggle_requested_ = true;
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Show all panels")) {
+        const std::string show_all_panels =
+            StableUiLabel(
+                language,
+                UiTextId::ShowAllPanels,
+                "SpecForgeShowAllPanels");
+        if (ImGui::MenuItem(
+                show_all_panels.c_str())) {
             (void)application_settings_.Apply(
                 ApplicationSettingsIntent::ShowAllPanels(),
                 {});
@@ -1356,10 +1546,19 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
         ImGui::Separator();
         const auto render_panel_toggle =
             [this](
-                const char* label,
+                UiLanguage current_language,
+                UiTextId text_id,
+                std::string_view stable_id,
                 ApplicationPanel panel,
                 bool visible) {
-                if (ImGui::MenuItem(label, nullptr, visible)) {
+                const std::string label = StableUiLabel(
+                    current_language,
+                    text_id,
+                    stable_id);
+                if (ImGui::MenuItem(
+                        label.c_str(),
+                        nullptr,
+                        visible)) {
                     (void)application_settings_.Apply(
                         ApplicationSettingsIntent::
                             TogglePanelVisibility(panel),
@@ -1367,45 +1566,67 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
                 }
             };
         render_panel_toggle(
-            "Files",
+            language,
+            UiTextId::Files,
+            "SpecForgeViewFiles",
             ApplicationPanel::Files,
             panel_visibility.files);
         render_panel_toggle(
-            "Navigation",
+            language,
+            UiTextId::Navigation,
+            "SpecForgeViewNavigation",
             ApplicationPanel::Navigation,
             panel_visibility.navigation);
         render_panel_toggle(
-            "Annotations",
+            language,
+            UiTextId::Annotations,
+            "SpecForgeViewAnnotations",
             ApplicationPanel::Annotations,
             panel_visibility.annotations);
         render_panel_toggle(
-            "Labeling",
+            language,
+            UiTextId::Labeling,
+            "SpecForgeViewLabeling",
             ApplicationPanel::Labeling,
             panel_visibility.labeling);
         render_panel_toggle(
-            "Sample Filters",
+            language,
+            UiTextId::SampleFilters,
+            "SpecForgeViewSampleFilters",
             ApplicationPanel::Filters,
             panel_visibility.filters);
         render_panel_toggle(
-            "Sample Sorting",
+            language,
+            UiTextId::SampleSorting,
+            "SpecForgeViewSampleSorting",
             ApplicationPanel::Sorting,
             panel_visibility.sorting);
         render_panel_toggle(
-            "Smoothing",
+            language,
+            UiTextId::Smoothing,
+            "SpecForgeViewSmoothing",
             ApplicationPanel::Smoothing,
             panel_visibility.smoothing);
         render_panel_toggle(
-            "Information",
+            language,
+            UiTextId::Information,
+            "SpecForgeViewInformation",
             ApplicationPanel::Information,
             panel_visibility.information);
         render_panel_toggle(
-            "Spectral Lines",
+            language,
+            UiTextId::SpectralLines,
+            "SpecForgeViewSpectralLines",
             ApplicationPanel::SpectralLines,
             panel_visibility.spectral_lines);
         ImGui::EndMenu();
     }
 
-    if (ImGui::MenuItem("Settings")) {
+    const std::string settings_label = StableUiLabel(
+        language,
+        UiTextId::Settings,
+        "SpecForgeOpenSettings");
+    if (ImGui::MenuItem(settings_label.c_str())) {
         settings_panel_ui_.Open();
     }
 
@@ -1417,7 +1638,8 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
             status,
             activation_status.loading,
             activation_status.error_message,
-            persistence)) {
+            persistence,
+            language)) {
         source_activation_.AcknowledgeLoadFailures();
     }
 
@@ -1432,11 +1654,11 @@ void ShellUi::RenderFilesPanel(
         panel_session_interaction_,
         language,
         &panel_open,
-        []() {
-            return ShowSourceFilePicker();
+        [language]() {
+            return ShowSourceFilePicker(language);
         },
-        []() {
-            return ShowSourceFolderPicker();
+        [language]() {
+            return ShowSourceFolderPicker(language);
         },
         [this](const std::filesystem::path& path) {
             OpenSource(path);
@@ -1451,6 +1673,7 @@ void ShellUi::RenderNavigationPanel(bool panel_open)
     SampleWorkflowShortcut shortcut;
     source_collection_panel_ui_.RenderNavigation(
         panel_session_interaction_,
+        application_settings_.View().language,
         &panel_open,
         shortcut);
     HandleSessionAction(
@@ -1467,8 +1690,10 @@ void ShellUi::RenderAnnotationsPanel(bool panel_open)
         panel_session_interaction_,
         application_settings_.View().language,
         &panel_open,
-        []() {
-            return ShowAnnotationFilePicker();
+        [language = application_settings_
+             .View()
+             .language]() {
+            return ShowAnnotationFilePicker(language);
         });
     HandleSessionAction(
         panel_session_interaction_.TakeAction());
@@ -1482,9 +1707,12 @@ void ShellUi::RenderLabelingPanel(bool panel_open)
     SampleWorkflowShortcut shortcut;
     sample_workflow_panel_ui_.RenderLabeling(
         panel_session_interaction_,
+        application_settings_.View().language,
         &panel_open,
-        []() {
-            return ShowLabelOutputFilePicker();
+        [language = application_settings_
+             .View()
+             .language]() {
+            return ShowLabelOutputFilePicker(language);
         },
         shortcut);
     HandleSessionAction(
@@ -1499,6 +1727,7 @@ void ShellUi::RenderFiltersPanel(bool panel_open)
 {
     sample_workflow_panel_ui_.RenderFilters(
         panel_session_interaction_,
+        application_settings_.View().language,
         &panel_open);
     HandleSessionAction(
         panel_session_interaction_.TakeAction());
@@ -1511,6 +1740,7 @@ void ShellUi::RenderSortingPanel(bool panel_open)
 {
     sample_workflow_panel_ui_.RenderSorting(
         panel_session_interaction_,
+        application_settings_.View().language,
         &panel_open);
     HandleSessionAction(
         panel_session_interaction_.TakeAction());
@@ -1521,8 +1751,14 @@ void ShellUi::RenderSortingPanel(bool panel_open)
 
 void ShellUi::RenderSmoothingPanel(bool panel_open)
 {
+    const UiLanguage language =
+        application_settings_.View().language;
+    const std::string smoothing_window = StableUiLabel(
+        language,
+        UiTextId::Smoothing,
+        "SpecForgeSmoothingV1");
     if (!ImGui::Begin(
-            kSmoothingWindow,
+            smoothing_window.c_str(),
             &panel_open)) {
         ImGui::End();
         SetPanelVisibility(
@@ -1608,8 +1844,15 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
 
 void ShellUi::RenderInfoTagsPanel(bool panel_open)
 {
+    const UiLanguage language =
+        application_settings_.View().language;
+    const std::string information_window =
+        StableUiLabel(
+            language,
+            UiTextId::Information,
+            "SpecForgeInfoTagsV2");
     if (!ImGui::Begin(
-            kInfoTagsWindow,
+            information_window.c_str(),
             &panel_open)) {
         ImGui::End();
         SetPanelVisibility(
@@ -1678,7 +1921,13 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
 
 void ShellUi::RenderMainPlot(const ShellStatus& status)
 {
-    if (!ImGui::Begin(kMainPlotWindow)) {
+    const UiLanguage language =
+        application_settings_.View().language;
+    const std::string spectrum_window = StableUiLabel(
+        language,
+        UiTextId::Spectrum,
+        "SpecForgeSpectrumV2");
+    if (!ImGui::Begin(spectrum_window.c_str())) {
         ImGui::End();
         return;
     }
@@ -1739,6 +1988,12 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
                 status.last_frame_capture_path,
             .frame_capture_status_message =
                 status.frame_capture_status_message,
+            .frame_capture_status =
+                status.frame_capture_status,
+            .frame_capture_status_operation =
+                status.frame_capture_status_operation,
+            .frame_capture_status_result =
+                status.frame_capture_status_result,
         });
     const ApplicationSettingsRuntimeState runtime{
         .profile_recording_in_progress =
@@ -1756,11 +2011,20 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
             applied_ui_scale_percentage_ =
                 application_settings_.View().
                     ui_scale_percentage;
+        } else if (
+            result.applied() &&
+            result.setting ==
+                ApplicationSetting::Language) {
+            applied_ui_language_ =
+                application_settings_.View().language;
         }
     }
     if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
         if (std::optional<std::filesystem::path> directory =
-                ShowFolderPicker(L"Choose performance profile output folder")) {
+                ShowFolderPicker(
+                    settings.language,
+                    UiTextId::
+                        ChooseProfileOutputFolderDialog)) {
             (void)application_settings_.Apply(
                 ApplicationSettingsIntent::
                     SetProfileOutputDirectory(
@@ -1832,6 +2096,7 @@ void ShellUi::RenderSpectralLinesPanel(bool panel_open)
     spectral_lines_panel_ui_.Render(
         spectral_lines_panel_,
         session_.CurrentSampleSnapshot(),
+        application_settings_.View().language,
         &panel_open);
     SetPanelVisibility(
         ApplicationPanel::SpectralLines,

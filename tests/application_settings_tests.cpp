@@ -178,8 +178,11 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
                     PersistenceError &&
             language_status.setting ==
                 specforge::ApplicationSetting::Language &&
+            language_status.reason ==
+                specforge::ApplicationSettingsStatusReason::
+                    SettingsWriteFailed &&
             !language_status.detail.empty(),
-        "save failure should remain visible on the owner view");
+        "save failure should remain structured on the owner view");
     Require(
         !settings
              .PersistenceStatus(
@@ -243,7 +246,13 @@ void TestUiScaleValidationAndPersistenceFirstBehavior()
     Require(
         rejected.outcome ==
                 specforge::ApplicationSettingsOutcome::Rejected &&
-            settings.View().ui_scale_percentage == 150,
+            settings.View().ui_scale_percentage == 150 &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::UiScale)
+                    .reason ==
+                specforge::ApplicationSettingsStatusReason::
+                    UiScaleOutOfRange,
         "out-of-range UI scale should be rejected without changing state");
 
     const std::filesystem::path blocker =
@@ -430,7 +439,10 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
                 specforge::ApplicationSettingsStatusKind::
                     LoadWarning &&
             language_status.setting ==
-                specforge::ApplicationSetting::Language,
+                specforge::ApplicationSetting::Language &&
+            language_status.reason ==
+                specforge::ApplicationSettingsStatusReason::
+                    SavedValueUnreadable,
         "damaged language settings should produce a typed load warning");
     const specforge::ApplicationSettingsStatus& ui_scale_status =
         loaded.StatusFor(specforge::ApplicationSetting::UiScale);
@@ -486,7 +498,14 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
         {});
     Require(
         result.outcome ==
-            specforge::ApplicationSettingsOutcome::Rejected,
+                specforge::ApplicationSettingsOutcome::Rejected &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::
+                            ProfileOutputDirectory)
+                    .reason ==
+                specforge::ApplicationSettingsStatusReason::
+                    EnvironmentOverrideActive,
         "environment-owned profile directory should reject edits");
     Require(
         settings.View().profile_output_directory ==
@@ -569,8 +588,9 @@ void TestProfileDirectoryChangeIsRejectedWhileRecording()
                 .StatusFor(
                     specforge::ApplicationSetting::
                         ProfileOutputDirectory)
-                .kind ==
-            specforge::ApplicationSettingsStatusKind::Rejected,
+                .reason ==
+            specforge::ApplicationSettingsStatusReason::
+                RecordingInProgress,
         "recording rejection should remain visible on the profile setting");
 
     const std::filesystem::path custom_directory =

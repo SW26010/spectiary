@@ -9,6 +9,7 @@
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
 #include "platform/win32_touchpad_gesture_source.h"
+#include "profile/profile_recording_status.h"
 #include "profile/profile_sink.h"
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "renderer/d3d11_renderer.h"
@@ -71,6 +72,7 @@ private:
     void ApplyUiScale(
         float system_dpi_scale,
         int user_scale_percentage);
+    void ApplyLocalizedWindowTitle();
     void WriteDpiConfiguration(std::string_view reason);
     void ToggleFullscreen();
     void EnterFullscreen();
@@ -133,8 +135,7 @@ private:
     bool immersive_plot_entered_fullscreen_ = false;
     bool shutdown_complete_ = false;
     ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
-    std::string profile_status_message_ =
-        "Use Settings > Diagnostics to record.";
+    ProfileRecordingStatus profile_status_;
     std::uint64_t frame_index_ = 0;
     std::optional<RuntimeResourceWorkload>
         runtime_resource_workload_;
