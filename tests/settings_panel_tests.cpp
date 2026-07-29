@@ -73,6 +73,26 @@ struct SettingsPanelUiTestAccess {
     {
         panel.SetUiScalePercentage(percentage);
     }
+    static std::string SectionLabel(
+        SettingsSection section,
+        UiLanguage language)
+    {
+        return SettingsPanelUi::SectionLabel(
+            section,
+            language);
+    }
+    static std::string AppearanceThemeLabel(
+        UiLanguage language)
+    {
+        return SettingsPanelUi::
+            AppearanceThemeLabel(language);
+    }
+    static std::string AppearanceAccentColorLabel(
+        UiLanguage language)
+    {
+        return SettingsPanelUi::
+            AppearanceAccentColorLabel(language);
+    }
     static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate)
@@ -173,6 +193,7 @@ struct LanguageRenderObservation {
 struct UiScaleRenderObservation {
     bool slider_hovered = false;
     bool slider_active = false;
+    bool reset_hovered = false;
 };
 
 LanguageRenderObservation RenderLanguageFrame(
@@ -216,27 +237,35 @@ LanguageRenderObservation RenderLanguageFrame(
 
 UiScaleRenderObservation RenderUiScaleFrame(
     specforge::SettingsPanelUi& panel,
-    int percentage = 100)
+    int percentage = 100,
+    specforge::UiLanguage language =
+        specforge::UiLanguage::English)
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
     io.DisplaySize = ImVec2(1600.0f, 1000.0f);
     ImGui::NewFrame();
     specforge::ApplicationSettingsView settings =
-        MakeSettingsView();
+        MakeSettingsView(language);
     settings.ui_scale_percentage = percentage;
     panel.Render(settings);
 
     UiScaleRenderObservation observation;
     for (ImGuiWindow* window : GImGui->Windows) {
         const ImGuiID slider_id =
-            window->GetID("UI scale");
+            window->GetID(
+                "UI scale###SpecForgeUiScale");
         observation.slider_hovered =
             observation.slider_hovered ||
             GImGui->HoveredId == slider_id;
         observation.slider_active =
             observation.slider_active ||
             GImGui->ActiveId == slider_id;
+        observation.reset_hovered =
+            observation.reset_hovered ||
+            GImGui->HoveredId ==
+                window->GetID(
+                    "Reset###SpecForgeUiScaleReset");
     }
     ImGui::EndFrame();
     return observation;
@@ -545,7 +574,10 @@ void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
     ImGui::GetIO().AddMousePosEvent(
         slider_position.x + 120.0f,
         slider_position.y);
-    observation = RenderUiScaleFrame(panel);
+    observation = RenderUiScaleFrame(
+        panel,
+        100,
+        specforge::UiLanguage::SimplifiedChinese);
     Require(
         observation.slider_active,
         "dragging should keep the UI scale slider active");
@@ -556,7 +588,10 @@ void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
         false);
-    observation = RenderUiScaleFrame(panel);
+    observation = RenderUiScaleFrame(
+        panel,
+        100,
+        specforge::UiLanguage::SimplifiedChinese);
     Require(
         !observation.slider_active,
         "releasing should deactivate the UI scale slider");
@@ -574,6 +609,83 @@ void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
     Require(
         !panel.TakeApplicationSettingsIntent(),
         "the released UI scale intent should be consumed once");
+}
+
+void TestLocalizedUiScaleResetEmitsDefaultIntent()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::Appearance);
+    panel.Open();
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    UiScaleRenderObservation observation =
+        RenderUiScaleFrame(
+            panel,
+            125,
+            specforge::UiLanguage::SimplifiedChinese);
+
+    float slider_y = 0.0f;
+    for (float y = 260.0f;
+         y <= 520.0f && !observation.slider_hovered;
+         y += 2.0f) {
+        slider_y = y;
+        ImGui::GetIO().AddMousePosEvent(700.0f, y);
+        observation = RenderUiScaleFrame(
+            panel,
+            125,
+            specforge::UiLanguage::SimplifiedChinese);
+    }
+    Require(
+        observation.slider_hovered,
+        "fixture should locate the localized UI scale row");
+
+    ImVec2 reset_position;
+    for (float x = 600.0f;
+         x <= 1150.0f && !observation.reset_hovered;
+         x += 2.0f) {
+        reset_position = ImVec2(x, slider_y);
+        ImGui::GetIO().AddMousePosEvent(
+            reset_position.x,
+            reset_position.y);
+        observation = RenderUiScaleFrame(
+            panel,
+            125,
+            specforge::UiLanguage::SimplifiedChinese);
+    }
+    Require(
+        observation.reset_hovered,
+        "fixture should locate the localized UI scale reset action");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderUiScaleFrame(
+        panel,
+        125,
+        specforge::UiLanguage::SimplifiedChinese);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderUiScaleFrame(
+        panel,
+        125,
+        specforge::UiLanguage::SimplifiedChinese);
+
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetUiScale &&
+            intent->ui_scale_percentage == 100,
+        "localized UI scale reset should emit 100%");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "localized UI scale reset should be consumed once");
 }
 
 void TestLanguageSelectorEmitsOneShotIntent()
@@ -714,6 +826,76 @@ void TestLanguageRenderKeepsStableImGuiIds()
             ImHashStr(
                 "语言###SpecForgeSettingsLanguage"),
         "localized Language labels should retain one ImGui ID");
+    const std::string appearance_english =
+        specforge::SettingsPanelUiTestAccess::SectionLabel(
+            specforge::SettingsSection::Appearance,
+            specforge::UiLanguage::English);
+    const std::string appearance_chinese =
+        specforge::SettingsPanelUiTestAccess::SectionLabel(
+            specforge::SettingsSection::Appearance,
+            specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        appearance_english ==
+                "Appearance###SpecForgeSettingsAppearance" &&
+            appearance_chinese ==
+                "外观###SpecForgeSettingsAppearance",
+        "Appearance navigation should use the production stable suffix");
+    Require(
+        ImHashStr(appearance_english.c_str()) ==
+            ImHashStr(appearance_chinese.c_str()),
+        "localized Appearance labels should retain one ImGui ID");
+
+    const std::string theme_english =
+        specforge::SettingsPanelUiTestAccess::
+            AppearanceThemeLabel(
+                specforge::UiLanguage::English);
+    const std::string theme_chinese =
+        specforge::SettingsPanelUiTestAccess::
+            AppearanceThemeLabel(
+                specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        theme_english ==
+                "Theme###SpecForgeAppearanceTheme" &&
+            theme_chinese ==
+                "主题###SpecForgeAppearanceTheme",
+        "theme controls should use the production stable suffix");
+    Require(
+        ImHashStr(theme_english.c_str()) ==
+            ImHashStr(theme_chinese.c_str()),
+        "localized theme controls should retain one ImGui ID");
+
+    const std::string accent_english =
+        specforge::SettingsPanelUiTestAccess::
+            AppearanceAccentColorLabel(
+                specforge::UiLanguage::English);
+    const std::string accent_chinese =
+        specforge::SettingsPanelUiTestAccess::
+            AppearanceAccentColorLabel(
+                specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        accent_english ==
+                "Accent color###"
+                "SpecForgeAppearanceAccentColor" &&
+            accent_chinese ==
+                "强调色###"
+                "SpecForgeAppearanceAccentColor",
+        "accent color controls should use the production stable suffix");
+    Require(
+        ImHashStr(accent_english.c_str()) ==
+            ImHashStr(accent_chinese.c_str()),
+        "localized accent color controls should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "UI scale###SpecForgeUiScale") ==
+            ImHashStr(
+                "界面缩放###SpecForgeUiScale"),
+        "localized UI scale controls should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "Reset###SpecForgeUiScaleReset") ==
+            ImHashStr(
+                "重置###SpecForgeUiScaleReset"),
+        "localized reset actions should retain one ImGui ID");
     Require(
         ImHashStr(
             "Application language###"
@@ -859,6 +1041,7 @@ int main()
     TestWarnedFallbacksRemainDirectlyRepairable();
     TestUiScaleControlEmitsOneShotSettingsIntent();
     TestUiScaleSliderCommitsOnlyAfterEditDeactivation();
+    TestLocalizedUiScaleResetEmitsDefaultIntent();
     TestLanguageSelectorEmitsOneShotIntent();
     TestLanguageRenderKeepsStableImGuiIds();
     TestRenderSmoke();

@@ -53,30 +53,21 @@ std::string SettingsWindowLabel(UiLanguage language)
         "SpecForgeSettingsV1");
 }
 
-std::string SectionLabel(
-    SettingsSection section,
-    UiLanguage language)
+std::string AppearanceThemeItems(UiLanguage language)
 {
-    switch (section) {
-    case SettingsSection::General:
-        return "General";
-    case SettingsSection::Appearance:
-        return "Appearance";
-    case SettingsSection::Language:
-        return StableUiLabel(
-            language,
-            UiTextId::Language,
-            "SpecForgeSettingsLanguage");
-    case SettingsSection::Input:
-        return "Input";
-    case SettingsSection::DataAndRecovery:
-        return "Data & Recovery";
-    case SettingsSection::Diagnostics:
-        return "Diagnostics";
-    case SettingsSection::About:
-        return "About";
+    constexpr std::array kThemeTextIds = {
+        UiTextId::FollowSystemTheme,
+        UiTextId::LightTheme,
+        UiTextId::DarkTheme,
+    };
+
+    std::string items;
+    for (const UiTextId text_id : kThemeTextIds) {
+        items += UiText(language, text_id);
+        items.push_back('\0');
     }
-    return "Settings";
+    items.push_back('\0');
+    return items;
 }
 
 UiTextId LanguageNameTextId(UiLanguage language)
@@ -221,6 +212,53 @@ std::string FormatDiagnosticInformation(
     diagnostics += "\nLog directory: ";
     diagnostics += PathToUtf8(profile_output_directory);
     return diagnostics;
+}
+
+std::string SettingsPanelUi::SectionLabel(
+    SettingsSection section,
+    UiLanguage language)
+{
+    switch (section) {
+    case SettingsSection::General:
+        return "General";
+    case SettingsSection::Appearance:
+        return StableUiLabel(
+            language,
+            UiTextId::Appearance,
+            "SpecForgeSettingsAppearance");
+    case SettingsSection::Language:
+        return StableUiLabel(
+            language,
+            UiTextId::Language,
+            "SpecForgeSettingsLanguage");
+    case SettingsSection::Input:
+        return "Input";
+    case SettingsSection::DataAndRecovery:
+        return "Data & Recovery";
+    case SettingsSection::Diagnostics:
+        return "Diagnostics";
+    case SettingsSection::About:
+        return "About";
+    }
+    return "Settings";
+}
+
+std::string SettingsPanelUi::AppearanceThemeLabel(
+    UiLanguage language)
+{
+    return StableUiLabel(
+        language,
+        UiTextId::Theme,
+        "SpecForgeAppearanceTheme");
+}
+
+std::string SettingsPanelUi::AppearanceAccentColorLabel(
+    UiLanguage language)
+{
+    return StableUiLabel(
+        language,
+        UiTextId::AccentColor,
+        "SpecForgeAppearanceAccentColor");
 }
 
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
@@ -415,22 +453,49 @@ void SettingsPanelUi::RenderGeneral()
 void SettingsPanelUi::RenderAppearance(
     const ApplicationSettingsView& settings)
 {
-    RenderSectionHeading("Appearance", "Adjust the application theme without changing scientific plot semantics.");
+    const UiLanguage language = settings.language;
+    RenderSectionHeading(
+        UiText(language, UiTextId::Appearance),
+        UiText(language, UiTextId::AppearancePageDescription));
 
     int theme = 2;
     float accent_color[3] = {0.24f, 0.55f, 0.86f};
+    const std::string theme_label =
+        AppearanceThemeLabel(language);
+    const std::string theme_items =
+        AppearanceThemeItems(language);
+    const std::string accent_color_label =
+        AppearanceAccentColorLabel(language);
     ImGui::BeginDisabled();
-    ImGui::Combo("Theme", &theme, "Follow system\0Light\0Dark\0");
-    ImGui::ColorEdit3("Accent color", accent_color, ImGuiColorEditFlags_NoInputs);
+    ImGui::Combo(
+        theme_label.c_str(),
+        &theme,
+        theme_items.c_str());
+    ImGui::ColorEdit3(
+        accent_color_label.c_str(),
+        accent_color,
+        ImGuiColorEditFlags_NoInputs);
     ImGui::EndDisabled();
-    RenderUnavailableNote(
-        "The current UI uses the built-in dark style.");
+    const std::string_view theme_unavailable = UiText(
+        language,
+        UiTextId::AppearanceThemeUnavailable);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos();
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(theme_unavailable.size()),
+        theme_unavailable.data());
+    ImGui::PopTextWrapPos();
 
     ImGui::Spacing();
     int ui_scale = ui_scale_draft_percentage_.value_or(
         settings.ui_scale_percentage);
+    const std::string ui_scale_label = StableUiLabel(
+        language,
+        UiTextId::UiScale,
+        "SpecForgeUiScale");
     const bool ui_scale_changed = ImGui::SliderInt(
-        "UI scale",
+        ui_scale_label.c_str(),
         &ui_scale,
         kMinimumUiScalePercentage,
         kMaximumUiScalePercentage,
@@ -450,14 +515,22 @@ void SettingsPanelUi::RenderAppearance(
         ui_scale_draft_percentage_.reset();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset##UiScale")) {
+    const std::string reset_label = StableUiLabel(
+        language,
+        UiTextId::Reset,
+        "SpecForgeUiScaleReset");
+    if (ImGui::Button(reset_label.c_str())) {
         ui_scale_draft_percentage_.reset();
         SetUiScalePercentage(kDefaultUiScalePercentage);
     }
+    const std::string_view ui_scale_description = UiText(
+        language,
+        UiTextId::UiScaleDescription);
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled(
-        "100%% follows Windows display scaling. This setting "
-        "adds an application-specific multiplier.");
+        "%.*s",
+        static_cast<int>(ui_scale_description.size()),
+        ui_scale_description.data());
     ImGui::PopTextWrapPos();
 
     const ApplicationSettingsStatus& setting_status =
@@ -474,16 +547,20 @@ void SettingsPanelUi::RenderAppearance(
     const ImVec4 feedback_color = warning
         ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
         : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+    const UiTextId feedback_text_id = warning
+        ? UiTextId::UiScaleLoadWarning
+        : (setting_status.kind ==
+                ApplicationSettingsStatusKind::Rejected
+            ? UiTextId::UiScaleRejected
+            : UiTextId::UiScaleSaveError);
+    const std::string_view feedback =
+        UiText(language, feedback_text_id);
     ImGui::PushTextWrapPos();
     ImGui::TextColored(
         feedback_color,
-        "%s",
-        warning
-            ? "The saved UI scale could not be loaded; using 100%."
-            : (setting_status.kind ==
-                    ApplicationSettingsStatusKind::Rejected
-                ? "The requested UI scale is not supported."
-                : "The UI scale could not be saved."));
+        "%.*s",
+        static_cast<int>(feedback.size()),
+        feedback.data());
     if (!setting_status.detail.empty()) {
         ImGui::TextDisabled(
             "%s",

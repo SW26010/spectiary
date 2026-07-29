@@ -26,6 +26,24 @@ constexpr std::array kTextByLanguage = {
             "The saved application language could not be loaded. English is being used."},
         std::string_view{
             "The application language could not be saved. The previous language is still in use."},
+        std::string_view{"Appearance"},
+        std::string_view{
+            "Adjust the application theme without changing scientific plot semantics."},
+        std::string_view{"Theme"},
+        std::string_view{"Follow system"},
+        std::string_view{"Light"},
+        std::string_view{"Dark"},
+        std::string_view{"Accent color"},
+        std::string_view{
+            "Not available yet. The current UI uses the built-in dark style."},
+        std::string_view{"UI scale"},
+        std::string_view{"Reset"},
+        std::string_view{
+            "100% follows Windows display scaling. This setting adds an application-specific multiplier."},
+        std::string_view{
+            "The saved UI scale could not be loaded; using 100%."},
+        std::string_view{"The requested UI scale is not supported."},
+        std::string_view{"The UI scale could not be saved."},
         std::string_view{"Experimental frame capture"},
         std::string_view{
             "Captures the requested frame from the main application viewport only. Detached viewport windows are excluded."},
@@ -53,6 +71,21 @@ constexpr std::array kTextByLanguage = {
         std::string_view{"本地化仍在逐步进行；SpecForge 的其它界面目前仍保持英文。"},
         std::string_view{"无法加载已保存的应用语言，当前使用英语。"},
         std::string_view{"无法保存应用语言，仍继续使用此前的语言。"},
+        std::string_view{"外观"},
+        std::string_view{"调整应用主题，不改变科学绘图语义。"},
+        std::string_view{"主题"},
+        std::string_view{"跟随系统"},
+        std::string_view{"浅色"},
+        std::string_view{"深色"},
+        std::string_view{"强调色"},
+        std::string_view{"暂不可用。当前界面使用内置深色样式。"},
+        std::string_view{"界面缩放"},
+        std::string_view{"重置"},
+        std::string_view{
+            "100% 跟随 Windows 显示缩放；此设置用于调整应用自身的缩放倍率。"},
+        std::string_view{"无法加载已保存的界面缩放比例，当前使用 100%。"},
+        std::string_view{"请求的界面缩放比例不受支持。"},
+        std::string_view{"无法保存界面缩放比例。"},
         std::string_view{"实验性画面捕获"},
         std::string_view{"仅从主应用视口捕获所请求的画面；不包含分离的视口窗口。"},
         std::string_view{"捕获下一主画面帧"},

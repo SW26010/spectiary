@@ -82,6 +82,90 @@ void TestRepresentativeMappingsAreExact()
         "Chinese frame capture output label should be exact");
 }
 
+void TestAppearanceMappingsAreExact()
+{
+    using specforge::UiLanguage;
+    using specforge::UiText;
+    using specforge::UiTextId;
+
+    struct ExpectedText {
+        UiTextId text_id;
+        std::string_view english;
+        std::string_view simplified_chinese;
+    };
+    constexpr std::array kExpectedTexts = {
+        ExpectedText{
+            UiTextId::Appearance,
+            "Appearance",
+            "外观"},
+        ExpectedText{
+            UiTextId::AppearancePageDescription,
+            "Adjust the application theme without changing scientific plot semantics.",
+            "调整应用主题，不改变科学绘图语义。"},
+        ExpectedText{
+            UiTextId::Theme,
+            "Theme",
+            "主题"},
+        ExpectedText{
+            UiTextId::FollowSystemTheme,
+            "Follow system",
+            "跟随系统"},
+        ExpectedText{
+            UiTextId::LightTheme,
+            "Light",
+            "浅色"},
+        ExpectedText{
+            UiTextId::DarkTheme,
+            "Dark",
+            "深色"},
+        ExpectedText{
+            UiTextId::AccentColor,
+            "Accent color",
+            "强调色"},
+        ExpectedText{
+            UiTextId::AppearanceThemeUnavailable,
+            "Not available yet. The current UI uses the built-in dark style.",
+            "暂不可用。当前界面使用内置深色样式。"},
+        ExpectedText{
+            UiTextId::UiScale,
+            "UI scale",
+            "界面缩放"},
+        ExpectedText{
+            UiTextId::Reset,
+            "Reset",
+            "重置"},
+        ExpectedText{
+            UiTextId::UiScaleDescription,
+            "100% follows Windows display scaling. This setting adds an application-specific multiplier.",
+            "100% 跟随 Windows 显示缩放；此设置用于调整应用自身的缩放倍率。"},
+        ExpectedText{
+            UiTextId::UiScaleLoadWarning,
+            "The saved UI scale could not be loaded; using 100%.",
+            "无法加载已保存的界面缩放比例，当前使用 100%。"},
+        ExpectedText{
+            UiTextId::UiScaleRejected,
+            "The requested UI scale is not supported.",
+            "请求的界面缩放比例不受支持。"},
+        ExpectedText{
+            UiTextId::UiScaleSaveError,
+            "The UI scale could not be saved.",
+            "无法保存界面缩放比例。"},
+    };
+
+    for (const ExpectedText& expected : kExpectedTexts) {
+        Require(
+            UiText(UiLanguage::English, expected.text_id) ==
+                expected.english,
+            "English Appearance text should be exact");
+        Require(
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                expected.text_id) ==
+                expected.simplified_chinese,
+            "Chinese Appearance text should be exact");
+    }
+}
+
 void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
 {
     using specforge::SampleAnnotationWorkflowRelationship;
@@ -149,6 +233,7 @@ int main()
     try {
         TestEveryDisplayTextIsPresent();
         TestRepresentativeMappingsAreExact();
+        TestAppearanceMappingsAreExact();
         TestSessionSemanticsAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();
         TestCountSentinelIsNotDisplayable();

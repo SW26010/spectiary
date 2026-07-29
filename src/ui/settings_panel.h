@@ -81,6 +81,13 @@ public:
     [[nodiscard]] bool open() const;
 
 private:
+    [[nodiscard]] static std::string SectionLabel(
+        SettingsSection section,
+        UiLanguage language);
+    [[nodiscard]] static std::string
+    AppearanceThemeLabel(UiLanguage language);
+    [[nodiscard]] static std::string
+    AppearanceAccentColorLabel(UiLanguage language);
     void RenderNavigation(UiLanguage language);
     void RenderSelectedSection(
         const ApplicationSettingsView& settings,
