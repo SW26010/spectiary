@@ -1,0 +1,50 @@
+#pragma once
+
+#include "automation/automation_named_pipe.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <string>
+
+namespace specforge {
+
+struct AutomationShellState {
+    bool idle = true;
+    bool source_load_idle = true;
+    bool pending_completion_idle = true;
+    bool background_retirement_idle = true;
+    std::size_t active_load_count = 0;
+    std::size_t completed_load_count = 0;
+    std::size_t pending_load_count = 0;
+    std::size_t retirement_queued_count = 0;
+    std::size_t retirement_in_flight_count = 0;
+    std::string current_source_id;
+    std::filesystem::path current_source_path;
+};
+
+struct AutomationWindowState {
+    bool visible = true;
+    bool minimized = false;
+    unsigned int client_width = 0;
+    unsigned int client_height = 0;
+};
+
+struct AutomationRuntimeState {
+    bool running = true;
+    bool shutting_down = false;
+    std::uint64_t frame_index = 0;
+};
+
+struct AutomationStateSnapshot {
+    std::string instance_id;
+    AutomationControlQueueSnapshot control;
+    AutomationShellState shell;
+    AutomationWindowState window;
+    AutomationRuntimeState runtime;
+};
+
+[[nodiscard]] std::string SerializeAutomationStateBody(
+    const AutomationStateSnapshot& state);
+
+}  // namespace specforge

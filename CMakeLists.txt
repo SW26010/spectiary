@@ -254,6 +254,21 @@ specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
 target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB bcrypt)
 
+add_library(specforge_automation STATIC
+    src/automation/automation_named_pipe.cpp
+    src/automation/automation_protocol.cpp
+    src/automation/automation_startup.cpp
+    src/automation/automation_state.cpp
+)
+specforge_configure_production_target(specforge_automation)
+target_link_libraries(specforge_automation
+    PUBLIC
+        specforge_core
+    PRIVATE
+        advapi32
+        shell32
+)
+
 add_library(specforge_sessions STATIC
     src/ui/panel_visibility_state_cache_io.cpp
     src/ui/sample_annotation_labeling_rules.cpp
@@ -343,6 +358,7 @@ add_executable(specforge_native WIN32
 )
 specforge_configure_production_target(specforge_native)
 target_link_libraries(specforge_native PRIVATE
+    specforge_automation
     specforge_desktop_ui
     specforge_renderer
     dwmapi
@@ -380,6 +396,26 @@ add_custom_target(specforge_metadata
         "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
     COMMENT "Synchronizing SpecForge metadata"
     VERBATIM
+)
+
+add_executable(specforge_automation_launcher
+    src/automation/automation_launcher_main.cpp
+)
+specforge_configure_production_target(
+    specforge_automation_launcher
+)
+target_link_libraries(
+    specforge_automation_launcher
+    PRIVATE
+        specforge_automation
+        bcrypt
+)
+set_target_properties(
+    specforge_automation_launcher
+    PROPERTIES
+        OUTPUT_NAME SpecForgeAutomation
+        VS_DEBUGGER_WORKING_DIRECTORY
+            "${CMAKE_SOURCE_DIR}"
 )
 add_dependencies(specforge_native specforge_metadata)
 
@@ -502,6 +538,44 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
+specforge_add_test(
+    specforge_automation_control_tests
+    tests/automation_control_tests.cpp
+    specforge_automation
+)
+target_link_libraries(
+    specforge_automation_control_tests
+    PRIVATE
+        advapi32
+)
+specforge_add_test(
+    specforge_automation_state_isolation_tests
+    tests/automation_state_isolation_tests.cpp
+    specforge_desktop_ui
+)
+target_link_libraries(
+    specforge_automation_state_isolation_tests
+    PRIVATE
+        dwmapi
+)
+add_dependencies(
+    specforge_automation_state_isolation_tests
+    specforge_metadata
+)
+add_test(
+    NAME specforge_automation_launcher_integration_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/automation_launcher_integration_tests.ps1"
+        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
+        -Executable "$<TARGET_FILE:specforge_native>"
+        -CleanupFixture "$<TARGET_FILE:specforge_automation_control_tests>"
+)
+set_tests_properties(
+    specforge_automation_launcher_integration_tests
+    PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 30
+)
 specforge_add_test(
     specforge_on_demand_frame_capture_tests
     tests/on_demand_frame_capture_tests.cpp

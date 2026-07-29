@@ -120,9 +120,25 @@ bool Win32Window::Create(HINSTANCE instance, const wchar_t* title, int width, in
     return true;
 }
 
-void Win32Window::Show(int show_command) const
+void Win32Window::Show(
+    int show_command,
+    Win32WindowActivation activation) const
 {
-    ShowWindow(hwnd_, show_command);
+    const Win32WindowShowPlan plan =
+        ResolveWin32WindowShowPlan(
+            show_command,
+            activation);
+    ShowWindow(hwnd_, plan.show_command);
+    if (plan.position_flags != 0) {
+        (void)SetWindowPos(
+            hwnd_,
+            nullptr,
+            0,
+            0,
+            0,
+            0,
+            plan.position_flags);
+    }
     UpdateWindow(hwnd_);
 }
 

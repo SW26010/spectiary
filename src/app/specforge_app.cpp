@@ -37,6 +37,9 @@ constexpr int kInitialHeight = 820;
 constexpr UINT kCompositorClockTickMessage = WM_APP + 0x54U;
 constexpr UINT kProfileRecorderStateChangedMessage = WM_APP + 0x55U;
 constexpr UINT kSourceLoadCompletionReadyMessage = WM_APP + 0x56U;
+constexpr UINT kAutomationCommandReadyMessage = WM_APP + 0x57U;
+constexpr auto kAutomationIdlePollInterval =
+    std::chrono::milliseconds(25);
 constexpr UINT_PTR kPresentationRefreshTimer = 0x5350U;
 constexpr UINT kPresentationRefreshDelayMs = 500U;
 constexpr float kDefaultWindowsDpi = 96.0f;
@@ -299,9 +302,14 @@ void ApplyTitleBarTheme(HWND hwnd)
 
 }  // namespace
 
-SpecForgeApp::SpecForgeApp(const SpecForgeStartup& startup)
+SpecForgeApp::SpecForgeApp(
+    const SpecForgeStartup& startup,
+    std::optional<AutomationStartupConfiguration>
+        automation)
     : startup_(startup),
-      ui_(startup_, &touchpad_gestures_)
+      ui_(startup_, &touchpad_gestures_),
+      automation_configuration_(
+          std::move(automation))
 {
 }
 
@@ -320,14 +328,22 @@ int SpecForgeApp::Run(
     MSG message = {};
     const auto next_maintenance_deadline = [this]() {
         auto deadline = ui_.NextMaintenanceDeadline();
-        if (!runtime_resource_workload_) {
-            return deadline;
+        if (runtime_resource_workload_) {
+            const auto workload_deadline =
+                runtime_resource_workload_
+                    ->next_deadline();
+            if (workload_deadline &&
+                (!deadline ||
+                 *workload_deadline < *deadline)) {
+                deadline = workload_deadline;
+            }
         }
-        const auto workload_deadline =
-            runtime_resource_workload_->next_deadline();
-        if (workload_deadline &&
-            (!deadline || *workload_deadline < *deadline)) {
-            deadline = workload_deadline;
+        const auto automation_deadline =
+            NextAutomationDeadline();
+        if (automation_deadline &&
+            (!deadline ||
+             *automation_deadline < *deadline)) {
+            deadline = automation_deadline;
         }
         return deadline;
     };
@@ -372,6 +388,7 @@ int SpecForgeApp::Run(
                     window_.hwnd(),
                     now);
             }
+            ServiceAutomation();
             now = RenderWakeScheduler::Clock::now();
             render_wake_scheduler_.RequestFrame();
         }
@@ -403,6 +420,7 @@ int SpecForgeApp::Run(
         switch (render_wake_scheduler_.TakeAction(now, window_renderable)) {
         case RenderWakeAction::RenderFrame: {
             const RenderFrameOutcome outcome = RenderFrame();
+            ServiceAutomation();
             const ImGuiIO& io = ImGui::GetIO();
             const bool popup_open = ImGui::IsPopupOpen(
                 nullptr,
@@ -433,6 +451,12 @@ int SpecForgeApp::Run(
             next_maintenance_deadline()));
     }
 
+    if (automation_server_) {
+        automation_server_->Shutdown(
+            "app_shutdown");
+        automation_idle_waits_.clear();
+        automation_poll_deadline_.reset();
+    }
     const ShellLocalStateFlushResult local_state_flush =
         ui_.FlushLocalState();
     if (!local_state_flush.all_saved()) {
@@ -571,7 +595,12 @@ void SpecForgeApp::Initialize(
             &SpecForgeApp::ObserveWin32Message)) {
         throw std::runtime_error("Failed to observe Win32 messages for render invalidation.");
     }
-    window_.Show(show_command);
+    InitializeAutomation();
+    window_.Show(
+        show_command,
+        automation_configuration_
+            ? Win32WindowActivation::NoActivate
+            : Win32WindowActivation::Default);
     LogDisplayEnvironment("startup");
     LogPresentationUpdates();
     WritePanPacingState("startup", false);
@@ -666,6 +695,12 @@ void SpecForgeApp::Shutdown()
 {
     if (shutdown_complete_) {
         return;
+    }
+    if (automation_server_) {
+        automation_server_->Shutdown(
+            "app_shutdown");
+        automation_idle_waits_.clear();
+        automation_poll_deadline_.reset();
     }
     ui_.UnregisterSourceLoadCompletionReadyCallback();
     if (window_.hwnd() != nullptr) {
@@ -1501,6 +1536,191 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
     profile_.RequestStopAfterFrame();
 }
 
+void SpecForgeApp::PostAutomationCommandReady(
+    HWND hwnd) noexcept
+{
+    if (hwnd != nullptr) {
+        (void)PostMessageW(
+            hwnd,
+            kAutomationCommandReadyMessage,
+            0,
+            0);
+    }
+}
+
+void SpecForgeApp::InitializeAutomation()
+{
+    if (!automation_configuration_) {
+        return;
+    }
+    automation_server_ =
+        std::make_unique<AutomationNamedPipeServer>(
+            automation_configuration_->pipe_name,
+            automation_configuration_->nonce,
+            automation_configuration_->instance_id);
+    std::string error_message;
+    const HWND automation_window = window_.hwnd();
+    if (!automation_server_->Start(
+            [automation_window]() noexcept {
+                PostAutomationCommandReady(
+                    automation_window);
+            },
+            error_message)) {
+        automation_server_.reset();
+        throw std::runtime_error(
+            "Could not start the local automation control pipe: " +
+            error_message);
+    }
+}
+
+void SpecForgeApp::ServiceAutomation()
+{
+    if (!automation_server_) {
+        return;
+    }
+
+    std::vector<AutomationQueuedCommand> commands =
+        automation_server_->TakePendingCommands();
+    for (const AutomationQueuedCommand& command :
+         commands) {
+        switch (command.command) {
+        case AutomationCommandKind::StateGet:
+            if (!automation_server_->IsRequestActive(
+                    command.request_id)) {
+                break;
+            }
+            automation_server_->Complete(
+                command,
+                SerializeAutomationStateBody(
+                    AutomationState()));
+            break;
+        case AutomationCommandKind::WaitIdle:
+            if (!automation_server_->IsRequestActive(
+                    command.request_id)) {
+                break;
+            }
+            automation_idle_waits_.push_back(
+                command.request_id);
+            break;
+        case AutomationCommandKind::AppQuit: {
+            if (!automation_server_->TryBeginAppQuit(
+                    command)) {
+                break;
+            }
+            automation_idle_waits_.clear();
+            automation_poll_deadline_.reset();
+            automation_shutdown_requested_ = true;
+            const bool posted =
+                window_.hwnd() != nullptr &&
+                PostMessageW(
+                    window_.hwnd(),
+                    WM_CLOSE,
+                    0,
+                    0) != FALSE;
+            if (posted) {
+                automation_server_->Complete(command);
+            } else {
+                automation_server_->Fail(
+                    command,
+                    "close_request_failed",
+                    "Could not post the normal Win32 close request.");
+            }
+            break;
+        }
+        }
+    }
+
+    automation_idle_waits_.erase(
+        std::remove_if(
+            automation_idle_waits_.begin(),
+            automation_idle_waits_.end(),
+            [this](const std::string& request_id) {
+                return !automation_server_
+                            ->IsRequestActive(
+                                request_id);
+            }),
+        automation_idle_waits_.end());
+    if (automation_idle_waits_.empty()) {
+        automation_poll_deadline_.reset();
+        return;
+    }
+
+    const ShellRuntimeResourceObservation observation =
+        ui_.runtime_resource_observation();
+    if (observation.idle() &&
+        automation_server_->TryCompleteIdleWaits(
+            automation_idle_waits_)) {
+        automation_idle_waits_.clear();
+        automation_poll_deadline_.reset();
+        return;
+    }
+    automation_poll_deadline_ =
+        RenderWakeScheduler::Clock::now() +
+        kAutomationIdlePollInterval;
+}
+
+std::optional<RenderWakeScheduler::TimePoint>
+SpecForgeApp::NextAutomationDeadline() const
+{
+    return automation_poll_deadline_;
+}
+
+AutomationStateSnapshot
+SpecForgeApp::AutomationState() const
+{
+    AutomationStateSnapshot state;
+    if (!automation_configuration_ ||
+        !automation_server_) {
+        return state;
+    }
+    state.instance_id =
+        automation_configuration_->instance_id;
+    state.control =
+        automation_server_->queue_snapshot();
+
+    const ShellRuntimeResourceObservation shell =
+        ui_.runtime_resource_observation();
+    state.shell = {
+        .idle = shell.idle(),
+        .source_load_idle =
+            shell.source_load_idle(),
+        .pending_completion_idle =
+            shell.pending_completion_idle(),
+        .background_retirement_idle =
+            shell.background_retirement_idle(),
+        .active_load_count =
+            shell.load_activity.active_task_count,
+        .completed_load_count =
+            shell.load_activity.completed_count,
+        .pending_load_count =
+            shell.pending_load_count,
+        .retirement_queued_count =
+            shell.load_activity
+                .retirement_queued_count,
+        .retirement_in_flight_count =
+            shell.load_activity
+                .retirement_in_flight_count,
+        .current_source_id =
+            shell.active_source_id,
+        .current_source_path =
+            shell.active_source_path,
+    };
+    state.window = {
+        .visible = window_visible_,
+        .minimized = minimized_,
+        .client_width = window_.client_width(),
+        .client_height =
+            window_.client_height(),
+    };
+    state.runtime = {
+        .running = running_,
+        .shutting_down =
+            automation_shutdown_requested_,
+        .frame_index = frame_index_,
+    };
+    return state;
+}
+
 void SpecForgeApp::LogProfileRecordingStarted(
     std::string_view trigger,
     std::string_view configuration_reason)
@@ -2170,6 +2390,10 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
 {
     if (message == kSourceLoadCompletionReadyMessage) {
         render_wake_scheduler_.RequestFrame();
+        return 0;
+    }
+    if (message == kAutomationCommandReadyMessage) {
+        ServiceAutomation();
         return 0;
     }
 

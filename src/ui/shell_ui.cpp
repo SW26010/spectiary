@@ -1268,6 +1268,9 @@ ShellUi::runtime_resource_observation() const
                 presented_source_load_observation(),
         .pending_load_count =
             source_activation_.PendingLoadCount(),
+        .active_source_id =
+            snapshot ? snapshot->source.id
+                     : std::string{},
         .active_source_path =
             snapshot ? snapshot->source.path
                      : std::filesystem::path{},

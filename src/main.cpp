@@ -1,41 +1,20 @@
 #include "app/specforge_app.h"
 #include "app/runtime_paths.h"
+#include "automation/automation_startup.h"
 #include "platform/win32_text.h"
 #include "ui/ui_language_settings.h"
 #include "ui/ui_text.h"
 
 #include <Windows.h>
-#include <shellapi.h>
-
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
+#include <utility>
 
 namespace {
-
-std::optional<std::filesystem::path> InitialSourceFromCommandLine()
-{
-    int argument_count = 0;
-    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
-    if (arguments == nullptr) {
-        return std::nullopt;
-    }
-
-    std::optional<std::filesystem::path> source;
-    for (int index = 1; index < argument_count; ++index) {
-        if (arguments[index] != nullptr && arguments[index][0] != L'\0' && arguments[index][0] != L'-') {
-            source = std::filesystem::path(arguments[index]);
-            break;
-        }
-    }
-
-    LocalFree(arguments);
-    return source;
-}
 
 std::optional<std::filesystem::path> EnvironmentPath(
     const wchar_t* name)
@@ -67,11 +46,94 @@ bool RuntimeResourceWorkloadEnabled()
         .has_value();
 }
 
+std::string PathToUtf8(
+    const std::filesystem::path& path)
+{
+    const std::u8string utf8 = path.u8string();
+    return std::string(
+        utf8.begin(),
+        utf8.end());
+}
+
+std::filesystem::path StartupErrorFileName(
+    bool automation)
+{
+    return automation
+        ? std::filesystem::path(
+              "automation-startup-error.txt")
+        : std::filesystem::path(
+              "runtime-resource-startup-error.txt");
+}
+
+specforge::SpecForgeStartup PrepareStartup(
+    const specforge::SpecForgeCommandLine& command_line)
+{
+    specforge::RuntimePathInputs inputs =
+        specforge::CurrentProcessRuntimePathInputs(
+            specforge::CurrentExecutablePath());
+    if (!command_line.automation) {
+        return specforge::PrepareSpecForgeStartup(
+            std::move(inputs));
+    }
+
+    const std::filesystem::path ordinary_root =
+        specforge::OrdinaryUserStateRootForExecutable(
+            specforge::CurrentExecutablePath());
+    if (!specforge::AutomationStateRootIsIndependent(
+            command_line.automation->state_root,
+            ordinary_root)) {
+        throw std::runtime_error(
+            "Automation state root must be independent from the ordinary user state root ('" +
+            PathToUtf8(ordinary_root) +
+            "').");
+    }
+    inputs.local_user_state_root_override =
+        command_line.automation->state_root;
+    return specforge::PrepareSpecForgeStartup(
+        std::move(inputs));
+}
+
+bool AutomatedStartupEnabled(
+    bool automation_requested,
+    const std::optional<std::filesystem::path>&
+        automation_state_root)
+{
+    return automation_requested ||
+           automation_state_root.has_value() ||
+           RuntimeResourceWorkloadEnabled();
+}
+
+void WriteAutomatedStartupError(
+    const std::filesystem::path& state_directory,
+    bool automation,
+    std::string_view diagnostic)
+{
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        state_directory,
+        directory_error);
+    if (directory_error) {
+        return;
+    }
+    std::ofstream output(
+        state_directory /
+            StartupErrorFileName(automation),
+        std::ios::binary | std::ios::trunc);
+    if (output) {
+        output << diagnostic;
+    }
+}
+
 void ReportStartupError(
     std::string_view message,
-    specforge::UiLanguage language)
+    specforge::UiLanguage language,
+    bool automation_requested,
+    const std::optional<std::filesystem::path>&
+        automation_state_root)
 {
-    if (!RuntimeResourceWorkloadEnabled()) {
+    if (!AutomatedStartupEnabled(
+            automation_requested,
+            automation_state_root)) {
         const std::wstring wide_message =
             specforge::Utf8ToWide(message);
         const std::wstring wide_title =
@@ -92,28 +154,27 @@ void ReportStartupError(
         "SpecForge startup error: " +
         std::string(message) + "\n";
     OutputDebugStringA(diagnostic.c_str());
-    const std::optional<std::filesystem::path> state_directory =
-        EnvironmentPath(
-            L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR");
-    if (!state_directory) {
-        return;
-    }
-
-    std::error_code directory_error;
-    std::filesystem::create_directories(
-        *state_directory,
-        directory_error);
-    if (directory_error) {
-        return;
-    }
-    std::ofstream output(
-        *state_directory /
-            "runtime-resource-startup-error.txt",
-        std::ios::binary | std::ios::trunc);
-    if (output) {
-        output << diagnostic;
+    const std::optional<std::filesystem::path>
+        state_directory =
+            automation_state_root
+            ? automation_state_root
+            : (automation_requested
+                   ? std::nullopt
+                   : EnvironmentPath(
+                         L"SPECFORGE_RUNTIME_RESOURCE_STATE_DIR"));
+    if (state_directory) {
+        WriteAutomatedStartupError(
+            *state_directory,
+            automation_state_root.has_value(),
+            diagnostic);
     }
 }
+
+/*
+ * EnvironmentPath and RuntimeResourceWorkloadEnabled remain the legacy
+ * resource-stability startup contract. The explicit automation command line
+ * above is independent and takes its state root from the launcher.
+ */
 
 }  // namespace
 
@@ -121,27 +182,67 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     specforge::UiLanguage startup_error_language =
         specforge::UiLanguage::English;
+    const specforge::SpecForgeCommandLine command_line =
+        specforge::ParseCurrentProcessSpecForgeCommandLine();
+    std::optional<std::filesystem::path>
+        automation_diagnostic_root;
     try {
-        const specforge::SpecForgeStartup& startup =
-            specforge::DefaultSpecForgeStartup();
+        if (!command_line.error_message.empty()) {
+            throw std::runtime_error(
+                command_line.error_message);
+        }
+        if (command_line.automation) {
+            if (const auto conflict =
+                    specforge::
+                        ActiveIncompatibleAutomationEnvironmentVariable()) {
+                std::string conflict_name;
+                conflict_name.reserve(
+                    conflict->size());
+                for (const wchar_t character :
+                     *conflict) {
+                    conflict_name.push_back(
+                        static_cast<char>(
+                            character));
+                }
+                throw std::runtime_error(
+                    "Automation startup rejects inherited legacy environment variable '" +
+                    conflict_name +
+                    "'.");
+            }
+        }
+        specforge::SpecForgeStartup startup =
+            PrepareStartup(command_line);
+        if (command_line.automation) {
+            automation_diagnostic_root =
+                command_line.automation->state_root;
+        }
         startup_error_language =
             specforge::LoadUiLanguageSettings(
                 startup.runtime_paths()
                     .ui_language_settings_path)
                 .language;
-        specforge::SpecForgeApp app(startup);
-        return app.Run(instance, show_command, InitialSourceFromCommandLine());
+        specforge::SpecForgeApp app(
+            startup,
+            command_line.automation);
+        return app.Run(
+            instance,
+            show_command,
+            command_line.initial_source);
     } catch (const std::exception& error) {
         ReportStartupError(
             error.what(),
-            startup_error_language);
+            startup_error_language,
+            command_line.automation_requested,
+            automation_diagnostic_root);
     } catch (...) {
         ReportStartupError(
             specforge::UiText(
                 startup_error_language,
                 specforge::UiTextId::
                     UnknownStartupError),
-            startup_error_language);
+            startup_error_language,
+            command_line.automation_requested,
+            automation_diagnostic_root);
     }
 
     return 1;

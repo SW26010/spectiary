@@ -1,0 +1,1065 @@
+#include "automation/automation_named_pipe.h"
+
+#include "app/local_user_state_json.h"
+#include "automation/automation_protocol.h"
+
+#include <Windows.h>
+#include <Aclapi.h>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <memory>
+#include <sstream>
+#include <utility>
+
+namespace specforge {
+namespace {
+
+constexpr DWORD kPipeBufferBytes =
+    static_cast<DWORD>(kAutomationMaxMessageBytes);
+
+std::string Win32ErrorMessage(
+    std::string_view operation,
+    DWORD error)
+{
+    std::ostringstream message;
+    message << operation << " failed with Win32 error "
+            << error << ".";
+    return message.str();
+}
+
+struct LocalFreeDeleter {
+    void operator()(void* value) const noexcept
+    {
+        if (value != nullptr) {
+            LocalFree(value);
+        }
+    }
+};
+
+struct HandleCloser {
+    void operator()(void* value) const noexcept
+    {
+        if (value != nullptr &&
+            value != INVALID_HANDLE_VALUE) {
+            CloseHandle(value);
+        }
+    }
+};
+
+using UniqueHandle =
+    std::unique_ptr<void, HandleCloser>;
+using UniqueLocalMemory =
+    std::unique_ptr<void, LocalFreeDeleter>;
+
+struct PipeSecurity {
+    SECURITY_DESCRIPTOR descriptor = {};
+    UniqueLocalMemory acl;
+    std::vector<std::byte> token_user;
+    SECURITY_ATTRIBUTES attributes = {};
+};
+
+bool PrepareCurrentUserPipeSecurity(
+    PipeSecurity& security,
+    std::string& error_message)
+{
+    HANDLE raw_token = nullptr;
+    if (!OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY,
+            &raw_token)) {
+        error_message = Win32ErrorMessage(
+            "OpenProcessToken",
+            GetLastError());
+        return false;
+    }
+    UniqueHandle token(raw_token);
+
+    DWORD required = 0;
+    (void)GetTokenInformation(
+        token.get(),
+        TokenUser,
+        nullptr,
+        0,
+        &required);
+    if (required == 0) {
+        error_message = Win32ErrorMessage(
+            "GetTokenInformation",
+            GetLastError());
+        return false;
+    }
+    security.token_user.resize(required);
+    if (!GetTokenInformation(
+            token.get(),
+            TokenUser,
+            security.token_user.data(),
+            required,
+            &required)) {
+        error_message = Win32ErrorMessage(
+            "GetTokenInformation",
+            GetLastError());
+        return false;
+    }
+
+    auto* token_user = reinterpret_cast<TOKEN_USER*>(
+        security.token_user.data());
+    EXPLICIT_ACCESSW access = {};
+    access.grfAccessPermissions =
+        GENERIC_READ | GENERIC_WRITE |
+        READ_CONTROL;
+    access.grfAccessMode = SET_ACCESS;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName =
+        static_cast<LPWSTR>(token_user->User.Sid);
+
+    PACL raw_acl = nullptr;
+    const DWORD acl_result = SetEntriesInAclW(
+        1,
+        &access,
+        nullptr,
+        &raw_acl);
+    if (acl_result != ERROR_SUCCESS) {
+        error_message = Win32ErrorMessage(
+            "SetEntriesInAclW",
+            acl_result);
+        return false;
+    }
+    security.acl.reset(raw_acl);
+
+    if (!InitializeSecurityDescriptor(
+            &security.descriptor,
+            SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorDacl(
+            &security.descriptor,
+            TRUE,
+            static_cast<PACL>(security.acl.get()),
+            FALSE)) {
+        error_message = Win32ErrorMessage(
+            "SetSecurityDescriptorDacl",
+            GetLastError());
+        return false;
+    }
+
+    security.attributes.nLength =
+        sizeof(security.attributes);
+    security.attributes.lpSecurityDescriptor =
+        &security.descriptor;
+    security.attributes.bInheritHandle = FALSE;
+    return true;
+}
+
+bool IsPipeDisconnectError(DWORD error)
+{
+    return error == ERROR_BROKEN_PIPE ||
+           error == ERROR_NO_DATA ||
+           error == ERROR_PIPE_NOT_CONNECTED ||
+           error == ERROR_OPERATION_ABORTED;
+}
+
+}  // namespace
+
+AutomationNamedPipeServer::AutomationNamedPipeServer(
+    std::wstring pipe_name,
+    std::string nonce,
+    std::string instance_id)
+    : pipe_name_(std::move(pipe_name)),
+      nonce_(std::move(nonce)),
+      instance_id_(std::move(instance_id))
+{
+}
+
+AutomationNamedPipeServer::~AutomationNamedPipeServer()
+{
+    Shutdown();
+}
+
+bool AutomationNamedPipeServer::Start(
+    CommandReadyCallback command_ready,
+    std::string& error_message)
+{
+    std::lock_guard lock(mutex_);
+    if (started_) {
+        error_message =
+            "Automation named-pipe server is already started.";
+        return false;
+    }
+
+    PipeSecurity security;
+    if (!PrepareCurrentUserPipeSecurity(
+            security,
+            error_message)) {
+        return false;
+    }
+
+    pipe_ = CreateNamedPipeW(
+        pipe_name_.c_str(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE |
+            PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+        1,
+        kPipeBufferBytes,
+        kPipeBufferBytes,
+        0,
+        &security.attributes);
+    if (pipe_ == INVALID_HANDLE_VALUE) {
+        error_message = Win32ErrorMessage(
+            "CreateNamedPipeW",
+            GetLastError());
+        return false;
+    }
+
+    command_ready_ = std::move(command_ready);
+    started_ = true;
+    stop_requested_ = false;
+    accepting_requests_ = true;
+    reader_thread_ =
+        std::thread([this]() { ReaderMain(); });
+    writer_thread_ =
+        std::thread([this]() { WriterMain(); });
+    return true;
+}
+
+void AutomationNamedPipeServer::Shutdown(
+    std::string_view cancellation_code)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (!started_) {
+            return;
+        }
+        accepting_requests_ = false;
+        CancelOutstandingLocked(
+            cancellation_code,
+            "The application is shutting down.");
+    }
+    NotifyCommandReady();
+    WaitForResponsesDrained(
+        std::chrono::milliseconds(250));
+
+    {
+        std::lock_guard lock(mutex_);
+        stop_requested_ = true;
+        response_ready_.notify_all();
+        reader_poll_.notify_all();
+    }
+    if (pipe_ != INVALID_HANDLE_VALUE) {
+        (void)CancelIoEx(pipe_, nullptr);
+        (void)DisconnectNamedPipe(pipe_);
+    }
+    if (reader_thread_.joinable()) {
+        (void)CancelSynchronousIo(
+            reader_thread_.native_handle());
+        reader_thread_.join();
+    }
+    if (writer_thread_.joinable()) {
+        (void)CancelSynchronousIo(
+            writer_thread_.native_handle());
+        response_ready_.notify_all();
+        writer_thread_.join();
+    }
+
+    std::lock_guard lock(mutex_);
+    if (pipe_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(pipe_);
+        pipe_ = INVALID_HANDLE_VALUE;
+    }
+    started_ = false;
+    client_connected_ = false;
+    handshake_complete_ = false;
+    accepting_requests_ = false;
+    pending_commands_.clear();
+    outstanding_.clear();
+    responses_.clear();
+}
+
+std::vector<AutomationQueuedCommand>
+AutomationNamedPipeServer::TakePendingCommands()
+{
+    std::lock_guard lock(mutex_);
+    std::vector<AutomationQueuedCommand> commands;
+    if (!client_connected_) {
+        pending_commands_.clear();
+        return commands;
+    }
+    commands.reserve(pending_commands_.size());
+    while (!pending_commands_.empty()) {
+        commands.push_back(
+            std::move(pending_commands_.front()));
+        pending_commands_.pop_front();
+    }
+    return commands;
+}
+
+bool AutomationNamedPipeServer::IsRequestActive(
+    std::string_view request_id) const
+{
+    std::lock_guard lock(mutex_);
+    return client_connected_ &&
+           outstanding_.contains(
+               std::string(request_id));
+}
+
+AutomationControlQueueSnapshot
+AutomationNamedPipeServer::queue_snapshot() const
+{
+    std::lock_guard lock(mutex_);
+    return {
+        .client_connected = client_connected_,
+        .handshake_complete = handshake_complete_,
+        .accepting_requests = accepting_requests_,
+        .pending_count = pending_commands_.size(),
+        .outstanding_count = outstanding_.size(),
+    };
+}
+
+void AutomationNamedPipeServer::Complete(
+    const AutomationQueuedCommand& command,
+    std::string_view body_members)
+{
+    std::lock_guard lock(mutex_);
+    const auto found =
+        outstanding_.find(command.request_id);
+    if (!client_connected_ ||
+        found == outstanding_.end() ||
+        found->second.sequence != command.sequence) {
+        return;
+    }
+    outstanding_.erase(found);
+    EnqueueResponseLocked(
+        SerializeAutomationTerminalResponse(
+            command.request_id,
+            command.command,
+            "completed",
+            body_members));
+}
+
+void AutomationNamedPipeServer::Fail(
+    const AutomationQueuedCommand& command,
+    std::string_view error_code,
+    std::string_view error_message)
+{
+    std::lock_guard lock(mutex_);
+    const auto found =
+        outstanding_.find(command.request_id);
+    if (!client_connected_ ||
+        found == outstanding_.end() ||
+        found->second.sequence != command.sequence) {
+        return;
+    }
+    outstanding_.erase(found);
+    EnqueueResponseLocked(
+        SerializeAutomationFailureResponse(
+            command.request_id,
+            AutomationCommandName(command.command),
+            error_code,
+            error_message));
+}
+
+bool AutomationNamedPipeServer::TryBeginAppQuit(
+    const AutomationQueuedCommand& quit_command)
+{
+    std::lock_guard lock(mutex_);
+    const auto found =
+        outstanding_.find(quit_command.request_id);
+    if (!client_connected_ ||
+        found == outstanding_.end() ||
+        found->second.command !=
+            AutomationCommandKind::AppQuit ||
+        found->second.sequence !=
+            quit_command.sequence ||
+        found->second.execution_started) {
+        return false;
+    }
+    found->second.execution_started = true;
+    accepting_requests_ = false;
+    CancelOutstandingLocked(
+        "app_quit",
+        "The request was canceled because app.quit began normal shutdown.",
+        quit_command.request_id);
+    return true;
+}
+
+bool AutomationNamedPipeServer::TryCompleteIdleWaits(
+    const std::vector<std::string>& request_ids)
+{
+    if (request_ids.empty()) {
+        return true;
+    }
+    std::lock_guard lock(mutex_);
+    if (!client_connected_ ||
+        !pending_commands_.empty() ||
+        outstanding_.size() != request_ids.size()) {
+        return false;
+    }
+    for (const std::string& request_id : request_ids) {
+        const auto found = outstanding_.find(request_id);
+        if (found == outstanding_.end() ||
+            found->second.command !=
+                AutomationCommandKind::WaitIdle) {
+            return false;
+        }
+    }
+    for (const std::string& request_id : request_ids) {
+        outstanding_.erase(request_id);
+        EnqueueResponseLocked(
+            SerializeAutomationTerminalResponse(
+                request_id,
+                AutomationCommandKind::WaitIdle,
+                "completed"));
+    }
+    return true;
+}
+
+void AutomationNamedPipeServer::ReaderMain()
+{
+    const BOOL connected =
+        ConnectNamedPipe(pipe_, nullptr);
+    if (!connected &&
+        GetLastError() != ERROR_PIPE_CONNECTED) {
+        HandleDisconnect();
+        return;
+    }
+    {
+        std::lock_guard lock(mutex_);
+        if (stop_requested_) {
+            return;
+        }
+        client_connected_ = true;
+    }
+
+    while (true) {
+        {
+            std::lock_guard lock(mutex_);
+            if (stop_requested_ ||
+                !client_connected_) {
+                break;
+            }
+        }
+        bool message_available = false;
+        if (!MessageAvailable(message_available)) {
+            break;
+        }
+        if (!message_available) {
+            std::unique_lock lock(mutex_);
+            (void)reader_poll_.wait_for(
+                lock,
+                std::chrono::milliseconds(5),
+                [this]() {
+                    return stop_requested_ ||
+                           !client_connected_;
+                });
+            continue;
+        }
+
+        std::string message;
+        bool too_large = false;
+        {
+            std::lock_guard io_lock(
+                pipe_io_mutex_);
+            if (ReadMessage(message, too_large)) {
+                // Continue below after releasing the shared pipe I/O seam.
+            } else if (!too_large) {
+                break;
+            }
+        }
+        if (message.empty() && !too_large) {
+            break;
+        }
+        if (too_large) {
+            bool close_after_response = false;
+            {
+                std::lock_guard lock(mutex_);
+                EnqueueResponseLocked(
+                    SerializeAutomationFailureResponse(
+                        {},
+                        {},
+                        "message_too_large",
+                        "Automation message exceeds max_message_bytes."));
+                close_after_response =
+                    !handshake_complete_;
+            }
+            if (close_after_response) {
+                WaitForResponsesDrained(
+                    std::chrono::milliseconds(250));
+                break;
+            }
+            continue;
+        }
+        HandleClientMessage(std::move(message));
+        WaitForResponsesDrained(
+            std::chrono::milliseconds(1000));
+    }
+    HandleDisconnect();
+    if (pipe_ != INVALID_HANDLE_VALUE) {
+        std::lock_guard io_lock(pipe_io_mutex_);
+        (void)DisconnectNamedPipe(pipe_);
+    }
+}
+
+void AutomationNamedPipeServer::WriterMain()
+{
+    while (true) {
+        std::string response;
+        {
+            std::unique_lock lock(mutex_);
+            response_ready_.wait(lock, [this]() {
+                return stop_requested_ ||
+                       !responses_.empty();
+            });
+            if (responses_.empty()) {
+                if (stop_requested_) {
+                    break;
+                }
+                continue;
+            }
+            response = std::move(responses_.front());
+            responses_.pop_front();
+            response_write_in_progress_ = true;
+        }
+        bool written = false;
+        {
+            std::lock_guard io_lock(
+                pipe_io_mutex_);
+            written = WriteMessage(response);
+        }
+        if (!written) {
+            {
+                std::lock_guard lock(mutex_);
+                response_write_in_progress_ = false;
+                response_drained_.notify_all();
+            }
+            HandleDisconnect();
+            break;
+        }
+        {
+            std::lock_guard lock(mutex_);
+            response_write_in_progress_ = false;
+            if (responses_.empty()) {
+                response_drained_.notify_all();
+            }
+        }
+    }
+}
+
+void AutomationNamedPipeServer::HandleClientMessage(
+    std::string message)
+{
+    const AutomationClientMessageParseResult parsed =
+        ParseAutomationClientMessage(message);
+    if (!parsed.message) {
+        bool close_after_response = false;
+        {
+            std::lock_guard lock(mutex_);
+            const bool reserved =
+                !parsed.validated_request_id ||
+                TryReserveRequestIdLocked(
+                    *parsed.validated_request_id,
+                    parsed.command_name);
+            if (reserved) {
+                EnqueueResponseLocked(
+                    SerializeAutomationFailureResponse(
+                        parsed.request_id,
+                        parsed.command_name,
+                        parsed.error_code,
+                        parsed.error_message));
+            }
+            close_after_response =
+                !handshake_complete_;
+        }
+        if (close_after_response) {
+            WaitForResponsesDrained(
+                std::chrono::milliseconds(250));
+            std::lock_guard lock(mutex_);
+            client_connected_ = false;
+        }
+        return;
+    }
+
+    bool notify = false;
+    bool close_after_response = false;
+    {
+        std::lock_guard lock(mutex_);
+        const AutomationClientMessage& request =
+            *parsed.message;
+        const std::string_view command_name =
+            request.kind ==
+                    AutomationClientMessage::Kind::Request
+            ? AutomationCommandName(request.command)
+            : std::string_view{};
+        if (!TryReserveRequestIdLocked(
+                request.request_id,
+                command_name)) {
+            return;
+        }
+
+        if (!handshake_complete_) {
+            if (request.kind !=
+                AutomationClientMessage::Kind::Hello) {
+                EnqueueResponseLocked(
+                    SerializeAutomationFailureResponse(
+                        request.request_id,
+                        AutomationCommandName(
+                            request.command),
+                        "handshake_required",
+                        "A successful hello handshake is required before commands."));
+                close_after_response = true;
+            } else if (
+                request.protocol_version !=
+                kAutomationProtocolVersion) {
+                EnqueueResponseLocked(
+                    SerializeAutomationFailureResponse(
+                        request.request_id,
+                        {},
+                        "version_mismatch",
+                        "The requested automation protocol version is not supported."));
+                close_after_response = true;
+            } else if (request.nonce != nonce_) {
+                EnqueueResponseLocked(
+                    SerializeAutomationFailureResponse(
+                        request.request_id,
+                        {},
+                        "nonce_mismatch",
+                        "The launcher nonce did not match this automation instance."));
+                close_after_response = true;
+            } else {
+                handshake_complete_ = true;
+                EnqueueResponseLocked(
+                    SerializeAutomationHelloResponse(
+                        request.request_id,
+                        instance_id_));
+            }
+        } else if (
+            request.kind ==
+            AutomationClientMessage::Kind::Hello) {
+            EnqueueResponseLocked(
+                SerializeAutomationFailureResponse(
+                    request.request_id,
+                    {},
+                    "handshake_already_completed",
+                    "The connection already completed its hello handshake."));
+        } else if (!accepting_requests_) {
+            EnqueueResponseLocked(
+                SerializeAutomationFailureResponse(
+                    request.request_id,
+                    AutomationCommandName(
+                        request.command),
+                    "shutting_down",
+                    "The automation instance is no longer accepting requests."));
+        } else if (
+            outstanding_.size() >=
+            kAutomationQueueCapacity) {
+            EnqueueResponseLocked(
+                SerializeAutomationFailureResponse(
+                    request.request_id,
+                    AutomationCommandName(
+                        request.command),
+                    "queue_full",
+                    "The bounded automation command queue is full."));
+        } else {
+            const std::uint64_t sequence =
+                next_sequence_++;
+            pending_commands_.push_back({
+                .request_id = request.request_id,
+                .command = request.command,
+                .sequence = sequence,
+            });
+            outstanding_.emplace(
+                request.request_id,
+                OutstandingRequest{
+                    .command = request.command,
+                    .sequence = sequence,
+                });
+            EnqueueResponseLocked(
+                SerializeAutomationAcceptedResponse(
+                    request.request_id,
+                    request.command));
+            notify = true;
+        }
+    }
+
+    if (notify) {
+        NotifyCommandReady();
+    }
+    if (close_after_response) {
+        WaitForResponsesDrained(
+            std::chrono::milliseconds(250));
+        std::lock_guard lock(mutex_);
+        client_connected_ = false;
+    }
+}
+
+void AutomationNamedPipeServer::HandleDisconnect()
+{
+    bool notify = false;
+    {
+        std::lock_guard lock(mutex_);
+        if (!client_connected_ &&
+            pending_commands_.empty() &&
+            outstanding_.empty()) {
+            return;
+        }
+        client_connected_ = false;
+        handshake_complete_ = false;
+        accepting_requests_ = false;
+        pending_commands_.clear();
+        outstanding_.clear();
+        responses_.clear();
+        response_drained_.notify_all();
+        notify = true;
+    }
+    if (notify) {
+        NotifyCommandReady();
+    }
+}
+
+void AutomationNamedPipeServer::EnqueueResponseLocked(
+    std::string response)
+{
+    responses_.push_back(std::move(response));
+    response_ready_.notify_one();
+    reader_poll_.notify_one();
+}
+
+bool AutomationNamedPipeServer::TryReserveRequestIdLocked(
+    std::string_view request_id,
+    std::string_view command_name)
+{
+    if (seen_request_ids_.contains(
+            std::string(request_id))) {
+        EnqueueResponseLocked(
+            SerializeAutomationFailureResponse(
+                request_id,
+                command_name,
+                "duplicate_request_id",
+                "request_id values must be unique for the connection."));
+        return false;
+    }
+    if (seen_request_ids_.size() >=
+        kAutomationMaxRequestsPerConnection) {
+        accepting_requests_ = false;
+        EnqueueResponseLocked(
+            SerializeAutomationFailureResponse(
+                request_id,
+                command_name,
+                "request_limit_reached",
+                "The connection reached its bounded request limit."));
+        return false;
+    }
+    seen_request_ids_.insert(
+        std::string(request_id));
+    return true;
+}
+
+void AutomationNamedPipeServer::CancelOutstandingLocked(
+    std::string_view cancellation_code,
+    std::string_view cancellation_message,
+    std::string_view except_request_id)
+{
+    pending_commands_.erase(
+        std::remove_if(
+            pending_commands_.begin(),
+            pending_commands_.end(),
+            [&](const AutomationQueuedCommand& command) {
+                return command.request_id !=
+                       except_request_id;
+            }),
+        pending_commands_.end());
+
+    for (auto iterator = outstanding_.begin();
+         iterator != outstanding_.end();) {
+        if (iterator->first == except_request_id) {
+            ++iterator;
+            continue;
+        }
+        if (client_connected_) {
+            EnqueueResponseLocked(
+                SerializeAutomationTerminalResponse(
+                    iterator->first,
+                    iterator->second.command,
+                    "canceled",
+                    "\"error\":{\"code\":\"" +
+                        JsonEscape(cancellation_code) +
+                        "\",\"message\":\"" +
+                        JsonEscape(cancellation_message) +
+                        "\"}"));
+        }
+        iterator = outstanding_.erase(iterator);
+    }
+}
+
+bool AutomationNamedPipeServer::ReadMessage(
+    std::string& message,
+    bool& too_large)
+{
+    too_large = false;
+    std::vector<char> buffer(
+        kAutomationMaxMessageBytes + 1U);
+    DWORD bytes_read = 0;
+    const BOOL result = ReadFile(
+        pipe_,
+        buffer.data(),
+        static_cast<DWORD>(buffer.size()),
+        &bytes_read,
+        nullptr);
+    if (result) {
+        if (bytes_read >
+            kAutomationMaxMessageBytes) {
+            too_large = true;
+            return false;
+        }
+        message.assign(
+            buffer.data(),
+            static_cast<std::size_t>(bytes_read));
+        return true;
+    }
+
+    const DWORD error = GetLastError();
+    if (error == ERROR_MORE_DATA) {
+        too_large = true;
+        std::array<char, 4096> discard = {};
+        do {
+            bytes_read = 0;
+            if (ReadFile(
+                    pipe_,
+                    discard.data(),
+                    static_cast<DWORD>(
+                        discard.size()),
+                    &bytes_read,
+                    nullptr)) {
+                break;
+            }
+        } while (GetLastError() ==
+                 ERROR_MORE_DATA);
+        return false;
+    }
+    return false;
+}
+
+bool AutomationNamedPipeServer::MessageAvailable(
+    bool& available)
+{
+    std::lock_guard io_lock(pipe_io_mutex_);
+    DWORD bytes_available = 0;
+    const BOOL result = PeekNamedPipe(
+        pipe_,
+        nullptr,
+        0,
+        nullptr,
+        &bytes_available,
+        nullptr);
+    if (!result) {
+        available = false;
+        return false;
+    }
+    available = bytes_available != 0;
+    return true;
+}
+
+bool AutomationNamedPipeServer::WriteMessage(
+    std::string_view message)
+{
+    if (message.size() >
+        kAutomationMaxMessageBytes) {
+        return false;
+    }
+    DWORD bytes_written = 0;
+    const BOOL result = WriteFile(
+        pipe_,
+        message.data(),
+        static_cast<DWORD>(message.size()),
+        &bytes_written,
+        nullptr);
+    return result &&
+           bytes_written == message.size();
+}
+
+void AutomationNamedPipeServer::NotifyCommandReady()
+{
+    CommandReadyCallback callback;
+    {
+        std::lock_guard lock(mutex_);
+        callback = command_ready_;
+    }
+    if (callback) {
+        callback();
+    }
+}
+
+void AutomationNamedPipeServer::WaitForResponsesDrained(
+    std::chrono::milliseconds timeout)
+{
+    std::unique_lock lock(mutex_);
+    (void)response_drained_.wait_for(
+        lock,
+        timeout,
+        [this]() {
+            return (responses_.empty() &&
+                    !response_write_in_progress_) ||
+                   !client_connected_;
+        });
+}
+
+AutomationNamedPipeClient::~AutomationNamedPipeClient()
+{
+    Close();
+}
+
+bool AutomationNamedPipeClient::Connect(
+    const std::wstring& pipe_name,
+    std::chrono::milliseconds timeout,
+    std::string& error_message)
+{
+    Close();
+    const DWORD timeout_ms =
+        timeout.count() < 0
+        ? 0
+        : static_cast<DWORD>(
+              std::min<std::int64_t>(
+                  timeout.count(),
+                  MAXDWORD));
+    if (!WaitNamedPipeW(
+            pipe_name.c_str(),
+            timeout_ms)) {
+        const DWORD error = GetLastError();
+        error_message =
+            error == ERROR_SEM_TIMEOUT ||
+                    error == ERROR_PIPE_BUSY
+            ? "Automation connection was explicitly refused because the single client slot is unavailable."
+            : Win32ErrorMessage(
+                  "WaitNamedPipeW",
+                  error);
+        return false;
+    }
+
+    pipe_ = CreateFileW(
+        pipe_name.c_str(),
+        // READ_CONTROL is granted only to the current-user ACE and lets the
+        // client/test verify that the pipe did not inherit a broad DACL.
+        GENERIC_READ | GENERIC_WRITE |
+            READ_CONTROL,
+        0,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr);
+    if (pipe_ == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        error_message =
+            error == ERROR_PIPE_BUSY
+            ? "Automation connection was explicitly refused because another client is already connected."
+            : Win32ErrorMessage(
+                  "CreateFileW",
+                  error);
+        return false;
+    }
+    DWORD mode = PIPE_READMODE_MESSAGE;
+    if (!SetNamedPipeHandleState(
+            pipe_,
+            &mode,
+            nullptr,
+            nullptr)) {
+        error_message = Win32ErrorMessage(
+            "SetNamedPipeHandleState",
+            GetLastError());
+        Close();
+        return false;
+    }
+    return true;
+}
+
+bool AutomationNamedPipeClient::Send(
+    std::string_view message,
+    std::string& error_message)
+{
+    if (!connected()) {
+        error_message =
+            "Automation client is not connected.";
+        return false;
+    }
+    if (message.empty() ||
+        message.size() >
+            kAutomationMaxMessageBytes) {
+        error_message =
+            "Automation client message violates max_message_bytes.";
+        return false;
+    }
+    DWORD bytes_written = 0;
+    if (!WriteFile(
+            pipe_,
+            message.data(),
+            static_cast<DWORD>(message.size()),
+            &bytes_written,
+            nullptr) ||
+        bytes_written != message.size()) {
+        error_message = Win32ErrorMessage(
+            "WriteFile",
+            GetLastError());
+        Close();
+        return false;
+    }
+    return true;
+}
+
+bool AutomationNamedPipeClient::Receive(
+    std::string& message,
+    std::string& error_message)
+{
+    if (!connected()) {
+        error_message =
+            "Automation client is not connected.";
+        return false;
+    }
+    std::vector<char> buffer(
+        kAutomationMaxMessageBytes + 1U);
+    DWORD bytes_read = 0;
+    const BOOL result = ReadFile(
+        pipe_,
+        buffer.data(),
+        static_cast<DWORD>(buffer.size()),
+        &bytes_read,
+        nullptr);
+    if (!result) {
+        const DWORD error = GetLastError();
+        error_message = IsPipeDisconnectError(error)
+            ? "Automation server disconnected."
+            : Win32ErrorMessage(
+                  "ReadFile",
+                  error);
+        Close();
+        return false;
+    }
+    if (bytes_read >
+        kAutomationMaxMessageBytes) {
+        error_message =
+            "Automation server response exceeded max_message_bytes.";
+        Close();
+        return false;
+    }
+    message.assign(
+        buffer.data(),
+        static_cast<std::size_t>(bytes_read));
+    return true;
+}
+
+void AutomationNamedPipeClient::Close()
+{
+    if (pipe_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(pipe_);
+        pipe_ = INVALID_HANDLE_VALUE;
+    }
+}
+
+bool AutomationNamedPipeClient::connected() const noexcept
+{
+    return pipe_ != INVALID_HANDLE_VALUE;
+}
+
+HANDLE AutomationNamedPipeClient::native_handle() const noexcept
+{
+    return pipe_;
+}
+
+}  // namespace specforge

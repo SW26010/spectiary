@@ -61,14 +61,33 @@ struct ShellRuntimeResourceObservation {
         PresentedSourceLoadObservation
             presented_source_load;
     std::size_t pending_load_count = 0;
+    std::string active_source_id;
     std::filesystem::path active_source_path;
     std::string load_error;
 
+    [[nodiscard]] bool source_load_idle() const noexcept
+    {
+        return load_activity.active_task_count == 0;
+    }
+
+    [[nodiscard]] bool
+    pending_completion_idle() const noexcept
+    {
+        return load_activity.completed_count == 0 &&
+               pending_load_count == 0;
+    }
+
+    [[nodiscard]] bool
+    background_retirement_idle() const noexcept
+    {
+        return load_activity.retirement_idle();
+    }
+
     [[nodiscard]] bool idle() const noexcept
     {
-        return load_activity.load_idle() &&
-               load_activity.retirement_idle() &&
-               pending_load_count == 0;
+        return source_load_idle() &&
+               pending_completion_idle() &&
+               background_retirement_idle();
     }
 };
 

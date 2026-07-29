@@ -125,6 +125,10 @@ minutes or 100 MiB. Stopping from Settings drains in the background; completed
 recordings are accepted by the analyzer only when their final summary reports
 zero dropped events.
 
+For the explicit test/debug-only console launcher, named-pipe protocol,
+state-isolation contract, and supported automation commands, see
+[docs/automation_control.md](docs/automation_control.md).
+
 ## Portable Package
 
 The first portable package is a no-launcher zip with `SpecForge.exe`,

@@ -7,6 +7,36 @@
 
 namespace specforge {
 
+enum class Win32WindowActivation {
+    Default,
+    NoActivate,
+};
+
+struct Win32WindowShowPlan {
+    int show_command = SW_SHOWNORMAL;
+    UINT position_flags = 0;
+};
+
+[[nodiscard]] inline Win32WindowShowPlan
+ResolveWin32WindowShowPlan(
+    int requested_show_command,
+    Win32WindowActivation activation) noexcept
+{
+    if (activation ==
+        Win32WindowActivation::NoActivate) {
+        return {
+            .show_command = SW_SHOWNOACTIVATE,
+            .position_flags =
+                SWP_NOMOVE | SWP_NOSIZE |
+                SWP_NOZORDER | SWP_NOACTIVATE |
+                SWP_SHOWWINDOW,
+        };
+    }
+    return {
+        .show_command = requested_show_command,
+    };
+}
+
 class Win32Window {
 public:
     using MessageHandler = std::function<LRESULT(HWND, UINT, WPARAM, LPARAM)>;
@@ -18,7 +48,10 @@ public:
     Win32Window& operator=(const Win32Window&) = delete;
 
     bool Create(HINSTANCE instance, const wchar_t* title, int width, int height, MessageHandler handler);
-    void Show(int show_command) const;
+    void Show(
+        int show_command,
+        Win32WindowActivation activation =
+            Win32WindowActivation::Default) const;
     void Destroy();
     void ClearMessageHandler() noexcept;
 

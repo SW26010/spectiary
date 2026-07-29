@@ -5,6 +5,9 @@
 #include "app/render_wake_scheduler.h"
 #include "app/runtime_paths.h"
 #include "app/runtime_resource_workload.h"
+#include "automation/automation_named_pipe.h"
+#include "automation/automation_startup.h"
+#include "automation/automation_state.h"
 #include "platform/win32_compositor_clock.h"
 #include "platform/win32_message_render_observer.h"
 #include "platform/win32_window.h"
@@ -21,14 +24,19 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace specforge {
 
 class SpecForgeApp {
 public:
-    explicit SpecForgeApp(const SpecForgeStartup& startup);
+    explicit SpecForgeApp(
+        const SpecForgeStartup& startup,
+        std::optional<AutomationStartupConfiguration>
+            automation = std::nullopt);
     ~SpecForgeApp();
 
     SpecForgeApp(const SpecForgeApp&) = delete;
@@ -101,6 +109,15 @@ private:
         const D3D11CompositionFeedback& feedback);
     void SchedulePresentationTargetRefresh(HWND hwnd) noexcept;
     void RefreshPresentationTargets(std::string_view reason);
+    void InitializeAutomation();
+    void ServiceAutomation();
+    [[nodiscard]] std::optional<
+        RenderWakeScheduler::TimePoint>
+    NextAutomationDeadline() const;
+    [[nodiscard]] AutomationStateSnapshot
+    AutomationState() const;
+    static void PostAutomationCommandReady(
+        HWND hwnd) noexcept;
 
     LRESULT HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     void LogInputMessage(UINT message, WPARAM wparam, LPARAM lparam);
@@ -118,6 +135,15 @@ private:
     ShellUi ui_;
     PanPacingConfiguration pan_pacing_;
     OnDemandFrameCapture frame_capture_;
+    std::optional<AutomationStartupConfiguration>
+        automation_configuration_;
+    std::unique_ptr<AutomationNamedPipeServer>
+        automation_server_;
+    std::vector<std::string>
+        automation_idle_waits_;
+    std::optional<RenderWakeScheduler::TimePoint>
+        automation_poll_deadline_;
+    bool automation_shutdown_requested_ = false;
 
     std::string imgui_ini_path_utf8_;
     bool imgui_initialized_ = false;
