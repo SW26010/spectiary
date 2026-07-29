@@ -144,7 +144,9 @@ public:
         Require(
             ImGui::Begin("Spectrum view session test", nullptr, kWindowFlags),
             "test plot window should be visible");
-        const specforge::SpectrumViewRenderFeedback feedback = session.Render(snapshot);
+        const specforge::SpectrumViewRenderFeedback feedback = session.Render(
+            snapshot,
+            specforge::UiLanguage::English);
         ImGui::End();
         ImGui::EndFrame();
         return feedback;

@@ -387,9 +387,17 @@ void TestControllerAddsManualAnnotationToActiveContext()
     Require(context != nullptr, "active context should still exist after rejected annotation");
     Require(context->annotations.size() == 1, "rejected annotation should not be appended");
     Require(
-        !context->messages.empty() &&
-            context->messages.back().find("NPY array length does not match") != std::string::npos,
-        "rejected annotation should add a visible context message");
+        !context->diagnostics.empty() &&
+            context->diagnostics.back().kind ==
+                specforge::
+                    SourceCollectionManifestDiagnosticKind::
+                        AnnotationIgnored &&
+            context->diagnostics.back().path ==
+                mismatched_path &&
+            context->diagnostics.back().detail.find(
+                "NPY array length does not match") !=
+                std::string::npos,
+        "rejected annotation should add a structured context diagnostic");
 }
 
 void TestControllerRestoresAndRemovesProvidedAnnotations()

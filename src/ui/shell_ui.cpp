@@ -97,6 +97,32 @@ std::string NarrowPath(const std::filesystem::path& path)
     return PathToUtf8(path);
 }
 
+void RenderUiText(UiLanguage language, UiTextId text_id)
+{
+    const std::string_view text = UiText(language, text_id);
+    ImGui::TextUnformatted(
+        text.data(),
+        text.data() + text.size());
+}
+
+void RenderDisabledUiText(
+    UiLanguage language,
+    UiTextId text_id)
+{
+    const std::string_view text = UiText(language, text_id);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(text.size()),
+        text.data());
+}
+
+std::string_view LabelValueSeparator(UiLanguage language)
+{
+    return language == UiLanguage::SimplifiedChinese
+        ? std::string_view{"："}
+        : std::string_view{": "};
+}
+
 bool RenderTopBarStatus(
     const ShellStatus& status,
     bool source_load_active,
@@ -349,44 +375,77 @@ std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadat
     return {};
 }
 
-std::string_view MetadataDisplayValue(std::string_view value)
+std::string_view MetadataDisplayValue(
+    UiLanguage language,
+    std::string_view value)
 {
     if (value == "not_applied") {
-        return "not applied";
+        return UiText(
+            language,
+            UiTextId::MetadataNotApplied);
     }
     if (value == "available_not_applied") {
-        return "available, not applied";
+        return UiText(
+            language,
+            UiTextId::MetadataAvailableNotApplied);
     }
     if (value == "unreliable_not_applied") {
-        return "unreliable, not applied";
+        return UiText(
+            language,
+            UiTextId::MetadataUnreliableNotApplied);
     }
     if (value == "radial_velocity_low_speed") {
-        return "RV / c low-speed approximation";
+        return UiText(
+            language,
+            UiTextId::MetadataLowSpeedApproximation);
     }
     if (value == "pipeline_redshift") {
-        return "pipeline redshift";
+        return UiText(
+            language,
+            UiTextId::MetadataPipelineRedshift);
     }
     if (value == "zwarning_nonzero") {
-        return "ZWARNING nonzero";
+        return UiText(
+            language,
+            UiTextId::MetadataZWarningNonzero);
     }
     if (value == "invalid_pipeline_redshift") {
-        return "invalid pipeline redshift";
+        return UiText(
+            language,
+            UiTextId::MetadataInvalidPipelineRedshift);
     }
     return value;
 }
 
-void RenderMetadataLine(const char* label, std::string_view value, std::string_view suffix = {})
+void RenderMetadataLine(
+    UiLanguage language,
+    UiTextId label_id,
+    std::string_view value,
+    std::string_view suffix = {})
 {
     if (value.empty()) {
         return;
     }
-    value = MetadataDisplayValue(value);
+    const std::string_view label = UiText(language, label_id);
+    const std::string_view separator =
+        LabelValueSeparator(language);
+    value = MetadataDisplayValue(language, value);
     if (suffix.empty()) {
-        ImGui::Text("%s: %.*s", label, static_cast<int>(value.size()), value.data());
+        ImGui::Text(
+            "%.*s%.*s%.*s",
+            static_cast<int>(label.size()),
+            label.data(),
+            static_cast<int>(separator.size()),
+            separator.data(),
+            static_cast<int>(value.size()),
+            value.data());
     } else {
         ImGui::Text(
-            "%s: %.*s %.*s",
-            label,
+            "%.*s%.*s%.*s %.*s",
+            static_cast<int>(label.size()),
+            label.data(),
+            static_cast<int>(separator.size()),
+            separator.data(),
             static_cast<int>(value.size()),
             value.data(),
             static_cast<int>(suffix.size()),
@@ -394,17 +453,27 @@ void RenderMetadataLine(const char* label, std::string_view value, std::string_v
     }
 }
 
-std::string_view SeverityLabel(SpectrumDiagnosticSeverity severity)
+std::string_view SeverityLabel(
+    UiLanguage language,
+    SpectrumDiagnosticSeverity severity)
 {
     switch (severity) {
     case SpectrumDiagnosticSeverity::Info:
-        return "info";
+        return UiText(
+            language,
+            UiTextId::DiagnosticSeverityInfo);
     case SpectrumDiagnosticSeverity::Warning:
-        return "warning";
+        return UiText(
+            language,
+            UiTextId::DiagnosticSeverityWarning);
     case SpectrumDiagnosticSeverity::Error:
-        return "error";
+        return UiText(
+            language,
+            UiTextId::DiagnosticSeverityError);
     default:
-        return "unknown";
+        return UiText(
+            language,
+            UiTextId::DiagnosticSeverityUnknown);
     }
 }
 
@@ -771,15 +840,21 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
     return DialogResultPath(dialog.Get());
 }
 
-void RenderDiagnosticRows(const SpectrumSnapshotHandle& snapshot)
+void RenderDiagnosticRows(
+    const SpectrumSnapshotHandle& snapshot,
+    UiLanguage language)
 {
     if (!snapshot || snapshot->diagnostics.empty()) {
-        ImGui::TextDisabled("No diagnostics");
+        RenderDisabledUiText(
+            language,
+            UiTextId::NoDiagnostics);
         return;
     }
 
     for (const SpectrumDiagnostic& diagnostic : snapshot->diagnostics) {
-        const std::string_view severity = SeverityLabel(diagnostic.severity);
+        const std::string_view severity = SeverityLabel(
+            language,
+            diagnostic.severity);
         const std::string_view code = DiagnosticCodeLabel(diagnostic.code);
         ImGui::TextColored(
             SeverityColor(diagnostic.severity),
@@ -1407,6 +1482,7 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     const SpectrumViewRenderFeedback plot_feedback =
         spectrum_view_session_.Render(
             snapshot,
+            language,
             SpectrumPlotProfileContext{status.profile, status.frame_index},
             SpectrumPlotOverlays{
                 .spectral_lines = spectral_lines.visible_markers.data(),
@@ -1767,12 +1843,16 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         return;
     }
 
-    ImGui::TextUnformatted("Smoothing");
+    RenderUiText(
+        language,
+        UiTextId::Smoothing);
     ImGui::Separator();
 
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     if (!snapshot || !snapshot->capabilities.can_plot_current_spectrum) {
-        ImGui::TextDisabled("No plottable spectrum");
+        RenderDisabledUiText(
+            language,
+            UiTextId::NoPlottableSpectrum);
         ImGui::End();
         SetPanelVisibility(
             ApplicationPanel::Smoothing,
@@ -1782,19 +1862,44 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
 
     SpectrumViewSessionView view = spectrum_view_session_.View();
     bool show_smoothed = view.show_smoothed;
-    if (ImGui::Checkbox("Show smoothed curve", &show_smoothed)) {
+    const std::string show_smoothed_label = StableUiLabel(
+        language,
+        UiTextId::ShowSmoothedCurve,
+        "SpecForgeShowSmoothedCurve");
+    if (ImGui::Checkbox(
+            show_smoothed_label.c_str(),
+            &show_smoothed)) {
         spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowSmoothed(show_smoothed));
         view = spectrum_view_session_.View();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset")) {
+    const std::string reset_label = StableUiLabel(
+        language,
+        UiTextId::Reset,
+        "SpecForgeResetSmoothing");
+    if (ImGui::Button(reset_label.c_str())) {
         spectrum_view_session_.Submit(SpectrumViewSessionCommand::ResetSmoothing());
         view = spectrum_view_session_.View();
     }
 
-    static constexpr const char* kMethodLabels[] = {"None", "Gaussian", "Median"};
+    std::string method_labels;
+    for (const UiTextId text_id : {
+             UiTextId::SmoothingNone,
+             UiTextId::SmoothingGaussian,
+             UiTextId::SmoothingMedian}) {
+        method_labels += UiText(language, text_id);
+        method_labels.push_back('\0');
+    }
+    method_labels.push_back('\0');
+    const std::string method_label = StableUiLabel(
+        language,
+        UiTextId::SmoothingMethod,
+        "SpecForgeSmoothingMethod");
     int method_index = SmoothingMethodIndex(view.smoothing.method);
-    if (ImGui::Combo("Method", &method_index, kMethodLabels, IM_ARRAYSIZE(kMethodLabels))) {
+    if (ImGui::Combo(
+            method_label.c_str(),
+            &method_index,
+            method_labels.c_str())) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetSmoothingMethod(SmoothingMethodFromIndex(method_index)));
         view = spectrum_view_session_.View();
@@ -1803,33 +1908,66 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     if (view.smoothing.method == SpectrumSmoothingMethod::Gaussian) {
         float sigma = static_cast<float>(view.smoothing.gaussian_sigma);
         ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::DragFloat("Sigma", &sigma, 0.05f, 0.01f, 100.0f, "%.2f")) {
+        const std::string sigma_label = StableUiLabel(
+            language,
+            UiTextId::GaussianSigma,
+            "SpecForgeGaussianSigma");
+        if (ImGui::DragFloat(
+                sigma_label.c_str(),
+                &sigma,
+                0.05f,
+                0.01f,
+                100.0f,
+                "%.2f")) {
             spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetGaussianSigma(static_cast<double>(sigma)));
             view = spectrum_view_session_.View();
         }
     } else if (view.smoothing.method == SpectrumSmoothingMethod::Median) {
         int kernel_size = view.smoothing.median_kernel_size;
         ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::InputInt("Kernel size", &kernel_size, 2, 10)) {
+        const std::string kernel_size_label = StableUiLabel(
+            language,
+            UiTextId::MedianKernelSize,
+            "SpecForgeMedianKernelSize");
+        if (ImGui::InputInt(
+                kernel_size_label.c_str(),
+                &kernel_size,
+                2,
+                10)) {
             spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetMedianKernelSize(kernel_size));
             view = spectrum_view_session_.View();
         }
         const int effective_kernel_size =
             spectrum_view_session_.EffectiveMedianKernelSize(snapshot->current_spectrum.point_count);
         if (effective_kernel_size != view.smoothing.median_kernel_size) {
-            ImGui::TextDisabled("Effective kernel: %d", effective_kernel_size);
+            const std::string_view effective_kernel = UiText(
+                language,
+                UiTextId::EffectiveKernel);
+            ImGui::TextDisabled(
+                "%.*s %d",
+                static_cast<int>(effective_kernel.size()),
+                effective_kernel.data(),
+                effective_kernel_size);
         }
     }
 
     if (view.smoothing.method == SpectrumSmoothingMethod::None && view.show_smoothed) {
-        ImGui::TextDisabled("No smoothing method selected");
+        RenderDisabledUiText(
+            language,
+            UiTextId::NoSmoothingMethodSelected);
     }
 
     if (!view.smoothing_active) {
         ImGui::BeginDisabled();
     }
     bool show_raw_when_smoothed = view.show_raw_when_smoothed;
-    if (ImGui::Checkbox("Show raw overlay", &show_raw_when_smoothed)) {
+    const std::string show_raw_label = StableUiLabel(
+        language,
+        UiTextId::ShowRawOverlay,
+        "SpecForgeShowRawOverlay");
+    if (ImGui::Checkbox(
+            show_raw_label.c_str(),
+            &show_raw_when_smoothed)) {
         spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowRawWhenSmoothed(show_raw_when_smoothed));
     }
     if (!view.smoothing_active) {
@@ -1861,57 +1999,170 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
         return;
     }
 
-    ImGui::TextUnformatted("Information");
+    RenderUiText(
+        language,
+        UiTextId::Information);
     ImGui::Separator();
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
     if (snapshot) {
         const CurrentSpectrumSnapshot& current = snapshot->current_spectrum;
-        ImGui::Text("Name: %s", current.name.empty() ? "(none)" : current.name.c_str());
-        ImGui::Text("Points: %zu", current.point_count);
-        ImGui::Text("X: %s", snapshot->axis.x_label.empty() ? "unknown" : snapshot->axis.x_label.c_str());
-        ImGui::Text("Y: %s", snapshot->axis.y_label.empty() ? "unknown" : snapshot->axis.y_label.c_str());
-        RenderMetadataLine("Wavelength medium", MetadataValue(snapshot->source.metadata, "wavelength_medium"));
+        const std::string_view separator =
+            LabelValueSeparator(language);
+        const std::string_view name_label = UiText(
+            language,
+            UiTextId::Name);
+        const std::string_view none_value = UiText(
+            language,
+            UiTextId::NoneValue);
+        ImGui::Text(
+            "%.*s%.*s%.*s",
+            static_cast<int>(name_label.size()),
+            name_label.data(),
+            static_cast<int>(separator.size()),
+            separator.data(),
+            static_cast<int>(
+                current.name.empty()
+                    ? none_value.size()
+                    : current.name.size()),
+            current.name.empty()
+                ? none_value.data()
+                : current.name.data());
+        const std::string_view points_label = UiText(
+            language,
+            UiTextId::Points);
+        ImGui::Text(
+            "%.*s%.*s%zu",
+            static_cast<int>(points_label.size()),
+            points_label.data(),
+            static_cast<int>(separator.size()),
+            separator.data(),
+            current.point_count);
+        const std::string_view unknown_value = UiText(
+            language,
+            UiTextId::UnknownValue);
+        ImGui::Text(
+            "X%.*s%.*s",
+            static_cast<int>(separator.size()),
+            separator.data(),
+            static_cast<int>(
+                snapshot->axis.x_label.empty()
+                    ? unknown_value.size()
+                    : snapshot->axis.x_label.size()),
+            snapshot->axis.x_label.empty()
+                ? unknown_value.data()
+                : snapshot->axis.x_label.data());
+        ImGui::Text(
+            "Y%.*s%.*s",
+            static_cast<int>(separator.size()),
+            separator.data(),
+            static_cast<int>(
+                snapshot->axis.y_label.empty()
+                    ? unknown_value.size()
+                    : snapshot->axis.y_label.size()),
+            snapshot->axis.y_label.empty()
+                ? unknown_value.data()
+                : snapshot->axis.y_label.data());
         RenderMetadataLine(
-            "Observer correction",
+            language,
+            UiTextId::WavelengthMedium,
+            MetadataValue(
+                snapshot->source.metadata,
+                "wavelength_medium"));
+        RenderMetadataLine(
+            language,
+            UiTextId::ObserverCorrection,
             MetadataValue(snapshot->source.metadata, "observer_frame_correction"));
         RenderMetadataLine(
-            "Radial velocity",
+            language,
+            UiTextId::RadialVelocity,
             MetadataValue(snapshot->source.metadata, "radial_velocity_km_s"),
             "km/s");
-        RenderMetadataLine("RV source", MetadataValue(snapshot->source.metadata, "radial_velocity_source"));
-        RenderMetadataLine("Redshift", MetadataValue(snapshot->source.metadata, "redshift"));
-        RenderMetadataLine("Redshift warning", MetadataValue(snapshot->source.metadata, "redshift_warning"));
-        RenderMetadataLine("Target z", MetadataValue(snapshot->source.metadata, "target_redshift"));
-        RenderMetadataLine("Target z source", MetadataValue(snapshot->source.metadata, "target_redshift_source"));
-        RenderMetadataLine("Target z status", MetadataValue(snapshot->source.metadata, "target_redshift_status"));
-        RenderMetadataLine("Target z warning", MetadataValue(snapshot->source.metadata, "target_redshift_warning"));
         RenderMetadataLine(
-            "Heliocentric correction",
+            language,
+            UiTextId::RadialVelocitySource,
+            MetadataValue(
+                snapshot->source.metadata,
+                "radial_velocity_source"));
+        RenderMetadataLine(
+            language,
+            UiTextId::Redshift,
+            MetadataValue(snapshot->source.metadata, "redshift"));
+        RenderMetadataLine(
+            language,
+            UiTextId::RedshiftWarning,
+            MetadataValue(
+                snapshot->source.metadata,
+                "redshift_warning"));
+        RenderMetadataLine(
+            language,
+            UiTextId::TargetRedshift,
+            MetadataValue(
+                snapshot->source.metadata,
+                "target_redshift"));
+        RenderMetadataLine(
+            language,
+            UiTextId::TargetRedshiftSource,
+            MetadataValue(
+                snapshot->source.metadata,
+                "target_redshift_source"));
+        RenderMetadataLine(
+            language,
+            UiTextId::TargetRedshiftStatus,
+            MetadataValue(
+                snapshot->source.metadata,
+                "target_redshift_status"));
+        RenderMetadataLine(
+            language,
+            UiTextId::TargetRedshiftWarning,
+            MetadataValue(
+                snapshot->source.metadata,
+                "target_redshift_warning"));
+        RenderMetadataLine(
+            language,
+            UiTextId::HeliocentricCorrection,
             MetadataValue(snapshot->source.metadata, "heliocentric_correction_km_s"),
             "km/s");
         RenderMetadataLine(
-            "Target rest frame",
+            language,
+            UiTextId::TargetRestFrame,
             MetadataValue(snapshot->source.metadata, "target_rest_frame_status"));
         RenderMetadataLine(
-            "Rest-frame correction",
+            language,
+            UiTextId::RestFrameCorrection,
             MetadataValue(snapshot->source.metadata, "rest_frame_correction_status"));
     } else {
-        ImGui::TextDisabled("No snapshot");
+        RenderDisabledUiText(
+            language,
+            UiTextId::NoSnapshot);
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Fit view")) {
+    const std::string fit_view_label = StableUiLabel(
+        language,
+        UiTextId::FitView,
+        "SpecForgeFitSpectrumView");
+    if (ImGui::Button(fit_view_label.c_str())) {
         spectrum_view_session_.Submit(SpectrumViewSessionCommand::RequestFitView());
     }
     bool show_points = spectrum_view_session_.View().show_points;
-    if (ImGui::Checkbox("Show points", &show_points)) {
+    const std::string show_points_label = StableUiLabel(
+        language,
+        UiTextId::ShowPoints,
+        "SpecForgeShowSpectrumPoints");
+    if (ImGui::Checkbox(
+            show_points_label.c_str(),
+            &show_points)) {
         spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowPoints(show_points));
     }
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Diagnostics");
+    RenderUiText(
+        language,
+        UiTextId::DiagnosticsHeading);
     ImGui::Separator();
-    RenderDiagnosticRows(snapshot);
+    RenderDiagnosticRows(
+        snapshot,
+        language);
 
     ImGui::End();
     SetPanelVisibility(
@@ -1937,6 +2188,7 @@ void ShellUi::RenderMainPlot(const ShellStatus& status)
     const SpectrumViewRenderFeedback plot_feedback =
         spectrum_view_session_.Render(
             snapshot,
+            language,
             SpectrumPlotProfileContext{status.profile, status.frame_index},
             SpectrumPlotOverlays{
                 .spectral_lines = spectral_lines.visible_markers.data(),

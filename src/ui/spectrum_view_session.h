@@ -3,6 +3,7 @@
 #include "domain/spectrum_smoothing.h"
 #include "domain/spectrum_snapshot.h"
 #include "plot/spectrum_plot.h"
+#include "ui/ui_text.h"
 
 #include <cstddef>
 #include <memory>
@@ -85,6 +86,7 @@ public:
     [[nodiscard]] int EffectiveMedianKernelSize(std::size_t point_count) const;
     [[nodiscard]] SpectrumViewRenderFeedback Render(
         const SpectrumSnapshotHandle& snapshot,
+        UiLanguage language,
         const SpectrumPlotProfileContext& profile = {},
         const SpectrumPlotOverlays& overlays = {},
         const SpectrumPlotDisplayOptions& display = {},

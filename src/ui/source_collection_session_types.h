@@ -3,6 +3,7 @@
 #include "app/local_user_state.h"
 #include "domain/sample_filter.h"
 #include "domain/sample_labeling.h"
+#include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/background_retirement.h"
 #include "ui/sample_navigation_sequence.h"
@@ -47,7 +48,8 @@ struct SourceCollectionAnnotationValueView {
     SampleAnnotationWorkflowRelationship relationship =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
     std::string display_text;
-    std::string message;
+    std::optional<SourceCollectionManifestDiagnostic>
+        diagnostic;
     bool missing = false;
     bool output_missing = false;
     bool metadata_missing = false;
@@ -80,7 +82,8 @@ struct SourceCollectionNavigationView {
     std::string exact_sample_name;
     bool has_partial_sample_name_matches = false;
     std::vector<SourceCollectionSampleNameMatchView> sample_name_matches;
-    std::vector<std::string> annotation_messages;
+    std::vector<SourceCollectionManifestDiagnostic>
+        annotation_diagnostics;
     std::vector<SourceCollectionAnnotationValueView> current_annotations;
 };
 

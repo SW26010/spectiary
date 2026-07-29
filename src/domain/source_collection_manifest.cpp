@@ -384,7 +384,13 @@ void LoadNpySampleNames(
         manifest.sample_names = ReadStringNpyValues(*name_path, spectrum_count, cancellation_checkpoint);
     } catch (const std::exception& error) {
         Checkpoint(cancellation_checkpoint);
-        manifest.messages.push_back("Ignored " + FileNameToUtf8(name_path->filename()) + ": " + error.what() + ".");
+        manifest.diagnostics.push_back({
+            .kind =
+                SourceCollectionManifestDiagnosticKind::
+                    SampleNamesIgnored,
+            .path = *name_path,
+            .detail = error.what(),
+        });
     }
 }
 
@@ -409,11 +415,27 @@ void LoadNpyAutoAnnotations(
             &error_message);
     if (annotation) {
         if (!annotation->metadata_warning.empty()) {
-            manifest.messages.push_back(annotation->metadata_warning);
+            manifest.diagnostics.push_back({
+                .kind =
+                    SourceCollectionManifestDiagnosticKind::
+                        AnnotationMetadataIgnored,
+                .path =
+                    SampleAnnotationIoAdapter::
+                        MetadataPathForResult(
+                            annotation->path),
+                .detail =
+                    annotation->metadata_warning,
+            });
         }
         manifest.annotations.push_back(std::move(*annotation));
     } else {
-        manifest.messages.push_back("Ignored " + FileNameToUtf8(annotation_path->filename()) + ": " + error_message + ".");
+        manifest.diagnostics.push_back({
+            .kind =
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationIgnored,
+            .path = *annotation_path,
+            .detail = std::move(error_message),
+        });
     }
 }
 
@@ -616,7 +638,13 @@ bool IngestReadOnlySampleAnnotationCancelable(
             &load_error);
     if (!annotation) {
         std::string ignored_message = "Ignored " + FileNameToUtf8(path.filename()) + ": " + load_error + ".";
-        manifest.messages.push_back(ignored_message);
+        manifest.diagnostics.push_back({
+            .kind =
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationIgnored,
+            .path = path,
+            .detail = std::move(load_error),
+        });
         if (message != nullptr) {
             *message = std::move(ignored_message);
         }
@@ -636,7 +664,15 @@ bool IngestReadOnlySampleAnnotationCancelable(
         manifest.annotations.push_back(std::move(*annotation));
     }
     if (!metadata_warning.empty()) {
-        manifest.messages.push_back(metadata_warning);
+        manifest.diagnostics.push_back({
+            .kind =
+                SourceCollectionManifestDiagnosticKind::
+                    AnnotationMetadataIgnored,
+            .path =
+                SampleAnnotationIoAdapter::
+                    MetadataPathForResult(path),
+            .detail = metadata_warning,
+        });
     }
     if (message != nullptr) {
         message->clear();

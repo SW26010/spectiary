@@ -785,7 +785,19 @@ void TestRejectsMismatchedSampleAnnotationLength()
     const SpectrumSnapshotHandle snapshot = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     const specforge::SourceCollectionManifest context = specforge::LoadSourceCollectionManifest(*snapshot);
     Require(context.annotations.empty(), "mismatched annotation length must not attach to the source collection");
-    Require(!context.messages.empty(), "mismatched annotation length should explain why it was ignored");
+    Require(
+        context.diagnostics.size() == 1,
+        "mismatched annotation length should produce one structured diagnostic");
+    Require(
+        context.diagnostics.front().kind ==
+                specforge::
+                    SourceCollectionManifestDiagnosticKind::
+                        AnnotationIgnored &&
+            context.diagnostics.front().path ==
+                annotation_path &&
+            context.diagnostics.front().detail.find(
+                "length") != std::string::npos,
+        "mismatched annotation diagnostics should preserve kind, path, and technical detail");
 }
 
 void TestRejectsAuxiliaryNpyArrays()
@@ -1259,7 +1271,20 @@ void TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates()
         specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
         "shared annotation ingestion should retain the usable value array");
     Require(manifest.annotations.size() == 1, "shared ingestion should append one annotation");
-    Require(!manifest.messages.empty(), "shared ingestion should preserve the metadata warning");
+    Require(
+        manifest.diagnostics.size() == 1,
+        "shared ingestion should preserve one structured metadata warning");
+    Require(
+        manifest.diagnostics.front().kind ==
+                specforge::
+                    SourceCollectionManifestDiagnosticKind::
+                        AnnotationMetadataIgnored &&
+            manifest.diagnostics.front().path ==
+                specforge::SampleAnnotationIoAdapter::
+                    MetadataPathForResult(
+                        annotation_path) &&
+            !manifest.diagnostics.front().detail.empty(),
+        "metadata diagnostics should preserve kind, path, and technical detail");
     Require(
         specforge::IngestReadOnlySampleAnnotation(manifest, annotation_path, 2),
         "re-ingesting the same annotation should update it");

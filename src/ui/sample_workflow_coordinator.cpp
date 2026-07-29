@@ -96,7 +96,20 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     view.relationship = local_task == nullptr
         ? annotation.relationship
         : SampleAnnotationWorkflowRelationship::LocalLabelingTask;
-    view.message = annotation.metadata_warning;
+    if (!annotation.metadata_warning.empty()) {
+        view.diagnostic =
+            SourceCollectionManifestDiagnostic{
+                .kind =
+                    SourceCollectionManifestDiagnosticKind::
+                        AnnotationMetadataIgnored,
+                .path =
+                    SampleAnnotationIoAdapter::
+                        MetadataPathForResult(
+                            annotation.path),
+                .detail =
+                    annotation.metadata_warning,
+            };
+    }
     if (local_task != nullptr && current_index < local_task->values.size()) {
         view.display_text = FormatSampleLabelValue(local_task->label_set, local_task->values[current_index]);
     } else if (current_index < annotation.values.size()) {
@@ -1509,7 +1522,8 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     }
     if (const SourceCollectionManifest* context = navigation_.active_context()) {
         view.has_sample_names = !context->sample_names.empty();
-        view.annotation_messages = context->messages;
+        view.annotation_diagnostics =
+            context->diagnostics;
         if (view.current_index && *view.current_index < context->sample_names.size()) {
             view.current_sample_name = context->sample_names[*view.current_index];
         }

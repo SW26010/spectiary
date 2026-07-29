@@ -119,6 +119,75 @@ void RenderDisabledText(std::string_view text)
     ImGui::PopStyleColor();
 }
 
+void RenderText(std::string_view text)
+{
+    ImGui::TextUnformatted(text.data(), text.data() + text.size());
+}
+
+UiTextId SourceCollectionDiagnosticTextId(
+    SourceCollectionManifestDiagnosticKind kind)
+{
+    switch (kind) {
+    case SourceCollectionManifestDiagnosticKind::
+        SampleNamesIgnored:
+        return UiTextId::SampleNamesFileIgnored;
+    case SourceCollectionManifestDiagnosticKind::
+        AnnotationMetadataIgnored:
+        return UiTextId::AnnotationMetadataFileIgnored;
+    case SourceCollectionManifestDiagnosticKind::
+        AnnotationIgnored:
+    default:
+        return UiTextId::AnnotationFileIgnored;
+    }
+}
+
+void RenderSourceCollectionDiagnosticTooltip(
+    const SourceCollectionManifestDiagnostic& diagnostic,
+    UiLanguage language)
+{
+    if (diagnostic.detail.empty()) {
+        return;
+    }
+
+    ImGui::BeginTooltip();
+    RenderText(
+        UiText(
+            language,
+            UiTextId::DiagnosticDetails));
+    ImGui::Separator();
+    ImGui::PushTextWrapPos(
+        ImGui::GetFontSize() * 32.0f);
+    ImGui::TextUnformatted(
+        diagnostic.detail.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+void RenderSourceCollectionDiagnostic(
+    const SourceCollectionManifestDiagnostic& diagnostic,
+    UiLanguage language)
+{
+    std::string filename = NarrowPath(
+        diagnostic.path.filename());
+    if (filename.empty()) {
+        filename = UiText(
+            language,
+            UiTextId::UnknownValue);
+    }
+    const std::string_view summary = UiText(
+        language,
+        SourceCollectionDiagnosticTextId(
+            diagnostic.kind));
+    ImGui::TextDisabled(
+        summary.data(),
+        filename.c_str());
+    if (ImGui::IsItemHovered()) {
+        RenderSourceCollectionDiagnosticTooltip(
+            diagnostic,
+            language);
+    }
+}
+
 bool TableCellTextButton(const char* id, std::string_view text, ImU32 text_color)
 {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -169,7 +238,7 @@ bool ActionIconButton(
     const char* id,
     const ImRect& hit_rect,
     ActionIcon icon,
-    const char* tooltip,
+    std::string_view tooltip,
     bool reveal_on_hover)
 {
     const float height = ImGui::GetFrameHeight();
@@ -227,15 +296,26 @@ bool ActionIconButton(
             1.0f);
     }
 
-    if (hovered && tooltip != nullptr && tooltip[0] != '\0') {
-        ImGui::SetTooltip("%s", tooltip);
+    if (hovered && !tooltip.empty()) {
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(tooltip.size()),
+            tooltip.data());
     }
     return clicked;
 }
 
-bool TrashIconButton(const char* id, const ImRect& hit_rect)
+bool TrashIconButton(
+    const char* id,
+    const ImRect& hit_rect,
+    UiLanguage language)
 {
-    return ActionIconButton(id, hit_rect, ActionIcon::Trash, "Remove from list", false);
+    return ActionIconButton(
+        id,
+        hit_rect,
+        ActionIcon::Trash,
+        UiText(language, UiTextId::RemoveFromList),
+        false);
 }
 
 }  // namespace
@@ -291,16 +371,24 @@ void SourceCollectionPanelUi::RenderFiles(
     }
 
     const SourceCollectionSessionView& view = interaction.View();
-    ImGui::TextUnformatted("Files");
+    RenderText(UiText(language, UiTextId::Files));
     ImGui::Separator();
 
-    if (ImGui::Button("Add file...")) {
+    const std::string add_file_label = StableUiLabel(
+        language,
+        UiTextId::AddFile,
+        "SpecForgeFilesAddFile");
+    if (ImGui::Button(add_file_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_source_file()) {
             open_source(*path);
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Add folder...")) {
+    const std::string add_folder_label = StableUiLabel(
+        language,
+        UiTextId::AddFolder,
+        "SpecForgeFilesAddFolder");
+    if (ImGui::Button(add_folder_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_source_folder()) {
             open_source(*path);
         }
@@ -310,7 +398,12 @@ void SourceCollectionPanelUi::RenderFiles(
     const std::optional<std::size_t> current_source_index = view.current_source_index;
     const SpectrumSnapshotHandle& snapshot = view.snapshot;
     const std::string source_count =
-        std::to_string(sources.size()) + (sources.size() == 1 ? " source" : " sources");
+        std::to_string(sources.size()) + " " +
+        std::string(UiText(
+            language,
+            sources.size() == 1
+                ? UiTextId::SourceSingular
+                : UiTextId::SourcesPlural));
     RenderDisabledText(source_count);
 
     ImGui::Spacing();
@@ -318,16 +411,33 @@ void SourceCollectionPanelUi::RenderFiles(
         !sources.empty() && current_source_index && *current_source_index < sources.size() && snapshot &&
         !snapshot->source.path.empty();
     if (!has_active_source) {
-        ImGui::TextDisabled("No sources added in this session.");
+        RenderDisabledText(
+            UiText(language, UiTextId::NoSourcesInSession));
     } else if (ImGui::BeginTable(
                    "files_table",
                    4,
                    ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
                        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX)) {
-        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 200.0f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 128.0f);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::SourceColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            200.0f,
+            ImGui::GetID("SpecForgeFilesSourceColumn"));
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::TypeColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            72.0f,
+            ImGui::GetID("SpecForgeFilesTypeColumn"));
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::StateColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            128.0f,
+            ImGui::GetID("SpecForgeFilesStateColumn"));
+        ImGui::TableSetupColumn(
+            "",
+            ImGuiTableColumnFlags_WidthFixed,
+            32.0f,
+            ImGui::GetID("SpecForgeFilesActionsColumn"));
         ImGui::TableHeadersRow();
 
         std::optional<std::size_t> source_to_remove;
@@ -376,7 +486,10 @@ void SourceCollectionPanelUi::RenderFiles(
             ImGui::TableSetColumnIndex(3);
             const ImRect remove_cell =
                 ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
-            if (TrashIconButton("remove", remove_cell)) {
+            if (TrashIconButton(
+                    "remove",
+                    remove_cell,
+                    language)) {
                 source_to_remove = index;
             }
             ImGui::PopID();
@@ -423,7 +536,8 @@ void SourceCollectionPanelUi::RenderNavigation(
     SourceCollectionNavigationView navigation =
         interaction.View().navigation;
     if (!navigation.has_active_source) {
-        ImGui::TextDisabled("No active source");
+        RenderDisabledText(
+            UiText(language, UiTextId::NoActiveSource));
         const bool shortcut_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         const bool shortcut_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
         shortcut = RouteSampleWorkflowShortcut({
@@ -437,7 +551,7 @@ void SourceCollectionPanelUi::RenderNavigation(
     const std::size_t navigation_index = navigation.current_index.value_or(0);
     const std::size_t navigation_count = navigation.sample_count;
 
-    ImGui::TextUnformatted("source sample:");
+    RenderText(UiText(language, UiTextId::SourceSample));
     ImGui::SameLine();
     const float sample_input_width =
         std::max(72.0f, ImGui::CalcTextSize("000000").x + ImGui::GetStyle().FramePadding.x * 2.0f);
@@ -491,7 +605,13 @@ void SourceCollectionPanelUi::RenderNavigation(
         navigation = update.view.get().navigation;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Previous sample (Left Arrow)");
+        const std::string_view tooltip = UiText(
+            language,
+            UiTextId::PreviousSampleShortcut);
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(tooltip.size()),
+            tooltip.data());
     }
     if (!can_previous) {
         ImGui::EndDisabled();
@@ -510,7 +630,13 @@ void SourceCollectionPanelUi::RenderNavigation(
         navigation = update.view.get().navigation;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Next sample (Right Arrow)");
+        const std::string_view tooltip = UiText(
+            language,
+            UiTextId::NextSampleShortcut);
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(tooltip.size()),
+            tooltip.data());
     }
     if (!can_next) {
         ImGui::EndDisabled();
@@ -520,13 +646,23 @@ void SourceCollectionPanelUi::RenderNavigation(
         ImGui::TextDisabled("%s", navigation.current_sample_display_name.c_str());
     }
     if (navigation.sequence_active) {
+        const std::string_view sequence_label = UiText(
+            language,
+            UiTextId::Sequence);
         if (navigation.current_sequence_position) {
             ImGui::Text(
-                "sequence: %llu / %llu",
+                "%.*s %llu / %llu",
+                static_cast<int>(sequence_label.size()),
+                sequence_label.data(),
                 static_cast<unsigned long long>(*navigation.current_sequence_position + 1),
                 static_cast<unsigned long long>(navigation.sequence_count));
         } else {
-            ImGui::Text("sequence: - / %llu", static_cast<unsigned long long>(navigation.sequence_count));
+            ImGui::Text(
+                "%.*s - / %llu",
+                static_cast<int>(sequence_label.size()),
+                sequence_label.data(),
+                static_cast<unsigned long long>(
+                    navigation.sequence_count));
         }
     }
 
@@ -550,7 +686,7 @@ void SourceCollectionPanelUi::RenderSampleNameSearch(
     UiLanguage language)
 {
     const std::size_t navigation_index = navigation.current_index.value_or(0);
-    ImGui::TextUnformatted("name:");
+    RenderText(UiText(language, UiTextId::SampleName));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
     const bool sample_name_changed = ImGui::InputText(
@@ -675,12 +811,17 @@ void SourceCollectionPanelUi::RenderAnnotations(
     const SpectrumSnapshotHandle& snapshot = session_view.snapshot;
     const SourceCollectionNavigationView& navigation = session_view.navigation;
     if (!snapshot || !navigation.has_active_source || snapshot->source.path.empty()) {
-        ImGui::TextDisabled("No active source");
+        RenderDisabledText(
+            UiText(language, UiTextId::NoActiveSource));
         ImGui::End();
         return;
     }
 
-    if (ImGui::Button("Add file...")) {
+    const std::string add_file_label = StableUiLabel(
+        language,
+        UiTextId::AddFile,
+        "SpecForgeAnnotationsAddFile");
+    if (ImGui::Button(add_file_label.c_str())) {
         if (std::optional<std::filesystem::path> path = choose_annotation_file()) {
             (void)interaction.Submit(
                 EditSourceCollection(
@@ -689,15 +830,20 @@ void SourceCollectionPanelUi::RenderAnnotations(
         }
     }
 
-    if (!navigation.annotation_messages.empty()) {
-        for (const std::string& message : navigation.annotation_messages) {
-            ImGui::TextDisabled("%s", message.c_str());
+    if (!navigation.annotation_diagnostics.empty()) {
+        for (const SourceCollectionManifestDiagnostic&
+                 diagnostic :
+             navigation.annotation_diagnostics) {
+            RenderSourceCollectionDiagnostic(
+                diagnostic,
+                language);
         }
         ImGui::Separator();
     }
 
     if (navigation.current_annotations.empty()) {
-        ImGui::TextDisabled("No read-only annotations");
+        RenderDisabledText(
+            UiText(language, UiTextId::NoReadOnlyAnnotations));
         ImGui::End();
         return;
     }
@@ -707,10 +853,30 @@ void SourceCollectionPanelUi::RenderAnnotations(
             4,
             ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
                 ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoHostExtendX)) {
-        ImGui::TableSetupColumn("Display name", ImGuiTableColumnFlags_WidthFixed, 220.0f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 160.0f);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::DisplayNameColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            220.0f,
+            ImGui::GetID(
+                "SpecForgeAnnotationsDisplayNameColumn"));
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::TypeColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            72.0f,
+            ImGui::GetID(
+                "SpecForgeAnnotationsTypeColumn"));
+        ImGui::TableSetupColumn(
+            UiText(language, UiTextId::ValueColumn).data(),
+            ImGuiTableColumnFlags_WidthFixed,
+            160.0f,
+            ImGui::GetID(
+                "SpecForgeAnnotationsValueColumn"));
+        ImGui::TableSetupColumn(
+            "",
+            ImGuiTableColumnFlags_WidthFixed,
+            32.0f,
+            ImGui::GetID(
+                "SpecForgeAnnotationsActionsColumn"));
         ImGui::TableHeadersRow();
 
         std::optional<std::filesystem::path> annotation_to_remove;
@@ -784,30 +950,51 @@ void SourceCollectionPanelUi::RenderAnnotations(
                 ImGui::GetColorU32(ImGuiCol_Text));
 
             ImGui::TableSetColumnIndex(2);
-            std::string value_text = annotation.missing ? "(missing)" : annotation.display_text;
+            std::string value_text = annotation.missing
+                ? std::string(UiText(
+                      language,
+                      UiTextId::AnnotationMissing))
+                : annotation.display_text;
             if (!annotation.missing && annotation.output_missing) {
-                value_text += " (output missing)";
+                value_text += " ";
+                value_text += UiText(
+                    language,
+                    UiTextId::AnnotationOutputMissing);
             } else if (!annotation.missing && annotation.metadata_missing) {
-                value_text += " (metadata missing)";
-            } else if (!annotation.missing && !annotation.message.empty()) {
-                value_text += " (metadata ignored)";
+                value_text += " ";
+                value_text += UiText(
+                    language,
+                    UiTextId::AnnotationMetadataMissing);
+            } else if (
+                !annotation.missing &&
+                annotation.diagnostic) {
+                value_text += " ";
+                value_text += UiText(
+                    language,
+                    UiTextId::AnnotationMetadataIgnored);
             }
             const bool disabled_value =
                 annotation.missing || annotation.output_missing || annotation.metadata_missing ||
-                !annotation.message.empty();
+                annotation.diagnostic.has_value();
             (void)TableCellTextButton(
                 "annotation_value",
                 value_text,
                 ImGui::GetColorU32(disabled_value ? ImGuiCol_TextDisabled : ImGuiCol_Text));
-            if (!annotation.message.empty() && ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", annotation.message.c_str());
+            if (annotation.diagnostic &&
+                ImGui::IsItemHovered()) {
+                RenderSourceCollectionDiagnosticTooltip(
+                    *annotation.diagnostic,
+                    language);
             }
 
             ImGui::TableSetColumnIndex(3);
             if (annotation.can_remove_annotation) {
                 const ImRect remove_cell =
                     ImGui::TableGetCellBgRect(ImGui::GetCurrentTable(), ImGui::TableGetColumnIndex());
-                if (TrashIconButton("remove_annotation", remove_cell)) {
+                if (TrashIconButton(
+                        "remove_annotation",
+                        remove_cell,
+                        language)) {
                     annotation_to_remove = annotation.path;
                 }
             }

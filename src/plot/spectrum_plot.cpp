@@ -109,16 +109,17 @@ bool SmoothingActive(const SpectrumPlotState& state)
     return state.show_smoothed && state.smoothing.method != SpectrumSmoothingMethod::None;
 }
 
-const char* SmoothingLabel(const SpectrumSmoothingSettings& settings)
+UiTextId SmoothingTextId(
+    const SpectrumSmoothingSettings& settings)
 {
     switch (settings.method) {
     case SpectrumSmoothingMethod::Gaussian:
-        return "Gaussian smoothing";
+        return UiTextId::GaussianSmoothing;
     case SpectrumSmoothingMethod::Median:
-        return "Median smoothing";
+        return UiTextId::MedianSmoothing;
     case SpectrumSmoothingMethod::None:
     default:
-        return "current spectrum";
+        return UiTextId::CurrentSpectrum;
     }
 }
 
@@ -849,6 +850,7 @@ bool IsPlotPanDragActive(
 SpectrumPlotRenderResult RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
+    UiLanguage language,
     const SpectrumPlotProfileContext& profile,
     const SpectrumPlotStyle& style,
     const SpectrumPlotOverlays& overlays,
@@ -861,7 +863,13 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         if (touchpad_gestures != nullptr) {
             touchpad_gestures->ClearTarget();
         }
-        ImGui::TextDisabled("No plottable spectrum.");
+        const std::string_view no_spectrum = UiText(
+            language,
+            UiTextId::NoPlottableSpectrum);
+        ImGui::TextDisabled(
+            "%.*s",
+            static_cast<int>(no_spectrum.size()),
+            no_spectrum.data());
         return result;
     }
 
@@ -937,7 +945,14 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
     }
 
     bool plot_submitted = false;
-    if (ImPlot::BeginPlot("Spectrum##main_spectrum", plot_size, plot_flags)) {
+    const std::string plot_label = StableUiLabel(
+        language,
+        UiTextId::Spectrum,
+        "main_spectrum");
+    if (ImPlot::BeginPlot(
+            plot_label.c_str(),
+            plot_size,
+            plot_flags)) {
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
         ImPlot::SetupAxis(ImAxis_X1, x_label, x_axis_flags);
@@ -958,13 +973,18 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
 
         if (SmoothingActive(state)) {
             if (state.show_raw_when_smoothed) {
+                const std::string raw_spectrum_label =
+                    StableUiLabel(
+                        language,
+                        UiTextId::RawSpectrum,
+                        "SpecForgeRawSpectrum");
                 ImPlotSpec raw_spec = base_spec;
                 raw_spec.LineColor.w = 0.30f;
                 raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
                 raw_spec.MarkerLineColor = raw_spec.LineColor;
                 raw_spec.MarkerFillColor = raw_spec.LineColor;
                 ImPlot::PlotLine(
-                    "raw spectrum",
+                    raw_spectrum_label.c_str(),
                     x_values->data(),
                     y_values->data(),
                     static_cast<int>(x_values->size()),
@@ -974,6 +994,11 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
 
             const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
             if (smoothed_values && smoothed_values->size() == x_values->size()) {
+                const std::string smoothed_spectrum_label =
+                    StableUiLabel(
+                        language,
+                        SmoothingTextId(state.smoothing),
+                        "SpecForgeSmoothedSpectrum");
                 ImPlotSpec smoothed_spec = base_spec;
                 smoothed_spec.LineColor = ImVec4(0.94f, 0.36f, 0.22f, 1.0f);
                 smoothed_spec.LineWeight = std::max(1.0f, style.line_weight * 1.08f);
@@ -984,7 +1009,7 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
                     smoothed_spec.MarkerSize = 2.0f;
                 }
                 ImPlot::PlotLine(
-                    SmoothingLabel(state.smoothing),
+                    smoothed_spectrum_label.c_str(),
                     x_values->data(),
                     smoothed_values->data(),
                     static_cast<int>(x_values->size()),
@@ -996,8 +1021,18 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
                 base_spec.Marker = ImPlotMarker_Circle;
                 base_spec.MarkerSize = 2.0f;
             }
+            std::string current_spectrum_label;
+            const char* series_label = name.c_str();
+            if (name.empty()) {
+                current_spectrum_label = StableUiLabel(
+                    language,
+                    UiTextId::CurrentSpectrum,
+                    "SpecForgeCurrentSpectrum");
+                series_label =
+                    current_spectrum_label.c_str();
+            }
             ImPlot::PlotLine(
-                name.empty() ? "current spectrum" : name.c_str(),
+                series_label,
                 x_values->data(),
                 y_values->data(),
                 static_cast<int>(x_values->size()),

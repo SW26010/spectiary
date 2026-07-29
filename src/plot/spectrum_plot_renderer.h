@@ -5,6 +5,7 @@
 #include "plot/scientific_label.h"
 #include "plot/spectral_line_label_layout.h"
 #include "plot/spectrum_plot.h"
+#include "ui/ui_text.h"
 
 #include <optional>
 
@@ -47,6 +48,7 @@ struct SpectrumPlotRenderResult {
 [[nodiscard]] SpectrumPlotRenderResult RenderSpectrumPlot(
     const SpectrumSnapshotHandle& snapshot,
     SpectrumPlotState& state,
+    UiLanguage language,
     const SpectrumPlotProfileContext& profile,
     const SpectrumPlotStyle& style,
     const SpectrumPlotOverlays& overlays,

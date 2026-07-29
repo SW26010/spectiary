@@ -70,10 +70,25 @@ struct SourceCollectionContextReuseProof {
         const SourceCollectionContextReuseProof&) const = default;
 };
 
+enum class SourceCollectionManifestDiagnosticKind {
+    SampleNamesIgnored,
+    AnnotationIgnored,
+    AnnotationMetadataIgnored,
+};
+
+struct SourceCollectionManifestDiagnostic {
+    SourceCollectionManifestDiagnosticKind kind =
+        SourceCollectionManifestDiagnosticKind::
+            AnnotationIgnored;
+    std::filesystem::path path;
+    std::string detail;
+};
+
 struct SourceCollectionManifest {
     std::vector<std::string> sample_names;
     std::vector<SampleAnnotationResult> annotations;
-    std::vector<std::string> messages;
+    std::vector<SourceCollectionManifestDiagnostic>
+        diagnostics;
 };
 
 struct SourceCollectionContext {

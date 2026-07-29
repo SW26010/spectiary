@@ -184,6 +184,7 @@ int SpectrumViewSession::EffectiveMedianKernelSize(std::size_t point_count) cons
 
 SpectrumViewRenderFeedback SpectrumViewSession::Render(
     const SpectrumSnapshotHandle& snapshot,
+    UiLanguage language,
     const SpectrumPlotProfileContext& profile,
     const SpectrumPlotOverlays& overlays,
     const SpectrumPlotDisplayOptions& display,
@@ -192,6 +193,7 @@ SpectrumViewRenderFeedback SpectrumViewSession::Render(
     const SpectrumPlotRenderResult result = RenderSpectrumPlot(
         snapshot,
         state_->plot,
+        language,
         profile,
         state_->style,
         overlays,
