@@ -907,6 +907,17 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     const specforge::SourceCollectionSessionResult assign_result =
         Submit(session, AssignActiveLabelToCurrentSample(1));
     const specforge::SourceCollectionSessionAction& assign_action = assign_result.action;
+    Require(
+        assign_result.label_write &&
+            assign_result.label_write->write.accepted &&
+            assign_result.label_write->write.changed &&
+            assign_result.label_write->write.sample_index == 0 &&
+            assign_result.label_write->write.previous_code ==
+                specforge::kUnlabeledSampleLabelCode &&
+            assign_result.label_write->write.current_code == 1 &&
+            assign_result.label_write->write.advance_requested &&
+            assign_result.label_write->operation.state_save_scheduled,
+        "session should preserve the real label write and persistence outcome across auto-advance");
     Require(assign_action.snapshot_changed, "auto-advance should load the next sample snapshot");
     Require(assign_action.navigation_inputs_changed, "auto-advance should refresh navigation inputs");
     Require(session.View().snapshot->collection.current_index == 1, "auto-advance should move to row 1");

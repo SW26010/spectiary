@@ -11,6 +11,8 @@
 
 #include <array>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -125,6 +127,119 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+struct TestFileIdentity {
+    DWORD volume_serial_number = 0;
+    DWORD file_index_high = 0;
+    DWORD file_index_low = 0;
+
+    [[nodiscard]] bool operator==(
+        const TestFileIdentity&) const = default;
+};
+
+std::optional<TestFileIdentity> FileIdentity(
+    const std::filesystem::path& path)
+{
+    const HANDLE file =
+        CreateFileW(
+            path.c_str(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ |
+                FILE_SHARE_WRITE |
+                FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return std::nullopt;
+    }
+    BY_HANDLE_FILE_INFORMATION information = {};
+    const bool queried =
+        GetFileInformationByHandle(
+            file,
+            &information) != FALSE;
+    CloseHandle(file);
+    if (!queried) {
+        return std::nullopt;
+    }
+    return TestFileIdentity{
+        .volume_serial_number =
+            information.dwVolumeSerialNumber,
+        .file_index_high =
+            information.nFileIndexHigh,
+        .file_index_low =
+            information.nFileIndexLow,
+    };
+}
+
+bool IsReparseEntry(
+    const std::filesystem::path& path)
+{
+    const HANDLE entry =
+        CreateFileW(
+            path.c_str(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ |
+                FILE_SHARE_WRITE |
+                FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT |
+                FILE_FLAG_BACKUP_SEMANTICS,
+            nullptr);
+    if (entry == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    BY_HANDLE_FILE_INFORMATION information = {};
+    const bool reparse =
+        GetFileInformationByHandle(
+            entry,
+            &information) != FALSE &&
+        (information.dwFileAttributes &
+         FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    CloseHandle(entry);
+    return reparse;
+}
+
+std::string ReadFileBytes(
+    const std::filesystem::path& path)
+{
+    std::ifstream stream(
+        path,
+        std::ios::binary);
+    return {
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>(),
+    };
+}
+
+std::vector<std::filesystem::path>
+CaptureTemporaryArtifacts(
+    const std::filesystem::path& directory)
+{
+    std::vector<std::filesystem::path> artifacts;
+    std::error_code error;
+    for (std::filesystem::directory_iterator entry(
+             directory,
+             error);
+         !error &&
+         entry !=
+             std::filesystem::directory_iterator{};
+         entry.increment(error)) {
+        const std::wstring name =
+            entry->path().filename().wstring();
+        if (name.starts_with(
+                L".specforge-capture-") &&
+            name.ends_with(L".tmp")) {
+            artifacts.push_back(entry->path());
+        }
+    }
+    Require(
+        !error,
+        "capture temporary artifacts should be enumerable");
+    return artifacts;
 }
 
 bool ReadPngObservation(
@@ -690,6 +805,184 @@ void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
         SUCCEEDED(renderer.BeginFrame(clear_color)),
         "the capture test should begin and clear a real frame");
 
+    const std::filesystem::path dangling_output =
+        temporary.path() / L"dangling.png";
+    const std::filesystem::path dangling_temporary =
+        std::filesystem::path(
+            dangling_output.wstring() + L".tmp");
+    const std::filesystem::path escaped_output =
+        temporary.path().parent_path() /
+        (temporary.path().filename().wstring() +
+         L"-escaped.png");
+    std::filesystem::remove(escaped_output);
+    const BOOL symlink_created =
+        CreateSymbolicLinkW(
+            dangling_temporary.c_str(),
+            escaped_output.c_str(),
+            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+    const DWORD symlink_error = GetLastError();
+    Require(
+        symlink_created != FALSE ||
+            symlink_error ==
+                ERROR_PRIVILEGE_NOT_HELD,
+        "the capture security regression should create a dangling temporary-file symlink or identify an unavailable symlink privilege");
+    constexpr std::string_view
+        kLegacySentinel =
+            "legacy-fixed-temp-sentinel";
+    std::optional<TestFileIdentity>
+        sentinel_identity_before;
+    if (symlink_created == FALSE) {
+        const HANDLE temporary_sentinel =
+            CreateFileW(
+                dangling_temporary.c_str(),
+                GENERIC_WRITE,
+                0,
+                nullptr,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+        Require(
+            temporary_sentinel !=
+                INVALID_HANDLE_VALUE,
+            "the no-symlink fallback should reserve the legacy fixed temporary-file name");
+        DWORD written = 0;
+        Require(
+            WriteFile(
+                temporary_sentinel,
+                kLegacySentinel.data(),
+                static_cast<DWORD>(
+                    kLegacySentinel.size()),
+                &written,
+                nullptr) != FALSE &&
+                written ==
+                    kLegacySentinel.size(),
+            "the no-symlink fallback should write an identity-bearing legacy temporary sentinel");
+        CloseHandle(temporary_sentinel);
+        sentinel_identity_before =
+            FileIdentity(
+                dangling_temporary);
+        Require(
+            sentinel_identity_before.has_value(),
+            "the fallback sentinel identity should be observable before capture");
+    }
+    const HRESULT dangling_result =
+        renderer.CaptureFrameToPng(
+            dangling_output,
+            {},
+            temporary.path());
+    const bool dangling_output_created =
+        std::filesystem::exists(
+            dangling_output);
+    const bool escaped_output_created =
+        std::filesystem::exists(
+            escaped_output);
+    const bool legacy_entry_preserved =
+        symlink_created != FALSE
+        ? IsReparseEntry(
+              dangling_temporary)
+        : FileIdentity(
+              dangling_temporary) ==
+                  sentinel_identity_before &&
+              ReadFileBytes(
+                  dangling_temporary) ==
+                  kLegacySentinel;
+    const bool no_dangling_capture_temporary =
+        CaptureTemporaryArtifacts(
+            temporary.path())
+            .empty();
+    Require(
+        legacy_entry_preserved,
+        "capture must preserve the dangling symlink or the identity and contents of the no-symlink fallback sentinel at the legacy fixed temporary name");
+    (void)DeleteFileW(
+        dangling_temporary.c_str());
+    std::filesystem::remove(escaped_output);
+    Require(
+        SUCCEEDED(dangling_result) &&
+            dangling_output_created &&
+            !escaped_output_created &&
+            no_dangling_capture_temporary,
+        "capture must publish only through a random handle-bound file inside the allowed root without leaking a temporary artifact");
+
+    const std::filesystem::path relocation_parent =
+        temporary.path() / L"relocation-parent";
+    const std::filesystem::path relocated_parent =
+        temporary.path().parent_path() /
+        (temporary.path().filename().wstring() +
+         L"-relocated-parent");
+    std::filesystem::create_directory(
+        relocation_parent);
+    std::filesystem::remove_all(
+        relocated_parent);
+    const std::filesystem::path relocation_output =
+        relocation_parent / L"race.png";
+    bool parent_relocated = false;
+    const HRESULT relocation_result =
+        renderer.CaptureFrameToPng(
+            relocation_output,
+            [&](const std::function<HRESULT()>&
+                    publish) {
+                parent_relocated =
+                    MoveFileW(
+                        relocation_parent.c_str(),
+                        relocated_parent.c_str()) !=
+                    FALSE;
+                return publish();
+            },
+            temporary.path());
+    const bool relocated_output_created =
+        std::filesystem::exists(
+            relocated_parent / L"race.png");
+    const bool in_root_output_created =
+        std::filesystem::exists(
+            relocation_output);
+    if (parent_relocated) {
+        (void)MoveFileW(
+            relocated_parent.c_str(),
+            relocation_parent.c_str());
+    }
+    Require(
+        (parent_relocated &&
+         FAILED(relocation_result) &&
+         !relocated_output_created &&
+         !in_root_output_created) ||
+            (!parent_relocated &&
+             SUCCEEDED(relocation_result) &&
+             !relocated_output_created &&
+             in_root_output_created),
+        "capture publication must either deny parent relocation through its live file handle or detect the moved pinned directory and delete the temporary file");
+
+    const std::filesystem::path canceled =
+        temporary.path() / L"canceled.png";
+    Require(
+        FAILED(renderer.CaptureFrameToPng(
+            canceled,
+            [](const std::function<HRESULT()>&) {
+                return HRESULT_FROM_WIN32(
+                    ERROR_CANCELLED);
+            })) &&
+            !std::filesystem::exists(canceled) &&
+            !std::filesystem::exists(
+                canceled.wstring() + L".tmp") &&
+            CaptureTemporaryArtifacts(
+                temporary.path())
+                .empty(),
+        "a final request-cancellation checkpoint should remove the encoded temporary PNG without publishing output");
+
+    const std::filesystem::path nested_capture =
+        temporary.path() / L"new" / L"nested" /
+        L"captured.png";
+    Require(
+        SUCCEEDED(renderer.CaptureFrameToPng(
+            nested_capture,
+            {},
+            temporary.path())) &&
+            std::filesystem::is_regular_file(
+                nested_capture) &&
+            CaptureTemporaryArtifacts(
+                nested_capture.parent_path())
+                .empty(),
+        "an allowed-root capture should create missing parent components handle-relatively without following reparse points");
+
     const std::filesystem::path captured =
         temporary.path() / L"captured.png";
     Require(
@@ -702,6 +995,17 @@ void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
         window.hwnd(),
         captured,
         {64, 128, 191, 255});
+    const auto captured_size =
+        std::filesystem::file_size(captured);
+    Require(
+        FAILED(renderer.CaptureFrameToPng(
+            captured)) &&
+            std::filesystem::file_size(
+                captured) == captured_size &&
+            CaptureTemporaryArtifacts(
+                temporary.path())
+                .empty(),
+        "frame capture publication must not replace an existing PNG");
 
     Require(
         SUCCEEDED(renderer.Present(

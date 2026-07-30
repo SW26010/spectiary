@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <sstream>
+#include <type_traits>
 
 namespace specforge {
 namespace {
@@ -57,6 +58,157 @@ AutomationClientMessageParseResult ParseFailure(
     };
 }
 
+std::optional<AutomationSpectrumTarget>
+ParseSpectrumTarget(
+    const JsonValue& params,
+    std::string& error_message)
+{
+    const JsonValue* target =
+        JsonObjectMember(params, "target");
+    if (target == nullptr ||
+        target->kind != JsonValue::Kind::Object) {
+        error_message =
+            "Automation spectrum targets require an object 'target'.";
+        return std::nullopt;
+    }
+
+    const JsonValue* index =
+        JsonObjectMember(*target, "index");
+    const JsonValue* name =
+        JsonObjectMember(*target, "name");
+    if ((index == nullptr) == (name == nullptr)) {
+        error_message =
+            "Automation spectrum targets require exactly one of 'index' or 'name'.";
+        return std::nullopt;
+    }
+
+    AutomationSpectrumTarget result;
+    if (index != nullptr) {
+        result.index =
+            ReadJsonSizeMember(*target, "index");
+        if (!result.index) {
+            error_message =
+                "Automation spectrum target index must be a non-negative integer.";
+            return std::nullopt;
+        }
+    } else {
+        result.name =
+            ReadJsonStringMember(*target, "name");
+        if (!result.name || result.name->empty()) {
+            error_message =
+                "Automation spectrum target name must be a non-empty string.";
+            return std::nullopt;
+        }
+    }
+    return result;
+}
+
+std::optional<AutomationCommandParameters>
+ParseCommandParameters(
+    const JsonValue& root,
+    AutomationCommandKind command,
+    std::string& error_message)
+{
+    const JsonValue* params =
+        JsonObjectMember(root, "params");
+    const bool requires_params =
+        command == AutomationCommandKind::SourceOpen ||
+        command == AutomationCommandKind::SpectrumGoto ||
+        command == AutomationCommandKind::LabelAssign ||
+        command == AutomationCommandKind::FrameCapture;
+    if (!requires_params) {
+        if (params != nullptr &&
+            params->kind != JsonValue::Kind::Object) {
+            error_message =
+                "Automation request params must be a JSON object.";
+            return std::nullopt;
+        }
+        return AutomationCommandParameters{};
+    }
+    if (params == nullptr ||
+        params->kind != JsonValue::Kind::Object) {
+        error_message =
+            "Automation business commands require an object 'params'.";
+        return std::nullopt;
+    }
+
+    switch (command) {
+    case AutomationCommandKind::SourceOpen: {
+        const std::optional<std::string> path =
+            ReadJsonStringMember(*params, "path");
+        if (!path || path->empty()) {
+            error_message =
+                "source.open requires a non-empty string path.";
+            return std::nullopt;
+        }
+        return AutomationSourceOpenParameters{
+            .path = *path,
+        };
+    }
+    case AutomationCommandKind::SpectrumGoto: {
+        std::optional<AutomationSpectrumTarget> target =
+            ParseSpectrumTarget(*params, error_message);
+        if (!target) {
+            return std::nullopt;
+        }
+        return AutomationSpectrumGotoParameters{
+            .target = std::move(*target),
+        };
+    }
+    case AutomationCommandKind::LabelAssign: {
+        const std::optional<int> code =
+            ReadJsonIntMember(*params, "code");
+        if (!code) {
+            error_message =
+                "label.assign requires an integer code.";
+            return std::nullopt;
+        }
+        AutomationLabelAssignParameters result{
+            .code = *code,
+        };
+        if (JsonObjectMember(*params, "target") != nullptr) {
+            result.target =
+                ParseSpectrumTarget(*params, error_message);
+            if (!result.target) {
+                return std::nullopt;
+            }
+        }
+        return result;
+    }
+    case AutomationCommandKind::FrameCapture: {
+        const std::optional<std::string> path =
+            ReadJsonStringMember(*params, "path");
+        if (!path || path->empty()) {
+            error_message =
+                "frame.capture requires a non-empty string path.";
+            return std::nullopt;
+        }
+        return AutomationFrameCaptureParameters{
+            .path = *path,
+        };
+    }
+    case AutomationCommandKind::StateGet:
+    case AutomationCommandKind::WaitIdle:
+    case AutomationCommandKind::AppQuit:
+        return AutomationCommandParameters{};
+    }
+    return std::nullopt;
+}
+
+void SerializeSpectrumTarget(
+    std::ostringstream& output,
+    const AutomationSpectrumTarget& target)
+{
+    output << "\"target\":{";
+    if (target.index) {
+        output << "\"index\":" << *target.index;
+    } else {
+        output << "\"name\":"
+               << JsonString(target.name.value_or(""));
+    }
+    output << '}';
+}
+
 }  // namespace
 
 std::string_view AutomationCommandName(
@@ -67,6 +219,14 @@ std::string_view AutomationCommandName(
         return "state.get";
     case AutomationCommandKind::WaitIdle:
         return "wait.idle";
+    case AutomationCommandKind::SourceOpen:
+        return "source.open";
+    case AutomationCommandKind::SpectrumGoto:
+        return "spectrum.goto";
+    case AutomationCommandKind::LabelAssign:
+        return "label.assign";
+    case AutomationCommandKind::FrameCapture:
+        return "frame.capture";
     case AutomationCommandKind::AppQuit:
         return "app.quit";
     }
@@ -81,6 +241,18 @@ ParseAutomationCommandName(std::string_view name) noexcept
     }
     if (name == "wait.idle") {
         return AutomationCommandKind::WaitIdle;
+    }
+    if (name == "source.open") {
+        return AutomationCommandKind::SourceOpen;
+    }
+    if (name == "spectrum.goto") {
+        return AutomationCommandKind::SpectrumGoto;
+    }
+    if (name == "label.assign") {
+        return AutomationCommandKind::LabelAssign;
+    }
+    if (name == "frame.capture") {
+        return AutomationCommandKind::FrameCapture;
     }
     if (name == "app.quit") {
         return AutomationCommandKind::AppQuit;
@@ -190,10 +362,25 @@ ParseAutomationClientMessage(std::string_view json)
                 *command_name,
                 validated_request_id);
         }
+        std::string parameter_error;
+        std::optional<AutomationCommandParameters>
+            parameters = ParseCommandParameters(
+                *parsed,
+                *command,
+                parameter_error);
+        if (!parameters) {
+            return ParseFailure(
+                "invalid_params",
+                std::move(parameter_error),
+                *request_id,
+                *command_name,
+                validated_request_id);
+        }
         AutomationClientMessage message;
         message.kind = AutomationClientMessage::Kind::Request;
         message.request_id = *request_id;
         message.command = *command;
+        message.parameters = std::move(*parameters);
         return {.message = std::move(message)};
     }
 
@@ -291,12 +478,60 @@ std::string SerializeAutomationCommandRequest(
     std::string_view request_id,
     AutomationCommandKind command)
 {
+    return SerializeAutomationCommandRequest(
+        request_id,
+        command,
+        AutomationCommandParameters{});
+}
+
+std::string SerializeAutomationCommandRequest(
+    std::string_view request_id,
+    AutomationCommandKind command,
+    const AutomationCommandParameters& parameters)
+{
     std::ostringstream output;
     output << "{\"type\":\"request\",\"request_id\":"
            << JsonString(request_id)
            << ",\"command\":"
-           << JsonString(AutomationCommandName(command))
-           << "}";
+           << JsonString(AutomationCommandName(command));
+    std::visit(
+        [&output](const auto& value) {
+            using Value = std::decay_t<decltype(value)>;
+            if constexpr (!std::is_same_v<Value, std::monostate>) {
+                output << ",\"params\":{";
+                if constexpr (
+                    std::is_same_v<
+                        Value,
+                        AutomationSourceOpenParameters> ||
+                    std::is_same_v<
+                        Value,
+                        AutomationFrameCaptureParameters>) {
+                    output << "\"path\":"
+                           << JsonString(value.path);
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
+                        AutomationSpectrumGotoParameters>) {
+                    SerializeSpectrumTarget(
+                        output,
+                        value.target);
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
+                        AutomationLabelAssignParameters>) {
+                    output << "\"code\":" << value.code;
+                    if (value.target) {
+                        output << ',';
+                        SerializeSpectrumTarget(
+                            output,
+                            *value.target);
+                    }
+                }
+                output << '}';
+            }
+        },
+        parameters);
+    output << "}";
     return output.str();
 }
 
@@ -307,6 +542,10 @@ AutomationCapabilityNames()
         capabilities = {
             "state.get",
             "wait.idle",
+            "source.open",
+            "spectrum.goto",
+            "label.assign",
+            "frame.capture",
             "app.quit",
         };
     return capabilities;

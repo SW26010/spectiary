@@ -31,6 +31,32 @@ class SpectrumViewSession;
 // terminal correlation remain local to this implementation.
 class SourceCollectionActivationTransaction {
 public:
+    struct SourceOpenOperation {
+        std::string path_key;
+        std::uint64_t generation = 0;
+        std::uint64_t automation_sequence = 0;
+        std::uint64_t presented_sequence_before = 0;
+        bool session_changed = false;
+    };
+
+    enum class SourceOpenOperationState {
+        Pending,
+        Succeeded,
+        Failed,
+        Canceled,
+    };
+
+    struct SourceOpenOperationOutcome {
+        SourceOpenOperationState state =
+            SourceOpenOperationState::Pending;
+        std::filesystem::path source_path;
+        std::string source_id;
+        std::size_t spectrum_count = 0;
+        std::size_t spectrum_index = 0;
+        std::string spectrum_name;
+        SourceCollectionLoadError error;
+    };
+
     struct NavigationIntent {
         NavigationLatencyInputKind kind =
             NavigationLatencyInputKind::UiNext;
@@ -56,6 +82,13 @@ public:
         std::size_t spectrum_index = 0;
     };
 
+    struct PresentedSpectrumObservation {
+        std::uint64_t sequence = 0;
+        std::uint64_t activation_generation = 0;
+        std::string source_id;
+        std::size_t spectrum_index = 0;
+    };
+
     SourceCollectionActivationTransaction(
         SourceCollectionSession& session,
         SourceCollectionLoadQueue load_queue =
@@ -76,6 +109,13 @@ public:
     [[nodiscard]] bool OpenSource(
         const std::filesystem::path& path,
         std::size_t spectrum_index = 0);
+    [[nodiscard]] SourceOpenOperation
+    OpenSourceForAutomation(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index = 0);
+    [[nodiscard]] SourceOpenOperationOutcome
+    ObserveSourceOpenOperation(
+        const SourceOpenOperation& operation) const;
     [[nodiscard]] SourceCollectionSessionResult Submit(
         SourceCollectionSessionIntent intent,
         std::optional<NavigationIntent> navigation = std::nullopt);
@@ -100,6 +140,10 @@ public:
     [[nodiscard]] Status status() const;
     [[nodiscard]] const PresentedSourceLoadObservation&
     presented_source_load_observation() const noexcept;
+    [[nodiscard]] const PresentedSpectrumObservation&
+    presented_spectrum_observation() const noexcept;
+    [[nodiscard]] std::uint64_t
+    activation_generation() const noexcept;
     // Hides the currently failed generations from the UI projection while
     // retaining their terminal outcomes.
     void AcknowledgeLoadFailures();
@@ -117,6 +161,7 @@ private:
         std::size_t spectrum_index = 0;
         std::uint64_t generation = 0;
         std::uint64_t activation_epoch = 0;
+        std::uint64_t automation_sequence = 0;
         Purpose purpose = Purpose::ExplicitOpen;
         NavigationLatencyTraceHandle navigation_trace;
         SourceLoadLatencyTraceHandle source_load_trace;
@@ -137,7 +182,13 @@ private:
     struct TerminalOutcome {
         std::filesystem::path path;
         std::uint64_t generation = 0;
+        std::uint64_t automation_sequence = 0;
+        std::uint64_t activation_generation = 0;
         std::optional<SourceCollectionLoadError> error;
+        std::string source_id;
+        std::size_t spectrum_count = 0;
+        std::size_t spectrum_index = 0;
+        std::string spectrum_name;
         bool failure_acknowledged = false;
     };
 
@@ -159,6 +210,7 @@ private:
     struct SpectrumDrawSubmission {
         std::uint64_t frame_index = 0;
         unsigned int viewport_id = 0;
+        std::uint64_t activation_generation = 0;
         SpectrumSnapshotHandle snapshot;
     };
 
@@ -170,7 +222,13 @@ private:
         NavigationLatencyTraceHandle navigation_trace = {},
         SourceLoadLatencyTraceHandle source_load_trace = {},
         std::optional<SampleNavigationDirection> prefetch_direction =
-            std::nullopt);
+            std::nullopt,
+        std::uint64_t automation_sequence = 0);
+    [[nodiscard]] SourceOpenOperation OpenSourceWithPolicy(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        bool preserve_pending_explicit_opens,
+        std::uint64_t automation_sequence);
     void BeginActivationIntent(bool preserve_pending_explicit_opens);
     void CancelPendingTasks(std::vector<PendingTask> pending_tasks);
     void QueueSessionFollowUp(
@@ -241,6 +299,10 @@ private:
             std::uint64_t frame_index,
             std::span<const NavigationLatencyPresentation>
                 presentations);
+    void RecordPresentedSpectrum(
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations);
     [[nodiscard]] std::vector<NavigationPrefetchReport>
         TakeNavigationPrefetchReports();
     [[nodiscard]] bool NeedsService() const;
@@ -274,7 +336,8 @@ private:
         NavigationLatencyTraceHandle navigation_trace = {},
         SourceLoadLatencyTraceHandle source_load_trace = {},
         std::optional<SampleNavigationDirection> prefetch_direction =
-            std::nullopt);
+            std::nullopt,
+        std::uint64_t automation_sequence = 0);
     void RegisterLoad(std::uint64_t task_id, Ticket ticket);
     [[nodiscard]] std::vector<PendingTask> RegisterOrReplaceLoad(
         std::uint64_t task_id,
@@ -317,6 +380,7 @@ private:
     std::unordered_set<std::uint64_t>
         deferred_restore_task_ids_;
     std::uint64_t activation_epoch_ = 0;
+    std::uint64_t latest_automation_open_sequence_ = 0;
 
     std::optional<SampleNavigationDirection>
         pending_snapshot_prefetch_direction_;
@@ -347,6 +411,8 @@ private:
         spectrum_draw_submission_;
     PresentedSourceLoadObservation
         presented_source_load_observation_;
+    PresentedSpectrumObservation
+        presented_spectrum_observation_;
     NavigationLatencyTraceHandle
         presentable_navigation_trace_;
     SpectrumSnapshotHandle

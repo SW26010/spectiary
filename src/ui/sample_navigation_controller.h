@@ -75,6 +75,12 @@ struct SampleNavigationPrefetchPolicy {
     std::size_t behind = 0;
 };
 
+struct ExactSampleNameResolution {
+    bool names_available = false;
+    std::vector<std::size_t> matching_rows;
+    bool first_match_in_active_sequence = false;
+};
+
 class SampleNavigationController {
 public:
     SampleNavigationController();
@@ -153,6 +159,8 @@ public:
     [[nodiscard]] std::string_view sample_name_query() const;
     [[nodiscard]] const std::vector<std::size_t>& sample_name_matches() const;
     [[nodiscard]] const SourceCollectionManifest* active_context() const;
+    [[nodiscard]] ExactSampleNameResolution
+    ResolveExactSampleName(std::string_view name) const;
     [[nodiscard]] std::uint64_t active_context_generation() const;
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;

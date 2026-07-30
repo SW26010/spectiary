@@ -444,6 +444,180 @@ bool CurrentSourceMatches(
         specforge::SourcePathIdentityKey(snapshot->source.path) == expected_key;
 }
 
+void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path source_path =
+        UniqueTempPath("_automation_sequence.npy");
+    const std::optional<std::filesystem::path>
+        annotation_path =
+            specforge::
+                SourceCollectionCompanionAnnotationPath(
+                    source_path);
+    Require(
+        annotation_path.has_value(),
+        "automation sequence fixture should expose a companion annotation path");
+    {
+        std::ofstream stream(
+            source_path,
+            std::ios::binary | std::ios::trunc);
+        stream << "fixture";
+    }
+    std::string annotation_error;
+    Require(
+        SaveAnnotationFixture(
+            *annotation_path,
+            {1, 0, 1},
+            &annotation_error),
+        annotation_error.empty()
+            ? "automation sequence annotation should save"
+            : annotation_error);
+
+    const auto make_dependencies = []() {
+        specforge::
+            SourceCollectionPreparationAdapters
+                dependencies;
+        dependencies.snapshot_loader =
+            [](const std::filesystem::path& source,
+               std::size_t index,
+               const auto&) {
+                return MakeSnapshot(source, index);
+            };
+        dependencies.workflow_cache_loader =
+            [](const auto&,
+               const std::function<void()>& checkpoint) {
+                checkpoint();
+                return specforge::
+                    SampleWorkflowPreparationCacheBundle{};
+            };
+        dependencies.workflow_cache_paths = {{}, {}};
+        return dependencies;
+    };
+
+    specforge::SourceCollectionSession filtered =
+        MakePreparedDeferredSession(source_path);
+    std::optional<specforge::SampleAnnotationResult>
+        annotation =
+            specforge::SampleAnnotationIoAdapter{}.
+                Load(
+                    *annotation_path,
+                    3,
+                    &annotation_error);
+    Require(
+        annotation.has_value(),
+        "automation sequence annotation should load");
+    const std::string filter_source_id =
+        specforge::BuildAnnotationFilterSourceId(
+            *annotation);
+    Require(
+        filtered.Submit(
+                    specforge::
+                        SourceCollectionSessionIntent::
+                            EditSourceCollection(
+                                specforge::
+                                    SourceCollectionIntent::
+                                        AddReadOnlyAnnotationResult(
+                                            *annotation_path)))
+            .loaded,
+        "automation sequence fixture should attach its filter annotation");
+    (void)filtered.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    AddSource(filter_source_id)));
+    (void)filtered.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    SetFilterValueSelected(
+                        filter_source_id,
+                        "1",
+                        true)));
+    std::unique_ptr<specforge::ShellUi> filtered_shell =
+        Access::Create(
+            std::move(filtered),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting(
+                    make_dependencies()));
+    const auto included_index =
+        filtered_shell->GotoSpectrumForAutomation(
+            2,
+            std::nullopt);
+    const auto included_name =
+        filtered_shell->GotoSpectrumForAutomation(
+            std::nullopt,
+            "gamma");
+    const auto excluded_index =
+        filtered_shell->GotoSpectrumForAutomation(
+            1,
+            std::nullopt);
+    const auto excluded_name =
+        filtered_shell->GotoSpectrumForAutomation(
+            std::nullopt,
+            "beta");
+
+    specforge::SourceCollectionSession sorted =
+        MakePreparedDeferredSession(source_path);
+    (void)sorted.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleSorting(
+                specforge::SampleSortingIntent::
+                    SetSortSource("sample-name")));
+    std::unique_ptr<specforge::ShellUi> sorted_shell =
+        Access::Create(
+            std::move(sorted),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting(
+                    make_dependencies()));
+    const auto sorted_index =
+        sorted_shell->GotoSpectrumForAutomation(
+            2,
+            std::nullopt);
+    const auto sorted_name =
+        sorted_shell->GotoSpectrumForAutomation(
+            std::nullopt,
+            "gamma");
+
+    filtered_shell.reset();
+    sorted_shell.reset();
+    std::filesystem::remove(source_path);
+    std::filesystem::remove(*annotation_path);
+    Require(
+        included_index.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        None &&
+            included_index.target.index == 2 &&
+            included_name.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        None &&
+            included_name.target.index == 2,
+        "source-row index/name targets retained by a filter should remain valid for goto and targeted-label navigation");
+    Require(
+        excluded_index.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        FilteredOut &&
+            excluded_name.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        FilteredOut,
+        "source-row index/name targets excluded by the active sequence should remain deterministically filtered out");
+    Require(
+        sorted_index.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        None &&
+            sorted_index.target.index == 2 &&
+            sorted_name.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        None &&
+            sorted_name.target.index == 2,
+        "source-row index/name targets should remain valid under non-source-order sorting");
+}
+
 void TestExplicitOpenTracesAcceptedPathThroughFirstPresent()
 {
     using Access = specforge::ShellUiTestAccess;
@@ -2814,6 +2988,192 @@ void TestCanceledPrefetchReportsOnlyAfterWorkerExit()
     std::filesystem::remove(path);
 }
 
+void TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path path =
+        UniqueTempPath(
+            "_automation_presented_view.csv");
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary |
+                std::ios::trunc);
+        Require(
+            stream.good(),
+            "automation presented-view fixture should be created");
+        stream << "fixture";
+    }
+
+    auto dependencies =
+        MakeFixtureLoadDependencies(
+            {{}, {}, {}, {}});
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            MakePreparedDeferredSession(path),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting(
+                    std::move(dependencies)));
+    (void)Access::Submit(
+        *shell,
+        specforge::
+            SourceCollectionSessionIntent::
+                ChangeActiveSampleWorkflow(
+                    specforge::
+                        ActiveSampleWorkflowIntent::
+                            StartOrResumeTemporaryLabelingTask()));
+    (void)Access::Submit(
+        *shell,
+        specforge::
+            SourceCollectionSessionIntent::
+                ChangeActiveSampleWorkflow(
+                    specforge::
+                        ActiveSampleWorkflowIntent::
+                            UpsertActiveLabel(
+                                specforge::
+                                    SampleLabelDefinition{
+                                        7,
+                                        "presented",
+                                        'p'})));
+    (void)Access::Submit(
+        *shell,
+        specforge::
+            SourceCollectionSessionIntent::
+                ChangeActiveSampleWorkflow(
+                    specforge::
+                        ActiveSampleWorkflowIntent::
+                            AssignActiveLabelToCurrentSample(
+                                7)));
+
+    Access::EnableNavigationTracing(
+        *shell,
+        401);
+    Access::SubmitSpectrumDraw(
+        *shell,
+        401,
+        Access::Session(*shell).
+            CurrentSampleSnapshot(),
+        17);
+    const specforge::NavigationLatencyPresentation
+        first_presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        401,
+        std::span(&first_presentation, 1));
+    const specforge::ShellAutomationView
+        first_presented =
+            shell->PresentedAutomationView();
+
+    const specforge::ShellAutomationNavigationResult
+        navigation =
+            shell->GotoSpectrumForAutomation(
+                1,
+                std::nullopt);
+    const auto deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+           deadline) {
+        Access::Drain(*shell);
+        const auto snapshot =
+            Access::Session(*shell).
+                CurrentSampleSnapshot();
+        if (snapshot &&
+            snapshot->collection.current_index ==
+                1 &&
+            Access::PendingLoadCount(*shell) == 0) {
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    const specforge::ShellAutomationView live_after_drain =
+        shell->AutomationView();
+    const specforge::ShellAutomationView
+        presented_before_retry =
+            shell->PresentedAutomationView();
+
+    Access::EnableNavigationTracing(
+        *shell,
+        402);
+    Access::SubmitSpectrumDraw(
+        *shell,
+        402,
+        Access::Session(*shell).
+            CurrentSampleSnapshot(),
+        17);
+    shell->PresentFrame(402, {});
+    const specforge::ShellAutomationView
+        presented_after_retry =
+            shell->PresentedAutomationView();
+    const specforge::NavigationLatencyPresentation
+        wrong_viewport{
+            18,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        402,
+        std::span(&wrong_viewport, 1));
+    const specforge::ShellAutomationView
+        presented_after_wrong_viewport =
+            shell->PresentedAutomationView();
+    const specforge::NavigationLatencyPresentation
+        latest_presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        402,
+        std::span(&latest_presentation, 1));
+    const specforge::ShellAutomationView
+        latest_presented =
+            shell->PresentedAutomationView();
+
+    shell.reset();
+    std::filesystem::remove(path);
+    Require(
+        navigation.error ==
+                specforge::
+                    ShellAutomationNavigationError::
+                        None &&
+            first_presented.spectrum.present &&
+            first_presented.spectrum.index == 0 &&
+            first_presented.labeling
+                    .has_active_task &&
+            first_presented.labeling
+                    .current_spectrum_code ==
+                7,
+        "the first successful Present should establish source, row, task, and label projection");
+    Require(
+        live_after_drain.spectrum.present &&
+            live_after_drain.spectrum.index == 1 &&
+            live_after_drain.labeling
+                    .current_spectrum_code !=
+                7 &&
+            presented_before_retry.spectrum.index ==
+                0,
+        "maintenance may advance the live Session without changing the presented automation projection");
+    Require(
+        presented_after_retry.spectrum.index ==
+                0 &&
+            presented_after_retry.labeling
+                    .current_spectrum_code ==
+                7 &&
+            presented_after_wrong_viewport
+                    .spectrum.index ==
+                0,
+        "PresentRetry and a successful Present from the wrong viewport must retain the prior projection");
+    Require(
+        latest_presented.source_id ==
+                live_after_drain.source_id &&
+            latest_presented.spectrum.present &&
+            latest_presented.spectrum.index == 1 &&
+            latest_presented.labeling
+                    .has_active_task &&
+            latest_presented.labeling
+                    .current_spectrum_code ==
+                live_after_drain.labeling
+                    .current_spectrum_code,
+        "only the exact successful Present should publish the new source, spectrum, task, and code projection");
+}
+
 void TestShellFlushResultNamesEveryFailedOwner()
 {
     specforge::ShellLocalStateFlushResult result;
@@ -2873,6 +3233,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
 int main()
 {
     try {
+        TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence();
         TestExplicitOpenTracesAcceptedPathThroughFirstPresent();
         TestFailedExplicitOpenProducesTerminalSourceLoadReport();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();
@@ -2882,6 +3243,7 @@ int main()
         TestWarmUiAndKeyboardNavigationReuseSequenceStateAtFixedIndices();
         TestNewActivationSupersedesAnUnpresentedOlderTrace();
         TestPresentationWithoutSpectrumDrawDoesNotCompleteNavigation();
+        TestAutomationPresentedViewAdvancesOnlyAfterSuccessfulPresent();
         TestSameFrameSourceSwitchSupersedesActivatedNavigation();
         TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation();
         TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits();

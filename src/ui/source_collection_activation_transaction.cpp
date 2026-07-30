@@ -2,6 +2,7 @@
 
 #include "domain/source_path_identity.h"
 
+#include <algorithm>
 #include <chrono>
 #include <stdexcept>
 #include <utility>
@@ -54,12 +55,45 @@ bool SourceCollectionActivationTransaction::OpenSource(
     const std::filesystem::path& path,
     std::size_t spectrum_index)
 {
+    ++latest_automation_open_sequence_;
+    return OpenSourceWithPolicy(
+               path,
+               spectrum_index,
+               true,
+               0)
+        .session_changed;
+}
+
+SourceCollectionActivationTransaction::SourceOpenOperation
+SourceCollectionActivationTransaction::
+    OpenSourceForAutomation(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index)
+{
+    const std::uint64_t automation_sequence =
+        ++latest_automation_open_sequence_;
+    return OpenSourceWithPolicy(
+        path,
+        spectrum_index,
+        false,
+        automation_sequence);
+}
+
+SourceCollectionActivationTransaction::SourceOpenOperation
+SourceCollectionActivationTransaction::
+    OpenSourceWithPolicy(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index,
+        bool preserve_pending_explicit_opens,
+        std::uint64_t automation_sequence)
+{
     CancelSnapshotPrefetch();
     SourceLoadLatencyTraceHandle source_load_trace =
         StartSourceLoadTrace(
             spectrum_index,
             NavigationLatencyTrace::Now());
-    BeginActivationIntent(true);
+    BeginActivationIntent(
+        preserve_pending_explicit_opens);
     const bool session_changed =
         session_.CancelActivePendingSampleNavigation();
     if (deferred_restore_active_) {
@@ -71,8 +105,90 @@ bool SourceCollectionActivationTransaction::OpenSource(
         session_.AnnotationPathsForSource(path),
         Purpose::ExplicitOpen,
         {},
-        std::move(source_load_trace));
-    return session_changed;
+        std::move(source_load_trace),
+        std::nullopt,
+        automation_sequence);
+    return {
+        .path_key = SourcePathIdentityKey(path),
+        .generation =
+            GenerationForPath(path).value_or(0),
+        .automation_sequence =
+            automation_sequence,
+        .presented_sequence_before =
+            presented_spectrum_observation_.sequence,
+        .session_changed = session_changed,
+    };
+}
+
+SourceCollectionActivationTransaction::
+    SourceOpenOperationOutcome
+SourceCollectionActivationTransaction::
+    ObserveSourceOpenOperation(
+        const SourceOpenOperation& operation) const
+{
+    SourceOpenOperationOutcome result;
+    if (operation.automation_sequence !=
+        latest_automation_open_sequence_) {
+        result.state =
+            SourceOpenOperationState::Canceled;
+        return result;
+    }
+    for (const auto& [task_id, ticket] :
+         pending_loads_) {
+        (void)task_id;
+        if (ticket.path_key == operation.path_key &&
+            ticket.automation_sequence ==
+                operation.automation_sequence) {
+            result.source_path = ticket.path;
+            return result;
+        }
+    }
+
+    const auto terminal =
+        terminal_outcomes_.find(operation.path_key);
+    if (terminal != terminal_outcomes_.end() &&
+        terminal->second.automation_sequence ==
+            operation.automation_sequence) {
+        const TerminalOutcome& outcome =
+            terminal->second;
+        result.source_path = outcome.path;
+        if (outcome.error) {
+            result.state =
+                SourceOpenOperationState::Failed;
+            result.error = *outcome.error;
+            return result;
+        }
+        const bool presented =
+            outcome.activation_generation ==
+                activation_epoch_ &&
+            presented_spectrum_observation_.sequence >
+                operation.presented_sequence_before &&
+            presented_spectrum_observation_
+                    .activation_generation ==
+                outcome.activation_generation &&
+            presented_spectrum_observation_
+                    .source_id == outcome.source_id &&
+            presented_spectrum_observation_
+                    .spectrum_index ==
+                outcome.spectrum_index;
+        if (!presented) {
+            return result;
+        }
+        result.state =
+            SourceOpenOperationState::Succeeded;
+        result.source_id = outcome.source_id;
+        result.spectrum_count =
+            outcome.spectrum_count;
+        result.spectrum_index =
+            outcome.spectrum_index;
+        result.spectrum_name =
+            outcome.spectrum_name;
+        return result;
+    }
+
+    result.state =
+        SourceOpenOperationState::Canceled;
+    return result;
 }
 
 SourceCollectionSessionResult
@@ -105,6 +221,7 @@ SourceCollectionActivationTransaction::Submit(
     const bool supersedes_source_activation =
         session_.SupersedesPendingSourceActivation(intent);
     if (supersedes_source_activation) {
+        ++latest_automation_open_sequence_;
         BeginActivationIntent(false);
     }
     if (trace_requested) {
@@ -279,9 +396,11 @@ void SourceCollectionActivationTransaction::
         SpectrumSnapshotHandle snapshot)
 {
     spectrum_draw_submission_ = SpectrumDrawSubmission{
-        frame_index,
-        viewport_id,
-        std::move(snapshot),
+        .frame_index = frame_index,
+        .viewport_id = viewport_id,
+        .activation_generation =
+            activation_epoch_,
+        .snapshot = std::move(snapshot),
     };
     SupersedePresentableNavigationIfSnapshotChanged(
         spectrum_draw_submission_->snapshot);
@@ -344,6 +463,9 @@ void SourceCollectionActivationTransaction::PresentFrame(
     std::span<const NavigationLatencyPresentation>
         presentations)
 {
+    RecordPresentedSpectrum(
+        frame_index,
+        presentations);
     for (const NavigationLatencyReport& report :
          CompleteNavigationFramePresentations(
              frame_index,
@@ -372,6 +494,46 @@ void SourceCollectionActivationTransaction::PresentFrame(
                 report);
         }
     }
+}
+
+void SourceCollectionActivationTransaction::
+    RecordPresentedSpectrum(
+        std::uint64_t frame_index,
+        std::span<const NavigationLatencyPresentation>
+            presentations)
+{
+    if (!spectrum_draw_submission_ ||
+        spectrum_draw_submission_->frame_index !=
+            frame_index ||
+        !spectrum_draw_submission_->snapshot) {
+        return;
+    }
+    const auto presented = std::find_if(
+        presentations.begin(),
+        presentations.end(),
+        [this](
+            const NavigationLatencyPresentation&
+                presentation) {
+            return presentation.viewport_id ==
+                   spectrum_draw_submission_
+                       ->viewport_id;
+        });
+    if (presented == presentations.end()) {
+        return;
+    }
+    const SpectrumSnapshot& snapshot =
+        *spectrum_draw_submission_->snapshot;
+    presented_spectrum_observation_ = {
+        .sequence =
+            presented_spectrum_observation_.sequence +
+            1,
+        .activation_generation =
+            spectrum_draw_submission_
+                ->activation_generation,
+        .source_id = snapshot.source.id,
+        .spectrum_index =
+            snapshot.collection.current_index,
+    };
 }
 
 std::vector<SourceLoadLatencyReport>
@@ -492,6 +654,20 @@ SourceCollectionActivationTransaction::
     return presented_source_load_observation_;
 }
 
+const SourceCollectionActivationTransaction::
+    PresentedSpectrumObservation&
+SourceCollectionActivationTransaction::
+    presented_spectrum_observation() const noexcept
+{
+    return presented_spectrum_observation_;
+}
+
+std::uint64_t SourceCollectionActivationTransaction::
+    activation_generation() const noexcept
+{
+    return activation_epoch_;
+}
+
 bool SourceCollectionActivationTransaction::NeedsService() const
 {
     return load_queue_.NeedsService();
@@ -555,7 +731,8 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     NavigationLatencyTraceHandle navigation_trace,
     SourceLoadLatencyTraceHandle source_load_trace,
     std::optional<SampleNavigationDirection>
-        prefetch_direction)
+        prefetch_direction,
+    std::uint64_t automation_sequence)
 {
     CancelSnapshotPrefetch();
     std::optional<SourceCollectionLoadHint> hint =
@@ -579,7 +756,8 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
         purpose,
         std::move(navigation_trace),
         std::move(source_load_trace),
-        prefetch_direction);
+        prefetch_direction,
+        automation_sequence);
     const std::uint64_t task_id = load_queue_.Enqueue({
         .path = path,
         .spectrum_index = spectrum_index,
@@ -873,10 +1051,10 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                     SourceLoadLatencyOutcome::Rejected);
             }
         } else if (!result.follow_up_spectrum_index) {
-            RecordTerminalOutcome(ticket, std::nullopt);
             if (starts_activation_intent) {
                 BeginActivationIntent(true);
             }
+            RecordTerminalOutcome(ticket, std::nullopt);
         } else if (starts_activation_intent) {
             BeginActivationIntent(true);
         }
@@ -919,7 +1097,8 @@ void SourceCollectionActivationTransaction::DrainCompletions(
                     : Purpose::SessionFollowUp,
                 ticket.navigation_trace,
                 ticket.source_load_trace,
-                ticket.prefetch_direction);
+                ticket.prefetch_direction,
+                ticket.automation_sequence);
         } else if (
             result.loaded &&
             ticket.prefetch_direction) {
@@ -1364,7 +1543,8 @@ SourceCollectionActivationTransaction::ReserveLoad(
     NavigationLatencyTraceHandle navigation_trace,
     SourceLoadLatencyTraceHandle source_load_trace,
     std::optional<SampleNavigationDirection>
-        prefetch_direction)
+        prefetch_direction,
+    std::uint64_t automation_sequence)
 {
     const std::string path_key =
         SourcePathIdentityKey(path);
@@ -1374,6 +1554,8 @@ SourceCollectionActivationTransaction::ReserveLoad(
         .spectrum_index = spectrum_index,
         .generation = ++generations_[path_key],
         .activation_epoch = activation_epoch_,
+        .automation_sequence =
+            automation_sequence,
         .purpose = purpose,
         .navigation_trace =
             std::move(navigation_trace),
@@ -1429,7 +1611,8 @@ SourceCollectionActivationTransaction::AdvanceIntent(
             continue;
         }
         if (preserve_pending_explicit_opens &&
-            ticket.purpose == Purpose::ExplicitOpen) {
+            ticket.purpose == Purpose::ExplicitOpen &&
+            ticket.automation_sequence == 0) {
             ticket.activation_epoch = activation_epoch_;
             ++pending;
             continue;
@@ -1579,12 +1762,34 @@ void SourceCollectionActivationTransaction::
         existing->second.generation > ticket.generation) {
         return;
     }
+    const SpectrumSnapshotHandle snapshot =
+        session_.CurrentSampleSnapshot();
     terminal_outcomes_.insert_or_assign(
         ticket.path_key,
         TerminalOutcome{
             .path = ticket.path,
             .generation = ticket.generation,
+            .automation_sequence =
+                ticket.automation_sequence,
+            .activation_generation =
+                activation_epoch_,
             .error = std::move(error),
+            .source_id =
+                snapshot
+                    ? snapshot->source.id
+                    : std::string{},
+            .spectrum_count =
+                snapshot
+                    ? snapshot->collection.spectrum_count
+                    : 0,
+            .spectrum_index =
+                snapshot
+                    ? snapshot->collection.current_index
+                    : 0,
+            .spectrum_name =
+                snapshot
+                    ? snapshot->current_spectrum.name
+                    : std::string{},
             .failure_acknowledged = false,
         });
     RebuildErrorMessage();

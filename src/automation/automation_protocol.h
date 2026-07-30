@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace specforge {
@@ -19,6 +20,10 @@ inline constexpr std::size_t
 enum class AutomationCommandKind {
     StateGet,
     WaitIdle,
+    SourceOpen,
+    SpectrumGoto,
+    LabelAssign,
+    FrameCapture,
     AppQuit,
 };
 
@@ -26,6 +31,35 @@ enum class AutomationCommandKind {
     AutomationCommandKind command) noexcept;
 [[nodiscard]] std::optional<AutomationCommandKind>
 ParseAutomationCommandName(std::string_view name) noexcept;
+
+struct AutomationSpectrumTarget {
+    std::optional<std::size_t> index;
+    std::optional<std::string> name;
+};
+
+struct AutomationSourceOpenParameters {
+    std::string path;
+};
+
+struct AutomationSpectrumGotoParameters {
+    AutomationSpectrumTarget target;
+};
+
+struct AutomationLabelAssignParameters {
+    int code = 0;
+    std::optional<AutomationSpectrumTarget> target;
+};
+
+struct AutomationFrameCaptureParameters {
+    std::string path;
+};
+
+using AutomationCommandParameters = std::variant<
+    std::monostate,
+    AutomationSourceOpenParameters,
+    AutomationSpectrumGotoParameters,
+    AutomationLabelAssignParameters,
+    AutomationFrameCaptureParameters>;
 
 struct AutomationClientMessage {
     enum class Kind {
@@ -39,6 +73,7 @@ struct AutomationClientMessage {
     std::string nonce;
     AutomationCommandKind command =
         AutomationCommandKind::StateGet;
+    AutomationCommandParameters parameters;
 };
 
 struct AutomationClientMessageParseResult {
@@ -78,6 +113,10 @@ ParseAutomationServerMessage(std::string_view json);
 [[nodiscard]] std::string SerializeAutomationCommandRequest(
     std::string_view request_id,
     AutomationCommandKind command);
+[[nodiscard]] std::string SerializeAutomationCommandRequest(
+    std::string_view request_id,
+    AutomationCommandKind command,
+    const AutomationCommandParameters& parameters);
 [[nodiscard]] std::string SerializeAutomationHelloResponse(
     std::string_view request_id,
     std::string_view instance_id);

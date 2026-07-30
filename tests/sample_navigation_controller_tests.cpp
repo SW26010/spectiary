@@ -1318,6 +1318,74 @@ void TestAdjacentRowsFollowFilteredSortedRawSequence()
         "previous prefetch policy must reverse direction without leaving the active sequence");
 }
 
+void TestExactNameResolutionIsDeterministic()
+{
+    specforge::SampleNavigationController controller(
+        std::filesystem::path{});
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {
+        "Alpha",
+        "bravo",
+        "ALPHA",
+        "charlie",
+        "Étoile",
+    };
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/exact-name.npy",
+            "exact-name",
+            5,
+            0),
+        specforge::SourceCollectionIdentity{
+            .id = "exact-name-identity",
+            .source_name = "exact-name",
+            .source_fingerprint = "source",
+            .context_fingerprint = "context",
+            .spectrum_count = 5,
+        },
+        std::move(manifest));
+
+    const auto unique =
+        controller.ResolveExactSampleName("BRAVO");
+    const auto ambiguous =
+        controller.ResolveExactSampleName("alpha");
+    const auto missing =
+        controller.ResolveExactSampleName("delta");
+    const auto unicode =
+        controller.ResolveExactSampleName(
+            "éTOILE");
+    (void)controller.SetSampleFilter(
+        {true, false, true, true, true});
+    const auto filtered =
+        controller.ResolveExactSampleName("bravo");
+
+    Require(
+        unique.names_available &&
+            unique.matching_rows ==
+                std::vector<std::size_t>{1} &&
+            unique.first_match_in_active_sequence,
+        "exact spectrum names should resolve case-insensitively to one active source row");
+    Require(
+        ambiguous.matching_rows ==
+            std::vector<std::size_t>({0, 2}),
+        "duplicate exact spectrum names should remain explicitly ambiguous");
+    Require(
+        missing.names_available &&
+            missing.matching_rows.empty(),
+        "an available name column should distinguish a missing exact name");
+    Require(
+        unicode.matching_rows ==
+                std::vector<std::size_t>{4} &&
+            unicode.first_match_in_active_sequence,
+        "exact spectrum names should use Windows Unicode ordinal ignore-case matching rather than ASCII-only folding");
+    Require(
+        filtered.matching_rows ==
+                std::vector<std::size_t>{1} &&
+            !filtered.first_match_in_active_sequence,
+        "an exact name outside the active sequence should remain identifiable but blocked");
+}
+
 }  // namespace
 
 int main()
@@ -1343,5 +1411,6 @@ int main()
     TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions();
     TestSequenceStateInvalidatesWithNavigationInputsAndContext();
     TestAdjacentRowsFollowFilteredSortedRawSequence();
+    TestExactNameResolutionIsDeterministic();
     return 0;
 }

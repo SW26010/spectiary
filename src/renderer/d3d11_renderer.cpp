@@ -282,7 +282,10 @@ HRESULT D3D11Renderer::BeginFrame(const std::array<float, 4>& clear_color)
 }
 
 HRESULT D3D11Renderer::CaptureFrameToPng(
-    const std::filesystem::path& output_path)
+    const std::filesystem::path& output_path,
+    const D3D11FrameCaptureFinalizer& finalizer,
+    const std::optional<std::filesystem::path>&
+        allowed_root)
 {
     ID3D11Texture2D* source =
         presentation_.active_render_texture();
@@ -297,7 +300,9 @@ HRESULT D3D11Renderer::CaptureFrameToPng(
             device_.Get(),
             device_context_.Get(),
             source,
-            output_path);
+            output_path,
+            finalizer,
+            allowed_root);
     if (!capture.succeeded()) {
         return RecordFailure(
             capture.operation,

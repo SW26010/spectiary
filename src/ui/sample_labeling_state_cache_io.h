@@ -30,11 +30,19 @@ struct SampleLabelingStateCacheLoadResult {
     std::string warning;
 };
 
+enum class SampleLabelingStateCacheLoadPolicy {
+    AllowPersistentOutputs,
+    InternalDraftsOnly,
+};
+
 [[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath();
 
 [[nodiscard]] SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     const std::filesystem::path& path,
-    const std::function<void()>& cancellation_checkpoint = {});
+    const std::function<void()>& cancellation_checkpoint = {},
+    SampleLabelingStateCacheLoadPolicy policy =
+        SampleLabelingStateCacheLoadPolicy::
+            AllowPersistentOutputs);
 
 [[nodiscard]] bool SaveSampleLabelingStateCache(
     const std::filesystem::path& path,

@@ -40,6 +40,8 @@ struct SampleWorkflowTransitionOutcome {
     bool changed = false;
     bool loaded = false;
     bool invalidate_view = false;
+    std::optional<SampleLabelingWriteOperationResult>
+        label_write;
     std::string message;
 };
 
@@ -161,6 +163,8 @@ public:
         AnnotationPathsBySourceKey() const;
     [[nodiscard]] SourceCollectionNavigationView NavigationView(const SpectrumSnapshotHandle& snapshot) const;
     [[nodiscard]] SourceCollectionLabelingView LabelingView(const SpectrumSnapshotHandle& snapshot) const;
+    [[nodiscard]] ExactSampleNameResolution
+    ResolveExactSampleName(std::string_view name) const;
     [[nodiscard]] SourceCollectionFilterView BuildFilterView(
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SourceCollectionSampleSortingView BuildSortingView(
@@ -313,7 +317,7 @@ private:
     [[nodiscard]] bool FlushWorkflowStateCache();
     [[nodiscard]] SampleWorkflowTransitionOutcome ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
-        const SampleLabelWriteResult& result,
+        SampleLabelingWriteOperationResult result,
         NavigationTargetResolutionReport* target_resolution = nullptr,
         bool record_undo = true,
         std::optional<std::size_t> restore_sample_index = std::nullopt);

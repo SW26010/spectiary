@@ -30,6 +30,33 @@ struct AutomationWindowState {
     unsigned int client_height = 0;
 };
 
+struct AutomationSpectrumState {
+    bool present = false;
+    std::size_t index = 0;
+    std::string name;
+    std::size_t count = 0;
+};
+
+struct AutomationPresentedSourceState {
+    bool present = false;
+    std::string id;
+    std::filesystem::path path;
+};
+
+struct AutomationLabelingState {
+    bool has_active_task = false;
+    std::string task_id;
+    std::string task_name;
+    int current_spectrum_code = -1;
+};
+
+struct AutomationCaptureState {
+    bool pending = false;
+    std::filesystem::path current_path;
+    std::string last_result = "none";
+    std::filesystem::path last_path;
+};
+
 struct AutomationRuntimeState {
     bool running = true;
     bool shutting_down = false;
@@ -40,6 +67,10 @@ struct AutomationStateSnapshot {
     std::string instance_id;
     AutomationControlQueueSnapshot control;
     AutomationShellState shell;
+    AutomationPresentedSourceState presented_source;
+    AutomationSpectrumState spectrum;
+    AutomationLabelingState labeling;
+    AutomationCaptureState capture;
     AutomationWindowState window;
     AutomationRuntimeState runtime;
 };

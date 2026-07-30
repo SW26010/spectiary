@@ -799,6 +799,85 @@ void TestCancelSuppressesCompletion()
     std::filesystem::remove(path);
 }
 
+void TestCanceledWorkerRemainsNonIdleUntilItRetires()
+{
+    const std::filesystem::path path =
+        UniqueTempPath(
+            "_cancel_retirement_barrier.csv");
+    WriteFixture(path);
+    std::promise<void> entered_promise;
+    std::shared_future<void> entered =
+        entered_promise.get_future().share();
+    std::promise<void> cancellation_seen_promise;
+    std::shared_future<void> cancellation_seen =
+        cancellation_seen_promise.get_future().share();
+    std::promise<void> release_promise;
+    std::shared_future<void> release =
+        release_promise.get_future().share();
+    std::atomic_bool entered_once = false;
+    std::atomic_bool cancellation_signaled = false;
+
+    specforge::SourceCollectionLoadQueue queue =
+        specforge::
+            MakeSourceCollectionLoadQueueForTesting(
+                Dependencies(
+                    [&](const auto& source,
+                        std::size_t index,
+                        const auto& canceled) {
+                        if (!entered_once.exchange(
+                                true)) {
+                            entered_promise.set_value();
+                        }
+                        while (!canceled()) {
+                            std::this_thread::sleep_for(
+                                1ms);
+                        }
+                        if (!cancellation_signaled
+                                 .exchange(true)) {
+                            cancellation_seen_promise
+                                .set_value();
+                        }
+                        release.wait();
+                        return MakeSnapshot(
+                            source,
+                            index);
+                    }));
+    const std::uint64_t task_id =
+        queue.Enqueue({.path = path});
+    Require(
+        entered.wait_for(2s) ==
+            std::future_status::ready,
+        "retirement barrier fixture should start its source worker");
+    Require(
+        queue.Cancel(task_id),
+        "retirement barrier fixture should cancel the active source task");
+    Require(
+        cancellation_seen.wait_for(2s) ==
+            std::future_status::ready,
+        "the source worker should observe cancellation before its controlled retirement");
+    const auto before_retirement =
+        queue.ActivitySnapshot();
+    Require(
+        queue.NeedsService() &&
+            before_retirement.active_task_count ==
+                1 &&
+            !before_retirement.load_idle(),
+        "a canceled worker must keep Shell loading non-idle until the worker actually retires");
+
+    release_promise.set_value();
+    Require(
+        WaitUntil([&]() {
+            return !queue.NeedsService();
+        }),
+        "the canceled source worker should become idle after controlled retirement");
+    Require(
+        queue.TakeCompleted().empty() &&
+            queue.ActivitySnapshot()
+                .load_idle(),
+        "a retired canceled worker should leave no activatable completion");
+    std::filesystem::remove(path);
+}
+
 void TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse()
 {
     const std::filesystem::path path =
@@ -1093,6 +1172,7 @@ int main()
         TestCompletionReadyNotificationCoalescesUntilDrain();
         TestBufferedBatchCompletionCanBeCanceled();
         TestCancelSuppressesCompletion();
+        TestCanceledWorkerRemainsNonIdleUntilItRetires();
         TestRuntimeResourceCancellationHandshakeControlsFastResidentReuse();
         TestCompletionReadyCallbackIsReentrantAndUnregistersSafely();
         TestCancelStopsOnlyItsSourceThread();

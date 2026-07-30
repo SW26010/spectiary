@@ -94,6 +94,20 @@ std::string SerializeAutomationStateBody(
                           state.shell
                               .current_source_path));
     }
+    output << "},\"presented_source\":{"
+           << "\"present\":"
+           << JsonBool(
+                  state.presented_source.present);
+    if (state.presented_source.present) {
+        output << ",\"id\":"
+               << JsonString(
+                      state.presented_source.id)
+               << ",\"path\":"
+               << JsonString(
+                      PathToUtf8(
+                          state.presented_source
+                              .path));
+    }
     output << "},\"window\":{"
            << "\"visible\":"
            << JsonBool(state.window.visible)
@@ -103,7 +117,58 @@ std::string SerializeAutomationStateBody(
            << state.window.client_width
            << ",\"client_height\":"
            << state.window.client_height
-           << "},\"runtime\":{"
+           << "},\"spectrum\":{"
+           << "\"present\":"
+           << JsonBool(state.spectrum.present)
+           << ",\"count\":"
+           << state.spectrum.count;
+    if (state.spectrum.present) {
+        output << ",\"index\":"
+               << state.spectrum.index
+               << ",\"name\":"
+               << JsonString(state.spectrum.name);
+    }
+    output << "},\"labeling\":{"
+           << "\"has_active_task\":"
+           << JsonBool(
+                  state.labeling.has_active_task);
+    if (state.labeling.has_active_task) {
+        output << ",\"active_task\":{"
+               << "\"id\":"
+               << JsonString(state.labeling.task_id)
+               << ",\"name\":"
+               << JsonString(
+                      state.labeling.task_name)
+               << '}';
+        if (state.spectrum.present) {
+            output
+                << ",\"current_spectrum_label\":{"
+                << "\"code\":"
+                << state.labeling
+                       .current_spectrum_code
+                << '}';
+        }
+    }
+    output << "},\"capture\":{"
+           << "\"pending\":"
+           << JsonBool(state.capture.pending)
+           << ",\"last_result\":"
+           << JsonString(
+                  state.capture.last_result);
+    if (state.capture.pending &&
+        !state.capture.current_path.empty()) {
+        output << ",\"current_path\":"
+               << JsonString(
+                      PathToUtf8(
+                          state.capture.current_path));
+    }
+    if (!state.capture.last_path.empty()) {
+        output << ",\"last_path\":"
+               << JsonString(
+                      PathToUtf8(
+                          state.capture.last_path));
+    }
+    output << "},\"runtime\":{"
            << "\"running\":"
            << JsonBool(state.runtime.running)
            << ",\"shutting_down\":"

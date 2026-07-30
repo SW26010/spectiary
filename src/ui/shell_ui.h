@@ -108,11 +108,84 @@ struct ShellLocalStateFlushResult {
             UiLanguage::English) const;
 };
 
+struct ShellAutomationSpectrumView {
+    bool present = false;
+    std::size_t index = 0;
+    std::string name;
+    std::size_t count = 0;
+};
+
+struct ShellAutomationLabelingView {
+    bool has_active_task = false;
+    std::string task_id;
+    std::string task_name;
+    int current_spectrum_code =
+        kUnlabeledSampleLabelCode;
+};
+
+struct ShellAutomationView {
+    std::string source_id;
+    std::filesystem::path source_path;
+    ShellAutomationSpectrumView spectrum;
+    ShellAutomationLabelingView labeling;
+};
+
+enum class ShellAutomationNavigationError {
+    None,
+    NoActiveSource,
+    SourceNotReady,
+    IndexOutOfRange,
+    NameUnavailable,
+    NameNotFound,
+    NameAmbiguous,
+    FilteredOut,
+    Rejected,
+};
+
+struct ShellAutomationNavigationResult {
+    ShellAutomationNavigationError error =
+        ShellAutomationNavigationError::None;
+    std::string source_id;
+    ShellAutomationSpectrumView target;
+    bool changed = false;
+    bool pending = false;
+};
+
+enum class ShellAutomationLabelError {
+    None,
+    NoCurrentSpectrum,
+    NoActiveTask,
+    LabelNotFound,
+    Rejected,
+};
+
+struct ShellAutomationLabelAssignmentResult {
+    ShellAutomationLabelError error =
+        ShellAutomationLabelError::None;
+    std::string source_id;
+    std::string task_id;
+    ShellAutomationSpectrumView spectrum;
+    int previous_code = kUnlabeledSampleLabelCode;
+    int new_code = kUnlabeledSampleLabelCode;
+    bool changed = false;
+    bool state_save_scheduled = false;
+    bool state_save_attempted = false;
+    bool state_saved = false;
+    bool output_save_attempted = false;
+    bool output_saved = false;
+    bool output_retry_scheduled = false;
+    bool navigation_pending = false;
+};
+
 class ShellUi {
 public:
     ShellUi(
         const SpecForgeStartup& startup,
-        PlotTouchpadGestureSource* touchpad_gestures = nullptr);
+        PlotTouchpadGestureSource* touchpad_gestures = nullptr,
+        SampleLabelingStateCacheLoadPolicy
+            labeling_state_cache_load_policy =
+                SampleLabelingStateCacheLoadPolicy::
+                    AllowPersistentOutputs);
     ~ShellUi();
 
     void Render(const ShellStatus& status);
@@ -123,6 +196,30 @@ public:
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
+    [[nodiscard]] SourceCollectionActivationTransaction::
+        SourceOpenOperation
+    OpenSourceForAutomation(
+        const std::filesystem::path& path);
+    [[nodiscard]] SourceCollectionActivationTransaction::
+        SourceOpenOperationOutcome
+    ObserveSourceOpenForAutomation(
+        const SourceCollectionActivationTransaction::
+            SourceOpenOperation& operation) const;
+    [[nodiscard]] const
+        SourceCollectionActivationTransaction::
+            PresentedSpectrumObservation&
+    PresentedSpectrumForAutomation() const noexcept;
+    [[nodiscard]] std::uint64_t
+    ActivationGenerationForAutomation() const noexcept;
+    [[nodiscard]] ShellAutomationNavigationResult
+    GotoSpectrumForAutomation(
+        std::optional<std::size_t> index,
+        std::optional<std::string_view> name);
+    [[nodiscard]] ShellAutomationLabelAssignmentResult
+    AssignLabelForAutomation(int code);
+    [[nodiscard]] ShellAutomationView AutomationView();
+    [[nodiscard]] const ShellAutomationView&
+    PresentedAutomationView() const noexcept;
     [[nodiscard]] bool
     ArmRuntimeResourceCancellationCheckpoint();
     void RefreshSystemColors();
@@ -197,6 +294,14 @@ private:
         std::uint64_t frame_index,
         unsigned int viewport_id,
         SpectrumSnapshotHandle snapshot);
+    [[nodiscard]] ShellAutomationView
+    AutomationViewForSnapshot(
+        const SpectrumSnapshotHandle& snapshot);
+
+    struct AutomationPresentationCandidate {
+        std::uint64_t frame_index = 0;
+        ShellAutomationView view;
+    };
 
     friend struct ShellUiTestAccess;
 
@@ -223,6 +328,10 @@ private:
     std::optional<UiLanguage> applied_ui_language_;
     std::optional<ShellLocalStateFlushResult>
         local_state_flush_result_;
+    std::optional<AutomationPresentationCandidate>
+        automation_presentation_candidate_;
+    ShellAutomationView
+        presented_automation_view_;
 };
 
 }  // namespace specforge

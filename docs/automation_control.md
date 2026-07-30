@@ -19,13 +19,36 @@ Start an isolated automation instance:
 .\build\ninja-msvc-debug\SpecForgeAutomation.exe
 ```
 
-The launcher accepts `--app <SpecForge.exe>` and
-`--state-root <new-absolute-directory>`. The state-root path must not already
-exist. When omitted, the launcher creates a unique directory below the system
-temporary directory. The launcher also generates a cryptographically random
-instance ID and nonce, constructs the per-instance named-pipe name, and passes
-all four values to the GUI through explicit automation-only startup arguments.
-Those GUI arguments are an internal launcher contract.
+The launcher accepts `--app <SpecForge.exe>`,
+`--state-root <new-absolute-directory>`, and the optional
+`--labeling-state-seed <absolute-production-cache.json>`. The state-root path
+must not already exist. When omitted, the launcher creates a unique directory
+below the system temporary directory. The launcher also generates a
+cryptographically random instance ID and nonce, constructs the per-instance
+named-pipe name, and passes all four values to the GUI through explicit
+automation-only startup arguments. Those GUI arguments are an internal launcher
+contract.
+
+The labeling seed is automation-launch preparation, not a label mutation
+command or a profile importer. The launcher requires an existing regular file
+outside both ordinary and automation state roots and pins that read-only file
+identity while the production labeling-cache reader validates and materializes
+it. Automation seeds are deliberately narrower than ordinary user caches: every
+task must be an internal draft and every `output_path` must be `null`. Any
+non-null output reference is rejected before the production reader hydrates or
+accesses it, and the GUI's background production load applies the same policy.
+This avoids turning automation seeding into a general output import/write
+interface.
+
+The launcher creates the new root relative to a verified directory handle,
+copies the seed handle-to-handle with create-new/no-follow semantics, and
+validates the materialized `sample-labeling-tasks.json` with the same reader.
+A launcher-owned identity lock prevents the root from being renamed or replaced
+through the complete GUI child lifetime while permitting normal sibling cache
+renames; it is removed after that child exits. This entire sequence finishes
+before `CreateProcessW`. Any validation or materialization failure prevents GUI
+startup and removes the partial launcher-owned root. The seed is never modified,
+and any existing target root is rejected.
 
 Before creating the directory, the launcher resolves the target GUI's ordinary
 Standalone/Portable state root and rejects equal, parent, or child paths. A
@@ -41,14 +64,33 @@ processes.
 The thin console accepts only:
 
 ```text
+source open <absolute-file-or-directory>
+spectrum goto <zero-based-index>
+spectrum goto name <exact-name>
+label assign <integer-code>
+label assign <integer-code> spectrum <zero-based-index>
+label assign <integer-code> spectrum name <exact-name>
+frame capture <absolute-new-png-under-state-root>
 state get
 wait idle
 app quit
 help
+pipeline begin
+... one or more commands ...
+pipeline end
+disconnect after accepted
+... exactly one command ...
 ```
 
 It translates these fixed commands to JSON. The GUI never parses the console's
-free-form text. End of input asks the app to quit normally.
+free-form text. `pipeline` and `disconnect after accepted` are launcher-owned
+transport/concurrency test controls; they do not add GUI commands or business
+seams. A pipeline is limited to the advertised 32-command queue capacity and is
+rejected before its first request is sent when that bound is exceeded. End of
+input asks the app to quit normally. An attached Windows console
+is read as UTF-16 and converted strictly to UTF-8. Redirected standard input,
+including all three launcher modes, must already be well-formed UTF-8; bytes in
+the active OEM or ANSI code page are not accepted as an implicit encoding.
 
 ## Transport and protocol
 
@@ -78,7 +120,7 @@ The first message must be the launcher handshake:
 A successful response reports the protocol and fixed capabilities:
 
 ```json
-{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
+{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","source.open","spectrum.goto","label.assign","frame.capture","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
 ```
 
 Commands use protocol names rather than console spelling:
@@ -87,31 +129,170 @@ Commands use protocol names rather than console spelling:
 {"type":"request","request_id":"request-1","command":"state.get"}
 ```
 
-An accepted command receives an `accepted` response and exactly one terminal
-`completed`, `failed`, or `canceled` response carrying the same request ID.
+While its client connection remains alive, an accepted command receives an
+`accepted` response and exactly one terminal `completed`, `failed`, or
+`canceled` response carrying the same request ID. Disconnect retires requests
+under the server synchronization boundary, but responses that could no longer
+reach that client are discarded.
 Malformed input and commands rejected before acceptance receive only `failed`.
 Stable error codes cover invalid input, handshake or version/nonce mismatch,
 duplicate IDs, queue/request limits, shutdown rejection, and cancellation.
-When `app.quit` is accepted, other queued or waiting requests are canceled.
-Disconnecting the client invalidates queued work before it can mutate
-application state.
+If a correlated response would exceed `max_message_bytes`, the server replaces
+it before pipe write with a bounded terminal `failed` response carrying
+`response_too_large`; the connection remains usable.
+Mutating business requests enter an execution claim under the same pipe-server
+synchronization boundary before their first real App/Shell/Session mutation.
+Disconnect and `app.quit` cancel only requests that have not claimed execution.
+An `app.quit` behind an earlier claimed request is a sequence barrier: it waits
+for that request's factual terminal, then claims shutdown, cancels remaining
+unclaimed requests, and stops dispatching later commands from the same batch.
+Thus a canceled terminal cannot describe a mutation that was already applied,
+and a mutation that did occur reaches its matching terminal before the later
+quit terminal.
 
 ## Command contracts
+
+Business commands use these stable request shapes:
+
+```json
+{"type":"request","request_id":"open-1","command":"source.open","params":{"path":"C:\\fixtures\\spectra"}}
+{"type":"request","request_id":"goto-1","command":"spectrum.goto","params":{"target":{"index":4}}}
+{"type":"request","request_id":"goto-2","command":"spectrum.goto","params":{"target":{"name":"target.csv"}}}
+{"type":"request","request_id":"label-1","command":"label.assign","params":{"code":5}}
+{"type":"request","request_id":"label-2","command":"label.assign","params":{"code":5,"target":{"index":4}}}
+{"type":"request","request_id":"capture-1","command":"frame.capture","params":{"path":"C:\\automation-state\\artifacts\\target.png"}}
+```
+
+`source.open` requires an absolute existing regular file or directory accepted
+by the production source loader. Its terminal result contains stable source
+identity/path/count and the initially presented spectrum index/name. The
+request remains outstanding through background preparation, UI-thread session
+activation, draw submission, and a successful application Present. A newer
+activation generation may cancel an older operation even when the replacement
+has the same path, source ID, and row. Logical open identity is retained across
+production follow-up loads, so the latest same-path open does not cancel itself.
+A real GUI open also cancels a pending automation open; its retired worker
+completion cannot later enter the session or reactivate that source.
+Stable command errors are
+`path_not_absolute`, `source_not_found`, `source_load_failed`, and
+`operation_canceled`; malformed JSON parameters use `invalid_params`.
+
+`spectrum.goto` requires exactly one target identifier: a zero-based source row
+`index`, or a non-empty Windows Unicode ordinal, case-insensitive exact `name`.
+Signed indexes are invalid launcher syntax and never become requests. Indexes
+outside the source fail with `spectrum_index_out_of_range`. Name lookup distinguishes
+`spectrum_name_unavailable`, `spectrum_not_found`, `spectrum_ambiguous`, and
+`spectrum_filtered_out`. Source-row identity is independent of the current sort:
+an included row remains addressable by index or name in a filtered or sorted
+sequence, while only a row excluded from the active sequence is
+`spectrum_filtered_out`. With no active/ready source it returns
+`no_active_source` or `source_not_ready`. Successful navigation, including an
+unchanged same-row target,
+completes only after the requested spectrum is current, Shell is idle, and the
+exact source ID and row have been submitted by Draw and observed through a
+successful Present. Acquire/Present retry does not complete the command. The
+Draw/Present observation carries the activation generation captured at Draw;
+same-source/same-row presentation from an older activation cannot complete the
+request. The result includes source ID, spectrum index/name, and `changed`. A changed
+navigation that cannot load its row fails with `spectrum_load_failed`; a
+superseding source activation fails it with `operation_canceled`.
+
+`label.assign` takes a label code and optionally the same spectrum target. It
+uses the active production labeling task and retains its configured
+auto-advance/overwrite behavior. It fails deterministically with
+`no_current_spectrum`, `no_active_label_task`, `label_not_found`, or
+`label_assignment_rejected` (plus the navigation errors above for an explicit
+target, including `spectrum_load_failed` and `operation_canceled`). A targeted
+assignment does not write until the exact target source/row has a successful
+Draw/Present observation for the same activation generation. If a replacement
+activation wins first, the request is canceled without writing. Once the real
+label write begins, its terminal remains factually tied to that write even if a
+later quit, disconnect, or source activation occurs. A later activation cannot
+leave the request waiting for an impossible Present from the replaced source;
+the completed terminal is emitted from the stored production assignment fact.
+The terminal result records the spectrum that was actually written,
+task ID, previous/new code, `changed`, production persistence status/flags, and
+the current spectrum after any auto-advance. The caller must explicitly
+`spectrum.goto` back to the written row before asserting its current label;
+terminal assignment identity is not inferred from post-advance state.
+
+`frame.capture` is a test-control safety contract scoped to the current
+automation state root, not a general external file-write interface. The caller
+may choose any new absolute `.png` below that root. Existing output paths,
+paths through reparse points, other extensions, relative paths, and paths
+outside the root are rejected with `capture_output_exists`,
+`capture_path_outside_state_root`, `capture_path_invalid`, or
+`capture_path_not_absolute`. For automation capture, missing parent components
+are opened or created one component at a time relative to the pinned root and
+without following reparse points; there is no path-based recursive directory
+creation after validation.
+
+Capture uses the application's existing Direct3D 11/WIC seam after
+`ImGui_ImplDX11_RenderDrawData` and before the main viewport Present. A
+successful result contains normalized path, `png`, `main_viewport`, frame
+index, width, and height. There is no desktop/window screenshot API and no
+cached frame fallback. WIC encodes to `.tmp` outside the pipe lock; the final
+no-replace `.tmp` to PNG publication, exact request/sequence validation, and
+terminal transition share a short pipe-server finalization lease. The temporary
+name is random and created with create-new/no-follow semantics; WIC writes
+through an `IStream` bound to that file handle. Each directory component is
+opened without following a reparse point, and the pinned root, parent, and
+published file identities are revalidated around a directory-handle-relative
+no-replace rename. A dangling legacy `<output>.tmp` entry is never opened or
+followed. If
+disconnect or quit wins that boundary, the temporary file is removed and no
+PNG is published. A hidden or minimized window fails with
+`window_not_renderable`; it is never restored or forced to draw. Other stable
+capture errors are `capture_busy`, `capture_directory_failed`, and
+`capture_failed`.
+
+Only one automation navigation/label transition is active at a time; a
+conflicting request fails with `operation_busy`. Source opens retain the real
+source-activation generation/cancellation semantics.
 
 `state.get` returns only stable observation fields:
 
 - protocol and instance/handshake state;
 - control acceptance, pending/outstanding counts, and capacity;
 - aggregate Shell idle plus source-load, pending-completion, and background-
-  retirement idle components and their counts;
-- current source identity and path, when present;
+  retirement idle components and their counts (`state.shell.idle` retains
+  aggregate Shell semantics and does not fold control/business requests into
+  that field);
+- the existing live activated source identity/path in `state.source`, preserving
+  the original field semantics even before that source has presented;
+- the last successfully presented source identity/path in
+  `state.presented_source`;
+- successfully presented spectrum count and, when present, its zero-based
+  index and name;
+- the labeling task identity and spectrum label captured from that same
+  successful Draw/Present;
+- capture `pending`, the pending `current_path` when present, and terminal
+  `last_result` (`none`, `succeeded`, `failed`, or `canceled`) plus `last_path`;
 - window visibility, minimized state, and client-area dimensions;
 - running/shutdown flags and frame index.
 
+`state.spectrum` and `state.labeling.current_spectrum_label` always describe the
+`state.presented_source` draw snapshot. Source completion drained during
+maintenance, or a frame whose Present must retry, may advance the separate live
+`state.source`, but does not advance the presented source/spectrum/task/code
+projection. The label is not “the most recent assignment”; no last-assignment
+state is retained.
+If a second capture is rejected with `capture_busy`, the first request remains
+`pending`/`current_path`, while `last_result=failed` and `last_path` identify
+the rejected second attempt until the pending capture reaches its own terminal.
+
 `wait.idle` completes when all earlier accepted control requests are terminal,
-the control queue is empty, and the Shell observation reports source loading,
-pending completion, and background retirement idle. It deliberately does not
-wait for a future persistence deadline.
+and the Shell work attributable to that earlier sequence reports source
+loading, pending completion, and background retirement idle. Later accepted
+requests do not delay or cancel that barrier: the pipe may accept them, but the
+UI dispatch queue stops at the first `wait.idle` and does not dispatch later
+commands until that wait reaches its terminal. This makes the wait a real UI
+dispatch barrier, so later source work cannot mask an earlier canceled worker
+that is still unwinding. Source, navigation, label, and capture operations are
+part of the sequence-aware lifecycle. It deliberately does not wait for a
+future persistence deadline; `label.assign` reports whether state/output
+persistence completed, was scheduled, or requires retry, while normal
+`app.quit` performs the existing final flush.
 
 `app.quit` posts the normal window close path. Existing application flush and
 Shell shutdown own persistence and worker retirement; the control plane does
@@ -140,11 +321,22 @@ rejects automation startup if any of them is present, before App/Shell state is
 constructed.
 
 The launcher requests `SW_SHOWNOACTIVATE`; the GUI uses the narrow
-`SWP_NOACTIVATE` show seam. Automation does not call `SetForegroundWindow`.
+`SWP_NOACTIVATE` show seam. The successful capture workflow requires the main
+window to be visible and not minimized, but it does not activate or foreground
+that window. Automation does not call `SetForegroundWindow`.
 
 The CTest coverage includes protocol and pipe boundaries, current-user ACL,
 second-client rejection, queue/full and duplicate-ID handling, version
 mismatch, disconnect and shutdown cancellation, a controlled no-activation
-show-plan assertion, runtime-state isolation, and a real launcher/GUI
-state-wait-quit integration test that fingerprints the ordinary state root
-before and after the run.
+show-plan assertion, both disconnect-first and finalizer-lease-first capture
+publication ordering, and a real SpecForge HWND workflow that verifies visible
+capture without foreground activation plus hidden/minimized rejection without
+window restoration. Coverage also includes runtime-state isolation and a
+repeated real launcher/GUI
+source-open/wait/goto/label/return/capture/state/quit integration test. The test
+requires `window.visible=true` and `window.minimized=false`, validates a
+non-empty PNG IHDR whose dimensions match the terminal, reloads the production
+labeling cache after quit, verifies the seed and ordinary root fingerprints,
+proves the root cannot be replaced during the child lifetime, exercises
+explicit UTF-8 Unicode source/name input plus seed and capture-path failures,
+and checks that no owned GUI process remains.

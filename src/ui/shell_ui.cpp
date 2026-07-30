@@ -881,17 +881,22 @@ void RenderDiagnosticRows(
 }
 
 SourceCollectionSession SourceCollectionSessionForRuntimePaths(
-    const RuntimePaths& paths)
+    const RuntimePaths& paths,
+    SampleLabelingStateCacheLoadPolicy
+        labeling_state_cache_load_policy)
 {
     return SourceCollectionSession(
         paths.source_session_state_path,
         paths.sample_navigation_state_path,
         paths.sample_labeling_state_path,
-        paths.sample_workflow_state_path);
+        paths.sample_workflow_state_path,
+        labeling_state_cache_load_policy);
 }
 
 SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
-    const RuntimePaths& paths)
+    const RuntimePaths& paths,
+    SampleLabelingStateCacheLoadPolicy
+        labeling_state_cache_load_policy)
 {
     return SourceCollectionLoadQueue({
         .labeling_state_cache_path =
@@ -900,6 +905,8 @@ SourceCollectionLoadQueue SourceCollectionLoadQueueForRuntimePaths(
             paths.sample_workflow_state_path,
         .navigation_state_cache_path =
             paths.sample_navigation_state_path,
+        .labeling_state_cache_load_policy =
+            labeling_state_cache_load_policy,
     });
 }
 
@@ -954,13 +961,17 @@ std::string ShellLocalStateFlushResult::FailureMessage(
 
 ShellUi::ShellUi(
     const SpecForgeStartup& startup,
-    PlotTouchpadGestureSource* touchpad_gestures)
+    PlotTouchpadGestureSource* touchpad_gestures,
+    SampleLabelingStateCacheLoadPolicy
+        labeling_state_cache_load_policy)
     : session_(SourceCollectionSessionForRuntimePaths(
-          startup.runtime_paths())),
+          startup.runtime_paths(),
+          labeling_state_cache_load_policy)),
       source_activation_(
           session_,
           SourceCollectionLoadQueueForRuntimePaths(
-              startup.runtime_paths())),
+              startup.runtime_paths(),
+              labeling_state_cache_load_policy)),
       panel_session_interaction_(
           session_,
           source_activation_),
@@ -1231,6 +1242,285 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
         spectrum_index);
 }
 
+SourceCollectionActivationTransaction::
+    SourceOpenOperation
+ShellUi::OpenSourceForAutomation(
+    const std::filesystem::path& path)
+{
+    return source_activation_.OpenSourceForAutomation(
+        path);
+}
+
+SourceCollectionActivationTransaction::
+    SourceOpenOperationOutcome
+ShellUi::ObserveSourceOpenForAutomation(
+    const SourceCollectionActivationTransaction::
+        SourceOpenOperation& operation) const
+{
+    return source_activation_.
+        ObserveSourceOpenOperation(operation);
+}
+
+const SourceCollectionActivationTransaction::
+    PresentedSpectrumObservation&
+ShellUi::PresentedSpectrumForAutomation() const noexcept
+{
+    return source_activation_.
+        presented_spectrum_observation();
+}
+
+std::uint64_t
+ShellUi::ActivationGenerationForAutomation() const noexcept
+{
+    return source_activation_.
+        activation_generation();
+}
+
+ShellAutomationNavigationResult
+ShellUi::GotoSpectrumForAutomation(
+    std::optional<std::size_t> index,
+    std::optional<std::string_view> name)
+{
+    ShellAutomationNavigationResult automation;
+    const SourceCollectionSessionView& view =
+        SessionView();
+    if (!view.navigation.has_active_source ||
+        !view.snapshot) {
+        automation.error =
+            ShellAutomationNavigationError::
+                NoActiveSource;
+        return automation;
+    }
+    if (!view.current_sample_snapshot ||
+        !view.navigation.current_index) {
+        automation.error =
+            ShellAutomationNavigationError::
+                SourceNotReady;
+        return automation;
+    }
+
+    automation.source_id =
+        view.snapshot->source.id;
+    std::size_t target_index = 0;
+    std::string target_name;
+    if (index) {
+        if (*index >=
+            view.navigation.sample_count) {
+            automation.error =
+                ShellAutomationNavigationError::
+                    IndexOutOfRange;
+            return automation;
+        }
+        target_index = *index;
+    } else if (name) {
+        const ExactSampleNameResolution resolution =
+            session_.ResolveExactSampleName(*name);
+        if (!resolution.names_available) {
+            automation.error =
+                ShellAutomationNavigationError::
+                    NameUnavailable;
+            return automation;
+        }
+        if (resolution.matching_rows.empty()) {
+            automation.error =
+                ShellAutomationNavigationError::
+                    NameNotFound;
+            return automation;
+        }
+        if (resolution.matching_rows.size() != 1U) {
+            automation.error =
+                ShellAutomationNavigationError::
+                    NameAmbiguous;
+            return automation;
+        }
+        if (!resolution.first_match_in_active_sequence) {
+            automation.error =
+                ShellAutomationNavigationError::
+                    FilteredOut;
+            return automation;
+        }
+        target_index =
+            resolution.matching_rows.front();
+        target_name = std::string(*name);
+    } else {
+        automation.error =
+            ShellAutomationNavigationError::
+                Rejected;
+        return automation;
+    }
+
+    const std::size_t previous_index =
+        *view.navigation.current_index;
+    const std::size_t spectrum_count =
+        view.navigation.sample_count;
+    SourceCollectionSessionResult result =
+        SubmitSessionCommand(
+            SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    SampleNavigationIntent::Move(
+                        SampleNavigationRequest::
+                            LocateSourceRowInSequence(
+                                target_index))));
+    if (result.navigation.blocked_by_filter) {
+        automation.error =
+            ShellAutomationNavigationError::
+                FilteredOut;
+        return automation;
+    }
+    if (!result.navigation.target_found) {
+        automation.error =
+            ShellAutomationNavigationError::
+                Rejected;
+        return automation;
+    }
+
+    automation.target = {
+        .present = true,
+        .index = target_index,
+        .name = std::move(target_name),
+        .count = spectrum_count,
+    };
+    automation.changed =
+        previous_index != target_index;
+    automation.pending =
+        result.follow_up_spectrum_index.has_value();
+    return automation;
+}
+
+ShellAutomationLabelAssignmentResult
+ShellUi::AssignLabelForAutomation(int code)
+{
+    ShellAutomationLabelAssignmentResult automation;
+    const SourceCollectionSessionView& view =
+        SessionView();
+    if (!view.current_sample_snapshot ||
+        !view.navigation.current_index) {
+        automation.error =
+            ShellAutomationLabelError::
+                NoCurrentSpectrum;
+        return automation;
+    }
+    if (!view.labeling.has_active_task) {
+        automation.error =
+            ShellAutomationLabelError::
+                NoActiveTask;
+        return automation;
+    }
+    if (!ContainsSampleLabelCode(
+            view.labeling.label_set,
+            code)) {
+        automation.error =
+            ShellAutomationLabelError::
+                LabelNotFound;
+        return automation;
+    }
+
+    automation.source_id =
+        view.snapshot ? view.snapshot->source.id
+                      : std::string{};
+    automation.task_id =
+        view.labeling.task_id;
+    automation.spectrum = {
+        .present = true,
+        .index = *view.navigation.current_index,
+        .name = view.navigation.current_sample_name,
+        .count = view.navigation.sample_count,
+    };
+
+    SourceCollectionSessionResult result =
+        SubmitSessionCommand(
+            SourceCollectionSessionIntent::
+                ChangeActiveSampleWorkflow(
+                    ActiveSampleWorkflowIntent::
+                        AssignActiveLabelToCurrentSample(
+                            code)),
+            SourceCollectionActivationTransaction::
+                NavigationIntent{
+                    NavigationLatencyInputKind::
+                        AutoAdvance});
+    if (!result.label_write ||
+        !result.label_write->write.accepted) {
+        automation.error =
+            ShellAutomationLabelError::Rejected;
+        return automation;
+    }
+
+    const SampleLabelingWriteOperationResult&
+        write = *result.label_write;
+    automation.previous_code =
+        write.write.previous_code;
+    automation.new_code =
+        write.write.current_code;
+    automation.changed =
+        write.write.changed;
+    automation.state_save_scheduled =
+        write.operation.state_save_scheduled;
+    automation.state_save_attempted =
+        write.operation.state_save_attempted;
+    automation.state_saved =
+        write.operation.state_saved;
+    automation.output_save_attempted =
+        write.operation.output_save_attempted;
+    automation.output_saved =
+        write.operation.output_saved;
+    automation.output_retry_scheduled =
+        write.operation.output_retry_scheduled;
+    automation.navigation_pending =
+        result.follow_up_spectrum_index.has_value();
+    return automation;
+}
+
+ShellAutomationView ShellUi::AutomationView()
+{
+    return AutomationViewForSnapshot(
+        session_.CurrentSampleSnapshot());
+}
+
+const ShellAutomationView&
+ShellUi::PresentedAutomationView() const noexcept
+{
+    return presented_automation_view_;
+}
+
+ShellAutomationView
+ShellUi::AutomationViewForSnapshot(
+    const SpectrumSnapshotHandle& snapshot)
+{
+    ShellAutomationView automation;
+    const SourceCollectionSessionView& view =
+        SessionView();
+    if (snapshot) {
+        automation.source_id =
+            snapshot->source.id;
+        automation.source_path =
+            snapshot->source.path;
+        automation.spectrum = {
+            .present = true,
+            .index =
+                snapshot->collection.current_index,
+            .name =
+                snapshot->current_spectrum.name,
+            .count =
+                snapshot->collection.spectrum_count,
+        };
+    } else {
+        automation.spectrum.count =
+            view.navigation.sample_count;
+    }
+    if (snapshot &&
+        view.current_sample_snapshot == snapshot) {
+        automation.labeling = {
+            .has_active_task =
+                view.labeling.has_active_task,
+            .task_id = view.labeling.task_id,
+            .task_name = view.labeling.task_name,
+            .current_spectrum_code =
+                view.labeling.current_code,
+        };
+    }
+    return automation;
+}
+
 void ShellUi::DrainSourceLoads(
     bool allow_snapshot_prefetch)
 {
@@ -1307,6 +1597,13 @@ void ShellUi::RecordSpectrumDrawSubmission(
     unsigned int viewport_id,
     SpectrumSnapshotHandle snapshot)
 {
+    if (snapshot) {
+        automation_presentation_candidate_ = {
+            .frame_index = frame_index,
+            .view =
+                AutomationViewForSnapshot(snapshot),
+        };
+    }
     source_activation_.RecordSpectrumDrawSubmission(
         frame_index,
         viewport_id,
@@ -1317,9 +1614,34 @@ void ShellUi::PresentFrame(
     std::uint64_t frame_index,
     std::span<const NavigationLatencyPresentation> presentations)
 {
+    const std::uint64_t presented_sequence_before =
+        source_activation_.
+            presented_spectrum_observation()
+                .sequence;
     source_activation_.PresentFrame(
         frame_index,
         presentations);
+    const auto& presented =
+        source_activation_.
+            presented_spectrum_observation();
+    if (presented.sequence >
+            presented_sequence_before &&
+        automation_presentation_candidate_ &&
+        automation_presentation_candidate_
+                ->frame_index ==
+            frame_index &&
+        automation_presentation_candidate_
+                ->view.source_id ==
+            presented.source_id &&
+        automation_presentation_candidate_
+                ->view.spectrum.present &&
+        automation_presentation_candidate_
+                ->view.spectrum.index ==
+            presented.spectrum_index) {
+        presented_automation_view_ =
+            automation_presentation_candidate_
+                ->view;
+    }
 }
 
 void ShellUi::OpenSourceFromFilePicker()

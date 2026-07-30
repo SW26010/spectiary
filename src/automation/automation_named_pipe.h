@@ -19,10 +19,13 @@
 
 namespace specforge {
 
+struct AutomationNamedPipeServerTestAccess;
+
 struct AutomationQueuedCommand {
     std::string request_id;
     AutomationCommandKind command =
         AutomationCommandKind::StateGet;
+    AutomationCommandParameters parameters;
     std::uint64_t sequence = 0;
 };
 
@@ -38,6 +41,27 @@ struct AutomationControlQueueSnapshot {
 class AutomationNamedPipeServer {
 public:
     using CommandReadyCallback = std::function<void()>;
+    using FrameCapturePublishCallback =
+        std::function<HRESULT()>;
+
+    enum class AppQuitClaimResult {
+        Inactive,
+        WaitingForEarlierExecution,
+        Claimed,
+    };
+
+    enum class FrameCaptureFinalizationState {
+        Inactive,
+        Completed,
+        Failed,
+    };
+
+    struct FrameCaptureFinalizationResult {
+        FrameCaptureFinalizationState state =
+            FrameCaptureFinalizationState::Inactive;
+        HRESULT result =
+            HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    };
 
     AutomationNamedPipeServer(
         std::wstring pipe_name,
@@ -61,6 +85,8 @@ public:
     TakePendingCommands();
     [[nodiscard]] bool IsRequestActive(
         std::string_view request_id) const;
+    [[nodiscard]] bool TryClaimExecution(
+        const AutomationQueuedCommand& command);
     [[nodiscard]] AutomationControlQueueSnapshot
     queue_snapshot() const;
 
@@ -71,24 +97,34 @@ public:
         const AutomationQueuedCommand& command,
         std::string_view error_code,
         std::string_view error_message);
-    [[nodiscard]] bool TryBeginAppQuit(
+    [[nodiscard]] AppQuitClaimResult TryBeginAppQuit(
         const AutomationQueuedCommand& quit_command);
+    [[nodiscard]] FrameCaptureFinalizationResult
+    TryFinalizeFrameCapture(
+        const AutomationQueuedCommand& command,
+        std::string_view body_members,
+        const FrameCapturePublishCallback& publish);
     [[nodiscard]] bool TryCompleteIdleWaits(
         const std::vector<std::string>& request_ids);
 
 private:
+    friend struct AutomationNamedPipeServerTestAccess;
+
     struct OutstandingRequest {
         AutomationCommandKind command =
             AutomationCommandKind::StateGet;
         std::uint64_t sequence = 0;
-        bool execution_started = false;
+        bool execution_claimed = false;
     };
 
     void ReaderMain();
     void WriterMain();
     void HandleClientMessage(std::string message);
     void HandleDisconnect();
-    void EnqueueResponseLocked(std::string response);
+    void EnqueueResponseLocked(
+        std::string response,
+        std::string_view request_id,
+        std::string_view command_name);
     [[nodiscard]] bool TryReserveRequestIdLocked(
         std::string_view request_id,
         std::string_view command_name);

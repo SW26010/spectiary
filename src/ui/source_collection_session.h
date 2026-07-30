@@ -3,6 +3,7 @@
 #include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
 #include "domain/source_collection_manifest.h"
+#include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_preparation.h"
@@ -243,6 +244,8 @@ struct SourceCollectionSessionResult {
     bool changed = false;
     bool loaded = false;
     bool view_invalidated = false;
+    std::optional<SampleLabelingWriteOperationResult>
+        label_write;
     SourceCollectionLoadError load_error;
     std::string message;
 };
@@ -254,7 +257,11 @@ public:
         std::filesystem::path source_session_state_cache_path,
         std::filesystem::path navigation_state_cache_path,
         std::filesystem::path labeling_state_cache_path,
-        std::filesystem::path workflow_state_cache_path);
+        std::filesystem::path workflow_state_cache_path,
+        SampleLabelingStateCacheLoadPolicy
+            labeling_state_cache_load_policy =
+                SampleLabelingStateCacheLoadPolicy::
+                    AllowPersistentOutputs);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
@@ -268,6 +275,8 @@ public:
     [[nodiscard]] bool SupersedesPendingSourceActivation(
         const SourceCollectionSessionIntent& intent) const;
     [[nodiscard]] const SourceCollectionSessionView& View();
+    [[nodiscard]] ExactSampleNameResolution
+    ResolveExactSampleName(std::string_view name) const;
     // A deferred pending target is the origin for a subsequent navigation command.
     [[nodiscard]] std::optional<std::size_t> EffectiveSampleNavigationIndex() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;

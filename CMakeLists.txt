@@ -266,6 +266,7 @@ target_link_libraries(specforge_automation
         specforge_core
     PRIVATE
         advapi32
+        ntdll
         shell32
 )
 
@@ -344,6 +345,7 @@ target_link_libraries(specforge_renderer
         dcomp
         d3d11
         dxgi
+        ntdll
         ole32
         windowscodecs
 )
@@ -408,6 +410,7 @@ target_link_libraries(
     specforge_automation_launcher
     PRIVATE
         specforge_automation
+        specforge_sessions
         bcrypt
 )
 set_target_properties(
@@ -569,12 +572,13 @@ add_test(
         -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
         -Executable "$<TARGET_FILE:specforge_native>"
         -CleanupFixture "$<TARGET_FILE:specforge_automation_control_tests>"
+        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
 )
 set_tests_properties(
     specforge_automation_launcher_integration_tests
     PROPERTIES
         RUN_SERIAL TRUE
-        TIMEOUT 30
+        TIMEOUT 120
 )
 specforge_add_test(
     specforge_on_demand_frame_capture_tests

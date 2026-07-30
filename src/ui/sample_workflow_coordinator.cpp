@@ -179,6 +179,10 @@ void MergeSampleWorkflowTransitionOutcome(
     target.invalidate_view =
         target.invalidate_view ||
         source.invalidate_view;
+    if (source.label_write) {
+        target.label_write =
+            std::move(source.label_write);
+    }
     if (!source.message.empty()) {
         target.message = std::move(source.message);
     }
@@ -1292,7 +1296,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::AssignActiveLabelToCu
         labeling_.AssignLabel(*sample_index, code);
     return ApplyLabelWriteResult(
         snapshot,
-        write.write,
+        write,
         target_resolution);
 }
 
@@ -1308,7 +1312,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ClearActiveLabelForCu
         labeling_.ClearLabel(*sample_index);
     return ApplyLabelWriteResult(
         snapshot,
-        write.write,
+        write,
         target_resolution);
 }
 
@@ -1341,7 +1345,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::UndoLastLabelWrite(
     label_undo_history_->entries.pop_back();
     return ApplyLabelWriteResult(
         snapshot,
-        write_result,
+        std::move(write_operation),
         nullptr,
         false,
         entry.sample_index);
@@ -1654,6 +1658,13 @@ SourceCollectionSampleSortingView SampleWorkflowCoordinator::BuildSortingView(
     }
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     return view;
+}
+
+ExactSampleNameResolution
+SampleWorkflowCoordinator::ResolveExactSampleName(
+    std::string_view name) const
+{
+    return navigation_.ResolveExactSampleName(name);
 }
 
 bool SampleWorkflowCoordinator::can_add_read_only_annotation() const
@@ -2045,19 +2056,22 @@ bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult(
     const SpectrumSnapshotHandle& snapshot,
-    const SampleLabelWriteResult& result,
+    SampleLabelingWriteOperationResult result,
     NavigationTargetResolutionReport* target_resolution,
     bool record_undo,
     std::optional<std::size_t> restore_sample_index)
 {
     DiscardPreparedViewCaches();
     SampleWorkflowTransitionOutcome outcome;
-    if (!result.changed) {
+    const SampleLabelWriteResult& write =
+        result.write;
+    outcome.label_write = result;
+    if (!write.changed) {
         return outcome;
     }
 
     if (record_undo) {
-        RecordLabelUndo(result);
+        RecordLabelUndo(write);
     }
 
     const SampleLabelingTask* task = labeling_.View().active_task;
@@ -2074,13 +2088,13 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult
                 SampleNavigationRequest::RestoreLabelUndoPosition(
                     *restore_sample_index),
                 snapshot));
-    } else if (result.advance_requested && task != nullptr) {
+    } else if (write.advance_requested && task != nullptr) {
         MergeSampleWorkflowTransitionOutcome(
             outcome,
             RequestSampleNavigation(
                 BuildAutoAdvanceRequest(*task),
                 snapshot,
-                result.sample_index,
+                write.sample_index,
                 target_resolution));
     }
     return outcome;

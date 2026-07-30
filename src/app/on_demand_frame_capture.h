@@ -34,6 +34,7 @@ enum class OnDemandFrameCaptureStatus {
     WindowUnavailable,
     Pending,
     Captured,
+    Canceled,
     FailedPreparingOutputDirectory,
     FailedCapture,
     Failed,
@@ -47,11 +48,16 @@ public:
 
     [[nodiscard]] OnDemandFrameCaptureRequestOutcome Request(
         std::uint64_t current_frame,
-        bool window_renderable);
+        bool window_renderable,
+        std::optional<std::filesystem::path>
+            output_path = std::nullopt);
     void ObserveWindowRenderable(bool window_renderable);
     [[nodiscard]] bool ShouldCapture(
         std::uint64_t current_frame) const noexcept;
     void Complete(std::filesystem::path output_path);
+    void Cancel(
+        std::string message =
+            "Frame capture was canceled; no image was produced.");
     void Fail(std::string message);
     void FailPreparingOutputDirectory();
     void FailCapture(
@@ -95,10 +101,17 @@ public:
     {
         return last_output_path_;
     }
+    [[nodiscard]] const std::optional<std::filesystem::path>&
+    requested_output_path() const noexcept
+    {
+        return requested_output_path_;
+    }
 
 private:
     OnDemandFrameCaptureConfiguration configuration_;
     std::optional<std::uint64_t> requested_after_frame_;
+    std::optional<std::filesystem::path>
+        requested_output_path_;
     std::optional<std::filesystem::path> last_output_path_;
     std::string status_message_;
     OnDemandFrameCaptureStatus status_ =

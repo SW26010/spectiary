@@ -480,12 +480,25 @@ SourceCollectionSession::SourceCollectionSession(
     std::filesystem::path source_session_state_cache_path,
     std::filesystem::path navigation_state_cache_path,
     std::filesystem::path labeling_state_cache_path,
-    std::filesystem::path workflow_state_cache_path)
+    std::filesystem::path workflow_state_cache_path,
+    SampleLabelingStateCacheLoadPolicy
+        labeling_state_cache_load_policy)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
           std::move(labeling_state_cache_path),
-          std::move(workflow_state_cache_path))),
+          std::move(workflow_state_cache_path),
+          [labeling_state_cache_load_policy](
+              const std::filesystem::path& path) {
+              return LoadSampleLabelingStateCache(
+                  path,
+                  {},
+                  labeling_state_cache_load_policy);
+          },
+          [](const std::filesystem::path& path) {
+              return LoadSampleWorkflowStateCache(
+                  path);
+          })),
       source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
           std::move(source_session_state_cache_path)))
 {
@@ -697,6 +710,13 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
     cached_session_view_revision_ =
         session_view_revision_;
     return *session_view_cache_;
+}
+
+ExactSampleNameResolution
+SourceCollectionSession::ResolveExactSampleName(
+    std::string_view name) const
+{
+    return workflow_->ResolveExactSampleName(name);
 }
 
 SpectrumSnapshotHandle SourceCollectionSession::CurrentSampleSnapshot() const
@@ -1393,6 +1413,10 @@ void SourceCollectionSession::ApplyWorkflowTransitionOutcome(
     result.view_invalidated =
         result.view_invalidated ||
         outcome.invalidate_view;
+    if (outcome.label_write) {
+        result.label_write =
+            std::move(outcome.label_write);
+    }
     if (!outcome.message.empty()) {
         result.message = std::move(outcome.message);
     }

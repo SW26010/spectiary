@@ -351,7 +351,8 @@ std::filesystem::path DefaultSampleLabelingStateCachePath()
 
 SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     const std::filesystem::path& path,
-    const std::function<void()>& cancellation_checkpoint)
+    const std::function<void()>& cancellation_checkpoint,
+    SampleLabelingStateCacheLoadPolicy policy)
 {
     SampleLabelingStateCacheLoadResult result;
     VersionedJsonCacheLoadResult cache =
@@ -406,6 +407,22 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
             for (const JsonValue& task_object : tasks->array) {
                 if (cancellation_checkpoint) {
                     cancellation_checkpoint();
+                }
+                if (policy ==
+                        SampleLabelingStateCacheLoadPolicy::
+                            InternalDraftsOnly) {
+                    const JsonValue* output_path =
+                        ObjectMember(
+                            task_object,
+                            "output_path");
+                    if (output_path != nullptr &&
+                        output_path->kind !=
+                            JsonValue::Kind::Null) {
+                        result.cache = {};
+                        result.warning =
+                            "Persistent labeling output paths are not permitted in an automation state seed.";
+                        return result;
+                    }
                 }
                 if (std::optional<SampleLabelingTask> task =
                         ParseTask(task_object, state.sample_count, cancellation_checkpoint)) {

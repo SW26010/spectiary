@@ -1,5 +1,6 @@
 #include "app/specforge_app.h"
 
+#include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
 #include "platform/win32_text.h"
@@ -25,11 +26,15 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
 namespace specforge {
+
+std::string JsonString(std::string_view value);
+
 namespace {
 
 constexpr int kInitialWidth = 1280;
@@ -61,38 +66,6 @@ std::string HResultHex(HRESULT result)
     std::ostringstream message;
     message << "0x" << std::hex << std::setw(8) << std::setfill('0') << static_cast<unsigned long>(result);
     return message.str();
-}
-
-std::string WideToUtf8(std::wstring_view value)
-{
-    if (value.empty()) {
-        return {};
-    }
-
-    const int size = WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        value.data(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr);
-    if (size <= 0) {
-        return {};
-    }
-
-    std::string result(static_cast<std::size_t>(size), '\0');
-    WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        value.data(),
-        static_cast<int>(value.size()),
-        result.data(),
-        size,
-        nullptr,
-        nullptr);
-    return result;
 }
 
 std::string PathToUtf8(const std::filesystem::path& path)
@@ -307,7 +280,14 @@ SpecForgeApp::SpecForgeApp(
     std::optional<AutomationStartupConfiguration>
         automation)
     : startup_(startup),
-      ui_(startup_, &touchpad_gestures_),
+      ui_(
+          startup_,
+          &touchpad_gestures_,
+          automation
+          ? SampleLabelingStateCacheLoadPolicy::
+                InternalDraftsOnly
+          : SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputs),
       automation_configuration_(
           std::move(automation))
 {
@@ -452,6 +432,8 @@ int SpecForgeApp::Run(
     }
 
     if (automation_server_) {
+        CancelAutomationFrameCapture(
+            "Application shutdown canceled the pending automation frame capture.");
         automation_server_->Shutdown(
             "app_shutdown");
         automation_idle_waits_.clear();
@@ -508,8 +490,17 @@ void SpecForgeApp::Initialize(
     }
 
     pan_pacing_ = ResolvePanPacingEnvironment();
+    OnDemandFrameCaptureConfiguration
+        frame_capture_configuration =
+            ResolveOnDemandFrameCaptureEnvironment();
+    if (automation_configuration_) {
+        frame_capture_configuration.requested =
+            "automation";
+        frame_capture_configuration.enabled = true;
+        frame_capture_configuration.recognized = true;
+    }
     frame_capture_ = OnDemandFrameCapture(
-        ResolveOnDemandFrameCaptureEnvironment());
+        std::move(frame_capture_configuration));
     if (initial_source) {
         ui_.OpenSource(*initial_source);
     }
@@ -697,6 +688,8 @@ void SpecForgeApp::Shutdown()
         return;
     }
     if (automation_server_) {
+        CancelAutomationFrameCapture(
+            "Application shutdown canceled the pending automation frame capture.");
         automation_server_->Shutdown(
             "app_shutdown");
         automation_idle_waits_.clear();
@@ -1368,44 +1361,187 @@ void SpecForgeApp::RequestFrameCapture()
 
 void SpecForgeApp::CaptureRequestedFrame()
 {
-    const std::filesystem::path&
+    const std::optional<std::filesystem::path>
+        requested_output =
+            frame_capture_.requested_output_path();
+    if (requested_output &&
+        automation_capture_command_ &&
+        frame_index_ <=
+            automation_capture_command_
+                    ->accepted_frame +
+                1U) {
+        return;
+    }
+    std::filesystem::path output_path;
+    std::filesystem::path frame_capture_directory;
+    if (requested_output) {
+        if (!AutomationFrameCaptureRequestActive()) {
+            CancelAutomationFrameCapture(
+                "The automation request became inactive before capture.");
+            return;
+        }
+        if (!automation_configuration_) {
+            frame_capture_.Fail(
+                "Explicit frame-capture paths require an automation instance.");
+            return;
+        }
+        const AutomationCapturePathValidation validation =
+            ValidateAutomationCapturePath(
+                automation_configuration_->state_root,
+                *requested_output);
+        if (!validation.valid) {
+            frame_capture_.Fail(
+                validation.error_message);
+            return;
+        }
+        output_path = validation.normalized_path;
+        frame_capture_directory =
+            output_path.parent_path();
+    } else {
         frame_capture_directory =
             startup_.runtime_paths()
                 .frame_capture_directory;
-    std::error_code directory_error;
-    std::filesystem::create_directories(
-        frame_capture_directory,
-        directory_error);
-    if (directory_error) {
-        frame_capture_.
-            FailPreparingOutputDirectory();
-        profile_.WriteEvent(
-            "frame_capture",
-            {
-                ProfileSink::Field::String(
-                    "action",
-                    "failed"),
-                ProfileSink::Field::String(
-                    "stage",
-                    "create_output_directory"),
-                ProfileSink::Field::String(
-                    "detail",
-                    directory_error.message()),
-                ProfileSink::Field::Bool(
-                    "image_produced",
-                    false),
-            });
-        render_wake_scheduler_.RequestFrame();
-        return;
+        output_path =
+            FrameCaptureOutputPath(
+                frame_capture_directory,
+                frame_index_);
+    }
+    if (!requested_output) {
+        std::error_code directory_error;
+        std::filesystem::create_directories(
+            frame_capture_directory,
+            directory_error);
+        if (directory_error) {
+            frame_capture_.
+                FailPreparingOutputDirectory();
+            profile_.WriteEvent(
+                "frame_capture",
+                {
+                    ProfileSink::Field::String(
+                        "action",
+                        "failed"),
+                    ProfileSink::Field::String(
+                        "stage",
+                        "create_output_directory"),
+                    ProfileSink::Field::String(
+                        "detail",
+                        directory_error.message()),
+                    ProfileSink::Field::Bool(
+                        "image_produced",
+                        false),
+                });
+            render_wake_scheduler_.RequestFrame();
+            return;
+        }
     }
 
-    const std::filesystem::path output_path =
-        FrameCaptureOutputPath(
-            frame_capture_directory,
-            frame_index_);
+    if (requested_output) {
+        if (!AutomationFrameCaptureRequestActive()) {
+            CancelAutomationFrameCapture(
+                "The automation request became inactive before PNG encoding.");
+            return;
+        }
+        const AutomationCapturePathValidation validation =
+            ValidateAutomationCapturePath(
+                automation_configuration_->state_root,
+                output_path);
+        if (!validation.valid) {
+            frame_capture_.Fail(
+                validation.error_message);
+            render_wake_scheduler_.RequestFrame();
+            return;
+        }
+        output_path = validation.normalized_path;
+    }
+    if (requested_output &&
+        !AutomationFrameCaptureRequestActive()) {
+        CancelAutomationFrameCapture(
+            "The automation request became inactive before PNG encoding.");
+        return;
+    }
+    AutomationNamedPipeServer::
+        FrameCaptureFinalizationResult
+            automation_finalization;
+    bool automation_finalization_attempted = false;
+    AutomationQueuedCommand capture_command;
+    std::string capture_body;
+    if (requested_output &&
+        automation_capture_command_) {
+        capture_command =
+            automation_capture_command_->command;
+        std::ostringstream body;
+        body << "\"result\":{"
+             << "\"path\":"
+             << JsonString(PathToUtf8(output_path))
+             << ",\"format\":\"png\""
+             << ",\"scope\":\"main_viewport\""
+             << ",\"frame_index\":"
+             << frame_index_
+             << ",\"width\":"
+             << window_.client_width()
+             << ",\"height\":"
+             << window_.client_height()
+             << '}';
+        capture_body = body.str();
+    }
     const HRESULT result =
-        renderer_.CaptureFrameToPng(output_path);
+        renderer_.CaptureFrameToPng(
+            output_path,
+            requested_output
+            ? D3D11FrameCaptureFinalizer{
+                  [this,
+                   capture_command,
+                   capture_body,
+                   &automation_finalization,
+                   &automation_finalization_attempted](
+                      const std::function<HRESULT()>&
+                          publish) {
+                      automation_finalization_attempted =
+                          true;
+                      automation_finalization =
+                          automation_server_
+                              ->TryFinalizeFrameCapture(
+                                  capture_command,
+                                  capture_body,
+                              publish);
+                      return automation_finalization
+                          .result;
+                  }}
+            : D3D11FrameCaptureFinalizer{},
+            requested_output
+            ? std::optional<std::filesystem::path>(
+                  automation_configuration_
+                      ->state_root)
+            : std::nullopt);
     if (FAILED(result)) {
+        if (requested_output &&
+            automation_finalization_attempted) {
+            automation_capture_last_path_ =
+                output_path;
+            if (automation_finalization.state ==
+                AutomationNamedPipeServer::
+                    FrameCaptureFinalizationState::
+                        Inactive) {
+                CancelAutomationFrameCapture(
+                    "The automation request became inactive before PNG publication.");
+            } else {
+                frame_capture_.FailCapture(
+                    "Finalize frame capture output",
+                    HResultHex(result));
+                automation_capture_last_result_ =
+                    "failed";
+            }
+            automation_capture_command_.reset();
+            render_wake_scheduler_.RequestFrame();
+            return;
+        }
+        if (requested_output &&
+            !AutomationFrameCaptureRequestActive()) {
+            CancelAutomationFrameCapture(
+                "The automation request became inactive during PNG encoding.");
+            automation_capture_command_.reset();
+            return;
+        }
         const std::string operation(
             renderer_.last_error_operation());
         frame_capture_.FailCapture(
@@ -1438,6 +1574,14 @@ void SpecForgeApp::CaptureRequestedFrame()
     }
 
     frame_capture_.Complete(output_path);
+    if (requested_output &&
+        automation_finalization_attempted) {
+        automation_capture_last_result_ =
+            "succeeded";
+        automation_capture_last_path_ =
+            output_path;
+        automation_capture_command_.reset();
+    }
     profile_.WriteEvent(
         "frame_capture",
         {
@@ -1536,6 +1680,104 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
     profile_.RequestStopAfterFrame();
 }
 
+std::string JsonString(std::string_view value)
+{
+    return "\"" + JsonEscape(value) + "\"";
+}
+
+const char* JsonBool(bool value)
+{
+    return value ? "true" : "false";
+}
+
+std::pair<std::string_view, std::string_view>
+AutomationNavigationFailure(
+    ShellAutomationNavigationError error)
+{
+    switch (error) {
+    case ShellAutomationNavigationError::NoActiveSource:
+        return {
+            "no_active_source",
+            "No source is active.",
+        };
+    case ShellAutomationNavigationError::SourceNotReady:
+        return {
+            "source_not_ready",
+            "The active source is not ready for spectrum navigation.",
+        };
+    case ShellAutomationNavigationError::IndexOutOfRange:
+        return {
+            "spectrum_index_out_of_range",
+            "The requested spectrum index is outside the active source.",
+        };
+    case ShellAutomationNavigationError::NameUnavailable:
+        return {
+            "spectrum_name_unavailable",
+            "The active source does not provide spectrum names.",
+        };
+    case ShellAutomationNavigationError::NameNotFound:
+        return {
+            "spectrum_not_found",
+            "No spectrum has the requested exact name.",
+        };
+    case ShellAutomationNavigationError::NameAmbiguous:
+        return {
+            "spectrum_ambiguous",
+            "More than one spectrum has the requested exact name.",
+        };
+    case ShellAutomationNavigationError::FilteredOut:
+        return {
+            "spectrum_filtered_out",
+            "The requested spectrum is outside the active navigation sequence.",
+        };
+    case ShellAutomationNavigationError::Rejected:
+        return {
+            "spectrum_load_failed",
+            "The real session rejected the requested spectrum.",
+        };
+    case ShellAutomationNavigationError::None:
+        break;
+    }
+    return {
+        "spectrum_load_failed",
+        "Spectrum navigation failed.",
+    };
+}
+
+std::pair<std::string_view, std::string_view>
+AutomationLabelFailure(
+    ShellAutomationLabelError error)
+{
+    switch (error) {
+    case ShellAutomationLabelError::NoCurrentSpectrum:
+        return {
+            "no_current_spectrum",
+            "No current spectrum is ready for labeling.",
+        };
+    case ShellAutomationLabelError::NoActiveTask:
+        return {
+            "no_active_label_task",
+            "No labeling task is active.",
+        };
+    case ShellAutomationLabelError::LabelNotFound:
+        return {
+            "label_not_found",
+            "The active labeling task does not contain the requested code.",
+        };
+    case ShellAutomationLabelError::Rejected:
+        return {
+            "label_assignment_rejected",
+            "The real labeling workflow rejected the assignment.",
+        };
+    case ShellAutomationLabelError::None:
+        break;
+    }
+    return {
+        "label_assignment_rejected",
+        "Label assignment failed.",
+    };
+}
+
 void SpecForgeApp::PostAutomationCommandReady(
     HWND hwnd) noexcept
 {
@@ -1573,14 +1815,795 @@ void SpecForgeApp::InitializeAutomation()
     }
 }
 
+void SpecForgeApp::BeginAutomationSourceOpen(
+    const AutomationQueuedCommand& command)
+{
+    const auto* parameters =
+        std::get_if<AutomationSourceOpenParameters>(
+            &command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "source.open parameters were not decoded.");
+        return;
+    }
+    const std::filesystem::path path(
+        Utf8ToWide(parameters->path));
+    if (!path.is_absolute()) {
+        automation_server_->Fail(
+            command,
+            "path_not_absolute",
+            "source.open path must be absolute.");
+        return;
+    }
+    std::error_code path_error;
+    const bool supported_path_kind =
+        std::filesystem::is_regular_file(
+            path,
+            path_error) ||
+        std::filesystem::is_directory(
+            path,
+            path_error);
+    if (path_error || !supported_path_kind) {
+        automation_server_->Fail(
+            command,
+            "source_not_found",
+            "source.open path must identify an existing file or directory.");
+        return;
+    }
+    if (!automation_server_->TryClaimExecution(
+            command)) {
+        return;
+    }
+
+    automation_source_commands_.push_back({
+        .command = command,
+        .operation =
+            ui_.OpenSourceForAutomation(path),
+    });
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::BeginAutomationSpectrumGoto(
+    const AutomationQueuedCommand& command)
+{
+    if (automation_goto_command_ ||
+        automation_label_command_) {
+        automation_server_->Fail(
+            command,
+            "operation_busy",
+            "Another automation navigation or label operation is active.");
+        return;
+    }
+    const auto* parameters =
+        std::get_if<AutomationSpectrumGotoParameters>(
+            &command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "spectrum.goto parameters were not decoded.");
+        return;
+    }
+    if (!automation_server_->TryClaimExecution(
+            command)) {
+        return;
+    }
+    ShellAutomationNavigationResult navigation =
+        ui_.GotoSpectrumForAutomation(
+            parameters->target.index,
+            parameters->target.name
+                ? std::optional<std::string_view>(
+                      *parameters->target.name)
+                : std::nullopt);
+    if (navigation.error !=
+        ShellAutomationNavigationError::None) {
+        const auto [code, message] =
+            AutomationNavigationFailure(
+                navigation.error);
+        automation_server_->Fail(
+            command,
+            code,
+            message);
+        return;
+    }
+    automation_goto_command_ =
+        AutomationGotoCommand{
+            .command = command,
+            .source_id =
+                std::move(navigation.source_id),
+            .target_index =
+                navigation.target.index,
+            .activation_generation =
+                ui_.ActivationGenerationForAutomation(),
+            .presented_sequence_before =
+                ui_.PresentedSpectrumForAutomation()
+                    .sequence,
+            .changed = navigation.changed,
+        };
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::BeginAutomationLabelAssign(
+    const AutomationQueuedCommand& command)
+{
+    if (automation_goto_command_ ||
+        automation_label_command_) {
+        automation_server_->Fail(
+            command,
+            "operation_busy",
+            "Another automation navigation or label operation is active.");
+        return;
+    }
+    const auto* parameters =
+        std::get_if<AutomationLabelAssignParameters>(
+            &command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "label.assign parameters were not decoded.");
+        return;
+    }
+    if (!automation_server_->TryClaimExecution(
+            command)) {
+        return;
+    }
+
+    automation_label_command_ =
+        AutomationLabelCommand{
+            .command = command,
+            .phase =
+                AutomationLabelCommand::Phase::
+                    NavigatingToTarget,
+            .activation_generation =
+                ui_.ActivationGenerationForAutomation(),
+            .presented_sequence_before =
+                ui_.PresentedSpectrumForAutomation()
+                    .sequence,
+        };
+    AutomationLabelCommand& operation =
+        *automation_label_command_;
+    if (parameters->target) {
+        ShellAutomationNavigationResult navigation =
+            ui_.GotoSpectrumForAutomation(
+                parameters->target->index,
+                parameters->target->name
+                    ? std::optional<std::string_view>(
+                          *parameters->target->name)
+                    : std::nullopt);
+        if (navigation.error !=
+            ShellAutomationNavigationError::None) {
+            const auto [code, message] =
+                AutomationNavigationFailure(
+                    navigation.error);
+            automation_server_->Fail(
+                command,
+                code,
+                message);
+            automation_label_command_.reset();
+            return;
+        }
+        operation.source_id =
+            std::move(navigation.source_id);
+        operation.target_index =
+            navigation.target.index;
+        operation.activation_generation =
+            ui_.ActivationGenerationForAutomation();
+        const auto& presented =
+            ui_.PresentedSpectrumForAutomation();
+        operation.presented_sequence_before =
+            presented.sequence;
+        render_wake_scheduler_.RequestFrame();
+        return;
+    }
+    ContinueAutomationLabelAssign(operation);
+    if (!automation_server_->IsRequestActive(
+            command.request_id)) {
+        automation_label_command_.reset();
+    }
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::ContinueAutomationLabelAssign(
+    AutomationLabelCommand& operation)
+{
+    const auto* parameters =
+        std::get_if<AutomationLabelAssignParameters>(
+            &operation.command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            operation.command,
+            "invalid_params",
+            "label.assign parameters were not decoded.");
+        return;
+    }
+    ShellAutomationLabelAssignmentResult assignment =
+        ui_.AssignLabelForAutomation(
+            parameters->code);
+    if (assignment.error !=
+        ShellAutomationLabelError::None) {
+        const auto [code, message] =
+            AutomationLabelFailure(
+                assignment.error);
+        automation_server_->Fail(
+            operation.command,
+            code,
+            message);
+        return;
+    }
+    operation.source_id =
+        assignment.source_id;
+    operation.target_index =
+        assignment.spectrum.index;
+    operation.assignment =
+        std::move(assignment);
+    operation.phase =
+        AutomationLabelCommand::Phase::
+            WaitingForAutoAdvance;
+    operation.presented_sequence_before =
+        ui_.PresentedSpectrumForAutomation()
+            .sequence;
+}
+
+void SpecForgeApp::BeginAutomationFrameCapture(
+    const AutomationQueuedCommand& command)
+{
+    const auto* parameters =
+        std::get_if<AutomationFrameCaptureParameters>(
+            &command.parameters);
+    if (parameters == nullptr ||
+        !automation_configuration_) {
+        automation_capture_last_result_ =
+            "failed";
+        automation_capture_last_path_.clear();
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "frame.capture parameters were not decoded.");
+        return;
+    }
+    const std::filesystem::path requested_path(
+        Utf8ToWide(parameters->path));
+    if (automation_capture_command_ ||
+        frame_capture_.pending()) {
+        automation_capture_last_result_ =
+            "failed";
+        automation_capture_last_path_ =
+            requested_path;
+        automation_server_->Fail(
+            command,
+            "capture_busy",
+            "A frame capture is already pending.");
+        return;
+    }
+    const AutomationCapturePathValidation validation =
+        ValidateAutomationCapturePath(
+            automation_configuration_->state_root,
+            requested_path);
+    if (!validation.valid) {
+        automation_capture_last_result_ =
+            "failed";
+        automation_capture_last_path_ =
+            requested_path;
+        automation_server_->Fail(
+            command,
+            validation.error_code,
+            validation.error_message);
+        return;
+    }
+
+    const OnDemandFrameCaptureRequestOutcome outcome =
+        frame_capture_.Request(
+            frame_index_,
+            !minimized_ && window_visible_,
+            validation.normalized_path);
+    if (outcome ==
+        OnDemandFrameCaptureRequestOutcome::
+            WindowNotRenderable) {
+        automation_capture_last_result_ =
+            "failed";
+        automation_capture_last_path_ =
+            validation.normalized_path;
+        automation_server_->Fail(
+            command,
+            "window_not_renderable",
+            "The main application window is hidden or minimized.");
+        return;
+    }
+    if (outcome !=
+        OnDemandFrameCaptureRequestOutcome::Accepted) {
+        automation_capture_last_result_ =
+            "failed";
+        automation_capture_last_path_ =
+            validation.normalized_path;
+        automation_server_->Fail(
+            command,
+            outcome ==
+                    OnDemandFrameCaptureRequestOutcome::
+                        AlreadyPending
+                ? "capture_busy"
+                : "capture_failed",
+            "The application capture seam rejected the request.");
+        return;
+    }
+    automation_capture_command_ =
+        AutomationCaptureCommand{
+            .command = command,
+            .output_path =
+                validation.normalized_path,
+            .accepted_frame = frame_index_,
+        };
+    render_wake_scheduler_.RequestFrame();
+}
+
+bool SpecForgeApp::ServiceAutomationAppQuit(
+    const AutomationQueuedCommand& command)
+{
+    const AutomationQueuedCommand quit_command =
+        command;
+    using ClaimResult =
+        AutomationNamedPipeServer::
+            AppQuitClaimResult;
+    const ClaimResult claim =
+        automation_server_->TryBeginAppQuit(
+            quit_command);
+    if (claim ==
+        ClaimResult::WaitingForEarlierExecution) {
+        automation_pending_quit_command_ =
+            quit_command;
+        automation_poll_deadline_ =
+            RenderWakeScheduler::Clock::now() +
+            kAutomationIdlePollInterval;
+        return false;
+    }
+    automation_pending_quit_command_.reset();
+    if (claim != ClaimResult::Claimed) {
+        return true;
+    }
+
+    automation_idle_waits_.clear();
+    automation_source_commands_.clear();
+    automation_goto_command_.reset();
+    automation_label_command_.reset();
+    CancelAutomationFrameCapture(
+        "app.quit canceled the pending automation frame capture.");
+    automation_capture_command_.reset();
+    automation_poll_deadline_.reset();
+    automation_shutdown_requested_ = true;
+    const bool posted =
+        window_.hwnd() != nullptr &&
+        PostMessageW(
+            window_.hwnd(),
+            WM_CLOSE,
+            0,
+            0) != FALSE;
+    if (posted) {
+        automation_server_->Complete(quit_command);
+    } else {
+        automation_server_->Fail(
+            quit_command,
+            "close_request_failed",
+            "Could not post the normal Win32 close request.");
+    }
+    return true;
+}
+
+bool SpecForgeApp::
+    AutomationFrameCaptureRequestActive() const
+{
+    return automation_server_ &&
+           automation_capture_command_ &&
+           automation_server_->IsRequestActive(
+               automation_capture_command_
+                   ->command.request_id) &&
+           frame_capture_.requested_output_path() &&
+           *frame_capture_.requested_output_path() ==
+               automation_capture_command_
+                   ->output_path;
+}
+
+void SpecForgeApp::CancelAutomationFrameCapture(
+    std::string_view reason)
+{
+    if (!automation_capture_command_ &&
+        !frame_capture_.requested_output_path()) {
+        return;
+    }
+    if (automation_capture_command_) {
+        automation_capture_last_path_ =
+            automation_capture_command_
+                ->output_path;
+    } else if (
+        frame_capture_.requested_output_path()) {
+        automation_capture_last_path_ =
+            *frame_capture_
+                 .requested_output_path();
+    }
+    automation_capture_last_result_ =
+        "canceled";
+    frame_capture_.Cancel(
+        std::string(reason));
+}
+
+void SpecForgeApp::PollAutomationBusinessOperations()
+{
+    automation_source_commands_.erase(
+        std::remove_if(
+            automation_source_commands_.begin(),
+            automation_source_commands_.end(),
+            [this](AutomationSourceCommand& pending) {
+                if (!automation_server_->IsRequestActive(
+                        pending.command.request_id)) {
+                    return true;
+                }
+                const auto outcome =
+                    ui_.ObserveSourceOpenForAutomation(
+                        pending.operation);
+                using State =
+                    SourceCollectionActivationTransaction::
+                        SourceOpenOperationState;
+                if (outcome.state == State::Pending) {
+                    return false;
+                }
+                if (outcome.state == State::Succeeded) {
+                    std::ostringstream body;
+                    body << "\"result\":{"
+                         << "\"source\":{"
+                         << "\"id\":"
+                         << JsonString(
+                                outcome.source_id)
+                         << ",\"path\":"
+                         << JsonString(
+                                PathToUtf8(
+                                    outcome.source_path))
+                         << ",\"spectrum_count\":"
+                         << outcome.spectrum_count
+                         << "},\"current_spectrum\":{"
+                         << "\"index\":"
+                         << outcome.spectrum_index
+                         << ",\"name\":"
+                         << JsonString(
+                                outcome.spectrum_name)
+                         << "}}";
+                    automation_server_->Complete(
+                        pending.command,
+                        body.str());
+                } else if (
+                    outcome.state == State::Failed) {
+                    automation_server_->Fail(
+                        pending.command,
+                        "source_load_failed",
+                        "The real source loader could not activate the requested source.");
+                } else {
+                    automation_server_->Fail(
+                        pending.command,
+                        "operation_canceled",
+                        "The source open operation was superseded or canceled.");
+                }
+                return true;
+            }),
+        automation_source_commands_.end());
+
+    if (automation_goto_command_) {
+        AutomationGotoCommand& pending =
+            *automation_goto_command_;
+        if (!automation_server_->IsRequestActive(
+                pending.command.request_id)) {
+            automation_goto_command_.reset();
+        } else {
+            const ShellAutomationView view =
+                ui_.AutomationView();
+            const auto& presented =
+                ui_.PresentedSpectrumForAutomation();
+            const bool shell_idle =
+                ui_.runtime_resource_observation()
+                    .idle();
+            if (ui_.ActivationGenerationForAutomation() !=
+                pending.activation_generation) {
+                automation_server_->Fail(
+                    pending.command,
+                    "operation_canceled",
+                    "The source activation changed before spectrum navigation completed.");
+                automation_goto_command_.reset();
+            } else if (!view.source_id.empty() &&
+                view.source_id != pending.source_id) {
+                automation_server_->Fail(
+                    pending.command,
+                    "operation_canceled",
+                    "The active source changed before spectrum navigation completed.");
+                automation_goto_command_.reset();
+            } else if (
+                shell_idle &&
+                view.spectrum.present &&
+                view.spectrum.index ==
+                    pending.target_index &&
+                presented.sequence >
+                    pending
+                        .presented_sequence_before &&
+                presented.activation_generation ==
+                    pending.activation_generation &&
+                presented.source_id ==
+                    pending.source_id &&
+                presented.spectrum_index ==
+                    pending.target_index) {
+                std::ostringstream body;
+                body << "\"result\":{"
+                     << "\"source_id\":"
+                     << JsonString(pending.source_id)
+                     << ",\"spectrum\":{"
+                     << "\"index\":"
+                     << view.spectrum.index
+                     << ",\"name\":"
+                     << JsonString(view.spectrum.name)
+                     << "},\"changed\":"
+                     << JsonBool(pending.changed)
+                     << '}';
+                automation_server_->Complete(
+                    pending.command,
+                    body.str());
+                automation_goto_command_.reset();
+            } else if (
+                shell_idle &&
+                (!view.spectrum.present ||
+                 view.spectrum.index !=
+                     pending.target_index)) {
+                automation_server_->Fail(
+                    pending.command,
+                    "spectrum_load_failed",
+                    "The requested spectrum did not become the current rendered spectrum.");
+                automation_goto_command_.reset();
+            }
+        }
+    }
+
+    if (automation_label_command_) {
+        AutomationLabelCommand& pending =
+            *automation_label_command_;
+        if (!automation_server_->IsRequestActive(
+                pending.command.request_id)) {
+            automation_label_command_.reset();
+        } else {
+            const ShellAutomationView view =
+                ui_.AutomationView();
+            const auto& presented =
+                ui_.PresentedSpectrumForAutomation();
+            const bool shell_idle =
+                ui_.runtime_resource_observation()
+                    .idle();
+            if (pending.phase ==
+                AutomationLabelCommand::Phase::
+                    NavigatingToTarget) {
+                if (ui_.ActivationGenerationForAutomation() !=
+                    pending.activation_generation) {
+                    automation_server_->Fail(
+                        pending.command,
+                        "operation_canceled",
+                        "The source activation changed before the label target was ready.");
+                } else if (!view.source_id.empty() &&
+                    view.source_id !=
+                        pending.source_id) {
+                    automation_server_->Fail(
+                        pending.command,
+                        "operation_canceled",
+                        "The active source changed before the label target was ready.");
+                } else if (
+                    shell_idle &&
+                    view.spectrum.present &&
+                    view.spectrum.index ==
+                        pending.target_index &&
+                    presented.sequence >
+                        pending
+                            .presented_sequence_before &&
+                    presented.activation_generation ==
+                        pending.activation_generation &&
+                    presented.source_id ==
+                        pending.source_id &&
+                    presented.spectrum_index ==
+                        pending.target_index) {
+                    ContinueAutomationLabelAssign(
+                        pending);
+                    render_wake_scheduler_.
+                        RequestFrame();
+                } else if (
+                    shell_idle &&
+                    (!view.spectrum.present ||
+                     view.spectrum.index !=
+                         pending.target_index)) {
+                    automation_server_->Fail(
+                        pending.command,
+                        "spectrum_load_failed",
+                        "The label target did not become the current rendered spectrum.");
+                }
+            } else if (pending.assignment) {
+                const bool needs_render =
+                    pending.assignment->changed ||
+                    pending.assignment->
+                        navigation_pending;
+                const bool activation_replaced =
+                    ui_.ActivationGenerationForAutomation() !=
+                    pending.activation_generation;
+                if (activation_replaced ||
+                    (shell_idle &&
+                     (!needs_render ||
+                      (view.spectrum.present &&
+                       presented.sequence >
+                           pending
+                               .presented_sequence_before &&
+                       presented.source_id ==
+                           pending.source_id &&
+                       presented.spectrum_index ==
+                           view.spectrum.index)))) {
+                    const auto& assignment =
+                        *pending.assignment;
+                    std::string_view persistence =
+                        assignment.output_save_attempted
+                        ? (assignment.output_saved
+                               ? "output_saved"
+                           : assignment
+                                     .output_retry_scheduled
+                               ? "output_retry_scheduled"
+                               : "output_save_failed")
+                        : assignment.state_saved
+                        ? "state_saved"
+                        : assignment
+                                  .state_save_scheduled
+                        ? "state_save_scheduled"
+                        : "unchanged";
+                    std::ostringstream body;
+                    body << "\"result\":{"
+                         << "\"assignment\":{"
+                         << "\"source_id\":"
+                         << JsonString(
+                                assignment.source_id)
+                         << ",\"task_id\":"
+                         << JsonString(
+                                assignment.task_id)
+                         << ",\"spectrum\":{"
+                         << "\"index\":"
+                         << assignment.spectrum.index
+                         << ",\"name\":"
+                         << JsonString(
+                                assignment.spectrum.name)
+                         << "},\"previous_code\":"
+                         << assignment.previous_code
+                         << ",\"new_code\":"
+                         << assignment.new_code
+                         << ",\"changed\":"
+                         << JsonBool(
+                                assignment.changed)
+                         << "},\"persistence\":{"
+                         << "\"status\":"
+                         << JsonString(persistence)
+                         << ",\"state_save_scheduled\":"
+                         << JsonBool(
+                                assignment
+                                    .state_save_scheduled)
+                         << ",\"state_save_attempted\":"
+                         << JsonBool(
+                                assignment
+                                    .state_save_attempted)
+                         << ",\"state_saved\":"
+                         << JsonBool(
+                                assignment.state_saved)
+                         << ",\"output_save_attempted\":"
+                         << JsonBool(
+                                assignment
+                                    .output_save_attempted)
+                         << ",\"output_saved\":"
+                         << JsonBool(
+                                assignment.output_saved)
+                         << ",\"output_retry_scheduled\":"
+                         << JsonBool(
+                                assignment
+                                    .output_retry_scheduled)
+                         << "},\"current_spectrum_after\":{"
+                         << "\"present\":"
+                         << JsonBool(
+                                view.spectrum.present);
+                    if (view.spectrum.present) {
+                        body << ",\"index\":"
+                             << view.spectrum.index
+                             << ",\"name\":"
+                             << JsonString(
+                                    view.spectrum.name);
+                    }
+                    body << "}}";
+                    automation_server_->Complete(
+                        pending.command,
+                        body.str());
+                }
+            }
+            if (!automation_server_->IsRequestActive(
+                    pending.command.request_id)) {
+                automation_label_command_.reset();
+            }
+        }
+    }
+
+    if (automation_capture_command_) {
+        AutomationCaptureCommand& pending =
+            *automation_capture_command_;
+        if (!automation_server_->IsRequestActive(
+                pending.command.request_id)) {
+            CancelAutomationFrameCapture(
+                "The automation request was disconnected or canceled.");
+            automation_capture_command_.reset();
+        } else if (!frame_capture_.pending()) {
+            if (frame_capture_.status() ==
+                OnDemandFrameCaptureStatus::
+                    WindowUnavailable) {
+                automation_server_->Fail(
+                    pending.command,
+                    "window_not_renderable",
+                    "The main application window became hidden or minimized.");
+                automation_capture_last_result_ =
+                    "failed";
+                automation_capture_last_path_ =
+                    pending.output_path;
+            } else if (
+                frame_capture_.status() ==
+                OnDemandFrameCaptureStatus::
+                    FailedPreparingOutputDirectory) {
+                automation_server_->Fail(
+                    pending.command,
+                    "capture_directory_failed",
+                    "The capture output directory could not be prepared.");
+                automation_capture_last_result_ =
+                    "failed";
+                automation_capture_last_path_ =
+                    pending.output_path;
+            } else {
+                automation_server_->Fail(
+                    pending.command,
+                    "capture_failed",
+                    "The application-rendered PNG capture failed.");
+                automation_capture_last_result_ =
+                    frame_capture_.status() ==
+                            OnDemandFrameCaptureStatus::
+                                Canceled
+                        ? "canceled"
+                        : "failed";
+                automation_capture_last_path_ =
+                    pending.output_path;
+            }
+            automation_capture_command_.reset();
+        }
+    }
+}
+
+bool SpecForgeApp::AutomationBusinessIdle() const noexcept
+{
+    return automation_source_commands_.empty() &&
+           !automation_goto_command_ &&
+           !automation_label_command_ &&
+           !automation_capture_command_ &&
+           !frame_capture_.pending();
+}
+
 void SpecForgeApp::ServiceAutomation()
 {
     if (!automation_server_) {
         return;
     }
 
-    std::vector<AutomationQueuedCommand> commands =
-        automation_server_->TakePendingCommands();
+    PollAutomationBusinessOperations();
+    if (automation_pending_quit_command_) {
+        if (!ServiceAutomationAppQuit(
+                *automation_pending_quit_command_)) {
+            return;
+        }
+        if (automation_shutdown_requested_) {
+            return;
+        }
+    }
+    std::vector<AutomationQueuedCommand> commands;
+    if (automation_idle_waits_.empty()) {
+        commands =
+            automation_server_->TakePendingCommands();
+    }
+    bool stop_dispatch = false;
     for (const AutomationQueuedCommand& command :
          commands) {
         switch (command.command) {
@@ -1600,57 +2623,80 @@ void SpecForgeApp::ServiceAutomation()
                 break;
             }
             automation_idle_waits_.push_back(
-                command.request_id);
+                command);
             break;
-        case AutomationCommandKind::AppQuit: {
-            if (!automation_server_->TryBeginAppQuit(
-                    command)) {
-                break;
-            }
-            automation_idle_waits_.clear();
-            automation_poll_deadline_.reset();
-            automation_shutdown_requested_ = true;
-            const bool posted =
-                window_.hwnd() != nullptr &&
-                PostMessageW(
-                    window_.hwnd(),
-                    WM_CLOSE,
-                    0,
-                    0) != FALSE;
-            if (posted) {
-                automation_server_->Complete(command);
-            } else {
-                automation_server_->Fail(
-                    command,
-                    "close_request_failed",
-                    "Could not post the normal Win32 close request.");
-            }
+        case AutomationCommandKind::SourceOpen:
+            BeginAutomationSourceOpen(command);
+            break;
+        case AutomationCommandKind::SpectrumGoto:
+            BeginAutomationSpectrumGoto(command);
+            break;
+        case AutomationCommandKind::LabelAssign:
+            BeginAutomationLabelAssign(command);
+            break;
+        case AutomationCommandKind::FrameCapture:
+            BeginAutomationFrameCapture(command);
+            break;
+        case AutomationCommandKind::AppQuit:
+            (void)ServiceAutomationAppQuit(
+                command);
+            stop_dispatch = true;
             break;
         }
+        if (stop_dispatch) {
+            break;
         }
     }
 
+    PollAutomationBusinessOperations();
+    if (automation_pending_quit_command_) {
+        if (!ServiceAutomationAppQuit(
+                *automation_pending_quit_command_)) {
+            return;
+        }
+        if (automation_shutdown_requested_) {
+            return;
+        }
+    }
     automation_idle_waits_.erase(
         std::remove_if(
             automation_idle_waits_.begin(),
             automation_idle_waits_.end(),
-            [this](const std::string& request_id) {
+            [this](const auto& wait) {
                 return !automation_server_
                             ->IsRequestActive(
-                                request_id);
+                                wait.request_id);
             }),
         automation_idle_waits_.end());
-    if (automation_idle_waits_.empty()) {
+    if (automation_idle_waits_.empty() &&
+        AutomationBusinessIdle()) {
         automation_poll_deadline_.reset();
         return;
     }
 
     const ShellRuntimeResourceObservation observation =
         ui_.runtime_resource_observation();
-    if (observation.idle() &&
-        automation_server_->TryCompleteIdleWaits(
-            automation_idle_waits_)) {
-        automation_idle_waits_.clear();
+    bool idle_wait_completed = false;
+    for (auto wait = automation_idle_waits_.begin();
+         wait != automation_idle_waits_.end();) {
+        if (AutomationBusinessIdle() &&
+            observation.idle() &&
+            automation_server_->TryCompleteIdleWaits(
+                {wait->request_id})) {
+            idle_wait_completed = true;
+            wait =
+                automation_idle_waits_.erase(
+                    wait);
+        } else {
+            ++wait;
+        }
+    }
+    if (idle_wait_completed) {
+        PostAutomationCommandReady(
+            window_.hwnd());
+    }
+    if (automation_idle_waits_.empty() &&
+        AutomationBusinessIdle()) {
         automation_poll_deadline_.reset();
         return;
     }
@@ -1666,7 +2712,7 @@ SpecForgeApp::NextAutomationDeadline() const
 }
 
 AutomationStateSnapshot
-SpecForgeApp::AutomationState() const
+SpecForgeApp::AutomationState()
 {
     AutomationStateSnapshot state;
     if (!automation_configuration_ ||
@@ -1700,10 +2746,50 @@ SpecForgeApp::AutomationState() const
         .retirement_in_flight_count =
             shell.load_activity
                 .retirement_in_flight_count,
-        .current_source_id =
-            shell.active_source_id,
-        .current_source_path =
-            shell.active_source_path,
+    };
+    const ShellAutomationView& automation =
+        ui_.PresentedAutomationView();
+    state.shell.current_source_id =
+        shell.active_source_id;
+    state.shell.current_source_path =
+        shell.active_source_path;
+    state.presented_source = {
+        .present =
+            !automation.source_id.empty() ||
+            !automation.source_path.empty(),
+        .id = automation.source_id,
+        .path = automation.source_path,
+    };
+    state.spectrum = {
+        .present = automation.spectrum.present,
+        .index = automation.spectrum.index,
+        .name = automation.spectrum.name,
+        .count = automation.spectrum.count,
+    };
+    state.labeling = {
+        .has_active_task =
+            automation.labeling.has_active_task,
+        .task_id =
+            automation.labeling.task_id,
+        .task_name =
+            automation.labeling.task_name,
+        .current_spectrum_code =
+            automation.labeling
+                .current_spectrum_code,
+    };
+    state.capture = {
+        .pending =
+            automation_capture_command_ &&
+            frame_capture_.pending(),
+        .current_path =
+            automation_capture_command_
+            ? automation_capture_command_
+                  ->output_path
+            : std::filesystem::path{},
+        .last_result =
+            automation_capture_last_result_,
+        .last_path =
+            automation_capture_last_path_,
     };
     state.window = {
         .visible = window_visible_,

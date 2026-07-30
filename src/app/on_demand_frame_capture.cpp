@@ -64,9 +64,11 @@ OnDemandFrameCapture::OnDemandFrameCapture(
 OnDemandFrameCaptureRequestOutcome
 OnDemandFrameCapture::Request(
     std::uint64_t current_frame,
-    bool window_renderable)
+    bool window_renderable,
+    std::optional<std::filesystem::path> output_path)
 {
     if (!configuration_.enabled) {
+        requested_output_path_.reset();
         status_ = OnDemandFrameCaptureStatus::Disabled;
         status_operation_.clear();
         status_result_.clear();
@@ -76,6 +78,7 @@ OnDemandFrameCapture::Request(
     }
     if (!window_renderable) {
         requested_after_frame_.reset();
+        requested_output_path_.reset();
         last_output_path_.reset();
         status_ =
             OnDemandFrameCaptureStatus::
@@ -90,6 +93,8 @@ OnDemandFrameCapture::Request(
     }
 
     requested_after_frame_ = current_frame;
+    requested_output_path_ =
+        std::move(output_path);
     last_output_path_.reset();
     status_ = OnDemandFrameCaptureStatus::Pending;
     status_operation_.clear();
@@ -107,6 +112,7 @@ void OnDemandFrameCapture::ObserveWindowRenderable(
     }
 
     requested_after_frame_.reset();
+    requested_output_path_.reset();
     last_output_path_.reset();
     status_ =
         OnDemandFrameCaptureStatus::
@@ -127,6 +133,7 @@ void OnDemandFrameCapture::Complete(
     std::filesystem::path output_path)
 {
     requested_after_frame_.reset();
+    requested_output_path_.reset();
     last_output_path_ = std::move(output_path);
     status_ = OnDemandFrameCaptureStatus::Captured;
     status_operation_.clear();
@@ -134,9 +141,24 @@ void OnDemandFrameCapture::Complete(
     status_message_ = "Captured the requested main application frame.";
 }
 
+void OnDemandFrameCapture::Cancel(std::string message)
+{
+    requested_after_frame_.reset();
+    requested_output_path_.reset();
+    last_output_path_.reset();
+    status_ = OnDemandFrameCaptureStatus::Canceled;
+    status_operation_.clear();
+    status_result_.clear();
+    status_message_ =
+        message.empty()
+            ? "Frame capture was canceled; no image was produced."
+            : std::move(message);
+}
+
 void OnDemandFrameCapture::Fail(std::string message)
 {
     requested_after_frame_.reset();
+    requested_output_path_.reset();
     last_output_path_.reset();
     status_ = OnDemandFrameCaptureStatus::Failed;
     status_operation_.clear();
@@ -150,6 +172,7 @@ void OnDemandFrameCapture::Fail(std::string message)
 void OnDemandFrameCapture::FailPreparingOutputDirectory()
 {
     requested_after_frame_.reset();
+    requested_output_path_.reset();
     last_output_path_.reset();
     status_ =
         OnDemandFrameCaptureStatus::
@@ -165,6 +188,7 @@ void OnDemandFrameCapture::FailCapture(
     std::string result)
 {
     requested_after_frame_.reset();
+    requested_output_path_.reset();
     last_output_path_.reset();
     status_ =
         OnDemandFrameCaptureStatus::FailedCapture;

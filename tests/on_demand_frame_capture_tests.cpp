@@ -51,16 +51,23 @@ void TestRequestTargetsTheFollowingFrame()
     specforge::OnDemandFrameCapture capture(
         specforge::ResolveOnDemandFrameCapture(
             "1"));
+    const std::filesystem::path requested_output =
+        L"C:\\automation-state\\artifacts\\requested.png";
 
     Require(
-        capture.Request(41, true) ==
+        capture.Request(
+            41,
+            true,
+            requested_output) ==
             specforge::
                 OnDemandFrameCaptureRequestOutcome::
                     Accepted,
         "a renderable enabled window should accept a request");
     Require(
-        capture.pending(),
-        "an accepted request should remain pending");
+        capture.pending() &&
+            capture.requested_output_path() ==
+                requested_output,
+        "an accepted request should retain its validated explicit output until the next frame");
     Require(
         capture.status() ==
             specforge::OnDemandFrameCaptureStatus::
@@ -78,6 +85,7 @@ void TestRequestTargetsTheFollowingFrame()
     capture.Complete(output);
     Require(
         !capture.pending() &&
+            !capture.requested_output_path() &&
             capture.last_output_path() ==
                 output &&
             capture.status() ==
@@ -175,6 +183,36 @@ void TestTypedFailureStatusRetainsTechnicalDetail()
         "directory preparation failure should remain distinguishable");
 }
 
+void TestCanceledRequestCannotResurrect()
+{
+    specforge::OnDemandFrameCapture capture(
+        specforge::ResolveOnDemandFrameCapture("1"));
+    const std::filesystem::path output =
+        L"C:\\automation-state\\capture.png";
+    Require(
+        capture.Request(12, true, output) ==
+            specforge::
+                OnDemandFrameCaptureRequestOutcome::
+                    Accepted,
+        "the cancellation fixture should accept a request");
+    capture.Cancel(
+        "automation request disconnected");
+    Require(
+        !capture.pending() &&
+            !capture.requested_output_path() &&
+            !capture.last_output_path() &&
+            capture.status() ==
+                specforge::OnDemandFrameCaptureStatus::
+                    Canceled,
+        "cancel should synchronously clear the pending frame and explicit path");
+    capture.ObserveWindowRenderable(false);
+    capture.ObserveWindowRenderable(true);
+    Require(
+        !capture.ShouldCapture(13) &&
+            !capture.ShouldCapture(1000),
+        "window restoration and later frames must not resurrect a canceled capture");
+}
+
 void TestDisabledCaptureCannotBecomePending()
 {
     specforge::OnDemandFrameCapture capture;
@@ -200,5 +238,6 @@ int main()
     TestNonRenderableWindowRejectsAndCancels();
     TestDisabledCaptureCannotBecomePending();
     TestTypedFailureStatusRetainsTechnicalDetail();
+    TestCanceledRequestCannotResurrect();
     return 0;
 }

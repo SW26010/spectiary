@@ -48,6 +48,44 @@ public:
         std::optional<std::filesystem::path> initial_source = std::nullopt);
 
 private:
+    struct AutomationSourceCommand {
+        AutomationQueuedCommand command;
+        SourceCollectionActivationTransaction::
+            SourceOpenOperation operation;
+    };
+
+    struct AutomationGotoCommand {
+        AutomationQueuedCommand command;
+        std::string source_id;
+        std::size_t target_index = 0;
+        std::uint64_t activation_generation = 0;
+        std::uint64_t presented_sequence_before = 0;
+        bool changed = false;
+    };
+
+    struct AutomationLabelCommand {
+        enum class Phase {
+            NavigatingToTarget,
+            WaitingForAutoAdvance,
+        };
+
+        AutomationQueuedCommand command;
+        Phase phase = Phase::NavigatingToTarget;
+        std::string source_id;
+        std::size_t target_index = 0;
+        std::uint64_t activation_generation = 0;
+        std::uint64_t presented_sequence_before = 0;
+        std::optional<
+            ShellAutomationLabelAssignmentResult>
+            assignment;
+    };
+
+    struct AutomationCaptureCommand {
+        AutomationQueuedCommand command;
+        std::filesystem::path output_path;
+        std::uint64_t accepted_frame = 0;
+    };
+
     struct PendingResize {
         UINT width = 0;
         UINT height = 0;
@@ -111,11 +149,31 @@ private:
     void RefreshPresentationTargets(std::string_view reason);
     void InitializeAutomation();
     void ServiceAutomation();
+    void BeginAutomationSourceOpen(
+        const AutomationQueuedCommand& command);
+    void BeginAutomationSpectrumGoto(
+        const AutomationQueuedCommand& command);
+    void BeginAutomationLabelAssign(
+        const AutomationQueuedCommand& command);
+    void ContinueAutomationLabelAssign(
+        AutomationLabelCommand& operation);
+    void BeginAutomationFrameCapture(
+        const AutomationQueuedCommand& command);
+    [[nodiscard]] bool
+    ServiceAutomationAppQuit(
+        const AutomationQueuedCommand& command);
+    void CancelAutomationFrameCapture(
+        std::string_view reason);
+    [[nodiscard]] bool
+    AutomationFrameCaptureRequestActive() const;
+    void PollAutomationBusinessOperations();
+    [[nodiscard]] bool
+    AutomationBusinessIdle() const noexcept;
     [[nodiscard]] std::optional<
         RenderWakeScheduler::TimePoint>
     NextAutomationDeadline() const;
     [[nodiscard]] AutomationStateSnapshot
-    AutomationState() const;
+    AutomationState();
     static void PostAutomationCommandReady(
         HWND hwnd) noexcept;
 
@@ -139,8 +197,22 @@ private:
         automation_configuration_;
     std::unique_ptr<AutomationNamedPipeServer>
         automation_server_;
-    std::vector<std::string>
+    std::vector<AutomationQueuedCommand>
         automation_idle_waits_;
+    std::vector<AutomationSourceCommand>
+        automation_source_commands_;
+    std::optional<AutomationGotoCommand>
+        automation_goto_command_;
+    std::optional<AutomationLabelCommand>
+        automation_label_command_;
+    std::optional<AutomationCaptureCommand>
+        automation_capture_command_;
+    std::optional<AutomationQueuedCommand>
+        automation_pending_quit_command_;
+    std::string automation_capture_last_result_ =
+        "none";
+    std::filesystem::path
+        automation_capture_last_path_;
     std::optional<RenderWakeScheduler::TimePoint>
         automation_poll_deadline_;
     bool automation_shutdown_requested_ = false;

@@ -1,12 +1,14 @@
 #include "ui/sample_navigation_controller.h"
 
 #include "domain/source_path_identity.h"
+#include "platform/win32_text.h"
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_workflow_preparation.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -42,6 +44,37 @@ bool PathsReferToSameFile(const std::filesystem::path& left, const std::filesyst
         return false;
     }
     return SourcePathIdentityKey(left) == SourcePathIdentityKey(right);
+}
+
+bool UnicodeOrdinalCaseEqual(
+    std::string_view left,
+    std::string_view right)
+{
+    if (left.empty() || right.empty()) {
+        return left.empty() && right.empty();
+    }
+    const std::wstring wide_left =
+        Utf8ToWide(left);
+    const std::wstring wide_right =
+        Utf8ToWide(right);
+    if (wide_left.empty() ||
+        wide_right.empty() ||
+        wide_left.size() >
+            static_cast<std::size_t>(
+                (std::numeric_limits<int>::max)()) ||
+        wide_right.size() >
+            static_cast<std::size_t>(
+                (std::numeric_limits<int>::max)())) {
+        return false;
+    }
+    return CompareStringOrdinal(
+               wide_left.data(),
+               static_cast<int>(
+                   wide_left.size()),
+               wide_right.data(),
+               static_cast<int>(
+                   wide_right.size()),
+               TRUE) == CSTR_EQUAL;
 }
 
 std::vector<std::filesystem::path> AnnotationPaths(const SourceCollectionManifest& manifest)
@@ -1042,6 +1075,35 @@ const SourceCollectionManifest* SampleNavigationController::active_context() con
 {
     const SourceSession* session = ActiveSession();
     return session == nullptr ? nullptr : &session->manifest;
+}
+
+ExactSampleNameResolution
+SampleNavigationController::ResolveExactSampleName(
+    std::string_view name) const
+{
+    ExactSampleNameResolution resolution;
+    const SourceSession* session = ActiveSession();
+    if (session == nullptr ||
+        session->manifest.sample_names.empty()) {
+        return resolution;
+    }
+
+    resolution.names_available = true;
+    for (std::size_t row = 0;
+         row < session->manifest.sample_names.size();
+         ++row) {
+        if (UnicodeOrdinalCaseEqual(
+                session->manifest.sample_names[row],
+                name)) {
+            resolution.matching_rows.push_back(row);
+        }
+    }
+    if (!resolution.matching_rows.empty()) {
+        resolution.first_match_in_active_sequence =
+            CachedSequenceState(*session).ContainsSourceRow(
+                resolution.matching_rows.front());
+    }
+    return resolution;
 }
 
 std::uint64_t

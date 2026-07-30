@@ -1,5 +1,6 @@
 #pragma once
 
+#include "renderer/d3d11_frame_capture.h"
 #include "renderer/d3d11_window_presentation.h"
 
 #include <Windows.h>
@@ -10,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,7 +45,11 @@ public:
     HRESULT Resize(UINT width, UINT height);
     HRESULT BeginFrame(const std::array<float, 4>& clear_color);
     HRESULT CaptureFrameToPng(
-        const std::filesystem::path& output_path);
+        const std::filesystem::path& output_path,
+        const D3D11FrameCaptureFinalizer&
+            finalizer = {},
+        const std::optional<std::filesystem::path>&
+            allowed_root = std::nullopt);
     HRESULT Present(D3D11PresentMode mode = D3D11PresentMode::DisplayVSync);
     HRESULT RefreshPresentationTarget();
 

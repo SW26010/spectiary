@@ -64,6 +64,15 @@ struct SourceCollectionActivationTransactionTestAccess {
     {
         return activation.NextMaintenanceDeadline();
     }
+
+    static std::size_t CompletedLoadCount(
+        const SourceCollectionActivationTransaction&
+            activation)
+    {
+        return activation.load_queue_
+            .ActivitySnapshot()
+            .completed_count;
+    }
 };
 
 }  // namespace specforge
@@ -137,11 +146,12 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
 }
 
 specforge::SourceCollectionSession MakePreparedSession(
-    const std::filesystem::path& path)
+    const std::filesystem::path& path,
+    std::size_t spectrum_index = 0)
 {
     specforge::SourceCollectionSession session({}, {}, {}, {});
     const specforge::SpectrumSnapshotHandle snapshot =
-        MakeSnapshot(path, 0);
+        MakeSnapshot(path, spectrum_index);
     specforge::SourceCollectionContext context;
     context.identity =
         specforge::BuildSourceCollectionIdentity(
@@ -157,13 +167,13 @@ specforge::SourceCollectionSession MakePreparedSession(
         specforge::PrepareSampleWorkflowState(
             *snapshot,
             context,
-            0,
+            spectrum_index,
             {{}, {}});
     Require(
         session
             .OpenPreparedSource(
                 path,
-                0,
+                spectrum_index,
                 snapshot,
                 std::move(context),
                 std::move(workflow))
@@ -312,7 +322,8 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     specforge::ProfileSink profile(profile_path);
     profile.BeginFrame();
     activation.BeginFrame(true, 11, &profile);
-    (void)activation.OpenSource(path, 0);
+    const Activation::SourceOpenOperation operation =
+        activation.OpenSourceForAutomation(path, 0);
 
     const bool failure_drained = DrainUntil(
         activation,
@@ -324,6 +335,9 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
         activation.status().error_message);
     const Activation::Status status =
         activation.status();
+    const auto automation_outcome =
+        activation.ObserveSourceOpenOperation(
+            operation);
     const bool structured_failure =
         status.failures.size() == 1 &&
         status.failures.front().source_path ==
@@ -352,6 +366,15 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     Require(
         structured_failure,
         "activation status should preserve the semantic load error separately from its raw diagnostic");
+    Require(
+        automation_outcome.state ==
+                Activation::SourceOpenOperationState::
+                    Failed &&
+            automation_outcome.source_path == path &&
+            automation_outcome.error.kind ==
+                specforge::SourceCollectionLoadErrorKind::
+                    BackgroundLoadingFailed,
+        "automation should receive the same terminal failure from the real source loader");
     Require(
         profile_text.find(
             "\"event\":\"source_load_latency\"") !=
@@ -701,7 +724,11 @@ void TestCanceledGenerationDoesNotPublishFailure()
         specforge::MakeSourceCollectionLoadQueueForTesting(
             std::move(dependencies)));
 
-    (void)activation.OpenSource(path, 0);
+    const Activation::SourceOpenOperation
+        canceled_operation =
+            activation.OpenSourceForAutomation(
+                path,
+                0);
     Require(
         first_started.wait_for(2s) ==
             std::future_status::ready,
@@ -714,6 +741,9 @@ void TestCanceledGenerationDoesNotPublishFailure()
         });
     const std::string error(
         activation.status().error_message);
+    const auto canceled_outcome =
+        activation.ObserveSourceOpenOperation(
+            canceled_operation);
 
     std::filesystem::remove(path);
     Require(
@@ -723,6 +753,11 @@ void TestCanceledGenerationDoesNotPublishFailure()
         error.find("canceled source failure") ==
             std::string::npos,
         "a canceled source generation must not publish a user error");
+    Require(
+        canceled_outcome.state ==
+            Activation::SourceOpenOperationState::
+                Canceled,
+        "a superseded automation source generation should terminate as canceled");
 }
 
 void TestPresentationCompletesOnlyAfterExactSnapshotDraw()
@@ -891,6 +926,468 @@ void TestPublicInterfacePublishesPresentedOpenLifecycle()
         "the frame fact should complete and publish the presented activation lifecycle");
 }
 
+void TestAutomationOpenCompletesAfterPresentationWithoutProfiling()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_automation_present.csv");
+    WriteFixture(path);
+    auto dependencies = MakeDependencies(
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        {},
+        {},
+        {},
+        {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+    activation.BeginFrame(false, 31, nullptr);
+
+    const Activation::SourceOpenOperation operation =
+        activation.OpenSourceForAutomation(path, 0);
+    const bool activated = DrainUntil(
+        activation,
+        [&]() {
+            const auto snapshot =
+                session.CurrentSampleSnapshot();
+            return snapshot &&
+                snapshot->source.path == path &&
+                !activation.status().loading;
+        });
+    const auto before_present =
+        activation.ObserveSourceOpenOperation(
+            operation);
+    activation.RecordSpectrumDrawSubmission(
+        31,
+        11,
+        session.CurrentSampleSnapshot());
+    activation.PresentFrame(31, {});
+    const auto after_present_retry =
+        activation.presented_spectrum_observation();
+    const specforge::NavigationLatencyPresentation
+        wrong_presentation{
+            12,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        31,
+        std::span(&wrong_presentation, 1));
+    const auto after_wrong_viewport =
+        activation.presented_spectrum_observation();
+    const specforge::NavigationLatencyPresentation
+        presentation{
+            11,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        31,
+        std::span(&presentation, 1));
+    const auto after_present =
+        activation.ObserveSourceOpenOperation(
+            operation);
+
+    std::filesystem::remove(path);
+    Require(
+        activated &&
+            before_present.state ==
+                Activation::SourceOpenOperationState::
+                    Pending &&
+            after_present_retry.sequence == 0 &&
+            after_wrong_viewport.sequence == 0,
+        "automation source open should remain pending through missing or wrong-viewport Present evidence");
+    Require(
+        after_present.state ==
+                Activation::SourceOpenOperationState::
+                    Succeeded &&
+            after_present.source_path == path &&
+            after_present.source_id ==
+                "activation-fixture" &&
+            after_present.spectrum_count == 3 &&
+            after_present.spectrum_index == 0 &&
+            activation
+                    .presented_spectrum_observation()
+                    .sequence == 1 &&
+            activation
+                    .presented_spectrum_observation()
+                    .source_id ==
+                "activation-fixture" &&
+            activation
+                    .presented_spectrum_observation()
+                    .spectrum_index == 0,
+        "automation source open should complete from the normal presentation seam even when profiling is disabled");
+}
+
+void TestAutomationOpensSupersedeBeforeSingleCompletionDrain()
+{
+    const std::filesystem::path first_path =
+        UniqueTempPath("_automation_first.csv");
+    const std::filesystem::path second_path =
+        UniqueTempPath("_automation_second.csv");
+    WriteFixture(first_path);
+    WriteFixture(second_path);
+
+    std::promise<void> first_started_promise;
+    std::shared_future<void> first_started =
+        first_started_promise.get_future().share();
+    std::promise<void> second_started_promise;
+    std::shared_future<void> second_started =
+        second_started_promise.get_future().share();
+    std::promise<void> release_promise;
+    std::shared_future<void> release =
+        release_promise.get_future().share();
+    auto dependencies = MakeDependencies(
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            if (source == first_path) {
+                first_started_promise.set_value();
+            } else {
+                second_started_promise.set_value();
+            }
+            release.wait();
+            auto snapshot =
+                std::make_shared<
+                    specforge::SpectrumSnapshot>(
+                    *MakeSnapshot(source, index));
+            snapshot->source.id =
+                source.filename().string();
+            snapshot->current_spectrum.name =
+                source.filename().string();
+            return specforge::SpectrumSnapshotHandle(
+                std::move(snapshot));
+        });
+    specforge::SourceCollectionSession session(
+        {}, {}, {}, {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+    activation.BeginFrame(false, 41, nullptr);
+
+    const auto first =
+        activation.OpenSourceForAutomation(
+            first_path,
+            0);
+    Require(
+        first_started.wait_for(2s) ==
+            std::future_status::ready,
+        "the first automation open worker should start");
+    const auto second =
+        activation.OpenSourceForAutomation(
+            second_path,
+            0);
+    Require(
+        second_started.wait_for(2s) ==
+            std::future_status::ready,
+        "the superseding automation open worker should start");
+    const auto first_before_drain =
+        activation.ObserveSourceOpenOperation(first);
+    release_promise.set_value();
+    const auto completions_ready_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (ActivationAccess::CompletedLoadCount(
+               activation) < 2U &&
+           std::chrono::steady_clock::now() <
+               completions_ready_deadline) {
+        std::this_thread::sleep_for(2ms);
+    }
+    (void)activation.Drain(false);
+
+    const auto first_after_drain =
+        activation.ObserveSourceOpenOperation(first);
+    const auto second_before_present =
+        activation.ObserveSourceOpenOperation(second);
+    const auto active_snapshot =
+        session.CurrentSampleSnapshot();
+    activation.RecordSpectrumDrawSubmission(
+        41,
+        17,
+        active_snapshot);
+    const specforge::NavigationLatencyPresentation
+        presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        41,
+        std::span(&presentation, 1));
+    const auto second_after_present =
+        activation.ObserveSourceOpenOperation(second);
+
+    std::filesystem::remove(first_path);
+    std::filesystem::remove(second_path);
+    Require(
+        first_before_drain.state ==
+                Activation::SourceOpenOperationState::
+                    Canceled &&
+            first_after_drain.state ==
+                Activation::SourceOpenOperationState::
+                    Canceled,
+        "a superseded automation open should remain terminal canceled before and after both completions drain");
+    Require(
+        active_snapshot &&
+            active_snapshot->source.path ==
+                second_path &&
+            second_before_present.state ==
+                Activation::SourceOpenOperationState::
+                    Pending &&
+            second_after_present.state ==
+                Activation::SourceOpenOperationState::
+                    Succeeded,
+        "one completion drain should activate only the newer source and complete it after the exact successful Present");
+}
+
+void TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation()
+{
+    const std::filesystem::path automation_path =
+        UniqueTempPath("_automation_superseded_by_gui.csv");
+    const std::filesystem::path gui_path =
+        UniqueTempPath("_gui_superseding_automation.csv");
+    WriteFixture(automation_path);
+    WriteFixture(gui_path);
+
+    std::promise<void> automation_started_promise;
+    std::shared_future<void> automation_started =
+        automation_started_promise.get_future().share();
+    std::promise<void> release_automation_promise;
+    std::shared_future<void> release_automation =
+        release_automation_promise.get_future().share();
+    std::atomic_bool automation_signaled = false;
+    auto dependencies = MakeDependencies(
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            if (source == automation_path &&
+                !automation_signaled.exchange(true)) {
+                automation_started_promise.set_value();
+                release_automation.wait();
+            }
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        {}, {}, {}, {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+
+    const auto automation =
+        activation.OpenSourceForAutomation(
+            automation_path,
+            0);
+    Require(
+        automation_started.wait_for(2s) ==
+            std::future_status::ready,
+        "the automation worker should block before a real GUI open supersedes it");
+    (void)activation.OpenSource(gui_path, 0);
+    const auto canceled =
+        activation.ObserveSourceOpenOperation(
+            automation);
+    release_automation_promise.set_value();
+    const bool retired = DrainUntil(
+        activation,
+        [&]() {
+            const auto snapshot =
+                session.CurrentSampleSnapshot();
+            return snapshot &&
+                snapshot->source.path == gui_path &&
+                !activation.status().loading;
+        });
+    const auto final_snapshot =
+        session.CurrentSampleSnapshot();
+    const auto final_view = session.View();
+
+    std::filesystem::remove(automation_path);
+    std::filesystem::remove(gui_path);
+    Require(
+        canceled.state ==
+                Activation::SourceOpenOperationState::
+                    Canceled &&
+            retired &&
+            final_snapshot &&
+            final_snapshot->source.path ==
+                gui_path &&
+            final_view.sources.size() == 1 &&
+            final_view.sources.front().path ==
+                gui_path,
+        "a GUI-superseded automation open must stay side-effect-free after its worker eventually returns");
+}
+
+void TestSameIdentityOpenRequiresLatestActivationPresent()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_automation_same_identity.csv");
+    WriteFixture(path);
+    auto dependencies = MakeDependencies(
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        {}, {}, {}, {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+
+    activation.BeginFrame(false, 51, nullptr);
+    const auto first =
+        activation.OpenSourceForAutomation(path, 0);
+    Require(
+        DrainUntil(
+            activation,
+            [&]() {
+                return !activation.status().loading;
+            }),
+        "the first same-identity open should activate");
+    activation.RecordSpectrumDrawSubmission(
+        51,
+        23,
+        session.CurrentSampleSnapshot());
+    const specforge::NavigationLatencyPresentation
+        first_presentation{
+            23,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        51,
+        std::span(&first_presentation, 1));
+    Require(
+        activation.ObserveSourceOpenOperation(first)
+                .state ==
+            Activation::SourceOpenOperationState::
+                Succeeded,
+        "the initial source open should establish a presented activation");
+    const auto first_observation =
+        activation.presented_spectrum_observation();
+    const auto previous_snapshot =
+        session.CurrentSampleSnapshot();
+
+    const auto second =
+        activation.OpenSourceForAutomation(path, 0);
+    activation.BeginFrame(false, 52, nullptr);
+    activation.RecordSpectrumDrawSubmission(
+        52,
+        23,
+        previous_snapshot);
+    const specforge::NavigationLatencyPresentation
+        stale_presentation{
+            23,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        52,
+        std::span(&stale_presentation, 1));
+    const auto before_commit =
+        activation.ObserveSourceOpenOperation(second);
+    Require(
+        DrainUntil(
+            activation,
+            [&]() {
+                return !activation.status().loading;
+            }),
+        "the replacement same-identity open should commit");
+    const auto after_commit_before_present =
+        activation.ObserveSourceOpenOperation(second);
+
+    activation.BeginFrame(false, 53, nullptr);
+    activation.RecordSpectrumDrawSubmission(
+        53,
+        23,
+        session.CurrentSampleSnapshot());
+    const specforge::NavigationLatencyPresentation
+        latest_presentation{
+            23,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        53,
+        std::span(&latest_presentation, 1));
+    const auto after_latest_present =
+        activation.ObserveSourceOpenOperation(second);
+    const auto latest_observation =
+        activation.presented_spectrum_observation();
+
+    std::filesystem::remove(path);
+    Require(
+        before_commit.state ==
+                Activation::SourceOpenOperationState::
+                    Pending &&
+            after_commit_before_present.state ==
+                Activation::SourceOpenOperationState::
+                    Pending,
+        "an old same-source same-row Present must not complete the replacement activation");
+    Require(
+        after_latest_present.state ==
+                Activation::SourceOpenOperationState::
+                    Succeeded &&
+            latest_observation.activation_generation >
+                first_observation
+                    .activation_generation,
+        "only the latest activation generation Present should complete the same-identity open");
+}
+
+void TestSamePathOpenTokenSurvivesProductionFollowUp()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_automation_follow_up.csv");
+    WriteFixture(path);
+    auto dependencies = MakeDependencies(
+        [](const std::filesystem::path& source,
+           std::size_t index,
+           const auto&) {
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session =
+        MakePreparedSession(path, 2);
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+
+    activation.BeginFrame(false, 61, nullptr);
+    const auto operation =
+        activation.OpenSourceForAutomation(path, 0);
+    const bool completed_follow_up = DrainUntil(
+        activation,
+        [&]() {
+            const auto snapshot =
+                session.CurrentSampleSnapshot();
+            return snapshot &&
+                snapshot->source.path == path &&
+                snapshot->collection.current_index ==
+                    2 &&
+                !activation.status().loading;
+        });
+    const auto before_present =
+        activation.ObserveSourceOpenOperation(operation);
+    activation.RecordSpectrumDrawSubmission(
+        61,
+        29,
+        session.CurrentSampleSnapshot());
+    const specforge::NavigationLatencyPresentation
+        presentation{
+            29,
+            specforge::NavigationLatencyTrace::Now()};
+    activation.PresentFrame(
+        61,
+        std::span(&presentation, 1));
+    const auto after_present =
+        activation.ObserveSourceOpenOperation(operation);
+
+    std::filesystem::remove(path);
+    Require(
+        completed_follow_up &&
+            before_present.state ==
+                Activation::SourceOpenOperationState::
+                    Pending &&
+            after_present.state ==
+                Activation::SourceOpenOperationState::
+                    Succeeded &&
+            after_present.spectrum_index == 2,
+        "the latest same-path open token should survive its production follow-up load and complete after exact Present");
+}
+
 void TestIdlePrefetchReportsLifecycleCompletion()
 {
     const std::filesystem::path path =
@@ -956,6 +1453,11 @@ int main()
         TestCanceledGenerationDoesNotPublishFailure();
         TestPresentationCompletesOnlyAfterExactSnapshotDraw();
         TestPublicInterfacePublishesPresentedOpenLifecycle();
+        TestAutomationOpenCompletesAfterPresentationWithoutProfiling();
+        TestAutomationOpensSupersedeBeforeSingleCompletionDrain();
+        TestGuiOpenSupersedesPendingAutomationWithoutLaterActivation();
+        TestSameIdentityOpenRequiresLatestActivationPresent();
+        TestSamePathOpenTokenSurvivesProductionFollowUp();
         TestIdlePrefetchReportsLifecycleCompletion();
         return 0;
     } catch (const std::exception& error) {

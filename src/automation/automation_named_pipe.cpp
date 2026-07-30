@@ -286,9 +286,15 @@ AutomationNamedPipeServer::TakePendingCommands()
     }
     commands.reserve(pending_commands_.size());
     while (!pending_commands_.empty()) {
+        const bool dispatch_barrier =
+            pending_commands_.front().command ==
+            AutomationCommandKind::WaitIdle;
         commands.push_back(
             std::move(pending_commands_.front()));
         pending_commands_.pop_front();
+        if (dispatch_barrier) {
+            break;
+        }
     }
     return commands;
 }
@@ -297,9 +303,34 @@ bool AutomationNamedPipeServer::IsRequestActive(
     std::string_view request_id) const
 {
     std::lock_guard lock(mutex_);
-    return client_connected_ &&
-           outstanding_.contains(
-               std::string(request_id));
+    const auto found =
+        outstanding_.find(std::string(request_id));
+    return found != outstanding_.end() &&
+           (client_connected_ ||
+            found->second.execution_claimed);
+}
+
+bool AutomationNamedPipeServer::TryClaimExecution(
+    const AutomationQueuedCommand& command)
+{
+    std::lock_guard lock(mutex_);
+    const auto found =
+        outstanding_.find(command.request_id);
+    if (!client_connected_ ||
+        found == outstanding_.end() ||
+        found->second.command != command.command ||
+        found->second.sequence != command.sequence ||
+        found->second.execution_claimed ||
+        (command.command !=
+             AutomationCommandKind::SourceOpen &&
+         command.command !=
+             AutomationCommandKind::SpectrumGoto &&
+         command.command !=
+             AutomationCommandKind::LabelAssign)) {
+        return false;
+    }
+    found->second.execution_claimed = true;
+    return true;
 }
 
 AutomationControlQueueSnapshot
@@ -322,18 +353,26 @@ void AutomationNamedPipeServer::Complete(
     std::lock_guard lock(mutex_);
     const auto found =
         outstanding_.find(command.request_id);
-    if (!client_connected_ ||
-        found == outstanding_.end() ||
+    if (found == outstanding_.end() ||
         found->second.sequence != command.sequence) {
         return;
     }
+    const bool send_response = client_connected_;
+    if (!send_response &&
+        !found->second.execution_claimed) {
+        return;
+    }
     outstanding_.erase(found);
-    EnqueueResponseLocked(
-        SerializeAutomationTerminalResponse(
+    if (send_response) {
+        EnqueueResponseLocked(
+            SerializeAutomationTerminalResponse(
+                command.request_id,
+                command.command,
+                "completed",
+                body_members),
             command.request_id,
-            command.command,
-            "completed",
-            body_members));
+            AutomationCommandName(command.command));
+    }
 }
 
 void AutomationNamedPipeServer::Fail(
@@ -344,21 +383,30 @@ void AutomationNamedPipeServer::Fail(
     std::lock_guard lock(mutex_);
     const auto found =
         outstanding_.find(command.request_id);
-    if (!client_connected_ ||
-        found == outstanding_.end() ||
+    if (found == outstanding_.end() ||
         found->second.sequence != command.sequence) {
         return;
     }
+    const bool send_response = client_connected_;
+    if (!send_response &&
+        !found->second.execution_claimed) {
+        return;
+    }
     outstanding_.erase(found);
-    EnqueueResponseLocked(
-        SerializeAutomationFailureResponse(
+    if (send_response) {
+        EnqueueResponseLocked(
+            SerializeAutomationFailureResponse(
+                command.request_id,
+                AutomationCommandName(command.command),
+                error_code,
+                error_message),
             command.request_id,
-            AutomationCommandName(command.command),
-            error_code,
-            error_message));
+            AutomationCommandName(command.command));
+    }
 }
 
-bool AutomationNamedPipeServer::TryBeginAppQuit(
+AutomationNamedPipeServer::AppQuitClaimResult
+AutomationNamedPipeServer::TryBeginAppQuit(
     const AutomationQueuedCommand& quit_command)
 {
     std::lock_guard lock(mutex_);
@@ -370,16 +418,84 @@ bool AutomationNamedPipeServer::TryBeginAppQuit(
             AutomationCommandKind::AppQuit ||
         found->second.sequence !=
             quit_command.sequence ||
-        found->second.execution_started) {
-        return false;
+        found->second.execution_claimed) {
+        return AppQuitClaimResult::Inactive;
     }
-    found->second.execution_started = true;
     accepting_requests_ = false;
     CancelOutstandingLocked(
         "app_quit",
         "The request was canceled because app.quit began normal shutdown.",
         quit_command.request_id);
-    return true;
+    const bool earlier_execution =
+        std::any_of(
+            outstanding_.begin(),
+            outstanding_.end(),
+            [&quit_command](const auto& entry) {
+                return entry.first !=
+                           quit_command.request_id &&
+                       entry.second.execution_claimed &&
+                       entry.second.sequence <
+                           quit_command.sequence;
+            });
+    if (earlier_execution) {
+        return AppQuitClaimResult::
+            WaitingForEarlierExecution;
+    }
+    found->second.execution_claimed = true;
+    return AppQuitClaimResult::Claimed;
+}
+
+AutomationNamedPipeServer::
+    FrameCaptureFinalizationResult
+AutomationNamedPipeServer::TryFinalizeFrameCapture(
+    const AutomationQueuedCommand& command,
+    std::string_view body_members,
+    const FrameCapturePublishCallback& publish)
+{
+    std::lock_guard lock(mutex_);
+    const auto found =
+        outstanding_.find(command.request_id);
+    if (!client_connected_ ||
+        found == outstanding_.end() ||
+        found->second.command !=
+            AutomationCommandKind::FrameCapture ||
+        found->second.sequence != command.sequence ||
+        found->second.execution_claimed ||
+        !publish) {
+        return {};
+    }
+
+    found->second.execution_claimed = true;
+    const HRESULT publish_result = publish();
+    outstanding_.erase(found);
+    if (FAILED(publish_result)) {
+        EnqueueResponseLocked(
+            SerializeAutomationFailureResponse(
+                command.request_id,
+                AutomationCommandName(command.command),
+                "capture_failed",
+                "The application-rendered PNG could not be published."),
+            command.request_id,
+            AutomationCommandName(command.command));
+        return {
+            .state =
+                FrameCaptureFinalizationState::Failed,
+            .result = publish_result,
+        };
+    }
+    EnqueueResponseLocked(
+        SerializeAutomationTerminalResponse(
+            command.request_id,
+            command.command,
+            "completed",
+            body_members),
+        command.request_id,
+        AutomationCommandName(command.command));
+    return {
+        .state =
+            FrameCaptureFinalizationState::Completed,
+        .result = S_OK,
+    };
 }
 
 bool AutomationNamedPipeServer::TryCompleteIdleWaits(
@@ -389,16 +505,38 @@ bool AutomationNamedPipeServer::TryCompleteIdleWaits(
         return true;
     }
     std::lock_guard lock(mutex_);
-    if (!client_connected_ ||
-        !pending_commands_.empty() ||
-        outstanding_.size() != request_ids.size()) {
+    if (!client_connected_) {
         return false;
     }
+    std::unordered_set<std::string> completing(
+        request_ids.begin(),
+        request_ids.end());
     for (const std::string& request_id : request_ids) {
         const auto found = outstanding_.find(request_id);
         if (found == outstanding_.end() ||
             found->second.command !=
                 AutomationCommandKind::WaitIdle) {
+            return false;
+        }
+        const std::uint64_t wait_sequence =
+            found->second.sequence;
+        if (std::any_of(
+                pending_commands_.begin(),
+                pending_commands_.end(),
+                [wait_sequence](const auto& pending) {
+                    return pending.sequence <
+                        wait_sequence;
+                }) ||
+            std::any_of(
+                outstanding_.begin(),
+                outstanding_.end(),
+                [&completing,
+                 wait_sequence](const auto& entry) {
+                    return entry.second.sequence <
+                               wait_sequence &&
+                           !completing.contains(
+                               entry.first);
+                })) {
             return false;
         }
     }
@@ -408,7 +546,10 @@ bool AutomationNamedPipeServer::TryCompleteIdleWaits(
             SerializeAutomationTerminalResponse(
                 request_id,
                 AutomationCommandKind::WaitIdle,
-                "completed"));
+                "completed"),
+            request_id,
+            AutomationCommandName(
+                AutomationCommandKind::WaitIdle));
     }
     return true;
 }
@@ -477,7 +618,9 @@ void AutomationNamedPipeServer::ReaderMain()
                         {},
                         {},
                         "message_too_large",
-                        "Automation message exceeds max_message_bytes."));
+                        "Automation message exceeds max_message_bytes."),
+                    {},
+                    {});
                 close_after_response =
                     !handshake_complete_;
             }
@@ -564,7 +707,9 @@ void AutomationNamedPipeServer::HandleClientMessage(
                         parsed.request_id,
                         parsed.command_name,
                         parsed.error_code,
-                        parsed.error_message));
+                        parsed.error_message),
+                    parsed.request_id,
+                    parsed.command_name);
             }
             close_after_response =
                 !handshake_complete_;
@@ -604,7 +749,10 @@ void AutomationNamedPipeServer::HandleClientMessage(
                         AutomationCommandName(
                             request.command),
                         "handshake_required",
-                        "A successful hello handshake is required before commands."));
+                        "A successful hello handshake is required before commands."),
+                    request.request_id,
+                    AutomationCommandName(
+                        request.command));
                 close_after_response = true;
             } else if (
                 request.protocol_version !=
@@ -614,7 +762,9 @@ void AutomationNamedPipeServer::HandleClientMessage(
                         request.request_id,
                         {},
                         "version_mismatch",
-                        "The requested automation protocol version is not supported."));
+                        "The requested automation protocol version is not supported."),
+                    request.request_id,
+                    {});
                 close_after_response = true;
             } else if (request.nonce != nonce_) {
                 EnqueueResponseLocked(
@@ -622,14 +772,18 @@ void AutomationNamedPipeServer::HandleClientMessage(
                         request.request_id,
                         {},
                         "nonce_mismatch",
-                        "The launcher nonce did not match this automation instance."));
+                        "The launcher nonce did not match this automation instance."),
+                    request.request_id,
+                    {});
                 close_after_response = true;
             } else {
                 handshake_complete_ = true;
                 EnqueueResponseLocked(
                     SerializeAutomationHelloResponse(
                         request.request_id,
-                        instance_id_));
+                        instance_id_),
+                    request.request_id,
+                    {});
             }
         } else if (
             request.kind ==
@@ -639,7 +793,9 @@ void AutomationNamedPipeServer::HandleClientMessage(
                     request.request_id,
                     {},
                     "handshake_already_completed",
-                    "The connection already completed its hello handshake."));
+                    "The connection already completed its hello handshake."),
+                request.request_id,
+                {});
         } else if (!accepting_requests_) {
             EnqueueResponseLocked(
                 SerializeAutomationFailureResponse(
@@ -647,7 +803,10 @@ void AutomationNamedPipeServer::HandleClientMessage(
                     AutomationCommandName(
                         request.command),
                     "shutting_down",
-                    "The automation instance is no longer accepting requests."));
+                    "The automation instance is no longer accepting requests."),
+                request.request_id,
+                AutomationCommandName(
+                    request.command));
         } else if (
             outstanding_.size() >=
             kAutomationQueueCapacity) {
@@ -657,13 +816,17 @@ void AutomationNamedPipeServer::HandleClientMessage(
                     AutomationCommandName(
                         request.command),
                     "queue_full",
-                    "The bounded automation command queue is full."));
+                    "The bounded automation command queue is full."),
+                request.request_id,
+                AutomationCommandName(
+                    request.command));
         } else {
             const std::uint64_t sequence =
                 next_sequence_++;
             pending_commands_.push_back({
                 .request_id = request.request_id,
                 .command = request.command,
+                .parameters = request.parameters,
                 .sequence = sequence,
             });
             outstanding_.emplace(
@@ -675,6 +838,9 @@ void AutomationNamedPipeServer::HandleClientMessage(
             EnqueueResponseLocked(
                 SerializeAutomationAcceptedResponse(
                     request.request_id,
+                    request.command),
+                request.request_id,
+                AutomationCommandName(
                     request.command));
             notify = true;
         }
@@ -705,7 +871,12 @@ void AutomationNamedPipeServer::HandleDisconnect()
         handshake_complete_ = false;
         accepting_requests_ = false;
         pending_commands_.clear();
-        outstanding_.clear();
+        std::erase_if(
+            outstanding_,
+            [](const auto& entry) {
+                return !entry.second
+                            .execution_claimed;
+            });
         responses_.clear();
         response_drained_.notify_all();
         notify = true;
@@ -716,8 +887,41 @@ void AutomationNamedPipeServer::HandleDisconnect()
 }
 
 void AutomationNamedPipeServer::EnqueueResponseLocked(
-    std::string response)
+    std::string response,
+    std::string_view request_id,
+    std::string_view command_name)
 {
+    if (response.size() >
+        kAutomationMaxMessageBytes) {
+        constexpr std::string_view kErrorCode =
+            "response_too_large";
+        constexpr std::string_view kErrorMessage =
+            "The automation response exceeded max_message_bytes.";
+        response =
+            SerializeAutomationFailureResponse(
+                request_id,
+                command_name,
+                kErrorCode,
+                kErrorMessage);
+        if (response.size() >
+            kAutomationMaxMessageBytes) {
+            response =
+                SerializeAutomationFailureResponse(
+                    request_id,
+                    {},
+                    kErrorCode,
+                    kErrorMessage);
+        }
+        if (response.size() >
+            kAutomationMaxMessageBytes) {
+            response =
+                SerializeAutomationFailureResponse(
+                    {},
+                    {},
+                    kErrorCode,
+                    kErrorMessage);
+        }
+    }
     responses_.push_back(std::move(response));
     response_ready_.notify_one();
     reader_poll_.notify_one();
@@ -734,7 +938,9 @@ bool AutomationNamedPipeServer::TryReserveRequestIdLocked(
                 request_id,
                 command_name,
                 "duplicate_request_id",
-                "request_id values must be unique for the connection."));
+                "request_id values must be unique for the connection."),
+            request_id,
+            command_name);
         return false;
     }
     if (seen_request_ids_.size() >=
@@ -745,7 +951,9 @@ bool AutomationNamedPipeServer::TryReserveRequestIdLocked(
                 request_id,
                 command_name,
                 "request_limit_reached",
-                "The connection reached its bounded request limit."));
+                "The connection reached its bounded request limit."),
+            request_id,
+            command_name);
         return false;
     }
     seen_request_ids_.insert(
@@ -763,14 +971,27 @@ void AutomationNamedPipeServer::CancelOutstandingLocked(
             pending_commands_.begin(),
             pending_commands_.end(),
             [&](const AutomationQueuedCommand& command) {
-                return command.request_id !=
-                       except_request_id;
+                if (command.request_id ==
+                    except_request_id) {
+                    return false;
+                }
+                const auto found =
+                    outstanding_.find(
+                        command.request_id);
+                return found ==
+                           outstanding_.end() ||
+                       !found->second
+                            .execution_claimed;
             }),
         pending_commands_.end());
 
     for (auto iterator = outstanding_.begin();
          iterator != outstanding_.end();) {
         if (iterator->first == except_request_id) {
+            ++iterator;
+            continue;
+        }
+        if (iterator->second.execution_claimed) {
             ++iterator;
             continue;
         }
@@ -784,7 +1005,10 @@ void AutomationNamedPipeServer::CancelOutstandingLocked(
                         JsonEscape(cancellation_code) +
                         "\",\"message\":\"" +
                         JsonEscape(cancellation_message) +
-                        "\"}"));
+                        "\"}"),
+                iterator->first,
+                AutomationCommandName(
+                    iterator->second.command));
         }
         iterator = outstanding_.erase(iterator);
     }
