@@ -16,10 +16,16 @@ inline constexpr std::size_t kAutomationMaxMessageBytes =
 inline constexpr std::size_t kAutomationQueueCapacity = 32U;
 inline constexpr std::size_t
     kAutomationMaxRequestsPerConnection = 4096U;
+inline constexpr std::string_view
+    kAutomationUiLanguageSettingName = "ui.language";
+inline constexpr std::string_view
+    kAutomationUiScaleSettingName = "ui.scale";
 
 enum class AutomationCommandKind {
     StateGet,
     WaitIdle,
+    SettingGet,
+    SettingSet,
     SourceOpen,
     SpectrumGoto,
     LabelAssign,
@@ -35,6 +41,20 @@ ParseAutomationCommandName(std::string_view name) noexcept;
 struct AutomationSpectrumTarget {
     std::optional<std::size_t> index;
     std::optional<std::string> name;
+};
+
+using AutomationSettingValue = std::variant<
+    bool,
+    std::int64_t,
+    std::string>;
+
+struct AutomationSettingGetParameters {
+    std::string name;
+};
+
+struct AutomationSettingSetParameters {
+    std::string name;
+    AutomationSettingValue value = false;
 };
 
 struct AutomationSourceOpenParameters {
@@ -56,6 +76,8 @@ struct AutomationFrameCaptureParameters {
 
 using AutomationCommandParameters = std::variant<
     std::monostate,
+    AutomationSettingGetParameters,
+    AutomationSettingSetParameters,
     AutomationSourceOpenParameters,
     AutomationSpectrumGotoParameters,
     AutomationLabelAssignParameters,

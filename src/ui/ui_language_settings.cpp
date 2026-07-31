@@ -17,7 +17,10 @@ constexpr int kSettingsSchemaVersion = 1;
 constexpr std::string_view kEnglishStableValue = "en";
 constexpr std::string_view kSimplifiedChineseStableValue = "zh-Hans";
 
-std::string_view StableLanguageValue(UiLanguage language)
+}  // namespace
+
+std::string_view UiLanguageSettingValue(
+    UiLanguage language) noexcept
 {
     switch (language) {
     case UiLanguage::English:
@@ -30,7 +33,17 @@ std::string_view StableLanguageValue(UiLanguage language)
     return {};
 }
 
-}  // namespace
+std::optional<UiLanguage> ParseUiLanguageSettingValue(
+    std::string_view value) noexcept
+{
+    if (value == kEnglishStableValue) {
+        return UiLanguage::English;
+    }
+    if (value == kSimplifiedChineseStableValue) {
+        return UiLanguage::SimplifiedChinese;
+    }
+    return std::nullopt;
+}
 
 std::filesystem::path DefaultUiLanguageSettingsPath()
 {
@@ -59,12 +72,9 @@ UiLanguageSettingsLoadResult LoadUiLanguageSettings(
             "Ignored UI language settings: the language value is missing or invalid.";
         return settings;
     }
-    if (*language == kEnglishStableValue) {
-        settings.language = UiLanguage::English;
-        return settings;
-    }
-    if (*language == kSimplifiedChineseStableValue) {
-        settings.language = UiLanguage::SimplifiedChinese;
+    if (const std::optional<UiLanguage> parsed =
+            ParseUiLanguageSettingValue(*language)) {
+        settings.language = *parsed;
         return settings;
     }
 
@@ -78,7 +88,8 @@ bool SaveUiLanguageSettings(
     UiLanguage language,
     std::string* error_message)
 {
-    const std::string_view stable_value = StableLanguageValue(language);
+    const std::string_view stable_value =
+        UiLanguageSettingValue(language);
     if (stable_value.empty()) {
         if (error_message != nullptr) {
             *error_message = "The application language is not supported.";

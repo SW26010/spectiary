@@ -322,6 +322,8 @@ bool AutomationNamedPipeServer::TryClaimExecution(
         found->second.sequence != command.sequence ||
         found->second.execution_claimed ||
         (command.command !=
+             AutomationCommandKind::SettingSet &&
+         command.command !=
              AutomationCommandKind::SourceOpen &&
          command.command !=
              AutomationCommandKind::SpectrumGoto &&

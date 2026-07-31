@@ -1470,6 +1470,26 @@ ShellUi::AssignLabelForAutomation(int code)
     return automation;
 }
 
+ApplicationSettingsResult
+ShellUi::SetUiLanguageForAutomation(
+    UiLanguage language)
+{
+    return ApplyApplicationSettingsIntent(
+        ApplicationSettingsIntent::SetLanguage(
+            language),
+        {});
+}
+
+ApplicationSettingsResult
+ShellUi::SetUiScaleForAutomation(
+    int percentage)
+{
+    return ApplyApplicationSettingsIntent(
+        ApplicationSettingsIntent::SetUiScale(
+            percentage),
+        {});
+}
+
 ShellAutomationView ShellUi::AutomationView()
 {
     return AutomationViewForSnapshot(
@@ -2586,22 +2606,9 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
     if (std::optional<ApplicationSettingsIntent> intent =
             settings_panel_ui_.
                 TakeApplicationSettingsIntent()) {
-        const ApplicationSettingsResult result =
-            application_settings_.Apply(
+        (void)ApplyApplicationSettingsIntent(
             std::move(*intent),
             runtime);
-        if (result.applied() &&
-            result.setting == ApplicationSetting::UiScale) {
-            applied_ui_scale_percentage_ =
-                application_settings_.View().
-                    ui_scale_percentage;
-        } else if (
-            result.applied() &&
-            result.setting ==
-                ApplicationSetting::Language) {
-            applied_ui_language_ =
-                application_settings_.View().language;
-        }
     }
     if (settings_panel_ui_.TakeProfileOutputDirectorySelectionRequest()) {
         if (std::optional<std::filesystem::path> directory =
@@ -2609,13 +2616,37 @@ void ShellUi::RenderSettingsPanel(const ShellStatus& status)
                     settings.language,
                     UiTextId::
                         ChooseProfileOutputFolderDialog)) {
-            (void)application_settings_.Apply(
+            (void)ApplyApplicationSettingsIntent(
                 ApplicationSettingsIntent::
                     SetProfileOutputDirectory(
                         std::move(*directory)),
                 runtime);
         }
     }
+}
+
+ApplicationSettingsResult
+ShellUi::ApplyApplicationSettingsIntent(
+    ApplicationSettingsIntent intent,
+    ApplicationSettingsRuntimeState runtime)
+{
+    ApplicationSettingsResult result =
+        application_settings_.Apply(
+            std::move(intent),
+            runtime);
+    if (result.applied() &&
+        result.setting == ApplicationSetting::UiScale) {
+        applied_ui_scale_percentage_ =
+            application_settings_.View().
+                ui_scale_percentage;
+    } else if (
+        result.applied() &&
+        result.setting ==
+            ApplicationSetting::Language) {
+        applied_ui_language_ =
+            application_settings_.View().language;
+    }
+    return result;
 }
 
 void ShellUi::SetPanelVisibility(

@@ -112,6 +112,8 @@ ParseCommandParameters(
     const JsonValue* params =
         JsonObjectMember(root, "params");
     const bool requires_params =
+        command == AutomationCommandKind::SettingGet ||
+        command == AutomationCommandKind::SettingSet ||
         command == AutomationCommandKind::SourceOpen ||
         command == AutomationCommandKind::SpectrumGoto ||
         command == AutomationCommandKind::LabelAssign ||
@@ -133,6 +135,57 @@ ParseCommandParameters(
     }
 
     switch (command) {
+    case AutomationCommandKind::SettingGet: {
+        const std::optional<std::string> name =
+            ReadJsonStringMember(*params, "name");
+        if (!name || name->empty()) {
+            error_message =
+                "setting.get requires a non-empty string name.";
+            return std::nullopt;
+        }
+        return AutomationSettingGetParameters{
+            .name = *name,
+        };
+    }
+    case AutomationCommandKind::SettingSet: {
+        const std::optional<std::string> name =
+            ReadJsonStringMember(*params, "name");
+        const JsonValue* value =
+            JsonObjectMember(*params, "value");
+        if (!name || name->empty()) {
+            error_message =
+                "setting.set requires a non-empty string name.";
+            return std::nullopt;
+        }
+        if (value == nullptr) {
+            error_message =
+                "setting.set requires a scalar value.";
+            return std::nullopt;
+        }
+
+        AutomationSettingValue setting_value;
+        switch (value->kind) {
+        case JsonValue::Kind::String:
+            setting_value = value->string_value;
+            break;
+        case JsonValue::Kind::Integer:
+            setting_value = value->integer_value;
+            break;
+        case JsonValue::Kind::Bool:
+            setting_value = value->bool_value;
+            break;
+        case JsonValue::Kind::Null:
+        case JsonValue::Kind::Object:
+        case JsonValue::Kind::Array:
+            error_message =
+                "setting.set value must be a string, integer or boolean.";
+            return std::nullopt;
+        }
+        return AutomationSettingSetParameters{
+            .name = *name,
+            .value = std::move(setting_value),
+        };
+    }
     case AutomationCommandKind::SourceOpen: {
         const std::optional<std::string> path =
             ReadJsonStringMember(*params, "path");
@@ -209,6 +262,24 @@ void SerializeSpectrumTarget(
     output << '}';
 }
 
+void SerializeSettingValue(
+    std::ostringstream& output,
+    const AutomationSettingValue& value)
+{
+    std::visit(
+        [&output](const auto& scalar) {
+            using Value = std::decay_t<decltype(scalar)>;
+            if constexpr (std::is_same_v<Value, std::string>) {
+                output << JsonString(scalar);
+            } else if constexpr (std::is_same_v<Value, bool>) {
+                output << (scalar ? "true" : "false");
+            } else {
+                output << scalar;
+            }
+        },
+        value);
+}
+
 }  // namespace
 
 std::string_view AutomationCommandName(
@@ -219,6 +290,10 @@ std::string_view AutomationCommandName(
         return "state.get";
     case AutomationCommandKind::WaitIdle:
         return "wait.idle";
+    case AutomationCommandKind::SettingGet:
+        return "setting.get";
+    case AutomationCommandKind::SettingSet:
+        return "setting.set";
     case AutomationCommandKind::SourceOpen:
         return "source.open";
     case AutomationCommandKind::SpectrumGoto:
@@ -241,6 +316,12 @@ ParseAutomationCommandName(std::string_view name) noexcept
     }
     if (name == "wait.idle") {
         return AutomationCommandKind::WaitIdle;
+    }
+    if (name == "setting.get") {
+        return AutomationCommandKind::SettingGet;
+    }
+    if (name == "setting.set") {
+        return AutomationCommandKind::SettingSet;
     }
     if (name == "source.open") {
         return AutomationCommandKind::SourceOpen;
@@ -502,6 +583,22 @@ std::string SerializeAutomationCommandRequest(
                 if constexpr (
                     std::is_same_v<
                         Value,
+                        AutomationSettingGetParameters>) {
+                    output << "\"name\":"
+                           << JsonString(value.name);
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
+                        AutomationSettingSetParameters>) {
+                    output << "\"name\":"
+                           << JsonString(value.name)
+                           << ",\"value\":";
+                    SerializeSettingValue(
+                        output,
+                        value.value);
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
                         AutomationSourceOpenParameters> ||
                     std::is_same_v<
                         Value,
@@ -542,6 +639,8 @@ AutomationCapabilityNames()
         capabilities = {
             "state.get",
             "wait.idle",
+            "setting.get",
+            "setting.set",
             "source.open",
             "spectrum.goto",
             "label.assign",

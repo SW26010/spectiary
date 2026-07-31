@@ -149,6 +149,13 @@ private:
     void RefreshPresentationTargets(std::string_view reason);
     void InitializeAutomation();
     void ServiceAutomation();
+    void ApplyPendingApplicationSettings(
+        std::string_view scale_reason,
+        bool request_frame = true);
+    void ServiceAutomationSettingGet(
+        const AutomationQueuedCommand& command);
+    void ServiceAutomationSettingSet(
+        const AutomationQueuedCommand& command);
     void BeginAutomationSourceOpen(
         const AutomationQueuedCommand& command);
     void BeginAutomationSpectrumGoto(

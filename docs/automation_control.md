@@ -64,6 +64,8 @@ processes.
 The thin console accepts only:
 
 ```text
+setting get <ui.language|ui.scale>
+setting set <ui.language|ui.scale> <value>
 source open <absolute-file-or-directory>
 spectrum goto <zero-based-index>
 spectrum goto name <exact-name>
@@ -83,11 +85,17 @@ disconnect after accepted
 ```
 
 It translates these fixed commands to JSON. The GUI never parses the console's
-free-form text. `pipeline` and `disconnect after accepted` are launcher-owned
-transport/concurrency test controls; they do not add GUI commands or business
-seams. A pipeline is limited to the advertised 32-command queue capacity and is
-rejected before its first request is sent when that bound is exceeded. End of
-input asks the app to quit normally. An attached Windows console
+free-form text. For `setting set`, an optional single leading `+` or `-`
+followed by decimal digits becomes a JSON integer when the complete token fits
+in signed 64-bit range. An overflowing or otherwise malformed numeric token
+remains a JSON string. The ASCII tokens `true` and `false`, matched
+case-insensitively, become JSON booleans; other text remains a JSON string. The
+GUI still enforces the fixed setting whitelist and each setting's production
+type and value validation. `pipeline` and `disconnect after accepted` are
+launcher-owned transport/concurrency test controls; they do not add GUI commands
+or business seams. A pipeline is limited to the advertised 32-command queue
+capacity and is rejected before its first request is sent when that bound is
+exceeded. End of input asks the app to quit normally. An attached Windows console
 is read as UTF-16 and converted strictly to UTF-8. Redirected standard input,
 including all three launcher modes, must already be well-formed UTF-8; bytes in
 the active OEM or ANSI code page are not accepted as an implicit encoding.
@@ -120,7 +128,7 @@ The first message must be the launcher handshake:
 A successful response reports the protocol and fixed capabilities:
 
 ```json
-{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","source.open","spectrum.goto","label.assign","frame.capture","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
+{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","setting.get","setting.set","source.open","spectrum.goto","label.assign","frame.capture","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
 ```
 
 Commands use protocol names rather than console spelling:
@@ -140,7 +148,7 @@ duplicate IDs, queue/request limits, shutdown rejection, and cancellation.
 If a correlated response would exceed `max_message_bytes`, the server replaces
 it before pipe write with a bounded terminal `failed` response carrying
 `response_too_large`; the connection remains usable.
-Mutating business requests enter an execution claim under the same pipe-server
+Mutating requests enter an execution claim under the same pipe-server
 synchronization boundary before their first real App/Shell/Session mutation.
 Disconnect and `app.quit` cancel only requests that have not claimed execution.
 An `app.quit` behind an earlier claimed request is a sequence barrier: it waits
@@ -152,9 +160,11 @@ quit terminal.
 
 ## Command contracts
 
-Business commands use these stable request shapes:
+Commands with parameters use these stable request shapes:
 
 ```json
+{"type":"request","request_id":"setting-get-1","command":"setting.get","params":{"name":"ui.language"}}
+{"type":"request","request_id":"setting-set-1","command":"setting.set","params":{"name":"ui.scale","value":125}}
 {"type":"request","request_id":"open-1","command":"source.open","params":{"path":"C:\\fixtures\\spectra"}}
 {"type":"request","request_id":"goto-1","command":"spectrum.goto","params":{"target":{"index":4}}}
 {"type":"request","request_id":"goto-2","command":"spectrum.goto","params":{"target":{"name":"target.csv"}}}
@@ -162,6 +172,40 @@ Business commands use these stable request shapes:
 {"type":"request","request_id":"label-2","command":"label.assign","params":{"code":5,"target":{"index":4}}}
 {"type":"request","request_id":"capture-1","command":"frame.capture","params":{"path":"C:\\automation-state\\artifacts\\target.png"}}
 ```
+
+`setting.get` and `setting.set` expose only this initial stable whitelist:
+
+| Name | JSON value type | Supported values |
+| --- | --- | --- |
+| `ui.language` | string | exact persisted values `en` or `zh-Hans` |
+| `ui.scale` | integer | 80 through 150, inclusive |
+
+`setting.get` completes with
+`"result":{"name":"<name>","value":<current-value>}`. `setting.set`
+completes with the same fields plus boolean `changed`; an unchanged valid write
+is successful and reports `changed:false`.
+
+Writes route through the same `ApplicationSettings::Apply` owner used by the
+Settings UI. That owner performs the existing validation and save-before-publish
+transition. The App then consumes the existing language/UI-scale notification,
+updates the localized UI or live ImGui scale, and requests a frame before the
+terminal response is completed. There is no automation settings copy and no
+direct settings-file mutation. Both production settings paths resolve below the
+launcher-pinned automation state root. The same App-owned drain runs before
+automation dispatch and state observation, so a notification produced by the
+Settings UI cannot be skipped by a same-value `setting.set`, `state.get`, or
+`wait.idle`.
+
+Missing or non-scalar parameter structure fails before acceptance with
+`invalid_params`. After acceptance, an unknown name fails with
+`unsupported_setting`, a scalar of the wrong production type fails with
+`setting_type_mismatch`, a correctly typed but unsupported or out-of-range value
+fails with `setting_value_rejected`, and a production write failure fails with
+`setting_persistence_failed`. Failed writes retain the prior value and do not
+emit an application setting notification. Consequently, a CLI integer token
+outside signed 64-bit range remains a string and fails integer-valued
+`ui.scale` with `setting_type_mismatch`; a representable integer outside
+80 through 150 fails with `setting_value_rejected`.
 
 `source.open` requires an absolute existing regular file or directory accepted
 by the production source loader. Its terminal result contains stable source
@@ -260,6 +304,8 @@ source-activation generation/cancellation semantics.
   that field);
 - the existing live activated source identity/path in `state.source`, preserving
   the original field semantics even before that source has presented;
+- the applied `state.settings.language` and
+  `state.settings.ui_scale_percentage` UI observation;
 - the last successfully presented source identity/path in
   `state.presented_source`;
 - successfully presented spectrum count and, when present, its zero-based
@@ -292,7 +338,9 @@ that is still unwinding. Source, navigation, label, and capture operations are
 part of the sequence-aware lifecycle. It deliberately does not wait for a
 future persistence deadline; `label.assign` reports whether state/output
 persistence completed, was scheduled, or requires retry, while normal
-`app.quit` performs the existing final flush.
+`app.quit` performs the existing final flush. The initial `setting.set`
+whitelist uses synchronous production saves, so its terminal—and therefore a
+following idle barrier—cannot precede that settings-file write.
 
 `app.quit` posts the normal window close path. Existing application flush and
 Shell shutdown own persistence and worker retirement; the control plane does
@@ -328,7 +376,8 @@ that window. Automation does not call `SetForegroundWindow`.
 The CTest coverage includes protocol and pipe boundaries, current-user ACL,
 second-client rejection, queue/full and duplicate-ID handling, version
 mismatch, disconnect and shutdown cancellation, a controlled no-activation
-show-plan assertion, both disconnect-first and finalizer-lease-first capture
+show-plan assertion, bounded setting get/set parsing and execution claims,
+both disconnect-first and finalizer-lease-first capture
 publication ordering, and a real SpecForge HWND workflow that verifies visible
 capture without foreground activation plus hidden/minimized rejection without
 window restoration. Coverage also includes runtime-state isolation and a
@@ -339,4 +388,12 @@ non-empty PNG IHDR whose dimensions match the terminal, reloads the production
 labeling cache after quit, verifies the seed and ordinary root fingerprints,
 proves the root cannot be replaced during the child lifetime, exercises
 explicit UTF-8 Unicode source/name input plus seed and capture-path failures,
-and checks that no owned GUI process remains.
+and checks that no owned GUI process remains. A separate real GUI settings
+workflow verifies the initial isolated values, language and scale writes,
+including a leading-plus same-value write returning `changed:false`, stable
+invalid-name/type/value failures, a following idle barrier, applied
+`state.settings`, application-rendered capture, production settings files,
+and ordinary-state fingerprint preservation. Its interactive failure-injection
+coverage also blocks the production UI-scale path and verifies
+`setting_persistence_failed`, retained model/live values, no applied-setting
+notification, and a usable idle barrier.

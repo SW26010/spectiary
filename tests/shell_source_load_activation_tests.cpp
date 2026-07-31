@@ -58,6 +58,16 @@ struct ShellUiTestAccess {
                 NavigationIntent{kind, input_at});
     }
 
+    static ApplicationSettingsResult
+    ApplySettingsUiIntent(
+        ShellUi& shell,
+        ApplicationSettingsIntent intent)
+    {
+        return shell.ApplyApplicationSettingsIntent(
+            std::move(intent),
+            {});
+    }
+
     static void Drain(
         ShellUi& shell,
         bool allow_snapshot_prefetch = true)
@@ -3228,6 +3238,104 @@ void TestShellFlushResultNamesEveryFailedOwner()
         "the Chinese shutdown warning should omit successful owners");
 }
 
+void TestAutomationSettingsUseApplicationSettingsOwner()
+{
+    using Access = specforge::ShellUiTestAccess;
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                std::filesystem::path{},
+                std::filesystem::path{},
+                std::filesystem::path{},
+                std::filesystem::path{}),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting());
+
+    const specforge::ApplicationSettingsResult
+        language_result =
+            shell->SetUiLanguageForAutomation(
+                specforge::UiLanguage::
+                    SimplifiedChinese);
+    Require(
+        language_result.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Applied &&
+            shell->ui_language() ==
+                specforge::UiLanguage::
+                    SimplifiedChinese &&
+            shell->TakeAppliedUiLanguage() ==
+                specforge::UiLanguage::
+                    SimplifiedChinese &&
+            !shell->TakeAppliedUiLanguage(),
+        "automation language changes should use the production owner and emit the normal one-shot UI notification");
+
+    const specforge::ApplicationSettingsResult
+        rejected_language =
+            shell->SetUiLanguageForAutomation(
+                specforge::UiLanguage::Count);
+    Require(
+        rejected_language.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Rejected &&
+            shell->ui_language() ==
+                specforge::UiLanguage::
+                    SimplifiedChinese &&
+            !shell->TakeAppliedUiLanguage(),
+        "automation should retain the previous language when production validation rejects a value");
+
+    const specforge::ApplicationSettingsResult
+        rejected_scale =
+            shell->SetUiScaleForAutomation(151);
+    Require(
+        rejected_scale.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Rejected &&
+            shell->ui_scale_percentage() ==
+                specforge::
+                    kDefaultUiScalePercentage &&
+            !shell->TakeAppliedUiScalePercentage(),
+        "automation should not partially apply an out-of-range UI scale");
+
+    const specforge::ApplicationSettingsResult
+        scale_result =
+            shell->SetUiScaleForAutomation(125);
+    Require(
+        scale_result.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Applied &&
+            shell->ui_scale_percentage() == 125 &&
+            shell->TakeAppliedUiScalePercentage() == 125 &&
+            !shell->TakeAppliedUiScalePercentage(),
+        "automation UI scale changes should emit the same one-shot application notification as the settings panel");
+
+    const specforge::ApplicationSettingsResult
+        settings_ui_scale_result =
+            Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetUiScale(130));
+    const specforge::ApplicationSettingsResult
+        same_value_automation_result =
+            shell->SetUiScaleForAutomation(130);
+    Require(
+        settings_ui_scale_result.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Applied &&
+            same_value_automation_result.outcome ==
+                specforge::
+                    ApplicationSettingsOutcome::
+                        Unchanged &&
+            shell->ui_scale_percentage() == 130 &&
+            shell->TakeAppliedUiScalePercentage() == 130 &&
+            !shell->TakeAppliedUiScalePercentage(),
+        "a same-value automation write must preserve the production UI scale notification that was already pending from the Settings UI");
+}
+
 }  // namespace
 
 int main()
@@ -3254,6 +3362,7 @@ int main()
         TestIdlePrefetchIsConsumedBySecondForwardNavigation();
         TestPublishedPrefetchBecomesStaleAfterQueryInput();
         TestCanceledPrefetchReportsOnlyAfterWorkerExit();
+        TestAutomationSettingsUseApplicationSettingsOwner();
         TestShellFlushResultNamesEveryFailedOwner();
         return 0;
     } catch (const std::exception& error) {

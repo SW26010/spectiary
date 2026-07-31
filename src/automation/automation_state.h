@@ -30,6 +30,11 @@ struct AutomationWindowState {
     unsigned int client_height = 0;
 };
 
+struct AutomationSettingsState {
+    std::string language = "en";
+    int ui_scale_percentage = 100;
+};
+
 struct AutomationSpectrumState {
     bool present = false;
     std::size_t index = 0;
@@ -67,6 +72,7 @@ struct AutomationStateSnapshot {
     std::string instance_id;
     AutomationControlQueueSnapshot control;
     AutomationShellState shell;
+    AutomationSettingsState settings;
     AutomationPresentedSourceState presented_source;
     AutomationSpectrumState spectrum;
     AutomationLabelingState labeling;

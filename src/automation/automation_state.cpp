@@ -108,7 +108,12 @@ std::string SerializeAutomationStateBody(
                           state.presented_source
                               .path));
     }
-    output << "},\"window\":{"
+    output << "},\"settings\":{"
+           << "\"language\":"
+           << JsonString(state.settings.language)
+           << ",\"ui_scale_percentage\":"
+           << state.settings.ui_scale_percentage
+           << "},\"window\":{"
            << "\"visible\":"
            << JsonBool(state.window.visible)
            << ",\"minimized\":"

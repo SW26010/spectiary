@@ -6,6 +6,7 @@
 #include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
+#include "ui/ui_language_settings.h"
 #include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
 
@@ -21,6 +22,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -758,11 +760,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     } profile_frame_finalization{profile_};
 
     ApplyPendingResize();
-    if (const std::optional<int> percentage =
-            ui_.TakeAppliedUiScalePercentage()) {
-        ApplyUiScale(system_dpi_scale_, *percentage);
-        WriteDpiConfiguration("user_scale_changed");
-    }
+    ApplyPendingApplicationSettings(
+        "user_scale_changed",
+        false);
 
     ++frame_index_;
 
@@ -1690,6 +1690,40 @@ const char* JsonBool(bool value)
     return value ? "true" : "false";
 }
 
+std::string AutomationStringSettingResult(
+    std::string_view name,
+    std::string_view value,
+    std::optional<bool> changed = std::nullopt)
+{
+    std::ostringstream body;
+    body << "\"result\":{\"name\":"
+         << JsonString(name)
+         << ",\"value\":" << JsonString(value);
+    if (changed.has_value()) {
+        body << ",\"changed\":"
+             << JsonBool(*changed);
+    }
+    body << '}';
+    return body.str();
+}
+
+std::string AutomationIntegerSettingResult(
+    std::string_view name,
+    int value,
+    std::optional<bool> changed = std::nullopt)
+{
+    std::ostringstream body;
+    body << "\"result\":{\"name\":"
+         << JsonString(name)
+         << ",\"value\":" << value;
+    if (changed.has_value()) {
+        body << ",\"changed\":"
+             << JsonBool(*changed);
+    }
+    body << '}';
+    return body.str();
+}
+
 std::pair<std::string_view, std::string_view>
 AutomationNavigationFailure(
     ShellAutomationNavigationError error)
@@ -1813,6 +1847,201 @@ void SpecForgeApp::InitializeAutomation()
             "Could not start the local automation control pipe: " +
             error_message);
     }
+}
+
+void SpecForgeApp::ApplyPendingApplicationSettings(
+    std::string_view scale_reason,
+    bool request_frame)
+{
+    bool applied = false;
+    if (const std::optional<int> percentage =
+            ui_.TakeAppliedUiScalePercentage()) {
+        ApplyUiScale(
+            system_dpi_scale_,
+            *percentage);
+        WriteDpiConfiguration(scale_reason);
+        applied = true;
+    }
+    if (ui_.TakeAppliedUiLanguage()) {
+        ApplyLocalizedWindowTitle();
+        applied = true;
+    }
+    if (applied && request_frame) {
+        render_wake_scheduler_.RequestFrame();
+    }
+}
+
+void SpecForgeApp::ServiceAutomationSettingGet(
+    const AutomationQueuedCommand& command)
+{
+    if (!automation_server_->IsRequestActive(
+            command.request_id)) {
+        return;
+    }
+    const auto* parameters =
+        std::get_if<AutomationSettingGetParameters>(
+            &command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "setting.get parameters were not decoded.");
+        return;
+    }
+
+    if (parameters->name ==
+        kAutomationUiLanguageSettingName) {
+        automation_server_->Complete(
+            command,
+            AutomationStringSettingResult(
+                parameters->name,
+                UiLanguageSettingValue(
+                    ui_.ui_language())));
+        return;
+    }
+    if (parameters->name ==
+        kAutomationUiScaleSettingName) {
+        automation_server_->Complete(
+            command,
+            AutomationIntegerSettingResult(
+                parameters->name,
+                ui_.ui_scale_percentage()));
+        return;
+    }
+    automation_server_->Fail(
+        command,
+        "unsupported_setting",
+        "The requested automation setting is not supported.");
+}
+
+void SpecForgeApp::ServiceAutomationSettingSet(
+    const AutomationQueuedCommand& command)
+{
+    const auto* parameters =
+        std::get_if<AutomationSettingSetParameters>(
+            &command.parameters);
+    if (parameters == nullptr) {
+        automation_server_->Fail(
+            command,
+            "invalid_params",
+            "setting.set parameters were not decoded.");
+        return;
+    }
+
+    enum class SupportedSetting {
+        Language,
+        UiScale,
+    };
+    SupportedSetting setting =
+        SupportedSetting::Language;
+    UiLanguage requested_language =
+        UiLanguage::Count;
+    int requested_scale = 0;
+    if (parameters->name ==
+        kAutomationUiLanguageSettingName) {
+        setting = SupportedSetting::Language;
+        const auto* value =
+            std::get_if<std::string>(
+                &parameters->value);
+        if (value == nullptr) {
+            automation_server_->Fail(
+                command,
+                "setting_type_mismatch",
+                "ui.language requires a string value.");
+            return;
+        }
+        requested_language =
+            ParseUiLanguageSettingValue(*value)
+                .value_or(UiLanguage::Count);
+    } else if (
+        parameters->name ==
+        kAutomationUiScaleSettingName) {
+        setting = SupportedSetting::UiScale;
+        const auto* value =
+            std::get_if<std::int64_t>(
+                &parameters->value);
+        if (value == nullptr) {
+            automation_server_->Fail(
+                command,
+                "setting_type_mismatch",
+                "ui.scale requires an integer value.");
+            return;
+        }
+        if (*value <
+                (std::numeric_limits<int>::min)() ||
+            *value >
+                (std::numeric_limits<int>::max)()) {
+            automation_server_->Fail(
+                command,
+                "setting_value_rejected",
+                "The UI scale must be from 80% through 150%.");
+            return;
+        }
+        requested_scale =
+            static_cast<int>(*value);
+    } else {
+        automation_server_->Fail(
+            command,
+            "unsupported_setting",
+            "The requested automation setting is not supported.");
+        return;
+    }
+
+    if (!automation_server_->TryClaimExecution(
+            command)) {
+        return;
+    }
+
+    const UiLanguage previous_language =
+        ui_.ui_language();
+    const int previous_scale =
+        ui_.ui_scale_percentage();
+    const ApplicationSettingsResult result =
+        setting == SupportedSetting::Language
+        ? ui_.SetUiLanguageForAutomation(
+              requested_language)
+        : ui_.SetUiScaleForAutomation(
+              requested_scale);
+    if (result.outcome ==
+        ApplicationSettingsOutcome::Rejected) {
+        automation_server_->Fail(
+            command,
+            "setting_value_rejected",
+            result.detail);
+        return;
+    }
+    if (result.outcome ==
+        ApplicationSettingsOutcome::
+            PersistenceFailed) {
+        automation_server_->Fail(
+            command,
+            "setting_persistence_failed",
+            result.detail);
+        return;
+    }
+
+    ApplyPendingApplicationSettings(
+        "automation_setting_changed");
+
+    std::string body;
+    if (setting == SupportedSetting::Language) {
+        const UiLanguage current =
+            ui_.ui_language();
+        body = AutomationStringSettingResult(
+            parameters->name,
+            UiLanguageSettingValue(current),
+            current != previous_language);
+    } else {
+        const int current =
+            ui_.ui_scale_percentage();
+        body = AutomationIntegerSettingResult(
+            parameters->name,
+            current,
+            current != previous_scale);
+    }
+    automation_server_->Complete(
+        command,
+        body);
 }
 
 void SpecForgeApp::BeginAutomationSourceOpen(
@@ -2588,6 +2817,8 @@ void SpecForgeApp::ServiceAutomation()
         return;
     }
 
+    ApplyPendingApplicationSettings(
+        "user_scale_changed");
     PollAutomationBusinessOperations();
     if (automation_pending_quit_command_) {
         if (!ServiceAutomationAppQuit(
@@ -2624,6 +2855,12 @@ void SpecForgeApp::ServiceAutomation()
             }
             automation_idle_waits_.push_back(
                 command);
+            break;
+        case AutomationCommandKind::SettingGet:
+            ServiceAutomationSettingGet(command);
+            break;
+        case AutomationCommandKind::SettingSet:
+            ServiceAutomationSettingSet(command);
             break;
         case AutomationCommandKind::SourceOpen:
             BeginAutomationSourceOpen(command);
@@ -2753,6 +2990,16 @@ SpecForgeApp::AutomationState()
         shell.active_source_id;
     state.shell.current_source_path =
         shell.active_source_path;
+    const std::string_view language =
+        UiLanguageSettingValue(
+            ui_.ui_language());
+    state.settings = {
+        .language = language.empty()
+            ? "en"
+            : std::string(language),
+        .ui_scale_percentage =
+            user_ui_scale_percentage_,
+    };
     state.presented_source = {
         .present =
             !automation.source_id.empty() ||

@@ -544,6 +544,34 @@ ParseNonnegativeSize(std::string_view text)
         parsed);
 }
 
+std::optional<std::int64_t>
+ParseSignedInteger(std::string_view text)
+{
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    if (text.front() == '+') {
+        text.remove_prefix(1U);
+        if (text.empty() ||
+            text.front() < '0' ||
+            text.front() > '9') {
+            return std::nullopt;
+        }
+    }
+    std::int64_t parsed = 0;
+    const auto [end, error] =
+        std::from_chars(
+            text.data(),
+            text.data() + text.size(),
+            parsed,
+            10);
+    if (error != std::errc{} ||
+        end != text.data() + text.size()) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
 std::string LowerAscii(std::string value)
 {
     std::transform(
@@ -595,6 +623,82 @@ CommandFromHumanLine(
                 specforge::AutomationCommandKind::
                     AppQuit,
         };
+    }
+
+    constexpr std::string_view
+        setting_get_prefix = "setting get ";
+    if (lower.starts_with(
+            setting_get_prefix)) {
+        const std::string name =
+            LowerAscii(Trim(
+                line.substr(
+                    setting_get_prefix.size())));
+        if (!name.empty()) {
+            return HumanCommand{
+                .kind =
+                    specforge::
+                        AutomationCommandKind::
+                            SettingGet,
+                .parameters =
+                    specforge::
+                        AutomationSettingGetParameters{
+                            .name = name,
+                        },
+            };
+        }
+    }
+
+    constexpr std::string_view
+        setting_set_prefix = "setting set ";
+    if (lower.starts_with(
+            setting_set_prefix)) {
+        const std::string assignment = Trim(
+            line.substr(
+                setting_set_prefix.size()));
+        const std::size_t separator =
+            assignment.find_first_of(" \t");
+        if (separator != std::string::npos) {
+            const std::string name =
+                LowerAscii(Trim(
+                    assignment.substr(
+                        0,
+                        separator)));
+            const std::string value_text =
+                Trim(assignment.substr(
+                    separator + 1U));
+            if (!name.empty() &&
+                !value_text.empty()) {
+                specforge::AutomationSettingValue
+                    value = value_text;
+                if (const auto integer =
+                        ParseSignedInteger(
+                            value_text)) {
+                    value = *integer;
+                } else {
+                    const std::string lower_value =
+                        LowerAscii(value_text);
+                    if (lower_value == "true") {
+                        value = true;
+                    } else if (
+                        lower_value == "false") {
+                        value = false;
+                    }
+                }
+                return HumanCommand{
+                    .kind =
+                        specforge::
+                            AutomationCommandKind::
+                                SettingSet,
+                    .parameters =
+                        specforge::
+                            AutomationSettingSetParameters{
+                                .name = name,
+                                .value =
+                                    std::move(value),
+                            },
+                };
+            }
+        }
     }
 
     constexpr std::string_view
@@ -1119,7 +1223,7 @@ void PrintUsage()
 {
     std::cout
         << "Usage: SpecForgeAutomation [--app <SpecForge.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>]\n"
-        << "Commands: source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, state get, wait idle, app quit, help\n"
+        << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }
 

@@ -89,6 +89,26 @@ void TestMissingFileDefaultsToEnglishWithoutWarning()
 
 void TestSupportedLanguagesRoundTripWithStableValues()
 {
+    Require(
+        specforge::UiLanguageSettingValue(
+            specforge::UiLanguage::English) == "en" &&
+            specforge::UiLanguageSettingValue(
+                specforge::UiLanguage::
+                    SimplifiedChinese) == "zh-Hans" &&
+            specforge::UiLanguageSettingValue(
+                specforge::UiLanguage::Count)
+                .empty(),
+        "language settings should expose their stable protocol values");
+    Require(
+        specforge::ParseUiLanguageSettingValue("en") ==
+                specforge::UiLanguage::English &&
+            specforge::ParseUiLanguageSettingValue(
+                "zh-Hans") ==
+                specforge::UiLanguage::
+                    SimplifiedChinese &&
+            !specforge::ParseUiLanguageSettingValue("fr"),
+        "stable language values should parse without aliases");
+
     TemporaryDirectory temporary;
     const std::filesystem::path path =
         temporary.path() / "ui-language.json";

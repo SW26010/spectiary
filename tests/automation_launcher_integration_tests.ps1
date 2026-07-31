@@ -592,10 +592,12 @@ try {
             [string]$hello.type -eq 'hello' -and
             [string]$hello.status -eq 'completed' -and
             [int]$hello.protocol_version -eq 1 -and
-            @($hello.capabilities).Count -eq 7 -and
+            @($hello.capabilities).Count -eq 9 -and
+            @($hello.capabilities) -contains 'setting.get' -and
+            @($hello.capabilities) -contains 'setting.set' -and
             [int]$hello.max_message_bytes -eq 65536 -and
             [int]$hello.queue_capacity -eq 32) `
-        -Message 'Hello should expose the fixed protocol limits and P0 capabilities.'
+        -Message 'Hello should expose the fixed protocol limits and bounded capabilities.'
 
     $sourceAccepted = $messages[1]
     $sourceCompleted = $messages[2]
@@ -740,6 +742,158 @@ try {
                     -Id $guiPid `
                     -ErrorAction SilentlyContinue)) `
         -Message 'Normal app.quit should leave no GUI process.'
+
+    $settingsControlRoot =
+        Join-Path $fixtureParent 'settings-control-state'
+    $settingsCapturePath =
+        Join-Path $settingsControlRoot 'captures\settings.png'
+    $settingsOutput = @(
+        @(
+            'pipeline begin',
+            'setting get ui.language',
+            'setting set ui.language zh-Hans',
+            'setting get ui.language',
+            'setting set ui.scale 125',
+            'setting set ui.scale +125',
+            'setting set ui.scale not-an-integer',
+            'setting set ui.scale 151',
+            'setting get unsupported.setting',
+            'wait idle',
+            'pipeline end',
+            'setting get ui.scale',
+            'state get',
+            "frame capture $settingsCapturePath",
+            'app quit'
+        ) |
+            & $resolvedLauncher `
+                --app $fixtureExecutable `
+                --state-root $settingsControlRoot 2>&1
+    )
+    $settingsExitCode = $LASTEXITCODE
+    if ($settingsExitCode -ne 0) {
+        throw (
+            "Settings automation launcher exited with $settingsExitCode.`n" +
+            ($settingsOutput -join [Environment]::NewLine))
+    }
+    $settingsMessages = @(
+        $settingsOutput |
+            Where-Object { [string]$_ -match '^\{' } |
+            ForEach-Object {
+                [string]$_ | ConvertFrom-Json
+            }
+    )
+    Assert-True `
+        -Condition ($settingsMessages.Count -eq 27) `
+        -Message 'Settings workflow should emit hello plus accepted/terminal pairs for thirteen requests.'
+    $settingsHello = $settingsMessages[0]
+    Assert-True `
+        -Condition (
+            @($settingsHello.capabilities).Count -eq 9 -and
+            @($settingsHello.capabilities) -contains
+                'setting.get' -and
+            @($settingsHello.capabilities) -contains
+                'setting.set') `
+        -Message 'Settings workflow hello should advertise both setting capabilities.'
+
+    $settingsTerminals = @{}
+    foreach ($message in $settingsMessages) {
+        if (
+            [string]$message.type -eq 'response' -and
+            [string]$message.status -in @(
+                'completed',
+                'failed',
+                'canceled')) {
+            $settingsTerminals[
+                [string]$message.request_id] = $message
+        }
+    }
+    Assert-True `
+        -Condition (
+            $settingsTerminals.Count -eq 13 -and
+            [string]$settingsTerminals['request-1'].command -eq
+                'setting.get' -and
+            [string]$settingsTerminals['request-1'].result.name -eq
+                'ui.language' -and
+            [string]$settingsTerminals['request-1'].result.value -eq
+                'en' -and
+            [string]$settingsTerminals['request-2'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-2'].result.value -eq
+                'zh-Hans' -and
+            [bool]$settingsTerminals['request-2'].result.changed -and
+            [string]$settingsTerminals['request-3'].result.value -eq
+                'zh-Hans' -and
+            [int]$settingsTerminals['request-4'].result.value -eq
+                125 -and
+            [bool]$settingsTerminals['request-4'].result.changed -and
+            [string]$settingsTerminals['request-5'].status -eq
+                'completed' -and
+            [int]$settingsTerminals['request-5'].result.value -eq
+                125 -and
+            -not [bool]$settingsTerminals['request-5'].result.changed) `
+        -Message 'Supported setting reads and writes should use stable names, types and values, with a leading-plus same-value write reporting changed:false.'
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-6'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-6'].error.code -eq
+                'setting_type_mismatch' -and
+            [string]$settingsTerminals['request-7'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-7'].error.code -eq
+                'setting_value_rejected' -and
+            [string]$settingsTerminals['request-8'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-8'].error.code -eq
+                'unsupported_setting' -and
+            [string]$settingsTerminals['request-9'].command -eq
+                'wait.idle' -and
+            [string]$settingsTerminals['request-9'].status -eq
+                'completed') `
+        -Message 'Invalid setting name, scalar type and value should fail stably without breaking the following idle barrier.'
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-10'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-10'].result.name -eq
+                'ui.scale' -and
+            [int]$settingsTerminals['request-10'].result.value -eq
+                125 -and
+            [string]$settingsTerminals['request-11'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-11'].state.settings.language -eq
+                'zh-Hans' -and
+            [int]$settingsTerminals['request-11'].state.settings.ui_scale_percentage -eq
+                125 -and
+            [string]$settingsTerminals['request-12'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-12'].result.path -eq
+                $settingsCapturePath -and
+            [string]$settingsTerminals['request-13'].command -eq
+                'app.quit' -and
+            [string]$settingsTerminals['request-13'].status -eq
+                'completed') `
+        -Message 'Later reads, applied UI state, application capture and normal quit should reflect the last valid setting values.'
+
+    $savedLanguage =
+        Get-Content -Raw -LiteralPath (
+            Join-Path $settingsControlRoot 'ui-language.json') |
+            ConvertFrom-Json
+    $savedScale =
+        Get-Content -Raw -LiteralPath (
+            Join-Path $settingsControlRoot 'ui-scale.json') |
+            ConvertFrom-Json
+    Assert-True `
+        -Condition (
+            [string]$savedLanguage.language -eq
+                'zh-Hans' -and
+            [int]$savedScale.percentage -eq 125 -and
+            (Test-Path `
+                -LiteralPath $settingsCapturePath `
+                -PathType Leaf) -and
+            (Get-Item -LiteralPath $settingsCapturePath).Length -gt
+                8) `
+        -Message 'Settings should persist through production files only inside the automation state root, with invalid writes leaving the last valid value intact.'
 
     $windowContractRoot =
         Join-Path $fixtureParent 'window-contract-state'
@@ -1024,11 +1178,74 @@ try {
 
         [void][SpecForgeAutomationWindowTestNative]::
             ShowWindowAsync($windowHandle, 4)
+        $uiScaleWriteBlocker =
+            Join-Path $windowContractRoot 'ui-scale.json'
+        [System.IO.Directory]::CreateDirectory(
+            $uiScaleWriteBlocker) | Out-Null
+        $failedScaleMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @(
+                    'pipeline begin',
+                    'setting set ui.scale 125',
+                    'pipeline end') `
+                -RequestId 'request-8'
+        )
+        $scaleAfterFailureMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @(
+                    'setting get ui.scale') `
+                -RequestId 'request-9'
+        )
+        $stateAfterScaleFailureMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('state get') `
+                -RequestId 'request-10'
+        )
+        $waitAfterScaleFailureMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('wait idle') `
+                -RequestId 'request-11'
+        )
+        $failedScaleTerminal =
+            $failedScaleMessages[1]
+        $scaleAfterFailureTerminal =
+            $scaleAfterFailureMessages[1]
+        $stateAfterScaleFailureTerminal =
+            $stateAfterScaleFailureMessages[1]
+        $waitAfterScaleFailureTerminal =
+            $waitAfterScaleFailureMessages[1]
+        $appliedScaleAfterFailure =
+            [int]$stateAfterScaleFailureTerminal.
+                state.settings.ui_scale_percentage
+        Assert-True `
+            -Condition (
+                [string]$failedScaleTerminal.status -eq
+                    'failed' -and
+                [string]$failedScaleTerminal.error.code -eq
+                    'setting_persistence_failed' -and
+                [string]$scaleAfterFailureTerminal.status -eq
+                    'completed' -and
+                [int]$scaleAfterFailureTerminal.result.value -eq
+                    100 -and
+                $appliedScaleAfterFailure -eq 100 -and
+                [string]$waitAfterScaleFailureTerminal.status -eq
+                    'completed' -and
+                (Test-Path `
+                    -LiteralPath $uiScaleWriteBlocker `
+                    -PathType Container)) `
+            -Message 'A production UI-scale write failure must map to setting_persistence_failed, retain the old model and live UI value, emit no setting notification, and preserve idle-barrier semantics.'
+        [System.IO.Directory]::Delete(
+            $uiScaleWriteBlocker)
+
         $quitMessages = @(
             Send-InteractiveLauncherRequest `
                 -Process $interactiveLauncher `
                 -Lines @('app quit') `
-                -RequestId 'request-8'
+                -RequestId 'request-12'
         )
         Assert-True `
             -Condition (

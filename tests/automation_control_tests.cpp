@@ -396,6 +396,79 @@ void TestProtocolAndStableState()
                     AutomationCommandKind::
                         WaitIdle,
         "wait.idle should parse as a structured command");
+    const auto setting_get_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::
+                SerializeAutomationCommandRequest(
+                    "setting-get-1",
+                    specforge::
+                        AutomationCommandKind::
+                            SettingGet,
+                    specforge::
+                        AutomationSettingGetParameters{
+                            .name = "ui.language",
+                        }));
+    const auto* setting_get_parameters =
+        setting_get_request.message
+        ? std::get_if<
+              specforge::
+                  AutomationSettingGetParameters>(
+              &setting_get_request.message
+                   ->parameters)
+        : nullptr;
+    const auto setting_set_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::
+                SerializeAutomationCommandRequest(
+                    "setting-set-1",
+                    specforge::
+                        AutomationCommandKind::
+                            SettingSet,
+                    specforge::
+                        AutomationSettingSetParameters{
+                            .name = "ui.scale",
+                            .value =
+                                std::int64_t{125},
+                        }));
+    const auto* setting_set_parameters =
+        setting_set_request.message
+        ? std::get_if<
+              specforge::
+                  AutomationSettingSetParameters>(
+              &setting_set_request.message
+                   ->parameters)
+        : nullptr;
+    Require(
+        setting_get_parameters != nullptr &&
+            setting_get_parameters->name ==
+                "ui.language" &&
+            setting_set_parameters != nullptr &&
+            setting_set_parameters->name ==
+                "ui.scale" &&
+            std::get<std::int64_t>(
+                setting_set_parameters->value) ==
+                125,
+        "setting.get and setting.set should round-trip their bounded name and scalar value parameters");
+    Require(
+        specforge::ParseAutomationClientMessage(
+            R"({"type":"request","request_id":"bad-setting-value","command":"setting.set","params":{"name":"ui.scale","value":{"nested":true}}})")
+                .error_code == "invalid_params",
+        "setting.set should reject non-scalar values before dispatch");
+    const auto& capabilities =
+        specforge::AutomationCapabilityNames();
+    Require(
+        capabilities.size() == 9 &&
+            std::find(
+                capabilities.begin(),
+                capabilities.end(),
+                "setting.get") !=
+                capabilities.end() &&
+            std::find(
+                capabilities.begin(),
+                capabilities.end(),
+                "setting.set") !=
+                capabilities.end(),
+        "fixed capabilities should advertise both bounded setting commands");
     const auto source_request =
         specforge::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"source-1","command":"source.open","params":{"path":"C:\\fixtures\\source.npy"}})");
@@ -495,6 +568,10 @@ void TestProtocolAndStableState()
             std::filesystem::path(
                 L"C:\\光谱\\presented.csv"),
     };
+    state.settings = {
+        .language = "zh-Hans",
+        .ui_scale_percentage = 125,
+    };
     state.window = {
         .visible = true,
         .minimized = false,
@@ -552,6 +629,10 @@ void TestProtocolAndStableState()
         RequireObjectMember(
             state_object,
             "spectrum");
+    const auto& settings =
+        RequireObjectMember(
+            state_object,
+            "settings");
     const auto& labeling =
         RequireObjectMember(
             state_object,
@@ -586,6 +667,13 @@ void TestProtocolAndStableState()
                 "path")
                 ->find("presented.csv") !=
                 std::string::npos &&
+            specforge::ReadJsonStringMember(
+                settings,
+                "language") == "zh-Hans" &&
+            specforge::ReadJsonIntMember(
+                settings,
+                "ui_scale_percentage") ==
+                125 &&
             specforge::ReadJsonSizeMember(
                 spectrum,
                 "index") == 2U &&
@@ -1646,6 +1734,52 @@ void TestOversizedTerminalResponseIsBounded()
 
 void TestExecutionClaimsAndQuitBarrier()
 {
+    {
+        RunningServer setting_fixture;
+        specforge::AutomationNamedPipeClient
+            setting_client;
+        ConnectAndHandshake(
+            setting_fixture,
+            setting_client);
+        std::string setting_send_error;
+        Require(
+            setting_client.Send(
+                specforge::
+                    SerializeAutomationCommandRequest(
+                        "claimed-setting",
+                        specforge::
+                            AutomationCommandKind::
+                                SettingSet,
+                        specforge::
+                            AutomationSettingSetParameters{
+                                .name = "ui.scale",
+                                .value =
+                                    std::int64_t{125},
+                            }),
+                setting_send_error),
+            setting_send_error);
+        Require(
+            ReceiveParsed(setting_client).status ==
+                "accepted",
+            "setting.set claim fixture should be accepted");
+        const auto setting_commands =
+            setting_fixture.server
+                .TakePendingCommands();
+        Require(
+            setting_commands.size() == 1 &&
+                setting_fixture.server
+                    .TryClaimExecution(
+                        setting_commands.front()),
+            "setting.set should enter the synchronized mutation claim");
+        setting_fixture.server.Complete(
+            setting_commands.front(),
+            "\"result\":{}");
+        Require(
+            ReceiveParsed(setting_client).status ==
+                "completed",
+            "claimed setting.set should retain its factual terminal");
+    }
+
     RunningServer fixture;
     specforge::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);

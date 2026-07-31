@@ -217,6 +217,10 @@ public:
         std::optional<std::string_view> name);
     [[nodiscard]] ShellAutomationLabelAssignmentResult
     AssignLabelForAutomation(int code);
+    [[nodiscard]] ApplicationSettingsResult
+    SetUiLanguageForAutomation(UiLanguage language);
+    [[nodiscard]] ApplicationSettingsResult
+    SetUiScaleForAutomation(int percentage);
     [[nodiscard]] ShellAutomationView AutomationView();
     [[nodiscard]] const ShellAutomationView&
     PresentedAutomationView() const noexcept;
@@ -271,6 +275,10 @@ private:
     void RenderMainPlot(const ShellStatus& status);
     void RenderSettingsPanel(const ShellStatus& status);
     void RenderSpectralLinesPanel(bool panel_open);
+    [[nodiscard]] ApplicationSettingsResult
+    ApplyApplicationSettingsIntent(
+        ApplicationSettingsIntent intent,
+        ApplicationSettingsRuntimeState runtime);
     void SetPanelVisibility(
         ApplicationPanel panel,
         bool visible);
