@@ -1524,6 +1524,69 @@ void TestQueueCapacityVersionAndDisconnect()
     }
 }
 
+void TestPreHandshakeJsonNestingIsBounded()
+{
+    RunningServer fixture;
+    specforge::AutomationNamedPipeClient client;
+    std::string error;
+    Require(
+        client.Connect(
+            fixture.pipe_name,
+            1s,
+            error),
+        error);
+
+    constexpr std::size_t kDeepJsonNesting = 20'000U;
+    std::string deeply_nested_json;
+    deeply_nested_json.reserve(
+        kDeepJsonNesting * 2U + 4U);
+    deeply_nested_json.append(
+        kDeepJsonNesting,
+        '[');
+    deeply_nested_json += "null";
+    deeply_nested_json.append(
+        kDeepJsonNesting,
+        ']');
+    Require(
+        deeply_nested_json.size() <=
+            specforge::kAutomationMaxMessageBytes,
+        "deep JSON fixture must remain within max_message_bytes");
+
+    DWORD bytes_written = 0;
+    Require(
+        WriteFile(
+            client.native_handle(),
+            deeply_nested_json.data(),
+            static_cast<DWORD>(
+                deeply_nested_json.size()),
+            &bytes_written,
+            nullptr) != FALSE &&
+            bytes_written ==
+                deeply_nested_json.size(),
+        "deep raw pipe message should reach the pre-handshake parser");
+
+    const auto response = ReceiveParsed(client);
+    Require(
+        response.status == "failed" &&
+            response.error_code == "invalid_json",
+        "over-budget JSON nesting should fail as invalid_json");
+
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (!fixture.server
+                 .queue_snapshot()
+                 .client_connected) {
+            break;
+        }
+        std::this_thread::sleep_for(5ms);
+    }
+    const auto snapshot =
+        fixture.server.queue_snapshot();
+    Require(
+        !snapshot.client_connected &&
+            !snapshot.handshake_complete,
+        "invalid pre-handshake JSON should disconnect cleanly");
+}
+
 void TestOversizedTerminalResponseIsBounded()
 {
     RunningServer fixture;
@@ -2120,6 +2183,7 @@ int wmain(int argc, wchar_t** argv)
     TestSingleClientQueueAndLifecycle();
     TestIdleWaitIsAnEarlierOnlySequenceBarrier();
     TestIdleWaitStopsLaterBusinessDispatch();
+    TestPreHandshakeJsonNestingIsBounded();
     TestQueueCapacityVersionAndDisconnect();
     TestOversizedTerminalResponseIsBounded();
     TestExecutionClaimsAndQuitBarrier();

@@ -18,6 +18,8 @@
 namespace specforge {
 namespace {
 
+constexpr std::size_t kMaxJsonNestingDepth = 64U;
+
 class JsonParser {
 public:
     JsonParser(std::string_view text, JsonCancellationCheckpoint cancellation_checkpoint)
@@ -29,7 +31,7 @@ public:
     std::optional<JsonValue> Parse(std::string& error)
     {
         JsonValue value;
-        if (!ParseValue(value, error)) {
+        if (!ParseValue(value, error, 0U)) {
             return std::nullopt;
         }
         SkipWhitespace();
@@ -62,7 +64,10 @@ private:
         }
     }
 
-    bool ParseValue(JsonValue& value, std::string& error)
+    bool ParseValue(
+        JsonValue& value,
+        std::string& error,
+        std::size_t nesting_depth)
     {
         SkipWhitespace();
         if (position_ >= text_.size()) {
@@ -72,10 +77,28 @@ private:
 
         const char character = text_[position_];
         if (character == '{') {
-            return ParseObject(value, error);
+            if (nesting_depth >=
+                kMaxJsonNestingDepth) {
+                error =
+                    "JSON nesting depth exceeds the supported limit";
+                return false;
+            }
+            return ParseObject(
+                value,
+                error,
+                nesting_depth + 1U);
         }
         if (character == '[') {
-            return ParseArray(value, error);
+            if (nesting_depth >=
+                kMaxJsonNestingDepth) {
+                error =
+                    "JSON nesting depth exceeds the supported limit";
+                return false;
+            }
+            return ParseArray(
+                value,
+                error,
+                nesting_depth + 1U);
         }
         if (character == '"') {
             value.kind = JsonValue::Kind::String;
@@ -106,7 +129,10 @@ private:
         return false;
     }
 
-    bool ParseObject(JsonValue& value, std::string& error)
+    bool ParseObject(
+        JsonValue& value,
+        std::string& error,
+        std::size_t nesting_depth)
     {
         value.kind = JsonValue::Kind::Object;
         ++position_;
@@ -128,7 +154,10 @@ private:
             }
 
             JsonValue member;
-            if (!ParseValue(member, error)) {
+            if (!ParseValue(
+                    member,
+                    error,
+                    nesting_depth)) {
                 return false;
             }
             value.object.emplace(std::move(key), std::move(member));
@@ -145,7 +174,10 @@ private:
         }
     }
 
-    bool ParseArray(JsonValue& value, std::string& error)
+    bool ParseArray(
+        JsonValue& value,
+        std::string& error,
+        std::size_t nesting_depth)
     {
         value.kind = JsonValue::Kind::Array;
         ++position_;
@@ -157,7 +189,10 @@ private:
         for (;;) {
             Checkpoint();
             JsonValue item;
-            if (!ParseValue(item, error)) {
+            if (!ParseValue(
+                    item,
+                    error,
+                    nesting_depth)) {
                 return false;
             }
             value.array.push_back(std::move(item));
