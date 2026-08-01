@@ -312,28 +312,32 @@ when that sample remains in the sequence, recompute its sequence position, and
 make previous/next navigation, navigation lists, sample-name location, and
 labeling auto-advance follow the sorted sequence. Sample sorting never changes
 which samples belong to the sample navigation sequence.
-While a filtered or sorted sequence is active, the Navigation window exposes
-`sequence` as an editable 1-based position within the current sequence. Entering
-a position and committing it with Enter or by leaving the field locates the
-source row at that position after the active filtering and sorting have been
-applied. Escape cancels the draft; character-by-character edits do not navigate.
-Enter and Escape are resolved immediately. A focus-loss commit is finalized
-only after all same-frame panels have applied their actions, and is discarded
-when its activation-time sequence-topology revision is no longer current.
-If Navigation stops submitting the field because the window is collapsed,
-covered by another dock tab, hidden, or replaced by immersive plot mode, a
-dirty draft follows the same frame-end commit and topology-validation path.
-Every valid explicit commit is forwarded as the latest navigation intent, even
-when it names the currently displayed committed position, so it can cancel a
-different deferred target that has not yet been presented.
+The Navigation window exposes `source sample` as an editable 1-based source-row
+number whenever direct source-row location is available. While a filtered or
+sorted sequence is active, it also exposes `sequence` as an editable 1-based
+position within the current sequence. Committing `source sample` locates that
+source row by converting the entered number to a 0-based `LocateRow` target;
+committing `sequence` locates the source row at that position after active
+filtering and sorting through `LocateSequencePosition`.
+Both numeric fields use the same draft/commit contract while keeping independent
+edit state. Character-by-character edits do not navigate. Enter commits and
+Escape cancels immediately; leaving a dirty field queues one focus-loss commit
+after all same-frame panels have applied their actions. A focus-loss commit is
+discarded when its activation-time sequence-topology revision is no longer
+current. If Navigation stops submitting either field because the window is
+collapsed, covered by another dock tab, hidden, or replaced by immersive plot
+mode, its dirty draft follows the same frame-end commit and topology-validation
+path. Every valid explicit commit is forwarded as the latest navigation intent,
+even when it names the currently displayed committed row or position, so it can
+cancel a different deferred target that has not yet been presented.
 `source sample` remains read-only whenever direct source-row location is
-unavailable. If filtering or sorting changes while the sequence position is
-being edited, the explicit sequence-topology revision changes and the draft
-from the previous sequence must be discarded. Ordinary deferred cursor updates
-do not invalidate the draft. No-op sample-filter or sorting reconciliation that
-retains the effective active state, membership, and row order also retains the
-revision and the draft. The current source row remains selected when
-eligible, and only its displayed sequence position is resynchronized.
+unavailable. Source, context, count, filtering, or sorting topology changes
+invalidate drafts from the previous topology. Ordinary committed or pending
+cursor updates do not invalidate an active draft. No-op sample-filter or sorting
+reconciliation that retains the effective active state, membership, and row
+order also retains the revision and the draft. The current source row remains
+selected when eligible, and only its displayed sequence position is
+resynchronized.
 
 Sample filtering belongs to the separate `Sample Filters` window. It should
 start with no selected sample-filter entries and support stacking multiple

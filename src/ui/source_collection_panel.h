@@ -10,6 +10,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace specforge {
 
@@ -50,10 +51,24 @@ public:
         const SourceCollectionPathPicker& choose_annotation_file);
 
 private:
-    struct SequencePositionBlurCommit {
+    struct NavigationNumberInputCommit {
         std::string draft;
         std::uint64_t topology_revision = 0;
     };
+
+    struct NavigationNumberInputEdit {
+        std::array<char, 32> buffer = {};
+        std::optional<std::uint64_t> edit_topology_revision;
+        std::optional<NavigationNumberInputCommit> blur_commit;
+        std::string edit_initial_value;
+        bool edit_active = false;
+        bool edit_dirty = false;
+        bool input_rendered_since_finalize = false;
+        bool reload_deactivate_pending = false;
+    };
+
+    using NavigationRequestFactory =
+        SampleNavigationRequest (*)(std::size_t);
 
     void BeginSampleNameSearch(const SourceCollectionNavigationView& navigation);
     void ClearSampleNameSearch();
@@ -67,21 +82,44 @@ private:
         SourceCollectionNavigationView navigation,
         PanelSessionInteraction& interaction,
         UiLanguage language);
-    void ReloadSequencePositionInputFromBuffer();
+    void SyncNavigationNumberInput(
+        NavigationNumberInputEdit& input,
+        std::string_view synchronized_value,
+        bool enabled,
+        bool topology_changed,
+        const char* input_id);
+    void RenderNavigationNumberInput(
+        NavigationNumberInputEdit& input,
+        const char* input_id,
+        bool enabled,
+        std::size_t target_count,
+        std::uint64_t topology_revision,
+        NavigationRequestFactory make_request,
+        SourceCollectionNavigationView& navigation,
+        PanelSessionInteraction& interaction);
+    [[nodiscard]] std::optional<NavigationNumberInputCommit>
+    FinalizeNavigationNumberInput(
+        NavigationNumberInputEdit& input,
+        const char* input_id,
+        PanelSessionInteraction& interaction);
+    void ApplyNavigationNumberInputCommit(
+        NavigationNumberInputCommit commit,
+        bool enabled,
+        std::size_t target_count,
+        std::uint64_t topology_revision,
+        NavigationRequestFactory make_request,
+        SourceCollectionNavigationView& navigation,
+        PanelSessionInteraction& interaction);
+    static void ResetNavigationNumberInputEdit(
+        NavigationNumberInputEdit& input);
+    static void ReloadNavigationNumberInputFromBuffer(
+        NavigationNumberInputEdit& input,
+        const char* input_id);
 
-    std::array<char, 32> row_index_buffer_ = {};
-    std::array<char, 32> sequence_position_buffer_ = {};
+    NavigationNumberInputEdit source_row_input_;
+    NavigationNumberInputEdit sequence_position_input_;
     std::optional<std::uint64_t>
-        synchronized_sequence_topology_revision_;
-    std::optional<std::uint64_t>
-        sequence_position_edit_topology_revision_;
-    std::optional<SequencePositionBlurCommit>
-        sequence_position_blur_commit_;
-    std::string sequence_position_edit_initial_value_;
-    bool sequence_position_edit_active_ = false;
-    bool sequence_position_edit_dirty_ = false;
-    bool sequence_position_input_rendered_since_finalize_ = false;
-    bool sequence_position_reload_deactivate_pending_ = false;
+        synchronized_navigation_topology_revision_;
     std::array<char, 128> sample_name_query_buffer_ = {};
     std::array<char, 128> annotation_display_name_buffer_ = {};
     bool sample_name_matches_open_ = false;

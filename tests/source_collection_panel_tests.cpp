@@ -14,7 +14,7 @@
 namespace specforge {
 
 struct SourceCollectionPanelUiTestAccess {
-    [[nodiscard]] static bool IsSequencePositionMove(
+    [[nodiscard]] static bool IsNavigationNumberMove(
         const SourceCollectionSessionIntent& intent)
     {
         return intent.kind ==
@@ -22,9 +22,11 @@ struct SourceCollectionPanelUiTestAccess {
                        SampleNavigation &&
                intent.sample_navigation.kind ==
                    SampleNavigationIntentKind::Move &&
-               intent.sample_navigation.request.kind ==
-                   SampleNavigationRequestKind::
-                       LocateSequencePosition;
+               (intent.sample_navigation.request.kind ==
+                    SampleNavigationRequestKind::LocateRow ||
+                intent.sample_navigation.request.kind ==
+                    SampleNavigationRequestKind::
+                        LocateSequencePosition);
     }
 
     [[nodiscard]] static const SampleNavigationRequest&
@@ -91,8 +93,8 @@ public:
                   ++submission_count;
                   Require(
                       specforge::SourceCollectionPanelUiTestAccess::
-                          IsSequencePositionMove(intent),
-                      "sequence input should submit a sequence-position navigation request");
+                          IsNavigationNumberMove(intent),
+                      "numeric navigation input should submit a direct navigation request");
                   submitted_requests.push_back(
                       specforge::SourceCollectionPanelUiTestAccess::
                           MoveRequest(intent));
@@ -276,6 +278,19 @@ public:
             "##SampleNavigationSequence");
     }
 
+    [[nodiscard]] ImGuiID SourceInputId() const
+    {
+        ImGuiWindow* window =
+            ImGui::FindWindowByName(
+                specforge::SourceCollectionPanelUi::
+                    NavigationWindowName());
+        Require(
+            window != nullptr,
+            "Navigation window should exist");
+        return window->GetID(
+            "##SampleNavigationSample");
+    }
+
     specforge::SourceCollectionSessionView view;
     int submission_count = 0;
     std::vector<specforge::SampleNavigationRequest>
@@ -309,6 +324,386 @@ void SetActiveInputTextValue(std::string_view text)
     state.TextLen =
         static_cast<int>(text.size());
     GImGui->ActiveIdHasBeenEditedBefore = true;
+}
+
+void ConfigureEditableSourceInput(
+    NavigationFixture& fixture)
+{
+    fixture.view.navigation.current_index = 19;
+    fixture.view.navigation.current_source_row = 19;
+    fixture.view.navigation.sample_count = 100;
+    fixture.view.navigation.row_location_available = true;
+    fixture.view.navigation.sequence_active = false;
+    fixture.view.navigation.sequence_count = 0;
+    fixture.view.navigation.current_sequence_position.reset();
+}
+
+void TestSourceDraftWaitsForBlurAndSurvivesCursorSync()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    Require(
+        GImGui->ActiveId == source_input_id,
+        "source input should activate for a multi-digit edit");
+
+    SetActiveInputTextValue("4");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "the first valid digit of a multi-digit source draft must not navigate");
+
+    fixture.view.navigation.current_index = 29;
+    fixture.view.navigation.current_source_row = 29;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    SetActiveInputTextValue("45");
+    ImGui::ClearActiveID();
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.front().row_index == 44,
+        "source input 45 should submit one 0-based LocateRow target after blur despite a same-topology cursor sync");
+}
+
+void TestEnterCommitsSourceDraftOnce()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "editing a complete source draft must wait for explicit commit");
+
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame([&fixture]() {
+        Require(
+            fixture.submission_count == 1,
+            "Enter should submit the source draft immediately");
+    });
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.front().row_index == 44,
+        "Enter should submit the complete source draft exactly once with a 0-based target");
+}
+
+void TestExplicitCommittedSourceRowCancelsPendingTarget()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().row_index == 44,
+        "the first explicit source row should queue the pending target");
+
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("2");
+    fixture.RenderFrame();
+    SetActiveInputTextValue("20");
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submitted_requests.size() == 2,
+        "explicitly committing the displayed source row must submit a latest-intent request");
+    Require(
+        fixture.submitted_requests.back().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.back().row_index == 19,
+        "the pending-cancel source request should preserve the 1-based to 0-based row contract");
+}
+
+void TestEscapeCancelsSourceDraftAgainstLatestCommittedValue()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+
+    fixture.view.navigation.current_index = 29;
+    fixture.view.navigation.current_source_row = 29;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submission_count == 0,
+        "Escape should cancel the source draft without navigation");
+
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    Require(
+        GImGui->InputTextState.TextA.Data != nullptr &&
+            std::string_view{
+                GImGui->InputTextState.TextA.Data} == "30",
+        "Escape should restore the latest committed source row");
+}
+
+void TestTopologyChangeDiscardsActiveSourceDraft()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+
+    fixture.view.navigation.current_index = 7;
+    fixture.view.navigation.current_source_row = 7;
+    Require(
+        fixture.view.navigation.row_location_available,
+        "source input should remain available so topology revision is the only draft invalidation guard");
+    ++fixture.view.navigation.sequence_topology_revision;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submission_count == 0,
+        "a source draft must not submit after its topology revision changes");
+    Require(
+        GImGui->ActiveId != source_input_id,
+        "topology synchronization should deactivate the stale source draft");
+    Require(
+        GImGui->InputTextState.TextA.Data != nullptr &&
+            std::string_view{
+                GImGui->InputTextState.TextA.Data} == "8",
+        "topology synchronization should reload the source input with the latest committed row");
+
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "the reloaded source row must not return as a deactivation edit");
+}
+
+void TestInvalidAndUnavailableSourceTargetsDoNotSubmit()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.view.navigation.row_location_available = false;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "an unavailable source-row input must not submit even when the test forces activation and Enter");
+
+    fixture.view.navigation.row_location_available = true;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("0");
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "source row zero should not submit a navigation request");
+
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("101");
+    ImGui::ClearActiveID();
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 0,
+        "an out-of-range source row should not submit on blur");
+}
+
+void RequireSourceDraftFinalizesWhenNotRendered(
+    NavigationFixture::NavigationFramePresentation presentation,
+    std::string_view message)
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("6");
+    fixture.RenderFrame();
+
+    fixture.RenderFrame({}, presentation);
+
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.front().row_index == 5,
+        message);
+}
+
+void TestHiddenAndCollapsedNavigationFinalizeSourceDraft()
+{
+    RequireSourceDraftFinalizesWhenNotRendered(
+        NavigationFixture::NavigationFramePresentation::Hidden,
+        "hiding Navigation should finalize the dirty source draft through the frame-end commit");
+    RequireSourceDraftFinalizesWhenNotRendered(
+        NavigationFixture::NavigationFramePresentation::Collapsed,
+        "collapsing Navigation should finalize the dirty source draft through the frame-end commit");
+}
+
+void TestCoveredDockTabFinalizesSourceDraft()
+{
+    ScopedImGuiContext context;
+    ImGui::GetIO().ConfigFlags |=
+        ImGuiConfigFlags_DockingEnable;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderDockedFrame();
+    fixture.RenderDockedFrame();
+    Require(
+        fixture.navigation_tab_visible_last_frame,
+        "Navigation should start as the visible dock tab");
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderDockedFrame();
+    SetActiveInputTextValue("6");
+    fixture.RenderDockedFrame();
+    fixture.RenderDockedFrame(true);
+
+    Require(
+        !fixture.navigation_tab_visible_last_frame,
+        "the sibling window should cover the Navigation dock tab");
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.front().row_index == 5,
+        "covering the Navigation dock tab should finalize the dirty source draft");
+}
+
+void TestSourceAndSequenceEditsKeepIndependentCommitRouting()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.view.navigation.row_location_available = true;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    const ImGuiID sequence_input_id =
+        fixture.SequenceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("6");
+    fixture.RenderFrame();
+
+    ImGui::ActivateItemByID(sequence_input_id);
+    fixture.RenderFrame();
+    fixture.RenderFrame();
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests.front().row_index == 5,
+        "moving focus from source to sequence should route the source blur commit to LocateRow");
+    Require(
+        GImGui->ActiveId == sequence_input_id,
+        "the sequence input should remain active after the source blur commit is finalized");
+
+    SetActiveInputTextValue("7");
+    ImGui::ClearActiveID();
+    fixture.RenderFrame();
+    Require(
+        fixture.submitted_requests.size() == 2 &&
+            fixture.submitted_requests.back().kind ==
+                specforge::SampleNavigationRequestKind::
+                    LocateSequencePosition &&
+            fixture.submitted_requests.back().sequence_position == 6,
+        "the following sequence blur should keep its independent LocateSequencePosition routing");
 }
 
 void TestCurrentSequenceEditStillSubmitsOnDeactivation()
@@ -752,6 +1147,15 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 
 int main()
 {
+    TestSourceDraftWaitsForBlurAndSurvivesCursorSync();
+    TestEnterCommitsSourceDraftOnce();
+    TestExplicitCommittedSourceRowCancelsPendingTarget();
+    TestEscapeCancelsSourceDraftAgainstLatestCommittedValue();
+    TestTopologyChangeDiscardsActiveSourceDraft();
+    TestInvalidAndUnavailableSourceTargetsDoNotSubmit();
+    TestHiddenAndCollapsedNavigationFinalizeSourceDraft();
+    TestCoveredDockTabFinalizesSourceDraft();
+    TestSourceAndSequenceEditsKeepIndependentCommitRouting();
     TestCurrentSequenceEditStillSubmitsOnDeactivation();
     TestDeferredShellSyncDoesNotSubmitAMultiDigitPrefix();
     TestEnterCommitsSequenceDraftOnce();

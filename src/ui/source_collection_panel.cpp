@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <limits>
 #include <optional>
 #include <string>
@@ -22,6 +21,8 @@ constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
+constexpr const char* kSampleNavigationSourceInput =
+    "##SampleNavigationSample";
 constexpr const char* kSampleNavigationSequenceInput =
     "##SampleNavigationSequence";
 
@@ -340,15 +341,10 @@ const char* SourceCollectionPanelUi::AnnotationsWindowName()
 void SourceCollectionPanelUi::SyncNavigationInputs(
     const SourceCollectionNavigationView& navigation)
 {
-    const std::optional<std::size_t> navigation_index = navigation.current_index;
-    if (navigation_index) {
-        std::snprintf(
-            row_index_buffer_.data(),
-            row_index_buffer_.size(),
-            "%zu",
-            *navigation_index + 1);
-    } else {
-        row_index_buffer_.fill('\0');
+    std::string synchronized_source_row;
+    if (navigation.current_index) {
+        synchronized_source_row =
+            std::to_string(*navigation.current_index + 1);
     }
     std::string synchronized_sequence_position;
     if (navigation.sequence_active &&
@@ -357,35 +353,25 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
             std::to_string(
                 *navigation.current_sequence_position + 1);
     }
-    const bool sequence_topology_changed =
-        synchronized_sequence_topology_revision_ &&
-        *synchronized_sequence_topology_revision_ !=
+    const bool navigation_topology_changed =
+        synchronized_navigation_topology_revision_ &&
+        *synchronized_navigation_topology_revision_ !=
             navigation.sequence_topology_revision;
-    synchronized_sequence_topology_revision_ =
+    synchronized_navigation_topology_revision_ =
         navigation.sequence_topology_revision;
-    if (!sequence_position_edit_active_ ||
-        sequence_topology_changed ||
-        !navigation.sequence_active) {
-        CopyToBuffer(
-            sequence_position_buffer_,
-            synchronized_sequence_position);
-    }
-    if (sequence_topology_changed) {
-        sequence_position_edit_active_ = false;
-        sequence_position_edit_dirty_ = false;
-        sequence_position_edit_initial_value_.clear();
-        sequence_position_edit_topology_revision_.reset();
-        sequence_position_reload_deactivate_pending_ = false;
-        if (navigation.sequence_active) {
-            ReloadSequencePositionInputFromBuffer();
-        }
-    } else if (!navigation.sequence_active) {
-        sequence_position_edit_active_ = false;
-        sequence_position_edit_dirty_ = false;
-        sequence_position_edit_initial_value_.clear();
-        sequence_position_edit_topology_revision_.reset();
-        sequence_position_reload_deactivate_pending_ = false;
-    }
+    SyncNavigationNumberInput(
+        source_row_input_,
+        synchronized_source_row,
+        navigation.row_location_available,
+        navigation_topology_changed,
+        kSampleNavigationSourceInput);
+    SyncNavigationNumberInput(
+        sequence_position_input_,
+        synchronized_sequence_position,
+        navigation.sequence_active &&
+            navigation.sequence_count > 0,
+        navigation_topology_changed,
+        kSampleNavigationSequenceInput);
     displayed_sample_name_ = navigation.current_sample_name;
     CopyToBuffer(sample_name_query_buffer_, displayed_sample_name_);
     ClearSampleNameSearch();
@@ -394,67 +380,245 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
 void SourceCollectionPanelUi::FinalizeNavigationInputEdits(
     PanelSessionInteraction& interaction)
 {
-    const bool sequence_position_input_rendered =
+    if (std::optional<NavigationNumberInputCommit> source_commit =
+            FinalizeNavigationNumberInput(
+                source_row_input_,
+                kSampleNavigationSourceInput,
+                interaction)) {
+        SourceCollectionNavigationView navigation =
+            interaction.View().navigation;
+        ApplyNavigationNumberInputCommit(
+            std::move(*source_commit),
+            navigation.row_location_available,
+            navigation.sample_count,
+            navigation.sequence_topology_revision,
+            &SampleNavigationRequest::LocateRow,
+            navigation,
+            interaction);
+        SyncNavigationInputs(navigation);
+    }
+
+    if (std::optional<NavigationNumberInputCommit> sequence_commit =
+            FinalizeNavigationNumberInput(
+                sequence_position_input_,
+                kSampleNavigationSequenceInput,
+                interaction)) {
+        SourceCollectionNavigationView navigation =
+            interaction.View().navigation;
+        ApplyNavigationNumberInputCommit(
+            std::move(*sequence_commit),
+            navigation.sequence_active &&
+                navigation.sequence_count > 0,
+            navigation.sequence_count,
+            navigation.sequence_topology_revision,
+            &SampleNavigationRequest::LocateSequencePosition,
+            navigation,
+            interaction);
+        SyncNavigationInputs(navigation);
+    }
+}
+
+void SourceCollectionPanelUi::SyncNavigationNumberInput(
+    NavigationNumberInputEdit& input,
+    std::string_view synchronized_value,
+    bool enabled,
+    bool topology_changed,
+    const char* input_id)
+{
+    const bool edit_was_active = input.edit_active;
+    if (!input.edit_active || topology_changed || !enabled) {
+        CopyToBuffer(input.buffer, synchronized_value);
+    }
+    if (topology_changed) {
+        ResetNavigationNumberInputEdit(input);
+        input.reload_deactivate_pending = false;
+        ReloadNavigationNumberInputFromBuffer(
+            input,
+            input_id);
+    } else if (!enabled) {
+        ResetNavigationNumberInputEdit(input);
+        input.reload_deactivate_pending = false;
+        if (edit_was_active) {
+            ReloadNavigationNumberInputFromBuffer(
+                input,
+                input_id);
+        }
+    }
+}
+
+void SourceCollectionPanelUi::RenderNavigationNumberInput(
+    NavigationNumberInputEdit& input,
+    const char* input_id,
+    bool enabled,
+    std::size_t target_count,
+    std::uint64_t topology_revision,
+    NavigationRequestFactory make_request,
+    SourceCollectionNavigationView& navigation,
+    PanelSessionInteraction& interaction)
+{
+    if (!enabled) {
+        ImGui::BeginDisabled();
+    }
+    const bool cancel_requested =
+        input.edit_active &&
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+    const std::string value_before_input =
+        input.buffer.data();
+    input.input_rendered_since_finalize = true;
+    const bool commit_requested =
+        ImGui::InputText(
+            input_id,
+            input.buffer.data(),
+            input.buffer.size(),
+            ImGuiInputTextFlags_CharsDecimal |
+                ImGuiInputTextFlags_EnterReturnsTrue);
+    if (!enabled) {
+        ImGui::EndDisabled();
+    }
+
+    const bool reload_deactivate_requested =
+        input.reload_deactivate_pending;
+    if (reload_deactivate_requested) {
+        input.reload_deactivate_pending = false;
+        if (ImGui::IsItemActive()) {
+            ImGui::ClearActiveID();
+        }
+    }
+    const bool deactivated_after_edit =
+        ImGui::IsItemDeactivatedAfterEdit();
+    const bool deactivated = ImGui::IsItemDeactivated();
+    if (ImGui::IsItemActivated()) {
+        input.edit_active = true;
+        input.edit_dirty = false;
+        input.edit_initial_value = value_before_input;
+        input.edit_topology_revision = topology_revision;
+    }
+    if (input.edit_active &&
+        (ImGui::IsItemEdited() ||
+         input.edit_initial_value != input.buffer.data())) {
+        input.edit_dirty = true;
+    }
+    const bool edit_is_current =
+        input.edit_active &&
+        input.edit_topology_revision &&
+        *input.edit_topology_revision == topology_revision;
+    if (!reload_deactivate_requested &&
+        !cancel_requested &&
+        edit_is_current &&
+        enabled &&
+        commit_requested) {
+        ApplyNavigationNumberInputCommit(
+            NavigationNumberInputCommit{
+                .draft = input.buffer.data(),
+                .topology_revision =
+                    *input.edit_topology_revision,
+            },
+            enabled,
+            target_count,
+            topology_revision,
+            make_request,
+            navigation,
+            interaction);
+    }
+    if (!reload_deactivate_requested &&
+        !cancel_requested &&
+        !commit_requested &&
+        edit_is_current &&
+        enabled &&
+        deactivated_after_edit) {
+        input.blur_commit =
+            NavigationNumberInputCommit{
+                .draft = input.buffer.data(),
+                .topology_revision =
+                    *input.edit_topology_revision,
+            };
+    }
+    if (reload_deactivate_requested ||
+        cancel_requested ||
+        commit_requested ||
+        deactivated) {
+        ResetNavigationNumberInputEdit(input);
+        SyncNavigationInputs(navigation);
+    }
+}
+
+std::optional<SourceCollectionPanelUi::NavigationNumberInputCommit>
+SourceCollectionPanelUi::FinalizeNavigationNumberInput(
+    NavigationNumberInputEdit& input,
+    const char* input_id,
+    PanelSessionInteraction& interaction)
+{
+    const bool input_rendered =
         std::exchange(
-            sequence_position_input_rendered_since_finalize_,
+            input.input_rendered_since_finalize,
             false);
-    if (sequence_position_edit_active_ &&
-        !sequence_position_input_rendered) {
-        if (sequence_position_edit_dirty_ &&
-            sequence_position_edit_topology_revision_) {
-            sequence_position_blur_commit_ =
-                SequencePositionBlurCommit{
-                    .draft = sequence_position_buffer_.data(),
+    if (input.edit_active && !input_rendered) {
+        if (input.edit_dirty && input.edit_topology_revision) {
+            input.blur_commit =
+                NavigationNumberInputCommit{
+                    .draft = input.buffer.data(),
                     .topology_revision =
-                        *sequence_position_edit_topology_revision_,
+                        *input.edit_topology_revision,
                 };
         }
-        sequence_position_edit_active_ = false;
-        sequence_position_edit_dirty_ = false;
-        sequence_position_edit_initial_value_.clear();
-        sequence_position_edit_topology_revision_.reset();
+        ResetNavigationNumberInputEdit(input);
         SyncNavigationInputs(
             interaction.View().navigation);
         // The widget was not submitted, so it cannot run its ordinary
         // deactivation path. Reload its retained ImGui state now to prevent
         // the hidden draft from being restored when the panel returns.
-        ReloadSequencePositionInputFromBuffer();
+        ReloadNavigationNumberInputFromBuffer(
+            input,
+            input_id);
     }
 
-    if (!sequence_position_blur_commit_) {
-        return;
-    }
-
-    SequencePositionBlurCommit blur_commit =
-        std::move(*sequence_position_blur_commit_);
-    sequence_position_blur_commit_.reset();
-    SourceCollectionNavigationView navigation =
-        interaction.View().navigation;
-    if (!navigation.sequence_active ||
-        navigation.sequence_count == 0 ||
-        navigation.sequence_topology_revision !=
-            blur_commit.topology_revision) {
-        SyncNavigationInputs(navigation);
-        return;
-    }
-
-    const std::optional<std::size_t> target_sequence_number =
-        ParseSampleNumber(blur_commit.draft);
-    if (target_sequence_number &&
-        *target_sequence_number <= navigation.sequence_count) {
-        PanelSessionInteraction::Update update =
-            interaction.Submit(
-                UpdateSampleNavigation(
-                    SampleNavigationIntent::Move(
-                        SampleNavigationRequest::
-                            LocateSequencePosition(
-                                *target_sequence_number - 1))));
-        navigation = update.view.get().navigation;
-    }
-    SyncNavigationInputs(navigation);
+    std::optional<NavigationNumberInputCommit> commit =
+        std::move(input.blur_commit);
+    input.blur_commit.reset();
+    return commit;
 }
 
-void SourceCollectionPanelUi::ReloadSequencePositionInputFromBuffer()
+void SourceCollectionPanelUi::ApplyNavigationNumberInputCommit(
+    NavigationNumberInputCommit commit,
+    bool enabled,
+    std::size_t target_count,
+    std::uint64_t topology_revision,
+    NavigationRequestFactory make_request,
+    SourceCollectionNavigationView& navigation,
+    PanelSessionInteraction& interaction)
+{
+    if (!enabled ||
+        target_count == 0 ||
+        topology_revision != commit.topology_revision) {
+        return;
+    }
+
+    const std::optional<std::size_t> target_number =
+        ParseSampleNumber(commit.draft);
+    if (!target_number || *target_number > target_count) {
+        return;
+    }
+
+    PanelSessionInteraction::Update update =
+        interaction.Submit(
+            UpdateSampleNavigation(
+                SampleNavigationIntent::Move(
+                    make_request(*target_number - 1))));
+    navigation = update.view.get().navigation;
+}
+
+void SourceCollectionPanelUi::ResetNavigationNumberInputEdit(
+    NavigationNumberInputEdit& input)
+{
+    input.edit_active = false;
+    input.edit_dirty = false;
+    input.edit_initial_value.clear();
+    input.edit_topology_revision.reset();
+}
+
+void SourceCollectionPanelUi::ReloadNavigationNumberInputFromBuffer(
+    NavigationNumberInputEdit& input,
+    const char* input_id)
 {
     if (ImGui::GetCurrentContext() == nullptr) {
         return;
@@ -464,18 +628,17 @@ void SourceCollectionPanelUi::ReloadSequencePositionInputFromBuffer()
     if (window == nullptr) {
         return;
     }
-    const ImGuiID input_id = window->GetID(
-        kSampleNavigationSequenceInput);
-    if (GImGui->InputTextDeactivatedState.ID == input_id) {
+    const ImGuiID item_id = window->GetID(input_id);
+    if (GImGui->InputTextDeactivatedState.ID == item_id) {
         GImGui->InputTextDeactivatedState.ClearFreeMemory();
     }
     ImGuiInputTextState* input_state =
-        ImGui::GetInputTextState(input_id);
+        ImGui::GetInputTextState(item_id);
     if (input_state == nullptr) {
         return;
     }
     input_state->ReloadUserBufAndSelectAll();
-    sequence_position_reload_deactivate_pending_ = true;
+    input.reload_deactivate_pending = true;
 }
 
 void SourceCollectionPanelUi::RenderFiles(
@@ -675,7 +838,6 @@ void SourceCollectionPanelUi::RenderNavigation(
         return;
     }
 
-    const std::size_t navigation_index = navigation.current_index.value_or(0);
     const std::size_t navigation_count = navigation.sample_count;
 
     RenderText(UiText(language, UiTextId::SourceSample));
@@ -683,36 +845,15 @@ void SourceCollectionPanelUi::RenderNavigation(
     const float sample_input_width =
         std::max(72.0f, ImGui::CalcTextSize("000000").x + ImGui::GetStyle().FramePadding.x * 2.0f);
     ImGui::SetNextItemWidth(sample_input_width);
-    if (!navigation.row_location_available) {
-        ImGui::BeginDisabled();
-    }
-    const bool index_changed = ImGui::InputText(
-        "##SampleNavigationSample",
-        row_index_buffer_.data(),
-        row_index_buffer_.size(),
-        ImGuiInputTextFlags_CharsDecimal);
-    if (!navigation.row_location_available) {
-        ImGui::EndDisabled();
-    }
-    const bool index_deactivated_after_edit = ImGui::IsItemDeactivatedAfterEdit();
-    if (index_changed && navigation.row_location_available) {
-        const std::optional<std::size_t> target_sample = ParseSampleNumber(row_index_buffer_.data());
-        if (target_sample && *target_sample <= navigation_count) {
-            const std::size_t target_row = *target_sample - 1;
-            if (target_row != navigation_index) {
-                PanelSessionInteraction::Update update =
-                    interaction.Submit(
-                        UpdateSampleNavigation(
-                            SampleNavigationIntent::Move(
-                                SampleNavigationRequest::LocateRow(
-                                    target_row))));
-                navigation = update.view.get().navigation;
-            }
-        }
-    }
-    if (index_deactivated_after_edit) {
-        SyncNavigationInputs(navigation);
-    }
+    RenderNavigationNumberInput(
+        source_row_input_,
+        kSampleNavigationSourceInput,
+        navigation.row_location_available,
+        navigation_count,
+        navigation.sequence_topology_revision,
+        &SampleNavigationRequest::LocateRow,
+        navigation,
+        interaction);
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::Text("/%llu", static_cast<unsigned long long>(navigation_count));
     ImGui::SameLine();
@@ -776,108 +917,15 @@ void SourceCollectionPanelUi::RenderNavigation(
         RenderText(UiText(language, UiTextId::Sequence));
         ImGui::SameLine();
         ImGui::SetNextItemWidth(sample_input_width);
-        const bool sequence_empty =
-            navigation.sequence_count == 0;
-        if (sequence_empty) {
-            ImGui::BeginDisabled();
-        }
-        const bool sequence_position_cancel_requested =
-            sequence_position_edit_active_ &&
-            ImGui::IsKeyPressed(
-                ImGuiKey_Escape,
-                false);
-        const std::string sequence_position_before_input =
-            sequence_position_buffer_.data();
-        sequence_position_input_rendered_since_finalize_ = true;
-        const bool sequence_position_commit_requested =
-            ImGui::InputText(
-                kSampleNavigationSequenceInput,
-                sequence_position_buffer_.data(),
-                sequence_position_buffer_.size(),
-                ImGuiInputTextFlags_CharsDecimal |
-                    ImGuiInputTextFlags_EnterReturnsTrue);
-        if (sequence_empty) {
-            ImGui::EndDisabled();
-        }
-        const bool sequence_position_reload_deactivate_requested =
-            sequence_position_reload_deactivate_pending_;
-        if (sequence_position_reload_deactivate_requested) {
-            sequence_position_reload_deactivate_pending_ = false;
-            if (ImGui::IsItemActive()) {
-                ImGui::ClearActiveID();
-            }
-        }
-        const bool sequence_position_deactivated_after_edit =
-            ImGui::IsItemDeactivatedAfterEdit();
-        const bool sequence_position_deactivated =
-            ImGui::IsItemDeactivated();
-        if (ImGui::IsItemActivated()) {
-            sequence_position_edit_active_ = true;
-            sequence_position_edit_dirty_ = false;
-            sequence_position_edit_initial_value_ =
-                sequence_position_before_input;
-            sequence_position_edit_topology_revision_ =
-                navigation.sequence_topology_revision;
-        }
-        if (sequence_position_edit_active_ &&
-            (ImGui::IsItemEdited() ||
-             sequence_position_edit_initial_value_ !=
-                 sequence_position_buffer_.data())) {
-            sequence_position_edit_dirty_ = true;
-        }
-        const bool sequence_position_edit_is_current =
-            sequence_position_edit_active_ &&
-            sequence_position_edit_topology_revision_ &&
-            *sequence_position_edit_topology_revision_ ==
-                navigation.sequence_topology_revision;
-        if (!sequence_position_reload_deactivate_requested &&
-            !sequence_position_cancel_requested &&
-            sequence_position_edit_is_current &&
-            !sequence_empty &&
-            sequence_position_commit_requested) {
-            const std::optional<std::size_t>
-                target_sequence_number =
-                    ParseSampleNumber(
-                        sequence_position_buffer_.data());
-            if (target_sequence_number &&
-                *target_sequence_number <=
-                    navigation.sequence_count) {
-                const std::size_t target_sequence_position =
-                    *target_sequence_number - 1;
-                PanelSessionInteraction::Update update =
-                    interaction.Submit(
-                        UpdateSampleNavigation(
-                            SampleNavigationIntent::Move(
-                                SampleNavigationRequest::
-                                    LocateSequencePosition(
-                                        target_sequence_position))));
-                navigation =
-                    update.view.get().navigation;
-            }
-        }
-        if (!sequence_position_reload_deactivate_requested &&
-            !sequence_position_cancel_requested &&
-            !sequence_position_commit_requested &&
-            sequence_position_edit_is_current &&
-            !sequence_empty &&
-            sequence_position_deactivated_after_edit) {
-            sequence_position_blur_commit_ =
-                SequencePositionBlurCommit{
-                    .draft = sequence_position_buffer_.data(),
-                    .topology_revision =
-                        *sequence_position_edit_topology_revision_,
-                };
-        }
-        if (sequence_position_reload_deactivate_requested ||
-            sequence_position_cancel_requested ||
-            sequence_position_commit_requested ||
-            sequence_position_deactivated) {
-            sequence_position_edit_active_ = false;
-            sequence_position_edit_dirty_ = false;
-            sequence_position_edit_initial_value_.clear();
-            sequence_position_edit_topology_revision_.reset();
-            SyncNavigationInputs(navigation);
-        }
+        RenderNavigationNumberInput(
+            sequence_position_input_,
+            kSampleNavigationSequenceInput,
+            navigation.sequence_count > 0,
+            navigation.sequence_count,
+            navigation.sequence_topology_revision,
+            &SampleNavigationRequest::LocateSequencePosition,
+            navigation,
+            interaction);
         ImGui::SameLine(0.0f, 0.0f);
         ImGui::Text(
             "/%llu",
