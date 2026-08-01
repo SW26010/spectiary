@@ -1182,6 +1182,8 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
         filter_view.sources[0].options[1].key == "2" && filter_view.sources[0].options[1].sample_count == 2,
         "annotation filter view should count the second value");
 
+    const std::uint64_t topology_revision_before_filter =
+        session.View().navigation.sequence_topology_revision;
     result = Submit(
         session,
         SetFilterValueSelected(source_id, "2", true));
@@ -1190,6 +1192,12 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
         "filter reconciliation should report its complete view-invalidating outcome");
     filter_view = session.View().filter;
     specforge::SourceCollectionNavigationView navigation_view = session.View().navigation;
+    const std::uint64_t filtered_topology_revision =
+        navigation_view.sequence_topology_revision;
+    Require(
+        filtered_topology_revision >
+            topology_revision_before_filter,
+        "filter reconciliation should publish a new sequence topology revision");
     Require(navigation_view.filter_active, "annotation condition should activate navigation filtering");
     Require(navigation_view.filtered_sample_count == 2, "filter should include the two matching samples");
     Require(navigation_view.sequence_active, "filter should expose an active navigation sequence");
@@ -1211,15 +1219,27 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
     Require(locate_action.navigation.blocked_by_filter, "row locate should be blocked while filtering changes order");
     Require(!locate_action.navigation.target_found, "blocked row locate should not resolve");
     Require(locate_action.navigation.current_index == 1, "blocked row locate should keep the sequence current row");
+    Require(
+        session.View().navigation.sequence_topology_revision ==
+            filtered_topology_revision,
+        "a blocked cursor request must not change the sequence topology revision");
 
     const specforge::SourceCollectionSessionResult next_action =
         Submit(session, MoveSampleNavigation(
                             specforge::SampleNavigationRequest::Next()));
     Require(next_action.navigation.target_found, "filtered next should find a visible target");
     Require(next_action.navigation.current_index == 2, "filtered next should move to the next matching sample");
+    Require(
+        session.View().navigation.sequence_topology_revision ==
+            filtered_topology_revision,
+        "committing a deferred cursor move must retain the sequence topology revision");
 
     result = Submit(session, RemoveSampleFilterSource(source_id));
     Require(!session.View().navigation.filter_active, "removing the sample filter source should clear navigation filtering");
+    Require(
+        session.View().navigation.sequence_topology_revision >
+            filtered_topology_revision,
+        "clearing the active filter should publish a new sequence topology revision");
     Require(session.View().filter.sources.empty(), "removed source should leave no selected sample filters");
     Require(session.View().filter.available_sources.size() == 1, "removed source should return to the add-source list");
 }
@@ -4007,6 +4027,72 @@ void TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresent
         "filter target and snapshot should become visible together");
 }
 
+void TestExplicitCommittedSequencePositionCancelsPendingNavigation()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_deferred_sequence_cancel.npy");
+    specforge::SourceCollectionSession session({}, {}, {}, {});
+
+    const specforge::SpectrumSnapshotHandle initial_snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "deferred-sequence-cancel",
+        "source",
+        "source-fingerprint",
+        "context",
+        3,
+    };
+    context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(initial_snapshot, context, 0, {}, {});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   initial_snapshot,
+                   std::move(context),
+                   std::move(prepared))
+            .loaded,
+        "deferred sequence-cancel fixture should load");
+
+    (void)Submit(
+        session,
+        SetSampleSortSource("sample-name"));
+    Require(
+        session.View().navigation.sequence_active &&
+            session.View().navigation.current_sequence_position == 0,
+        "sample-name sorting should expose committed sequence position A");
+
+    const specforge::SourceCollectionSessionResult pending = Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateSequencePosition(1)));
+    Require(
+        pending.follow_up_spectrum_index == 1 &&
+            session.EffectiveSampleNavigationIndex() == 1,
+        "explicit sequence position B should become the deferred target while A remains displayed");
+    Require(
+        session.View().navigation.current_index == 0 &&
+            session.View().navigation.current_sequence_position == 0,
+        "the pending B request must not replace the committed A presentation");
+
+    const specforge::SourceCollectionSessionResult canceled = Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateSequencePosition(0)));
+    Require(
+        !canceled.follow_up_spectrum_index &&
+            canceled.canceled_source_follow_up_path == source_path,
+        "explicitly resubmitting committed A should cancel B's source-bound follow-up");
+    Require(
+        session.EffectiveSampleNavigationIndex() == 0 &&
+            !session.CancelActivePendingSampleNavigation(),
+        "latest intent A should clear the deferred B target");
+}
+
 void TestDeferredLabelAutoAdvanceUsesTheVisibleLabeledSampleAsItsBase()
 {
     const std::filesystem::path source_path = UniqueTempPath("_deferred_label_advance.npy");
@@ -6248,6 +6334,7 @@ void RunAllTests()
     TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp();
     TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp();
     TestDeferredFilterRetargetsPendingNavigationWithoutChangingCommittedPresentation();
+    TestExplicitCommittedSequencePositionCancelsPendingNavigation();
     TestNonActiveRemovalAndCurrentReselectionPreserveDeferredNavigation();
     TestDeferredNavigationKeepsPresentedSampleUntilPreparedSnapshotCommits();
     TestSwitchingAwayCancelsSourceBoundDeferredNavigation();

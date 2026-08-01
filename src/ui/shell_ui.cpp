@@ -1066,6 +1066,10 @@ void ShellUi::Render(const ShellStatus& status)
     sample_workflow_shortcut_ = {};
     if (immersive_plot_mode_) {
         RenderImmersivePlot(status);
+        source_collection_panel_ui_.FinalizeNavigationInputEdits(
+            panel_session_interaction_);
+        HandleSessionAction(
+            panel_session_interaction_.TakeAction());
         HandleSampleWorkflowShortcut();
         pending_keyboard_previous_at_.reset();
         pending_keyboard_next_at_.reset();
@@ -1115,6 +1119,12 @@ void ShellUi::Render(const ShellStatus& status)
             panel_visibility.spectral_lines);
     }
     RenderSettingsPanel(status);
+    // Blur commits must observe every same-frame panel mutation, especially
+    // sample filtering and sorting rendered after Navigation.
+    source_collection_panel_ui_.FinalizeNavigationInputEdits(
+        panel_session_interaction_);
+    HandleSessionAction(
+        panel_session_interaction_.TakeAction());
     HandleSampleWorkflowShortcut();
     pending_keyboard_previous_at_.reset();
     pending_keyboard_next_at_.reset();

@@ -43,6 +43,13 @@ void TestSourceOrderSequence()
     Require(sequence.next_target && *sequence.next_target == 2, "next target should be row 2");
     RequireRows(sequence.sample_name_matches, {0, 1, 2}, "sample-name matches should follow source order");
     Require(sequence.LocateSourceRow(2) && *sequence.LocateSourceRow(2) == 2, "row locate should resolve in source order");
+    Require(
+        sequence.LocateSequencePosition(2) &&
+            *sequence.LocateSequencePosition(2) == 2,
+        "sequence-position locate should resolve in source order");
+    Require(
+        !sequence.LocateSequencePosition(3),
+        "sequence-position locate should reject a source-order position outside the sequence");
 }
 
 void TestFilteredSequence()
@@ -69,6 +76,17 @@ void TestFilteredSequence()
     Require(sequence.next_target && *sequence.next_target == 3, "next target should skip excluded rows");
     RequireRows(sequence.sample_name_matches, {1, 3}, "sample-name matches should be scoped to included rows");
     Require(!sequence.LocateSourceRow(3), "row locate should be disabled while filtered order differs");
+    Require(
+        sequence.LocateSequencePosition(0) &&
+            *sequence.LocateSequencePosition(0) == 1,
+        "sequence position 0 should resolve the first included source row");
+    Require(
+        sequence.LocateSequencePosition(1) &&
+            *sequence.LocateSequencePosition(1) == 3,
+        "sequence position 1 should resolve the second included source row");
+    Require(
+        !sequence.LocateSequencePosition(2),
+        "sequence-position locate should reject a position outside the filtered sequence");
     Require(sequence.LocateSourceRowInSequence(3) && *sequence.LocateSourceRowInSequence(3) == 3, "sequence-scoped source row locate should allow included rows");
     Require(!sequence.LocateSourceRowInSequence(2), "sequence-scoped source row locate should not bypass the active sequence");
     Require(sequence.LocateSampleName(names, "beta") && *sequence.LocateSampleName(names, "beta") == 1, "sample-name locate should resolve the first sequence match");
@@ -94,6 +112,9 @@ void TestEmptySequence()
     Require(!sequence.current_source_row, "empty sequence should not expose a current source row");
     Require(!sequence.current_sequence_position, "empty sequence should not expose a current sequence position");
     Require(!sequence.previous_target && !sequence.next_target, "empty sequence should not expose movement targets");
+    Require(
+        !sequence.LocateSequencePosition(0),
+        "empty sequence should not resolve a sequence position");
 }
 
 void TestCurrentRowExcluded()

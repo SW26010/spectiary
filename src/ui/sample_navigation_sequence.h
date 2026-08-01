@@ -61,6 +61,8 @@ struct SampleNavigationSequence {
 
     [[nodiscard]] bool ContainsSourceRow(std::size_t row) const;
     [[nodiscard]] std::optional<std::size_t> LocateSourceRow(std::size_t row) const;
+    [[nodiscard]] std::optional<std::size_t> LocateSequencePosition(
+        std::size_t position) const;
     [[nodiscard]] std::optional<std::size_t> LocateSourceRowInSequence(std::size_t row) const;
     [[nodiscard]] std::optional<std::size_t> LocateSampleName(
         std::span<const std::string> sample_names,

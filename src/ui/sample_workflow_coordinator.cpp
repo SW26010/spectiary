@@ -1519,6 +1519,8 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     view.sequence_active = sequence.active;
     view.sequence_empty = sequence.empty;
     view.sequence_count = sequence.active ? sequence.ordered_rows.size() : view.sample_count;
+    view.sequence_topology_revision =
+        navigation_.sequence_topology_revision();
     view.filtered_sample_count = view.sequence_count;
     view.row_location_available = sequence.row_location_available;
     if (snapshot && view.current_index && snapshot->collection.current_index == *view.current_index) {

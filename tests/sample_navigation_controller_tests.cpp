@@ -1027,6 +1027,70 @@ void TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter()
         "sort-only row location must not claim that an inactive filter blocked the target");
 }
 
+void TestSequencePositionLocateFollowsFilteredSortedOrder()
+{
+    specforge::SampleNavigationController controller(
+        std::filesystem::path{});
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/sequence-position.npy",
+            "sequence-position",
+            5,
+            0),
+        specforge::SourceCollectionIdentity{
+            .id = "sequence-position-identity",
+            .source_name = "sequence-position",
+            .source_fingerprint = "source",
+            .context_fingerprint = "context",
+            .spectrum_count = 5,
+        },
+        {});
+    (void)controller.SetSampleFilter(
+        {false, true, true, false, true});
+    specforge::SampleNavigationSortChoice sort;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(50.0),
+        specforge::MakeSampleNavigationSortValue(40.0),
+        specforge::MakeSampleNavigationSortValue(20.0),
+        specforge::MakeSampleNavigationSortValue(60.0),
+        specforge::MakeSampleNavigationSortValue(10.0),
+    };
+    (void)controller.SetSampleSorting(std::move(sort));
+
+    specforge::SampleNavigationResult result =
+        controller.Navigate(
+            specforge::SampleNavigationRequest::
+                LocateSequencePosition(0));
+    Require(
+        result.target_found && result.moved &&
+            result.current_index == 4 &&
+            result.current_sequence_position == 0,
+        "sequence position 0 should resolve the first filtered and sorted source row");
+
+    result = controller.NavigateDeferred(
+        specforge::SampleNavigationRequest::
+            LocateSequencePosition(1),
+        false);
+    Require(
+        result.target_found && result.moved &&
+            result.current_index == 2 &&
+            result.current_sequence_position == 1 &&
+            controller.pending_index() == 2,
+        "deferred sequence-position locate should target the source row at the requested active position");
+
+    Require(
+        controller.CommitDeferredNavigation(2),
+        "the deferred sequence-position target should commit");
+    result = controller.Navigate(
+        specforge::SampleNavigationRequest::
+            LocateSequencePosition(3));
+    Require(
+        !result.target_found && !result.moved &&
+            result.current_index == 2,
+        "sequence-position locate should reject positions outside the active sequence");
+}
+
 void TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions()
 {
     const std::filesystem::path cache_path =
@@ -1318,6 +1382,96 @@ void TestAdjacentRowsFollowFilteredSortedRawSequence()
         "previous prefetch policy must reverse direction without leaving the active sequence");
 }
 
+void TestSequenceTopologyRevisionExcludesCursorMovement()
+{
+    specforge::SampleNavigationController controller(
+        std::filesystem::path{});
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/sequence-topology-revision.npy",
+            "sequence-topology-revision",
+            5,
+            0),
+        specforge::SourceCollectionIdentity{
+            .id = "sequence-topology-revision-identity",
+            .source_name = "sequence-topology-revision",
+            .source_fingerprint = "source",
+            .context_fingerprint = "context",
+            .spectrum_count = 5,
+        },
+        {});
+    const std::uint64_t activated_revision =
+        controller.sequence_topology_revision();
+
+    const specforge::SampleNavigationResult deferred =
+        controller.NavigateDeferred(
+            specforge::SampleNavigationRequest::
+                LocateSequencePosition(2),
+            false);
+    Require(
+        deferred.target_found &&
+            controller.sequence_topology_revision() ==
+                activated_revision,
+        "pending sequence-position navigation must not change the topology revision");
+    Require(
+        controller.CommitDeferredNavigation(2) &&
+            controller.sequence_topology_revision() ==
+                activated_revision,
+        "committing a pending cursor must not change the topology revision");
+
+    (void)controller.SetSampleFilter(
+        {true, true, true, true, true});
+    const std::uint64_t filtered_revision =
+        controller.sequence_topology_revision();
+    Require(
+        filtered_revision > activated_revision,
+        "changing the active filter should advance the topology revision");
+
+    (void)controller.SetSampleFilter(
+        {true, true, true, true, true});
+    Require(
+        controller.sequence_topology_revision() ==
+            filtered_revision,
+        "reapplying the same effective filter topology must not advance the revision");
+
+    (void)controller.SetSampleNameQuery("sample");
+    Require(
+        controller.sequence_topology_revision() ==
+            filtered_revision,
+        "changing a search query must not advance the sequence topology revision");
+
+    specforge::SampleNavigationSortChoice sort;
+    sort.values = {
+        specforge::MakeSampleNavigationSortValue(5.0),
+        specforge::MakeSampleNavigationSortValue(4.0),
+        specforge::MakeSampleNavigationSortValue(3.0),
+        specforge::MakeSampleNavigationSortValue(2.0),
+        specforge::MakeSampleNavigationSortValue(1.0),
+    };
+    (void)controller.SetSampleSorting(std::move(sort));
+    const std::uint64_t sorted_revision =
+        controller.sequence_topology_revision();
+    Require(
+        sorted_revision > filtered_revision,
+        "changing sorting should advance the sequence topology revision");
+
+    specforge::SampleNavigationSortChoice equivalent_sort;
+    equivalent_sort.values = {
+        specforge::MakeSampleNavigationSortValue(50.0),
+        specforge::MakeSampleNavigationSortValue(40.0),
+        specforge::MakeSampleNavigationSortValue(30.0),
+        specforge::MakeSampleNavigationSortValue(20.0),
+        specforge::MakeSampleNavigationSortValue(10.0),
+    };
+    (void)controller.SetSampleSorting(
+        std::move(equivalent_sort));
+    Require(
+        controller.sequence_topology_revision() ==
+            sorted_revision,
+        "sorting input changes that retain the effective row order must not advance the topology revision");
+}
+
 void TestExactNameResolutionIsDeterministic()
 {
     specforge::SampleNavigationController controller(
@@ -1408,8 +1562,10 @@ int main()
     TestFilterConstrainsSequentialNavigation();
     TestEmptyFilterClearsCurrentSequenceRow();
     TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
+    TestSequencePositionLocateFollowsFilteredSortedOrder();
     TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions();
     TestSequenceStateInvalidatesWithNavigationInputsAndContext();
+    TestSequenceTopologyRevisionExcludesCursorMovement();
     TestAdjacentRowsFollowFilteredSortedRawSequence();
     TestExactNameResolutionIsDeterministic();
     return 0;

@@ -5,6 +5,7 @@
 #include "ui/ui_text.h"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -21,6 +22,8 @@ public:
     [[nodiscard]] static const char* AnnotationsWindowName();
 
     void SyncNavigationInputs(const SourceCollectionNavigationView& navigation);
+    void FinalizeNavigationInputEdits(
+        PanelSessionInteraction& interaction);
 
     void RenderFiles(
         PanelSessionInteraction& interaction,
@@ -47,6 +50,11 @@ public:
         const SourceCollectionPathPicker& choose_annotation_file);
 
 private:
+    struct SequencePositionBlurCommit {
+        std::string draft;
+        std::uint64_t topology_revision = 0;
+    };
+
     void BeginSampleNameSearch(const SourceCollectionNavigationView& navigation);
     void ClearSampleNameSearch();
     void RestoreFailedSampleNameSearch(
@@ -59,8 +67,21 @@ private:
         SourceCollectionNavigationView navigation,
         PanelSessionInteraction& interaction,
         UiLanguage language);
+    void ReloadSequencePositionInputFromBuffer();
 
     std::array<char, 32> row_index_buffer_ = {};
+    std::array<char, 32> sequence_position_buffer_ = {};
+    std::optional<std::uint64_t>
+        synchronized_sequence_topology_revision_;
+    std::optional<std::uint64_t>
+        sequence_position_edit_topology_revision_;
+    std::optional<SequencePositionBlurCommit>
+        sequence_position_blur_commit_;
+    std::string sequence_position_edit_initial_value_;
+    bool sequence_position_edit_active_ = false;
+    bool sequence_position_edit_dirty_ = false;
+    bool sequence_position_input_rendered_since_finalize_ = false;
+    bool sequence_position_reload_deactivate_pending_ = false;
     std::array<char, 128> sample_name_query_buffer_ = {};
     std::array<char, 128> annotation_display_name_buffer_ = {};
     bool sample_name_matches_open_ = false;

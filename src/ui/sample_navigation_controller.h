@@ -27,6 +27,7 @@ enum class SampleNavigationRequestKind {
     Next,
     LabelAdvance,
     LocateRow,
+    LocateSequencePosition,
     LocateSourceRowInSequence,
     LocateSampleName,
     LocateSampleNameMatch,
@@ -36,6 +37,7 @@ enum class SampleNavigationRequestKind {
 struct SampleNavigationRequest {
     SampleNavigationRequestKind kind = SampleNavigationRequestKind::LocateRow;
     std::size_t row_index = 0;
+    std::size_t sequence_position = 0;
     std::string sample_name;
     std::vector<bool> eligible_samples;
 
@@ -44,6 +46,8 @@ struct SampleNavigationRequest {
     [[nodiscard]] static SampleNavigationRequest LabelAdvance();
     [[nodiscard]] static SampleNavigationRequest LabelAdvanceToEligible(std::vector<bool> eligible_samples);
     [[nodiscard]] static SampleNavigationRequest LocateRow(std::size_t row_index);
+    [[nodiscard]] static SampleNavigationRequest LocateSequencePosition(
+        std::size_t sequence_position);
     [[nodiscard]] static SampleNavigationRequest LocateSourceRowInSequence(std::size_t row_index);
     [[nodiscard]] static SampleNavigationRequest LocateSampleName(std::string sample_name);
     [[nodiscard]] static SampleNavigationRequest LocateSampleNameMatch(
@@ -162,12 +166,22 @@ public:
     [[nodiscard]] ExactSampleNameResolution
     ResolveExactSampleName(std::string_view name) const;
     [[nodiscard]] std::uint64_t active_context_generation() const;
+    [[nodiscard]] std::uint64_t sequence_topology_revision() const;
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
     [[nodiscard]] LocalUserStatePersistenceStatus PersistenceStatus() const;
 
 private:
+    struct PublishedSequenceTopology {
+        std::string source_collection_identity;
+        std::string source_fingerprint;
+        std::string context_fingerprint;
+        bool active = false;
+        std::size_t source_row_count = 0;
+        std::vector<std::size_t> ordered_rows;
+    };
+
     struct SourceSession {
         std::string source_collection_identity;
         std::string source_name;
@@ -198,8 +212,17 @@ private:
         const SourceSession& session);
     [[nodiscard]] static const SampleNavigationSequence& CachedSequenceState(
         const SourceSession& session);
+    [[nodiscard]] static PublishedSequenceTopology
+        CapturePublishedSequenceTopology(
+            const SourceSession& session,
+            const SampleNavigationSequence& sequence);
+    [[nodiscard]] static bool MatchesPublishedSequenceTopology(
+        const PublishedSequenceTopology& published,
+        const SourceSession& session,
+        const SampleNavigationSequence& sequence);
     [[nodiscard]] static const SampleNavigationSequence& CachedSequence(const SourceSession& session);
-    static void InvalidateSequenceState(SourceSession& session);
+    void InvalidateSequenceState(SourceSession& session);
+    void RefreshSequenceTopologyRevision();
     static std::optional<std::size_t> ReconcileCurrentWithSequence(SourceSession& session);
     static std::optional<std::size_t> ReconcileDeferredWithSequence(
         SourceSession& session,
@@ -232,6 +255,10 @@ private:
     std::string state_cache_load_warning_;
     std::optional<std::string> active_source_key_;
     std::uint64_t active_context_generation_ = 0;
+    // Cursor movement does not change the ordered-row topology.
+    std::uint64_t sequence_topology_revision_ = 0;
+    std::optional<PublishedSequenceTopology>
+        published_sequence_topology_;
     bool state_cache_loaded_ = false;
 };
 

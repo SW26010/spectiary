@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.7.0 LANGUAGES CXX)
+project(SpecForge VERSION 0.7.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -768,6 +768,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_sample_workflow_shortcut_tests
     tests/sample_workflow_shortcut_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_source_collection_panel_tests
+    tests/source_collection_panel_tests.cpp
     specforge_desktop_ui
 )
 specforge_add_test(

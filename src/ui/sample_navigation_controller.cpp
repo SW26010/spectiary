@@ -119,6 +119,9 @@ std::optional<std::size_t> ResolveNavigationTarget(
         }
         return target;
     }
+    case SampleNavigationRequestKind::LocateSequencePosition:
+        return sequence.LocateSequencePosition(
+            request.sequence_position);
     case SampleNavigationRequestKind::LocateSourceRowInSequence: {
         const std::optional<std::size_t> target = sequence.LocateSourceRowInSequence(request.row_index);
         if (!target && request.row_index < spectrum_count && sequence.active) {
@@ -177,6 +180,16 @@ SampleNavigationRequest SampleNavigationRequest::LocateRow(std::size_t row_index
     SampleNavigationRequest request;
     request.kind = SampleNavigationRequestKind::LocateRow;
     request.row_index = row_index;
+    return request;
+}
+
+SampleNavigationRequest SampleNavigationRequest::LocateSequencePosition(
+    std::size_t sequence_position)
+{
+    SampleNavigationRequest request;
+    request.kind =
+        SampleNavigationRequestKind::LocateSequencePosition;
+    request.sequence_position = sequence_position;
     return request;
 }
 
@@ -333,6 +346,7 @@ void SampleNavigationController::ActivateSource(
     active_source_key_ = identity.id;
     if (active_source_changed || context_changed) {
         ++active_context_generation_;
+        RefreshSequenceTopologyRevision();
     }
     PersistActiveIndex();
 }
@@ -382,6 +396,7 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
     source_key_to_session_key_[source_key] = identity.id;
     active_source_key_ = identity.id;
     ++active_context_generation_;
+    RefreshSequenceTopologyRevision();
     return retired_session;
 }
 
@@ -422,10 +437,14 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::ActivateKnow
     }
     const auto mapped = source_key_to_session_key_.find(std::string(source_key));
     if (!active_source_key_ || *active_source_key_ != mapped->second) {
-        InvalidateSequenceState(sessions_.at(mapped->second));
         ++active_context_generation_;
+        active_source_key_ = mapped->second;
+        RefreshSequenceTopologyRevision();
+        InvalidateSequenceState(
+            sessions_.at(mapped->second));
+    } else {
+        active_source_key_ = mapped->second;
     }
-    active_source_key_ = mapped->second;
     PersistActiveIndex();
     return identity;
 }
@@ -498,6 +517,7 @@ BackgroundRetirementHandle SampleNavigationController::RemoveSource(std::string_
     if (active_source_key_ && *active_source_key_ == session_key) {
         active_source_key_.reset();
         ++active_context_generation_;
+        RefreshSequenceTopologyRevision();
     }
     return retired;
 }
@@ -506,6 +526,9 @@ void SampleNavigationController::ClearActiveSource()
 {
     if (active_source_key_) {
         ++active_context_generation_;
+        active_source_key_.reset();
+        RefreshSequenceTopologyRevision();
+        return;
     }
     active_source_key_.reset();
 }
@@ -524,7 +547,6 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
 
     const bool loaded = LoadReadOnlyAnnotationIntoSession(*session, path, message);
     if (loaded) {
-        InvalidateSequenceState(*session);
         ++active_context_generation_;
     }
     return loaded;
@@ -550,7 +572,6 @@ bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const 
         return false;
     }
 
-    InvalidateSequenceState(*session);
     ++active_context_generation_;
     return true;
 }
@@ -577,7 +598,6 @@ bool SampleNavigationController::RestoreReadOnlyAnnotationsForActiveSource(
         restored = LoadReadOnlyAnnotationIntoSession(*session, path) || restored;
     }
     if (restored) {
-        InvalidateSequenceState(*session);
         ++active_context_generation_;
     }
     return restored;
@@ -846,6 +866,7 @@ std::optional<std::size_t> SampleNavigationController::SetSampleFilter(
         ? ReconcileDeferredWithSequence(*session)
         : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    RefreshSequenceTopologyRevision();
     if (defer_navigation) {
         return deferred_target;
     }
@@ -882,6 +903,7 @@ std::optional<std::size_t> SampleNavigationController::ClearSampleFilter(bool de
         ? ReconcileDeferredWithSequence(*session, restored_index)
         : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    RefreshSequenceTopologyRevision();
     if (defer_navigation) {
         return deferred_target;
     }
@@ -934,6 +956,7 @@ std::optional<std::size_t> SampleNavigationController::SetSampleSorting(
         ? ReconcileDeferredWithSequence(*session)
         : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    RefreshSequenceTopologyRevision();
     if (defer_navigation) {
         return deferred_target;
     }
@@ -958,6 +981,7 @@ std::optional<std::size_t> SampleNavigationController::ClearSampleSorting(bool d
         ? ReconcileDeferredWithSequence(*session)
         : ReconcileCurrentWithSequence(*session);
     RecomputeMatches(*session);
+    RefreshSequenceTopologyRevision();
     if (defer_navigation) {
         return deferred_target;
     }
@@ -1112,6 +1136,12 @@ SampleNavigationController::active_context_generation() const
     return active_context_generation_;
 }
 
+std::uint64_t
+SampleNavigationController::sequence_topology_revision() const
+{
+    return sequence_topology_revision_;
+}
+
 void SampleNavigationController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
@@ -1221,6 +1251,39 @@ SampleNavigationSequence SampleNavigationController::BuildSequenceState(
     return BuildSampleNavigationSequence(input);
 }
 
+SampleNavigationController::PublishedSequenceTopology
+SampleNavigationController::CapturePublishedSequenceTopology(
+    const SourceSession& session,
+    const SampleNavigationSequence& sequence)
+{
+    return PublishedSequenceTopology{
+        .source_collection_identity =
+            session.source_collection_identity,
+        .source_fingerprint = session.source_fingerprint,
+        .context_fingerprint = session.context_fingerprint,
+        .active = sequence.active,
+        .source_row_count = sequence.source_row_count,
+        .ordered_rows = sequence.ordered_rows,
+    };
+}
+
+bool SampleNavigationController::MatchesPublishedSequenceTopology(
+    const PublishedSequenceTopology& published,
+    const SourceSession& session,
+    const SampleNavigationSequence& sequence)
+{
+    return published.source_collection_identity ==
+               session.source_collection_identity &&
+           published.source_fingerprint ==
+               session.source_fingerprint &&
+           published.context_fingerprint ==
+               session.context_fingerprint &&
+           published.active == sequence.active &&
+           published.source_row_count ==
+               sequence.source_row_count &&
+           published.ordered_rows == sequence.ordered_rows;
+}
+
 const SampleNavigationSequence& SampleNavigationController::CachedSequenceState(
     const SourceSession& session)
 {
@@ -1242,7 +1305,39 @@ const SampleNavigationSequence& SampleNavigationController::CachedSequence(const
 
 void SampleNavigationController::InvalidateSequenceState(SourceSession& session)
 {
+    // Cache invalidation is not itself an observable topology change. Callers
+    // that mutate filtering or sorting rebuild the sequence before publishing
+    // its effective topology through RefreshSequenceTopologyRevision().
     session.sequence_state_cache_valid = false;
+}
+
+void SampleNavigationController::RefreshSequenceTopologyRevision()
+{
+    const SourceSession* session = ActiveSession();
+    if (session == nullptr) {
+        if (!published_sequence_topology_) {
+            return;
+        }
+        published_sequence_topology_.reset();
+        ++sequence_topology_revision_;
+        return;
+    }
+
+    // Topology mutations rebuild this cache before publication. A source
+    // switch may deliberately mark it cold afterward, but leaves its last
+    // effective topology resident so publication never warms the source.
+    if (published_sequence_topology_ &&
+        MatchesPublishedSequenceTopology(
+            *published_sequence_topology_,
+            *session,
+            session->sequence_state_cache)) {
+        return;
+    }
+    published_sequence_topology_ =
+        CapturePublishedSequenceTopology(
+            *session,
+            session->sequence_state_cache);
+    ++sequence_topology_revision_;
 }
 
 std::optional<std::size_t> SampleNavigationController::ReconcileCurrentWithSequence(SourceSession& session)

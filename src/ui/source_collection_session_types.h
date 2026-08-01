@@ -9,6 +9,7 @@
 #include "ui/sample_navigation_sequence.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -94,6 +95,8 @@ struct SourceCollectionNavigationView {
     bool sequence_active = false;
     bool sequence_empty = false;
     std::size_t sequence_count = 0;
+    // Changes only when source context, membership, or ordering changes.
+    std::uint64_t sequence_topology_revision = 0;
     std::optional<std::size_t> current_sequence_position;
     std::optional<std::size_t> current_source_row;
     bool row_location_available = true;

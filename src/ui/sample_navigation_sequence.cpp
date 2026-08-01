@@ -140,6 +140,19 @@ std::optional<std::size_t> SampleNavigationSequence::LocateSourceRow(std::size_t
     return row;
 }
 
+std::optional<std::size_t> SampleNavigationSequence::LocateSequencePosition(
+    std::size_t position) const
+{
+    if (UsesImplicitSourceOrder(*this)) {
+        return position < source_row_count
+            ? std::optional<std::size_t>{position}
+            : std::nullopt;
+    }
+    return position < ordered_rows.size()
+        ? std::optional<std::size_t>{ordered_rows[position]}
+        : std::nullopt;
+}
+
 std::optional<std::size_t> SampleNavigationSequence::LocateSourceRowInSequence(std::size_t row) const
 {
     if (!ContainsSourceRow(row)) {

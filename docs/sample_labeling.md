@@ -312,6 +312,28 @@ when that sample remains in the sequence, recompute its sequence position, and
 make previous/next navigation, navigation lists, sample-name location, and
 labeling auto-advance follow the sorted sequence. Sample sorting never changes
 which samples belong to the sample navigation sequence.
+While a filtered or sorted sequence is active, the Navigation window exposes
+`sequence` as an editable 1-based position within the current sequence. Entering
+a position and committing it with Enter or by leaving the field locates the
+source row at that position after the active filtering and sorting have been
+applied. Escape cancels the draft; character-by-character edits do not navigate.
+Enter and Escape are resolved immediately. A focus-loss commit is finalized
+only after all same-frame panels have applied their actions, and is discarded
+when its activation-time sequence-topology revision is no longer current.
+If Navigation stops submitting the field because the window is collapsed,
+covered by another dock tab, hidden, or replaced by immersive plot mode, a
+dirty draft follows the same frame-end commit and topology-validation path.
+Every valid explicit commit is forwarded as the latest navigation intent, even
+when it names the currently displayed committed position, so it can cancel a
+different deferred target that has not yet been presented.
+`source sample` remains read-only whenever direct source-row location is
+unavailable. If filtering or sorting changes while the sequence position is
+being edited, the explicit sequence-topology revision changes and the draft
+from the previous sequence must be discarded. Ordinary deferred cursor updates
+do not invalidate the draft. No-op sample-filter or sorting reconciliation that
+retains the effective active state, membership, and row order also retains the
+revision and the draft. The current source row remains selected when
+eligible, and only its displayed sequence position is resynchronized.
 
 Sample filtering belongs to the separate `Sample Filters` window. It should
 start with no selected sample-filter entries and support stacking multiple

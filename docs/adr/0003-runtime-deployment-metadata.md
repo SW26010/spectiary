@@ -37,7 +37,7 @@ separates product, build, and optional deployment data:
   "schema_version": 4,
   "product": {
     "name": "SpecForge",
-    "version": "0.7.0"
+    "version": "0.7.1"
   },
   "build": {
     "source_mode": "working_tree",

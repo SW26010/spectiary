@@ -22,6 +22,7 @@
 namespace specforge {
 
 class SampleWorkflowCoordinator;
+struct SourceCollectionPanelUiTestAccess;
 struct SampleWorkflowTransitionOutcome;
 class SourceCollectionRoster;
 struct SourceCollectionRosterOpenResult;
@@ -128,6 +129,7 @@ struct SampleNavigationIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend struct SourceCollectionPanelUiTestAccess;
     friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
 
@@ -224,6 +226,7 @@ struct SourceCollectionSessionIntent {
 
 private:
     friend class SourceCollectionSession;
+    friend struct SourceCollectionPanelUiTestAccess;
 
     SourceCollectionSessionIntent() = default;
 

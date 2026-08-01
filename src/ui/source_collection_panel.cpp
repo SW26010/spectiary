@@ -22,6 +22,8 @@ constexpr const char* kFilesWindow = "Files###SpecForgeFilesV2";
 constexpr const char* kNavigationWindow = "Navigation###SpecForgeNavigationV1";
 constexpr const char* kAnnotationsWindow = "Annotations###SpecForgeAnnotationsV1";
 constexpr const char* kSampleAnnotationDragPayload = "SPECFORGE_SAMPLE_ANNOTATION_PATH";
+constexpr const char* kSampleNavigationSequenceInput =
+    "##SampleNavigationSequence";
 
 SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent)
 {
@@ -348,9 +350,132 @@ void SourceCollectionPanelUi::SyncNavigationInputs(
     } else {
         row_index_buffer_.fill('\0');
     }
+    std::string synchronized_sequence_position;
+    if (navigation.sequence_active &&
+        navigation.current_sequence_position) {
+        synchronized_sequence_position =
+            std::to_string(
+                *navigation.current_sequence_position + 1);
+    }
+    const bool sequence_topology_changed =
+        synchronized_sequence_topology_revision_ &&
+        *synchronized_sequence_topology_revision_ !=
+            navigation.sequence_topology_revision;
+    synchronized_sequence_topology_revision_ =
+        navigation.sequence_topology_revision;
+    if (!sequence_position_edit_active_ ||
+        sequence_topology_changed ||
+        !navigation.sequence_active) {
+        CopyToBuffer(
+            sequence_position_buffer_,
+            synchronized_sequence_position);
+    }
+    if (sequence_topology_changed) {
+        sequence_position_edit_active_ = false;
+        sequence_position_edit_dirty_ = false;
+        sequence_position_edit_initial_value_.clear();
+        sequence_position_edit_topology_revision_.reset();
+        sequence_position_reload_deactivate_pending_ = false;
+        if (navigation.sequence_active) {
+            ReloadSequencePositionInputFromBuffer();
+        }
+    } else if (!navigation.sequence_active) {
+        sequence_position_edit_active_ = false;
+        sequence_position_edit_dirty_ = false;
+        sequence_position_edit_initial_value_.clear();
+        sequence_position_edit_topology_revision_.reset();
+        sequence_position_reload_deactivate_pending_ = false;
+    }
     displayed_sample_name_ = navigation.current_sample_name;
     CopyToBuffer(sample_name_query_buffer_, displayed_sample_name_);
     ClearSampleNameSearch();
+}
+
+void SourceCollectionPanelUi::FinalizeNavigationInputEdits(
+    PanelSessionInteraction& interaction)
+{
+    const bool sequence_position_input_rendered =
+        std::exchange(
+            sequence_position_input_rendered_since_finalize_,
+            false);
+    if (sequence_position_edit_active_ &&
+        !sequence_position_input_rendered) {
+        if (sequence_position_edit_dirty_ &&
+            sequence_position_edit_topology_revision_) {
+            sequence_position_blur_commit_ =
+                SequencePositionBlurCommit{
+                    .draft = sequence_position_buffer_.data(),
+                    .topology_revision =
+                        *sequence_position_edit_topology_revision_,
+                };
+        }
+        sequence_position_edit_active_ = false;
+        sequence_position_edit_dirty_ = false;
+        sequence_position_edit_initial_value_.clear();
+        sequence_position_edit_topology_revision_.reset();
+        SyncNavigationInputs(
+            interaction.View().navigation);
+        // The widget was not submitted, so it cannot run its ordinary
+        // deactivation path. Reload its retained ImGui state now to prevent
+        // the hidden draft from being restored when the panel returns.
+        ReloadSequencePositionInputFromBuffer();
+    }
+
+    if (!sequence_position_blur_commit_) {
+        return;
+    }
+
+    SequencePositionBlurCommit blur_commit =
+        std::move(*sequence_position_blur_commit_);
+    sequence_position_blur_commit_.reset();
+    SourceCollectionNavigationView navigation =
+        interaction.View().navigation;
+    if (!navigation.sequence_active ||
+        navigation.sequence_count == 0 ||
+        navigation.sequence_topology_revision !=
+            blur_commit.topology_revision) {
+        SyncNavigationInputs(navigation);
+        return;
+    }
+
+    const std::optional<std::size_t> target_sequence_number =
+        ParseSampleNumber(blur_commit.draft);
+    if (target_sequence_number &&
+        *target_sequence_number <= navigation.sequence_count) {
+        PanelSessionInteraction::Update update =
+            interaction.Submit(
+                UpdateSampleNavigation(
+                    SampleNavigationIntent::Move(
+                        SampleNavigationRequest::
+                            LocateSequencePosition(
+                                *target_sequence_number - 1))));
+        navigation = update.view.get().navigation;
+    }
+    SyncNavigationInputs(navigation);
+}
+
+void SourceCollectionPanelUi::ReloadSequencePositionInputFromBuffer()
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return;
+    }
+    ImGuiWindow* window =
+        ImGui::FindWindowByName(kNavigationWindow);
+    if (window == nullptr) {
+        return;
+    }
+    const ImGuiID input_id = window->GetID(
+        kSampleNavigationSequenceInput);
+    if (GImGui->InputTextDeactivatedState.ID == input_id) {
+        GImGui->InputTextDeactivatedState.ClearFreeMemory();
+    }
+    ImGuiInputTextState* input_state =
+        ImGui::GetInputTextState(input_id);
+    if (input_state == nullptr) {
+        return;
+    }
+    input_state->ReloadUserBufAndSelectAll();
+    sequence_position_reload_deactivate_pending_ = true;
 }
 
 void SourceCollectionPanelUi::RenderFiles(
@@ -648,24 +773,116 @@ void SourceCollectionPanelUi::RenderNavigation(
         ImGui::TextDisabled("%s", navigation.current_sample_display_name.c_str());
     }
     if (navigation.sequence_active) {
-        const std::string_view sequence_label = UiText(
-            language,
-            UiTextId::Sequence);
-        if (navigation.current_sequence_position) {
-            ImGui::Text(
-                "%.*s %llu / %llu",
-                static_cast<int>(sequence_label.size()),
-                sequence_label.data(),
-                static_cast<unsigned long long>(*navigation.current_sequence_position + 1),
-                static_cast<unsigned long long>(navigation.sequence_count));
-        } else {
-            ImGui::Text(
-                "%.*s - / %llu",
-                static_cast<int>(sequence_label.size()),
-                sequence_label.data(),
-                static_cast<unsigned long long>(
-                    navigation.sequence_count));
+        RenderText(UiText(language, UiTextId::Sequence));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(sample_input_width);
+        const bool sequence_empty =
+            navigation.sequence_count == 0;
+        if (sequence_empty) {
+            ImGui::BeginDisabled();
         }
+        const bool sequence_position_cancel_requested =
+            sequence_position_edit_active_ &&
+            ImGui::IsKeyPressed(
+                ImGuiKey_Escape,
+                false);
+        const std::string sequence_position_before_input =
+            sequence_position_buffer_.data();
+        sequence_position_input_rendered_since_finalize_ = true;
+        const bool sequence_position_commit_requested =
+            ImGui::InputText(
+                kSampleNavigationSequenceInput,
+                sequence_position_buffer_.data(),
+                sequence_position_buffer_.size(),
+                ImGuiInputTextFlags_CharsDecimal |
+                    ImGuiInputTextFlags_EnterReturnsTrue);
+        if (sequence_empty) {
+            ImGui::EndDisabled();
+        }
+        const bool sequence_position_reload_deactivate_requested =
+            sequence_position_reload_deactivate_pending_;
+        if (sequence_position_reload_deactivate_requested) {
+            sequence_position_reload_deactivate_pending_ = false;
+            if (ImGui::IsItemActive()) {
+                ImGui::ClearActiveID();
+            }
+        }
+        const bool sequence_position_deactivated_after_edit =
+            ImGui::IsItemDeactivatedAfterEdit();
+        const bool sequence_position_deactivated =
+            ImGui::IsItemDeactivated();
+        if (ImGui::IsItemActivated()) {
+            sequence_position_edit_active_ = true;
+            sequence_position_edit_dirty_ = false;
+            sequence_position_edit_initial_value_ =
+                sequence_position_before_input;
+            sequence_position_edit_topology_revision_ =
+                navigation.sequence_topology_revision;
+        }
+        if (sequence_position_edit_active_ &&
+            (ImGui::IsItemEdited() ||
+             sequence_position_edit_initial_value_ !=
+                 sequence_position_buffer_.data())) {
+            sequence_position_edit_dirty_ = true;
+        }
+        const bool sequence_position_edit_is_current =
+            sequence_position_edit_active_ &&
+            sequence_position_edit_topology_revision_ &&
+            *sequence_position_edit_topology_revision_ ==
+                navigation.sequence_topology_revision;
+        if (!sequence_position_reload_deactivate_requested &&
+            !sequence_position_cancel_requested &&
+            sequence_position_edit_is_current &&
+            !sequence_empty &&
+            sequence_position_commit_requested) {
+            const std::optional<std::size_t>
+                target_sequence_number =
+                    ParseSampleNumber(
+                        sequence_position_buffer_.data());
+            if (target_sequence_number &&
+                *target_sequence_number <=
+                    navigation.sequence_count) {
+                const std::size_t target_sequence_position =
+                    *target_sequence_number - 1;
+                PanelSessionInteraction::Update update =
+                    interaction.Submit(
+                        UpdateSampleNavigation(
+                            SampleNavigationIntent::Move(
+                                SampleNavigationRequest::
+                                    LocateSequencePosition(
+                                        target_sequence_position))));
+                navigation =
+                    update.view.get().navigation;
+            }
+        }
+        if (!sequence_position_reload_deactivate_requested &&
+            !sequence_position_cancel_requested &&
+            !sequence_position_commit_requested &&
+            sequence_position_edit_is_current &&
+            !sequence_empty &&
+            sequence_position_deactivated_after_edit) {
+            sequence_position_blur_commit_ =
+                SequencePositionBlurCommit{
+                    .draft = sequence_position_buffer_.data(),
+                    .topology_revision =
+                        *sequence_position_edit_topology_revision_,
+                };
+        }
+        if (sequence_position_reload_deactivate_requested ||
+            sequence_position_cancel_requested ||
+            sequence_position_commit_requested ||
+            sequence_position_deactivated) {
+            sequence_position_edit_active_ = false;
+            sequence_position_edit_dirty_ = false;
+            sequence_position_edit_initial_value_.clear();
+            sequence_position_edit_topology_revision_.reset();
+            SyncNavigationInputs(navigation);
+        }
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::Text(
+            "/%llu",
+            static_cast<unsigned long long>(
+                navigation.sequence_count));
     }
 
     RenderSampleNameSearch(
