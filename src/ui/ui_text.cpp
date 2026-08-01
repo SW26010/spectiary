@@ -296,12 +296,18 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Modified stb headers bundled with Dear ImGui - MIT License",
         "Dear ImGui 随附的修改版 stb 头文件 — MIT 许可证"},
+    UiTextEntry{"Legal documents", "法律文档"},
     UiTextEntry{
-        "Full terms: Legal/EULA.txt and Legal/THIRD_PARTY_NOTICES.txt.",
-        "完整条款：Legal/EULA.txt 与 Legal/THIRD_PARTY_NOTICES.txt。"},
+        "The complete license, notices, and data attributions are embedded in this executable and can be read here.",
+        "完整许可条款、第三方声明与数据来源已内嵌于此可执行文件，可在此处阅读。"},
+    UiTextEntry{"End User License Agreement", "最终用户许可协议"},
+    UiTextEntry{"Third-Party Notices", "第三方声明"},
+    UiTextEntry{"Data Sources", "数据来源"},
+    UiTextEntry{"Copy Document", "复制文档"},
+    UiTextEntry{"Close", "关闭"},
     UiTextEntry{
-        "Scientific data attribution: Legal/DATA_SOURCES.txt.",
-        "科学数据来源：Legal/DATA_SOURCES.txt。"},
+        "The embedded document is unavailable in this build.",
+        "当前构建中无法读取内嵌文档。"},
     UiTextEntry{"Performance logs", "性能日志"},
     UiTextEntry{"Open Log Folder", "打开日志文件夹"},
     UiTextEntry{"Copy Diagnostic Information", "复制诊断信息"},

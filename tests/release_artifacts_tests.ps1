@@ -56,6 +56,33 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class SpecForgeReleaseArtifactResources
+{
+    [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr LoadLibraryExW(string fileName, IntPtr file, uint flags);
+
+    [DllImport("kernel32.dll", EntryPoint = "FindResourceW", SetLastError = true)]
+    public static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SizeofResource(IntPtr module, IntPtr resource);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr LockResource(IntPtr resourceData);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FreeLibrary(IntPtr module);
+}
+'@
+
 function Assert-Contains {
     param(
         [Parameter(Mandatory = $true)] [string]$Text,
@@ -114,6 +141,59 @@ function Assert-FilesMatch {
     $actualBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ActualPath))
     if ($actualBytes -cne $expectedBytes) {
         throw "$Description is stale: expected $ExpectedPath to match $ActualPath."
+    }
+}
+
+function Get-ExecutableResourceBytes {
+    param(
+        [Parameter(Mandatory = $true)] [string]$ExecutablePath,
+        [Parameter(Mandatory = $true)] [int]$ResourceId
+    )
+
+    $loadLibraryAsDataFile = 0x00000002
+    $loadLibraryAsImageResource = 0x00000020
+    $module = [SpecForgeReleaseArtifactResources]::LoadLibraryExW(
+        $ExecutablePath,
+        [IntPtr]::Zero,
+        $loadLibraryAsDataFile -bor $loadLibraryAsImageResource)
+    if ($module -eq [IntPtr]::Zero) {
+        throw "Could not open executable resources: $ExecutablePath"
+    }
+
+    try {
+        $resource = [SpecForgeReleaseArtifactResources]::FindResourceW(
+            $module,
+            [IntPtr]$ResourceId,
+            [IntPtr]10)
+        if ($resource -eq [IntPtr]::Zero) {
+            throw "Executable resource $ResourceId is missing."
+        }
+        $size = [SpecForgeReleaseArtifactResources]::SizeofResource(
+            $module,
+            $resource)
+        $loaded = [SpecForgeReleaseArtifactResources]::LoadResource(
+            $module,
+            $resource)
+        $data = if ($loaded -ne [IntPtr]::Zero) {
+            [SpecForgeReleaseArtifactResources]::LockResource($loaded)
+        }
+        else {
+            [IntPtr]::Zero
+        }
+        if ($size -eq 0 -or $data -eq [IntPtr]::Zero) {
+            throw "Executable resource $ResourceId is empty or unreadable."
+        }
+
+        $bytes = [byte[]]::new([int]$size)
+        [Runtime.InteropServices.Marshal]::Copy(
+            $data,
+            $bytes,
+            0,
+            [int]$size)
+        return ,$bytes
+    }
+    finally {
+        [void][SpecForgeReleaseArtifactResources]::FreeLibrary($module)
     }
 }
 
@@ -190,7 +270,6 @@ function Assert-PortablePackage {
 
     $expectedPackageEntries = @(
         'Data',
-        'Legal',
         'SpecForge.exe',
         'specforge_metadata.json'
     )
@@ -241,10 +320,6 @@ function Assert-PortablePackage {
     try {
         $expectedZipEntries = @(
             'Data/',
-            'Legal/',
-            'Legal/DATA_SOURCES.txt',
-            'Legal/EULA.txt',
-            'Legal/THIRD_PARTY_NOTICES.txt',
             'SpecForge.exe',
             'specforge_metadata.json'
         )
@@ -497,6 +572,9 @@ $buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
 $manifestTemplatePath = Join-Path $RepoRoot 'src\platform\specforge.exe.manifest.in'
+$resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
+$resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
+$embeddedLegalSourcePath = Join-Path $RepoRoot 'src\app\embedded_legal_documents.cpp'
 
 foreach ($requiredPath in @(
     $eulaPath,
@@ -513,6 +591,9 @@ foreach ($requiredPath in @(
     $buildSourceContractPath,
     $buildIdentityFixturePath,
     $manifestTemplatePath,
+    $resourceHeaderPath,
+    $resourceTemplatePath,
+    $embeddedLegalSourcePath,
     $GeneratedManifest,
     $GeneratedBuildIdentity
 )) {
@@ -524,17 +605,43 @@ foreach ($requiredPath in @(
 $builtLegalRoot = Join-Path `
     (Split-Path -Parent $resolvedBuiltExecutable) `
     'Legal'
-foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
-    Assert-FilesMatch `
-        -ExpectedPath (Join-Path $legalRoot $documentName) `
-        -ActualPath (Join-Path $builtLegalRoot $documentName) `
-        -Description "Executable-adjacent Legal/$documentName"
+if (Test-Path -LiteralPath $builtLegalRoot) {
+    throw "Build output retains obsolete Legal directory: $builtLegalRoot"
+}
+foreach ($documentName in @(
+        'EULA.txt',
+        'THIRD_PARTY_NOTICES.txt',
+        'DATA_SOURCES.txt')) {
+    $obsoleteDocumentPath = Join-Path `
+        (Split-Path -Parent $resolvedBuiltExecutable) `
+        $documentName
+    if (Test-Path -LiteralPath $obsoleteDocumentPath) {
+        throw "Build output retains obsolete legal document: $obsoleteDocumentPath"
+    }
+}
+
+$embeddedDocuments = @(
+    [pscustomobject]@{ Name = 'EULA.txt'; Id = 101; Symbol = 'SPECFORGE_RESOURCE_EULA' },
+    [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = 102; Symbol = 'SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES' },
+    [pscustomobject]@{ Name = 'DATA_SOURCES.txt'; Id = 103; Symbol = 'SPECFORGE_RESOURCE_DATA_SOURCES' }
+)
+foreach ($document in $embeddedDocuments) {
+    $expectedBytes = [Convert]::ToBase64String(
+        [IO.File]::ReadAllBytes((Join-Path $legalRoot $document.Name)))
+    $actualBytes = [Convert]::ToBase64String(
+        (Get-ExecutableResourceBytes `
+            -ExecutablePath $resolvedBuiltExecutable `
+            -ResourceId $document.Id))
+    if ($actualBytes -cne $expectedBytes) {
+        throw "Embedded $($document.Name) does not byte-match its source file."
+    }
 }
 
 $eula = Get-Content -Raw -LiteralPath $eulaPath
 Assert-Contains $eula 'Copyright (c) 2026 SpecForge.' 'EULA'
-Assert-Contains $eula 'THIRD_PARTY_NOTICES.txt' 'EULA third-party boundary'
-Assert-Contains $eula 'DATA_SOURCES.txt' 'EULA data boundary'
+Assert-Contains $eula 'in-application' 'EULA embedded-document access'
+Assert-Contains $eula 'Third-Party Notices and Data Sources' 'EULA third-party boundary'
+Assert-NotContains $eula '.txt' 'EULA external document filename'
 
 $notices = Get-Content -Raw -LiteralPath $noticesPath
 foreach ($expected in @(
@@ -638,6 +745,9 @@ $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
 $buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath
 $buildIdentityTemplate = Get-Content -Raw -LiteralPath $buildIdentityTemplatePath
 $manifestTemplate = Get-Content -Raw -LiteralPath $manifestTemplatePath
+$resourceHeader = Get-Content -Raw -LiteralPath $resourceHeaderPath
+$resourceTemplate = Get-Content -Raw -LiteralPath $resourceTemplatePath
+$embeddedLegalSource = Get-Content -Raw -LiteralPath $embeddedLegalSourcePath
 $generatedManifestText = Get-Content -Raw -LiteralPath $GeneratedManifest
 [xml]$generatedManifest = $generatedManifestText
 $generatedAssemblyVersion = [string]$generatedManifest.assembly.assemblyIdentity.version
@@ -688,7 +798,9 @@ Assert-NotContains `
     $nativeTargetSources `
     'src/platform/specforge.exe.manifest' `
     'specforge_native sources'
-Assert-Contains $packageScript "`$releaseDocumentDirectoryName = 'Legal'" 'Portable packaging script'
+Assert-Contains $nativeTargetSources '${SPECFORGE_WINDOWS_RESOURCES}' 'specforge_native resources'
+Assert-NotContains $packageScript '$releaseDocumentDirectoryName' 'Portable packaging script'
+Assert-NotContains $packageScript '$releaseDocumentPackageRoot' 'Portable packaging script'
 Assert-Contains $packageScript `
     "`$sourceExecutableDirectory = Split-Path -Parent `$sourceExecutable" `
     'Portable packaging executable binding'
@@ -735,14 +847,14 @@ Assert-Contains $cmakeSource `
     'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
     'CMake build-source contract entry'
 Assert-Contains $cmakeSource `
-    'add_custom_target(specforge_release_documents' `
-    'CMake release-document target'
+    'OBJECT_DEPENDS' `
+    'CMake embedded legal-document dependencies'
 Assert-Contains $cmakeSource `
-    'DEPENDS ${SPECFORGE_RELEASE_DOCUMENTS}' `
-    'CMake release-document source dependencies'
-Assert-Contains $cmakeSource `
-    'add_dependencies(specforge_native specforge_release_documents)' `
-    'CMake executable release-document dependency'
+    '${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER}' `
+    'CMake embedded legal-document source dependencies'
+Assert-NotContains $cmakeSource `
+    'specforge_release_documents' `
+    'CMake obsolete release-document copy target'
 Assert-Contains $cmakeSource `
     'add_dependencies(specforge_native specforge_metadata)' `
     'CMake executable metadata dependency'
@@ -815,10 +927,20 @@ Assert-NotContains `
     $generatedBuildIdentityText `
     '$<CONFIG>' `
     'Generated build identity'
-foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
-    Assert-Contains $packageScript $documentName 'Portable packaging script'
-    Assert-Contains $aboutSource "Legal/$documentName" 'About panel'
+foreach ($document in $embeddedDocuments) {
+    Assert-Contains `
+        $resourceHeader `
+        "#define $($document.Symbol) $($document.Id)" `
+        'Legal resource identifiers'
+    Assert-Contains $resourceTemplate $document.Name 'Legal resource template'
 }
+Assert-Contains $packageScript 'THIRD_PARTY_NOTICES.txt' 'Portable notice-version check'
+Assert-NotContains $packageScript 'EULA.txt' 'Portable external document packaging'
+Assert-NotContains $packageScript 'DATA_SOURCES.txt' 'Portable external document packaging'
+Assert-Contains $embeddedLegalSource 'FindResourceW' 'Embedded legal runtime loader'
+Assert-Contains $embeddedLegalSource 'RT_RCDATA' 'Embedded legal resource type'
+Assert-Contains $aboutSource 'EmbeddedLegalDocumentContent' 'About embedded legal access'
+Assert-NotContains $aboutSource 'Legal/' 'About external legal path'
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     "specforge-release-artifacts-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -895,11 +1017,9 @@ try {
         $snapshotPackageScriptsRoot `
         'build-portable.ps1'
     Copy-Item -LiteralPath $packageScriptPath -Destination $snapshotPackageScriptPath
-    foreach ($documentName in @('EULA.txt', 'THIRD_PARTY_NOTICES.txt', 'DATA_SOURCES.txt')) {
-        Copy-Item `
-            -LiteralPath (Join-Path $legalRoot $documentName) `
-            -Destination (Join-Path $snapshotPackageLegalRoot $documentName)
-    }
+    Copy-Item `
+        -LiteralPath $noticesPath `
+        -Destination (Join-Path $snapshotPackageLegalRoot 'THIRD_PARTY_NOTICES.txt')
 
     $packageFixtures = @(
         [pscustomobject]@{

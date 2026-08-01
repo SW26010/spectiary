@@ -71,12 +71,12 @@ uses the rendered width. This is deliberately not a general markup or LaTeX
 contract.
 
 The built-in catalog's third-party attribution and transformation record lives
-in the repository at `legal/DATA_SOURCES.txt` and is shipped as
-`Legal/DATA_SOURCES.txt` under the executable directory. An approximate marker
-may use a SpecForge-owned derivation handle, but its note must state that it is
-approximate and must not imply laboratory or calibration precision. Removing
-an external attribution requires replacing both the value and its provenance;
-changing only `source_ref` is not sufficient.
+in the repository at `legal/DATA_SOURCES.txt`, is embedded in the executable,
+and is available from About as Data Sources. An approximate marker may use a
+SpecForge-owned derivation handle, but its note must state that it is approximate
+and must not imply laboratory or calibration precision. Removing an external
+attribution requires replacing both the value and its provenance; changing only
+`source_ref` is not sufficient.
 
 When one catalog marker combines multiple source transitions, such as an
 unresolved multiplet represented as a band, `legal/DATA_SOURCES.txt` must list

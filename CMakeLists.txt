@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.7.5 LANGUAGES CXX)
+project(SpecForge VERSION 0.7.6 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -87,10 +87,16 @@ set(SPECFORGE_MANIFEST
 )
 set(SPECFORGE_PUBLIC_SPECTRAL_LINES_TSV "${CMAKE_SOURCE_DIR}/config/spectral_lines.public.tsv")
 set(SPECFORGE_THIRD_PARTY_NOTICES "${CMAKE_SOURCE_DIR}/legal/THIRD_PARTY_NOTICES.txt")
-set(SPECFORGE_RELEASE_DOCUMENTS
+set(SPECFORGE_LEGAL_DOCUMENTS
     "${CMAKE_SOURCE_DIR}/legal/EULA.txt"
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
     "${CMAKE_SOURCE_DIR}/legal/DATA_SOURCES.txt"
+)
+set(SPECFORGE_WINDOWS_RESOURCES
+    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_resources.rc"
+)
+set(SPECFORGE_RESOURCE_HEADER
+    "${CMAKE_SOURCE_DIR}/src/platform/specforge_resource.h"
 )
 
 include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
@@ -124,6 +130,17 @@ configure_file(
     "${SPECFORGE_MANIFEST_TEMPLATE}"
     "${SPECFORGE_MANIFEST}"
     @ONLY
+)
+configure_file(
+    "${CMAKE_SOURCE_DIR}/src/platform/specforge_resources.rc.in"
+    "${SPECFORGE_WINDOWS_RESOURCES}"
+    @ONLY
+)
+set_source_files_properties(
+    "${SPECFORGE_WINDOWS_RESOURCES}"
+    PROPERTIES
+        OBJECT_DEPENDS
+            "${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER}"
 )
 configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
@@ -208,6 +225,7 @@ function(specforge_configure_production_target target_name)
 endfunction()
 
 add_library(specforge_core STATIC
+    src/app/embedded_legal_documents.cpp
     src/app/local_user_state.cpp
     src/app/local_user_state_json.cpp
     src/app/on_demand_frame_capture.cpp
@@ -358,6 +376,7 @@ add_executable(specforge_native WIN32
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
     ${SPECFORGE_MANIFEST}
+    ${SPECFORGE_WINDOWS_RESOURCES}
 )
 specforge_configure_production_target(specforge_native)
 target_link_libraries(specforge_native PRIVATE
@@ -422,36 +441,16 @@ set_target_properties(
             "${CMAKE_SOURCE_DIR}"
 )
 add_dependencies(specforge_native specforge_metadata)
-
-set(SPECFORGE_RELEASE_DOCUMENT_OUTPUTS)
-set(SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS)
-foreach(release_document IN LISTS SPECFORGE_RELEASE_DOCUMENTS)
-    get_filename_component(release_document_name "${release_document}" NAME)
-    set(release_document_output
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/Legal/${release_document_name}"
-    )
-    list(APPEND SPECFORGE_RELEASE_DOCUMENT_OUTPUTS "${release_document_output}")
-    list(APPEND SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${release_document}"
-            "${release_document_output}"
-    )
-endforeach()
-
-add_custom_target(specforge_release_documents
+add_custom_command(TARGET specforge_native POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf
+        "$<TARGET_FILE_DIR:specforge_native>/Legal"
     COMMAND "${CMAKE_COMMAND}" -E rm -f
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/EULA.txt"
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/THIRD_PARTY_NOTICES.txt"
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/DATA_SOURCES.txt"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/Legal"
-    ${SPECFORGE_RELEASE_DOCUMENT_COPY_COMMANDS}
-    BYPRODUCTS ${SPECFORGE_RELEASE_DOCUMENT_OUTPUTS}
-    DEPENDS ${SPECFORGE_RELEASE_DOCUMENTS}
-    COMMENT "Synchronizing SpecForge release documents"
+        "$<TARGET_FILE_DIR:specforge_native>/EULA.txt"
+        "$<TARGET_FILE_DIR:specforge_native>/THIRD_PARTY_NOTICES.txt"
+        "$<TARGET_FILE_DIR:specforge_native>/DATA_SOURCES.txt"
+    COMMENT "Removing obsolete executable-adjacent legal documents"
     VERBATIM
 )
-add_dependencies(specforge_native specforge_release_documents)
 
 enable_testing()
 
@@ -631,9 +630,29 @@ target_compile_definitions(specforge_metadata_tests PRIVATE
     SPECFORGE_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
 )
 specforge_add_test(
+    specforge_embedded_legal_documents_tests
+    tests/embedded_legal_documents_tests.cpp
+    specforge_core
+)
+target_sources(
+    specforge_embedded_legal_documents_tests
+    PRIVATE
+        ${SPECFORGE_WINDOWS_RESOURCES}
+)
+target_compile_definitions(
+    specforge_embedded_legal_documents_tests
+    PRIVATE
+        SPECFORGE_LEGAL_SOURCE_DIRECTORY="${CMAKE_SOURCE_DIR}/legal"
+)
+specforge_add_test(
     specforge_settings_panel_tests
     tests/settings_panel_tests.cpp
     specforge_desktop_ui
+)
+target_sources(
+    specforge_settings_panel_tests
+    PRIVATE
+        ${SPECFORGE_WINDOWS_RESOURCES}
 )
 target_compile_definitions(specforge_settings_panel_tests PRIVATE
     SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"

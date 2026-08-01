@@ -1,11 +1,14 @@
 #include "ui/settings_panel.h"
 
+#include "app/embedded_legal_documents.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -149,6 +152,14 @@ public:
                 font_width > 0 &&
                 font_height > 0,
             "ImGui font atlas should build");
+        ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+        platform_io.Platform_ClipboardUserData = &clipboard_text_;
+        platform_io.Platform_SetClipboardTextFn =
+            [](ImGuiContext* context, const char* text) {
+                auto* clipboard_text = static_cast<std::string*>(
+                    context->PlatformIO.Platform_ClipboardUserData);
+                *clipboard_text = text != nullptr ? text : "";
+            };
     }
 
     ~ScopedImGuiContext()
@@ -159,6 +170,14 @@ public:
     ScopedImGuiContext(const ScopedImGuiContext&) = delete;
     ScopedImGuiContext& operator=(
         const ScopedImGuiContext&) = delete;
+
+    const std::string& clipboard_text() const
+    {
+        return clipboard_text_;
+    }
+
+private:
+    std::string clipboard_text_;
 };
 
 specforge::SettingsPanelUi MakePanel()
@@ -203,6 +222,212 @@ struct UiScaleRenderObservation {
 struct InputRenderObservation {
     bool live_numeric_navigation_hovered = false;
 };
+
+struct LegalDocumentUiFixture {
+    specforge::LegalDocument document;
+    const char* entry_label;
+    const char* popup_label;
+};
+
+constexpr LegalDocumentUiFixture kLegalDocumentUiFixtures[] = {
+    {
+        specforge::LegalDocument::Eula,
+        "End User License Agreement###SpecForgeOpenEula",
+        "End User License Agreement###SpecForgeEulaDocument",
+    },
+    {
+        specforge::LegalDocument::ThirdPartyNotices,
+        "Third-Party Notices###SpecForgeOpenThirdPartyNotices",
+        "Third-Party Notices###SpecForgeThirdPartyNoticesDocument",
+    },
+    {
+        specforge::LegalDocument::DataSources,
+        "Data Sources###SpecForgeOpenDataSources",
+        "Data Sources###SpecForgeDataSourcesDocument",
+    },
+};
+
+struct LegalRenderObservation {
+    ImGuiID entry_id = 0;
+    bool entry_hovered = false;
+    ImGuiID copy_id = 0;
+    ImGuiID bottom_close_id = 0;
+    ImGuiID titlebar_close_id = 0;
+    bool popup_open = false;
+    bool popup_has_close_button = false;
+    bool popup_fits_viewport = false;
+    ImVec2 popup_position;
+    ImVec2 popup_size;
+    ImVec2 viewport_work_position;
+    ImVec2 viewport_work_size;
+    ImVec2 document_content_center;
+    bool document_content_found = false;
+    bool document_content_hovered = false;
+    bool document_text_active = false;
+    bool document_text_read_only = false;
+    bool document_text_has_selection = false;
+    int document_selection_start = 0;
+    int document_selection_end = 0;
+    float document_scroll_y = 0.0f;
+    float document_scroll_max_y = 0.0f;
+    ImGuiWindow* settings_content_window = nullptr;
+    ImRect settings_content_clip_rect;
+    float settings_content_scroll_max_y = 0.0f;
+};
+
+LegalRenderObservation RenderLegalFrame(
+    specforge::SettingsPanelUi& panel,
+    const LegalDocumentUiFixture& fixture,
+    ImVec2 display_size = ImVec2(700.0f, 500.0f))
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = display_size;
+    ImGui::NewFrame();
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.ui_scale_percentage = 150;
+    panel.Render(settings);
+
+    LegalRenderObservation observation;
+    ImGuiWindow* settings_window = ImGui::FindWindowByName(
+        "Settings###SpecForgeSettingsV1");
+    if (settings_window != nullptr) {
+        const ImGuiID content_child_id =
+            settings_window->GetID("##SettingsContent");
+        for (ImGuiWindow* window : GImGui->Windows) {
+            if (window->ParentWindow == settings_window &&
+                window->ChildId == content_child_id) {
+                observation.settings_content_window = window;
+                observation.settings_content_clip_rect =
+                    window->InnerClipRect;
+                observation.settings_content_scroll_max_y =
+                    window->ScrollMax.y;
+                observation.entry_id =
+                    window->GetID(fixture.entry_label);
+                observation.entry_hovered =
+                    GImGui->HoveredId == observation.entry_id;
+                break;
+            }
+        }
+    }
+
+    ImGuiWindow* popup_window =
+        ImGui::FindWindowByName(fixture.popup_label);
+    if (popup_window != nullptr && popup_window->Active) {
+        observation.popup_open = true;
+        observation.popup_has_close_button =
+            popup_window->HasCloseButton;
+        observation.copy_id = popup_window->GetID(
+            "Copy Document###SpecForgeCopyLegalDocument");
+        observation.bottom_close_id = popup_window->GetID(
+            "Close###SpecForgeCloseLegalDocument");
+        observation.titlebar_close_id =
+            popup_window->GetID("#CLOSE");
+
+        observation.popup_position = popup_window->Pos;
+        observation.popup_size = popup_window->Size;
+        observation.viewport_work_position =
+            popup_window->Viewport->WorkPos;
+        observation.viewport_work_size =
+            popup_window->Viewport->WorkSize;
+        constexpr float epsilon = 0.5f;
+        observation.popup_fits_viewport =
+            popup_window->Pos.x + epsilon >=
+                popup_window->Viewport->WorkPos.x &&
+            popup_window->Pos.y + epsilon >=
+                popup_window->Viewport->WorkPos.y &&
+            popup_window->Pos.x + popup_window->Size.x <=
+                popup_window->Viewport->WorkPos.x +
+                    popup_window->Viewport->WorkSize.x + epsilon &&
+            popup_window->Pos.y + popup_window->Size.y <=
+                popup_window->Viewport->WorkPos.y +
+                    popup_window->Viewport->WorkSize.y + epsilon;
+
+        const ImGuiID document_child_id =
+            popup_window->GetID("##EmbeddedLegalDocumentContent");
+        if (ImGuiInputTextState* input_state =
+                ImGui::GetInputTextState(document_child_id)) {
+            observation.document_text_active =
+                GImGui->ActiveId == document_child_id;
+            observation.document_text_read_only =
+                (input_state->Flags &
+                 ImGuiInputTextFlags_ReadOnly) != 0;
+            observation.document_text_has_selection =
+                input_state->HasSelection();
+            observation.document_selection_start =
+                input_state->GetSelectionStart();
+            observation.document_selection_end =
+                input_state->GetSelectionEnd();
+        }
+        for (ImGuiWindow* window : GImGui->Windows) {
+            if (window->ParentWindow == popup_window &&
+                window->ChildId == document_child_id) {
+                observation.document_content_center =
+                    ImVec2(
+                        window->Pos.x + window->Size.x * 0.5f,
+                        window->Pos.y + window->Size.y * 0.5f);
+                observation.document_content_found = true;
+                observation.document_content_hovered =
+                    GImGui->HoveredWindow == window;
+                observation.document_scroll_y = window->Scroll.y;
+                observation.document_scroll_max_y =
+                    window->ScrollMax.y;
+                break;
+            }
+        }
+    }
+
+    ImGui::EndFrame();
+    return observation;
+}
+
+ImVec2 FindLegalEntryPosition(
+    specforge::SettingsPanelUi& panel,
+    const LegalDocumentUiFixture& fixture)
+{
+    LegalRenderObservation observation =
+        RenderLegalFrame(panel, fixture);
+    observation = RenderLegalFrame(panel, fixture);
+    Require(
+        observation.settings_content_window != nullptr,
+        "the About test fixture should expose the Settings content child");
+
+    const float viewport_height = std::max(
+        1.0f,
+        observation.settings_content_clip_rect.GetHeight());
+    const float scroll_step = viewport_height * 0.5f;
+    for (float scroll_y = 0.0f;;
+         scroll_y = std::min(
+             scroll_y + scroll_step,
+             observation.settings_content_scroll_max_y)) {
+        observation.settings_content_window->Scroll.y = scroll_y;
+        observation = RenderLegalFrame(panel, fixture);
+
+        const float x =
+            observation.settings_content_clip_rect.Min.x + 10.0f;
+        for (float y =
+                 observation.settings_content_clip_rect.Min.y + 1.0f;
+             y < observation.settings_content_clip_rect.Max.y;
+             y += 3.0f) {
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            observation = RenderLegalFrame(panel, fixture);
+            if (observation.entry_hovered) {
+                return ImVec2(x, y);
+            }
+        }
+
+        if (scroll_y >=
+            observation.settings_content_scroll_max_y) {
+            break;
+        }
+    }
+
+    Require(
+        false,
+        "each Legal entry should remain pointer-accessible in the narrow About content area");
+    return ImVec2();
+}
 
 LanguageRenderObservation RenderLanguageFrame(
     specforge::SettingsPanelUi& panel,
@@ -1136,6 +1361,24 @@ void TestLanguageRenderKeepsStableImGuiIds()
             ImHashStr(
                 "英语###SpecForgeUiLanguageEnglish"),
         "localized language options should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "End User License Agreement###SpecForgeOpenEula") ==
+            ImHashStr(
+                "最终用户许可协议###SpecForgeOpenEula"),
+        "localized EULA actions should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "Third-Party Notices###SpecForgeOpenThirdPartyNotices") ==
+            ImHashStr(
+                "第三方声明###SpecForgeOpenThirdPartyNotices"),
+        "localized third-party notice actions should retain one ImGui ID");
+    Require(
+        ImHashStr(
+            "Data Sources###SpecForgeOpenDataSources") ==
+            ImHashStr(
+                "数据来源###SpecForgeOpenDataSources"),
+        "localized data-source actions should retain one ImGui ID");
 }
 
 void TestRenderSmoke()
@@ -1253,6 +1496,234 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
     GImGui->Viewports.pop_back();
 }
 
+void TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale()
+{
+    ScopedImGuiContext imgui;
+    ImGui::GetStyle().FontScaleMain = 1.5f;
+
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    panel.Open();
+
+    for (std::size_t index = 0;
+         index < std::size(kLegalDocumentUiFixtures);
+         ++index) {
+        const LegalDocumentUiFixture& fixture =
+            kLegalDocumentUiFixtures[index];
+        const ImVec2 entry_position =
+            FindLegalEntryPosition(panel, fixture);
+        ImGui::GetIO().AddMousePosEvent(
+            entry_position.x,
+            entry_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderLegalFrame(panel, fixture);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        LegalRenderObservation observation =
+            RenderLegalFrame(panel, fixture);
+        Require(
+            observation.popup_open,
+            "each embedded Legal document should open from About");
+        observation = RenderLegalFrame(panel, fixture);
+        Require(
+            observation.popup_has_close_button &&
+                observation.titlebar_close_id != 0,
+            "each Legal popup should expose the native title-bar close button");
+        if (!observation.popup_fits_viewport) {
+            std::cerr
+                << "Legal popup bounds: pos=("
+                << observation.popup_position.x << ", "
+                << observation.popup_position.y << "), size=("
+                << observation.popup_size.x << ", "
+                << observation.popup_size.y << "), work=("
+                << observation.viewport_work_position.x << ", "
+                << observation.viewport_work_position.y << "; "
+                << observation.viewport_work_size.x << ", "
+                << observation.viewport_work_size.y << ")\n";
+        }
+        Require(
+            observation.popup_fits_viewport,
+            "each Legal popup should fit within the 700x500 viewport at 150% scale");
+        if (!observation.document_content_found ||
+            observation.document_scroll_max_y <= 0.0f) {
+            std::cerr
+                << "Legal scroll fixture: " << fixture.entry_label
+                << ", child=" << observation.document_content_found
+                << ", max=" << observation.document_scroll_max_y
+                << ", bytes="
+                << specforge::EmbeddedLegalDocumentContent(
+                       fixture.document).size()
+                << '\n';
+        }
+        Require(
+            observation.document_content_found &&
+                observation.document_scroll_max_y > 0.0f,
+            "each embedded Legal document should remain scrollable");
+        Require(
+            observation.copy_id != 0 &&
+                observation.bottom_close_id != 0,
+            "each Legal popup should expose Copy and bottom Close actions");
+
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        observation = RenderLegalFrame(panel, fixture);
+        ImGui::GetIO().AddMousePosEvent(
+            observation.document_content_center.x,
+            observation.document_content_center.y);
+        observation = RenderLegalFrame(panel, fixture);
+        if (!observation.document_content_hovered) {
+            observation = RenderLegalFrame(panel, fixture);
+        }
+        Require(
+            observation.document_content_hovered,
+            "the Legal document body should accept pointer interaction");
+        const float initial_scroll_y =
+            observation.document_scroll_y;
+        ImGui::GetIO().AddMouseWheelEvent(0.0f, -8.0f);
+        observation = RenderLegalFrame(panel, fixture);
+        if (observation.document_scroll_y <= initial_scroll_y) {
+            std::cerr
+                << "Legal wheel fixture: " << fixture.entry_label
+                << ", initial=" << initial_scroll_y
+                << ", final=" << observation.document_scroll_y
+                << ", max=" << observation.document_scroll_max_y
+                << '\n';
+        }
+        Require(
+            observation.document_scroll_y > initial_scroll_y,
+            "each embedded Legal document should scroll at 150% scale");
+
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        observation = RenderLegalFrame(panel, fixture);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        observation = RenderLegalFrame(panel, fixture);
+        Require(
+            observation.document_text_active &&
+                observation.document_text_read_only,
+            "each Legal document body should be a selectable read-only text control");
+
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, true);
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+        observation = RenderLegalFrame(panel, fixture);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+        observation = RenderLegalFrame(panel, fixture);
+        const int selection_min = std::min(
+            observation.document_selection_start,
+            observation.document_selection_end);
+        const int selection_max = std::max(
+            observation.document_selection_start,
+            observation.document_selection_end);
+        Require(
+            observation.document_text_has_selection &&
+                selection_min == 0 &&
+                selection_max == static_cast<int>(
+                    specforge::EmbeddedLegalDocumentContent(
+                        fixture.document).size()),
+            "Ctrl+A should select the complete embedded Legal document");
+
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_C, true);
+        observation = RenderLegalFrame(panel, fixture);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_C, false);
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftCtrl, false);
+        observation = RenderLegalFrame(panel, fixture);
+        Require(
+            imgui.clipboard_text() ==
+                specforge::EmbeddedLegalDocumentContent(
+                    fixture.document),
+            "Ctrl+C should copy the selected embedded Legal document");
+
+        constexpr char kClipboardSentinel[] =
+            "SpecForge Legal copy button sentinel";
+        ImGui::SetClipboardText(kClipboardSentinel);
+        Require(
+            imgui.clipboard_text() == kClipboardSentinel,
+            "the Legal Copy button test should start from a distinct clipboard value");
+        ImGui::ActivateItemByID(observation.copy_id);
+        observation = RenderLegalFrame(panel, fixture);
+        Require(
+            imgui.clipboard_text() ==
+                specforge::EmbeddedLegalDocumentContent(
+                    fixture.document),
+            "Copy should place the complete embedded Legal document on the clipboard");
+
+        const ImGuiID close_id =
+            index + 1 == std::size(kLegalDocumentUiFixtures)
+            ? observation.titlebar_close_id
+            : observation.bottom_close_id;
+        ImGui::ActivateItemByID(close_id);
+        observation = RenderLegalFrame(panel, fixture);
+        observation = RenderLegalFrame(panel, fixture);
+        Require(
+            !observation.popup_open,
+            "each embedded Legal document should close without leaving Settings blocked");
+    }
+}
+
+void TestOpenLegalPopupTracksViewportShrink()
+{
+    ScopedImGuiContext imgui;
+    ImGui::GetStyle().FontScaleMain = 1.5f;
+
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    panel.Open();
+
+    constexpr ImVec2 large_viewport(1200.0f, 800.0f);
+    const LegalDocumentUiFixture& fixture =
+        kLegalDocumentUiFixtures[0];
+    LegalRenderObservation observation =
+        RenderLegalFrame(panel, fixture, large_viewport);
+    observation =
+        RenderLegalFrame(panel, fixture, large_viewport);
+    ImGui::ActivateItemByID(observation.entry_id);
+    observation =
+        RenderLegalFrame(panel, fixture, large_viewport);
+    observation =
+        RenderLegalFrame(panel, fixture, large_viewport);
+    Require(
+        observation.popup_open &&
+            (observation.popup_size.x > 700.0f ||
+             observation.popup_size.y > 500.0f),
+        "the shrink fixture should begin with a Legal popup larger than 700x500");
+
+    observation = RenderLegalFrame(panel, fixture);
+    observation = RenderLegalFrame(panel, fixture);
+    if (!observation.popup_open ||
+        !observation.popup_fits_viewport) {
+        std::cerr
+            << "Shrunk Legal popup bounds: open="
+            << observation.popup_open << ", pos=("
+            << observation.popup_position.x << ", "
+            << observation.popup_position.y << "), size=("
+            << observation.popup_size.x << ", "
+            << observation.popup_size.y << "), work=("
+            << observation.viewport_work_position.x << ", "
+            << observation.viewport_work_position.y << "; "
+            << observation.viewport_work_size.x << ", "
+            << observation.viewport_work_size.y << ")\n";
+    }
+    Require(
+        observation.popup_open &&
+            observation.popup_fits_viewport,
+        "an open Legal popup should immediately follow a viewport shrink");
+
+    ImGui::ActivateItemByID(observation.bottom_close_id);
+    (void)RenderLegalFrame(panel, fixture);
+    (void)RenderLegalFrame(panel, fixture);
+}
+
 }  // namespace
 
 int main()
@@ -1275,6 +1746,8 @@ int main()
     TestRenderSmoke();
     TestSettingsWindowMinimumSizeTracksUiScale();
     TestSettingsWindowConstraintsFollowCurrentViewport();
+    TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale();
+    TestOpenLegalPopupTracksViewportShrink();
     std::cout << "settings panel tests passed\n";
     return 0;
 }

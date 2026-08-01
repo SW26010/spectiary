@@ -200,7 +200,8 @@ Release 程序可在 `Settings > Diagnostics` 开始/停止性能诊断录制，
 ## Portable release
 
 第一版 portable 是 no-launcher 包：zip 根目录包含 `SpecForge.exe`、
-`specforge_metadata.json`、`Data\` 和 `Legal\`。直接从当前工作区文件构建：
+`specforge_metadata.json` 和 `Data\`。完整 EULA、第三方声明与数据来源内嵌在
+所有分发形式共用的 EXE 中，可从 About 阅读。直接从当前工作区文件构建：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
@@ -228,10 +229,9 @@ Working-tree 输出位于 `dist\SpecForge-portable`；HEAD 输出位于
 构建不会删除或覆盖 working-tree 包。
 共同脚本的 source mode/revision 参数是两个正式入口之间的内部契约；为避免 dirty
 checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` 模式。
-目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_metadata.json`、
-`Data\` 和 `Legal\`；`Legal\` 必须包含 `EULA.txt`、
-`THIRD_PARTY_NOTICES.txt` 和 `DATA_SOURCES.txt`。
-缺少任一发布文档时打包脚本会失败。
+目录和 ZIP 根部只保留 `SpecForge.exe`、`specforge_metadata.json` 和
+`Data\`，不要求 EXE 旁存在外部法律文档目录。仓库 `legal\` 中的三份文本仍是
+可审查、可维护的唯一来源，构建时原样嵌入 EXE。
 
 第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。构建成功后，
 CMake 将 schema 4 `specforge_metadata.json` 复制到实际 EXE 旁；`product`、`build` 和可选

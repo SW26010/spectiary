@@ -29,9 +29,9 @@ annotations, results, or other user-created data.
 4. Third-party software and data
 
 Third-party components and data remain subject to their own licenses and
-notices. Those terms are listed in THIRD_PARTY_NOTICES.txt and
-DATA_SOURCES.txt and prevail over this Agreement for the corresponding
-third-party material.
+notices. Those terms and notices are available from the in-application
+Third-Party Notices and Data Sources documents and prevail over this Agreement
+for the corresponding third-party material.
 
 5. Disclaimer
 

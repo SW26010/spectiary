@@ -132,8 +132,10 @@ state-isolation contract, and supported automation commands, see
 ## Portable Package
 
 The first portable package is a no-launcher zip with `SpecForge.exe`,
-`specforge_metadata.json`, `Data/`, and `Legal/` at the zip root. Schema 4 keeps
-product, build provenance, and deployment separate. The Portable packager adds
+`specforge_metadata.json`, and `Data/` at the zip root. The complete EULA,
+third-party notices, and data-source attributions are embedded in the shared
+executable and are available from About. Schema 4 keeps product, build
+provenance, and deployment separate. The Portable packager adds
 `deployment.distribution: "portable"` and
 `deployment.storage_profile: "portable"` to the build-output metadata without
 modifying the EXE; it verifies that the pre-package and packaged EXE SHA-256

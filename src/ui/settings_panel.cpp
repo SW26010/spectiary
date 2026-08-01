@@ -1,5 +1,6 @@
 #include "ui/settings_panel.h"
 
+#include "app/embedded_legal_documents.h"
 #include "app/runtime_paths.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
@@ -35,6 +36,116 @@ constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::Diagnostics,
     SettingsSection::About,
 };
+
+void RenderEmbeddedLegalDocument(
+    LegalDocument document,
+    UiTextId title_text_id,
+    const char* button_id,
+    const char* popup_id,
+    UiLanguage language)
+{
+    const std::string button_label = StableUiLabel(
+        language,
+        title_text_id,
+        button_id);
+    const std::string popup_label = StableUiLabel(
+        language,
+        title_text_id,
+        popup_id);
+    if (ImGui::Button(button_label.c_str())) {
+        ImGui::OpenPopup(popup_label.c_str());
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetWindowViewport();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float font_size = ImGui::GetFontSize();
+    const ImVec2 viewport_margin(
+        std::max(font_size, style.WindowPadding.x),
+        std::max(font_size, style.WindowPadding.y));
+    const ImVec2 maximum_size(
+        std::max(
+            1.0f,
+            viewport->WorkSize.x - viewport_margin.x * 2.0f),
+        std::max(
+            1.0f,
+            viewport->WorkSize.y - viewport_margin.y * 2.0f));
+    const ImVec2 minimum_size(
+        std::min(font_size * 24.0f, maximum_size.x),
+        std::min(font_size * 16.0f, maximum_size.y));
+    const ImVec2 popup_size(
+        std::min(font_size * 52.0f, maximum_size.x),
+        std::min(font_size * 34.0f, maximum_size.y));
+    const ImVec2 popup_position(
+        viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+        viewport->WorkPos.y + viewport->WorkSize.y * 0.5f);
+    ImGui::SetNextWindowSize(
+        popup_size,
+        ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(
+        minimum_size,
+        maximum_size);
+    ImGui::SetNextWindowPos(
+        popup_position,
+        ImGuiCond_Always,
+        ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowViewport(viewport->ID);
+    bool popup_open = true;
+    if (!ImGui::BeginPopupModal(
+            popup_label.c_str(),
+            &popup_open,
+            ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+
+    const std::string_view content =
+        EmbeddedLegalDocumentContent(document);
+    const float footer_height =
+        ImGui::GetFrameHeightWithSpacing();
+    if (content.empty()) {
+        if (ImGui::BeginChild(
+                "##EmbeddedLegalDocumentContent",
+                ImVec2(0.0f, -footer_height),
+                true)) {
+            const std::string_view unavailable = UiText(
+                language,
+                UiTextId::LegalDocumentUnavailable);
+            ImGui::TextDisabled(
+                "%.*s",
+                static_cast<int>(unavailable.size()),
+                unavailable.data());
+        }
+        ImGui::EndChild();
+    } else {
+        std::string selectable_content(content);
+        (void)ImGui::InputTextMultiline(
+            "##EmbeddedLegalDocumentContent",
+            selectable_content.data(),
+            selectable_content.size() + 1,
+            ImVec2(0.0f, -footer_height),
+            ImGuiInputTextFlags_ReadOnly |
+                ImGuiInputTextFlags_WordWrap);
+    }
+
+    const std::string copy_label = StableUiLabel(
+        language,
+        UiTextId::CopyDocument,
+        "SpecForgeCopyLegalDocument");
+    ImGui::BeginDisabled(content.empty());
+    if (ImGui::Button(copy_label.c_str())) {
+        ImGui::SetClipboardText(std::string(content).c_str());
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    const std::string close_label = StableUiLabel(
+        language,
+        UiTextId::Close,
+        "SpecForgeCloseLegalDocument");
+    if (ImGui::Button(close_label.c_str())) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
 
 std::string SettingsWindowLabel(UiLanguage language)
 {
@@ -1680,22 +1791,78 @@ void SettingsPanelUi::RenderAbout(
             language,
             UiTextId::ModifiedStbNotice)
             .data());
+
+    ImGui::Spacing();
+    const std::string legal_documents_heading =
+        StableUiLabel(
+            language,
+            UiTextId::LegalDocuments,
+            "SpecForgeLegalDocuments");
+    ImGui::SeparatorText(
+        legal_documents_heading.c_str());
     ImGui::PushTextWrapPos();
-    const std::string_view full_terms = UiText(
+    const std::string_view legal_documents_description = UiText(
         language,
-        UiTextId::FullTermsNotice);
+        UiTextId::LegalDocumentsDescription);
     ImGui::TextDisabled(
         "%.*s",
-        static_cast<int>(full_terms.size()),
-        full_terms.data());
-    const std::string_view data_attribution = UiText(
-        language,
-        UiTextId::DataAttributionNotice);
-    ImGui::TextDisabled(
-        "%.*s",
-        static_cast<int>(data_attribution.size()),
-        data_attribution.data());
+        static_cast<int>(legal_documents_description.size()),
+        legal_documents_description.data());
     ImGui::PopTextWrapPos();
+
+    const std::array<std::string, 3> legal_document_buttons = {
+        StableUiLabel(
+            language,
+            UiTextId::EndUserLicenseAgreement,
+            "SpecForgeOpenEula"),
+        StableUiLabel(
+            language,
+            UiTextId::ThirdPartyNotices,
+            "SpecForgeOpenThirdPartyNotices"),
+        StableUiLabel(
+            language,
+            UiTextId::DataSources,
+            "SpecForgeOpenDataSources"),
+    };
+    float legal_document_row_width =
+        ImGui::GetStyle().ItemSpacing.x *
+        static_cast<float>(legal_document_buttons.size() - 1);
+    for (const std::string& label : legal_document_buttons) {
+        legal_document_row_width +=
+            ImGui::CalcTextSize(
+                label.c_str(),
+                nullptr,
+                true).x +
+            ImGui::GetStyle().FramePadding.x * 2.0f;
+    }
+    const bool render_legal_documents_inline =
+        legal_document_row_width <=
+        ImGui::GetContentRegionAvail().x;
+
+    RenderEmbeddedLegalDocument(
+        LegalDocument::Eula,
+        UiTextId::EndUserLicenseAgreement,
+        "SpecForgeOpenEula",
+        "SpecForgeEulaDocument",
+        language);
+    if (render_legal_documents_inline) {
+        ImGui::SameLine();
+    }
+    RenderEmbeddedLegalDocument(
+        LegalDocument::ThirdPartyNotices,
+        UiTextId::ThirdPartyNotices,
+        "SpecForgeOpenThirdPartyNotices",
+        "SpecForgeThirdPartyNoticesDocument",
+        language);
+    if (render_legal_documents_inline) {
+        ImGui::SameLine();
+    }
+    RenderEmbeddedLegalDocument(
+        LegalDocument::DataSources,
+        UiTextId::DataSources,
+        "SpecForgeOpenDataSources",
+        "SpecForgeDataSourcesDocument",
+        language);
 
     ImGui::Spacing();
     const std::string diagnostics_heading =

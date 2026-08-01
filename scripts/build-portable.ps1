@@ -152,13 +152,10 @@ if ($PackageUnverifiedTestFixture) {
 }
 $packageRoot = Join-Path $distRoot $PackageName
 $zipPath = Join-Path $distRoot "$PackageName.zip"
-$releaseDocumentSourceRoot = Join-Path $repoRoot 'legal'
-$releaseDocumentDirectoryName = 'Legal'
-$releaseDocumentNames = @(
-    'EULA.txt',
-    'THIRD_PARTY_NOTICES.txt',
-    'DATA_SOURCES.txt'
-)
+$legalSourceRoot = Join-Path $repoRoot 'legal'
+$thirdPartyNoticesPath = Join-Path `
+    $legalSourceRoot `
+    'THIRD_PARTY_NOTICES.txt'
 
 if (-not $PackageUnverifiedTestFixture) {
     Write-Host 'build-portable.ps1 invokes CMake directly; run it from a normal developer shell or an approved unsandboxed agent run.'
@@ -291,15 +288,12 @@ if ($buildMetadata.windows_sdk_version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[
     throw "Build metadata has invalid windows_sdk_version '$($buildMetadata.windows_sdk_version)'."
 }
 
-foreach ($documentName in $releaseDocumentNames) {
-    $sourceDocument = Join-Path $releaseDocumentSourceRoot $documentName
-    if (-not (Test-Path -LiteralPath $sourceDocument -PathType Leaf)) {
-        throw "Required release document was not found: $sourceDocument"
-    }
+if (-not (Test-Path -LiteralPath $thirdPartyNoticesPath -PathType Leaf)) {
+    throw "Required third-party notices source was not found: $thirdPartyNoticesPath"
 }
 
 $thirdPartyNoticeLines = @(
-    Get-Content -LiteralPath (Join-Path $releaseDocumentSourceRoot 'THIRD_PARTY_NOTICES.txt')
+    Get-Content -LiteralPath $thirdPartyNoticesPath
 )
 Assert-SingleNoticeHeading `
     -Lines $thirdPartyNoticeLines `
@@ -327,8 +321,6 @@ if (Test-Path -LiteralPath $packageRoot) {
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-Null
-$releaseDocumentPackageRoot = Join-Path $packageRoot $releaseDocumentDirectoryName
-New-Item -ItemType Directory -Path $releaseDocumentPackageRoot -Force | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot 'SpecForge.exe') -Force
 $sourceExecutableHash = (
     Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
@@ -361,12 +353,6 @@ $portableMetadataJson = (
     $packageMetadataPath,
     $portableMetadataJson,
     (New-Object Text.UTF8Encoding($false)))
-foreach ($documentName in $releaseDocumentNames) {
-    Copy-Item `
-        -LiteralPath (Join-Path $releaseDocumentSourceRoot $documentName) `
-        -Destination (Join-Path $releaseDocumentPackageRoot $documentName) `
-        -Force
-}
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
@@ -390,14 +376,6 @@ try {
             'specforge_metadata.json',
             [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
         [void]$archive.CreateEntry('Data/')
-        [void]$archive.CreateEntry("$releaseDocumentDirectoryName/")
-        foreach ($documentName in $releaseDocumentNames) {
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                $archive,
-                (Join-Path $releaseDocumentPackageRoot $documentName),
-                "$releaseDocumentDirectoryName/$documentName",
-                [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
-        }
     }
     finally {
         $archive.Dispose()

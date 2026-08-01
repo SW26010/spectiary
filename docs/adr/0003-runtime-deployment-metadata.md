@@ -97,14 +97,15 @@ metadata unavailable or mismatch without changing the selected state root.
 
 The Portable packaging flow consumes schema 4 build-output metadata without a
 deployment section, adds the Portable deployment declaration only to the
-package metadata, creates `Data` and `Legal`, and copies the unchanged EXE.
+package metadata, creates `Data`, and copies the unchanged EXE. The EULA,
+third-party notices, and data-source attributions are embedded in that shared
+executable and remain available through About without adjacent documents.
 Packaging and artifact tests compare the build-output and packaged EXE bytes
 and SHA-256. The ZIP root is exactly:
 
 - `SpecForge.exe`
 - `specforge_metadata.json`
 - `Data\`
-- `Legal\`
 
 Future Installer, WinGet, and Scoop work must write their distribution
 explicitly in their own independently testable packaging flows. Registry

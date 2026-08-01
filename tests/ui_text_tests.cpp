@@ -306,6 +306,20 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
+            UiTextId::EndUserLicenseAgreement) ==
+            "最终用户许可协议" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::ThirdPartyNotices) ==
+                "第三方声明" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::DataSources) ==
+                "数据来源",
+        "embedded legal document actions should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
             UiTextId::LocalStateWarningTitle) ==
             "SpecForge - 本地状态警告",
         "native warning title should be localized");
