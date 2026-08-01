@@ -56,6 +56,17 @@ ApplicationSettingsIntent ApplicationSettingsIntent::SetUiScale(
 }
 
 ApplicationSettingsIntent
+ApplicationSettingsIntent::SetLiveNumericNavigation(bool enabled)
+{
+    return {
+        .kind =
+            ApplicationSettingsIntentKind::
+                SetLiveNumericNavigation,
+        .live_numeric_navigation = enabled,
+    };
+}
+
+ApplicationSettingsIntent
 ApplicationSettingsIntent::SetProfileOutputDirectory(
     std::filesystem::path directory)
 {
@@ -112,6 +123,8 @@ ApplicationSettingsStorageForRuntimePaths(
             paths.ui_language_settings_path,
         .ui_scale_settings_path =
             paths.ui_scale_settings_path,
+        .input_settings_path =
+            paths.input_settings_path,
         .profile_settings_path =
             paths.profile_settings_path,
         .panel_visibility_path =
@@ -156,6 +169,14 @@ ApplicationSettings::ApplicationSettings(
         ApplicationSetting::UiScale,
         std::move(ui_scale_settings.warning));
 
+    InputSettingsLoadResult input_settings =
+        LoadInputSettings(storage_.input_settings_path);
+    live_numeric_navigation_ =
+        input_settings.settings.live_numeric_navigation;
+    AdoptLoadWarning(
+        ApplicationSetting::Input,
+        std::move(input_settings.warning));
+
     ProfileSettingsLoadResult profile_settings =
         LoadProfileSettings(storage_.profile_settings_path);
     profile_output_directory_ = ResolveProfileOutputDirectory(
@@ -178,6 +199,8 @@ ApplicationSettingsView ApplicationSettings::View() const
     return {
         .language = language_,
         .ui_scale_percentage = ui_scale_percentage_,
+        .live_numeric_navigation =
+            live_numeric_navigation_,
         .profile_output_directory =
             profile_output_directory_.directory,
         .default_profile_output_directory =
@@ -198,6 +221,10 @@ ApplicationSettingsResult ApplicationSettings::Apply(
         return ApplyLanguage(intent.language);
     case ApplicationSettingsIntentKind::SetUiScale:
         return ApplyUiScale(intent.ui_scale_percentage);
+    case ApplicationSettingsIntentKind::
+        SetLiveNumericNavigation:
+        return ApplyLiveNumericNavigation(
+            intent.live_numeric_navigation);
     case ApplicationSettingsIntentKind::SetProfileOutputDirectory:
         return ApplyProfileOutputDirectory(
             std::move(intent.directory),
@@ -400,6 +427,44 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     }
 
     language_ = language;
+    MarkSaveSucceeded(kSetting);
+    return {
+        .outcome = ApplicationSettingsOutcome::Applied,
+        .setting = kSetting,
+    };
+}
+
+ApplicationSettingsResult
+ApplicationSettings::ApplyLiveNumericNavigation(bool enabled)
+{
+    constexpr ApplicationSetting kSetting =
+        ApplicationSetting::Input;
+    if (enabled == live_numeric_navigation_ &&
+        statuses_[static_cast<std::size_t>(kSetting)].kind ==
+            ApplicationSettingsStatusKind::Ready) {
+        return {
+            .outcome = ApplicationSettingsOutcome::Unchanged,
+            .setting = kSetting,
+        };
+    }
+
+    std::string error;
+    PrepareSave(kSetting);
+    if (storage_.persistent &&
+        !SaveInputSettings(
+            storage_.input_settings_path,
+            {.live_numeric_navigation = enabled},
+            &error)) {
+        MarkSaveFailed(kSetting, error);
+        return {
+            .outcome =
+                ApplicationSettingsOutcome::PersistenceFailed,
+            .setting = kSetting,
+            .detail = std::move(error),
+        };
+    }
+
+    live_numeric_navigation_ = enabled;
     MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,

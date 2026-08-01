@@ -57,6 +57,10 @@ void RequireCompleteLocalUserStatePathMapping(
             root / kUiScaleSettings,
         "UI scale settings should use the canonical name");
     Require(
+        paths.input_settings_path ==
+            root / kInputSettings,
+        "input settings should use the canonical name");
+    Require(
         paths.profile_settings_path ==
             root / kProfileSettings,
         "profile settings should use the canonical name");

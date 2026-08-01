@@ -200,6 +200,10 @@ struct UiScaleRenderObservation {
     bool reset_hovered = false;
 };
 
+struct InputRenderObservation {
+    bool live_numeric_navigation_hovered = false;
+};
+
 LanguageRenderObservation RenderLanguageFrame(
     specforge::SettingsPanelUi& panel,
     specforge::UiLanguage language)
@@ -270,6 +274,32 @@ UiScaleRenderObservation RenderUiScaleFrame(
             GImGui->HoveredId ==
                 window->GetID(
                     "Reset###SpecForgeUiScaleReset");
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
+InputRenderObservation RenderInputFrame(
+    specforge::SettingsPanelUi& panel,
+    bool live_numeric_navigation = true)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.live_numeric_navigation =
+        live_numeric_navigation;
+    panel.Render(settings);
+
+    InputRenderObservation observation;
+    for (ImGuiWindow* window : GImGui->Windows) {
+        observation.live_numeric_navigation_hovered =
+            observation.live_numeric_navigation_hovered ||
+            GImGui->HoveredId == window->GetID(
+                "Live numeric navigation###"
+                "SpecForgeLiveNumericNavigation");
     }
     ImGui::EndFrame();
     return observation;
@@ -605,6 +635,64 @@ void TestUiScaleControlEmitsOneShotSettingsIntent()
                     SetUiScale &&
             reset_intent->ui_scale_percentage == 100,
         "UI scale reset should emit 100%");
+}
+
+void TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::Input);
+    panel.Open();
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    InputRenderObservation observation =
+        RenderInputFrame(panel);
+    ImVec2 checkbox_position;
+    for (float y = 80.0f;
+         y <= 900.0f &&
+         !observation.live_numeric_navigation_hovered;
+         y += 2.0f) {
+        for (float x = 300.0f;
+             x <= 1300.0f &&
+             !observation.live_numeric_navigation_hovered;
+             x += 40.0f) {
+            checkbox_position = ImVec2(x, y);
+            ImGui::GetIO().AddMousePosEvent(
+                checkbox_position.x,
+                checkbox_position.y);
+            observation = RenderInputFrame(panel);
+        }
+    }
+    Require(
+        observation.live_numeric_navigation_hovered,
+        "fixture should locate the checked live numeric navigation checkbox");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderInputFrame(panel);
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "pressing the checkbox should wait for click release");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderInputFrame(panel);
+
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetLiveNumericNavigation &&
+            !intent->live_numeric_navigation,
+        "clicking the checked live numeric navigation checkbox should emit the disabled setting");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "live numeric navigation intent should be consumed once");
 }
 
 void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
@@ -1179,6 +1267,7 @@ int main()
     TestProfileResetEmitsOneShotSettingsIntent();
     TestWarnedFallbacksRemainDirectlyRepairable();
     TestUiScaleControlEmitsOneShotSettingsIntent();
+    TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent();
     TestUiScaleSliderCommitsOnlyAfterEditDeactivation();
     TestLocalizedUiScaleResetEmitsDefaultIntent();
     TestLanguageSelectorEmitsOneShotIntent();

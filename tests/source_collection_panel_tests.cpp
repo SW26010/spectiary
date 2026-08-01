@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -145,6 +146,7 @@ public:
             panel.RenderNavigation(
                 interaction,
                 specforge::UiLanguage::English,
+                live_numeric_navigation,
                 &open,
                 shortcut);
         }
@@ -241,6 +243,7 @@ public:
         panel.RenderNavigation(
             interaction,
             specforge::UiLanguage::English,
+            live_numeric_navigation,
             &open,
             shortcut);
         ImGuiWindow* navigation_window =
@@ -298,6 +301,7 @@ public:
     specforge::SourceCollectionPanelUi panel;
     specforge::PanelSessionInteraction interaction;
     bool navigation_tab_visible_last_frame = false;
+    bool live_numeric_navigation = false;
 
 private:
     static constexpr const char* kDockHostWindow =
@@ -336,6 +340,276 @@ void ConfigureEditableSourceInput(
     fixture.view.navigation.sequence_active = false;
     fixture.view.navigation.sequence_count = 0;
     fixture.view.navigation.current_sequence_position.reset();
+}
+
+void TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddInputCharactersUTF8("45");
+    fixture.RenderFrame();
+    Require(
+        fixture.submitted_requests.size() == 2 &&
+            fixture.submitted_requests[0].kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests[0].row_index == 3 &&
+            fixture.submitted_requests[1].kind ==
+                specforge::SampleNavigationRequestKind::LocateRow &&
+            fixture.submitted_requests[1].row_index == 44,
+        "live source input should submit 4 and 45 in order when both characters arrive in one frame");
+
+    fixture.view.navigation.current_index = 29;
+    fixture.view.navigation.current_source_row = 29;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    Require(
+        GImGui->InputTextState.TextA.Data != nullptr &&
+            std::string_view{
+                GImGui->InputTextState.TextA.Data} == "45",
+        "same-topology cursor synchronization must preserve the completed active source buffer");
+}
+
+void TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    fixture.view.navigation.sample_count = 100;
+    fixture.view.navigation.sequence_count = 100;
+    fixture.view.navigation.current_index = 19;
+    fixture.view.navigation.current_source_row = 19;
+    fixture.view.navigation.current_sequence_position = 19;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID sequence_input_id =
+        fixture.SequenceInputId();
+    ImGui::ActivateItemByID(sequence_input_id);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddInputCharactersUTF8("45");
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submitted_requests.size() == 2 &&
+            fixture.submitted_requests[0].kind ==
+                specforge::SampleNavigationRequestKind::
+                    LocateSequencePosition &&
+            fixture.submitted_requests[0].sequence_position == 3 &&
+            fixture.submitted_requests[1].kind ==
+                specforge::SampleNavigationRequestKind::
+                    LocateSequencePosition &&
+            fixture.submitted_requests[1].sequence_position == 44,
+        "live sequence input should submit valid prefixes 4 and 45 as 0-based latest intents");
+
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+    fixture.RenderFrame();
+    Require(
+        fixture.submitted_requests.size() == 2,
+        "Escape in live mode should end editing without reversing or repeating the latest navigation intent");
+}
+
+void TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    for (const std::string_view value : {"", "0", "101"}) {
+        SetActiveInputTextValue(value);
+        fixture.RenderFrame();
+    }
+    Require(
+        fixture.submission_count == 0,
+        "empty, zero, and out-of-range live source values must not submit");
+
+    SetActiveInputTextValue("4");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 1,
+        "a valid live source value should submit before topology replacement");
+    fixture.view.navigation.current_index = 7;
+    fixture.view.navigation.current_source_row = 7;
+    ++fixture.view.navigation.sequence_topology_revision;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 1 &&
+            GImGui->ActiveId != source_input_id,
+        "topology replacement should deactivate the old live edit and prevent further requests");
+
+    fixture.view.navigation.row_location_available = false;
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("45");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 1,
+        "an unavailable source-row locator must reject live requests");
+}
+
+void TestLiveExplicitCommitOfDisplayedTargetSubmitsLatestIntent()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submitted_requests.size() == 1 &&
+            fixture.submitted_requests.front().row_index == 19,
+        "explicitly submitting the displayed target in live mode should still express a latest intent");
+}
+
+void TestEnterOwnedByAnotherItemDoesNotCommitNumericInput()
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+
+    std::array<char, 16> other_buffer = {};
+    const auto render_other_input = [&other_buffer]() {
+        ImGui::Begin("Other input###NumericEnterOwnership");
+        (void)ImGui::InputText(
+            "##OtherInput",
+            other_buffer.data(),
+            other_buffer.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::End();
+    };
+    fixture.RenderFrame(render_other_input);
+    ImGuiWindow* other_window =
+        ImGui::FindWindowByName(
+            "Other input###NumericEnterOwnership");
+    Require(
+        other_window != nullptr,
+        "fixture should create the other input window");
+    const ImGuiID other_input_id =
+        other_window->GetID("##OtherInput");
+    ImGui::ActivateItemByID(other_input_id);
+    fixture.RenderFrame(render_other_input);
+    Require(
+        GImGui->ActiveId == other_input_id,
+        "fixture should transfer keyboard ownership to the other input");
+
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    fixture.RenderFrame(render_other_input);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    fixture.RenderFrame();
+
+    Require(
+        fixture.submission_count == 0,
+        "Enter owned by another active item must not commit the stale numeric edit state");
+}
+
+void RequireLiveSourceEditDoesNotRepeatWhenNotRendered(
+    NavigationFixture::NavigationFramePresentation presentation,
+    std::string_view message)
+{
+    ScopedImGuiContext context;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderFrame();
+    SetActiveInputTextValue("6");
+    fixture.RenderFrame();
+    Require(
+        fixture.submission_count == 1,
+        "live source edit should submit once while visible");
+
+    fixture.RenderFrame({}, presentation);
+    Require(
+        fixture.submission_count == 1,
+        message);
+}
+
+void TestHiddenAndCollapsedLiveEditsDoNotRepeat()
+{
+    RequireLiveSourceEditDoesNotRepeatWhenNotRendered(
+        NavigationFixture::NavigationFramePresentation::Hidden,
+        "hiding Navigation should not repeat an already submitted live edit");
+    RequireLiveSourceEditDoesNotRepeatWhenNotRendered(
+        NavigationFixture::NavigationFramePresentation::Collapsed,
+        "collapsing Navigation should not repeat an already submitted live edit");
+}
+
+void TestCoveredDockTabDoesNotRepeatLiveEdit()
+{
+    ScopedImGuiContext context;
+    ImGui::GetIO().ConfigFlags |=
+        ImGuiConfigFlags_DockingEnable;
+    NavigationFixture fixture;
+    fixture.live_numeric_navigation = true;
+    ConfigureEditableSourceInput(fixture);
+    fixture.panel.SyncNavigationInputs(
+        fixture.view.navigation);
+    fixture.RenderDockedFrame();
+    fixture.RenderDockedFrame();
+
+    const ImGuiID source_input_id =
+        fixture.SourceInputId();
+    ImGui::ActivateItemByID(source_input_id);
+    fixture.RenderDockedFrame();
+    SetActiveInputTextValue("6");
+    fixture.RenderDockedFrame();
+    Require(
+        fixture.submission_count == 1,
+        "live docked edit should submit once while its tab is visible");
+    fixture.RenderDockedFrame(true);
+    Require(
+        fixture.submission_count == 1,
+        "covering the Navigation dock tab should not repeat an already submitted live edit");
 }
 
 void TestSourceDraftWaitsForBlurAndSurvivesCursorSync()
@@ -1147,6 +1421,13 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 
 int main()
 {
+    TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync();
+    TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent();
+    TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange();
+    TestLiveExplicitCommitOfDisplayedTargetSubmitsLatestIntent();
+    TestEnterOwnedByAnotherItemDoesNotCommitNumericInput();
+    TestHiddenAndCollapsedLiveEditsDoNotRepeat();
+    TestCoveredDockTabDoesNotRepeatLiveEdit();
     TestSourceDraftWaitsForBlurAndSurvivesCursorSync();
     TestEnterCommitsSourceDraftOnce();
     TestExplicitCommittedSourceRowCancelsPendingTarget();

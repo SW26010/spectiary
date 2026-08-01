@@ -1732,6 +1732,9 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
         LocalUserStateArea::UiScale,
         ApplicationSetting::UiScale);
     append_setting(
+        LocalUserStateArea::Input,
+        ApplicationSetting::Input);
+    append_setting(
         LocalUserStateArea::
             ProfileOutputDirectory,
         ApplicationSetting::ProfileOutputDirectory);
@@ -2109,9 +2112,12 @@ void ShellUi::RenderFilesPanel(
 void ShellUi::RenderNavigationPanel(bool panel_open)
 {
     SampleWorkflowShortcut shortcut;
+    const ApplicationSettingsView settings =
+        application_settings_.View();
     source_collection_panel_ui_.RenderNavigation(
         panel_session_interaction_,
-        application_settings_.View().language,
+        settings.language,
+        settings.live_numeric_navigation,
         &panel_open,
         shortcut);
     HandleSessionAction(

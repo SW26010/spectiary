@@ -109,6 +109,9 @@ void SetLocalUserStatePaths(
     paths.ui_scale_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kUiScaleSettings;
+    paths.input_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kInputSettings;
     paths.profile_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kProfileSettings;

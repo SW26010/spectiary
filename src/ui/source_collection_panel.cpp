@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
@@ -25,6 +26,83 @@ constexpr const char* kSampleNavigationSourceInput =
     "##SampleNavigationSample";
 constexpr const char* kSampleNavigationSequenceInput =
     "##SampleNavigationSequence";
+
+struct NavigationNumberInputCharacterCapture {
+    std::string value;
+    std::vector<std::string> drafts;
+    std::optional<int> expected_cursor;
+    std::size_t max_text_size = 0;
+    bool sequential = true;
+};
+
+int CaptureNavigationNumberInputCharacter(
+    ImGuiInputTextCallbackData* data)
+{
+    if (data->EventFlag !=
+        ImGuiInputTextFlags_CallbackCharFilter) {
+        return 0;
+    }
+
+    auto& capture =
+        *static_cast<NavigationNumberInputCharacterCapture*>(
+            data->UserData);
+    if (!capture.sequential) {
+        return 0;
+    }
+
+    if (capture.expected_cursor &&
+        (data->CursorPos != *capture.expected_cursor ||
+         data->SelectionStart != data->SelectionEnd)) {
+        capture.sequential = false;
+        capture.drafts.clear();
+        return 0;
+    }
+    if (data->EventChar > 0x7fU) {
+        capture.sequential = false;
+        capture.drafts.clear();
+        return 0;
+    }
+
+    const bool has_selection =
+        data->SelectionStart != data->SelectionEnd;
+    const int selection_begin = has_selection
+        ? std::min(
+              data->SelectionStart,
+              data->SelectionEnd)
+        : data->CursorPos;
+    const int selection_end = has_selection
+        ? std::max(
+              data->SelectionStart,
+              data->SelectionEnd)
+        : data->CursorPos;
+    if (selection_begin < 0 ||
+        selection_end < selection_begin ||
+        static_cast<std::size_t>(selection_end) >
+            capture.value.size()) {
+        capture.sequential = false;
+        capture.drafts.clear();
+        return 0;
+    }
+
+    std::string next_value = capture.value;
+    next_value.replace(
+        static_cast<std::size_t>(selection_begin),
+        static_cast<std::size_t>(
+            selection_end - selection_begin),
+        1,
+        static_cast<char>(data->EventChar));
+    if (next_value.size() > capture.max_text_size) {
+        capture.sequential = false;
+        capture.drafts.clear();
+        return 0;
+    }
+    if (next_value != capture.value) {
+        capture.drafts.push_back(next_value);
+    }
+    capture.value = std::move(next_value);
+    capture.expected_cursor = selection_begin + 1;
+    return 0;
+}
 
 SourceCollectionSessionIntent EditSourceCollection(SourceCollectionIntent intent)
 {
@@ -449,6 +527,7 @@ void SourceCollectionPanelUi::SyncNavigationNumberInput(
 void SourceCollectionPanelUi::RenderNavigationNumberInput(
     NavigationNumberInputEdit& input,
     const char* input_id,
+    bool live_numeric_navigation,
     bool enabled,
     std::size_t target_count,
     std::uint64_t topology_revision,
@@ -462,16 +541,44 @@ void SourceCollectionPanelUi::RenderNavigationNumberInput(
     const bool cancel_requested =
         input.edit_active &&
         ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+    const bool enter_requested =
+        GImGui->ActiveId == ImGui::GetID(input_id) &&
+        ImGui::IsKeyPressed(ImGuiKey_Enter, false);
     const std::string value_before_input =
         input.buffer.data();
+    NavigationNumberInputCharacterCapture character_capture = {
+        .value = value_before_input,
+        .max_text_size = input.buffer.size() - 1,
+    };
+    const bool capture_character_edits =
+        enabled &&
+        (input.edit_active
+             ? input.live_submission_enabled
+             : live_numeric_navigation);
+    ImGuiInputTextFlags input_flags =
+        ImGuiInputTextFlags_CharsDecimal |
+        ImGuiInputTextFlags_EnterReturnsTrue;
+    if (capture_character_edits) {
+        input_flags |=
+            ImGuiInputTextFlags_CallbackCharFilter;
+    }
     input.input_rendered_since_finalize = true;
-    const bool commit_requested =
+    const bool input_submitted =
         ImGui::InputText(
             input_id,
             input.buffer.data(),
             input.buffer.size(),
-            ImGuiInputTextFlags_CharsDecimal |
-                ImGuiInputTextFlags_EnterReturnsTrue);
+            input_flags,
+            capture_character_edits
+                ? CaptureNavigationNumberInputCharacter
+                : nullptr,
+            capture_character_edits
+                ? &character_capture
+                : nullptr);
+    const bool commit_requested =
+        input_submitted || enter_requested;
+    const bool value_changed =
+        value_before_input != input.buffer.data();
     if (!enabled) {
         ImGui::EndDisabled();
     }
@@ -490,6 +597,8 @@ void SourceCollectionPanelUi::RenderNavigationNumberInput(
     if (ImGui::IsItemActivated()) {
         input.edit_active = true;
         input.edit_dirty = false;
+        input.live_submission_enabled =
+            live_numeric_navigation;
         input.edit_initial_value = value_before_input;
         input.edit_topology_revision = topology_revision;
     }
@@ -502,29 +611,67 @@ void SourceCollectionPanelUi::RenderNavigationNumberInput(
         input.edit_active &&
         input.edit_topology_revision &&
         *input.edit_topology_revision == topology_revision;
+    std::vector<std::string> live_drafts;
+    if (input.live_submission_enabled) {
+        if (capture_character_edits &&
+            character_capture.sequential) {
+            live_drafts =
+                std::move(character_capture.drafts);
+            if (character_capture.value !=
+                    input.buffer.data() &&
+                (live_drafts.empty() ||
+                 live_drafts.back() != input.buffer.data())) {
+                live_drafts.emplace_back(
+                    input.buffer.data());
+            }
+        } else if (value_changed) {
+            live_drafts.emplace_back(input.buffer.data());
+        }
+    }
     if (!reload_deactivate_requested &&
         !cancel_requested &&
         edit_is_current &&
-        enabled &&
-        commit_requested) {
-        ApplyNavigationNumberInputCommit(
-            NavigationNumberInputCommit{
-                .draft = input.buffer.data(),
-                .topology_revision =
-                    *input.edit_topology_revision,
-            },
-            enabled,
-            target_count,
-            topology_revision,
-            make_request,
-            navigation,
-            interaction);
+        enabled) {
+        const bool live_submission_covers_commit =
+            input.live_submission_enabled &&
+            !live_drafts.empty() &&
+            live_drafts.back() == input.buffer.data();
+        for (const std::string& draft : live_drafts) {
+            ApplyNavigationNumberInputCommit(
+                NavigationNumberInputCommit{
+                    .draft = draft,
+                    .topology_revision =
+                        *input.edit_topology_revision,
+                },
+                enabled,
+                target_count,
+                topology_revision,
+                make_request,
+                navigation,
+                interaction);
+        }
+        if (commit_requested &&
+            !live_submission_covers_commit) {
+            ApplyNavigationNumberInputCommit(
+                NavigationNumberInputCommit{
+                    .draft = input.buffer.data(),
+                    .topology_revision =
+                        *input.edit_topology_revision,
+                },
+                enabled,
+                target_count,
+                topology_revision,
+                make_request,
+                navigation,
+                interaction);
+        }
     }
     if (!reload_deactivate_requested &&
         !cancel_requested &&
         !commit_requested &&
         edit_is_current &&
         enabled &&
+        !input.live_submission_enabled &&
         deactivated_after_edit) {
         input.blur_commit =
             NavigationNumberInputCommit{
@@ -553,7 +700,9 @@ SourceCollectionPanelUi::FinalizeNavigationNumberInput(
             input.input_rendered_since_finalize,
             false);
     if (input.edit_active && !input_rendered) {
-        if (input.edit_dirty && input.edit_topology_revision) {
+        if (input.edit_dirty &&
+            !input.live_submission_enabled &&
+            input.edit_topology_revision) {
             input.blur_commit =
                 NavigationNumberInputCommit{
                     .draft = input.buffer.data(),
@@ -612,6 +761,7 @@ void SourceCollectionPanelUi::ResetNavigationNumberInputEdit(
 {
     input.edit_active = false;
     input.edit_dirty = false;
+    input.live_submission_enabled = false;
     input.edit_initial_value.clear();
     input.edit_topology_revision.reset();
 }
@@ -798,12 +948,14 @@ void SourceCollectionPanelUi::RenderFiles(
 
 void SourceCollectionPanelUi::RenderNavigation(
     PanelSessionInteraction& interaction,
+    bool live_numeric_navigation,
     bool* open,
     SampleWorkflowShortcut& shortcut)
 {
     RenderNavigation(
         interaction,
         UiLanguage::English,
+        live_numeric_navigation,
         open,
         shortcut);
 }
@@ -811,6 +963,7 @@ void SourceCollectionPanelUi::RenderNavigation(
 void SourceCollectionPanelUi::RenderNavigation(
     PanelSessionInteraction& interaction,
     UiLanguage language,
+    bool live_numeric_navigation,
     bool* open,
     SampleWorkflowShortcut& shortcut)
 {
@@ -848,6 +1001,7 @@ void SourceCollectionPanelUi::RenderNavigation(
     RenderNavigationNumberInput(
         source_row_input_,
         kSampleNavigationSourceInput,
+        live_numeric_navigation,
         navigation.row_location_available,
         navigation_count,
         navigation.sequence_topology_revision,
@@ -920,6 +1074,7 @@ void SourceCollectionPanelUi::RenderNavigation(
         RenderNavigationNumberInput(
             sequence_position_input_,
             kSampleNavigationSequenceInput,
+            live_numeric_navigation,
             navigation.sequence_count > 0,
             navigation.sequence_count,
             navigation.sequence_topology_revision,

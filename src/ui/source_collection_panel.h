@@ -36,11 +36,13 @@ public:
 
     void RenderNavigation(
         PanelSessionInteraction& interaction,
+        bool live_numeric_navigation,
         bool* open,
         SampleWorkflowShortcut& shortcut);
     void RenderNavigation(
         PanelSessionInteraction& interaction,
         UiLanguage language,
+        bool live_numeric_navigation,
         bool* open,
         SampleWorkflowShortcut& shortcut);
 
@@ -63,6 +65,7 @@ private:
         std::string edit_initial_value;
         bool edit_active = false;
         bool edit_dirty = false;
+        bool live_submission_enabled = false;
         bool input_rendered_since_finalize = false;
         bool reload_deactivate_pending = false;
     };
@@ -91,6 +94,7 @@ private:
     void RenderNavigationNumberInput(
         NavigationNumberInputEdit& input,
         const char* input_id,
+        bool live_numeric_navigation,
         bool enabled,
         std::size_t target_count,
         std::uint64_t topology_revision,

@@ -55,6 +55,7 @@ specforge::ApplicationSettingsStorage MakeStorage(
     return {
         .language_settings_path = root / "ui-language.json",
         .ui_scale_settings_path = root / "ui-scale.json",
+        .input_settings_path = root / "input-settings.json",
         .profile_settings_path = root / "profile-settings.json",
         .panel_visibility_path = root / "panel-visibility.json",
         .default_profile_output_directory = root / "profiles",
@@ -78,6 +79,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         initial.ui_scale_percentage == 100,
         "missing UI scale settings should default to 100%");
     Require(
+        initial.live_numeric_navigation,
+        "missing input settings should enable live numeric navigation");
+    Require(
         initial.profile_output_directory ==
             storage.default_profile_output_directory,
         "missing profile settings should use the default directory");
@@ -96,6 +100,14 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         ui_scale_result.applied(),
         "UI scale intent should apply");
+
+    const auto input_result = settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            SetLiveNumericNavigation(false),
+        {});
+    Require(
+        input_result.applied(),
+        "live numeric navigation intent should apply");
 
     const std::filesystem::path custom_directory =
         temporary.path() / "custom profiles";
@@ -117,6 +129,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         reloaded_view.ui_scale_percentage == 125,
         "UI scale should reload through the application settings owner");
+    Require(
+        !reloaded_view.live_numeric_navigation,
+        "live numeric navigation should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory == custom_directory,
         "profile directory should reload through the application settings owner");
@@ -151,6 +166,7 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
     specforge::ApplicationSettings settings({
         .language_settings_path = blocker / "ui-language.json",
         .ui_scale_settings_path = blocker / "ui-scale.json",
+        .input_settings_path = blocker / "input-settings.json",
         .profile_settings_path = blocker / "profile-settings.json",
         .panel_visibility_path = blocker / "panel-visibility.json",
         .default_profile_output_directory =
@@ -284,6 +300,40 @@ void TestUiScaleValidationAndPersistenceFirstBehavior()
             specforge::ApplicationSettingsStatusKind::
                 PersistenceError,
         "UI scale save failure should remain visible");
+}
+
+void TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block input settings directory creation";
+    }
+
+    auto storage = MakeStorage(temporary.path());
+    storage.input_settings_path =
+        blocker / "input-settings.json";
+    specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsResult result =
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetLiveNumericNavigation(false),
+            {});
+    const specforge::ApplicationSettingsView view =
+        settings.View();
+    Require(
+        result.outcome ==
+                specforge::ApplicationSettingsOutcome::
+                    PersistenceFailed &&
+            view.live_numeric_navigation,
+        "input settings save failure should retain the enabled runtime value");
+    Require(
+        view.StatusFor(specforge::ApplicationSetting::Input).kind ==
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError,
+        "input settings save failure should remain visible on the owner view");
 }
 
 void TestUiScaleResetRepairsDamagedFallbackState()
@@ -422,6 +472,10 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
         stream << R"({"format_kind":)";
     }
     {
+        std::ofstream stream(storage.input_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
         std::ofstream stream(storage.profile_settings_path);
         stream << R"({"format_kind":)";
     }
@@ -454,6 +508,15 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
             ui_scale_status.setting ==
                 specforge::ApplicationSetting::UiScale,
         "damaged UI scale settings should fall back with a typed load warning");
+    Require(
+        loaded.live_numeric_navigation &&
+            loaded
+                    .StatusFor(
+                        specforge::ApplicationSetting::Input)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning,
+        "damaged input settings should enable live navigation with a typed load warning");
     Require(
         loaded
                 .StatusFor(
@@ -671,6 +734,7 @@ int main()
     TestSettingsIntentsPersistAndReloadThroughOneOwner();
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestUiScaleValidationAndPersistenceFirstBehavior();
+    TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue();
     TestUiScaleResetRepairsDamagedFallbackState();
     TestLanguageAndProfileFallbacksCanBeReapplied();
     TestLoadWarningAndEnvironmentOverrideAreTyped();

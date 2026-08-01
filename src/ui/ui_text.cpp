@@ -180,13 +180,25 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Tune mouse, touchpad, and keyboard behavior for spectrum inspection.",
         "调整光谱检视中的鼠标、触控板与键盘行为。"},
+    UiTextEntry{
+        "Live numeric navigation",
+        "实时数值导航"},
+    UiTextEntry{
+        "When enabled, each valid 1-based source sample or sequence value is submitted while you type. Disable it to navigate only after Enter or focus loss.",
+        "启用后，输入过程中每个有效的 1-based 源样本或序列数值都会立即提交；关闭后仅在按下 Enter 或输入框失去焦点时导航。"},
+    UiTextEntry{
+        "The saved input behavior could not be loaded; live numeric navigation is enabled.",
+        "无法加载已保存的输入行为，当前已启用实时数值导航。"},
+    UiTextEntry{
+        "The input behavior could not be saved. The previous behavior is still in use.",
+        "无法保存输入行为，仍继续使用此前的行为。"},
     UiTextEntry{"Mouse zoom sensitivity", "鼠标缩放灵敏度"},
     UiTextEntry{"Touchpad zoom sensitivity", "触控板缩放灵敏度"},
     UiTextEntry{"Reverse zoom direction", "反转缩放方向"},
     UiTextEntry{"View keyboard shortcuts", "查看键盘快捷键"},
     UiTextEntry{
-        "Not available yet. Input behavior currently follows the built-in interaction model.",
-        "暂不可用。输入行为目前遵循内置交互模型。"},
+        "Other input behavior settings are not available yet.",
+        "其他输入行为设置暂不可用。"},
     UiTextEntry{"Data & Recovery", "数据与恢复"},
     UiTextEntry{
         "Inspect local application storage. Scientific source files and label result files remain user-owned.",
@@ -1006,6 +1018,8 @@ std::string_view UiText(
         return UiText(language, UiTextId::Language);
     case LocalUserStateArea::UiScale:
         return UiText(language, UiTextId::UiScale);
+    case LocalUserStateArea::Input:
+        return UiText(language, UiTextId::Input);
     case LocalUserStateArea::ProfileOutputDirectory:
         return UiText(
             language,

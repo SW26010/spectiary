@@ -1091,6 +1091,44 @@ void TestSequencePositionLocateFollowsFilteredSortedOrder()
         "sequence-position locate should reject positions outside the active sequence");
 }
 
+void TestDeferredNumericPrefixesAdmitOnlyTheLatestTarget()
+{
+    specforge::SampleNavigationController controller(
+        std::filesystem::path{});
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/live-numeric-navigation.npy",
+            "live-numeric-navigation",
+            50,
+            0));
+
+    const specforge::SampleNavigationResult prefix =
+        controller.NavigateDeferred(
+            specforge::SampleNavigationRequest::LocateRow(3),
+            false);
+    const specforge::SampleNavigationResult completed =
+        controller.NavigateDeferred(
+            specforge::SampleNavigationRequest::LocateRow(44),
+            false);
+    Require(
+        prefix.target_found && prefix.current_index == 3 &&
+            completed.target_found &&
+            completed.current_index == 44 &&
+            controller.pending_index() == 44,
+        "rapid numeric prefixes should replace the pending navigation target with the latest row");
+    Require(
+        !controller.CommitDeferredNavigation(3) &&
+            controller.current_index() == 0 &&
+            controller.pending_index() == 44,
+        "completion for an older numeric prefix should be rejected as stale");
+    Require(
+        controller.CommitDeferredNavigation(44) &&
+            controller.current_index() == 44 &&
+            !controller.pending_index(),
+        "the latest numeric target should remain admissible");
+}
+
 void TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions()
 {
     const std::filesystem::path cache_path =
@@ -1563,6 +1601,7 @@ int main()
     TestEmptyFilterClearsCurrentSequenceRow();
     TestSortOnlyRowLocateIsUnavailableButNotBlockedByFilter();
     TestSequencePositionLocateFollowsFilteredSortedOrder();
+    TestDeferredNumericPrefixesAdmitOnlyTheLatestTarget();
     TestDeferredNavigationReusesSequenceStateAcrossCursorTransitions();
     TestSequenceStateInvalidatesWithNavigationInputsAndContext();
     TestSequenceTopologyRevisionExcludesCursorMovement();

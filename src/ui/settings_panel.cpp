@@ -644,7 +644,7 @@ void SettingsPanelUi::RenderSelectedSection(
         RenderLanguage(settings);
         return;
     case SettingsSection::Input:
-        RenderInput(settings.language);
+        RenderInput(settings);
         return;
     case SettingsSection::DataAndRecovery:
         RenderDataAndRecovery(settings.language);
@@ -894,11 +894,68 @@ void SettingsPanelUi::RenderLanguage(
     ImGui::PopTextWrapPos();
 }
 
-void SettingsPanelUi::RenderInput(UiLanguage language)
+void SettingsPanelUi::RenderInput(
+    const ApplicationSettingsView& settings)
 {
+    const UiLanguage language = settings.language;
     RenderSectionHeading(
         UiText(language, UiTextId::Input),
         UiText(language, UiTextId::InputPageDescription));
+
+    bool live_numeric_navigation =
+        settings.live_numeric_navigation;
+    const std::string live_numeric_navigation_label =
+        StableUiLabel(
+            language,
+            UiTextId::LiveNumericNavigation,
+            "SpecForgeLiveNumericNavigation");
+    if (ImGui::Checkbox(
+            live_numeric_navigation_label.c_str(),
+            &live_numeric_navigation)) {
+        SetLiveNumericNavigation(
+            live_numeric_navigation);
+    }
+    ImGui::PushTextWrapPos();
+    const std::string_view live_description = UiText(
+        language,
+        UiTextId::LiveNumericNavigationDescription);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(live_description.size()),
+        live_description.data());
+    ImGui::PopTextWrapPos();
+
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(ApplicationSetting::Input);
+    if (setting_status.kind !=
+        ApplicationSettingsStatusKind::Ready) {
+        ImGui::Spacing();
+        const bool warning =
+            setting_status.kind ==
+            ApplicationSettingsStatusKind::LoadWarning;
+        const ImVec4 feedback_color = warning
+            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
+            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const std::string_view feedback = UiText(
+            language,
+            warning
+                ? UiTextId::InputSettingsLoadWarning
+                : UiTextId::InputSettingsSaveError);
+        ImGui::PushTextWrapPos();
+        ImGui::TextColored(
+            feedback_color,
+            "%.*s",
+            static_cast<int>(feedback.size()),
+            feedback.data());
+        RenderApplicationSettingsStatusReason(
+            setting_status,
+            language);
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
     float mouse_zoom_sensitivity = 1.0f;
     float touchpad_zoom_sensitivity = 1.0f;
@@ -947,6 +1004,13 @@ void SettingsPanelUi::RenderInput(UiLanguage language)
         static_cast<int>(unavailable.size()),
         unavailable.data());
     ImGui::PopTextWrapPos();
+}
+
+void SettingsPanelUi::SetLiveNumericNavigation(bool enabled)
+{
+    application_settings_intent_ =
+        ApplicationSettingsIntent::
+            SetLiveNumericNavigation(enabled);
 }
 
 void SettingsPanelUi::RenderDataAndRecovery(

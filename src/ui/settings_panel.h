@@ -111,7 +111,8 @@ private:
     void RenderAppearance(
         const ApplicationSettingsView& settings);
     void RenderLanguage(const ApplicationSettingsView& settings);
-    void RenderInput(UiLanguage language);
+    void RenderInput(
+        const ApplicationSettingsView& settings);
     void RenderDataAndRecovery(UiLanguage language);
     void RenderDiagnostics(
         const ApplicationSettingsView& settings,
@@ -119,6 +120,7 @@ private:
     void RenderAbout(const ApplicationSettingsView& settings);
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
+    void SetLiveNumericNavigation(bool enabled);
     [[nodiscard]] static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate);

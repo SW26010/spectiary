@@ -315,27 +315,38 @@ which samples belong to the sample navigation sequence.
 The Navigation window exposes `source sample` as an editable 1-based source-row
 number whenever direct source-row location is available. While a filtered or
 sorted sequence is active, it also exposes `sequence` as an editable 1-based
-position within the current sequence. Committing `source sample` locates that
-source row by converting the entered number to a 0-based `LocateRow` target;
-committing `sequence` locates the source row at that position after active
+position within the current sequence. A `source sample` submission locates that
+source row by converting the entered number to a 0-based `LocateRow` target; a
+`sequence` submission locates the source row at that position after active
 filtering and sorting through `LocateSequencePosition`.
-Both numeric fields use the same draft/commit contract while keeping independent
-edit state. Character-by-character edits do not navigate. Enter commits and
-Escape cancels immediately; leaving a dirty field queues one focus-loss commit
-after all same-frame panels have applied their actions. A focus-loss commit is
-discarded when its activation-time sequence-topology revision is no longer
-current. If Navigation stops submitting either field because the window is
-collapsed, covered by another dock tab, hidden, or replaced by immersive plot
-mode, its dirty draft follows the same frame-end commit and topology-validation
-path. Every valid explicit commit is forwarded as the latest navigation intent,
-even when it names the currently displayed committed row or position, so it can
-cancel a different deferred target that has not yet been presented.
+Both numeric fields use the same panel-private editing implementation while
+keeping independent edit state. `Settings > Input > Live numeric navigation` is
+persisted and enabled by default. While it is enabled, every actual text change
+that parses as a valid in-range 1-based target submits a navigation intent in the
+same UI frame, without debounce. For example, entering `45` submits the valid
+prefix `4` and then `45` as 0-based targets `3` and `44`. Empty, invalid,
+out-of-range, and unavailable source-row targets do not submit. These requests
+express the latest intent immediately; asynchronous source loading may cancel an
+older task or reject its completion, and does not guarantee that every prefix is
+presented.
+
+Enter remains an explicit latest-intent submission even when the text names the
+currently displayed row or position, so it can cancel a different deferred
+target. In live mode, Escape ends editing while retaining the last navigation
+intent already submitted; focus loss, a collapsed or hidden Navigation window,
+a covered dock tab, and immersive plot mode also end the edit without replaying
+the last value. When live numeric navigation is disabled, character-by-character
+edits do not navigate: Enter commits, Escape cancels, and leaving a dirty field
+queues one focus-loss commit after all same-frame panels have applied their
+actions. A focus-loss commit is discarded when its activation-time
+sequence-topology revision is no longer current. Both modes continue to use the
+Shell's single frame-end navigation-input finalization entry.
 `source sample` remains read-only whenever direct source-row location is
 unavailable. Source, context, count, filtering, or sorting topology changes
-invalidate drafts from the previous topology. Ordinary committed or pending
-cursor updates do not invalidate an active draft. No-op sample-filter or sorting
+invalidate edits from the previous topology. Ordinary committed or pending
+cursor updates do not overwrite an active buffer. No-op sample-filter or sorting
 reconciliation that retains the effective active state, membership, and row
-order also retains the revision and the draft. The current source row remains
+order also retains the revision and the edit. The current source row remains
 selected when eligible, and only its displayed sequence position is
 resynchronized.
 

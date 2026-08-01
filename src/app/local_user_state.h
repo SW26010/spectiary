@@ -35,6 +35,7 @@ enum class LocalUserStateArea {
     SampleWorkflow,
     Language,
     UiScale,
+    Input,
     ProfileOutputDirectory,
     PanelVisibility,
     SpectralLines,

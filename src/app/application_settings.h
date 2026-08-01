@@ -1,6 +1,7 @@
 #pragma once
 
 #include "profile/profile_settings.h"
+#include "ui/input_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
@@ -20,6 +21,7 @@ enum class ApplicationSetting {
     Language,
     ProfileOutputDirectory,
     UiScale,
+    Input,
     PanelVisibility,
 };
 
@@ -57,6 +59,8 @@ struct ApplicationSettingsStatus {
 struct ApplicationSettingsView {
     UiLanguage language = UiLanguage::English;
     int ui_scale_percentage = kDefaultUiScalePercentage;
+    bool live_numeric_navigation =
+        kDefaultLiveNumericNavigation;
     std::filesystem::path profile_output_directory;
     std::filesystem::path default_profile_output_directory;
     ProfileOutputDirectorySource profile_output_directory_source =
@@ -89,6 +93,7 @@ enum class ApplicationPanel {
 enum class ApplicationSettingsIntentKind {
     SetLanguage,
     SetUiScale,
+    SetLiveNumericNavigation,
     SetProfileOutputDirectory,
     RestoreDefaultProfileOutputDirectory,
     SetPanelVisibility,
@@ -101,6 +106,8 @@ struct ApplicationSettingsIntent {
         ApplicationSettingsIntentKind::SetLanguage;
     UiLanguage language = UiLanguage::English;
     int ui_scale_percentage = kDefaultUiScalePercentage;
+    bool live_numeric_navigation =
+        kDefaultLiveNumericNavigation;
     std::filesystem::path directory;
     ApplicationPanel panel = ApplicationPanel::Files;
     bool visible = true;
@@ -109,6 +116,8 @@ struct ApplicationSettingsIntent {
         UiLanguage language);
     [[nodiscard]] static ApplicationSettingsIntent SetUiScale(
         int percentage);
+    [[nodiscard]] static ApplicationSettingsIntent
+    SetLiveNumericNavigation(bool enabled);
     [[nodiscard]] static ApplicationSettingsIntent SetProfileOutputDirectory(
         std::filesystem::path directory);
     [[nodiscard]] static ApplicationSettingsIntent
@@ -147,6 +156,7 @@ struct ApplicationSettingsRuntimeState {
 struct ApplicationSettingsStorage {
     std::filesystem::path language_settings_path;
     std::filesystem::path ui_scale_settings_path;
+    std::filesystem::path input_settings_path;
     std::filesystem::path profile_settings_path;
     std::filesystem::path panel_visibility_path;
     std::filesystem::path default_profile_output_directory;
@@ -179,6 +189,8 @@ private:
         UiLanguage language);
     [[nodiscard]] ApplicationSettingsResult ApplyUiScale(
         int percentage);
+    [[nodiscard]] ApplicationSettingsResult
+    ApplyLiveNumericNavigation(bool enabled);
     [[nodiscard]] ApplicationSettingsResult ApplyProfileOutputDirectory(
         std::optional<std::filesystem::path> directory,
         const ApplicationSettingsRuntimeState& runtime);
@@ -204,6 +216,8 @@ private:
     ApplicationSettingsStorage storage_;
     UiLanguage language_ = UiLanguage::English;
     int ui_scale_percentage_ = kDefaultUiScalePercentage;
+    bool live_numeric_navigation_ =
+        kDefaultLiveNumericNavigation;
     ProfileOutputDirectoryResolution profile_output_directory_;
     PanelVisibilityStatePersistence panel_visibility_persistence_;
     PanelVisibilityState panel_visibility_;

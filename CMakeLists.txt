@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.7.1 LANGUAGES CXX)
+project(SpecForge VERSION 0.7.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -301,6 +301,7 @@ add_library(specforge_desktop_ui STATIC
     src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
+    src/ui/input_settings.cpp
     src/ui/panel_session_interaction.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
@@ -864,6 +865,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_ui_scale_settings_tests
     tests/ui_scale_settings_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_input_settings_tests
+    tests/input_settings_tests.cpp
     specforge_desktop_ui
 )
 add_test(

@@ -270,9 +270,21 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
+            UiTextId::LiveNumericNavigation) ==
+            "实时数值导航",
+        "live numeric navigation setting should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::InputSettingsSaveError) ==
+            "无法保存输入行为，仍继续使用此前的行为。",
+        "input settings save feedback should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
             UiTextId::InputBehaviorUnavailable) ==
-            "暂不可用。输入行为目前遵循内置交互模型。",
-        "Input page should be localized");
+            "其他输入行为设置暂不可用。",
+        "remaining Input placeholders should be localized");
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
