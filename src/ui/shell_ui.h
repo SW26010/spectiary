@@ -130,6 +130,58 @@ struct ShellAutomationView {
     ShellAutomationLabelingView labeling;
 };
 
+struct ShellAutomationPanelPresentation {
+    std::array<
+        std::uint64_t,
+        kApplicationPanelCount>
+        frame_indices{};
+    PanelVisibilityState visibility;
+
+    [[nodiscard]] std::uint64_t FrameIndex(
+        ApplicationPanel panel) const noexcept
+    {
+        return frame_indices[
+            static_cast<std::size_t>(panel)];
+    }
+
+    [[nodiscard]] bool operator==(
+        const ShellAutomationPanelPresentation&) const = default;
+};
+
+struct ShellAutomationPanelPresentationStatus {
+    std::array<
+        std::uint64_t,
+        kApplicationPanelCount>
+        frame_indices{};
+    std::array<
+        bool,
+        kApplicationPanelCount>
+        blocked{};
+
+    [[nodiscard]] bool BlockedAfter(
+        ApplicationPanel panel,
+        std::uint64_t frame_index) const noexcept
+    {
+        const std::size_t panel_index =
+            static_cast<std::size_t>(panel);
+        return frame_indices[panel_index] >
+                   frame_index &&
+               blocked[panel_index];
+    }
+
+    [[nodiscard]] bool Blocked(
+        ApplicationPanel panel) const noexcept
+    {
+        return blocked[
+            static_cast<std::size_t>(panel)];
+    }
+};
+
+struct ShellAutomationViewportPresentationState {
+    unsigned int viewport_id = 0;
+    bool renderable = true;
+};
+
 enum class ShellAutomationNavigationError {
     None,
     NoActiveSource,
@@ -221,9 +273,21 @@ public:
     SetUiLanguageForAutomation(UiLanguage language);
     [[nodiscard]] ApplicationSettingsResult
     SetUiScaleForAutomation(int percentage);
+    [[nodiscard]] ApplicationSettingsResult
+    SetPanelVisibilityForAutomation(
+        ApplicationPanel panel,
+        bool visible);
+    [[nodiscard]] PanelVisibilityState
+    PanelVisibilityForAutomation() const;
     [[nodiscard]] ShellAutomationView AutomationView();
     [[nodiscard]] const ShellAutomationView&
     PresentedAutomationView() const noexcept;
+    [[nodiscard]] const
+        ShellAutomationPanelPresentation&
+    PresentedPanelVisibilityForAutomation() const noexcept;
+    [[nodiscard]] const
+        ShellAutomationPanelPresentationStatus&
+    PanelPresentationStatusForAutomation() const noexcept;
     [[nodiscard]] bool
     ArmRuntimeResourceCancellationCheckpoint();
     void RefreshSystemColors();
@@ -250,7 +314,10 @@ public:
         NavigationLatencyTimePoint at = NavigationLatencyTrace::Now());
     void PresentFrame(
         std::uint64_t frame_index,
-        std::span<const NavigationLatencyPresentation> presentations);
+        std::span<const NavigationLatencyPresentation> presentations,
+        std::span<
+            const ShellAutomationViewportPresentationState>
+            viewport_states = {});
 
 private:
     ShellUi(
@@ -302,6 +369,15 @@ private:
         std::uint64_t frame_index,
         unsigned int viewport_id,
         SpectrumSnapshotHandle snapshot);
+    void RecordPanelVisibilityDrawSubmission(
+        std::uint64_t frame_index,
+        unsigned int viewport_id,
+        PanelVisibilityState visibility);
+    void RecordPanelDrawSubmission(
+        ApplicationPanel panel,
+        unsigned int viewport_id);
+    void RecordPanelWindowDrawSubmission(
+        ApplicationPanel panel);
     [[nodiscard]] ShellAutomationView
     AutomationViewForSnapshot(
         const SpectrumSnapshotHandle& snapshot);
@@ -309,6 +385,17 @@ private:
     struct AutomationPresentationCandidate {
         std::uint64_t frame_index = 0;
         ShellAutomationView view;
+    };
+
+    struct AutomationPanelPresentationCandidate {
+        std::uint64_t frame_index = 0;
+        unsigned int main_viewport_id = 0;
+        PanelVisibilityState visibility;
+        std::array<
+            std::optional<unsigned int>,
+            kApplicationPanelCount>
+            draw_viewport_ids;
+        bool main_viewport_presented = false;
     };
 
     friend struct ShellUiTestAccess;
@@ -340,6 +427,16 @@ private:
         automation_presentation_candidate_;
     ShellAutomationView
         presented_automation_view_;
+    std::optional<AutomationPanelPresentationCandidate>
+        automation_panel_presentation_candidate_;
+    std::array<
+        std::vector<unsigned int>,
+        kApplicationPanelCount>
+        automation_panel_visible_viewports_;
+    ShellAutomationPanelPresentation
+        presented_panel_visibility_;
+    ShellAutomationPanelPresentationStatus
+        automation_panel_presentation_status_;
 };
 
 }  // namespace specforge

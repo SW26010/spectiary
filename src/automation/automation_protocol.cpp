@@ -114,6 +114,8 @@ ParseCommandParameters(
     const bool requires_params =
         command == AutomationCommandKind::SettingGet ||
         command == AutomationCommandKind::SettingSet ||
+        command == AutomationCommandKind::PanelGet ||
+        command == AutomationCommandKind::PanelSet ||
         command == AutomationCommandKind::SourceOpen ||
         command == AutomationCommandKind::SpectrumGoto ||
         command == AutomationCommandKind::LabelAssign ||
@@ -190,6 +192,39 @@ ParseCommandParameters(
         return AutomationSettingSetParameters{
             .name = *name,
             .value = std::move(setting_value),
+        };
+    }
+    case AutomationCommandKind::PanelGet: {
+        const std::optional<std::string> name =
+            ReadJsonStringMember(*params, "name");
+        if (!name || name->empty()) {
+            error_message =
+                "panel.get requires a non-empty string name.";
+            return std::nullopt;
+        }
+        return AutomationPanelGetParameters{
+            .name = *name,
+        };
+    }
+    case AutomationCommandKind::PanelSet: {
+        const std::optional<std::string> name =
+            ReadJsonStringMember(*params, "name");
+        const JsonValue* visible =
+            JsonObjectMember(*params, "visible");
+        if (!name || name->empty()) {
+            error_message =
+                "panel.set requires a non-empty string name.";
+            return std::nullopt;
+        }
+        if (visible == nullptr ||
+            visible->kind != JsonValue::Kind::Bool) {
+            error_message =
+                "panel.set requires a boolean visible value.";
+            return std::nullopt;
+        }
+        return AutomationPanelSetParameters{
+            .name = *name,
+            .visible = visible->bool_value,
         };
     }
     case AutomationCommandKind::SourceOpen: {
@@ -325,6 +360,10 @@ std::string_view AutomationCommandName(
         return "setting.get";
     case AutomationCommandKind::SettingSet:
         return "setting.set";
+    case AutomationCommandKind::PanelGet:
+        return "panel.get";
+    case AutomationCommandKind::PanelSet:
+        return "panel.set";
     case AutomationCommandKind::SourceOpen:
         return "source.open";
     case AutomationCommandKind::SpectrumGoto:
@@ -357,6 +396,12 @@ ParseAutomationCommandName(std::string_view name) noexcept
     }
     if (name == "setting.set") {
         return AutomationCommandKind::SettingSet;
+    }
+    if (name == "panel.get") {
+        return AutomationCommandKind::PanelGet;
+    }
+    if (name == "panel.set") {
+        return AutomationCommandKind::PanelSet;
     }
     if (name == "source.open") {
         return AutomationCommandKind::SourceOpen;
@@ -640,6 +685,20 @@ std::string SerializeAutomationCommandRequest(
                 } else if constexpr (
                     std::is_same_v<
                         Value,
+                        AutomationPanelGetParameters>) {
+                    output << "\"name\":"
+                           << JsonString(value.name);
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
+                        AutomationPanelSetParameters>) {
+                    output << "\"name\":"
+                           << JsonString(value.name)
+                           << ",\"visible\":"
+                           << (value.visible ? "true" : "false");
+                } else if constexpr (
+                    std::is_same_v<
+                        Value,
                         AutomationSourceOpenParameters> ||
                     std::is_same_v<
                         Value,
@@ -682,6 +741,8 @@ AutomationCapabilityNames()
             "wait.idle",
             "setting.get",
             "setting.set",
+            "panel.get",
+            "panel.set",
             "source.open",
             "spectrum.goto",
             "label.assign",

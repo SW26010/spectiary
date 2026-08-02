@@ -28,6 +28,8 @@ enum class AutomationCommandKind {
     WaitIdle,
     SettingGet,
     SettingSet,
+    PanelGet,
+    PanelSet,
     SourceOpen,
     SpectrumGoto,
     LabelAssign,
@@ -70,6 +72,15 @@ struct AutomationSettingSetParameters {
     AutomationSettingValue value = false;
 };
 
+struct AutomationPanelGetParameters {
+    std::string name;
+};
+
+struct AutomationPanelSetParameters {
+    std::string name;
+    bool visible = true;
+};
+
 struct AutomationSourceOpenParameters {
     std::string path;
 };
@@ -91,6 +102,8 @@ using AutomationCommandParameters = std::variant<
     std::monostate,
     AutomationSettingGetParameters,
     AutomationSettingSetParameters,
+    AutomationPanelGetParameters,
+    AutomationPanelSetParameters,
     AutomationSourceOpenParameters,
     AutomationSpectrumGotoParameters,
     AutomationLabelAssignParameters,

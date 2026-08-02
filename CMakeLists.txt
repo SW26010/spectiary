@@ -550,6 +550,7 @@ target_link_libraries(
     specforge_automation_control_tests
     PRIVATE
         advapi32
+        specforge_desktop_ui
 )
 specforge_add_test(
     specforge_automation_state_isolation_tests

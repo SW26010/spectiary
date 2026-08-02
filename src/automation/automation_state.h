@@ -2,6 +2,7 @@
 
 #include "automation/automation_named_pipe.h"
 #include "profile/profile_sink.h"
+#include "ui/panel_visibility_state_cache_io.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -81,6 +82,7 @@ struct AutomationStateSnapshot {
     AutomationControlQueueSnapshot control;
     AutomationShellState shell;
     AutomationSettingsState settings;
+    PanelVisibilityState panels;
     AutomationPresentedSourceState presented_source;
     AutomationSpectrumState spectrum;
     AutomationLabelingState labeling;

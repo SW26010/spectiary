@@ -90,6 +90,19 @@ enum class ApplicationPanel {
     SpectralLines,
 };
 
+inline constexpr std::size_t kApplicationPanelCount =
+    static_cast<std::size_t>(
+        ApplicationPanel::SpectralLines) +
+    1;
+
+[[nodiscard]] bool ApplicationPanelVisible(
+    const PanelVisibilityState& visibility,
+    ApplicationPanel panel) noexcept;
+void SetApplicationPanelVisible(
+    PanelVisibilityState& visibility,
+    ApplicationPanel panel,
+    bool visible) noexcept;
+
 enum class ApplicationSettingsIntentKind {
     SetLanguage,
     SetUiScale,

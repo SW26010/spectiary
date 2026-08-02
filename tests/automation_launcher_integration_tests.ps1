@@ -26,6 +26,23 @@ function Assert-True {
     }
 }
 
+function Test-JsonBooleanProperty {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Object,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [bool]$Expected
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    return (
+        $null -ne $property -and
+        $property.Value -is [bool] -and
+        [bool]$property.Value -eq $Expected)
+}
+
 function Get-FileSha256 {
     param(
         [Parameter(Mandatory = $true)]
@@ -400,6 +417,27 @@ using System.Runtime.InteropServices;
 public static class SpecForgeAutomationWindowTestNative
 {
     [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr window,
+        out uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenThread(
+        uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+        uint threadId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SuspendThread(IntPtr thread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -410,11 +448,73 @@ public static class SpecForgeAutomationWindowTestNative
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessageW(
+        IntPtr window,
+        uint message,
+        IntPtr wparam,
+        IntPtr lparam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsWindowVisible(IntPtr window);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsIconic(IntPtr window);
+
+    public static uint WindowThreadId(IntPtr window)
+    {
+        uint processId;
+        return GetWindowThreadProcessId(
+            window,
+            out processId);
+    }
+
+    public static uint SuspendWindowThread(IntPtr window)
+    {
+        uint processId;
+        uint threadId = GetWindowThreadProcessId(
+            window,
+            out processId);
+        IntPtr thread = OpenThread(
+            0x0002,
+            false,
+            threadId);
+        if (thread == IntPtr.Zero)
+        {
+            return 0;
+        }
+        try
+        {
+            return SuspendThread(thread) == UInt32.MaxValue
+                ? 0
+                : threadId;
+        }
+        finally
+        {
+            CloseHandle(thread);
+        }
+    }
+
+    public static bool ResumeWindowThread(uint threadId)
+    {
+        IntPtr thread = OpenThread(
+            0x0002,
+            false,
+            threadId);
+        if (thread == IntPtr.Zero)
+        {
+            return false;
+        }
+        try
+        {
+            return ResumeThread(thread) != UInt32.MaxValue;
+        }
+        finally
+        {
+            CloseHandle(thread);
+        }
+    }
 
     [DllImport(
         "kernel32.dll",
@@ -478,6 +578,542 @@ function Invoke-RejectedGuiWorkflow {
         Output = $output
         Messages = $messages
         Pid = Get-LauncherProcessId -Output $output
+    }
+}
+
+function Invoke-UnrenderablePanelQuitScenario {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LauncherPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AppPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('hidden', 'minimized', 'immersive')]
+        [string]$Mode
+    )
+
+    $launcherProcess = $null
+    $guiPid = 0
+    try {
+        $start = [System.Diagnostics.ProcessStartInfo]::new()
+        $start.FileName = $LauncherPath
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $utf8WithoutBom =
+            [System.Text.UTF8Encoding]::new($false)
+        $start.StandardOutputEncoding = $utf8WithoutBom
+        $start.StandardErrorEncoding = $utf8WithoutBom
+        $start.Arguments =
+            '--app "' + $AppPath +
+            '" --state-root "' + $Root + '"'
+        $launcherProcess =
+            [System.Diagnostics.Process]::Start($start)
+
+        while ($true) {
+            $line =
+                Read-LauncherLine -Process $launcherProcess
+            if ($line -match '^SpecForge PID: ([0-9]+)$') {
+                $guiPid = [int]$Matches[1]
+            }
+            if ($line -eq (
+                    'Harness controls: pipeline begin ... pipeline end; ' +
+                    'disconnect after accepted <next command>')) {
+                break
+            }
+        }
+        Assert-True `
+            -Condition ($guiPid -gt 0) `
+            -Message "$Mode panel/quit scenario should report its owned GUI PID."
+
+        $windowHandle = [IntPtr]::Zero
+        $windowDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        while ([DateTime]::UtcNow -lt $windowDeadline) {
+            $guiProcess =
+                Get-Process `
+                    -Id $guiPid `
+                    -ErrorAction SilentlyContinue
+            if ($null -ne $guiProcess) {
+                $guiProcess.Refresh()
+                $windowHandle =
+                    [IntPtr]$guiProcess.MainWindowHandle
+            }
+            if ($windowHandle -ne [IntPtr]::Zero -and
+                [SpecForgeAutomationWindowTestNative]::
+                    IsWindowVisible($windowHandle) -and
+                -not [SpecForgeAutomationWindowTestNative]::
+                    IsIconic($windowHandle)) {
+                break
+            }
+            Start-Sleep -Milliseconds 25
+        }
+        Assert-True `
+            -Condition ($windowHandle -ne [IntPtr]::Zero) `
+            -Message "$Mode panel/quit scenario should find the real GUI HWND."
+
+        $nextRequestNumber = 1
+        if ($Mode -eq 'immersive') {
+            Assert-True `
+                -Condition (
+                    [SpecForgeAutomationWindowTestNative]::
+                        PostMessageW(
+                            $windowHandle,
+                            0x0100,
+                            [IntPtr]0x7A,
+                            [IntPtr]1)) `
+                -Message 'Immersive panel/quit scenario should post F11 to the real GUI HWND.'
+            $immersiveBarrier = @(
+                Send-InteractiveLauncherRequest `
+                    -Process $launcherProcess `
+                    -Lines @('state get') `
+                    -RequestId 'request-1'
+            )
+            Assert-True `
+                -Condition (
+                    [string]$immersiveBarrier[1].status -eq
+                        'completed') `
+                -Message 'Immersive panel/quit scenario should cross a UI-thread protocol barrier after F11.'
+            $nextRequestNumber = 2
+        }
+        else {
+            $showCommand = if ($Mode -eq 'hidden') { 0 } else { 7 }
+            [void][SpecForgeAutomationWindowTestNative]::
+                ShowWindowAsync($windowHandle, $showCommand)
+            $unrenderableDeadline =
+                [DateTime]::UtcNow.AddSeconds(5)
+            while ([DateTime]::UtcNow -lt $unrenderableDeadline) {
+                $isUnrenderable =
+                    if ($Mode -eq 'hidden') {
+                        -not [SpecForgeAutomationWindowTestNative]::
+                            IsWindowVisible($windowHandle)
+                    }
+                    else {
+                        [SpecForgeAutomationWindowTestNative]::
+                            IsIconic($windowHandle)
+                    }
+                if ($isUnrenderable) {
+                    break
+                }
+                Start-Sleep -Milliseconds 25
+            }
+        }
+
+        $panelRequestId =
+            'request-' + $nextRequestNumber
+        $waitRequestId =
+            'request-' + ($nextRequestNumber + 1)
+        $quitRequestId =
+            'request-' + ($nextRequestNumber + 2)
+        $messages = @(
+            Send-InteractiveLauncherBatch `
+                -Process $launcherProcess `
+                -Lines @(
+                    'pipeline begin',
+                    'panel set files false',
+                    'wait idle',
+                    'app quit',
+                    'pipeline end') `
+                -ExpectedRequestIds @(
+                    $panelRequestId,
+                    $waitRequestId,
+                    $quitRequestId)
+        )
+        $panelTerminal =
+            Get-ProtocolMessage `
+                -Messages $messages `
+                -RequestId $panelRequestId `
+                -Status 'failed'
+        $waitTerminal =
+            Get-ProtocolMessage `
+                -Messages $messages `
+                -RequestId $waitRequestId `
+                -Status 'completed'
+        $quitTerminal =
+            Get-ProtocolMessage `
+                -Messages $messages `
+                -RequestId $quitRequestId `
+                -Status 'completed'
+        $launcherProcess.StandardInput.Close()
+        Assert-True `
+            -Condition (
+                [string]$panelTerminal.error.code -eq
+                    $(if ($Mode -eq 'immersive') {
+                        'panel_not_renderable'
+                    }
+                    else {
+                        'window_not_renderable'
+                    }) -and
+                [string]$waitTerminal.command -eq
+                    'wait.idle' -and
+                [string]$quitTerminal.command -eq
+                    'app.quit' -and
+                $launcherProcess.WaitForExit(15000) -and
+                $launcherProcess.ExitCode -eq 0) `
+            -Message (
+                "$Mode panel.set must terminate without mutation and must not strand the following wait.idle/app.quit. Messages: " +
+                ($messages | ConvertTo-Json -Compress -Depth 20) +
+                '; launcher exit: ' +
+                $(if ($launcherProcess.HasExited) {
+                    $launcherProcess.ExitCode
+                }
+                else {
+                    'still-running'
+                }))
+
+        $savedPanelPath =
+            Join-Path $Root 'panel-visibility.json'
+        if (Test-Path -LiteralPath $savedPanelPath) {
+            $savedPanels =
+                Get-Content -Raw -LiteralPath $savedPanelPath |
+                    ConvertFrom-Json
+            Assert-True `
+                -Condition (
+                    Test-JsonBooleanProperty `
+                        -Object $savedPanels `
+                        -Name 'files' `
+                        -Expected $true) `
+                -Message "$Mode rejected panel.set must not persist a visibility mutation."
+        }
+        Assert-True `
+            -Condition (
+                $null -eq (
+                    Get-Process `
+                        -Id $guiPid `
+                        -ErrorAction SilentlyContinue)) `
+            -Message "$Mode panel/quit scenario should leave no GUI process."
+    }
+    finally {
+        if ($null -ne $launcherProcess) {
+            if (-not $launcherProcess.HasExited) {
+                $launcherProcess.StandardInput.Close()
+                if (-not $launcherProcess.WaitForExit(3000)) {
+                    $launcherProcess.Kill($true)
+                    [void]$launcherProcess.WaitForExit(3000)
+                }
+            }
+            $launcherProcess.Dispose()
+        }
+        if ($guiPid -gt 0) {
+            $ownedGui =
+                Get-Process `
+                    -Id $guiPid `
+                    -ErrorAction SilentlyContinue
+            if ($null -ne $ownedGui) {
+                [void]$ownedGui.CloseMainWindow()
+                if (-not $ownedGui.WaitForExit(3000)) {
+                    Stop-Process `
+                        -Id $guiPid `
+                        -Force `
+                        -ErrorAction SilentlyContinue
+                }
+                $ownedGui.Dispose()
+            }
+        }
+    }
+}
+
+function Start-InteractiveAutomationLauncher {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LauncherPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AppPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $LauncherPath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $utf8WithoutBom =
+        [System.Text.UTF8Encoding]::new($false)
+    $start.StandardOutputEncoding = $utf8WithoutBom
+    $start.StandardErrorEncoding = $utf8WithoutBom
+    $start.Arguments =
+        '--app "' + $AppPath +
+        '" --state-root "' + $Root + '"'
+    $process =
+        [System.Diagnostics.Process]::Start($start)
+    $guiPid = 0
+    while ($true) {
+        $line = Read-LauncherLine -Process $process
+        if ($line -match '^SpecForge PID: ([0-9]+)$') {
+            $guiPid = [int]$Matches[1]
+        }
+        if ($line -eq (
+                'Harness controls: pipeline begin ... pipeline end; ' +
+                'disconnect after accepted <next command>')) {
+            break
+        }
+    }
+    Assert-True `
+        -Condition ($guiPid -gt 0) `
+        -Message 'Interactive scenario should report its owned GUI PID.'
+    return [pscustomobject]@{
+        Process = $process
+        GuiPid = $guiPid
+    }
+}
+
+function Wait-ForMainGuiWindow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId
+    )
+
+    $windowHandle = [IntPtr]::Zero
+    $windowDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $windowDeadline) {
+        $guiProcess =
+            Get-Process `
+                -Id $ProcessId `
+                -ErrorAction SilentlyContinue
+        if ($null -ne $guiProcess) {
+            $guiProcess.Refresh()
+            $windowHandle =
+                [IntPtr]$guiProcess.MainWindowHandle
+        }
+        if ($windowHandle -ne [IntPtr]::Zero -and
+            [SpecForgeAutomationWindowTestNative]::
+                IsWindowVisible($windowHandle) -and
+            -not [SpecForgeAutomationWindowTestNative]::
+                IsIconic($windowHandle)) {
+            return $windowHandle
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw 'Interactive scenario could not find a renderable main GUI HWND.'
+}
+
+function Write-InteractiveLauncherLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines
+    )
+
+    $payload =
+        [System.Text.UTF8Encoding]::new($false).GetBytes(
+            ($Lines -join "`n") + "`n")
+    $inputStream = $Process.StandardInput.BaseStream
+    $inputStream.Write($payload, 0, $payload.Length)
+    $inputStream.Flush()
+}
+
+function Invoke-PanelShutdownRollbackScenario {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LauncherPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AppPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $launcherProcess = $null
+    $guiPid = 0
+    $suspendedUiThreadId = [uint32]0
+    try {
+        $launch =
+            Start-InteractiveAutomationLauncher `
+                -LauncherPath $LauncherPath `
+                -AppPath $AppPath `
+                -Root $Root
+        $launcherProcess = $launch.Process
+        $guiPid = $launch.GuiPid
+        $windowHandle =
+            Wait-ForMainGuiWindow -ProcessId $guiPid
+
+        $uiThreadId =
+            [SpecForgeAutomationWindowTestNative]::
+                WindowThreadId($windowHandle)
+        $uiThreadWaiting = $false
+        $uiThreadWaitDeadline =
+            [DateTime]::UtcNow.AddSeconds(5)
+        while ([DateTime]::UtcNow -lt
+            $uiThreadWaitDeadline) {
+            $guiProcess =
+                Get-Process `
+                    -Id $guiPid `
+                    -ErrorAction SilentlyContinue
+            if ($null -ne $guiProcess) {
+                $guiProcess.Refresh()
+                $uiThread = @(
+                    $guiProcess.Threads |
+                        Where-Object {
+                            [uint32]$_.Id -eq
+                                $uiThreadId
+                        }
+                ) | Select-Object -First 1
+                if ($null -ne $uiThread -and
+                    [string]$uiThread.ThreadState -eq
+                        'Wait') {
+                    $uiThreadWaiting = $true
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 1
+        }
+        Assert-True `
+            -Condition $uiThreadWaiting `
+            -Message 'Shutdown rollback scenario should observe the real HWND UI thread idle before suspension.'
+        $suspendedUiThreadId =
+            [SpecForgeAutomationWindowTestNative]::
+                SuspendWindowThread($windowHandle)
+        Assert-True `
+            -Condition ($suspendedUiThreadId -ne 0) `
+            -Message 'Shutdown rollback scenario should suspend the real HWND UI thread.'
+
+        Write-InteractiveLauncherLines `
+            -Process $launcherProcess `
+            -Lines @('panel set files false')
+        $messages = @()
+        while ($true) {
+            try {
+                $line =
+                    Read-LauncherLine `
+                        -Process $launcherProcess
+            }
+            catch {
+                throw (
+                    'Timed out before panel.set acceptance while the real GUI UI thread was suspended: ' +
+                    $_.Exception.Message)
+            }
+            if ($line -notmatch '^\{') {
+                continue
+            }
+            $message = $line | ConvertFrom-Json
+            Assert-True `
+                -Condition (
+                    [string]$message.request_id -eq
+                        'request-1') `
+                -Message "Shutdown rollback returned an unexpected request: $line"
+            $messages += $message
+            if ([string]$message.status -eq 'accepted') {
+                break
+            }
+        }
+        Assert-True `
+            -Condition (
+                [SpecForgeAutomationWindowTestNative]::
+                    PostMessageW(
+                        $windowHandle,
+                        0x0010,
+                        [IntPtr]::Zero,
+                        [IntPtr]::Zero)) `
+            -Message 'Shutdown rollback scenario should post WM_CLOSE to the real GUI HWND.'
+        Assert-True `
+            -Condition (
+                [SpecForgeAutomationWindowTestNative]::
+                    ResumeWindowThread(
+                        $suspendedUiThreadId)) `
+            -Message 'Shutdown rollback scenario should resume the real HWND UI thread.'
+        $suspendedUiThreadId = [uint32]0
+
+        while ($true) {
+            try {
+                $line =
+                    Read-LauncherLine `
+                        -Process $launcherProcess
+            }
+            catch {
+                throw (
+                    'Timed out waiting for shutdown settlement after resuming the real GUI UI thread: ' +
+                    $_.Exception.Message)
+            }
+            if ($line -notmatch '^\{') {
+                continue
+            }
+            $message = $line | ConvertFrom-Json
+            Assert-True `
+                -Condition (
+                    [string]$message.request_id -eq
+                        'request-1') `
+                -Message "Shutdown rollback returned an unexpected terminal: $line"
+            $messages += $message
+            if ([string]$message.status -in @(
+                    'completed',
+                    'failed',
+                    'canceled')) {
+                break
+            }
+        }
+        $terminal =
+            Get-ProtocolTerminalMessage `
+                -Messages $messages `
+                -RequestId 'request-1'
+        $launcherProcess.StandardInput.Close()
+        Assert-True `
+            -Condition (
+                [string]$terminal.status -eq 'failed' -and
+                [string]$terminal.error.code -eq
+                    'app_shutdown' -and
+                $launcherProcess.WaitForExit(15000) -and
+                $launcherProcess.ExitCode -eq 2) `
+            -Message (
+                'WM_CLOSE must settle a claimed panel.set with a factual app_shutdown terminal before the launcher reports the failed command. Messages: ' +
+                ($messages | ConvertTo-Json -Compress -Depth 20))
+
+        $savedPanelPath =
+            Join-Path $Root 'panel-visibility.json'
+        Assert-True `
+            -Condition (
+                (Test-Path `
+                    -LiteralPath $savedPanelPath `
+                    -PathType Leaf) -and
+                (Test-JsonBooleanProperty `
+                    -Object (
+                        Get-Content `
+                            -Raw `
+                            -LiteralPath $savedPanelPath |
+                            ConvertFrom-Json) `
+                    -Name 'files' `
+                    -Expected $true)) `
+            -Message 'Shutdown must flush the restored pre-chain Files baseline, not the unpresented mutation.'
+
+    }
+    finally {
+        if ($suspendedUiThreadId -ne 0) {
+            [void][SpecForgeAutomationWindowTestNative]::
+                ResumeWindowThread(
+                    $suspendedUiThreadId)
+            $suspendedUiThreadId = [uint32]0
+        }
+        if ($null -ne $launcherProcess) {
+            if (-not $launcherProcess.HasExited) {
+                $launcherProcess.StandardInput.Close()
+                if (-not $launcherProcess.WaitForExit(3000)) {
+                    $launcherProcess.Kill($true)
+                    [void]$launcherProcess.WaitForExit(3000)
+                }
+            }
+            $launcherProcess.Dispose()
+        }
+        if ($guiPid -gt 0) {
+            $ownedGui =
+                Get-Process `
+                    -Id $guiPid `
+                    -ErrorAction SilentlyContinue
+            if ($null -ne $ownedGui) {
+                [void]$ownedGui.CloseMainWindow()
+                if (-not $ownedGui.WaitForExit(3000)) {
+                    Stop-Process `
+                        -Id $guiPid `
+                        -Force `
+                        -ErrorAction SilentlyContinue
+                }
+                $ownedGui.Dispose()
+            }
+        }
     }
 }
 
@@ -713,9 +1349,11 @@ try {
             [string]$hello.type -eq 'hello' -and
             [string]$hello.status -eq 'completed' -and
             [int]$hello.protocol_version -eq 1 -and
-            @($hello.capabilities).Count -eq 11 -and
+            @($hello.capabilities).Count -eq 13 -and
             @($hello.capabilities) -contains 'setting.get' -and
             @($hello.capabilities) -contains 'setting.set' -and
+            @($hello.capabilities) -contains 'panel.get' -and
+            @($hello.capabilities) -contains 'panel.set' -and
             @($hello.capabilities) -contains 'profile.start' -and
             @($hello.capabilities) -contains 'profile.stop' -and
             [int]$hello.max_message_bytes -eq 65536 -and
@@ -1111,24 +1749,62 @@ try {
         Join-Path $fixtureParent 'settings-control-state'
     $settingsCapturePath =
         Join-Path $settingsControlRoot 'captures\settings.png'
-    $settingsOutput = @(
-        @(
-            'pipeline begin',
-            'setting get ui.language',
-            'setting set ui.language zh-Hans',
-            'setting get ui.language',
-            'setting set ui.scale 125',
-            'setting set ui.scale +125',
-            'setting set ui.scale not-an-integer',
-            'setting set ui.scale 151',
-            'setting get unsupported.setting',
-            'wait idle',
-            'pipeline end',
-            'setting get ui.scale',
+    $panelNames = @(
+        'files',
+        'navigation',
+        'annotations',
+        'labeling',
+        'filters',
+        'sorting',
+        'smoothing',
+        'information',
+        'spectral_lines')
+    $settingsCommands = @(
+        'pipeline begin',
+        'setting get ui.language',
+        'setting set ui.language zh-Hans',
+        'setting get ui.language',
+        'setting set ui.scale 125',
+        'setting set ui.scale +125',
+        'setting set ui.scale not-an-integer',
+        'setting set ui.scale 151',
+        'setting get unsupported.setting',
+        'state get',
+        'panel get files',
+        'panel get navigation',
+        'panel get annotations',
+        'panel get labeling',
+        'panel get filters',
+        'panel get sorting',
+        'panel get smoothing',
+        'panel get information',
+        'panel get spectral_lines',
+        'panel set files false',
+        'panel set files false',
+        'panel set spectral_lines false',
+        'panel get spectral_lines',
+        'panel get unsupported.panel',
+        'panel set navigation false',
+        'panel set navigation true',
+        'panel set navigation false',
+        'wait idle',
+        'pipeline end',
+        'setting get ui.scale',
+        'state get',
+        'panel set files true',
+        'panel set spectral_lines true',
+        'panel set navigation true')
+    foreach ($panelName in $panelNames) {
+        $settingsCommands += @(
+            "panel set $panelName false",
             'state get',
-            "frame capture $settingsCapturePath",
-            'app quit'
-        ) |
+            "panel set $panelName true")
+    }
+    $settingsCommands += @(
+        "frame capture $settingsCapturePath",
+        'app quit')
+    $settingsOutput = @(
+        $settingsCommands |
             & $resolvedLauncher `
                 --app $fixtureExecutable `
                 --state-root $settingsControlRoot 2>&1
@@ -1147,21 +1823,25 @@ try {
             }
     )
     Assert-True `
-        -Condition ($settingsMessages.Count -eq 27) `
-        -Message 'Settings workflow should emit hello plus accepted/terminal pairs for thirteen requests.'
+        -Condition ($settingsMessages.Count -eq 123) `
+        -Message 'Settings and panel workflow should emit hello plus accepted/terminal pairs for sixty-one requests.'
     $settingsHello = $settingsMessages[0]
     Assert-True `
         -Condition (
-            @($settingsHello.capabilities).Count -eq 11 -and
+            @($settingsHello.capabilities).Count -eq 13 -and
             @($settingsHello.capabilities) -contains
                 'setting.get' -and
             @($settingsHello.capabilities) -contains
                 'setting.set' -and
             @($settingsHello.capabilities) -contains
+                'panel.get' -and
+            @($settingsHello.capabilities) -contains
+                'panel.set' -and
+            @($settingsHello.capabilities) -contains
                 'profile.start' -and
             @($settingsHello.capabilities) -contains
                 'profile.stop') `
-        -Message 'Settings workflow hello should advertise the fixed setting and profile capabilities.'
+        -Message 'Settings workflow hello should advertise the fixed setting, panel and profile capabilities.'
 
     $settingsTerminals = @{}
     foreach ($message in $settingsMessages) {
@@ -1177,7 +1857,7 @@ try {
     }
     Assert-True `
         -Condition (
-            $settingsTerminals.Count -eq 13 -and
+            $settingsTerminals.Count -eq 61 -and
             [string]$settingsTerminals['request-1'].command -eq
                 'setting.get' -and
             [string]$settingsTerminals['request-1'].result.name -eq
@@ -1188,17 +1868,26 @@ try {
                 'completed' -and
             [string]$settingsTerminals['request-2'].result.value -eq
                 'zh-Hans' -and
-            [bool]$settingsTerminals['request-2'].result.changed -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-2'].result `
+                -Name 'changed' `
+                -Expected $true) -and
             [string]$settingsTerminals['request-3'].result.value -eq
                 'zh-Hans' -and
             [int]$settingsTerminals['request-4'].result.value -eq
                 125 -and
-            [bool]$settingsTerminals['request-4'].result.changed -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-4'].result `
+                -Name 'changed' `
+                -Expected $true) -and
             [string]$settingsTerminals['request-5'].status -eq
                 'completed' -and
             [int]$settingsTerminals['request-5'].result.value -eq
                 125 -and
-            -not [bool]$settingsTerminals['request-5'].result.changed) `
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-5'].result `
+                -Name 'changed' `
+                -Expected $false)) `
         -Message 'Supported setting reads and writes should use stable names, types and values, with a leading-plus same-value write reporting changed:false.'
     Assert-True `
         -Condition (
@@ -1214,34 +1903,224 @@ try {
                 'failed' -and
             [string]$settingsTerminals['request-8'].error.code -eq
                 'unsupported_setting' -and
-            [string]$settingsTerminals['request-9'].command -eq
+            [string]$settingsTerminals['request-27'].command -eq
                 'wait.idle' -and
-            [string]$settingsTerminals['request-9'].status -eq
+            [string]$settingsTerminals['request-27'].status -eq
                 'completed') `
         -Message 'Invalid setting name, scalar type and value should fail stably without breaking the following idle barrier.'
     Assert-True `
         -Condition (
-            [string]$settingsTerminals['request-10'].status -eq
+            [string]$settingsTerminals['request-9'].status -eq
                 'completed' -and
-            [string]$settingsTerminals['request-10'].result.name -eq
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-9'].state.panels `
+                -Name 'files' `
+                -Expected $true) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-9'].state.panels `
+                -Name 'spectral_lines' `
+                -Expected $true)) `
+        -Message 'Initial state.get should project the isolated production panel defaults before writes.'
+    for ($panelIndex = 0;
+         $panelIndex -lt $panelNames.Count;
+         ++$panelIndex) {
+        $panelRequestId =
+            'request-' + (10 + $panelIndex)
+        Assert-True `
+            -Condition (
+                [string]$settingsTerminals[$panelRequestId].status -eq
+                    'completed' -and
+                [string]$settingsTerminals[$panelRequestId].result.name -eq
+                    $panelNames[$panelIndex] -and
+                (Test-JsonBooleanProperty `
+                    -Object $settingsTerminals[$panelRequestId].result `
+                    -Name 'visible' `
+                    -Expected $true)) `
+            -Message (
+                'Initial panel.get should expose visible production state for ' +
+                $panelNames[$panelIndex] + '.')
+    }
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-19'].status -eq
+                'completed' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-19'].result `
+                -Name 'visible' `
+                -Expected $false) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-19'].result `
+                -Name 'changed' `
+                -Expected $true) -and
+            [uint64]$settingsTerminals['request-19'].result.frame_index -gt
+                [uint64]$settingsTerminals['request-9'].state.runtime.frame_index -and
+            [string]$settingsTerminals['request-20'].status -eq
+                'completed' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-20'].result `
+                -Name 'visible' `
+                -Expected $false) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-20'].result `
+                -Name 'changed' `
+                -Expected $false) -and
+            [uint64]$settingsTerminals['request-20'].result.frame_index -gt
+                [uint64]$settingsTerminals['request-9'].state.runtime.frame_index -and
+            [string]$settingsTerminals['request-21'].result.name -eq
+                'spectral_lines' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-21'].result `
+                -Name 'visible' `
+                -Expected $false) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-21'].result `
+                -Name 'changed' `
+                -Expected $true) -and
+            [uint64]$settingsTerminals['request-21'].result.frame_index -gt
+                [uint64]$settingsTerminals['request-9'].state.runtime.frame_index -and
+            [string]$settingsTerminals['request-22'].result.name -eq
+                'spectral_lines' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-22'].result `
+                -Name 'visible' `
+                -Expected $false) -and
+            [string]$settingsTerminals['request-23'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-23'].error.code -eq
+                'unsupported_panel') `
+        -Message 'Panel reads and writes should use stable identifiers, wait for a presented frame and distinguish changed from unchanged writes.'
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-24'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-24'].error.code -eq
+                'operation_canceled' -and
+            [string]$settingsTerminals['request-25'].status -eq
+                'failed' -and
+            [string]$settingsTerminals['request-25'].error.code -eq
+                'operation_canceled' -and
+            [string]$settingsTerminals['request-26'].status -eq
+                'completed' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-26'].result `
+                -Name 'visible' `
+                -Expected $false)) `
+        -Message 'Every opposite accepted panel write should permanently supersede older unpresented generations, even when a later write returns to the first value.'
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-28'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-28'].result.name -eq
                 'ui.scale' -and
-            [int]$settingsTerminals['request-10'].result.value -eq
+            [int]$settingsTerminals['request-28'].result.value -eq
                 125 -and
-            [string]$settingsTerminals['request-11'].status -eq
+            [string]$settingsTerminals['request-29'].status -eq
                 'completed' -and
-            [string]$settingsTerminals['request-11'].state.settings.language -eq
+            [string]$settingsTerminals['request-29'].state.settings.language -eq
                 'zh-Hans' -and
-            [int]$settingsTerminals['request-11'].state.settings.ui_scale_percentage -eq
+            [int]$settingsTerminals['request-29'].state.settings.ui_scale_percentage -eq
                 125 -and
-            [string]$settingsTerminals['request-12'].status -eq
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-29'].state.panels `
+                -Name 'files' `
+                -Expected $false) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-29'].state.panels `
+                -Name 'spectral_lines' `
+                -Expected $false) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-29'].state.panels `
+                -Name 'navigation' `
+                -Expected $false)) `
+        -Message 'Later reads should reflect the last valid setting values and the final superseding panel generation.'
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-30'].status -eq
                 'completed' -and
-            [string]$settingsTerminals['request-12'].result.path -eq
+            [string]$settingsTerminals['request-31'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-32'].status -eq
+                'completed' -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-30'].result `
+                -Name 'visible' `
+                -Expected $true) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-31'].result `
+                -Name 'visible' `
+                -Expected $true) -and
+            (Test-JsonBooleanProperty `
+                -Object $settingsTerminals['request-32'].result `
+                -Name 'visible' `
+                -Expected $true)) `
+        -Message 'Panel mapping fixture should restore the three earlier hidden panels before one-hot checks.'
+    for ($panelIndex = 0;
+         $panelIndex -lt $panelNames.Count;
+         ++$panelIndex) {
+        $hideRequestId =
+            'request-' + (33 + 3 * $panelIndex)
+        $stateRequestId =
+            'request-' + (34 + 3 * $panelIndex)
+        $showRequestId =
+            'request-' + (35 + 3 * $panelIndex)
+        Assert-True `
+            -Condition (
+                [string]$settingsTerminals[$hideRequestId].status -eq
+                    'completed' -and
+                [string]$settingsTerminals[$hideRequestId].result.name -eq
+                    $panelNames[$panelIndex] -and
+                (Test-JsonBooleanProperty `
+                    -Object $settingsTerminals[$hideRequestId].result `
+                    -Name 'visible' `
+                    -Expected $false) -and
+                (Test-JsonBooleanProperty `
+                    -Object $settingsTerminals[$hideRequestId].result `
+                    -Name 'changed' `
+                    -Expected $true) -and
+                [string]$settingsTerminals[$showRequestId].status -eq
+                    'completed' -and
+                [string]$settingsTerminals[$showRequestId].result.name -eq
+                    $panelNames[$panelIndex] -and
+                (Test-JsonBooleanProperty `
+                    -Object $settingsTerminals[$showRequestId].result `
+                    -Name 'visible' `
+                    -Expected $true) -and
+                (Test-JsonBooleanProperty `
+                    -Object $settingsTerminals[$showRequestId].result `
+                    -Name 'changed' `
+                    -Expected $true)) `
+            -Message (
+                'One-hot panel mapping writes should change and restore only ' +
+                $panelNames[$panelIndex] + '.')
+        for ($observedPanelIndex = 0;
+             $observedPanelIndex -lt $panelNames.Count;
+             ++$observedPanelIndex) {
+            $observedPanel =
+                $panelNames[$observedPanelIndex]
+            Assert-True `
+                -Condition (
+                    Test-JsonBooleanProperty `
+                        -Object $settingsTerminals[$stateRequestId].state.panels `
+                        -Name $observedPanel `
+                        -Expected ($observedPanelIndex -ne $panelIndex)) `
+                -Message (
+                    'One-hot state projection for ' +
+                    $panelNames[$panelIndex] +
+                    ' should expose an exact boolean for ' +
+                    $observedPanel + '.')
+        }
+    }
+    Assert-True `
+        -Condition (
+            [string]$settingsTerminals['request-60'].status -eq
+                'completed' -and
+            [string]$settingsTerminals['request-60'].result.path -eq
                 $settingsCapturePath -and
-            [string]$settingsTerminals['request-13'].command -eq
+            [string]$settingsTerminals['request-61'].command -eq
                 'app.quit' -and
-            [string]$settingsTerminals['request-13'].status -eq
+            [string]$settingsTerminals['request-61'].status -eq
                 'completed') `
-        -Message 'Later reads, applied UI state, application capture and normal quit should reflect the last valid setting values.'
+        -Message 'Application capture and normal quit should remain usable after exhaustive panel mapping checks.'
 
     $savedLanguage =
         Get-Content -Raw -LiteralPath (
@@ -1250,6 +2129,10 @@ try {
     $savedScale =
         Get-Content -Raw -LiteralPath (
             Join-Path $settingsControlRoot 'ui-scale.json') |
+            ConvertFrom-Json
+    $savedPanels =
+        Get-Content -Raw -LiteralPath (
+            Join-Path $settingsControlRoot 'panel-visibility.json') |
             ConvertFrom-Json
     Assert-True `
         -Condition (
@@ -1261,7 +2144,18 @@ try {
                 -PathType Leaf) -and
             (Get-Item -LiteralPath $settingsCapturePath).Length -gt
                 8) `
-        -Message 'Settings should persist through production files only inside the automation state root, with invalid writes leaving the last valid value intact.'
+        -Message 'Settings and panel visibility should persist through production files only inside the automation state root, with invalid writes leaving the last valid value intact.'
+    foreach ($panelName in $panelNames) {
+        Assert-True `
+            -Condition (
+                Test-JsonBooleanProperty `
+                    -Object $savedPanels `
+                    -Name $panelName `
+                    -Expected $true) `
+            -Message (
+                'The final production panel cache should contain an explicit true boolean for ' +
+                $panelName + '.')
+    }
 
     $windowContractRoot =
         Join-Path $fixtureParent 'window-contract-state'
@@ -1936,6 +2830,26 @@ try {
             }
         }
     }
+
+    Invoke-UnrenderablePanelQuitScenario `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $fixtureExecutable `
+        -Root (Join-Path $fixtureParent 'hidden-panel-quit-state') `
+        -Mode 'hidden'
+    Invoke-UnrenderablePanelQuitScenario `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $fixtureExecutable `
+        -Root (Join-Path $fixtureParent 'minimized-panel-quit-state') `
+        -Mode 'minimized'
+    Invoke-UnrenderablePanelQuitScenario `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $fixtureExecutable `
+        -Root (Join-Path $fixtureParent 'immersive-panel-quit-state') `
+        -Mode 'immersive'
+    Invoke-PanelShutdownRollbackScenario `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $fixtureExecutable `
+        -Root (Join-Path $fixtureParent 'panel-shutdown-rollback-state')
 
     $repeatStateRoot =
         Join-Path $fixtureParent 'state-repeat'

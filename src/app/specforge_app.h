@@ -6,6 +6,7 @@
 #include "app/runtime_paths.h"
 #include "app/runtime_resource_workload.h"
 #include "automation/automation_named_pipe.h"
+#include "automation/automation_panel_mutation_chain.h"
 #include "automation/automation_startup.h"
 #include "automation/automation_state.h"
 #include "platform/win32_compositor_clock.h"
@@ -21,6 +22,7 @@
 #include <Windows.h>
 #include <imgui.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -85,6 +87,36 @@ private:
         std::filesystem::path output_path;
         std::uint64_t accepted_frame = 0;
     };
+
+    struct AutomationPanelCommand {
+        AutomationQueuedCommand command;
+        ApplicationPanel panel = ApplicationPanel::Files;
+        std::string name;
+        bool visible = true;
+        bool changed = false;
+        std::uint64_t generation = 0;
+        std::uint64_t accepted_frame = 0;
+    };
+
+    enum class AutomationPanelRollbackReason {
+        PresentationUnavailable,
+        ViewportBlocked,
+        Shutdown,
+    };
+
+    struct AutomationPanelRollbackResolution {
+        std::uint64_t generation = 0;
+        bool succeeded = false;
+        AutomationPanelRollbackReason reason =
+            AutomationPanelRollbackReason::
+                PresentationUnavailable;
+    };
+
+    using AutomationPanelRollbackResolutions =
+        std::array<
+            std::optional<
+                AutomationPanelRollbackResolution>,
+            kApplicationPanelCount>;
 
     struct PendingResize {
         UINT width = 0;
@@ -159,6 +191,10 @@ private:
         const AutomationQueuedCommand& command);
     void ServiceAutomationSettingSet(
         const AutomationQueuedCommand& command);
+    void ServiceAutomationPanelGet(
+        const AutomationQueuedCommand& command);
+    void ServiceAutomationPanelSet(
+        const AutomationQueuedCommand& command);
     void BeginAutomationSourceOpen(
         const AutomationQueuedCommand& command);
     void BeginAutomationSpectrumGoto(
@@ -182,6 +218,19 @@ private:
     [[nodiscard]] bool
     AutomationFrameCaptureRequestActive() const;
     void PollAutomationBusinessOperations();
+    void PollAutomationPanelCommands();
+    [[nodiscard]] std::optional<
+        AutomationPanelRollbackResolution>
+    RollbackAutomationPanelMutationChain(
+        ApplicationPanel panel,
+        AutomationPanelRollbackReason reason);
+    [[nodiscard]] AutomationPanelRollbackResolutions
+    RollbackActiveAutomationPanelMutationChains(
+        AutomationPanelRollbackReason reason);
+    [[nodiscard]] bool
+    SettleAutomationPanelCommandsForShutdown();
+    [[nodiscard]] bool
+    AutomationPanelPresentationAvailable() const noexcept;
     [[nodiscard]] bool
     AutomationBusinessIdle() const noexcept;
     [[nodiscard]] std::optional<
@@ -216,6 +265,16 @@ private:
         automation_idle_waits_;
     std::vector<AutomationSourceCommand>
         automation_source_commands_;
+    std::vector<AutomationPanelCommand>
+        automation_panel_commands_;
+    std::array<
+        std::uint64_t,
+        kApplicationPanelCount>
+        automation_panel_generations_{};
+    std::array<
+        AutomationPanelMutationChain,
+        kApplicationPanelCount>
+        automation_panel_mutation_chains_;
     std::optional<AutomationGotoCommand>
         automation_goto_command_;
     std::optional<AutomationLabelCommand>

@@ -1,5 +1,7 @@
+#include "app/application_settings.h"
 #include "app/local_user_state_json.h"
 #include "automation/automation_named_pipe.h"
+#include "automation/automation_panel_mutation_chain.h"
 #include "automation/automation_protocol.h"
 #include "automation/automation_startup.h"
 #include "automation/automation_state.h"
@@ -427,6 +429,22 @@ void ConnectAndHandshake(
         "hello handshake should return version, capabilities contract and instance identity");
 }
 
+void WaitForClientDisconnect(
+    RunningServer& fixture)
+{
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (!fixture.server
+                 .queue_snapshot()
+                 .client_connected) {
+            return;
+        }
+        std::this_thread::sleep_for(5ms);
+    }
+    Require(
+        false,
+        "automation client should disconnect within the bounded fixture deadline");
+}
+
 void SendRequest(
     specforge::AutomationNamedPipeClient& client,
     std::string_view request_id,
@@ -611,10 +629,54 @@ void TestProtocolAndStableState()
             R"({"type":"request","request_id":"bad-setting-value","command":"setting.set","params":{"name":"ui.scale","value":{"nested":true}}})")
                 .error_code == "invalid_params",
         "setting.set should reject non-scalar values before dispatch");
+    const auto panel_get_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::SerializeAutomationCommandRequest(
+                "panel-get-1",
+                specforge::AutomationCommandKind::
+                    PanelGet,
+                specforge::AutomationPanelGetParameters{
+                    .name = "files",
+                }));
+    const auto* panel_get_parameters =
+        panel_get_request.message
+        ? std::get_if<
+              specforge::AutomationPanelGetParameters>(
+              &panel_get_request.message->parameters)
+        : nullptr;
+    const auto panel_set_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::SerializeAutomationCommandRequest(
+                "panel-set-1",
+                specforge::AutomationCommandKind::
+                    PanelSet,
+                specforge::AutomationPanelSetParameters{
+                    .name = "spectral_lines",
+                    .visible = false,
+                }));
+    const auto* panel_set_parameters =
+        panel_set_request.message
+        ? std::get_if<
+              specforge::AutomationPanelSetParameters>(
+              &panel_set_request.message->parameters)
+        : nullptr;
+    Require(
+        panel_get_parameters != nullptr &&
+            panel_get_parameters->name == "files" &&
+            panel_set_parameters != nullptr &&
+            panel_set_parameters->name ==
+                "spectral_lines" &&
+            !panel_set_parameters->visible,
+        "panel.get and panel.set should round-trip their stable name and explicit visibility parameters");
+    Require(
+        specforge::ParseAutomationClientMessage(
+            R"({"type":"request","request_id":"bad-panel-visible","command":"panel.set","params":{"name":"files","visible":1}})")
+                .error_code == "invalid_params",
+        "panel.set should reject a non-boolean visible value before dispatch");
     const auto& capabilities =
         specforge::AutomationCapabilityNames();
     Require(
-        capabilities.size() == 11 &&
+        capabilities.size() == 13 &&
             std::find(
                 capabilities.begin(),
                 capabilities.end(),
@@ -628,6 +690,16 @@ void TestProtocolAndStableState()
             std::find(
                 capabilities.begin(),
                 capabilities.end(),
+                "panel.get") !=
+                capabilities.end() &&
+            std::find(
+                capabilities.begin(),
+                capabilities.end(),
+                "panel.set") !=
+                capabilities.end() &&
+            std::find(
+                capabilities.begin(),
+                capabilities.end(),
                 "profile.start") !=
                 capabilities.end() &&
             std::find(
@@ -635,7 +707,7 @@ void TestProtocolAndStableState()
                 capabilities.end(),
                 "profile.stop") !=
                 capabilities.end(),
-        "fixed capabilities should advertise the bounded settings and production profile controls");
+        "fixed capabilities should advertise bounded settings, panel visibility and production profile controls");
     const auto source_request =
         specforge::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"source-1","command":"source.open","params":{"path":"C:\\fixtures\\source.npy"}})");
@@ -739,6 +811,17 @@ void TestProtocolAndStableState()
         .language = "zh-Hans",
         .ui_scale_percentage = 125,
     };
+    state.panels = {
+        .files = false,
+        .navigation = true,
+        .annotations = false,
+        .labeling = true,
+        .filters = false,
+        .sorting = true,
+        .smoothing = false,
+        .information = true,
+        .spectral_lines = false,
+    };
     state.window = {
         .visible = true,
         .minimized = false,
@@ -808,6 +891,10 @@ void TestProtocolAndStableState()
         RequireObjectMember(
             state_object,
             "settings");
+    const auto& panels =
+        RequireObjectMember(
+            state_object,
+            "panels");
     const auto& labeling =
         RequireObjectMember(
             state_object,
@@ -853,6 +940,42 @@ void TestProtocolAndStableState()
                 settings,
                 "ui_scale_percentage") ==
                 125 &&
+            !specforge::ReadJsonBoolMember(
+                panels,
+                "files",
+                true) &&
+            specforge::ReadJsonBoolMember(
+                panels,
+                "navigation",
+                false) &&
+            !specforge::ReadJsonBoolMember(
+                panels,
+                "annotations",
+                true) &&
+            specforge::ReadJsonBoolMember(
+                panels,
+                "labeling",
+                false) &&
+            !specforge::ReadJsonBoolMember(
+                panels,
+                "filters",
+                true) &&
+            specforge::ReadJsonBoolMember(
+                panels,
+                "sorting",
+                false) &&
+            !specforge::ReadJsonBoolMember(
+                panels,
+                "smoothing",
+                true) &&
+            specforge::ReadJsonBoolMember(
+                panels,
+                "information",
+                false) &&
+            !specforge::ReadJsonBoolMember(
+                panels,
+                "spectral_lines",
+                true) &&
             specforge::ReadJsonSizeMember(
                 spectrum,
                 "index") == 2U &&
@@ -891,7 +1014,7 @@ void TestProtocolAndStableState()
                 "path")
                 ->find("profile.jsonl") !=
                 std::string::npos,
-        "state.get body should expose the stable source, label, capture, profile, window and runtime contract");
+        "state.get body should expose the stable source, settings, panel, label, capture, profile, window and runtime contract");
 
     state.capture = {
         .pending = false,
@@ -2261,6 +2384,51 @@ void TestExecutionClaimsAndQuitBarrier()
             "claimed setting.set should retain its factual terminal");
     }
 
+    {
+        RunningServer panel_fixture;
+        specforge::AutomationNamedPipeClient
+            panel_client;
+        ConnectAndHandshake(
+            panel_fixture,
+            panel_client);
+        std::string panel_send_error;
+        Require(
+            panel_client.Send(
+                specforge::
+                    SerializeAutomationCommandRequest(
+                        "claimed-panel",
+                        specforge::
+                            AutomationCommandKind::
+                                PanelSet,
+                        specforge::
+                            AutomationPanelSetParameters{
+                                .name = "files",
+                                .visible = false,
+                            }),
+                panel_send_error),
+            panel_send_error);
+        Require(
+            ReceiveParsed(panel_client).status ==
+                "accepted",
+            "panel.set claim fixture should be accepted");
+        const auto panel_commands =
+            panel_fixture.server
+                .TakePendingCommands();
+        Require(
+            panel_commands.size() == 1 &&
+                panel_fixture.server
+                    .TryClaimExecution(
+                        panel_commands.front()),
+            "panel.set should enter the synchronized mutation claim");
+        panel_fixture.server.Complete(
+            panel_commands.front(),
+            "\"result\":{}");
+        Require(
+            ReceiveParsed(panel_client).status ==
+                "completed",
+            "claimed panel.set should retain its factual terminal");
+    }
+
     RunningServer fixture;
     specforge::AutomationNamedPipeClient client;
     ConnectAndHandshake(fixture, client);
@@ -2418,6 +2586,220 @@ void TestExecutionClaimsAndQuitBarrier()
         !disconnected_fixture.server
              .IsRequestActive("claimed-open"),
         "a disconnected claimed mutation should be retired by its factual terminal");
+}
+
+void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
+{
+    const std::filesystem::path fixture_root =
+        std::filesystem::temp_directory_path() /
+        ("specforge-panel-disconnect-" +
+         UniqueInstanceId());
+    std::error_code filesystem_error;
+    std::filesystem::create_directories(
+        fixture_root,
+        filesystem_error);
+    Require(
+        !filesystem_error,
+        "panel disconnect fixture root should exist");
+
+    const auto make_storage =
+        [](const std::filesystem::path& root) {
+            return specforge::ApplicationSettingsStorage{
+                .language_settings_path =
+                    root / "ui-language.json",
+                .ui_scale_settings_path =
+                    root / "ui-scale.json",
+                .input_settings_path =
+                    root / "input-settings.json",
+                .profile_settings_path =
+                    root / "profile-settings.json",
+                .panel_visibility_path =
+                    root / "panel-visibility.json",
+                .default_profile_output_directory =
+                    root / "profiles",
+            };
+        };
+    const auto send_panel_set =
+        [](specforge::AutomationNamedPipeClient& client,
+           std::string_view request_id) {
+            std::string error;
+            Require(
+                client.Send(
+                    specforge::
+                        SerializeAutomationCommandRequest(
+                            request_id,
+                            specforge::
+                                AutomationCommandKind::
+                                    PanelSet,
+                            specforge::
+                                AutomationPanelSetParameters{
+                                    .name = "files",
+                                    .visible = false,
+                                }),
+                    error),
+                error);
+            Require(
+                ReceiveParsed(client).status ==
+                    "accepted",
+                "panel disconnect fixture should accept panel.set");
+        };
+
+    {
+        const std::filesystem::path root =
+            fixture_root / "before-claim";
+        std::filesystem::create_directories(root);
+        const auto storage = make_storage(root);
+        specforge::ApplicationSettings settings(storage);
+        RunningServer fixture;
+        specforge::AutomationNamedPipeClient client;
+        ConnectAndHandshake(fixture, client);
+        send_panel_set(
+            client,
+            "panel-disconnect-before-claim");
+        const auto commands =
+            fixture.server.TakePendingCommands();
+        Require(
+            commands.size() == 1,
+            "pre-claim disconnect should dequeue exactly one panel.set command");
+
+        client.Close();
+        WaitForClientDisconnect(fixture);
+        Require(
+            !fixture.server.TryClaimExecution(
+                commands.front()) &&
+                !fixture.server.IsRequestActive(
+                    "panel-disconnect-before-claim") &&
+                fixture.server.queue_snapshot()
+                        .outstanding_count == 0 &&
+                settings.View()
+                    .panel_visibility.files &&
+                !std::filesystem::exists(
+                    storage.panel_visibility_path),
+            "disconnect after dequeue but before claim must retire panel.set without touching the production cache");
+        const specforge::ApplicationSettings reloaded(
+            storage);
+        Require(
+            reloaded.View().panel_visibility.files,
+            "pre-claim disconnect should reload the untouched production baseline");
+    }
+
+    {
+        const std::filesystem::path root =
+            fixture_root / "after-claim";
+        std::filesystem::create_directories(root);
+        const auto storage = make_storage(root);
+        specforge::ApplicationSettings settings(storage);
+        specforge::AutomationPanelMutationChain chain;
+        RunningServer fixture;
+        specforge::AutomationNamedPipeClient client;
+        ConnectAndHandshake(fixture, client);
+        send_panel_set(
+            client,
+            "panel-disconnect-after-claim");
+        SendRequest(
+            client,
+            "panel-disconnect-wait",
+            specforge::AutomationCommandKind::
+                WaitIdle);
+        Require(
+            ReceiveParsed(client).status ==
+                "accepted",
+            "post-claim disconnect fixture should accept wait.idle");
+        SendRequest(
+            client,
+            "panel-disconnect-quit",
+            specforge::AutomationCommandKind::
+                AppQuit);
+        Require(
+            ReceiveParsed(client).status ==
+                "accepted",
+            "post-claim disconnect fixture should accept app.quit");
+
+        const auto commands =
+            fixture.server.TakePendingCommands();
+        Require(
+            commands.size() == 2 &&
+                commands.front().command ==
+                    specforge::AutomationCommandKind::
+                        PanelSet &&
+                commands.back().command ==
+                    specforge::AutomationCommandKind::
+                        WaitIdle &&
+                fixture.server.TryClaimExecution(
+                    commands.front()),
+            "post-claim disconnect should claim panel.set before the wait.idle dispatch barrier");
+        const bool previous_visible =
+            settings.View().panel_visibility.files;
+        const auto applied = settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    false),
+            {});
+        Require(
+            previous_visible && applied.applied(),
+            "claimed panel.set should mutate the real ApplicationSettings owner before disconnect");
+        chain.RecordAppliedMutation(
+            previous_visible,
+            false,
+            1,
+            10);
+
+        client.Close();
+        WaitForClientDisconnect(fixture);
+        Require(
+            fixture.server.IsRequestActive(
+                "panel-disconnect-after-claim") &&
+                !fixture.server.IsRequestActive(
+                    "panel-disconnect-wait") &&
+                !fixture.server.IsRequestActive(
+                    "panel-disconnect-quit") &&
+                fixture.server.queue_snapshot()
+                        .outstanding_count == 1 &&
+                fixture.server.queue_snapshot()
+                        .pending_count == 0 &&
+                chain.active() &&
+                !settings.View()
+                     .panel_visibility.files,
+            "disconnect must retain only the claimed panel mutation while clearing wait.idle and app.quit");
+
+        const auto rollback = settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    chain.baseline_visible()),
+            {});
+        chain.Clear();
+        fixture.server.Fail(
+            commands.front(),
+            "panel_not_renderable",
+            "The claimed disconnected panel mutation was rolled back before presentation.");
+        Require(
+            rollback.applied() &&
+                settings.View()
+                    .panel_visibility.files &&
+                !chain.active() &&
+                !fixture.server.IsRequestActive(
+                    "panel-disconnect-after-claim") &&
+                fixture.server.queue_snapshot()
+                        .outstanding_count == 0,
+            "a disconnected claimed panel mutation must factually rollback and retire its active chain");
+        Require(
+            settings.Flush(),
+            "the disconnected panel rollback should flush through the production cache owner");
+        const specforge::ApplicationSettings reloaded(
+            storage);
+        Require(
+            reloaded.View().panel_visibility.files,
+            "the final production cache should reload the pre-chain baseline after disconnect rollback");
+    }
+
+    std::filesystem::remove_all(
+        fixture_root,
+        filesystem_error);
+    Require(
+        !filesystem_error,
+        "panel disconnect fixture should remove its isolated state root");
 }
 
 void TestFrameCaptureFinalizationLease()
@@ -2804,6 +3186,7 @@ int wmain(int argc, wchar_t** argv)
     TestQueueCapacityVersionAndDisconnect();
     TestOversizedTerminalResponseIsBounded();
     TestExecutionClaimsAndQuitBarrier();
+    TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState();
     TestFrameCaptureFinalizationLease();
     TestDistinctRequestIdLimit();
     std::cout

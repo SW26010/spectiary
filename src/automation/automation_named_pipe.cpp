@@ -324,6 +324,8 @@ bool AutomationNamedPipeServer::TryClaimExecution(
         (command.command !=
              AutomationCommandKind::SettingSet &&
          command.command !=
+             AutomationCommandKind::PanelSet &&
+         command.command !=
              AutomationCommandKind::SourceOpen &&
          command.command !=
              AutomationCommandKind::SpectrumGoto &&

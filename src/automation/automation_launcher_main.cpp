@@ -718,6 +718,59 @@ CommandFromHumanLine(
     }
 
     constexpr std::string_view
+        panel_get_prefix = "panel get ";
+    if (lower.starts_with(panel_get_prefix)) {
+        const std::string name =
+            LowerAscii(Trim(line.substr(
+                panel_get_prefix.size())));
+        if (!name.empty()) {
+            return HumanCommand{
+                .kind =
+                    specforge::AutomationCommandKind::
+                        PanelGet,
+                .parameters =
+                    specforge::AutomationPanelGetParameters{
+                        .name = name,
+                    },
+            };
+        }
+    }
+
+    constexpr std::string_view
+        panel_set_prefix = "panel set ";
+    if (lower.starts_with(panel_set_prefix)) {
+        const std::string assignment = Trim(
+            line.substr(panel_set_prefix.size()));
+        const std::size_t separator =
+            assignment.find_first_of(" \t");
+        if (separator != std::string::npos) {
+            const std::string name =
+                LowerAscii(Trim(assignment.substr(
+                    0,
+                    separator)));
+            const std::string value =
+                LowerAscii(Trim(assignment.substr(
+                    separator + 1U)));
+            if (!name.empty() &&
+                (value == "true" || value == "false")) {
+                return HumanCommand{
+                    .kind =
+                        specforge::AutomationCommandKind::
+                            PanelSet,
+                    .parameters =
+                        specforge::AutomationPanelSetParameters{
+                            .name = name,
+                            .visible = value == "true",
+                        },
+                };
+            }
+        }
+        error_message =
+            "panel set requires a panel name followed by true or false.";
+        return std::nullopt;
+    }
+
+    constexpr std::string_view
         source_prefix = "source open ";
     if (lower.starts_with(source_prefix)) {
         const std::string path = Trim(
@@ -943,7 +996,8 @@ bool SendCommandAndWait(
                 error_message)) {
             return false;
         }
-        std::cout << response << '\n';
+        std::cout << response << '\n'
+                  << std::flush;
         const auto parsed =
             specforge::ParseAutomationServerMessage(
                 response);
@@ -1026,7 +1080,8 @@ bool SendPipelineAndWait(
                 error_message)) {
             return false;
         }
-        std::cout << response << '\n';
+        std::cout << response << '\n'
+                  << std::flush;
         const auto parsed =
             specforge::ParseAutomationServerMessage(
                 response);
@@ -1094,7 +1149,8 @@ bool SendCommandAndDisconnectAfterAccepted(
                 error_message)) {
             return false;
         }
-        std::cout << response << '\n';
+        std::cout << response << '\n'
+                  << std::flush;
         const auto parsed =
             specforge::ParseAutomationServerMessage(
                 response);
@@ -1239,7 +1295,7 @@ void PrintUsage()
 {
     std::cout
         << "Usage: SpecForgeAutomation [--app <SpecForge.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>]\n"
-        << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
+        << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, panel get <name>, panel set <name> <true|false>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }
 

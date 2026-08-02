@@ -1,4 +1,5 @@
 #include "app/application_settings.h"
+#include "automation/automation_panel_mutation_chain.h"
 #include "ui/ui_language_settings.h"
 
 #include <chrono>
@@ -626,6 +627,118 @@ void TestPanelVisibilitySharesTheSettingsLifecycle()
         "show-all intent should persist through maintenance and reload");
 }
 
+void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    specforge::ApplicationSettings settings(storage);
+    specforge::AutomationPanelMutationChain chain;
+
+    const bool initial_visible =
+        settings.View().panel_visibility.files;
+    Require(
+        initial_visible,
+        "panel rollback fixture should start from the production visible default");
+
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    false),
+            {})
+            .applied(),
+        "the first unpresented panel generation should apply");
+    chain.RecordAppliedMutation(
+        initial_visible,
+        false,
+        1,
+        10);
+
+    const bool second_previous_visible =
+        settings.View().panel_visibility.files;
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    true),
+            {})
+            .applied(),
+        "the opposite unpresented panel generation should apply");
+    chain.RecordAppliedMutation(
+        second_previous_visible,
+        true,
+        2,
+        10);
+
+    Require(
+        chain.active() &&
+            chain.generation() == 2 &&
+            chain.baseline_visible(),
+        "superseding an unpresented generation must preserve the pre-chain rollback baseline");
+
+    (void)settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            SetPanelVisibility(
+                specforge::ApplicationPanel::Files,
+                chain.baseline_visible()),
+        {});
+    chain.Clear();
+    Require(
+        settings.View().panel_visibility.files,
+        "an unrenderable terminal should restore the live production state to the pre-chain value");
+    Require(
+        settings.Flush(),
+        "the restored production state should flush through the real panel cache owner");
+
+    const specforge::ApplicationSettings reloaded(storage);
+    Require(
+        reloaded.View().panel_visibility.files,
+        "the final panel cache must retain the pre-chain value after rollback and shutdown-style flush");
+
+    const auto applied_storage =
+        MakeStorage(temporary.path() / "applied-rollback");
+    specforge::ApplicationSettings applied_settings(
+        applied_storage);
+    specforge::AutomationPanelMutationChain
+        applied_chain;
+    Require(
+        applied_settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    false),
+            {})
+            .applied(),
+        "the applied rollback fixture should mutate the production state away from its baseline");
+    applied_chain.RecordAppliedMutation(
+        true,
+        false,
+        1,
+        20);
+    const auto applied_rollback =
+        applied_settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetPanelVisibility(
+                    specforge::ApplicationPanel::Files,
+                    applied_chain.baseline_visible()),
+            {});
+    applied_chain.Clear();
+    Require(
+        applied_rollback.outcome ==
+            specforge::ApplicationSettingsOutcome::Applied,
+        "a single unpresented generation must exercise a real Applied restoration mutation");
+    Require(
+        applied_settings.Flush(),
+        "an Applied restoration should mark the real panel cache dirty and flush successfully");
+    const specforge::ApplicationSettings
+        applied_reloaded(applied_storage);
+    Require(
+        applied_reloaded.View().panel_visibility.files,
+        "an Applied restoration must survive cache reload at the pre-chain baseline");
+}
+
 void TestProfileDirectoryChangeIsRejectedWhileRecording()
 {
     TemporaryDirectory temporary;
@@ -739,6 +852,7 @@ int main()
     TestLanguageAndProfileFallbacksCanBeReapplied();
     TestLoadWarningAndEnvironmentOverrideAreTyped();
     TestPanelVisibilitySharesTheSettingsLifecycle();
+    TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline();
     TestProfileDirectoryChangeIsRejectedWhileRecording();
     TestSuccessfulSettingDoesNotClearAnotherSettingsStatus();
     return 0;

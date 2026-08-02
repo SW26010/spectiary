@@ -154,6 +154,28 @@ struct ShellUiTestAccess {
             std::move(snapshot));
     }
 
+    static void SubmitPanelVisibilityDraw(
+        ShellUi& shell,
+        std::uint64_t frame_index,
+        unsigned int viewport_id,
+        PanelVisibilityState visibility)
+    {
+        shell.RecordPanelVisibilityDrawSubmission(
+            frame_index,
+            viewport_id,
+            visibility);
+    }
+
+    static void SubmitPanelDraw(
+        ShellUi& shell,
+        ApplicationPanel panel,
+        unsigned int viewport_id)
+    {
+        shell.RecordPanelDrawSubmission(
+            panel,
+            viewport_id);
+    }
+
     static std::vector<NavigationLatencyReport> CompleteFramePresentationWithoutSpectrumDraw(
         ShellUi& shell,
         std::uint64_t frame_index,
@@ -3334,6 +3356,340 @@ void TestAutomationSettingsUseApplicationSettingsOwner()
             shell->TakeAppliedUiScalePercentage() == 130 &&
             !shell->TakeAppliedUiScalePercentage(),
         "a same-value automation write must preserve the production UI scale notification that was already pending from the Settings UI");
+
+    const specforge::ApplicationSettingsResult panel_result =
+        shell->SetPanelVisibilityForAutomation(
+            specforge::ApplicationPanel::Navigation,
+            false);
+    const specforge::ApplicationSettingsResult
+        same_panel_result =
+            shell->SetPanelVisibilityForAutomation(
+                specforge::ApplicationPanel::Navigation,
+                false);
+    const specforge::PanelVisibilityState panel_visibility =
+        shell->PanelVisibilityForAutomation();
+    Require(
+        panel_result.outcome ==
+                specforge::ApplicationSettingsOutcome::Applied &&
+            same_panel_result.outcome ==
+                specforge::ApplicationSettingsOutcome::Unchanged &&
+            !panel_visibility.navigation &&
+            panel_visibility.files &&
+            panel_visibility.annotations,
+        "automation panel writes should use the production owner and preserve unrelated panel visibility");
+}
+
+void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
+{
+    using Access = specforge::ShellUiTestAccess;
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                std::filesystem::path{},
+                std::filesystem::path{},
+                std::filesystem::path{},
+                std::filesystem::path{}),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting());
+
+    specforge::PanelVisibilityState first;
+    first.files = false;
+    first.navigation = false;
+    first.annotations = false;
+    first.labeling = false;
+    first.filters = false;
+    first.sorting = false;
+    first.smoothing = false;
+    first.information = false;
+    first.spectral_lines = false;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        501,
+        17,
+        first);
+    const specforge::NavigationLatencyPresentation
+        first_presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        501,
+        std::span(&first_presentation, 1));
+    const auto first_presented =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    specforge::PanelVisibilityState second = first;
+    second.files = true;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        502,
+        17,
+        second);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Files,
+        18);
+    const std::array<
+        specforge::ShellAutomationViewportPresentationState,
+        2>
+        detached_active{{
+            {.viewport_id = 17, .renderable = true},
+            {.viewport_id = 18, .renderable = true},
+        }};
+    const specforge::NavigationLatencyPresentation
+        main_only_presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        502,
+        std::span(&main_only_presentation, 1),
+        detached_active);
+    const auto after_main_only_present =
+        shell->PresentedPanelVisibilityForAutomation();
+    const specforge::NavigationLatencyPresentation
+        wrong_viewport{
+            19,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        502,
+        std::span(&wrong_viewport, 1),
+        detached_active);
+    const auto after_wrong_viewport =
+        shell->PresentedPanelVisibilityForAutomation();
+    const specforge::NavigationLatencyPresentation
+        target_presentation{
+            18,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        502,
+        std::span(&target_presentation, 1),
+        detached_active);
+    const auto second_presented =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    specforge::PanelVisibilityState third = first;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        503,
+        17,
+        third);
+    shell->PresentFrame(
+        503,
+        std::span(&main_only_presentation, 1),
+        detached_active);
+    const auto after_hide_main_only =
+        shell->PresentedPanelVisibilityForAutomation();
+    shell->PresentFrame(
+        503,
+        std::span(&target_presentation, 1),
+        detached_active);
+    const auto hidden_after_target_present =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    specforge::PanelVisibilityState fourth = first;
+    fourth.files = true;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        504,
+        17,
+        fourth);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Files,
+        20);
+    const std::array<
+        specforge::ShellAutomationViewportPresentationState,
+        2>
+        second_detached_active{{
+            {.viewport_id = 17, .renderable = true},
+            {.viewport_id = 20, .renderable = true},
+        }};
+    const specforge::NavigationLatencyPresentation
+        second_target_presentation{
+            20,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        504,
+        std::span(&second_target_presentation, 1),
+        second_detached_active);
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        505,
+        17,
+        first);
+    const std::array<
+        specforge::ShellAutomationViewportPresentationState,
+        1>
+        main_only_active{{
+            {.viewport_id = 17, .renderable = true},
+        }};
+    shell->PresentFrame(
+        505,
+        {},
+        main_only_active);
+    const auto hidden_after_target_teardown =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    specforge::PanelVisibilityState shared_visible = first;
+    shared_visible.files = true;
+    shared_visible.navigation = true;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        506,
+        17,
+        shared_visible);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Files,
+        30);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Navigation,
+        30);
+    const std::array<
+        specforge::ShellAutomationViewportPresentationState,
+        2>
+        shared_active{{
+            {.viewport_id = 17, .renderable = true},
+            {.viewport_id = 30, .renderable = true},
+        }};
+    const specforge::NavigationLatencyPresentation
+        shared_target_presentation{
+            30,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        506,
+        std::span(&shared_target_presentation, 1),
+        shared_active);
+
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        507,
+        17,
+        shared_visible);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Files,
+        30);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Navigation,
+        30);
+    const std::array<
+        specforge::ShellAutomationViewportPresentationState,
+        2>
+        shared_minimized{{
+            {.viewport_id = 17, .renderable = true},
+            {.viewport_id = 30, .renderable = false},
+        }};
+    shell->PresentFrame(
+        507,
+        std::span(&main_only_presentation, 1),
+        shared_minimized);
+    const auto shown_while_target_minimized =
+        shell->PresentedPanelVisibilityForAutomation();
+    const auto shown_minimized_status =
+        shell->PanelPresentationStatusForAutomation();
+
+    specforge::PanelVisibilityState shared_hidden =
+        shared_visible;
+    shared_hidden.files = false;
+    Access::SubmitPanelVisibilityDraw(
+        *shell,
+        508,
+        17,
+        shared_hidden);
+    Access::SubmitPanelDraw(
+        *shell,
+        specforge::ApplicationPanel::Navigation,
+        30);
+    shell->PresentFrame(
+        508,
+        std::span(&main_only_presentation, 1),
+        shared_minimized);
+    const auto hidden_while_shared_target_minimized =
+        shell->PresentedPanelVisibilityForAutomation();
+    const auto hidden_minimized_status =
+        shell->PanelPresentationStatusForAutomation();
+    shell->PresentFrame(
+        508,
+        std::span(&shared_target_presentation, 1),
+        shared_active);
+    const auto hidden_after_shared_target_present =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    shell->EnterImmersivePlotMode();
+    const specforge::NavigationLatencyPresentation
+        immersive_presentation{
+            17,
+            specforge::NavigationLatencyTrace::Now()};
+    shell->PresentFrame(
+        509,
+        std::span(&immersive_presentation, 1));
+    const auto after_immersive_present =
+        shell->PresentedPanelVisibilityForAutomation();
+
+    Require(
+        first_presented.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                501 &&
+            first_presented.visibility == first,
+        "the exact successful main-viewport Present should publish the normal Shell panel snapshot");
+    Require(
+        after_main_only_present.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                501 &&
+            !after_main_only_present.visibility.files &&
+            after_wrong_viewport ==
+                after_main_only_present,
+        "a main-only or unrelated Present must not publish a panel submitted to a detached viewport");
+    Require(
+        second_presented.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                502 &&
+            second_presented.visibility == second,
+        "the target detached viewport Present should publish the shown panel state");
+    Require(
+        after_hide_main_only.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                502 &&
+            after_hide_main_only.visibility.files &&
+            hidden_after_target_present.FrameIndex(
+                    specforge::ApplicationPanel::Files) ==
+                503 &&
+            !hidden_after_target_present.visibility.files,
+        "hiding a detached panel should wait until its prior viewport presents a frame without the panel");
+    Require(
+        hidden_after_target_teardown.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                505 &&
+            !hidden_after_target_teardown.visibility.files,
+        "tearing down a detached panel viewport should also qualify the hidden state without an impossible Present");
+    Require(
+        shown_while_target_minimized.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                506 &&
+            shown_minimized_status.BlockedAfter(
+                specforge::ApplicationPanel::Files,
+                506),
+        "a minimized detached target must block a same-value shown-panel presentation instead of remaining silently pending");
+    Require(
+        hidden_while_shared_target_minimized.FrameIndex(
+                specforge::ApplicationPanel::Files) ==
+                506 &&
+            hidden_while_shared_target_minimized.visibility.files &&
+            hidden_minimized_status.BlockedAfter(
+                specforge::ApplicationPanel::Files,
+                507) &&
+            hidden_after_shared_target_present.FrameIndex(
+                    specforge::ApplicationPanel::Files) ==
+                508 &&
+            !hidden_after_shared_target_present.visibility.files &&
+            hidden_after_shared_target_present.visibility.navigation,
+        "hiding from a shared minimized viewport must block until that viewport can present without the target panel");
+    Require(
+        after_immersive_present ==
+            hidden_after_shared_target_present,
+        "an immersive frame without a normal Shell panel draw must not publish panel visibility");
 }
 
 }  // namespace
@@ -3363,6 +3719,7 @@ int main()
         TestPublishedPrefetchBecomesStaleAfterQueryInput();
         TestCanceledPrefetchReportsOnlyAfterWorkerExit();
         TestAutomationSettingsUseApplicationSettingsOwner();
+        TestAutomationPanelProjectionRequiresExactNormalShellPresent();
         TestShellFlushResultNamesEveryFailedOwner();
         return 0;
     } catch (const std::exception& error) {

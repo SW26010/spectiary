@@ -8,34 +8,50 @@
 namespace specforge {
 namespace {
 
-bool& PanelVisibilityValue(
-    PanelVisibilityState& visibility,
+template <typename Visibility>
+decltype(auto) PanelVisibilityValue(
+    Visibility& visibility,
     ApplicationPanel panel)
 {
     switch (panel) {
     case ApplicationPanel::Files:
-        return visibility.files;
+        return (visibility.files);
     case ApplicationPanel::Navigation:
-        return visibility.navigation;
+        return (visibility.navigation);
     case ApplicationPanel::Annotations:
-        return visibility.annotations;
+        return (visibility.annotations);
     case ApplicationPanel::Labeling:
-        return visibility.labeling;
+        return (visibility.labeling);
     case ApplicationPanel::Filters:
-        return visibility.filters;
+        return (visibility.filters);
     case ApplicationPanel::Sorting:
-        return visibility.sorting;
+        return (visibility.sorting);
     case ApplicationPanel::Smoothing:
-        return visibility.smoothing;
+        return (visibility.smoothing);
     case ApplicationPanel::Information:
-        return visibility.information;
+        return (visibility.information);
     case ApplicationPanel::SpectralLines:
-        return visibility.spectral_lines;
+        return (visibility.spectral_lines);
     }
-    return visibility.files;
+    return (visibility.files);
 }
 
 }  // namespace
+
+bool ApplicationPanelVisible(
+    const PanelVisibilityState& visibility,
+    ApplicationPanel panel) noexcept
+{
+    return PanelVisibilityValue(visibility, panel);
+}
+
+void SetApplicationPanelVisible(
+    PanelVisibilityState& visibility,
+    ApplicationPanel panel,
+    bool visible) noexcept
+{
+    PanelVisibilityValue(visibility, panel) = visible;
+}
 
 ApplicationSettingsIntent ApplicationSettingsIntent::SetLanguage(
     UiLanguage language)

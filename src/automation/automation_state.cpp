@@ -113,6 +113,25 @@ std::string SerializeAutomationStateBody(
            << JsonString(state.settings.language)
            << ",\"ui_scale_percentage\":"
            << state.settings.ui_scale_percentage
+           << "},\"panels\":{"
+           << "\"files\":"
+           << JsonBool(state.panels.files)
+           << ",\"navigation\":"
+           << JsonBool(state.panels.navigation)
+           << ",\"annotations\":"
+           << JsonBool(state.panels.annotations)
+           << ",\"labeling\":"
+           << JsonBool(state.panels.labeling)
+           << ",\"filters\":"
+           << JsonBool(state.panels.filters)
+           << ",\"sorting\":"
+           << JsonBool(state.panels.sorting)
+           << ",\"smoothing\":"
+           << JsonBool(state.panels.smoothing)
+           << ",\"information\":"
+           << JsonBool(state.panels.information)
+           << ",\"spectral_lines\":"
+           << JsonBool(state.panels.spectral_lines)
            << "},\"window\":{"
            << "\"visible\":"
            << JsonBool(state.window.visible)

@@ -66,6 +66,8 @@ The thin console accepts only:
 ```text
 setting get <ui.language|ui.scale>
 setting set <ui.language|ui.scale> <value>
+panel get <files|navigation|annotations|labeling|filters|sorting|smoothing|information|spectral_lines>
+panel set <files|navigation|annotations|labeling|filters|sorting|smoothing|information|spectral_lines> <true|false>
 source open <absolute-file-or-directory>
 spectrum goto <zero-based-index>
 spectrum goto name <exact-name>
@@ -130,7 +132,7 @@ The first message must be the launcher handshake:
 A successful response reports the protocol and fixed capabilities:
 
 ```json
-{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","setting.get","setting.set","source.open","spectrum.goto","label.assign","frame.capture","profile.start","profile.stop","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
+{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","setting.get","setting.set","panel.get","panel.set","source.open","spectrum.goto","label.assign","frame.capture","profile.start","profile.stop","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
 ```
 
 Commands use protocol names rather than console spelling:
@@ -167,6 +169,8 @@ Commands with parameters use these stable request shapes:
 ```json
 {"type":"request","request_id":"setting-get-1","command":"setting.get","params":{"name":"ui.language"}}
 {"type":"request","request_id":"setting-set-1","command":"setting.set","params":{"name":"ui.scale","value":125}}
+{"type":"request","request_id":"panel-get-1","command":"panel.get","params":{"name":"files"}}
+{"type":"request","request_id":"panel-set-1","command":"panel.set","params":{"name":"spectral_lines","visible":false}}
 {"type":"request","request_id":"open-1","command":"source.open","params":{"path":"C:\\fixtures\\spectra"}}
 {"type":"request","request_id":"goto-1","command":"spectrum.goto","params":{"target":{"index":4}}}
 {"type":"request","request_id":"goto-2","command":"spectrum.goto","params":{"target":{"name":"target.csv"}}}
@@ -214,6 +218,92 @@ emit an application setting notification. Consequently, a CLI integer token
 outside signed 64-bit range remains a string and fails integer-valued
 `ui.scale` with `setting_type_mismatch`; a representable integer outside
 80 through 150 fails with `setting_value_rejected`.
+
+`panel.get` and `panel.set` expose the fixed production panel set:
+
+| Stable name | Production panel |
+| --- | --- |
+| `files` | Files |
+| `navigation` | Navigation |
+| `annotations` | Annotations |
+| `labeling` | Labeling |
+| `filters` | Filters |
+| `sorting` | Sorting |
+| `smoothing` | Smoothing |
+| `information` | Information |
+| `spectral_lines` | Spectral Lines |
+
+`panel.get` completes with
+`"result":{"name":"<name>","visible":<boolean>}`. `panel.set` requires an
+explicit JSON boolean and completes with the same fields plus `changed` and the
+`frame_index` of the normal Shell frame that successfully presented the
+requested state. A valid same-value write is successful and reports
+`changed:false`.
+
+Every write calls `ShellUi::SetPanelVisibilityForAutomation`, which delegates
+to the existing `ApplicationSettings::Apply` and
+`ApplicationSettingsIntent::SetPanelVisibility` production seam. The menu and
+panel rendering continue to consume that same `ApplicationSettings` view;
+automation does not edit the panel cache, manipulate an ImGui window, or retain
+a parallel visibility model. A `panel.set`, including an unchanged write,
+remains outstanding until a later normal Shell frame consumes the complete
+production `PanelVisibilityState` and produces panel-specific presentation
+evidence. Showing a panel requires a successful Present from the actual ImGui
+viewport to which that panel window was submitted; a successful main-viewport
+Present cannot stand in for a detached panel viewport. Hiding a panel completes
+only after every viewport known to have presented that panel either presents a
+normal Shell frame without it or is torn down. `ShellUi` publishes each panel's
+candidate independently after that evidence; an immersive frame does not
+consume or publish panel state, and an unrelated viewport Present, Acquire
+retry, or Present retry does not complete the request.
+
+Every applied opposite automation write increments that panel's generation.
+An older unpresented generation fails with `operation_canceled` even if a later
+write eventually returns to the older requested value; compatible same-target
+requests may complete from the same presented frame.
+
+A hidden or minimized main window fails before claim and mutation with
+`window_not_renderable`. Immersive plot mode similarly fails before mutation
+with `panel_not_renderable`. If the window becomes unrenderable or immersive
+mode begins after a production mutation but before a qualifying Present, the
+complete chain of mutations since that panel's last qualifying presentation is
+restored to its pre-chain visibility through the same `ApplicationSettings`
+production seam, and the current request then fails with the corresponding
+code. Superseding generations therefore transfer rollback ownership instead of
+replacing the original baseline. An unexpected failure to restore reports
+`panel_rollback_failed` and states that the unpresented chain could not be
+restored. These failures do not leave an earlier claimed execution blocking a
+following `app.quit`.
+
+A detached viewport that still exists but is minimized is not renderable:
+Dear ImGui omits that secondary viewport from both platform rendering and
+buffer swap. A same-value request that depends on it fails with
+`panel_viewport_not_renderable`; an applied request first restores the complete
+unpresented mutation chain and then fails with the same code. Hiding a panel
+from a shared detached viewport uses the same rule while that viewport is
+minimized, rather than treating an unrelated main-window Present as proof or
+mistaking the still-existing viewport for teardown.
+
+If an ordinary `WM_CLOSE`/`WM_QUIT` ends the run loop while a panel mutation
+chain is still awaiting presentation, shutdown restores every active chain
+through `ApplicationSettings` before stopping the automation server or flushing
+local state. Its claimed request receives an `app_shutdown` terminal (or
+`panel_rollback_failed` if restoration cannot be verified), and the final panel
+cache therefore contains the pre-chain baseline rather than an unpresented
+value.
+
+Changed visibility uses the production 500 ms debounce and retry scheduler.
+The successful `panel.set` terminal means the production state has been applied
+and presented, not that the future debounce deadline has already written the
+cache.
+`wait.idle` waits for the panel request's presentation terminal but, consistent
+with other scheduled local-state work, does not wait for that future persistence
+deadline. Normal `app.quit` performs the existing final flush. The production
+panel cache path resolves below the launcher-pinned automation state root, so
+neither the debounce write nor shutdown flush can target ordinary user state.
+An unknown stable name fails after acceptance with `unsupported_panel`;
+missing or wrongly typed parameters fail before acceptance with
+`invalid_params`.
 
 `source.open` requires an absolute existing regular file or directory accepted
 by the production source loader. Its terminal result contains stable source
@@ -372,6 +462,8 @@ source-activation generation/cancellation semantics.
   the original field semantics even before that source has presented;
 - the applied `state.settings.language` and
   `state.settings.ui_scale_percentage` UI observation;
+- all nine current production visibility booleans in `state.panels`, keyed by
+  the stable panel names above;
 - the last successfully presented source identity/path in
   `state.presented_source`;
 - successfully presented spectrum count and, when present, its zero-based
@@ -403,13 +495,18 @@ requests do not delay or cancel that barrier: the pipe may accept them, but the
 UI dispatch queue stops at the first `wait.idle` and does not dispatch later
 commands until that wait reaches its terminal. This makes the wait a real UI
 dispatch barrier, so later source work cannot mask an earlier canceled worker
-that is still unwinding. Source, navigation, label, and capture operations are
-part of the sequence-aware lifecycle. It deliberately does not wait for a
-future persistence deadline; `label.assign` reports whether state/output
+that is still unwinding. Source, navigation, label, panel-set, and capture
+operations are part of the sequence-aware lifecycle. It deliberately does not
+wait for a future persistence deadline; `label.assign` reports whether
+state/output
 persistence completed, was scheduled, or requires retry, while normal
 `app.quit` performs the existing final flush. The initial `setting.set`
 whitelist uses synchronous production saves, so its terminal—and therefore a
 following idle barrier—cannot precede that settings-file write.
+`panel.set` is part of the sequence-aware lifecycle until its requested state
+has a qualifying normal Shell Present or an unavailable/superseded terminal
+restores or accounts for the applied mutation. Its production debounce write
+remains future persistence work and follows the same final-flush rule.
 An active performance recording is continuous observation rather than pending
 business work, so it does not keep `wait.idle` open. A claimed `profile.stop`
 does remain an earlier outstanding operation until the output has factually
@@ -459,6 +556,15 @@ The CTest coverage includes protocol and pipe boundaries, current-user ACL,
 second-client rejection, queue/full and duplicate-ID handling, version
 mismatch, disconnect and shutdown cancellation, a controlled no-activation
 show-plan assertion, bounded setting get/set parsing and execution claims,
+all nine one-hot panel mappings, exact boolean fields, generation-based
+supersession, chain-baseline rollback through the real settings cache,
+deterministic panel disconnects before and after execution claim with
+production-cache and active-chain settlement checks,
+panel-specific main/detached Present and teardown evidence, and
+detached-minimized unchanged/applied rollback plus shared-viewport hide
+blocking, hidden/minimized/immersive panel rejection followed by normal quit,
+an intervening idle barrier, and a real HWND shutdown rollback before final
+cache validation,
 both disconnect-first and finalizer-lease-first capture
 publication ordering, and a real SpecForge HWND workflow that verifies visible
 capture without foreground activation plus hidden/minimized rejection without
@@ -487,9 +593,11 @@ and capture-path failures, and checks that no owned GUI process remains. A
 separate real GUI settings
 workflow verifies the initial isolated values, language and scale writes,
 including a leading-plus same-value write returning `changed:false`, stable
-invalid-name/type/value failures, a following idle barrier, applied
-`state.settings`, application-rendered capture, production settings files,
-and ordinary-state fingerprint preservation. Its interactive failure-injection
+invalid-name/type/value failures, fixed panel reads, changed and unchanged panel
+writes, an unsupported-panel failure, a following idle barrier, applied
+`state.settings` and `state.panels`, application-rendered capture, production
+settings/panel files, and ordinary-state fingerprint preservation. Its
+interactive failure-injection
 coverage also blocks the production UI-scale path and verifies
 `setting_persistence_failed`, retained model/live values, no applied-setting
 notification, and a usable idle barrier.

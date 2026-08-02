@@ -33,6 +33,18 @@ constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHost
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
 constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
+constexpr std::array<const char*, kApplicationPanelCount>
+    kApplicationPanelWindowIds{
+        "###SpecForgeFilesV2",
+        "###SpecForgeNavigationV1",
+        "###SpecForgeAnnotationsV1",
+        "###SpecForgeLabelingV1",
+        "###SpecForgeFiltersV1",
+        "###SpecForgeSampleSortingV1",
+        "###SpecForgeSmoothingV1",
+        "###SpecForgeInfoTagsV2",
+        "###SpecForgeSpectralLinesV2",
+    };
 const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
 enum class ImmersivePlotAxisImplementation {
@@ -1054,6 +1066,7 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
 
 void ShellUi::Render(const ShellStatus& status)
 {
+    automation_panel_presentation_candidate_.reset();
     source_activation_.BeginFrame(
         status.latency_trace_recording_active,
         status.frame_index,
@@ -1080,43 +1093,65 @@ void ShellUi::Render(const ShellStatus& status)
         application_settings_.View();
     const PanelVisibilityState& panel_visibility =
         settings.panel_visibility;
+    RecordPanelVisibilityDrawSubmission(
+        status.frame_index,
+        ImGui::GetMainViewport()->ID,
+        panel_visibility);
     if (panel_visibility.files) {
         RenderFilesPanel(
             panel_visibility.files,
             settings.language);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Files);
     }
     if (panel_visibility.navigation) {
         RenderNavigationPanel(
             panel_visibility.navigation);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Navigation);
     }
     if (panel_visibility.annotations) {
         RenderAnnotationsPanel(
             panel_visibility.annotations);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Annotations);
     }
     if (panel_visibility.smoothing) {
         RenderSmoothingPanel(
             panel_visibility.smoothing);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Smoothing);
     }
     RenderMainPlot(status);
     if (panel_visibility.labeling) {
         RenderLabelingPanel(
             panel_visibility.labeling);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Labeling);
     }
     if (panel_visibility.filters) {
         RenderFiltersPanel(
             panel_visibility.filters);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Filters);
     }
     if (panel_visibility.sorting) {
         RenderSortingPanel(
             panel_visibility.sorting);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Sorting);
     }
     if (panel_visibility.information) {
         RenderInfoTagsPanel(
             panel_visibility.information);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::Information);
     }
     if (panel_visibility.spectral_lines) {
         RenderSpectralLinesPanel(
             panel_visibility.spectral_lines);
+        RecordPanelWindowDrawSubmission(
+            ApplicationPanel::SpectralLines);
     }
     RenderSettingsPanel(status);
     // Blur commits must observe every same-frame panel mutation, especially
@@ -1500,6 +1535,24 @@ ShellUi::SetUiScaleForAutomation(
         {});
 }
 
+ApplicationSettingsResult
+ShellUi::SetPanelVisibilityForAutomation(
+    ApplicationPanel panel,
+    bool visible)
+{
+    return ApplyApplicationSettingsIntent(
+        ApplicationSettingsIntent::SetPanelVisibility(
+            panel,
+            visible),
+        {});
+}
+
+PanelVisibilityState
+ShellUi::PanelVisibilityForAutomation() const
+{
+    return application_settings_.View().panel_visibility;
+}
+
 ShellAutomationView ShellUi::AutomationView()
 {
     return AutomationViewForSnapshot(
@@ -1510,6 +1563,18 @@ const ShellAutomationView&
 ShellUi::PresentedAutomationView() const noexcept
 {
     return presented_automation_view_;
+}
+
+const ShellAutomationPanelPresentation&
+ShellUi::PresentedPanelVisibilityForAutomation() const noexcept
+{
+    return presented_panel_visibility_;
+}
+
+const ShellAutomationPanelPresentationStatus&
+ShellUi::PanelPresentationStatusForAutomation() const noexcept
+{
+    return automation_panel_presentation_status_;
 }
 
 ShellAutomationView
@@ -1640,9 +1705,55 @@ void ShellUi::RecordSpectrumDrawSubmission(
         std::move(snapshot));
 }
 
+void ShellUi::RecordPanelVisibilityDrawSubmission(
+    std::uint64_t frame_index,
+    unsigned int viewport_id,
+    PanelVisibilityState visibility)
+{
+    automation_panel_presentation_candidate_ = {
+        .frame_index = frame_index,
+        .main_viewport_id = viewport_id,
+        .visibility = visibility,
+    };
+}
+
+void ShellUi::RecordPanelDrawSubmission(
+    ApplicationPanel panel,
+    unsigned int viewport_id)
+{
+    if (!automation_panel_presentation_candidate_) {
+        return;
+    }
+    automation_panel_presentation_candidate_
+        ->draw_viewport_ids[
+            static_cast<std::size_t>(panel)] =
+        viewport_id;
+}
+
+void ShellUi::RecordPanelWindowDrawSubmission(
+    ApplicationPanel panel)
+{
+    const std::size_t panel_index =
+        static_cast<std::size_t>(panel);
+    ImGuiWindow* window = ImGui::FindWindowByName(
+        kApplicationPanelWindowIds[panel_index]);
+    if (window == nullptr ||
+        window->LastFrameActive !=
+            ImGui::GetFrameCount() ||
+        window->Viewport == nullptr) {
+        return;
+    }
+    RecordPanelDrawSubmission(
+        panel,
+        window->Viewport->ID);
+}
+
 void ShellUi::PresentFrame(
     std::uint64_t frame_index,
-    std::span<const NavigationLatencyPresentation> presentations)
+    std::span<const NavigationLatencyPresentation> presentations,
+    std::span<
+        const ShellAutomationViewportPresentationState>
+        viewport_states)
 {
     const std::uint64_t presented_sequence_before =
         source_activation_.
@@ -1671,6 +1782,138 @@ void ShellUi::PresentFrame(
         presented_automation_view_ =
             automation_presentation_candidate_
                 ->view;
+    }
+    if (!automation_panel_presentation_candidate_ ||
+        automation_panel_presentation_candidate_
+                ->frame_index !=
+            frame_index) {
+        return;
+    }
+
+    AutomationPanelPresentationCandidate& candidate =
+        *automation_panel_presentation_candidate_;
+    const auto viewport_presented =
+        [&presentations](unsigned int viewport_id) {
+            return std::ranges::any_of(
+                presentations,
+                [viewport_id](const auto& presentation) {
+                    return presentation.viewport_id ==
+                           viewport_id;
+                });
+        };
+    const bool viewport_states_observed =
+        !viewport_states.empty();
+    const auto viewport_state =
+        [&viewport_states](unsigned int viewport_id)
+            -> const ShellAutomationViewportPresentationState* {
+            const auto found =
+                std::ranges::find_if(
+                    viewport_states,
+                    [viewport_id](const auto& state) {
+                        return state.viewport_id ==
+                               viewport_id;
+                    });
+            return found == viewport_states.end()
+                       ? nullptr
+                       : &*found;
+        };
+    candidate.main_viewport_presented =
+        candidate.main_viewport_presented ||
+        viewport_presented(candidate.main_viewport_id);
+
+    for (std::size_t panel_index = 0;
+         panel_index < kApplicationPanelCount;
+         ++panel_index) {
+        const ApplicationPanel panel =
+            static_cast<ApplicationPanel>(
+                panel_index);
+        const bool visible =
+            ApplicationPanelVisible(
+                candidate.visibility,
+                panel);
+        const std::optional<unsigned int>
+            draw_viewport_id =
+                candidate.draw_viewport_ids[
+                    panel_index];
+        bool exposure_resolved = false;
+        std::vector<unsigned int>& exposed_viewports =
+            automation_panel_visible_viewports_[
+                panel_index];
+        bool presentation_blocked = false;
+        if (visible && draw_viewport_id) {
+            const auto* state =
+                viewport_state(*draw_viewport_id);
+            presentation_blocked =
+                state != nullptr &&
+                !state->renderable;
+        } else if (!visible) {
+            presentation_blocked =
+                std::ranges::any_of(
+                    exposed_viewports,
+                    [&](unsigned int viewport_id) {
+                        const auto* state =
+                            viewport_state(viewport_id);
+                        return state != nullptr &&
+                               !state->renderable;
+                    });
+        }
+        automation_panel_presentation_status_
+            .frame_indices[panel_index] =
+            frame_index;
+        automation_panel_presentation_status_
+            .blocked[panel_index] =
+            presentation_blocked;
+
+        std::erase_if(
+            exposed_viewports,
+            [&](unsigned int viewport_id) {
+                if (visible &&
+                    draw_viewport_id &&
+                    *draw_viewport_id ==
+                        viewport_id) {
+                    return false;
+                }
+                const auto* state =
+                    viewport_state(viewport_id);
+                const bool resolved =
+                    viewport_presented(viewport_id) ||
+                    (viewport_states_observed &&
+                     state == nullptr);
+                exposure_resolved =
+                    exposure_resolved || resolved;
+                return resolved;
+            });
+
+        bool panel_presented = false;
+        if (!presentation_blocked &&
+            visible && draw_viewport_id &&
+            viewport_presented(
+                *draw_viewport_id)) {
+            if (std::ranges::find(
+                    exposed_viewports,
+                    *draw_viewport_id) ==
+                exposed_viewports.end()) {
+                exposed_viewports.push_back(
+                    *draw_viewport_id);
+            }
+            panel_presented = true;
+        } else if (!presentation_blocked &&
+                   !visible &&
+                   exposed_viewports.empty() &&
+                   (candidate.main_viewport_presented ||
+                    exposure_resolved)) {
+            panel_presented = true;
+        }
+
+        if (panel_presented) {
+            SetApplicationPanelVisible(
+                presented_panel_visibility_.visibility,
+                panel,
+                visible);
+            presented_panel_visibility_
+                .frame_indices[panel_index] =
+                frame_index;
+        }
     }
 }
 
