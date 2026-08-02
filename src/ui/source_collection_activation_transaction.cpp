@@ -639,8 +639,14 @@ void SourceCollectionActivationTransaction::
 SourceCollectionActivationTransaction::Status
 SourceCollectionActivationTransaction::status() const
 {
+    const std::filesystem::path* loading_source_path =
+        VisibleLoadingSourcePath();
     return {
         .loading = NeedsService(),
+        .loading_source_path =
+            loading_source_path == nullptr
+                ? std::filesystem::path{}
+                : *loading_source_path,
         .failures = visible_failures_,
         .error_message = ErrorMessage(),
     };
@@ -682,6 +688,31 @@ std::size_t SourceCollectionActivationTransaction::
     PendingLoadCount() const
 {
     return pending_loads_.size();
+}
+
+const std::filesystem::path*
+SourceCollectionActivationTransaction::
+    VisibleLoadingSourcePath() const noexcept
+{
+    const Ticket* latest = nullptr;
+    std::uint64_t latest_task_id = 0;
+    for (const auto& [task_id, ticket] : pending_loads_) {
+        if (ticket.activation_epoch != activation_epoch_) {
+            continue;
+        }
+        if (ticket.purpose == Purpose::DeferredRestore) {
+            if (!deferred_restore_active_path_ ||
+                ticket.path != *deferred_restore_active_path_) {
+                continue;
+            }
+            return &ticket.path;
+        }
+        if (latest == nullptr || task_id > latest_task_id) {
+            latest = &ticket;
+            latest_task_id = task_id;
+        }
+    }
+    return latest == nullptr ? nullptr : &latest->path;
 }
 
 bool SourceCollectionActivationTransaction::PrefetchActive() const

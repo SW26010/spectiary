@@ -2452,6 +2452,15 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         source_b_finished_first,
         "source B should decode while source A and C remain blocked");
+    const specforge::ShellWindowTitleView
+        active_restore_loading = shell->WindowTitleView();
+    Require(
+        active_restore_loading.loading_source_path != nullptr &&
+            specforge::SourcePathIdentityKey(
+                *active_restore_loading.loading_source_path) ==
+                specforge::SourcePathIdentityKey(
+                    source_paths[1]),
+        "deferred restore should project only its saved active source while multiple sources are loading");
 
     release_a_promise.set_value();
     const auto source_b_activation_deadline =
@@ -2477,6 +2486,20 @@ void TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion()
     Require(
         source_b_activated,
         "source B should be active before the later source C completion");
+    const specforge::ShellWindowTitleView
+        active_source_with_inactive_restore_pending =
+            shell->WindowTitleView();
+    Require(
+        active_source_with_inactive_restore_pending
+                .loading_source_path == nullptr &&
+            active_source_with_inactive_restore_pending
+                .source_path != nullptr &&
+            specforge::SourcePathIdentityKey(
+                *active_source_with_inactive_restore_pending
+                     .source_path) ==
+                specforge::SourcePathIdentityKey(
+                    source_paths[1]),
+        "an inactive deferred source should not replace the restored active source projection");
 
     const auto restore_deadline =
         std::chrono::steady_clock::now() + 2s;

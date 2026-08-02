@@ -1,6 +1,7 @@
 #include "app/specforge_app.h"
 
 #include "app/local_user_state_json.h"
+#include "app/native_window_title.h"
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
 #include "platform/win32_text.h"
@@ -428,9 +429,11 @@ int SpecForgeApp::Run(
             break;
         }
 
-        (void)WaitForWin32MessageOrDeadline(render_wake_scheduler_.NextWakeDeadline(
-            window_renderable,
-            next_maintenance_deadline()));
+        ApplyLocalizedWindowTitle();
+        (void)WaitForWin32MessageOrDeadline(
+            render_wake_scheduler_.NextWakeDeadline(
+                window_renderable,
+                next_maintenance_deadline()));
     }
 
     (void)SettleAutomationPanelCommandsForShutdown();
@@ -529,10 +532,11 @@ void SpecForgeApp::Initialize(
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
-    const std::wstring window_title = Utf8ToWide(
-        UiText(
-            ui_.ui_language(),
-            UiTextId::ApplicationWindowTitle));
+    const std::wstring window_title =
+        FormatSpecForgeNativeWindowTitle(
+            UiText(
+                ui_.ui_language(),
+                UiTextId::ApplicationWindowTitle));
     const bool window_created = window_.Create(
         instance,
         window_title.c_str(),
@@ -544,6 +548,7 @@ void SpecForgeApp::Initialize(
     if (!window_created) {
         throw std::runtime_error("Failed to create the Win32 window.");
     }
+    applied_window_title_ = window_title;
     const HWND profile_state_window = window_.hwnd();
     profile_.SetStateChangeCallback([profile_state_window]() noexcept {
         (void)PostMessageW(profile_state_window, kProfileRecorderStateChangedMessage, 0, 0);
@@ -821,9 +826,7 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         status.client_height = window_.client_height();
         status.frame_index = frame_index_;
         ui_.Render(status);
-        if (ui_.TakeAppliedUiLanguage()) {
-            ApplyLocalizedWindowTitle();
-        }
+        (void)ui_.TakeAppliedUiLanguage();
         if (ui_.TakeImmersivePlotModeToggleRequest()) {
             ToggleImmersivePlotMode();
         }
@@ -1168,12 +1171,43 @@ void SpecForgeApp::ApplyLocalizedWindowTitle()
     if (window_.hwnd() == nullptr) {
         return;
     }
-    const std::wstring title = Utf8ToWide(UiText(
-        ui_.ui_language(),
-        UiTextId::ApplicationWindowTitle));
-    (void)SetWindowTextW(
-        window_.hwnd(),
-        title.c_str());
+    const ShellWindowTitleView view =
+        ui_.WindowTitleView();
+    const bool loading =
+        view.loading_source_path != nullptr &&
+        !view.loading_source_path->empty();
+    const NativeWindowTitleView title_view{
+        .product_name = UiText(
+            ui_.ui_language(),
+            UiTextId::ApplicationWindowTitle),
+        .source_path =
+            loading ? view.loading_source_path
+                    : view.source_path,
+        .loading = loading,
+        .loading_text = UiText(
+            ui_.ui_language(),
+            UiTextId::LoadingSource),
+        .sample_present = view.sample_present,
+        .sample_name = view.sample_name,
+        .sample_index = view.sample_index,
+        .sample_count = view.sample_count,
+    };
+    if (applied_window_title_key_ &&
+        applied_window_title_key_->Matches(title_view)) {
+        return;
+    }
+    const std::wstring title =
+        FormatSpecForgeNativeWindowTitle(title_view);
+    if (title == applied_window_title_) {
+        applied_window_title_key_.emplace(title_view);
+        return;
+    }
+    if (SetWindowTextW(
+            window_.hwnd(),
+            title.c_str()) != FALSE) {
+        applied_window_title_ = title;
+        applied_window_title_key_.emplace(title_view);
+    }
 }
 
 void SpecForgeApp::WriteDpiConfiguration(

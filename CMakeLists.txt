@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.7.6 LANGUAGES CXX RC)
+project(SpecForge VERSION 0.7.7 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -315,6 +315,7 @@ target_link_libraries(specforge_sessions PUBLIC specforge_core)
 
 add_library(specforge_desktop_ui STATIC
     src/app/application_settings.cpp
+    src/app/native_window_title.cpp
     src/plot/plot_touchpad_gesture.cpp
     src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
@@ -868,6 +869,16 @@ specforge_add_test(
     specforge_desktop_ui
 )
 specforge_add_test(
+    specforge_native_window_title_tests
+    tests/native_window_title_tests.cpp
+    specforge_desktop_ui
+)
+target_compile_definitions(
+    specforge_native_window_title_tests
+    PRIVATE
+        SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+)
+specforge_add_test(
     specforge_ui_font_glyph_ranges_tests
     tests/ui_font_glyph_ranges_tests.cpp
     specforge_desktop_ui
@@ -896,6 +907,12 @@ add_test(
     NAME specforge_ui_scale_runtime_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/ui_scale_runtime_architecture_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
+add_test(
+    NAME specforge_native_window_title_architecture_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/native_window_title_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 specforge_add_test(

@@ -1559,6 +1559,27 @@ ShellAutomationView ShellUi::AutomationView()
         session_.CurrentSampleSnapshot());
 }
 
+ShellWindowTitleView ShellUi::WindowTitleView() const
+{
+    ShellWindowTitleView view;
+    view.snapshot_owner =
+        session_.CurrentSampleSnapshot();
+    view.loading_source_path =
+        source_activation_.VisibleLoadingSourcePath();
+    if (view.snapshot_owner) {
+        view.source_path =
+            &view.snapshot_owner->source.path;
+        view.sample_present = true;
+        view.sample_name =
+            view.snapshot_owner->current_spectrum.name;
+        view.sample_index =
+            view.snapshot_owner->collection.current_index;
+        view.sample_count =
+            view.snapshot_owner->collection.spectrum_count;
+    }
+    return view;
+}
+
 const ShellAutomationView&
 ShellUi::PresentedAutomationView() const noexcept
 {
@@ -1584,6 +1605,12 @@ ShellUi::AutomationViewForSnapshot(
     ShellAutomationView automation;
     const SourceCollectionSessionView& view =
         SessionView();
+    const SourceCollectionActivationTransaction::Status
+        activation_status = source_activation_.status();
+    automation.loading_source_path =
+        activation_status.loading_source_path;
+    automation.loading =
+        !automation.loading_source_path.empty();
     if (snapshot) {
         automation.source_id =
             snapshot->source.id;

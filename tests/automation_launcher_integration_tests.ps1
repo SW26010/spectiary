@@ -339,6 +339,75 @@ function Send-InteractiveLauncherRequest {
     return $messages
 }
 
+function Begin-InteractiveLauncherRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [string]$Line,
+        [Parameter(Mandatory = $true)]
+        [string]$RequestId
+    )
+
+    $payload =
+        [System.Text.UTF8Encoding]::new($false).GetBytes(
+            $Line + "`n")
+    $inputStream =
+        $Process.StandardInput.BaseStream
+    $inputStream.Write(
+        $payload,
+        0,
+        $payload.Length)
+    $inputStream.Flush()
+    while ($true) {
+        $line =
+            Read-LauncherLine -Process $Process
+        if ($line -notmatch '^\{') {
+            continue
+        }
+        $message = $line | ConvertFrom-Json
+        Assert-True `
+            -Condition (
+                [string]$message.request_id -eq
+                    $RequestId -and
+                [string]$message.status -eq
+                    'accepted') `
+            -Message (
+                "Interactive request $RequestId should begin with one accepted message: $line")
+        return $message
+    }
+}
+
+function Complete-InteractiveLauncherRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [string]$RequestId
+    )
+
+    while ($true) {
+        $line =
+            Read-LauncherLine -Process $Process
+        if ($line -notmatch '^\{') {
+            continue
+        }
+        $message = $line | ConvertFrom-Json
+        Assert-True `
+            -Condition (
+                [string]$message.request_id -eq
+                    $RequestId) `
+            -Message (
+                "Interactive launcher returned an unexpected request ID: $line")
+        if ([string]$message.status -in @(
+                'completed',
+                'failed',
+                'canceled')) {
+            return $message
+        }
+    }
+}
+
 function Send-InteractiveLauncherBatch {
     param(
         [Parameter(Mandatory = $true)]
@@ -413,6 +482,7 @@ if ($null -eq (
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class SpecForgeAutomationWindowTestNative
 {
@@ -461,6 +531,24 @@ public static class SpecForgeAutomationWindowTestNative
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLengthW(
+        IntPtr window);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextW(
+        IntPtr window,
+        StringBuilder text,
+        int maximumCount);
+
+    public static string WindowTitle(IntPtr window)
+    {
+        int length = GetWindowTextLengthW(window);
+        StringBuilder text = new StringBuilder(length + 1);
+        GetWindowTextW(window, text, text.Capacity);
+        return text.ToString();
+    }
 
     public static uint WindowThreadId(IntPtr window)
     {
@@ -791,7 +879,7 @@ function Invoke-UnrenderablePanelQuitScenario {
             if (-not $launcherProcess.HasExited) {
                 $launcherProcess.StandardInput.Close()
                 if (-not $launcherProcess.WaitForExit(3000)) {
-                    $launcherProcess.Kill($true)
+                    $launcherProcess.Kill()
                     [void]$launcherProcess.WaitForExit(3000)
                 }
             }
@@ -1092,7 +1180,7 @@ function Invoke-PanelShutdownRollbackScenario {
             if (-not $launcherProcess.HasExited) {
                 $launcherProcess.StandardInput.Close()
                 if (-not $launcherProcess.WaitForExit(3000)) {
-                    $launcherProcess.Kill($true)
+                    $launcherProcess.Kill()
                     [void]$launcherProcess.WaitForExit(3000)
                 }
             }
@@ -2752,11 +2840,78 @@ try {
             $profileDirectoryBlocker)
         $successfulProfileDirectoryMoved = $false
 
+        [void][SpecForgeAutomationWindowTestNative]::
+            ShowWindowAsync($windowHandle, 7)
+        $titleMinimizeDeadline =
+            [DateTime]::UtcNow.AddSeconds(5)
+        while (
+            -not [SpecForgeAutomationWindowTestNative]::
+                IsIconic($windowHandle) -and
+            [DateTime]::UtcNow -lt
+                $titleMinimizeDeadline) {
+            Start-Sleep -Milliseconds 25
+        }
+        $titleOpenAccepted =
+            Begin-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Line "source open $sourceRoot" `
+                -RequestId 'request-22'
+        $expectedTitleSuffix =
+            ' | source-fixture | 1/3 | alpha.csv'
+        $minimizedTitle = ''
+        $titleDeadline =
+            [DateTime]::UtcNow.AddSeconds(10)
+        while ([DateTime]::UtcNow -lt $titleDeadline) {
+            $minimizedTitle =
+                [SpecForgeAutomationWindowTestNative]::
+                    WindowTitle($windowHandle)
+            if ($minimizedTitle.EndsWith(
+                    $expectedTitleSuffix,
+                    [StringComparison]::Ordinal)) {
+                break
+            }
+            Start-Sleep -Milliseconds 25
+        }
+        Assert-True `
+            -Condition (
+                [string]$titleOpenAccepted.status -eq
+                    'accepted' -and
+                [SpecForgeAutomationWindowTestNative]::
+                    IsIconic($windowHandle) -and
+                $minimizedTitle.EndsWith(
+                    $expectedTitleSuffix,
+                    [StringComparison]::Ordinal)) `
+            -Message (
+                'A minimized HWND must reconcile a completed source load into its taskbar/Alt-Tab title before rendering resumes. Actual title: ' +
+                $minimizedTitle)
+
+        [void][SpecForgeAutomationWindowTestNative]::
+            ShowWindowAsync($windowHandle, 4)
+        $titleRestoreDeadline =
+            [DateTime]::UtcNow.AddSeconds(5)
+        while (
+            [SpecForgeAutomationWindowTestNative]::
+                IsIconic($windowHandle) -and
+            [DateTime]::UtcNow -lt
+                $titleRestoreDeadline) {
+            Start-Sleep -Milliseconds 25
+        }
+        $titleOpenTerminal =
+            Complete-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -RequestId 'request-22'
+        Assert-True `
+            -Condition (
+                [string]$titleOpenTerminal.status -eq
+                    'completed') `
+            -Message (
+                'The minimized title source.open should complete after rendering resumes.')
+
         $quitMessages = @(
             Send-InteractiveLauncherRequest `
                 -Process $interactiveLauncher `
                 -Lines @('app quit') `
-                -RequestId 'request-22'
+                -RequestId 'request-23'
         )
         Assert-True `
             -Condition (
@@ -2808,7 +2963,7 @@ try {
             if (-not $interactiveLauncher.HasExited) {
                 $interactiveLauncher.StandardInput.Close()
                 if (-not $interactiveLauncher.WaitForExit(3000)) {
-                    $interactiveLauncher.Kill($true)
+                    $interactiveLauncher.Kill()
                     [void]$interactiveLauncher.WaitForExit(3000)
                 }
             }

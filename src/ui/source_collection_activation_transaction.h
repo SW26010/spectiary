@@ -65,6 +65,7 @@ public:
 
     struct Status {
         bool loading = false;
+        std::filesystem::path loading_source_path;
         std::span<const SourceCollectionLoadFailure>
             failures;
         // Diagnostic-only aggregate retained for runtime instrumentation and
@@ -138,6 +139,11 @@ public:
             presentations);
 
     [[nodiscard]] Status status() const;
+    // Valid until the next non-const activation operation. This lets narrow
+    // synchronous projections observe the visible load without copying a
+    // filesystem path on every message-loop iteration.
+    [[nodiscard]] const std::filesystem::path*
+    VisibleLoadingSourcePath() const noexcept;
     [[nodiscard]] const PresentedSourceLoadObservation&
     presented_source_load_observation() const noexcept;
     [[nodiscard]] const PresentedSpectrumObservation&

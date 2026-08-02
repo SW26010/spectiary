@@ -126,8 +126,23 @@ struct ShellAutomationLabelingView {
 struct ShellAutomationView {
     std::string source_id;
     std::filesystem::path source_path;
+    bool loading = false;
+    std::filesystem::path loading_source_path;
     ShellAutomationSpectrumView spectrum;
     ShellAutomationLabelingView labeling;
+};
+
+struct ShellWindowTitleView {
+    // Keeps source_path and sample_name alive while the App compares the
+    // non-owning title view. The loading path remains valid until the next
+    // non-const Shell operation on the same UI thread.
+    SpectrumSnapshotHandle snapshot_owner;
+    const std::filesystem::path* source_path = nullptr;
+    const std::filesystem::path* loading_source_path = nullptr;
+    bool sample_present = false;
+    std::string_view sample_name;
+    std::size_t sample_index = 0;
+    std::size_t sample_count = 0;
 };
 
 struct ShellAutomationPanelPresentation {
@@ -280,6 +295,8 @@ public:
     [[nodiscard]] PanelVisibilityState
     PanelVisibilityForAutomation() const;
     [[nodiscard]] ShellAutomationView AutomationView();
+    [[nodiscard]] ShellWindowTitleView
+    WindowTitleView() const;
     [[nodiscard]] const ShellAutomationView&
     PresentedAutomationView() const noexcept;
     [[nodiscard]] const

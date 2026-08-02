@@ -73,6 +73,13 @@ struct SourceCollectionActivationTransactionTestAccess {
             .ActivitySnapshot()
             .completed_count;
     }
+
+    static bool PrefetchActive(
+        const SourceCollectionActivationTransaction&
+            activation)
+    {
+        return activation.PrefetchActive();
+    }
 };
 
 }  // namespace specforge
@@ -218,6 +225,54 @@ bool DrainUntil(
         std::this_thread::sleep_for(2ms);
     }
     return predicate();
+}
+
+void TestStatusReportsCurrentLoadingSourcePath()
+{
+    const std::filesystem::path path =
+        UniqueTempPath("_loading_status.csv");
+    WriteFixture(path);
+
+    std::promise<void> started_promise;
+    std::shared_future<void> started =
+        started_promise.get_future().share();
+    std::promise<void> release_promise;
+    std::shared_future<void> release =
+        release_promise.get_future().share();
+    auto dependencies = MakeDependencies(
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            started_promise.set_value();
+            release.wait();
+            return MakeSnapshot(source, index);
+        });
+    specforge::SourceCollectionSession session(
+        {}, {}, {}, {});
+    Activation activation(
+        session,
+        specforge::MakeSourceCollectionLoadQueueForTesting(
+            std::move(dependencies)));
+
+    (void)activation.OpenSource(path, 0);
+    const bool worker_started =
+        started.wait_for(2s) ==
+        std::future_status::ready;
+    const Activation::Status loading =
+        activation.status();
+    release_promise.set_value();
+    const bool drained = DrainUntil(
+        activation,
+        [&]() {
+            return !activation.status().loading;
+        });
+
+    std::filesystem::remove(path);
+    Require(
+        worker_started && loading.loading &&
+            loading.loading_source_path == path &&
+            drained,
+        "loading status should expose the current activation ticket path");
 }
 
 void TestRapidNavigationPublishesOnlyLatestIntent()
@@ -366,6 +421,9 @@ void TestFailedExplicitOpenProducesTerminalLifecycleResult()
     Require(
         structured_failure,
         "activation status should preserve the semantic load error separately from its raw diagnostic");
+    Require(
+        status.loading_source_path.empty(),
+        "a failed load should clear its visible loading-source projection");
     Require(
         automation_outcome.state ==
                 Activation::SourceOpenOperationState::
@@ -1083,6 +1141,8 @@ void TestAutomationOpensSupersedeBeforeSingleCompletionDrain()
         second_started.wait_for(2s) ==
             std::future_status::ready,
         "the superseding automation open worker should start");
+    const Activation::Status superseding_status =
+        activation.status();
     const auto first_before_drain =
         activation.ObserveSourceOpenOperation(first);
     release_promise.set_value();
@@ -1126,6 +1186,10 @@ void TestAutomationOpensSupersedeBeforeSingleCompletionDrain()
                 Activation::SourceOpenOperationState::
                     Canceled,
         "a superseded automation open should remain terminal canceled before and after both completions drain");
+    Require(
+        superseding_status.loading_source_path ==
+            second_path,
+        "concurrent opens should project only the latest activation source");
     Require(
         active_snapshot &&
             active_snapshot->source.path ==
@@ -1393,10 +1457,23 @@ void TestIdlePrefetchReportsLifecycleCompletion()
     const std::filesystem::path path =
         UniqueTempPath("_prefetch.csv");
     WriteFixture(path);
+
+    std::promise<void> prefetch_started_promise;
+    std::shared_future<void> prefetch_started =
+        prefetch_started_promise.get_future().share();
+    std::promise<void> release_prefetch_promise;
+    std::shared_future<void> release_prefetch =
+        release_prefetch_promise.get_future().share();
+    std::atomic_bool prefetch_started_once = false;
     auto dependencies = MakeDependencies(
-        [](const std::filesystem::path& source,
-           std::size_t index,
-           const auto&) {
+        [&](const std::filesystem::path& source,
+            std::size_t index,
+            const auto&) {
+            if (index == 2 &&
+                !prefetch_started_once.exchange(true)) {
+                prefetch_started_promise.set_value();
+                release_prefetch.wait();
+            }
             return MakeSnapshot(source, index);
         });
     specforge::SourceCollectionSession session =
@@ -1414,6 +1491,19 @@ void TestIdlePrefetchReportsLifecycleCompletion()
         Activation::NavigationIntent{
             specforge::NavigationLatencyInputKind::UiNext,
             std::nullopt});
+
+    const bool prefetch_active = DrainUntil(
+        activation,
+        [&]() {
+            return prefetch_started.wait_for(0s) ==
+                       std::future_status::ready &&
+                ActivationAccess::PrefetchActive(
+                    activation);
+        },
+        true);
+    const Activation::Status prefetch_status =
+        activation.status();
+    release_prefetch_promise.set_value();
 
     const bool prefetch_finished = DrainUntil(
         activation,
@@ -1434,8 +1524,10 @@ void TestIdlePrefetchReportsLifecycleCompletion()
 
     std::filesystem::remove(path);
     Require(
-        prefetch_finished,
-        "idle prefetch should publish a terminal lifecycle result");
+        prefetch_active &&
+            prefetch_status.loading_source_path.empty() &&
+            prefetch_finished,
+        "idle prefetch should stay out of the visible loading-source projection and publish a terminal lifecycle result");
 }
 
 }  // namespace
@@ -1443,6 +1535,7 @@ void TestIdlePrefetchReportsLifecycleCompletion()
 int main()
 {
     try {
+        TestStatusReportsCurrentLoadingSourcePath();
         TestRapidNavigationPublishesOnlyLatestIntent();
         TestFailedExplicitOpenProducesTerminalLifecycleResult();
         TestActivationOwnsQueueServiceDeadline();

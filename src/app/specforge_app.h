@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/native_window_title.h"
 #include "app/on_demand_frame_capture.h"
 #include "app/pan_pacing.h"
 #include "app/render_wake_scheduler.h"
@@ -294,6 +295,9 @@ private:
     bool automation_shutdown_requested_ = false;
 
     std::string imgui_ini_path_utf8_;
+    std::wstring applied_window_title_;
+    std::optional<NativeWindowTitleSemanticKey>
+        applied_window_title_key_;
     bool imgui_initialized_ = false;
     bool running_ = true;
     bool minimized_ = false;
