@@ -37,6 +37,21 @@ struct AutomationNamedPipeServerTestAccess {
     }
 };
 
+struct AutomationProfileOutputFactoryTestAccess {
+    static AutomationPreparedProfileOutput Create(
+        const std::filesystem::path& automation_root,
+        const std::filesystem::path& output_directory,
+        AutomationProfileOutputFactory::BeforeOpenCheckpoint
+            before_open)
+    {
+        return AutomationProfileOutputFactory::
+            CreateWithOpenCheckpoint(
+                automation_root,
+                output_directory,
+                std::move(before_open));
+    }
+};
+
 }  // namespace specforge
 
 namespace {
@@ -138,6 +153,84 @@ std::string NarrowAscii(std::wstring_view value)
             static_cast<char>(character));
     }
     return result;
+}
+
+std::string ReadFileBytes(
+    const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return {
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>(),
+    };
+}
+
+bool CreateDirectoryJunction(
+    const std::filesystem::path& junction,
+    const std::filesystem::path& target)
+{
+    std::wstring command =
+        L"cmd.exe /d /c mklink /J \"" +
+        junction.wstring() + L"\" \"" +
+        target.wstring() + L"\" >nul";
+    STARTUPINFOW startup = {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process = {};
+    if (CreateProcessW(
+            nullptr,
+            command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startup,
+            &process) == FALSE) {
+        return false;
+    }
+    CloseHandle(process.hThread);
+    const DWORD wait =
+        WaitForSingleObject(process.hProcess, 10'000);
+    DWORD exit_code = 1;
+    const bool succeeded =
+        wait == WAIT_OBJECT_0 &&
+        GetExitCodeProcess(
+            process.hProcess,
+            &exit_code) != FALSE &&
+        exit_code == 0;
+    CloseHandle(process.hProcess);
+    return succeeded;
+}
+
+bool IsReparseEntryNoFollow(
+    const std::filesystem::path& path)
+{
+    const HANDLE entry = CreateFileW(
+        path.c_str(),
+        FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ |
+            FILE_SHARE_WRITE |
+            FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT |
+            FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr);
+    if (entry == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    FILE_BASIC_INFO information = {};
+    const bool is_reparse =
+        GetFileInformationByHandleEx(
+            entry,
+            FileBasicInfo,
+            &information,
+            sizeof(information)) != FALSE &&
+        (information.FileAttributes &
+         FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    CloseHandle(entry);
+    return is_reparse;
 }
 
 int RunLauncherCleanupFixture(
@@ -366,6 +459,30 @@ const specforge::JsonValue& RequireObjectMember(
 
 void TestProtocolAndStableState()
 {
+    const auto write_failure_policy =
+        specforge::AutomationProfileStopPolicy(
+            specforge::ProfileSink::StopReason::WriteFailure);
+    const auto missing_reason_policy =
+        specforge::AutomationProfileStopPolicy(
+            specforge::ProfileSink::StopReason::None);
+    Require(
+        !write_failure_policy.succeeded &&
+            write_failure_policy.error_code ==
+                "profile_write_failed" &&
+            !missing_reason_policy.succeeded &&
+            missing_reason_policy.error_code ==
+                "profile_stop_failed" &&
+            specforge::AutomationProfileStopPolicy(
+                specforge::ProfileSink::StopReason::Explicit)
+                .succeeded &&
+            specforge::AutomationProfileStopPolicy(
+                specforge::ProfileSink::StopReason::DurationLimit)
+                .succeeded &&
+            specforge::AutomationProfileStopPolicy(
+                specforge::ProfileSink::StopReason::FileSizeLimit)
+                .succeeded,
+        "profile stop terminal policy should reserve success for finalized production outcomes and expose write failure stably");
+
     const auto hello =
         specforge::ParseAutomationClientMessage(
             specforge::SerializeAutomationHelloRequest(
@@ -396,6 +513,46 @@ void TestProtocolAndStableState()
                     AutomationCommandKind::
                         WaitIdle,
         "wait.idle should parse as a structured command");
+    const auto profile_start_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::
+                SerializeAutomationCommandRequest(
+                    "profile-start-1",
+                    specforge::
+                        AutomationCommandKind::
+                            ProfileStart));
+    const auto profile_stop_request =
+        specforge::ParseAutomationClientMessage(
+            specforge::
+                SerializeAutomationCommandRequest(
+                    "profile-stop-1",
+                    specforge::
+                        AutomationCommandKind::
+                            ProfileStop));
+    const auto profile_start_with_empty_params =
+        specforge::ParseAutomationClientMessage(
+            R"({"type":"request","request_id":"profile-start-empty","command":"profile.start","params":{}})");
+    const auto profile_start_with_members =
+        specforge::ParseAutomationClientMessage(
+            R"({"type":"request","request_id":"profile-start-members","command":"profile.start","params":{"ignored":true}})");
+    const auto profile_stop_with_members =
+        specforge::ParseAutomationClientMessage(
+            R"({"type":"request","request_id":"profile-stop-members","command":"profile.stop","params":{"path":"C:\\outside.jsonl"}})");
+    Require(
+        profile_start_request.message &&
+            profile_start_request.message->command ==
+                specforge::AutomationCommandKind::
+                    ProfileStart &&
+            profile_stop_request.message &&
+            profile_stop_request.message->command ==
+                specforge::AutomationCommandKind::
+                    ProfileStop &&
+            profile_start_with_empty_params.message &&
+            profile_start_with_members.error_code ==
+                "invalid_params" &&
+            profile_stop_with_members.error_code ==
+                "invalid_params",
+        "profile.start and profile.stop should accept omitted or empty params and reject every member of a fixed parameterless command");
     const auto setting_get_request =
         specforge::ParseAutomationClientMessage(
             specforge::
@@ -457,7 +614,7 @@ void TestProtocolAndStableState()
     const auto& capabilities =
         specforge::AutomationCapabilityNames();
     Require(
-        capabilities.size() == 9 &&
+        capabilities.size() == 11 &&
             std::find(
                 capabilities.begin(),
                 capabilities.end(),
@@ -467,8 +624,18 @@ void TestProtocolAndStableState()
                 capabilities.begin(),
                 capabilities.end(),
                 "setting.set") !=
+                capabilities.end() &&
+            std::find(
+                capabilities.begin(),
                 capabilities.end(),
-        "fixed capabilities should advertise both bounded setting commands");
+                "profile.start") !=
+                capabilities.end() &&
+            std::find(
+                capabilities.begin(),
+                capabilities.end(),
+                "profile.stop") !=
+                capabilities.end(),
+        "fixed capabilities should advertise the bounded settings and production profile controls");
     const auto source_request =
         specforge::ParseAutomationClientMessage(
             R"({"type":"request","request_id":"source-1","command":"source.open","params":{"path":"C:\\fixtures\\source.npy"}})");
@@ -604,6 +771,14 @@ void TestProtocolAndStableState()
             std::filesystem::path(
                 L"C:\\automation\\failed.png"),
     };
+    state.profile = {
+        .status = "stopping",
+        .path =
+            std::filesystem::path(
+                L"C:\\automation\\logs\\profile.jsonl"),
+        .stop_reason = "explicit",
+        .dropped_events = 3,
+    };
     std::string parse_error;
     const auto state_json = specforge::ParseJson(
         "{" +
@@ -645,6 +820,10 @@ void TestProtocolAndStableState()
         RequireObjectMember(
             state_object,
             "capture");
+    const auto& profile =
+        RequireObjectMember(
+            state_object,
+            "profile");
     Require(
         specforge::ReadJsonBoolMember(
             shell,
@@ -697,8 +876,22 @@ void TestProtocolAndStableState()
                 capture,
                 "last_path")
                 ->find("failed.png") !=
+                std::string::npos &&
+            specforge::ReadJsonStringMember(
+                profile,
+                "status") == "stopping" &&
+            specforge::ReadJsonStringMember(
+                profile,
+                "stop_reason") == "explicit" &&
+            specforge::ReadJsonSizeMember(
+                profile,
+                "dropped_events") == 3U &&
+            specforge::ReadJsonStringMember(
+                profile,
+                "path")
+                ->find("profile.jsonl") !=
                 std::string::npos,
-        "state.get body should expose the stable source, current spectrum label, capture, window and runtime contract");
+        "state.get body should expose the stable source, label, capture, profile, window and runtime contract");
 
     state.capture = {
         .pending = false,
@@ -722,6 +915,37 @@ void TestProtocolAndStableState()
                 "\"last_result\":\"canceled\"") !=
                 std::string::npos,
         "state.capture should distinguish stable successful and canceled terminal outcomes");
+
+    state.profile = {
+        .status = "succeeded",
+        .path =
+            std::filesystem::path(
+                L"C:\\automation\\logs\\saved.jsonl"),
+        .stop_reason = "explicit",
+        .dropped_events = 0,
+    };
+    const std::string succeeded_profile_state =
+        specforge::SerializeAutomationStateBody(
+            state);
+    state.profile.status = "failed";
+    state.profile.stop_reason = "write_failure";
+    const std::string failed_profile_state =
+        specforge::SerializeAutomationStateBody(
+            state);
+    Require(
+        succeeded_profile_state.find(
+            "\"status\":\"succeeded\"") !=
+                std::string::npos &&
+            succeeded_profile_state.find(
+                "\"stop_reason\":\"explicit\"") !=
+                std::string::npos &&
+            failed_profile_state.find(
+                "\"status\":\"failed\"") !=
+                std::string::npos &&
+            failed_profile_state.find(
+                "\"stop_reason\":\"write_failure\"") !=
+                std::string::npos,
+        "state.profile should distinguish completed output from a final write failure");
 }
 
 void TestStartupAndNoActivationContract()
@@ -1023,6 +1247,34 @@ void TestStartupAndNoActivationContract()
                  "sample-labeling.json")
                     .c_str()) != FALSE,
         "the root identity lease must permit sibling cache rename operations used by production atomic persistence");
+    auto lease_bound_profile =
+        specforge::AutomationProfileOutputFactory::Create(
+            pinned_root,
+            pinned_root / "logs");
+    Require(
+        lease_bound_profile.valid(),
+        "profile output creation must remain compatible with the launcher's live state-root identity lease: " +
+            lease_bound_profile.error_message);
+    const std::filesystem::path lease_bound_profile_path =
+        lease_bound_profile.path;
+    Require(
+        MoveFileW(
+            pinned_root.c_str(),
+            moved_root.c_str()) == FALSE,
+        "profile factory share compatibility must not weaken the launcher's root replacement boundary");
+    lease_bound_profile.stream.reset();
+    lease_bound_profile.discard_output();
+    lease_bound_profile.discard_output = {};
+    Require(
+        !std::filesystem::exists(
+            lease_bound_profile_path),
+        "the lease-bound profile fixture should roll back its prepared output through the final handle");
+    Require(
+        std::filesystem::remove(
+            pinned_root / "logs",
+            error) &&
+            !error,
+        "the lease-bound profile fixture should remove its empty output directory before root cleanup");
     specforge::
         RemovePinnedAutomationStateRootBeforeLaunch(
             root_lease);
@@ -1039,6 +1291,192 @@ void TestStartupAndNoActivationContract()
 
     std::filesystem::remove_all(
         state_root,
+        error);
+}
+
+void TestProfileOutputCreationIsHandleBoundToAutomationRoot()
+{
+    const std::filesystem::path fixture_parent =
+        std::filesystem::temp_directory_path() /
+        ("specforge-profile-output-security-" +
+         UniqueInstanceId());
+    const std::filesystem::path state_root =
+        fixture_parent / "state";
+    const std::filesystem::path output_directory =
+        state_root / "logs";
+    const std::filesystem::path external_directory =
+        fixture_parent / "external";
+    const std::filesystem::path external_sentinel =
+        external_directory / "sentinel.txt";
+    std::error_code error;
+    std::filesystem::create_directories(
+        output_directory,
+        error);
+    std::filesystem::create_directories(
+        external_directory,
+        error);
+    Require(
+        !error,
+        "profile security fixture directories should exist");
+    {
+        std::ofstream sentinel(
+            external_sentinel,
+            std::ios::binary);
+        sentinel << "external-directory-sentinel";
+    }
+    const std::string external_fingerprint =
+        ReadFileBytes(external_sentinel);
+
+    std::filesystem::path reserved_final_path;
+    bool dangling_symlink_created = false;
+    bool dangling_junction_created = false;
+    auto dangling =
+        specforge::AutomationProfileOutputFactoryTestAccess::
+            Create(
+                state_root,
+                output_directory,
+                [&](const std::filesystem::path& final_path) {
+                    reserved_final_path = final_path;
+                    const std::filesystem::path escaped =
+                        external_directory / "escaped.jsonl";
+                    dangling_symlink_created =
+                        CreateSymbolicLinkW(
+                            final_path.c_str(),
+                            escaped.c_str(),
+                            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) !=
+                        FALSE;
+                    const DWORD symlink_error =
+                        GetLastError();
+                    if (!dangling_symlink_created) {
+                        dangling_junction_created =
+                            CreateDirectoryJunction(
+                                final_path,
+                                external_directory /
+                                    "missing-junction-target");
+                        Require(
+                            dangling_junction_created,
+                            "the final-entry security fixture must create a real no-follow reparse point when file-symlink privilege is unavailable; CreateSymbolicLinkW error " +
+                                std::to_string(
+                                    symlink_error));
+                        std::cout
+                            << "profile security fixture: file-symlink capability unavailable (Win32 "
+                            << symlink_error
+                            << "); testing a real dangling final-component junction instead\n";
+                    }
+                });
+    Require(
+        !dangling.valid() &&
+            (dangling_symlink_created ||
+             dangling_junction_created) &&
+            !reserved_final_path.empty() &&
+            IsReparseEntryNoFollow(
+                reserved_final_path) &&
+            !std::filesystem::exists(
+                external_directory / "escaped.jsonl") &&
+            ReadFileBytes(external_sentinel) ==
+                external_fingerprint,
+        "CREATE_NEW no-follow profile creation must reject and preserve a real dangling final-component reparse point without writing outside the automation root");
+    Require(
+        (dangling_symlink_created
+             ? DeleteFileW(
+                   reserved_final_path.c_str())
+             : RemoveDirectoryW(
+                   reserved_final_path.c_str())) != FALSE,
+        "profile dangling final-entry fixture should clean up");
+
+    const std::filesystem::path retired_directory =
+        state_root / "logs-before-swap";
+    bool directory_swapped = false;
+    auto swapped =
+        specforge::AutomationProfileOutputFactoryTestAccess::
+            Create(
+                state_root,
+                output_directory,
+                [&](const std::filesystem::path&) {
+                    directory_swapped =
+                        MoveFileW(
+                            output_directory.c_str(),
+                            retired_directory.c_str()) !=
+                            FALSE &&
+                        CreateDirectoryJunction(
+                            output_directory,
+                            external_directory);
+                });
+    Require(
+        directory_swapped,
+        "profile security fixture should replace the validated directory with a junction");
+    Require(
+        !swapped.valid() &&
+            ReadFileBytes(external_sentinel) ==
+                external_fingerprint &&
+            std::distance(
+                std::filesystem::directory_iterator(
+                    external_directory),
+                std::filesystem::directory_iterator{}) == 1,
+        "profile creation must reject validation-to-open directory replacement and preserve the external directory fingerprint");
+    Require(
+        RemoveDirectoryW(
+            output_directory.c_str()) != FALSE &&
+            MoveFileW(
+                retired_directory.c_str(),
+                output_directory.c_str()) != FALSE,
+        "profile directory-swap fixture should restore the isolated output directory");
+
+    auto prepared =
+        specforge::AutomationProfileOutputFactory::Create(
+            state_root,
+            output_directory);
+    Require(
+        prepared.valid() &&
+            prepared.path.parent_path() ==
+                output_directory,
+        prepared.error_message);
+    const std::filesystem::path created_path =
+        prepared.path;
+    const std::filesystem::path relocated_output_directory =
+        fixture_parent / "relocated-logs";
+    Require(
+        MoveFileW(
+            output_directory.c_str(),
+            relocated_output_directory.c_str()) == FALSE,
+        "the prepared profile stream should retain root and directory identity handles for the writer lifetime");
+    *prepared.stream << "handle-bound-profile\n";
+    prepared.stream->flush();
+    Require(
+        prepared.stream->good(),
+        "handle-bound profile stream should flush successfully");
+    prepared.stream.reset();
+    prepared.discard_output = {};
+    Require(
+        ReadFileBytes(created_path) ==
+                "handle-bound-profile\n" &&
+            ReadFileBytes(external_sentinel) ==
+                external_fingerprint,
+        "successful profile output should remain bound to the isolated final handle");
+
+    auto discarded =
+        specforge::AutomationProfileOutputFactory::Create(
+            state_root,
+            output_directory);
+    Require(
+        discarded.valid() &&
+            static_cast<bool>(
+                discarded.discard_output),
+        "a prepared automation profile should retain a handle-bound discard operation for startup rollback");
+    const std::filesystem::path discarded_path =
+        discarded.path;
+    discarded.stream.reset();
+    discarded.discard_output();
+    discarded.discard_output = {};
+    Require(
+        !std::filesystem::exists(
+            discarded_path) &&
+            ReadFileBytes(external_sentinel) ==
+                external_fingerprint,
+        "discarding a prepared automation profile must remove the created file through its validated final handle");
+
+    std::filesystem::remove_all(
+        fixture_parent,
         error);
 }
 
@@ -1320,6 +1758,49 @@ void TestSingleClientQueueAndLifecycle()
             shutting_down.error_code ==
                 "shutting_down",
         "requests after app.quit begins should fail explicitly");
+}
+
+void TestProfileWriteFailureUsesStopTerminalResponsePath()
+{
+    RunningServer fixture;
+    specforge::AutomationNamedPipeClient client;
+    ConnectAndHandshake(fixture, client);
+
+    SendRequest(
+        client,
+        "profile-write-failure",
+        specforge::AutomationCommandKind::ProfileStop);
+    Require(
+        ReceiveParsed(client).status == "accepted",
+        "profile.stop write-failure fixture should first be accepted");
+    auto commands =
+        fixture.server.TakePendingCommands();
+    Require(
+        commands.size() == 1 &&
+            commands.front().command ==
+                specforge::AutomationCommandKind::
+                    ProfileStop &&
+            fixture.server.TryClaimExecution(
+                commands.front()),
+        "profile.stop write-failure fixture should claim the real queued command");
+
+    specforge::CompleteAutomationProfileStopTerminal(
+        fixture.server,
+        commands.front(),
+        specforge::ProfileSink::StopReason::
+            WriteFailure,
+        "unpublished-write-failure.jsonl",
+        7);
+    const auto terminal = ReceiveParsed(client);
+    Require(
+        terminal.request_id ==
+                "profile-write-failure" &&
+            terminal.command_name ==
+                "profile.stop" &&
+            terminal.status == "failed" &&
+            terminal.error_code ==
+                "profile_write_failed",
+        "the terminal response path used by PollAutomationProfileStop must map a production write failure to profile_write_failed");
 }
 
 void TestIdleWaitIsAnEarlierOnlySequenceBarrier()
@@ -2314,7 +2795,9 @@ int wmain(int argc, wchar_t** argv)
 
     TestProtocolAndStableState();
     TestStartupAndNoActivationContract();
+    TestProfileOutputCreationIsHandleBoundToAutomationRoot();
     TestSingleClientQueueAndLifecycle();
+    TestProfileWriteFailureUsesStopTerminalResponsePath();
     TestIdleWaitIsAnEarlierOnlySequenceBarrier();
     TestIdleWaitStopsLaterBusinessDispatch();
     TestPreHandshakeJsonNestingIsBounded();

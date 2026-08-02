@@ -73,6 +73,8 @@ label assign <integer-code>
 label assign <integer-code> spectrum <zero-based-index>
 label assign <integer-code> spectrum name <exact-name>
 frame capture <absolute-new-png-under-state-root>
+profile start
+profile stop
 state get
 wait idle
 app quit
@@ -128,7 +130,7 @@ The first message must be the launcher handshake:
 A successful response reports the protocol and fixed capabilities:
 
 ```json
-{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","setting.get","setting.set","source.open","spectrum.goto","label.assign","frame.capture","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
+{"type":"hello","request_id":"hello-1","status":"completed","protocol_version":1,"instance_id":"<instance>","capabilities":["state.get","wait.idle","setting.get","setting.set","source.open","spectrum.goto","label.assign","frame.capture","profile.start","profile.stop","app.quit"],"max_message_bytes":65536,"queue_capacity":32}
 ```
 
 Commands use protocol names rather than console spelling:
@@ -171,7 +173,13 @@ Commands with parameters use these stable request shapes:
 {"type":"request","request_id":"label-1","command":"label.assign","params":{"code":5}}
 {"type":"request","request_id":"label-2","command":"label.assign","params":{"code":5,"target":{"index":4}}}
 {"type":"request","request_id":"capture-1","command":"frame.capture","params":{"path":"C:\\automation-state\\artifacts\\target.png"}}
+{"type":"request","request_id":"profile-start-1","command":"profile.start"}
+{"type":"request","request_id":"profile-stop-1","command":"profile.stop"}
 ```
+
+Fixed parameterless commands accept an omitted `params` member or an empty
+object only. Any member is rejected before acceptance with `invalid_params`;
+no field is silently ignored.
 
 `setting.get` and `setting.set` expose only this initial stable whitelist:
 
@@ -290,6 +298,64 @@ PNG is published. A hidden or minimized window fails with
 capture errors are `capture_busy`, `capture_directory_failed`, and
 `capture_failed`.
 
+`profile.start` and `profile.stop` control the production performance recorder
+used by Settings > Diagnostics. They are fixed parameterless commands: the
+control plane does not create an automation-only recorder and does not accept a
+caller-selected output directory or file path. Their `params` member may be
+omitted or an empty object; any member is rejected with `invalid_params`.
+`profile.start` first resolves
+the normal production profile output directory from the isolated instance's
+`ApplicationSettings`, then requires that resolved directory to remain strictly
+below the launcher-pinned automation root without existing reparse points. It
+then reopens the isolated root and every output-directory component with
+no-follow, directory-handle-relative operations. The final JSONL is opened with
+create-new/no-follow semantics relative to the pinned output-directory handle;
+the root, directory, and final-file identities are checked before the resulting
+file handle is transferred to `ProfileSink`. `ProfileSink` writes and performs
+its final flush through the stream that owns that exact handle, so a dangling
+final-file symlink or a validation-to-open directory replacement cannot redirect
+the recording. The App's existing `StartProfileRecording` UI-thread seam remains
+the owner of production status, events, limits, and writer lifetime. The command
+completes only after that production writer owns the real JSONL output. Its
+result is:
+
+```json
+{"result":{"status":"recording","path":"C:\\automation-state\\logs\\specforge-profile-<timestamp>.jsonl"}}
+```
+
+An already active or finishing recording fails with
+`profile_recording_active` or `profile_stop_in_progress`. A resolver outside the
+isolated root fails with `profile_output_outside_state_root`; a production start
+failure uses `profile_start_failed`. Each start attempt replaces the previous
+terminal observation. If it fails before `ProfileSink` accepts a file,
+`state.get` reports `status:"failed"`, `stop_reason:"none"`, zero dropped
+events, and no profile path; it never reuses or later restores metadata from a
+previous successful recording.
+
+`profile.stop` enters the same mutation claim used by other factual App
+operations, writes the existing stop event, and calls
+`ProfileSink::RequestStopAfterFrame()`. Automation command dispatch occurs
+outside the active render-frame admission guard, so this command does not
+promise an additional render-frame tail: admission closes and the existing
+queued events drain asynchronously. The request does not complete merely
+because stopping was requested. Completion requires `TryFinalizeStop()` to join
+the finished writer and therefore implies that the JSONL's final
+`profile_recorder_summary` record and final flush have succeeded. The completed
+result is:
+
+```json
+{"result":{"status":"succeeded","path":"C:\\automation-state\\logs\\specforge-profile-<timestamp>.jsonl","stop_reason":"explicit","dropped_events":0}}
+```
+
+A final stream failure produces terminal `failed` with
+`profile_write_failed`, never a successful saved result. The stable
+`dropped_events` count describes bounded-recorder pressure; a nonzero value does
+not mean the final file flush failed. `profile_not_recording` rejects a stop
+without an active session, and a concurrent stop uses
+`profile_stop_in_progress`. Duration and file-size limits retain their existing
+production stop reasons and are observable through `state.get` even when no
+explicit stop request owns the terminal.
+
 Only one automation navigation/label transition is active at a time; a
 conflicting request fails with `operation_busy`. Source opens retain the real
 source-activation generation/cancellation semantics.
@@ -314,6 +380,9 @@ source-activation generation/cancellation semantics.
   successful Draw/Present;
 - capture `pending`, the pending `current_path` when present, and terminal
   `last_result` (`none`, `succeeded`, `failed`, or `canceled`) plus `last_path`;
+- profile `status` (`inactive`, `recording`, `stopping`, `succeeded`, or
+  `failed`), `stop_reason`, `dropped_events`, and `path` once a production path
+  has been selected;
 - window visibility, minimized state, and client-area dimensions;
 - running/shutdown flags and frame index.
 
@@ -341,10 +410,17 @@ persistence completed, was scheduled, or requires retry, while normal
 `app.quit` performs the existing final flush. The initial `setting.set`
 whitelist uses synchronous production saves, so its terminal—and therefore a
 following idle barrier—cannot precede that settings-file write.
+An active performance recording is continuous observation rather than pending
+business work, so it does not keep `wait.idle` open. A claimed `profile.stop`
+does remain an earlier outstanding operation until the output has factually
+finished, so a later idle barrier cannot pass its final flush.
 
 `app.quit` posts the normal window close path. Existing application flush and
 Shell shutdown own persistence and worker retirement; the control plane does
-not bypass them.
+not bypass them. Quitting during an active recording synchronously drains the
+existing recorder during App shutdown. A quit queued behind a claimed
+`profile.stop` waits for that stop's terminal first; neither case leaves a
+writer or partial final record after the launcher-owned GUI process exits.
 
 Named-pipe I/O runs away from the UI thread. It may validate and enqueue
 requests, but all App, Shell, Session, ImGui, and HWND state observation or
@@ -368,6 +444,12 @@ The launcher passes an explicit child environment with the legacy
 rejects automation startup if any of them is present, before App/Shell state is
 constructed.
 
+The cleared environment is not restored for profile automation. Performance
+recording starts only through `profile.start`, uses the isolated instance's
+production directory resolver, and is rejected if that resolver no longer
+points below the automation root. Ordinary profile settings and output remain
+untouched.
+
 The launcher requests `SW_SHOWNOACTIVATE`; the GUI uses the narrow
 `SWP_NOACTIVATE` show seam. The successful capture workflow requires the main
 window to be visible and not minimized, but it does not activate or foreground
@@ -381,14 +463,28 @@ both disconnect-first and finalizer-lease-first capture
 publication ordering, and a real SpecForge HWND workflow that verifies visible
 capture without foreground activation plus hidden/minimized rejection without
 window restoration. Coverage also includes runtime-state isolation and a
-repeated real launcher/GUI
-source-open/wait/goto/label/return/capture/state/quit integration test. The test
+real launcher/GUI profile-start/source-open/wait/goto/label/return/capture/
+profile-stop/state/quit integration plus a second fresh-root replay of the core
+source/label/capture workflow. Profile-specific coverage also exercises start/
+stop conflicts, stable recording/stopping state, production start failure, and
+quit during both recording and asynchronous stop. The primary GUI workflow
 requires `window.visible=true` and `window.minimized=false`, validates a
 non-empty PNG IHDR whose dimensions match the terminal, reloads the production
-labeling cache after quit, verifies the seed and ordinary root fingerprints,
-proves the root cannot be replaced during the child lifetime, exercises
-explicit UTF-8 Unicode source/name input plus seed and capture-path failures,
-and checks that no owned GUI process remains. A separate real GUI settings
+labeling cache after quit, verifies the finalized JSONL summary and isolated
+handle-bound path, and checks the seed and ordinary root fingerprints. Security
+regressions verify create-new/no-follow rejection of a real dangling final
+reparse entry and a directory-swap junction without changing the external-
+directory fingerprint. The final-entry fixture uses a file symlink when the
+Windows token has that capability; otherwise it reports the missing capability
+and uses a real dangling final-component junction. It never substitutes an
+ordinary name-collision file for reparse-point coverage.
+The factory regression also holds the same live pinned-root lease used by the
+launcher, verifies profile creation remains compatible with that lease, and
+confirms the root still cannot be replaced.
+Additional integration coverage proves the root cannot be replaced during the
+child lifetime, exercises explicit UTF-8 Unicode source/name input plus seed
+and capture-path failures, and checks that no owned GUI process remains. A
+separate real GUI settings
 workflow verifies the initial isolated values, language and scale writes,
 including a leading-plus same-value write returning `changed:false`, stable
 invalid-name/type/value failures, a following idle barrier, applied

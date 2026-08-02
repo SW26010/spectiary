@@ -408,12 +408,13 @@ HRESULT OpenAbsoluteDirectory(
     const std::filesystem::path& path,
     UniqueHandle& directory)
 {
+    // Temporary cleanup and publication use DELETE on the temporary file
+    // handle itself; the directory does not need FILE_DELETE_CHILD.
     directory.Reset(
         CreateFileW(
             path.c_str(),
             FILE_LIST_DIRECTORY |
                 FILE_ADD_FILE |
-                FILE_DELETE_CHILD |
                 FILE_TRAVERSE |
                 FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ |
@@ -470,7 +471,6 @@ HRESULT OpenOrCreateRelativeDirectory(
             name,
             FILE_LIST_DIRECTORY |
                 FILE_ADD_FILE |
-                FILE_DELETE_CHILD |
                 FILE_TRAVERSE |
                 FILE_READ_ATTRIBUTES |
                 SYNCHRONIZE,

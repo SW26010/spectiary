@@ -10,7 +10,7 @@ $appSource = Get-Content -Raw (
 
 $startRecording = [regex]::Match(
     $appSource,
-    'void SpecForgeApp::StartProfileRecording\(.*?(?=void SpecForgeApp::StopProfileRecording\()',
+    'bool SpecForgeApp::StartProfileRecording\(.*?(?=void SpecForgeApp::StopProfileRecording\()',
     [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
 if (-not $startRecording.Success) {

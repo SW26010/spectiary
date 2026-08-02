@@ -118,6 +118,40 @@ function Get-TreeFingerprint {
     return ($entries -join "`n")
 }
 
+function New-TestDirectoryJunction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    $output = @(
+        & cmd.exe /d /c (
+            "mklink /J `"$Path`" `"$Target`"") 2>&1
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            'Could not create test directory junction: ' +
+            ($output -join [Environment]::NewLine))
+    }
+}
+
+function Remove-TestDirectoryJunction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not [SpecForgeAutomationWindowTestNative]::
+            RemoveDirectory($Path)) {
+        throw (
+            'Could not remove test directory junction. Win32 error: ' +
+            [Runtime.InteropServices.Marshal]::
+                GetLastWin32Error())
+    }
+}
+
 function Get-OrdinaryStateRoot {
     param(
         [Parameter(Mandatory = $true)]
@@ -288,6 +322,75 @@ function Send-InteractiveLauncherRequest {
     return $messages
 }
 
+function Send-InteractiveLauncherBatch {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ExpectedRequestIds
+    )
+
+    $payload =
+        [System.Text.UTF8Encoding]::new($false).GetBytes(
+            ($Lines -join "`n") + "`n")
+    $inputStream =
+        $Process.StandardInput.BaseStream
+    $inputStream.Write(
+        $payload,
+        0,
+        $payload.Length)
+    $inputStream.Flush()
+    $messages = @()
+    $terminalIds = @{}
+    while ($terminalIds.Count -lt $ExpectedRequestIds.Count) {
+        $line =
+            Read-LauncherLine -Process $Process
+        if ($line -notmatch '^\{') {
+            continue
+        }
+        $message = $line | ConvertFrom-Json
+        $requestId = [string]$message.request_id
+        if ($requestId -notin $ExpectedRequestIds) {
+            throw (
+                "Interactive launcher returned an unexpected batch request ID: $line")
+        }
+        $messages += $message
+        if ([string]$message.status -in @(
+                'completed',
+                'failed',
+                'canceled')) {
+            $terminalIds[$requestId] = $true
+        }
+    }
+    foreach ($requestId in $ExpectedRequestIds) {
+        $acceptedCount = @(
+            $messages |
+                Where-Object {
+                    [string]$_.request_id -eq $requestId -and
+                    [string]$_.status -eq 'accepted'
+                }
+        ).Count
+        $terminalCount = @(
+            $messages |
+                Where-Object {
+                    [string]$_.request_id -eq $requestId -and
+                    [string]$_.status -in @(
+                        'completed',
+                        'failed',
+                        'canceled')
+                }
+        ).Count
+        Assert-True `
+            -Condition (
+                $acceptedCount -eq 1 -and
+                $terminalCount -eq 1) `
+            -Message "Interactive batch request $requestId should emit accepted and one terminal."
+    }
+    return $messages
+}
+
 if ($null -eq (
         'SpecForgeAutomationWindowTestNative' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -321,6 +424,13 @@ public static class SpecForgeAutomationWindowTestNative
     public static extern bool MoveFile(
         string existingPath,
         string newPath);
+
+    [DllImport(
+        "kernel32.dll",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RemoveDirectory(string path);
 }
 '@
 }
@@ -551,24 +661,35 @@ try {
         $externalSentinelRoot,
         [System.EnvironmentVariableTarget]::Process)
 
-    $output = @(
-        @(
-            "source open $sourceRoot",
-            'wait idle',
-            'spectrum goto 2',
-            'label assign 5 spectrum 1',
-            'spectrum goto 1',
-            'wait idle',
-            "frame capture $capturePath",
-            'state get',
-            'app quit'
-        ) |
-            & $resolvedLauncher `
-                --app $fixtureExecutable `
-                --state-root $stateRoot `
-                --labeling-state-seed $labelSeed 2>&1
-    )
-    $exitCode = $LASTEXITCODE
+    $savedMainErrorActionPreference =
+        $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(
+            @(
+                'profile start',
+                "source open $sourceRoot",
+                'wait idle',
+                'spectrum goto 2',
+                'label assign 5 spectrum 1',
+                'spectrum goto 1',
+                'wait idle',
+                "frame capture $capturePath",
+                'profile stop',
+                'state get',
+                'app quit'
+            ) |
+                & $resolvedLauncher `
+                    --app $fixtureExecutable `
+                    --state-root $stateRoot `
+                    --labeling-state-seed $labelSeed 2>&1
+        )
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference =
+            $savedMainErrorActionPreference
+    }
     if ($exitCode -ne 0) {
         throw (
             "Automation launcher exited with $exitCode.`n" +
@@ -583,8 +704,8 @@ try {
             }
     )
     Assert-True `
-        -Condition ($messages.Count -eq 19) `
-        -Message 'Launcher should emit hello plus accepted/completed pairs for the nine-command GUI workflow.'
+        -Condition ($messages.Count -eq 23) `
+        -Message 'Launcher should emit hello plus accepted/completed pairs for the eleven-command GUI and profile workflow.'
 
     $hello = $messages[0]
     Assert-True `
@@ -592,31 +713,37 @@ try {
             [string]$hello.type -eq 'hello' -and
             [string]$hello.status -eq 'completed' -and
             [int]$hello.protocol_version -eq 1 -and
-            @($hello.capabilities).Count -eq 9 -and
+            @($hello.capabilities).Count -eq 11 -and
             @($hello.capabilities) -contains 'setting.get' -and
             @($hello.capabilities) -contains 'setting.set' -and
+            @($hello.capabilities) -contains 'profile.start' -and
+            @($hello.capabilities) -contains 'profile.stop' -and
             [int]$hello.max_message_bytes -eq 65536 -and
             [int]$hello.queue_capacity -eq 32) `
         -Message 'Hello should expose the fixed protocol limits and bounded capabilities.'
 
-    $sourceAccepted = $messages[1]
-    $sourceCompleted = $messages[2]
-    $waitAccepted = $messages[3]
-    $waitCompleted = $messages[4]
-    $gotoAccepted = $messages[5]
-    $gotoCompleted = $messages[6]
-    $labelAccepted = $messages[7]
-    $labelCompleted = $messages[8]
-    $returnAccepted = $messages[9]
-    $returnCompleted = $messages[10]
-    $secondWaitAccepted = $messages[11]
-    $secondWaitCompleted = $messages[12]
-    $captureAccepted = $messages[13]
-    $captureCompleted = $messages[14]
-    $stateAccepted = $messages[15]
-    $stateCompleted = $messages[16]
-    $quitAccepted = $messages[17]
-    $quitCompleted = $messages[18]
+    $profileStartAccepted = $messages[1]
+    $profileStartCompleted = $messages[2]
+    $sourceAccepted = $messages[3]
+    $sourceCompleted = $messages[4]
+    $waitAccepted = $messages[5]
+    $waitCompleted = $messages[6]
+    $gotoAccepted = $messages[7]
+    $gotoCompleted = $messages[8]
+    $labelAccepted = $messages[9]
+    $labelCompleted = $messages[10]
+    $returnAccepted = $messages[11]
+    $returnCompleted = $messages[12]
+    $secondWaitAccepted = $messages[13]
+    $secondWaitCompleted = $messages[14]
+    $captureAccepted = $messages[15]
+    $captureCompleted = $messages[16]
+    $profileStopAccepted = $messages[17]
+    $profileStopCompleted = $messages[18]
+    $stateAccepted = $messages[19]
+    $stateCompleted = $messages[20]
+    $quitAccepted = $messages[21]
+    $quitCompleted = $messages[22]
     $sourcePathProperty =
         $stateCompleted.state.source.PSObject.Properties['path']
     $ordinarySourceNotImported =
@@ -647,8 +774,27 @@ try {
             -not [bool]$stateCompleted.state.capture.pending -and
             [string]$stateCompleted.state.capture.last_result -eq 'succeeded' -and
             [string]$stateCompleted.state.capture.last_path -eq $capturePath -and
+            [string]$stateCompleted.state.profile.status -eq 'succeeded' -and
+            [string]$stateCompleted.state.profile.path -eq
+                [string]$profileStopCompleted.result.path -and
+            [string]$stateCompleted.state.profile.stop_reason -eq
+                'explicit' -and
+            [uint64]$stateCompleted.state.profile.dropped_events -eq
+                [uint64]$profileStopCompleted.result.dropped_events -and
             $ordinarySourceNotImported) `
-        -Message 'state.get should return the stable instance, queue, Shell, source, window and runtime contract.'
+        -Message 'state.get should return the stable instance, Shell, capture, profile, window and runtime contract.'
+    Assert-True `
+        -Condition (
+            [string]$profileStartAccepted.command -eq 'profile.start' -and
+            [string]$profileStartCompleted.status -eq 'completed' -and
+            [string]$profileStartCompleted.result.status -eq 'recording' -and
+            [string]$profileStartCompleted.result.path -eq
+                [string]$profileStopCompleted.result.path -and
+            [string]$profileStopAccepted.command -eq 'profile.stop' -and
+            [string]$profileStopCompleted.status -eq 'completed' -and
+            [string]$profileStopCompleted.result.status -eq 'succeeded' -and
+            [string]$profileStopCompleted.result.stop_reason -eq 'explicit') `
+        -Message 'Profile start should expose the live production path and profile stop should terminal only with the finalized writer outcome.'
     Assert-True `
         -Condition (
             [string]$waitAccepted.command -eq 'wait.idle' -and
@@ -710,6 +856,28 @@ try {
                 [uint32]$captureCompleted.result.height) `
         -Message 'Captured PNG IHDR dimensions must match the terminal dimensions from the application render target.'
 
+    $profilePath = [string]$profileStopCompleted.result.path
+    $profileRoot = [System.IO.Path]::GetFullPath($stateRoot)
+    $normalizedProfilePath = [System.IO.Path]::GetFullPath($profilePath)
+    $profileLines = @(
+        Get-Content -LiteralPath $profilePath |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    $profileSummary =
+        [string]$profileLines[-1] | ConvertFrom-Json
+    Assert-True `
+        -Condition (
+            $normalizedProfilePath.StartsWith(
+                $profileRoot + [System.IO.Path]::DirectorySeparatorChar,
+                [System.StringComparison]::OrdinalIgnoreCase) -and
+            (Test-Path -LiteralPath $profilePath -PathType Leaf) -and
+            $profileLines.Count -gt 2 -and
+            [string]$profileSummary.event -eq 'profile_recorder_summary' -and
+            [string]$profileSummary.stop_reason -eq 'explicit' -and
+            [uint64]$profileSummary.dropped_events -eq
+                [uint64]$profileStopCompleted.result.dropped_events) `
+        -Message 'profile.stop completion must correspond to a complete JSONL summary inside the isolated automation root.'
+
     & $resolvedStateFixture `
         --verify-labeling-state (
             Join-Path $stateRoot 'sample-labeling-tasks.json') `
@@ -742,6 +910,202 @@ try {
                     -Id $guiPid `
                     -ErrorAction SilentlyContinue)) `
         -Message 'Normal app.quit should leave no GUI process.'
+
+    $recordingQuitRoot =
+        Join-Path $fixtureParent 'recording-quit-state'
+    $recordingQuitOutput = @(
+        @(
+            'profile start',
+            'app quit'
+        ) |
+            & $resolvedLauncher `
+                --app $fixtureExecutable `
+                --state-root $recordingQuitRoot 2>&1
+    )
+    $recordingQuitExitCode = $LASTEXITCODE
+    if ($recordingQuitExitCode -ne 0) {
+        throw (
+            "Recording app.quit workflow exited with $recordingQuitExitCode.`n" +
+            ($recordingQuitOutput -join [Environment]::NewLine))
+    }
+    $recordingQuitMessages = @(
+        $recordingQuitOutput |
+            Where-Object { [string]$_ -match '^\{' } |
+            ForEach-Object {
+                [string]$_ | ConvertFrom-Json
+            }
+    )
+    $recordingQuitStart =
+        Get-ProtocolMessage `
+            -Messages $recordingQuitMessages `
+            -RequestId 'request-1' `
+            -Status 'completed'
+    $recordingQuitTerminal =
+        Get-ProtocolMessage `
+            -Messages $recordingQuitMessages `
+            -RequestId 'request-2' `
+            -Status 'completed'
+    $recordingQuitProfilePath =
+        [string]$recordingQuitStart.result.path
+    $recordingQuitProfileLines = @(
+        Get-Content -LiteralPath $recordingQuitProfilePath |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    $recordingQuitSummary =
+        [string]$recordingQuitProfileLines[-1] |
+            ConvertFrom-Json
+    $recordingQuitPid =
+        Get-LauncherProcessId -Output $recordingQuitOutput
+    Assert-True `
+        -Condition (
+            [string]$recordingQuitTerminal.command -eq 'app.quit' -and
+            [string]$recordingQuitSummary.event -eq
+                'profile_recorder_summary' -and
+            [string]$recordingQuitSummary.stop_reason -eq 'explicit' -and
+            $null -eq (
+                Get-Process `
+                    -Id $recordingQuitPid `
+                    -ErrorAction SilentlyContinue)) `
+        -Message 'app.quit while recording should drain the production writer, preserve its summary, and leave no GUI process.'
+
+    $stoppingQuitRoot =
+        Join-Path $fixtureParent 'stopping-quit-state'
+    $stoppingQuitOutput = @(
+        @(
+            'profile start',
+            'pipeline begin',
+            'profile stop',
+            'app quit',
+            'pipeline end'
+        ) |
+            & $resolvedLauncher `
+                --app $fixtureExecutable `
+                --state-root $stoppingQuitRoot 2>&1
+    )
+    $stoppingQuitExitCode = $LASTEXITCODE
+    if ($stoppingQuitExitCode -ne 0) {
+        throw (
+            "Stopping app.quit workflow exited with $stoppingQuitExitCode.`n" +
+            ($stoppingQuitOutput -join [Environment]::NewLine))
+    }
+    $stoppingQuitMessages = @(
+        $stoppingQuitOutput |
+            Where-Object { [string]$_ -match '^\{' } |
+            ForEach-Object {
+                [string]$_ | ConvertFrom-Json
+            }
+    )
+    $stoppingQuitStart =
+        Get-ProtocolMessage `
+            -Messages $stoppingQuitMessages `
+            -RequestId 'request-1' `
+            -Status 'completed'
+    $stoppingQuitStop =
+        Get-ProtocolMessage `
+            -Messages $stoppingQuitMessages `
+            -RequestId 'request-2' `
+            -Status 'completed'
+    $stoppingQuitTerminal =
+        Get-ProtocolMessage `
+            -Messages $stoppingQuitMessages `
+            -RequestId 'request-3' `
+            -Status 'completed'
+    $stoppingQuitStopIndex =
+        [array]::IndexOf(
+            $stoppingQuitMessages,
+            $stoppingQuitStop)
+    $stoppingQuitTerminalIndex =
+        [array]::IndexOf(
+            $stoppingQuitMessages,
+            $stoppingQuitTerminal)
+    $stoppingQuitProfilePath =
+        [string]$stoppingQuitStart.result.path
+    $stoppingQuitProfileLines = @(
+        Get-Content -LiteralPath $stoppingQuitProfilePath |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    $stoppingQuitSummary =
+        [string]$stoppingQuitProfileLines[-1] |
+            ConvertFrom-Json
+    $stoppingQuitPid =
+        Get-LauncherProcessId -Output $stoppingQuitOutput
+    Assert-True `
+        -Condition (
+            $stoppingQuitStopIndex -ge 0 -and
+            $stoppingQuitStopIndex -lt $stoppingQuitTerminalIndex -and
+            [string]$stoppingQuitStop.result.status -eq 'succeeded' -and
+            [string]$stoppingQuitSummary.event -eq
+                'profile_recorder_summary' -and
+            [string]$stoppingQuitTerminal.command -eq 'app.quit' -and
+            $null -eq (
+                Get-Process `
+                    -Id $stoppingQuitPid `
+                    -ErrorAction SilentlyContinue)) `
+        -Message 'app.quit should wait behind an earlier claimed profile.stop terminal and leave no unfinished output or GUI process.'
+
+    $profileConflictRoot =
+        Join-Path $fixtureParent 'profile-conflict-state'
+    $profileConflictOutput = @(
+        @(
+            'pipeline begin',
+            'profile stop',
+            'profile start',
+            'state get',
+            'profile start',
+            'profile stop',
+            'state get',
+            'profile stop',
+            'app quit',
+            'pipeline end'
+        ) |
+            & $resolvedLauncher `
+                --app $fixtureExecutable `
+                --state-root $profileConflictRoot 2>&1
+    )
+    $profileConflictExitCode = $LASTEXITCODE
+    if ($profileConflictExitCode -ne 0) {
+        throw (
+            "Profile conflict workflow exited with $profileConflictExitCode.`n" +
+            ($profileConflictOutput -join [Environment]::NewLine))
+    }
+    $profileConflictMessages = @(
+        $profileConflictOutput |
+            Where-Object { [string]$_ -match '^\{' } |
+            ForEach-Object {
+                [string]$_ | ConvertFrom-Json
+            }
+    )
+    $profileConflictTerminals = @{}
+    foreach ($message in $profileConflictMessages) {
+        if ([string]$message.status -in @(
+                'completed',
+                'failed',
+                'canceled')) {
+            $profileConflictTerminals[
+                [string]$message.request_id] = $message
+        }
+    }
+    Assert-True `
+        -Condition (
+            $profileConflictMessages.Count -eq 17 -and
+            [string]$profileConflictTerminals['request-1'].error.code -eq
+                'profile_not_recording' -and
+            [string]$profileConflictTerminals['request-2'].status -eq
+                'completed' -and
+            [string]$profileConflictTerminals['request-3'].state.profile.status -eq
+                'recording' -and
+            [string]$profileConflictTerminals['request-4'].error.code -eq
+                'profile_recording_active' -and
+            [string]$profileConflictTerminals['request-5'].status -eq
+                'completed' -and
+            [string]$profileConflictTerminals['request-6'].state.profile.status -in @(
+                'stopping',
+                'succeeded') -and
+            [string]$profileConflictTerminals['request-7'].error.code -eq
+                'profile_stop_in_progress' -and
+            [string]$profileConflictTerminals['request-8'].status -eq
+                'completed') `
+        -Message 'Profile conflict workflow should expose not-recording, recording-active and stop-in-progress errors plus stable recording/stopping state without leaving the GUI running.'
 
     $settingsControlRoot =
         Join-Path $fixtureParent 'settings-control-state'
@@ -788,12 +1152,16 @@ try {
     $settingsHello = $settingsMessages[0]
     Assert-True `
         -Condition (
-            @($settingsHello.capabilities).Count -eq 9 -and
+            @($settingsHello.capabilities).Count -eq 11 -and
             @($settingsHello.capabilities) -contains
                 'setting.get' -and
             @($settingsHello.capabilities) -contains
-                'setting.set') `
-        -Message 'Settings workflow hello should advertise both setting capabilities.'
+                'setting.set' -and
+            @($settingsHello.capabilities) -contains
+                'profile.start' -and
+            @($settingsHello.capabilities) -contains
+                'profile.stop') `
+        -Message 'Settings workflow hello should advertise the fixed setting and profile capabilities.'
 
     $settingsTerminals = @{}
     foreach ($message in $settingsMessages) {
@@ -930,6 +1298,9 @@ try {
     }
     $interactiveLauncher = $null
     $interactiveGuiPid = 0
+    $profileDirectoryJunctionActive = $false
+    $profileDirectoryBlockerCreated = $false
+    $successfulProfileDirectoryMoved = $false
     $foregroundBefore =
         [SpecForgeAutomationWindowTestNative]::
             GetForegroundWindow()
@@ -1241,11 +1612,257 @@ try {
         [System.IO.Directory]::Delete(
             $uiScaleWriteBlocker)
 
+        $profileDirectoryBlocker =
+            Join-Path $windowContractRoot 'logs'
+        $successfulProfileDirectory =
+            Join-Path $windowContractRoot 'logs-successful'
+        $externalProfileDirectory =
+            Join-Path $fixtureParent 'outside-profile-directory'
+        [System.IO.Directory]::CreateDirectory(
+            $externalProfileDirectory) | Out-Null
+        $externalProfileSentinel =
+            Join-Path $externalProfileDirectory 'sentinel.txt'
+        [System.IO.File]::WriteAllText(
+            $externalProfileSentinel,
+            'must remain unchanged by rejected profile starts',
+            [System.Text.UTF8Encoding]::new($false))
+        $externalProfileFingerprint =
+            Get-TreeFingerprint -Path $externalProfileDirectory
+
+        New-TestDirectoryJunction `
+            -Path $profileDirectoryBlocker `
+            -Target $externalProfileDirectory
+        $profileDirectoryJunctionActive = $true
+        $initialOutsideProfileBatch = @(
+            Send-InteractiveLauncherBatch `
+                -Process $interactiveLauncher `
+                -Lines @(
+                    'pipeline begin',
+                    'profile start',
+                    'state get',
+                    'pipeline end') `
+                -ExpectedRequestIds @(
+                    'request-12',
+                    'request-13')
+        )
+        $initialOutsideProfileStart =
+            Get-ProtocolMessage `
+                -Messages $initialOutsideProfileBatch `
+                -RequestId 'request-12' `
+                -Status 'failed'
+        $initialOutsideProfileState =
+            Get-ProtocolMessage `
+                -Messages $initialOutsideProfileBatch `
+                -RequestId 'request-13' `
+                -Status 'completed'
+        $initialOutsideProfilePath =
+            $initialOutsideProfileState.state.profile.
+                PSObject.Properties['path']
+        Assert-True `
+            -Condition (
+                [string]$initialOutsideProfileStart.error.code -eq
+                    'profile_output_outside_state_root' -and
+                [string]$initialOutsideProfileState.state.profile.status -eq
+                    'failed' -and
+                [string]$initialOutsideProfileState.state.profile.stop_reason -eq
+                    'none' -and
+                [uint64]$initialOutsideProfileState.state.profile.dropped_events -eq
+                    0 -and
+                $null -eq $initialOutsideProfilePath -and
+                (Get-TreeFingerprint -Path $externalProfileDirectory) -eq
+                    $externalProfileFingerprint) `
+            -Message 'An initial production profile resolver outside the isolated root must publish a fresh failed/none/0/no-path state without changing the external directory.'
+        Remove-TestDirectoryJunction `
+            -Path $profileDirectoryBlocker
+        $profileDirectoryJunctionActive = $false
+
+        $successfulProfileStartMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('profile start') `
+                -RequestId 'request-14'
+        )
+        $successfulProfileStopMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('profile stop') `
+                -RequestId 'request-15'
+        )
+        $successfulProfilePath =
+            [string]$successfulProfileStopMessages[1].result.path
+        $successfulProfileCompleted =
+            Test-Path `
+                -LiteralPath $successfulProfilePath `
+                -PathType Leaf
+        [System.IO.Directory]::Move(
+            $profileDirectoryBlocker,
+            $successfulProfileDirectory)
+        $successfulProfileDirectoryMoved = $true
+        New-TestDirectoryJunction `
+            -Path $profileDirectoryBlocker `
+            -Target $externalProfileDirectory
+        $profileDirectoryJunctionActive = $true
+        $outsideRestartBatchMessages = @(
+            Send-InteractiveLauncherBatch `
+                -Process $interactiveLauncher `
+                -Lines @(
+                    'pipeline begin',
+                    'profile start',
+                    'state get',
+                    'pipeline end') `
+                -ExpectedRequestIds @(
+                    'request-16',
+                    'request-17')
+        )
+        $outsideProfileRestart =
+            Get-ProtocolMessage `
+                -Messages $outsideRestartBatchMessages `
+                -RequestId 'request-16' `
+                -Status 'failed'
+        $sameBatchStateAfterOutsideFailure =
+            Get-ProtocolMessage `
+                -Messages $outsideRestartBatchMessages `
+                -RequestId 'request-17' `
+                -Status 'completed'
+        $laterStateAfterOutsideFailureMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('state get') `
+                -RequestId 'request-18'
+        )
+        $laterStateAfterOutsideFailure =
+            $laterStateAfterOutsideFailureMessages[1]
+        $sameBatchOutsideFailedPath =
+            $sameBatchStateAfterOutsideFailure.state.profile.
+                PSObject.Properties['path']
+        $laterOutsideFailedPath =
+            $laterStateAfterOutsideFailure.state.profile.
+                PSObject.Properties['path']
+        Assert-True `
+            -Condition (
+                [string]$successfulProfileStartMessages[1].status -eq
+                    'completed' -and
+                [string]$successfulProfileStopMessages[1].status -eq
+                    'completed' -and
+                $successfulProfileCompleted -and
+                [string]$outsideProfileRestart.error.code -eq
+                    'profile_output_outside_state_root' -and
+                [string]$sameBatchStateAfterOutsideFailure.state.profile.status -eq
+                    'failed' -and
+                [string]$sameBatchStateAfterOutsideFailure.state.profile.stop_reason -eq
+                    'none' -and
+                [uint64]$sameBatchStateAfterOutsideFailure.state.profile.dropped_events -eq
+                    0 -and
+                $null -eq $sameBatchOutsideFailedPath -and
+                [string]$laterStateAfterOutsideFailure.state.profile.status -eq
+                    'failed' -and
+                [string]$laterStateAfterOutsideFailure.state.profile.stop_reason -eq
+                    'none' -and
+                [uint64]$laterStateAfterOutsideFailure.state.profile.dropped_events -eq
+                    0 -and
+                $null -eq $laterOutsideFailedPath -and
+                (Get-TreeFingerprint -Path $externalProfileDirectory) -eq
+                    $externalProfileFingerprint) `
+            -Message (
+                'A production resolver outside the isolated root after a successful recording must replace the prior terminal with failed/none/0/no-path and remain stable across later refreshes. Same batch: ' +
+                ($sameBatchStateAfterOutsideFailure.state.profile |
+                    ConvertTo-Json -Compress -Depth 8) +
+                '; later: ' +
+                ($laterStateAfterOutsideFailure.state.profile |
+                    ConvertTo-Json -Compress -Depth 8))
+        Remove-TestDirectoryJunction `
+            -Path $profileDirectoryBlocker
+        $profileDirectoryJunctionActive = $false
+
+        [System.IO.File]::WriteAllText(
+            $profileDirectoryBlocker,
+            'blocks the production profile directory',
+            [System.Text.UTF8Encoding]::new($false))
+        $profileDirectoryBlockerCreated = $true
+        $failedRestartBatchMessages = @(
+            Send-InteractiveLauncherBatch `
+                -Process $interactiveLauncher `
+                -Lines @(
+                    'pipeline begin',
+                    'profile start',
+                    'state get',
+                    'pipeline end') `
+                -ExpectedRequestIds @(
+                    'request-19',
+                    'request-20')
+        )
+        $failedProfileRestart =
+            Get-ProtocolMessage `
+                -Messages $failedRestartBatchMessages `
+                -RequestId 'request-19' `
+                -Status 'failed'
+        $sameBatchStateAfterFailure =
+            Get-ProtocolMessage `
+                -Messages $failedRestartBatchMessages `
+                -RequestId 'request-20' `
+                -Status 'completed'
+        $laterStateAfterFailureMessages = @(
+            Send-InteractiveLauncherRequest `
+                -Process $interactiveLauncher `
+                -Lines @('state get') `
+                -RequestId 'request-21'
+        )
+        $laterStateAfterFailure =
+            $laterStateAfterFailureMessages[1]
+        $sameBatchFailedPath =
+            $sameBatchStateAfterFailure.state.profile.
+                PSObject.Properties['path']
+        $laterFailedPath =
+            $laterStateAfterFailure.state.profile.
+                PSObject.Properties['path']
+        Assert-True `
+            -Condition (
+                [string]$successfulProfileStartMessages[1].status -eq
+                    'completed' -and
+                [string]$successfulProfileStopMessages[1].status -eq
+                    'completed' -and
+                $successfulProfileCompleted -and
+                [string]$failedProfileRestart.status -eq
+                    'failed' -and
+                [string]$failedProfileRestart.error.code -eq
+                    'profile_start_failed' -and
+                [string]$sameBatchStateAfterFailure.state.profile.status -eq
+                    'failed' -and
+                [string]$sameBatchStateAfterFailure.state.profile.stop_reason -eq
+                    'none' -and
+                [uint64]$sameBatchStateAfterFailure.state.profile.dropped_events -eq
+                    0 -and
+                $null -eq $sameBatchFailedPath -and
+                [string]$laterStateAfterFailure.state.profile.status -eq
+                    'failed' -and
+                [string]$laterStateAfterFailure.state.profile.stop_reason -eq
+                    'none' -and
+                [uint64]$laterStateAfterFailure.state.profile.dropped_events -eq
+                    0 -and
+                $null -eq $laterFailedPath -and
+                (Test-Path `
+                    -LiteralPath $profileDirectoryBlocker `
+                    -PathType Leaf)) `
+            -Message (
+                'A blocked restart after a successful recording must own a fresh failed state without inheriting or later restoring the previous path, stop reason, dropped count or success terminal. Same batch: ' +
+                ($sameBatchStateAfterFailure.state.profile |
+                    ConvertTo-Json -Compress -Depth 8) +
+                '; later: ' +
+                ($laterStateAfterFailure.state.profile |
+                    ConvertTo-Json -Compress -Depth 8))
+        [System.IO.File]::Delete(
+            $profileDirectoryBlocker)
+        $profileDirectoryBlockerCreated = $false
+        [System.IO.Directory]::Move(
+            $successfulProfileDirectory,
+            $profileDirectoryBlocker)
+        $successfulProfileDirectoryMoved = $false
+
         $quitMessages = @(
             Send-InteractiveLauncherRequest `
                 -Process $interactiveLauncher `
                 -Lines @('app quit') `
-                -RequestId 'request-12'
+                -RequestId 'request-22'
         )
         Assert-True `
             -Condition (
@@ -1269,6 +1886,30 @@ try {
             -Message 'The launcher must release and remove its state-root identity lock after the owned GUI exits.'
     }
     finally {
+        if ($profileDirectoryJunctionActive -and
+            (Test-Path -LiteralPath $profileDirectoryBlocker)) {
+            Remove-TestDirectoryJunction `
+                -Path $profileDirectoryBlocker
+            $profileDirectoryJunctionActive = $false
+        }
+        if ($profileDirectoryBlockerCreated -and
+            (Test-Path `
+                -LiteralPath $profileDirectoryBlocker `
+                -PathType Leaf)) {
+            [System.IO.File]::Delete(
+                $profileDirectoryBlocker)
+            $profileDirectoryBlockerCreated = $false
+        }
+        if ($successfulProfileDirectoryMoved -and
+            (Test-Path `
+                -LiteralPath $successfulProfileDirectory `
+                -PathType Container) -and
+            -not (Test-Path -LiteralPath $profileDirectoryBlocker)) {
+            [System.IO.Directory]::Move(
+                $successfulProfileDirectory,
+                $profileDirectoryBlocker)
+            $successfulProfileDirectoryMoved = $false
+        }
         if ($null -ne $interactiveLauncher) {
             if (-not $interactiveLauncher.HasExited) {
                 $interactiveLauncher.StandardInput.Close()
@@ -2773,6 +3414,26 @@ finally {
                 $tempRoot,
                 [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to remove fixture outside temp: $resolvedFixture"
+        }
+        $ownedFixtureProcesses = @(
+            Get-Process `
+                -Name 'SpecForge','SpecForgeAutomation' `
+                -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $null -ne $_.Path -and
+                    $_.Path.StartsWith(
+                        $resolvedFixture +
+                            [System.IO.Path]::DirectorySeparatorChar,
+                        [System.StringComparison]::OrdinalIgnoreCase)
+                }
+        )
+        foreach ($ownedFixtureProcess in $ownedFixtureProcesses) {
+            Stop-Process `
+                -Id $ownedFixtureProcess.Id `
+                -Force `
+                -ErrorAction SilentlyContinue
+            [void]$ownedFixtureProcess.WaitForExit(5000)
+            $ownedFixtureProcess.Dispose()
         }
         $removed = $false
         for ($attempt = 0;

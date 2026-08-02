@@ -8,9 +8,11 @@
 #include <iostream>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -21,12 +23,30 @@ struct ProfileSinkTestAccess {
         ProfileSink& sink,
         std::filesystem::path path,
         ProfileSink::Limits limits,
-        ProfileSink::OutputStreamFactory output_stream_factory)
+        ProfileSink::OutputStreamFactory output_stream_factory,
+        ProfileSink::OutputDiscard discard_output = {},
+        std::function<std::thread()> writer_thread_starter = {},
+        std::function<void()>
+            stop_transition_checkpoint = {})
     {
+        ProfileSink::WriterThreadStarter adapted_starter;
+        if (writer_thread_starter) {
+            adapted_starter =
+                [writer_thread_starter =
+                     std::move(writer_thread_starter)](
+                    ProfileSink::WriterState*) mutable {
+                    return writer_thread_starter();
+                };
+        }
         return sink.StartWithOutputStreamFactory(
             std::move(path),
             limits,
-            std::move(output_stream_factory));
+            std::move(output_stream_factory),
+            true,
+            std::move(discard_output),
+            std::move(adapted_starter),
+            std::move(
+                stop_transition_checkpoint));
     }
 };
 
@@ -328,7 +348,8 @@ void TestFrameFinalizationKeepsSameFrameTailBeforeSummary()
     Require(
         sink.is_frame_recording_active(),
         "one atomic admission snapshot should retain the final frame");
-    const specforge::ProfileSink::StateSnapshot finalizing = sink.state_snapshot();
+    const specforge::ProfileSink::LifecycleSnapshot
+        finalizing = sink.lifecycle_snapshot();
     Require(
         !finalizing.open && finalizing.stopping &&
             finalizing.frame_finalization_pending && finalizing.frame_recording_active,
@@ -373,7 +394,8 @@ void TestInFlightDurationStopNotifiesStateChange()
            std::chrono::steady_clock::now() < transition_deadline) {
         std::this_thread::sleep_for(1ms);
     }
-    const specforge::ProfileSink::StateSnapshot automatic_limit = sink.state_snapshot();
+    const specforge::ProfileSink::LifecycleSnapshot
+        automatic_limit = sink.lifecycle_snapshot();
     Require(
         notifications.load(std::memory_order_relaxed) >= 1 &&
             !automatic_limit.open && automatic_limit.stopping &&
@@ -394,6 +416,92 @@ void TestInFlightDurationStopNotifiesStateChange()
     Require(
         ReadTextFile(sink.path()).find("duration_limit_final_frame") != std::string::npos,
         "the automatic-stop final frame should be written before the summary");
+}
+
+void TestLifecycleObservationDoesNotTearDuringAutomaticStop()
+{
+    specforge::ProfileSink::Limits limits =
+        GenerousLimits();
+    limits.max_duration = 20ms;
+    limits.max_queue_bytes = 8;
+    std::atomic<bool> transition_entered = false;
+    std::atomic<bool> release_transition = false;
+    specforge::ProfileSink sink;
+    Require(
+        specforge::ProfileSinkTestAccess::
+            StartWithOutputStreamFactory(
+                sink,
+                "controlled-lifecycle-transition.jsonl",
+                limits,
+                [](const std::filesystem::path&) {
+                    return std::make_unique<
+                        std::ostringstream>();
+                },
+                {},
+                {},
+                [&]() {
+                    transition_entered.store(
+                        true,
+                        std::memory_order_release);
+                    while (!release_transition.load(
+                        std::memory_order_acquire)) {
+                        std::this_thread::sleep_for(1ms);
+                    }
+                }),
+        "the controlled automatic-stop fixture should start");
+    Require(
+        !sink.WriteEvent(
+            "controlled_dropped_event"),
+        "the controlled lifecycle fixture should retain a dropped-event observation");
+
+    const auto transition_deadline =
+        std::chrono::steady_clock::now() + 1s;
+    while (!transition_entered.load(
+               std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() <
+               transition_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    if (!transition_entered.load(
+            std::memory_order_acquire)) {
+        release_transition.store(
+            true,
+            std::memory_order_release);
+        sink.Stop();
+        Require(
+            false,
+            "the writer should reach the controlled stop transition");
+    }
+
+    specforge::ProfileSink::LifecycleSnapshot
+        observed_state;
+    std::atomic<bool> observation_complete = false;
+    std::thread observer([&]() {
+        observed_state =
+            sink.lifecycle_snapshot();
+        observation_complete.store(
+            true,
+            std::memory_order_release);
+    });
+    std::this_thread::sleep_for(20ms);
+    const bool completed_while_transition_held =
+        observation_complete.load(
+            std::memory_order_acquire);
+    release_transition.store(
+        true,
+        std::memory_order_release);
+    observer.join();
+    sink.Stop();
+
+    Require(
+        !completed_while_transition_held &&
+            !observed_state.open &&
+            observed_state.stopping &&
+            observed_state.stop_reason ==
+                specforge::ProfileSink::StopReason::
+                    DurationLimit &&
+            observed_state.dropped_events == 1,
+        "one lifecycle observation must not publish recording together with a terminal automatic-stop reason");
 }
 
 void TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame()
@@ -508,6 +616,151 @@ void TestWriteFailureStatusIsNeverReportedAsSaved()
         "stop descriptions should preserve semantic reason and dropped-event data without display text");
 }
 
+void TestRejectedRestartCanClearThePreviousStoppedOutcome()
+{
+    TemporaryDirectory temporary;
+    specforge::ProfileSink::Limits limits =
+        GenerousLimits();
+    limits.max_queue_bytes = 8;
+    specforge::ProfileSink sink;
+    Require(
+        sink.Start(
+            temporary.path() / "successful.jsonl",
+            limits),
+        "the previous recording should start");
+    Require(
+        !sink.WriteEvent(
+            "oversized_event_for_dropped_count"),
+        "the previous recording should retain a nonzero dropped count");
+    sink.Stop();
+    Require(
+        !sink.path().empty() &&
+            sink.stop_reason() ==
+                specforge::ProfileSink::StopReason::Explicit &&
+            sink.dropped_event_count() == 1,
+        "the previous successful terminal should expose path, reason and dropped count");
+
+    sink.ResetStoppedOutcome();
+    Require(
+        sink.path().empty() &&
+            sink.stop_reason() ==
+                specforge::ProfileSink::StopReason::None &&
+            sink.dropped_event_count() == 0 &&
+            sink.error_message().empty(),
+        "a new rejected start attempt should not inherit the previous stopped outcome");
+}
+
+void TestWriterThreadStartFailureDiscardsOpenedOutput()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path output_path =
+        temporary.path() / "writer-start-failure.jsonl";
+    specforge::ProfileSink sink;
+    const bool started =
+        specforge::ProfileSinkTestAccess::
+            StartWithOutputStreamFactory(
+                sink,
+                output_path,
+                GenerousLimits(),
+                [](const std::filesystem::path& path) {
+                    return std::make_unique<std::ofstream>(
+                        path,
+                        std::ios::binary |
+                            std::ios::out |
+                            std::ios::trunc);
+                },
+                [output_path]() noexcept {
+                    std::error_code error;
+                    (void)std::filesystem::remove(
+                        output_path,
+                        error);
+                },
+                []() -> std::thread {
+                    throw std::system_error(
+                        std::make_error_code(
+                            std::errc::
+                                resource_unavailable_try_again));
+                });
+
+    Require(
+        !started &&
+            sink.path().empty() &&
+            !std::filesystem::exists(output_path) &&
+            sink.error_message().find(
+                "Could not start the profile writer thread") !=
+                std::string::npos,
+        "writer-thread startup failure must clear the attempt path and discard the already-created output file");
+}
+
+void TestInvalidPreparedOutputsAreDiscarded()
+{
+    TemporaryDirectory temporary;
+    const auto require_discarded =
+        [&](std::string_view name,
+            std::filesystem::path sink_path,
+            specforge::ProfileSink::Limits limits,
+            bool mark_stream_bad) {
+            const std::filesystem::path opened_path =
+                temporary.path() /
+                (std::string(name) + ".jsonl");
+            auto stream =
+                std::make_unique<std::ofstream>(
+                    opened_path,
+                    std::ios::binary |
+                        std::ios::out |
+                        std::ios::trunc);
+            Require(
+                stream->good() &&
+                    std::filesystem::exists(
+                        opened_path),
+                "prepared-output rollback fixture should open its output before calling the sink");
+            if (mark_stream_bad) {
+                stream->setstate(std::ios::badbit);
+            }
+            int discard_count = 0;
+            specforge::ProfileSink sink;
+            const bool started = sink.StartPrepared(
+                std::move(sink_path),
+                limits,
+                std::move(stream),
+                [&]() noexcept {
+                    ++discard_count;
+                    std::error_code error;
+                    (void)std::filesystem::remove(
+                        opened_path,
+                        error);
+                });
+            Require(
+                !started &&
+                    discard_count == 1 &&
+                    sink.path().empty() &&
+                    !std::filesystem::exists(
+                        opened_path),
+                "an invalid prepared-output attempt must invoke rollback around stream close and leave no path or file");
+        };
+
+    require_discarded(
+        "empty-path",
+        {},
+        GenerousLimits(),
+        false);
+    specforge::ProfileSink::Limits invalid_limits =
+        GenerousLimits();
+    invalid_limits.max_queue_bytes = 0;
+    require_discarded(
+        "invalid-limits",
+        temporary.path() /
+            "invalid-limits.jsonl",
+        invalid_limits,
+        false);
+    require_discarded(
+        "bad-stream",
+        temporary.path() /
+            "bad-stream.jsonl",
+        GenerousLimits(),
+        true);
+}
+
 }  // namespace
 
 int main()
@@ -523,9 +776,13 @@ int main()
         TestBackgroundStopCanBeFinalizedWithoutBlockingTheRequest();
         TestFrameFinalizationKeepsSameFrameTailBeforeSummary();
         TestInFlightDurationStopNotifiesStateChange();
+        TestLifecycleObservationDoesNotTearDuringAutomaticStop();
         TestMinimizedOrHiddenDurationStopSealsWithoutRenderFrame();
         TestRequestStopDoesNotWaitForSlowFinalFlush();
         TestWriteFailureStatusIsNeverReportedAsSaved();
+        TestRejectedRestartCanClearThePreviousStoppedOutcome();
+        TestWriterThreadStartFailureDiscardsOpenedOutput();
+        TestInvalidPreparedOutputsAreDiscarded();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';

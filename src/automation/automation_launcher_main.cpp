@@ -616,6 +616,22 @@ CommandFromHumanLine(
                     WaitIdle,
         };
     }
+    if (lower == "profile start" ||
+        lower == "profile.start") {
+        return HumanCommand{
+            .kind =
+                specforge::AutomationCommandKind::
+                    ProfileStart,
+        };
+    }
+    if (lower == "profile stop" ||
+        lower == "profile.stop") {
+        return HumanCommand{
+            .kind =
+                specforge::AutomationCommandKind::
+                    ProfileStop,
+        };
+    }
     if (lower == "app quit" ||
         lower == "app.quit") {
         return HumanCommand{
@@ -1223,7 +1239,7 @@ void PrintUsage()
 {
     std::cout
         << "Usage: SpecForgeAutomation [--app <SpecForge.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>]\n"
-        << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, state get, wait idle, app quit, help\n"
+        << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }
 

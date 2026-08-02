@@ -129,7 +129,10 @@ private:
     void ToggleProfileRecording();
     void RequestFrameCapture();
     void CaptureRequestedFrame();
-    void StartProfileRecording(std::string_view trigger);
+    [[nodiscard]] bool StartProfileRecording(
+        std::string_view trigger,
+        std::optional<AutomationPreparedProfileOutput>
+            prepared_output = std::nullopt);
     void StopProfileRecording(std::string_view trigger);
     void LogProfileRecordingStarted(std::string_view trigger, std::string_view configuration_reason);
     void WriteRuntimeConfiguration(std::string_view reason);
@@ -166,6 +169,11 @@ private:
         AutomationLabelCommand& operation);
     void BeginAutomationFrameCapture(
         const AutomationQueuedCommand& command);
+    void ServiceAutomationProfileStart(
+        const AutomationQueuedCommand& command);
+    void BeginAutomationProfileStop(
+        const AutomationQueuedCommand& command);
+    void PollAutomationProfileStop();
     [[nodiscard]] bool
     ServiceAutomationAppQuit(
         const AutomationQueuedCommand& command);
@@ -214,6 +222,8 @@ private:
         automation_label_command_;
     std::optional<AutomationCaptureCommand>
         automation_capture_command_;
+    std::optional<AutomationQueuedCommand>
+        automation_profile_stop_command_;
     std::optional<AutomationQueuedCommand>
         automation_pending_quit_command_;
     std::string automation_capture_last_result_ =

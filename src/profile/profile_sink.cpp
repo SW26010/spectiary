@@ -89,6 +89,8 @@ struct ProfileSink::WriterState {
     std::atomic<bool> stop_requested = false;
     std::atomic<StopReason> stop_reason = StopReason::None;
     std::atomic<bool> writer_done = false;
+    StopTransitionCheckpoint
+        stop_transition_checkpoint;
     std::mutex callback_mutex;
     StateChangeCallback state_change_callback;
     std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
@@ -200,7 +202,7 @@ bool ProfileSink::StartDefault(
     Limits limits)
 {
     Stop();
-    error_message_.clear();
+    ResetStoppedOutcome();
     const std::string stem = "specforge-profile-" + TimestampForFileName();
     std::filesystem::path path =
         output_directory / (stem + ".jsonl");
@@ -233,49 +235,156 @@ bool ProfileSink::Start(std::filesystem::path path, Limits limits)
         });
 }
 
-bool ProfileSink::StartWithOutputStreamFactory(
+bool ProfileSink::StartPrepared(
     std::filesystem::path path,
     Limits limits,
-    OutputStreamFactory output_stream_factory)
+    std::unique_ptr<std::ostream> stream,
+    OutputDiscard discard_output)
 {
     Stop();
-    path_ = std::move(path);
+    ResetStoppedOutcome();
+    const auto reject_prepared_output =
+        [&](std::string message) {
+            error_message_ = std::move(message);
+            stream.reset();
+            try {
+                if (discard_output) {
+                    discard_output();
+                }
+            } catch (...) {
+            }
+            path_.clear();
+            return false;
+        };
+    if (path.empty()) {
+        return reject_prepared_output(
+            "The profile output path is empty.");
+    }
+    if (limits.max_queue_bytes == 0 ||
+        limits.max_file_bytes == 0) {
+        return reject_prepared_output(
+            "Profile queue and file limits must be greater than zero.");
+    }
+    if (stream == nullptr || !stream->good()) {
+        return reject_prepared_output(
+            "Could not open the profile output file.");
+    }
+
+    auto stream_holder =
+        std::make_shared<
+            std::unique_ptr<std::ostream>>(
+                std::move(stream));
+    return StartWithOutputStreamFactory(
+        std::move(path),
+        limits,
+        [stream_holder](
+            const std::filesystem::path&) mutable {
+            return std::move(*stream_holder);
+        },
+        false,
+        std::move(discard_output));
+}
+
+void ProfileSink::ResetStoppedOutcome() noexcept
+{
+    if (state_ != nullptr) {
+        return;
+    }
+    path_.clear();
     last_stop_reason_ = StopReason::None;
     last_dropped_event_count_ = 0;
     error_message_.clear();
+}
+
+bool ProfileSink::StartWithOutputStreamFactory(
+    std::filesystem::path path,
+    Limits limits,
+    OutputStreamFactory output_stream_factory,
+    bool create_parent_directories,
+    OutputDiscard discard_output,
+    WriterThreadStarter writer_thread_starter,
+    StopTransitionCheckpoint
+        stop_transition_checkpoint)
+{
+    Stop();
+    ResetStoppedOutcome();
+    path_ = std::move(path);
+    const auto discard_without_stream = [&]() noexcept {
+        try {
+            if (discard_output) {
+                discard_output();
+            }
+        } catch (...) {
+        }
+        path_.clear();
+    };
 
     if (path_.empty()) {
         error_message_ = "The profile output path is empty.";
+        discard_without_stream();
         return false;
     }
     if (limits.max_queue_bytes == 0 || limits.max_file_bytes == 0) {
         error_message_ = "Profile queue and file limits must be greater than zero.";
+        discard_without_stream();
         return false;
     }
 
     const std::filesystem::path parent = path_.parent_path();
-    if (!parent.empty()) {
+    if (create_parent_directories &&
+        !parent.empty()) {
         std::error_code directory_error;
         std::filesystem::create_directories(parent, directory_error);
         if (directory_error) {
             error_message_ = "Could not create the profile output directory: " + directory_error.message();
+            path_.clear();
             return false;
         }
     }
 
     auto state = std::make_unique<WriterState>(limits);
     state->state_change_callback = state_change_callback_;
+    state->stop_transition_checkpoint =
+        std::move(stop_transition_checkpoint);
     state->stream = output_stream_factory(path_);
+    const std::filesystem::path opened_path = path_;
+    const auto discard_opened_output = [&]() noexcept {
+        state->stream.reset();
+        try {
+            if (discard_output) {
+                discard_output();
+            }
+        } catch (...) {
+        }
+        if (!discard_output) {
+            std::error_code remove_error;
+            (void)std::filesystem::remove(
+                opened_path,
+                remove_error);
+        }
+        path_.clear();
+    };
     if (state->stream == nullptr || !state->stream->good()) {
         error_message_ = "Could not open the profile output file.";
+        if (discard_output) {
+            discard_opened_output();
+        } else {
+            state->stream.reset();
+            path_.clear();
+        }
         return false;
     }
 
     try {
         WriterState* state_pointer = state.get();
-        state->writer = std::thread([state_pointer]() { WriterMain(state_pointer); });
+        state->writer = writer_thread_starter
+            ? writer_thread_starter(state_pointer)
+            : std::thread([state_pointer]() {
+                  WriterMain(state_pointer);
+              });
     } catch (const std::system_error& error) {
         error_message_ = "Could not start the profile writer thread: " + std::string(error.what());
+        discard_opened_output();
         return false;
     }
 
@@ -447,11 +556,17 @@ bool ProfileSink::is_frame_recording_active() const noexcept
             FrameAdmissionState::Closed;
 }
 
-ProfileSink::StateSnapshot ProfileSink::state_snapshot() const noexcept
+ProfileSink::LifecycleSnapshot
+ProfileSink::lifecycle_snapshot() const
 {
     if (state_ == nullptr) {
-        return {};
+        return {
+            .stop_reason = last_stop_reason_,
+            .dropped_events =
+                last_dropped_event_count_,
+        };
     }
+    std::lock_guard lock(state_->queue_mutex);
     const FrameAdmissionState admission =
         state_->frame_admission.load(std::memory_order_acquire);
     return {
@@ -459,6 +574,10 @@ ProfileSink::StateSnapshot ProfileSink::state_snapshot() const noexcept
         .stopping = admission != FrameAdmissionState::Accepting,
         .frame_finalization_pending = admission == FrameAdmissionState::Finalizing,
         .frame_recording_active = admission != FrameAdmissionState::Closed,
+        .stop_reason = state_->stop_reason.load(
+            std::memory_order_acquire),
+        .dropped_events = state_->dropped_events.load(
+            std::memory_order_relaxed),
     };
 }
 
@@ -585,9 +704,23 @@ void ProfileSink::WriterMain(WriterState* state)
         state->limits.max_duration > std::chrono::steady_clock::duration::zero();
     const auto duration_deadline = state->started_at + state->limits.max_duration;
     const auto mark_write_failure = [state]() {
-        state->stop_reason.store(StopReason::WriteFailure, std::memory_order_release);
-        state->frame_admission.store(FrameAdmissionState::Closed, std::memory_order_release);
-        state->stop_requested.store(true, std::memory_order_release);
+        {
+            std::lock_guard lock(state->queue_mutex);
+            state->stop_reason.store(
+                StopReason::WriteFailure,
+                std::memory_order_release);
+            if (state->stop_transition_checkpoint) {
+                state->stop_transition_checkpoint();
+            }
+            state->frame_admission.store(
+                FrameAdmissionState::Closed,
+                std::memory_order_release);
+            state->stop_requested.store(
+                true,
+                std::memory_order_release);
+            state->queue.clear();
+            state->queued_bytes = 0;
+        }
         NotifyStateChange(state);
     };
 
@@ -605,6 +738,10 @@ void ProfileSink::WriterMain(WriterState* state)
                 if (!state->queue_ready.wait_until(lock, duration_deadline, work_ready)) {
                     StopReason expected = StopReason::None;
                     state_changed = state->stop_reason.compare_exchange_strong(expected, StopReason::DurationLimit);
+                    if (state_changed &&
+                        state->stop_transition_checkpoint) {
+                        state->stop_transition_checkpoint();
+                    }
                     state->frame_admission.store(
                         state->frame_in_progress
                             ? FrameAdmissionState::Finalizing
@@ -646,9 +783,6 @@ void ProfileSink::WriterMain(WriterState* state)
 
         if (!state->stream->good()) {
             mark_write_failure();
-            std::lock_guard lock(state->queue_mutex);
-            state->queue.clear();
-            state->queued_bytes = 0;
             break;
         }
 
@@ -658,9 +792,6 @@ void ProfileSink::WriterMain(WriterState* state)
             last_flush = now;
             if (!state->stream->good()) {
                 mark_write_failure();
-                std::lock_guard lock(state->queue_mutex);
-                state->queue.clear();
-                state->queued_bytes = 0;
                 break;
             }
         }

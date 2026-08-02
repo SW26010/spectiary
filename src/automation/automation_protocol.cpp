@@ -125,6 +125,12 @@ ParseCommandParameters(
                 "Automation request params must be a JSON object.";
             return std::nullopt;
         }
+        if (params != nullptr &&
+            !params->object.empty()) {
+            error_message =
+                "Parameterless automation commands accept only an omitted or empty object 'params'.";
+            return std::nullopt;
+        }
         return AutomationCommandParameters{};
     }
     if (params == nullptr ||
@@ -242,6 +248,8 @@ ParseCommandParameters(
     }
     case AutomationCommandKind::StateGet:
     case AutomationCommandKind::WaitIdle:
+    case AutomationCommandKind::ProfileStart:
+    case AutomationCommandKind::ProfileStop:
     case AutomationCommandKind::AppQuit:
         return AutomationCommandParameters{};
     }
@@ -282,6 +290,29 @@ void SerializeSettingValue(
 
 }  // namespace
 
+AutomationProfileStopTerminalPolicy
+AutomationProfileStopPolicy(
+    ProfileSink::StopReason reason) noexcept
+{
+    switch (reason) {
+    case ProfileSink::StopReason::Explicit:
+    case ProfileSink::StopReason::DurationLimit:
+    case ProfileSink::StopReason::FileSizeLimit:
+        return {.succeeded = true};
+    case ProfileSink::StopReason::WriteFailure:
+        return {
+            .error_code = "profile_write_failed",
+        };
+    case ProfileSink::StopReason::None:
+        return {
+            .error_code = "profile_stop_failed",
+        };
+    }
+    return {
+        .error_code = "profile_stop_failed",
+    };
+}
+
 std::string_view AutomationCommandName(
     AutomationCommandKind command) noexcept
 {
@@ -302,6 +333,10 @@ std::string_view AutomationCommandName(
         return "label.assign";
     case AutomationCommandKind::FrameCapture:
         return "frame.capture";
+    case AutomationCommandKind::ProfileStart:
+        return "profile.start";
+    case AutomationCommandKind::ProfileStop:
+        return "profile.stop";
     case AutomationCommandKind::AppQuit:
         return "app.quit";
     }
@@ -334,6 +369,12 @@ ParseAutomationCommandName(std::string_view name) noexcept
     }
     if (name == "frame.capture") {
         return AutomationCommandKind::FrameCapture;
+    }
+    if (name == "profile.start") {
+        return AutomationCommandKind::ProfileStart;
+    }
+    if (name == "profile.stop") {
+        return AutomationCommandKind::ProfileStop;
     }
     if (name == "app.quit") {
         return AutomationCommandKind::AppQuit;
@@ -645,6 +686,8 @@ AutomationCapabilityNames()
             "spectrum.goto",
             "label.assign",
             "frame.capture",
+            "profile.start",
+            "profile.stop",
             "app.quit",
         };
     return capabilities;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "automation/automation_named_pipe.h"
+#include "profile/profile_sink.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -62,6 +63,13 @@ struct AutomationCaptureState {
     std::filesystem::path last_path;
 };
 
+struct AutomationProfileState {
+    std::string status = "inactive";
+    std::filesystem::path path;
+    std::string stop_reason = "none";
+    std::uint64_t dropped_events = 0;
+};
+
 struct AutomationRuntimeState {
     bool running = true;
     bool shutting_down = false;
@@ -77,11 +85,21 @@ struct AutomationStateSnapshot {
     AutomationSpectrumState spectrum;
     AutomationLabelingState labeling;
     AutomationCaptureState capture;
+    AutomationProfileState profile;
     AutomationWindowState window;
     AutomationRuntimeState runtime;
 };
 
 [[nodiscard]] std::string SerializeAutomationStateBody(
     const AutomationStateSnapshot& state);
+
+// Publishes the terminal profile.stop response after the production sink has
+// completed its asynchronous drain and final flush.
+void CompleteAutomationProfileStopTerminal(
+    AutomationNamedPipeServer& server,
+    const AutomationQueuedCommand& command,
+    ProfileSink::StopReason reason,
+    const std::filesystem::path& path,
+    std::uint64_t dropped_events);
 
 }  // namespace specforge

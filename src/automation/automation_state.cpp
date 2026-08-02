@@ -173,6 +173,20 @@ std::string SerializeAutomationStateBody(
                       PathToUtf8(
                           state.capture.last_path));
     }
+    output << "},\"profile\":{"
+           << "\"status\":"
+           << JsonString(state.profile.status)
+           << ",\"stop_reason\":"
+           << JsonString(
+                  state.profile.stop_reason)
+           << ",\"dropped_events\":"
+           << state.profile.dropped_events;
+    if (!state.profile.path.empty()) {
+        output << ",\"path\":"
+               << JsonString(
+                      PathToUtf8(
+                          state.profile.path));
+    }
     output << "},\"runtime\":{"
            << "\"running\":"
            << JsonBool(state.runtime.running)
@@ -183,6 +197,41 @@ std::string SerializeAutomationStateBody(
            << state.runtime.frame_index
            << "}}";
     return output.str();
+}
+
+void CompleteAutomationProfileStopTerminal(
+    AutomationNamedPipeServer& server,
+    const AutomationQueuedCommand& command,
+    ProfileSink::StopReason reason,
+    const std::filesystem::path& path,
+    std::uint64_t dropped_events)
+{
+    const AutomationProfileStopTerminalPolicy policy =
+        AutomationProfileStopPolicy(reason);
+    if (!policy.succeeded) {
+        server.Fail(
+            command,
+            policy.error_code,
+            reason == ProfileSink::StopReason::WriteFailure
+                ? "The performance recording could not be finalized on disk."
+                : "The performance recorder stopped without a terminal reason.");
+        return;
+    }
+
+    std::ostringstream body;
+    body << "\"result\":{"
+         << "\"status\":\"succeeded\""
+         << ",\"path\":"
+         << JsonString(PathToUtf8(path))
+         << ",\"stop_reason\":"
+         << JsonString(
+                ProfileSink::StopReasonName(reason))
+         << ",\"dropped_events\":"
+         << dropped_events
+         << '}';
+    server.Complete(
+        command,
+        body.str());
 }
 
 }  // namespace specforge

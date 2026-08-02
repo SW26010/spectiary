@@ -328,7 +328,11 @@ bool AutomationNamedPipeServer::TryClaimExecution(
          command.command !=
              AutomationCommandKind::SpectrumGoto &&
          command.command !=
-             AutomationCommandKind::LabelAssign)) {
+             AutomationCommandKind::LabelAssign &&
+         command.command !=
+             AutomationCommandKind::ProfileStart &&
+         command.command !=
+             AutomationCommandKind::ProfileStop)) {
         return false;
     }
     found->second.execution_claimed = true;

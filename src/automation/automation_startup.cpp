@@ -9,9 +9,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cwctype>
+#include <iomanip>
+#include <sstream>
+#include <streambuf>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -164,6 +169,220 @@ bool PathHasExistingReparsePoint(
     return false;
 }
 
+class ScopedWin32Handle {
+public:
+    ScopedWin32Handle() = default;
+    explicit ScopedWin32Handle(HANDLE handle)
+        : handle_(handle)
+    {
+    }
+    ~ScopedWin32Handle()
+    {
+        Reset();
+    }
+    ScopedWin32Handle(ScopedWin32Handle&& other) noexcept
+        : handle_(std::exchange(
+              other.handle_,
+              INVALID_HANDLE_VALUE))
+    {
+    }
+    ScopedWin32Handle& operator=(
+        ScopedWin32Handle&& other) noexcept
+    {
+        if (this != &other) {
+            Reset(std::exchange(
+                other.handle_,
+                INVALID_HANDLE_VALUE));
+        }
+        return *this;
+    }
+    ScopedWin32Handle(const ScopedWin32Handle&) = delete;
+    ScopedWin32Handle& operator=(const ScopedWin32Handle&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept
+    {
+        return handle_;
+    }
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return handle_ != nullptr &&
+               handle_ != INVALID_HANDLE_VALUE;
+    }
+    void Reset(HANDLE handle = INVALID_HANDLE_VALUE) noexcept
+    {
+        if (*this) {
+            CloseHandle(handle_);
+        }
+        handle_ = handle;
+    }
+
+private:
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+};
+
+class Win32HandleStreamBuffer final : public std::streambuf {
+public:
+    explicit Win32HandleStreamBuffer(HANDLE handle)
+        : handle_(handle)
+    {
+        setp(buffer_.data(),
+             buffer_.data() + buffer_.size());
+    }
+
+    ~Win32HandleStreamBuffer() override
+    {
+        (void)sync();
+    }
+
+protected:
+    int sync() override
+    {
+        if (!FlushPending()) {
+            return -1;
+        }
+        return FlushFileBuffers(handle_) != FALSE
+            ? 0
+            : -1;
+    }
+
+    int_type overflow(int_type character) override
+    {
+        if (!FlushPending()) {
+            return traits_type::eof();
+        }
+        if (!traits_type::eq_int_type(
+                character,
+                traits_type::eof())) {
+            *pptr() = traits_type::to_char_type(character);
+            pbump(1);
+        }
+        return traits_type::not_eof(character);
+    }
+
+private:
+    [[nodiscard]] bool FlushPending()
+    {
+        if (failed_) {
+            return false;
+        }
+        const std::ptrdiff_t pending =
+            pptr() - pbase();
+        std::ptrdiff_t offset = 0;
+        while (offset < pending) {
+            const auto remaining =
+                static_cast<DWORD>(pending - offset);
+            DWORD written = 0;
+            if (WriteFile(
+                    handle_,
+                    pbase() + offset,
+                    remaining,
+                    &written,
+                    nullptr) == FALSE ||
+                written == 0) {
+                failed_ = true;
+                setp(buffer_.data(),
+                     buffer_.data() + buffer_.size());
+                return false;
+            }
+            offset += written;
+        }
+        setp(buffer_.data(),
+             buffer_.data() + buffer_.size());
+        return true;
+    }
+
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+    std::array<char, 64U * 1024U> buffer_ = {};
+    bool failed_ = false;
+};
+
+struct Win32ProfileOutputHandleState {
+    Win32ProfileOutputHandleState(
+        ScopedWin32Handle file_handle,
+        ScopedWin32Handle root_handle,
+        std::vector<ScopedWin32Handle> directory_handles)
+        : root(std::move(root_handle)),
+          directories(std::move(directory_handles)),
+          file(std::move(file_handle))
+    {
+    }
+
+    ScopedWin32Handle root;
+    std::vector<ScopedWin32Handle> directories;
+    ScopedWin32Handle file;
+};
+
+class Win32HandleOutputStream final : public std::ostream {
+public:
+    Win32HandleOutputStream(
+        std::shared_ptr<Win32ProfileOutputHandleState> handles)
+        : std::ostream(nullptr),
+          handles_(std::move(handles)),
+          buffer_(handles_->file.get())
+    {
+        rdbuf(&buffer_);
+        clear();
+    }
+
+private:
+    std::shared_ptr<Win32ProfileOutputHandleState>
+        handles_;
+    Win32HandleStreamBuffer buffer_;
+};
+
+std::wstring ProfileOutputFileName()
+{
+    SYSTEMTIME utc = {};
+    GetSystemTime(&utc);
+    static std::atomic_uint32_t sequence = 0;
+    std::wostringstream name;
+    name << L"specforge-profile-"
+         << std::setfill(L'0')
+         << std::setw(4) << utc.wYear
+         << std::setw(2) << utc.wMonth
+         << std::setw(2) << utc.wDay
+         << L'-'
+         << std::setw(2) << utc.wHour
+         << std::setw(2) << utc.wMinute
+         << std::setw(2) << utc.wSecond
+         << L'-'
+         << std::setw(3) << utc.wMilliseconds
+         << L'-' << GetCurrentProcessId()
+         << L'-' << ++sequence
+         << L".jsonl";
+    return name.str();
+}
+
+bool AppendRelativeComponents(
+    const std::filesystem::path& root,
+    const std::filesystem::path& child,
+    std::vector<std::filesystem::path>& components)
+{
+    auto root_component = root.begin();
+    auto child_component = child.begin();
+    for (;
+         root_component != root.end();
+         ++root_component, ++child_component) {
+        if (child_component == child.end() ||
+            !Win32PathsEqualOrdinal(
+                *root_component,
+                *child_component)) {
+            return false;
+        }
+    }
+    for (;
+         child_component != child.end();
+         ++child_component) {
+        if (child_component->empty() ||
+            *child_component == L"." ||
+            *child_component == L"..") {
+            return false;
+        }
+        components.push_back(*child_component);
+    }
+    return !components.empty();
+}
+
 template <typename T>
 bool SetOnce(
     std::optional<T>& target,
@@ -183,6 +402,206 @@ bool SetOnce(
 }
 
 }  // namespace
+
+AutomationPreparedProfileOutput
+AutomationProfileOutputFactory::Create(
+    const std::filesystem::path& automation_root,
+    const std::filesystem::path& output_directory)
+{
+    return CreateWithOpenCheckpoint(
+        automation_root,
+        output_directory,
+        {});
+}
+
+AutomationPreparedProfileOutput
+AutomationProfileOutputFactory::CreateWithOpenCheckpoint(
+    const std::filesystem::path& automation_root,
+    const std::filesystem::path& output_directory,
+    BeforeOpenCheckpoint before_open)
+{
+    const auto failure =
+        [](std::string message) {
+            return AutomationPreparedProfileOutput{
+                .error_message = std::move(message),
+            };
+        };
+    const AutomationStateOwnedPathValidation validation =
+        ValidateAutomationStateOwnedPath(
+            automation_root,
+            output_directory);
+    const std::filesystem::path normalized_root =
+        Win32FullPath(automation_root);
+    if (!validation.valid ||
+        normalized_root.empty()) {
+        return failure(
+            "The profile output directory is outside the isolated automation state root.");
+    }
+
+    std::vector<std::filesystem::path> components;
+    if (!AppendRelativeComponents(
+            normalized_root,
+            validation.normalized_path,
+            components)) {
+        return failure(
+            "The profile output directory is not a strict child of the isolated automation state root.");
+    }
+    const std::filesystem::path final_path =
+        validation.normalized_path /
+        ProfileOutputFileName();
+    if (before_open) {
+        before_open(final_path);
+    }
+
+    ScopedWin32Handle root(CreateFileW(
+        normalized_root.c_str(),
+        FILE_LIST_DIRECTORY |
+            FILE_ADD_FILE |
+            FILE_ADD_SUBDIRECTORY |
+            FILE_TRAVERSE |
+            FILE_READ_ATTRIBUTES |
+            SYNCHRONIZE,
+        FILE_SHARE_READ |
+            FILE_SHARE_WRITE |
+            FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS |
+            FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr));
+    if (!root ||
+        FAILED(ValidateWin32DirectoryHandleNoFollow(root.get())) ||
+        !Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(root.get()),
+            normalized_root)) {
+        return failure(
+            "The automation state-root identity changed before profile creation.");
+    }
+
+    std::vector<ScopedWin32Handle> directories;
+    directories.reserve(components.size());
+    HANDLE parent = root.get();
+    std::filesystem::path expected_parent =
+        normalized_root;
+    for (const std::filesystem::path& component :
+         components) {
+        const HANDLE opened =
+            OpenWin32Relative(
+                parent,
+                component.wstring(),
+                FILE_LIST_DIRECTORY |
+                    FILE_ADD_FILE |
+                    FILE_ADD_SUBDIRECTORY |
+                    FILE_TRAVERSE |
+                    FILE_READ_ATTRIBUTES |
+                    SYNCHRONIZE,
+                FILE_SHARE_READ |
+                    FILE_SHARE_WRITE,
+                FILE_OPEN_IF,
+                FILE_DIRECTORY_FILE |
+                    FILE_OPEN_REPARSE_POINT |
+                    FILE_SYNCHRONOUS_IO_NONALERT,
+                FILE_ATTRIBUTE_NORMAL);
+        ScopedWin32Handle directory(opened);
+        expected_parent /= component;
+        if (!directory ||
+            FAILED(
+                ValidateWin32DirectoryHandleNoFollow(
+                    directory.get())) ||
+            !Win32PathsEqualOrdinal(
+                Win32FinalPathByHandle(
+                    directory.get()),
+                expected_parent)) {
+            return failure(
+                "The profile output directory changed identity or traversed a reparse point.");
+        }
+        parent = directory.get();
+        directories.push_back(
+            std::move(directory));
+    }
+
+    if (!Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(root.get()),
+            normalized_root) ||
+        !Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(parent),
+            validation.normalized_path)) {
+        return failure(
+            "The pinned profile output boundary changed before final file creation.");
+    }
+
+    ScopedWin32Handle file(
+        OpenWin32Relative(
+            parent,
+            final_path.filename().wstring(),
+            GENERIC_WRITE |
+                DELETE |
+                FILE_READ_ATTRIBUTES |
+                SYNCHRONIZE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE |
+                FILE_OPEN_REPARSE_POINT |
+                FILE_SYNCHRONOUS_IO_NONALERT,
+            FILE_ATTRIBUTE_NORMAL));
+    if (!file ||
+        FAILED(
+            ValidateWin32RegularFileHandleNoFollow(
+                file.get()))) {
+        return failure(
+            "Could not CREATE_NEW the isolated profile output file without following reparse points.");
+    }
+
+    const bool identity_valid =
+        Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(root.get()),
+            normalized_root) &&
+        Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(parent),
+            validation.normalized_path) &&
+        Win32PathsEqualOrdinal(
+            Win32FinalPathByHandle(file.get()),
+            final_path);
+    if (!identity_valid) {
+        (void)MarkWin32HandleForDeletion(file.get());
+        return failure(
+            "The final profile file identity escaped its pinned automation directory.");
+    }
+
+    AutomationPreparedProfileOutput result;
+    std::shared_ptr<Win32ProfileOutputHandleState>
+        handle_state;
+    try {
+        result.path = final_path;
+        handle_state =
+            std::make_shared<
+                Win32ProfileOutputHandleState>(
+                std::move(file),
+                std::move(root),
+                std::move(directories));
+        result.stream =
+            std::make_unique<Win32HandleOutputStream>(
+                handle_state);
+        result.discard_output =
+            [handle_state]() noexcept {
+                if (handle_state->file) {
+                    (void)MarkWin32HandleForDeletion(
+                        handle_state->file.get());
+                }
+            };
+        return result;
+    } catch (const std::bad_alloc&) {
+        if (handle_state && handle_state->file) {
+            (void)MarkWin32HandleForDeletion(
+                handle_state->file.get());
+        } else if (file) {
+            (void)MarkWin32HandleForDeletion(
+                file.get());
+        }
+        return failure(
+            "Could not allocate the isolated profile output stream.");
+    }
+}
 
 bool IsValidAutomationInstanceId(
     std::string_view value) noexcept

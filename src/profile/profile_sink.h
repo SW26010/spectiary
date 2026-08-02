@@ -10,12 +10,14 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace specforge {
 
 class ProfileSink {
 public:
     using StateChangeCallback = std::function<void()>;
+    using OutputDiscard = std::function<void()>;
 
     struct Field {
         std::string_view name;
@@ -34,19 +36,21 @@ public:
         std::chrono::steady_clock::duration max_duration = std::chrono::minutes(5);
     };
 
-    struct StateSnapshot {
-        bool open = false;
-        bool stopping = false;
-        bool frame_finalization_pending = false;
-        bool frame_recording_active = false;
-    };
-
     enum class StopReason : std::uint8_t {
         None,
         Explicit,
         DurationLimit,
         FileSizeLimit,
         WriteFailure,
+    };
+
+    struct LifecycleSnapshot {
+        bool open = false;
+        bool stopping = false;
+        bool frame_finalization_pending = false;
+        bool frame_recording_active = false;
+        StopReason stop_reason = StopReason::None;
+        std::uint64_t dropped_events = 0;
     };
 
     ProfileSink();
@@ -74,6 +78,18 @@ public:
         Limits limits);
     [[nodiscard]] bool Start(std::filesystem::path path);
     [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
+    // Starts the production writer on a caller-opened final file. The stream
+    // owns the validated file handle for the complete writer lifetime;
+    // discard_output rolls that file back after the stream is released if
+    // this attempt cannot start.
+    [[nodiscard]] bool StartPrepared(
+        std::filesystem::path path,
+        Limits limits,
+        std::unique_ptr<std::ostream> stream,
+        OutputDiscard discard_output = {});
+    // Starts a new inactive attempt without inheriting the previous terminal
+    // path, reason, dropped count, or error.
+    void ResetStoppedOutcome() noexcept;
     void SetStateChangeCallback(StateChangeCallback callback);
     // Marks a real render frame as in progress. Automatic limits retain a tail only while
     // such a frame is active; idle/minimized sessions seal immediately.
@@ -93,7 +109,8 @@ public:
     [[nodiscard]] bool is_stopping() const noexcept;
     [[nodiscard]] bool is_frame_finalization_pending() const noexcept;
     [[nodiscard]] bool is_frame_recording_active() const noexcept;
-    [[nodiscard]] StateSnapshot state_snapshot() const noexcept;
+    [[nodiscard]] LifecycleSnapshot
+    lifecycle_snapshot() const;
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
     [[nodiscard]] StopReason stop_reason() const noexcept;
     [[nodiscard]] std::uint64_t dropped_event_count() const noexcept;
@@ -107,6 +124,10 @@ private:
     struct WriterState;
     using OutputStreamFactory =
         std::function<std::unique_ptr<std::ostream>(const std::filesystem::path&)>;
+    using WriterThreadStarter =
+        std::function<std::thread(WriterState*)>;
+    using StopTransitionCheckpoint =
+        std::function<void()>;
 
     friend struct ProfileSinkTestAccess;
 
@@ -121,7 +142,12 @@ private:
     bool StartWithOutputStreamFactory(
         std::filesystem::path path,
         Limits limits,
-        OutputStreamFactory output_stream_factory);
+        OutputStreamFactory output_stream_factory,
+        bool create_parent_directories = true,
+        OutputDiscard discard_output = {},
+        WriterThreadStarter writer_thread_starter = {},
+        StopTransitionCheckpoint
+            stop_transition_checkpoint = {});
     void FinalizeStoppedState();
 
     std::filesystem::path path_;

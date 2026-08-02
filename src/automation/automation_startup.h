@@ -1,7 +1,10 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,6 +37,38 @@ struct AutomationStateOwnedPathValidation {
     bool valid = false;
     std::filesystem::path normalized_path;
     std::string error_message;
+};
+
+struct AutomationPreparedProfileOutput {
+    std::filesystem::path path;
+    std::unique_ptr<std::ostream> stream;
+    std::function<void()> discard_output;
+    std::string error_message;
+
+    [[nodiscard]] bool valid() const noexcept
+    {
+        return stream != nullptr;
+    }
+};
+
+class AutomationProfileOutputFactory {
+public:
+    [[nodiscard]] static AutomationPreparedProfileOutput
+    Create(
+        const std::filesystem::path& automation_root,
+        const std::filesystem::path& output_directory);
+
+private:
+    friend struct AutomationProfileOutputFactoryTestAccess;
+
+    using BeforeOpenCheckpoint =
+        std::function<void(const std::filesystem::path&)>;
+
+    [[nodiscard]] static AutomationPreparedProfileOutput
+    CreateWithOpenCheckpoint(
+        const std::filesystem::path& automation_root,
+        const std::filesystem::path& output_directory,
+        BeforeOpenCheckpoint before_open);
 };
 
 class AutomationStateRootLease {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "profile/profile_sink.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -30,8 +32,19 @@ enum class AutomationCommandKind {
     SpectrumGoto,
     LabelAssign,
     FrameCapture,
+    ProfileStart,
+    ProfileStop,
     AppQuit,
 };
+
+struct AutomationProfileStopTerminalPolicy {
+    bool succeeded = false;
+    std::string_view error_code;
+};
+
+[[nodiscard]] AutomationProfileStopTerminalPolicy
+AutomationProfileStopPolicy(
+    ProfileSink::StopReason reason) noexcept;
 
 [[nodiscard]] std::string_view AutomationCommandName(
     AutomationCommandKind command) noexcept;

@@ -773,7 +773,9 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     {
         ProfileTimer timer(profile_, "view_update", frame_index_);
         RefreshProfileRecordingStatus();
-        const ProfileSink::StateSnapshot profile_state = profile_.state_snapshot();
+        const ProfileSink::LifecycleSnapshot
+            profile_state =
+                profile_.lifecycle_snapshot();
         ShellStatus status;
         status.profile_open = profile_state.open;
         status.profile_stopping = profile_state.stopping;
@@ -871,7 +873,8 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     HRESULT present_result = S_OK;
     NavigationLatencyTimePoint present_completed_at;
     const bool profile_frame_active_at_present =
-        profile_.state_snapshot().frame_recording_active;
+        profile_.lifecycle_snapshot()
+            .frame_recording_active;
     if (profile_frame_active_at_present) {
         const auto present_start = std::chrono::steady_clock::now();
         present_result = renderer_.Present(present_mode);
@@ -1302,12 +1305,16 @@ void SpecForgeApp::ExitImmersivePlotMode()
 
 void SpecForgeApp::ToggleProfileRecording()
 {
-    switch (ResolveProfileRecordingToggleAction(profile_.is_open(), profile_.is_stopping())) {
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    switch (ResolveProfileRecordingToggleAction(
+        lifecycle.open,
+        lifecycle.stopping)) {
     case ProfileRecordingToggleAction::Stop:
         StopProfileRecording("user_toggle");
         break;
     case ProfileRecordingToggleAction::Start:
-        StartProfileRecording("user_toggle");
+        (void)StartProfileRecording("user_toggle");
         break;
     case ProfileRecordingToggleAction::None:
         return;
@@ -1612,20 +1619,49 @@ void SpecForgeApp::CaptureRequestedFrame()
     render_wake_scheduler_.RequestFrame();
 }
 
-void SpecForgeApp::StartProfileRecording(std::string_view trigger)
+bool SpecForgeApp::StartProfileRecording(
+    std::string_view trigger,
+    std::optional<AutomationPreparedProfileOutput>
+        prepared_output)
 {
-    if (profile_.is_open() || profile_.is_stopping()) {
-        return;
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (lifecycle.open || lifecycle.stopping) {
+        return false;
     }
-    if (!profile_.StartDefault(
+    profile_.ResetStoppedOutcome();
+    displayed_profile_stop_reason_ =
+        ProfileSink::StopReason::None;
+    bool started = false;
+    if (prepared_output) {
+        if (prepared_output->valid()) {
+            started = profile_.StartPrepared(
+                std::move(prepared_output->path),
+                profile_limits_,
+                std::move(prepared_output->stream),
+                std::move(
+                    prepared_output->discard_output));
+        } else {
+            profile_status_ = {
+                .kind =
+                    ProfileRecordingStatusKind::
+                        StartFailed,
+                .detail =
+                    prepared_output->error_message,
+            };
+            return false;
+        }
+    } else {
+        started = profile_.StartDefault(
             ui_.profile_output_directory(),
-            profile_limits_)) {
+            profile_limits_);
+    }
+    if (!started) {
         profile_status_ = {
             .kind = ProfileRecordingStatusKind::StartFailed,
             .detail = profile_.error_message(),
         };
-        displayed_profile_stop_reason_ = ProfileSink::StopReason::WriteFailure;
-        return;
+        return false;
     }
 
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
@@ -1659,11 +1695,14 @@ void SpecForgeApp::StartProfileRecording(std::string_view trigger)
     WritePanPacingState(
         "recording_started",
         UncappedPanActive(!minimized_ && window_visible_));
+    return true;
 }
 
 void SpecForgeApp::StopProfileRecording(std::string_view trigger)
 {
-    if (!profile_.is_open()) {
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (!lifecycle.open) {
         return;
     }
     profile_.WriteEvent("profile_recording", {
@@ -1671,7 +1710,7 @@ void SpecForgeApp::StopProfileRecording(std::string_view trigger)
                                                    ProfileSink::Field::String("trigger", std::string(trigger)),
                                                    ProfileSink::Field::Number(
                                                        "dropped_events",
-                                                       std::to_string(profile_.dropped_event_count())),
+                                                       std::to_string(lifecycle.dropped_events)),
     });
     displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     profile_status_ = {
@@ -2367,6 +2406,142 @@ void SpecForgeApp::BeginAutomationFrameCapture(
     render_wake_scheduler_.RequestFrame();
 }
 
+void SpecForgeApp::ServiceAutomationProfileStart(
+    const AutomationQueuedCommand& command)
+{
+    if (!automation_configuration_) {
+        automation_server_->Fail(
+            command,
+            "profile_start_unavailable",
+            "Performance recording is unavailable outside an isolated automation instance.");
+        return;
+    }
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (lifecycle.open) {
+        automation_server_->Fail(
+            command,
+            "profile_recording_active",
+            "Performance recording is already active.");
+        return;
+    }
+    if (lifecycle.stopping ||
+        automation_profile_stop_command_) {
+        automation_server_->Fail(
+            command,
+            "profile_stop_in_progress",
+            "The previous performance recording is still finishing.");
+        return;
+    }
+    if (!automation_server_->TryClaimExecution(command)) {
+        return;
+    }
+
+    const std::filesystem::path output_directory =
+        ui_.profile_output_directory();
+    const AutomationStateOwnedPathValidation validation =
+        ValidateAutomationStateOwnedPath(
+            automation_configuration_->state_root,
+            output_directory);
+    if (!validation.valid) {
+        AutomationPreparedProfileOutput rejected_output{
+            .error_message = validation.error_message,
+        };
+        (void)StartProfileRecording(
+            "automation",
+            std::optional<AutomationPreparedProfileOutput>(
+                std::move(rejected_output)));
+        automation_server_->Fail(
+            command,
+            "profile_output_outside_state_root",
+            "The resolved performance output directory must remain below the isolated automation state root without reparse points.");
+        render_wake_scheduler_.RequestFrame();
+        return;
+    }
+    AutomationPreparedProfileOutput prepared_output =
+        AutomationProfileOutputFactory::Create(
+            automation_configuration_->state_root,
+            validation.normalized_path);
+    if (!StartProfileRecording(
+            "automation",
+            std::optional<AutomationPreparedProfileOutput>(
+                std::move(prepared_output)))) {
+        automation_server_->Fail(
+            command,
+            "profile_start_failed",
+            "The production performance recorder could not start.");
+        render_wake_scheduler_.RequestFrame();
+        return;
+    }
+
+    std::ostringstream body;
+    body << "\"result\":{"
+         << "\"status\":\"recording\""
+         << ",\"path\":"
+         << JsonString(PathToUtf8(profile_.path()))
+         << '}';
+    automation_server_->Complete(
+        command,
+        body.str());
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::BeginAutomationProfileStop(
+    const AutomationQueuedCommand& command)
+{
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (automation_profile_stop_command_ ||
+        lifecycle.stopping) {
+        automation_server_->Fail(
+            command,
+            "profile_stop_in_progress",
+            "Performance recording is already finishing.");
+        return;
+    }
+    if (!lifecycle.open) {
+        automation_server_->Fail(
+            command,
+            "profile_not_recording",
+            "Performance recording is not active.");
+        return;
+    }
+    if (!automation_server_->TryClaimExecution(command)) {
+        return;
+    }
+
+    automation_profile_stop_command_ = command;
+    StopProfileRecording("automation");
+    automation_poll_deadline_ =
+        RenderWakeScheduler::Clock::now() +
+        kAutomationIdlePollInterval;
+    render_wake_scheduler_.RequestFrame();
+}
+
+void SpecForgeApp::PollAutomationProfileStop()
+{
+    if (!automation_profile_stop_command_) {
+        return;
+    }
+
+    RefreshProfileRecordingStatus();
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (lifecycle.stopping) {
+        return;
+    }
+
+    const AutomationQueuedCommand command =
+        *automation_profile_stop_command_;
+    automation_profile_stop_command_.reset();
+    CompleteAutomationProfileStopTerminal(
+        *automation_server_,
+        command,
+        lifecycle.stop_reason,
+        profile_.path(),
+        lifecycle.dropped_events);
+}
+
 bool SpecForgeApp::ServiceAutomationAppQuit(
     const AutomationQueuedCommand& command)
 {
@@ -2458,6 +2633,7 @@ void SpecForgeApp::CancelAutomationFrameCapture(
 
 void SpecForgeApp::PollAutomationBusinessOperations()
 {
+    PollAutomationProfileStop();
     automation_source_commands_.erase(
         std::remove_if(
             automation_source_commands_.begin(),
@@ -2808,6 +2984,7 @@ bool SpecForgeApp::AutomationBusinessIdle() const noexcept
            !automation_goto_command_ &&
            !automation_label_command_ &&
            !automation_capture_command_ &&
+           !automation_profile_stop_command_ &&
            !frame_capture_.pending();
 }
 
@@ -2817,6 +2994,7 @@ void SpecForgeApp::ServiceAutomation()
         return;
     }
 
+    RefreshProfileRecordingStatus();
     ApplyPendingApplicationSettings(
         "user_scale_changed");
     PollAutomationBusinessOperations();
@@ -2873,6 +3051,12 @@ void SpecForgeApp::ServiceAutomation()
             break;
         case AutomationCommandKind::FrameCapture:
             BeginAutomationFrameCapture(command);
+            break;
+        case AutomationCommandKind::ProfileStart:
+            ServiceAutomationProfileStart(command);
+            break;
+        case AutomationCommandKind::ProfileStop:
+            BeginAutomationProfileStop(command);
             break;
         case AutomationCommandKind::AppQuit:
             (void)ServiceAutomationAppQuit(
@@ -3038,6 +3222,38 @@ SpecForgeApp::AutomationState()
         .last_path =
             automation_capture_last_path_,
     };
+    const ProfileSink::LifecycleSnapshot profile_state =
+        profile_.lifecycle_snapshot();
+    const ProfileSink::StopReason profile_stop_reason =
+        profile_state.stop_reason;
+    std::string profile_status = "inactive";
+    if (profile_state.open) {
+        profile_status = "recording";
+    } else if (profile_state.stopping) {
+        profile_status = "stopping";
+    } else if (
+        profile_stop_reason ==
+            ProfileSink::StopReason::WriteFailure ||
+        profile_status_.kind ==
+            ProfileRecordingStatusKind::StartFailed ||
+        profile_status_.kind ==
+            ProfileRecordingStatusKind::Failed ||
+        profile_status_.kind ==
+            ProfileRecordingStatusKind::FailedWhileWriting) {
+        profile_status = "failed";
+    } else if (
+        profile_stop_reason !=
+        ProfileSink::StopReason::None) {
+        profile_status = "succeeded";
+    }
+    state.profile = {
+        .status = std::move(profile_status),
+        .path = profile_.path(),
+        .stop_reason =
+            ProfileSink::StopReasonName(
+                profile_stop_reason),
+        .dropped_events = profile_state.dropped_events,
+    };
     state.window = {
         .visible = window_visible_,
         .minimized = minimized_,
@@ -3158,26 +3374,29 @@ void SpecForgeApp::WriteRuntimeConfiguration(std::string_view reason)
 void SpecForgeApp::RefreshProfileRecordingStatus()
 {
     (void)profile_.TryFinalizeStop();
-    if (profile_.is_open()) {
-        if (profile_.dropped_event_count() > 0) {
+    const ProfileSink::LifecycleSnapshot lifecycle =
+        profile_.lifecycle_snapshot();
+    if (lifecycle.open) {
+        if (lifecycle.dropped_events > 0) {
             profile_status_ = {
                 .kind =
                     ProfileRecordingStatusKind::
                         EventsDroppedUnderPressure,
                 .dropped_events =
-                    profile_.dropped_event_count(),
+                    lifecycle.dropped_events,
             };
         }
         return;
     }
-    if (profile_.is_stopping()) {
+    if (lifecycle.stopping) {
         profile_status_ = {
             .kind = ProfileRecordingStatusKind::Finishing,
         };
         return;
     }
 
-    const ProfileSink::StopReason reason = profile_.stop_reason();
+    const ProfileSink::StopReason reason =
+        lifecycle.stop_reason;
     if (reason == displayed_profile_stop_reason_) {
         return;
     }
@@ -3185,7 +3404,7 @@ void SpecForgeApp::RefreshProfileRecordingStatus()
     if (reason != ProfileSink::StopReason::None) {
         profile_status_ = DescribeProfileRecordingStop(
             reason,
-            profile_.dropped_event_count(),
+            lifecycle.dropped_events,
             profile_.error_message());
     }
 }
