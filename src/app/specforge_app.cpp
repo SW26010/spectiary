@@ -283,6 +283,8 @@ SpecForgeApp::SpecForgeApp(
     std::optional<AutomationStartupConfiguration>
         automation)
     : startup_(startup),
+      imgui_layout_persistence_(
+          startup.runtime_paths().imgui_ini_path),
       ui_(
           startup_,
           &touchpad_gestures_,
@@ -440,6 +442,7 @@ int SpecForgeApp::Run(
     }
 
     (void)SettleAutomationPanelCommandsForShutdown();
+    SaveImGuiLayoutForShutdown();
     if (automation_server_) {
         CancelAutomationFrameCapture(
             "Application shutdown canceled the pending automation frame capture.");
@@ -630,8 +633,8 @@ void SpecForgeApp::InitializeUiBackends()
             "Failed to create SpecForge runtime data directory '" +
             PathToUtf8(runtime_paths.local_user_state_root) + "': " + data_directory_error.message());
     }
-    imgui_ini_path_utf8_ = PathToUtf8(runtime_paths.imgui_ini_path);
-    io.IniFilename = imgui_ini_path_utf8_.c_str();
+    io.IniFilename = nullptr;
+    (void)imgui_layout_persistence_.Load();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
@@ -693,11 +696,36 @@ void SpecForgeApp::InitializeUiBackends()
     imgui_initialized_ = true;
 }
 
+void SpecForgeApp::SaveImGuiLayoutForShutdown()
+{
+    if (!imgui_initialized_ || imgui_layout_saved_for_shutdown_) {
+        return;
+    }
+
+    std::string imgui_layout_error;
+    if (imgui_layout_persistence_.SaveNow(
+            &imgui_layout_error)) {
+        imgui_layout_saved_for_shutdown_ = true;
+        return;
+    }
+    if (!imgui_layout_error.empty()) {
+        profile_.WriteEvent(
+            "imgui_layout_save",
+            {
+                ProfileSink::Field::String("phase", "shutdown"),
+                ProfileSink::Field::String(
+                    "error",
+                    imgui_layout_error),
+            });
+    }
+}
+
 void SpecForgeApp::Shutdown()
 {
     if (shutdown_complete_) {
         return;
     }
+    SaveImGuiLayoutForShutdown();
     const bool restored_panel_state_requires_flush =
         SettleAutomationPanelCommandsForShutdown();
     if (restored_panel_state_requires_flush) {
@@ -844,6 +872,20 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
     {
         ProfileTimer timer(profile_, "draw_submission", frame_index_);
         ImGui::Render();
+    }
+
+    std::string imgui_layout_error;
+    if (!imgui_layout_persistence_.SaveIfRequested(
+            &imgui_layout_error) &&
+        !imgui_layout_error.empty()) {
+        profile_.WriteEvent(
+            "imgui_layout_save",
+            {
+                ProfileSink::Field::String("phase", "frame"),
+                ProfileSink::Field::String(
+                    "error",
+                    imgui_layout_error),
+            });
     }
 
     {

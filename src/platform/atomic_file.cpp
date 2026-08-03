@@ -2,7 +2,9 @@
 #include "platform/atomic_file_internal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -22,6 +24,8 @@
 
 namespace specforge {
 namespace {
+
+std::atomic<std::uint64_t> temporary_file_sequence{0};
 
 void SetError(std::string* error_message, std::string message)
 {
@@ -67,6 +71,11 @@ std::filesystem::path TemporarySiblingPath(const std::filesystem::path& target_p
 #endif
     temporary += ".";
     temporary += std::to_string(timestamp);
+    temporary += ".";
+    temporary += std::to_string(
+        temporary_file_sequence.fetch_add(
+            1,
+            std::memory_order_relaxed));
     return temporary;
 }
 

@@ -3,6 +3,7 @@
 #include "app/native_window_title.h"
 #include "app/on_demand_frame_capture.h"
 #include "app/pan_pacing.h"
+#include "app/imgui_layout_persistence.h"
 #include "app/render_wake_scheduler.h"
 #include "app/runtime_paths.h"
 #include "app/runtime_resource_workload.h"
@@ -135,6 +136,7 @@ private:
         int show_command,
         const std::optional<std::filesystem::path>& initial_source);
     void InitializeUiBackends();
+    void SaveImGuiLayoutForShutdown();
     void Shutdown();
     [[nodiscard]] RenderFrameOutcome RenderFrame();
     void UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active);
@@ -255,6 +257,7 @@ private:
     Win32CompositorClock compositor_clock_;
     Win32MessageRenderObserver message_render_observer_;
     RenderWakeScheduler render_wake_scheduler_;
+    ImGuiLayoutPersistence imgui_layout_persistence_;
     ShellUi ui_;
     PanPacingConfiguration pan_pacing_;
     OnDemandFrameCapture frame_capture_;
@@ -294,11 +297,11 @@ private:
         automation_poll_deadline_;
     bool automation_shutdown_requested_ = false;
 
-    std::string imgui_ini_path_utf8_;
     std::wstring applied_window_title_;
     std::optional<NativeWindowTitleSemanticKey>
         applied_window_title_key_;
     bool imgui_initialized_ = false;
+    bool imgui_layout_saved_for_shutdown_ = false;
     bool running_ = true;
     bool minimized_ = false;
     bool window_visible_ = true;

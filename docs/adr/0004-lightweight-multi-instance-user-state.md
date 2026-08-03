@@ -96,11 +96,18 @@ a separate follow-up and do not by themselves require a primary process or IPC
 configuration service.
 
 Other shared settings and caches do not gain multi-writer merge semantics.
-Hardening the non-atomic ImGui layout path and making independently created
-performance-recording names collision-resistant are explicitly deferred; this
-labeling change does not implement either follow-up. Automation instances
-retain their existing isolated state roots and are outside this ordinary
-multi-instance contract. The test-only two-process labeling smoke runner is a
+The shared ImGui layout is the bounded exception required for ordinary GUI
+instances: it uses a complete-snapshot, shared last-completed-writer-wins
+protocol. ImGui automatic disk I/O is disabled; startup reads the existing
+snapshot only when it passes a conservative structural check, and each save
+writes a unique sibling temporary file, closes it successfully, then atomically
+replaces the shared target. A writer crash therefore leaves the previous complete
+snapshot or the new complete snapshot, while an incomplete temporary sibling is
+ignored. A malformed existing snapshot is treated as defaults and is repaired
+by the next successful explicit or orderly-shutdown save. There is no merge or
+live synchronization between instances. Automation instances retain their
+existing isolated state roots and are outside this ordinary multi-instance
+contract. The test-only two-process labeling smoke runner is a
 deliberate exception: it launches direct GUI copies with an explicit
 persistent-output fixture opt-in and a runner-owned shared temporary root to
 exercise the production target leases; it is not a user-facing automation or

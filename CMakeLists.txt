@@ -273,6 +273,17 @@ specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
 target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB bcrypt)
 
+add_library(specforge_imgui_layout STATIC
+    src/app/imgui_layout_persistence.cpp
+)
+specforge_configure_production_target(specforge_imgui_layout)
+target_link_libraries(
+    specforge_imgui_layout
+    PUBLIC
+        specforge_core
+        imgui::imgui
+)
+
 add_library(specforge_automation STATIC
     src/automation/automation_named_pipe.cpp
     src/automation/automation_protocol.cpp
@@ -384,6 +395,7 @@ specforge_configure_production_target(specforge_native)
 target_link_libraries(specforge_native PRIVATE
     specforge_automation
     specforge_desktop_ui
+    specforge_imgui_layout
     specforge_renderer
     dwmapi
     comctl32
@@ -543,6 +555,11 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_render_wake_scheduler_tests PRIVATE imgui::imgui)
+specforge_add_test(
+    specforge_imgui_layout_persistence_tests
+    tests/imgui_layout_persistence_tests.cpp
+    specforge_imgui_layout
+)
 specforge_add_test(
     specforge_automation_control_tests
     tests/automation_control_tests.cpp
