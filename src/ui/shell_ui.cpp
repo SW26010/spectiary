@@ -1637,6 +1637,7 @@ ShellUi::AutomationViewForSnapshot(
                 view.labeling.has_active_task,
             .task_id = view.labeling.task_id,
             .task_name = view.labeling.task_name,
+            .task_ids = view.labeling.task_ids,
             .current_spectrum_code =
                 view.labeling.current_code,
         };

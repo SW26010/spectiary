@@ -155,7 +155,17 @@ std::string SerializeAutomationStateBody(
     output << "},\"labeling\":{"
            << "\"has_active_task\":"
            << JsonBool(
-                  state.labeling.has_active_task);
+                  state.labeling.has_active_task)
+           << ",\"task_ids\":[";
+    for (std::size_t index = 0;
+         index < state.labeling.task_ids.size();
+         ++index) {
+        if (index != 0U) {
+            output << ',';
+        }
+        output << JsonString(state.labeling.task_ids[index]);
+    }
+    output << ']';
     if (state.labeling.has_active_task) {
         output << ",\"active_task\":{"
                << "\"id\":"

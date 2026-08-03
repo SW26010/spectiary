@@ -1,6 +1,8 @@
 #include "app/runtime_paths.h"
+#include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_loader.h"
+#include "ui/sample_labeling_controller.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/shell_ui.h"
 #include "ui/ui_language_settings.h"
@@ -21,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -72,6 +75,79 @@ std::optional<std::filesystem::path> ArgumentPath(
     return std::nullopt;
 }
 
+std::optional<std::wstring> ArgumentText(
+    int argc,
+    wchar_t** argv,
+    std::wstring_view name)
+{
+    for (int index = 1;
+         index + 1 < argc;
+         ++index) {
+        if (std::wstring_view(argv[index]) ==
+            name) {
+            return std::wstring(argv[index + 1]);
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::vector<int>> ArgumentIntList(
+    int argc,
+    wchar_t** argv,
+    std::wstring_view name)
+{
+    const auto text = ArgumentText(argc, argv, name);
+    if (!text || text->empty()) {
+        return std::nullopt;
+    }
+
+    std::vector<int> values;
+    std::size_t start = 0;
+    while (start <= text->size()) {
+        const std::size_t separator =
+            text->find(L',', start);
+        const std::wstring token = text->substr(
+            start,
+            separator == std::wstring::npos
+                ? std::wstring::npos
+                : separator - start);
+        if (token.empty()) {
+            return std::nullopt;
+        }
+        wchar_t* end = nullptr;
+        errno = 0;
+        const long long parsed = std::wcstoll(
+            token.c_str(),
+            &end,
+            10);
+        if (errno == ERANGE ||
+            end != token.c_str() + token.size() ||
+            parsed < (std::numeric_limits<int>::min)() ||
+            parsed > (std::numeric_limits<int>::max)()) {
+            return std::nullopt;
+        }
+        values.push_back(static_cast<int>(parsed));
+        if (separator == std::wstring::npos) {
+            break;
+        }
+        start = separator + 1;
+    }
+    return values;
+}
+
+bool HasArgument(
+    int argc,
+    wchar_t** argv,
+    std::wstring_view name)
+{
+    for (int index = 1; index < argc; ++index) {
+        if (std::wstring_view(argv[index]) == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::optional<std::size_t> ArgumentSize(
     int argc,
     wchar_t** argv,
@@ -110,6 +186,44 @@ std::optional<std::size_t> ArgumentSize(
             parsed);
     }
     return std::nullopt;
+}
+
+int WriteLabelingCoordinationDirectoriesFixture(
+    int argc,
+    wchar_t** argv)
+{
+    const auto cache_path = ArgumentPath(
+        argc,
+        argv,
+        L"--write-labeling-coordination-directories");
+    const auto manifest_path = ArgumentPath(
+        argc,
+        argv,
+        L"--manifest-path");
+    if (!cache_path || !manifest_path) {
+        return 2;
+    }
+
+    const std::vector<std::filesystem::path> directories =
+        specforge::SampleLabelingStateCoordinationDirectories(
+            *cache_path);
+    if (directories.empty()) {
+        return 3;
+    }
+    std::ofstream output(
+        *manifest_path,
+        std::ios::binary | std::ios::trunc);
+    if (!output) {
+        return 4;
+    }
+    for (const std::filesystem::path& directory : directories) {
+        const std::u8string utf8 = directory.u8string();
+        output.write(
+            reinterpret_cast<const char*>(utf8.data()),
+            static_cast<std::streamsize>(utf8.size()));
+        output.put('\n');
+    }
+    return output.good() ? 0 : 5;
 }
 
 int WriteLabelingSeedFixture(
@@ -163,6 +277,35 @@ int WriteLabelingSeedFixture(
     task.auto_advance = true;
     if (output_path) {
         task.output_path = *output_path;
+        if (HasArgument(
+                argc,
+                argv,
+                L"--materialize-labeling-output")) {
+            std::error_code directory_error;
+            std::filesystem::create_directories(
+                output_path->parent_path(),
+                directory_error);
+            if (directory_error) {
+                return 5;
+            }
+            const specforge::SampleLabelResultMetadataSource source_metadata{
+                .source_name = context.identity.source_name,
+                .source_fingerprint = context.identity.source_fingerprint,
+                .context_fingerprint = context.identity.context_fingerprint,
+                .spectrum_count = context.identity.spectrum_count,
+            };
+            const specforge::SampleLabelResultWriteOutcome write_outcome =
+                specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
+                    *output_path,
+                    task,
+                    &source_metadata);
+            if (!write_outcome.array_saved ||
+                !write_outcome.metadata_saved) {
+                return 5;
+            }
+            task.save_state.kind =
+                specforge::SampleLabelSaveStateKind::AutosavedToOutput;
+        }
     }
 
     specforge::SampleLabelingSourceState source;
@@ -193,6 +336,153 @@ int WriteLabelingSeedFixture(
                    loaded.cache.sources.size() == 1U
                ? 0
                : 6;
+}
+
+int ExerciseLabelingDeleteFixture(
+    int argc,
+    wchar_t** argv)
+{
+    const auto cache_path = ArgumentPath(
+        argc,
+        argv,
+        L"--exercise-labeling-delete");
+    const auto source_path = ArgumentPath(
+        argc,
+        argv,
+        L"--source");
+    const auto task_id = ArgumentPath(
+        argc,
+        argv,
+        L"--task-id");
+    if (!cache_path || !source_path) {
+        return 2;
+    }
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(
+            *source_path,
+            0);
+    if (!snapshot ||
+        snapshot->capabilities.has_domain_error ||
+        snapshot->collection.spectrum_count == 0U) {
+        return 3;
+    }
+    const specforge::SourceCollectionContext context =
+        specforge::LoadSourceCollectionContext(*snapshot);
+    specforge::SampleLabelingController controller(*cache_path);
+    controller.ActivateSource(context.identity);
+    const std::string selected_task_id =
+        task_id
+        ? task_id->string()
+        : std::string("quality");
+    const auto first_view = controller.View();
+    if (first_view.active_task == nullptr ||
+        first_view.active_task->task_id != selected_task_id) {
+        return 4;
+    }
+
+    const specforge::SampleLabelingOperationResult deactivated =
+        controller.DeactivateActiveTask();
+    if (!deactivated.accepted || !deactivated.state_saved) {
+        return 5;
+    }
+    const specforge::SampleLabelingOperationResult reactivated =
+        controller.ActivateTask(selected_task_id);
+    if (!reactivated.accepted || !reactivated.state_saved) {
+        return 6;
+    }
+    const specforge::SampleLabelingOperationResult deleted =
+        controller.DeleteActiveTask();
+    if (!deleted.accepted || !deleted.state_saved ||
+        controller.View().active_task != nullptr) {
+        return 7;
+    }
+    return controller.FlushStateCache() ? 0 : 8;
+}
+
+int VerifyLabelOutputFixture(
+    int argc,
+    wchar_t** argv)
+{
+    const auto output_path = ArgumentPath(
+        argc,
+        argv,
+        L"--verify-label-output");
+    const auto source_path = ArgumentPath(
+        argc,
+        argv,
+        L"--source");
+    const auto expected_values = ArgumentIntList(
+        argc,
+        argv,
+        L"--expected-values");
+    const auto task_id_text = ArgumentText(
+        argc,
+        argv,
+        L"--task-id");
+    if (!output_path || !source_path ||
+        !expected_values || expected_values->empty()) {
+        return 2;
+    }
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        specforge::LoadSpectrumSnapshotFromPath(
+            *source_path,
+            0);
+    if (!snapshot ||
+        snapshot->capabilities.has_domain_error) {
+        return 3;
+    }
+    const specforge::SourceCollectionContext context =
+        specforge::LoadSourceCollectionContext(*snapshot);
+    if (expected_values->size() !=
+        context.identity.spectrum_count) {
+        return 4;
+    }
+
+    std::string load_error;
+    const std::optional<specforge::LoadedSampleLabelResult> loaded =
+        specforge::SampleAnnotationIoAdapter{}.LoadLabelResult(
+            *output_path,
+            context.identity.spectrum_count,
+            {},
+            &load_error);
+    if (!loaded) {
+        std::cerr << "FAILED: could not load label output: "
+                  << load_error << '\n';
+        return 5;
+    }
+    if (loaded->values != *expected_values ||
+        !loaded->metadata_sidecar_exists ||
+        !loaded->metadata) {
+        return 6;
+    }
+
+    const std::string expected_task_id =
+        task_id_text
+        ? std::filesystem::path(*task_id_text).string()
+        : std::string("quality");
+    const specforge::SampleLabelResultMetadata& metadata =
+        *loaded->metadata;
+    if (metadata.task_id != expected_task_id ||
+        metadata.value_count !=
+            context.identity.spectrum_count ||
+        metadata.expected_dtype != "int32" ||
+        !metadata.source) {
+        return 7;
+    }
+    const auto& source_metadata = *metadata.source;
+    if (source_metadata.source_name !=
+            context.identity.source_name ||
+        source_metadata.source_fingerprint !=
+            context.identity.source_fingerprint ||
+        source_metadata.context_fingerprint !=
+            context.identity.context_fingerprint ||
+        source_metadata.spectrum_count !=
+            context.identity.spectrum_count) {
+        return 8;
+    }
+    return 0;
 }
 
 int VerifyLabelingStateFixture(
@@ -282,8 +572,32 @@ int wmain(int argc, wchar_t** argv)
     if (ArgumentPath(
             argc,
             argv,
+            L"--write-labeling-coordination-directories")) {
+        return WriteLabelingCoordinationDirectoriesFixture(
+            argc,
+            argv);
+    }
+    if (ArgumentPath(
+            argc,
+            argv,
+            L"--exercise-labeling-delete")) {
+        return ExerciseLabelingDeleteFixture(
+            argc,
+            argv);
+    }
+    if (ArgumentPath(
+            argc,
+            argv,
             L"--write-labeling-seed")) {
         return WriteLabelingSeedFixture(
+            argc,
+            argv);
+    }
+    if (ArgumentPath(
+            argc,
+            argv,
+            L"--verify-label-output")) {
+        return VerifyLabelOutputFixture(
             argc,
             argv);
     }

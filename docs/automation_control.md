@@ -40,6 +40,18 @@ accesses it, and the GUI's background production load applies the same policy.
 This avoids turning automation seeding into a general output import/write
 interface.
 
+The two-process labeling smoke runner is the one narrow fixture exception. It
+launches two direct GUI copies with
+`--automation-allow-persistent-labeling-outputs` and a runner-owned shared
+state root, so the production controller can exercise output-backed task
+leases. This is an explicit startup opt-in, not a client protocol command; the
+normal launcher and all automation startups without the option retain the
+`InternalDraftsOnly` seed policy above.
+The runner also requires each formal label terminal to report both output-save
+success flags, reloads the final NPY and metadata through the production reader,
+and bounds pipe I/O and owned-process cleanup so a stalled GUI cannot leave its
+fixture behind.
+
 The launcher creates the new root relative to a verified directory handle,
 copies the seed handle-to-handle with create-new/no-follow semantics, and
 validates the materialized `sample-labeling-tasks.json` with the same reader.

@@ -238,6 +238,10 @@ private:
     [[nodiscard]] SourceState* ActiveSource();
     [[nodiscard]] const SourceState* ActiveSource() const;
     [[nodiscard]] SourceState* MaterializeSource(std::string_view source_identity);
+    [[nodiscard]] SourceState MergeRefreshedSourceState(
+        std::string_view source_identity,
+        const SourceState& local,
+        SourceState refreshed) const;
     [[nodiscard]] SampleLabelingOperationResult RejectOperation() const;
     [[nodiscard]] SampleLabelingOperationResult
         RejectEditLeaseUnavailable() const;
@@ -349,6 +353,8 @@ private:
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
+    std::unordered_set<std::string>
+        lease_unavailable_source_identities_;
     TaskEditLeaseSet active_task_leases_;
     std::vector<TaskEditLeaseSet> deferred_task_leases_;
     SampleLabelingStateCachePatch pending_cache_patch_;

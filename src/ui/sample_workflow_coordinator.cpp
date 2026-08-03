@@ -1680,6 +1680,13 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     view.current_index = ActiveSampleIndex(snapshot);
     view.has_temporary_task = labeling_view.temporary_task != nullptr;
+    if (labeling_view.active_source_tasks != nullptr) {
+        view.task_ids.reserve(labeling_view.active_source_tasks->size());
+        for (const SampleLabelingTask& task :
+             *labeling_view.active_source_tasks) {
+            view.task_ids.push_back(task.task_id);
+        }
+    }
     if (const SampleLabelingTask* task = labeling_view.active_task) {
         view.has_active_task = true;
         view.active_task_is_temporary = !task->output_path;

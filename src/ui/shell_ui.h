@@ -119,6 +119,7 @@ struct ShellAutomationLabelingView {
     bool has_active_task = false;
     std::string task_id;
     std::string task_name;
+    std::vector<std::string> task_ids;
     int current_spectrum_code =
         kUnlabeledSampleLabelCode;
 };

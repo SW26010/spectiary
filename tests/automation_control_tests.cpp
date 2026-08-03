@@ -842,6 +842,7 @@ void TestProtocolAndStableState()
         .has_active_task = true,
         .task_id = "quality",
         .task_name = "Quality",
+        .task_ids = {"quality", "temporary"},
         .current_spectrum_code = 5,
     };
     state.capture = {
@@ -863,11 +864,16 @@ void TestProtocolAndStableState()
         .dropped_events = 3,
     };
     std::string parse_error;
+    const std::string state_body =
+        specforge::SerializeAutomationStateBody(state);
+    Require(
+        state_body.find(
+            "\"task_ids\":[\"quality\",\"temporary\"]") !=
+            std::string::npos,
+        "state.get body should expose all labeling task ids");
     const auto state_json = specforge::ParseJson(
         "{" +
-            specforge::
-                SerializeAutomationStateBody(
-                    state) +
+            state_body +
             "}",
         parse_error);
     Require(
@@ -1108,6 +1114,37 @@ void TestStartupAndNoActivationContract()
             parsed.automation->state_root ==
                 state_root,
         "complete explicit automation arguments should parse");
+    Require(
+        parsed.automation &&
+            !parsed.automation->allow_persistent_labeling_outputs,
+        "ordinary automation arguments should keep persistent labeling outputs disabled by default");
+
+    std::vector<std::wstring> persistent_output_fixture_arguments =
+        arguments;
+    persistent_output_fixture_arguments.push_back(
+        L"--automation-allow-persistent-labeling-outputs");
+    const auto persistent_output_fixture_parsed =
+        specforge::ParseSpecForgeCommandLine(
+            persistent_output_fixture_arguments);
+    Require(
+        persistent_output_fixture_parsed.automation &&
+            persistent_output_fixture_parsed.automation
+                ->allow_persistent_labeling_outputs,
+        "persistent labeling output fixtures should require and preserve the explicit automation opt-in");
+
+    std::vector<std::wstring> repeated_persistent_output_fixture_arguments =
+        persistent_output_fixture_arguments;
+    repeated_persistent_output_fixture_arguments.push_back(
+        L"--automation-allow-persistent-labeling-outputs");
+    const auto repeated_persistent_output_fixture_parsed =
+        specforge::ParseSpecForgeCommandLine(
+            repeated_persistent_output_fixture_arguments);
+    Require(
+        !repeated_persistent_output_fixture_parsed.automation &&
+            repeated_persistent_output_fixture_parsed.error_message.find(
+                "may not be repeated") !=
+                std::string::npos,
+        "repeated persistent labeling output opt-in should be rejected");
 
     std::vector<std::wstring> incomplete =
         arguments;

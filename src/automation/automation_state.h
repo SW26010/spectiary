@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace specforge {
 
@@ -54,6 +55,7 @@ struct AutomationLabelingState {
     bool has_active_task = false;
     std::string task_id;
     std::string task_name;
+    std::vector<std::string> task_ids;
     int current_spectrum_code = -1;
 };
 

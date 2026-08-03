@@ -583,6 +583,22 @@ set_tests_properties(
         RUN_SERIAL TRUE
         TIMEOUT 120
 )
+add_test(
+    NAME specforge_multi_instance_labeling_smoke_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/multi_instance_labeling_smoke_tests.ps1"
+        -Executable "$<TARGET_FILE:specforge_native>"
+        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
+)
+set_tests_properties(
+    specforge_multi_instance_labeling_smoke_tests
+    PROPERTIES
+        RUN_SERIAL TRUE
+        # Runner main flow is capped at 180s; 30s shared GUI cleanup, two
+        # 1s GUI Kill waits, and a shared 10s helper/fallback fixture and
+        # alias-directory cleanup budget stay below 240s.
+        TIMEOUT 240
+)
 specforge_add_test(
     specforge_on_demand_frame_capture_tests
     tests/on_demand_frame_capture_tests.cpp

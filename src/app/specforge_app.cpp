@@ -287,8 +287,11 @@ SpecForgeApp::SpecForgeApp(
           startup_,
           &touchpad_gestures_,
           automation
-          ? SampleLabelingStateCacheLoadPolicy::
-                InternalDraftsOnly
+          ? (automation->allow_persistent_labeling_outputs
+                 ? SampleLabelingStateCacheLoadPolicy::
+                       AllowPersistentOutputs
+                 : SampleLabelingStateCacheLoadPolicy::
+                       InternalDraftsOnly)
           : SampleLabelingStateCacheLoadPolicy::
                 AllowPersistentOutputs),
       automation_configuration_(
@@ -3820,6 +3823,8 @@ SpecForgeApp::AutomationState()
             automation.labeling.task_id,
         .task_name =
             automation.labeling.task_name,
+        .task_ids =
+            automation.labeling.task_ids,
         .current_spectrum_code =
             automation.labeling
                 .current_spectrum_code,

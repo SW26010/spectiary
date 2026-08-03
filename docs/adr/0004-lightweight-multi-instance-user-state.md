@@ -100,4 +100,8 @@ Hardening the non-atomic ImGui layout path and making independently created
 performance-recording names collision-resistant are explicitly deferred; this
 labeling change does not implement either follow-up. Automation instances
 retain their existing isolated state roots and are outside this ordinary
-multi-instance contract.
+multi-instance contract. The test-only two-process labeling smoke runner is a
+deliberate exception: it launches direct GUI copies with an explicit
+persistent-output fixture opt-in and a runner-owned shared temporary root to
+exercise the production target leases; it is not a user-facing automation or
+state-sharing mode.

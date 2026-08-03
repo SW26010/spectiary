@@ -17,6 +17,7 @@ struct AutomationStartupConfiguration {
     std::string nonce;
     std::string instance_id;
     std::filesystem::path state_root;
+    bool allow_persistent_labeling_outputs = false;
 };
 
 struct SpecForgeCommandLine {

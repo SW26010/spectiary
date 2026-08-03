@@ -33,6 +33,9 @@ constexpr std::wstring_view kAutomationInstanceOption =
 constexpr std::wstring_view kAutomationStateRootOption =
     L"--automation-state-root";
 constexpr std::wstring_view
+    kAutomationAllowPersistentLabelingOutputsOption =
+        L"--automation-allow-persistent-labeling-outputs";
+constexpr std::wstring_view
     kAutomationRootIdentityLockName =
         L".specforge-automation-root.lock";
 constexpr std::array<std::wstring_view, 4>
@@ -1344,12 +1347,24 @@ SpecForgeCommandLine ParseSpecForgeCommandLine(
     std::optional<std::wstring> nonce;
     std::optional<std::wstring> instance_id;
     std::optional<std::filesystem::path> state_root;
+    bool allow_persistent_labeling_outputs = false;
 
     for (std::size_t index = 1;
          index < arguments.size();
          ++index) {
         const std::wstring_view argument =
             arguments[index];
+        if (argument ==
+            kAutomationAllowPersistentLabelingOutputsOption) {
+            result.automation_requested = true;
+            if (allow_persistent_labeling_outputs) {
+                result.error_message =
+                    "Automation startup option '--automation-allow-persistent-labeling-outputs' may not be repeated.";
+                return result;
+            }
+            allow_persistent_labeling_outputs = true;
+            continue;
+        }
         const bool automation_option =
             argument == kAutomationPipeOption ||
             argument == kAutomationNonceOption ||
@@ -1462,6 +1477,8 @@ SpecForgeCommandLine ParseSpecForgeCommandLine(
         .nonce = nonce_utf8,
         .instance_id = instance_utf8,
         .state_root = std::move(*state_root),
+        .allow_persistent_labeling_outputs =
+            allow_persistent_labeling_outputs,
     };
     return result;
 }

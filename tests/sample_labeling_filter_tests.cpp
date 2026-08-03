@@ -2584,6 +2584,107 @@ void TestSameTargetLeaseRejectsSecondInstance()
         "second instance should acquire the released target");
 }
 
+void TestLeaseConflictTemporaryReopenPreservesPendingEdit()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_conflict_temporary_reopen");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "shared_y.npy";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        CreateFormalTask(
+            seed,
+            "shared-source",
+            "shared-task",
+            output_path,
+            5);
+    }
+
+    specforge::SampleLabelingController formal_owner(cache_path);
+    specforge::SampleLabelingController fallback(cache_path);
+    formal_owner.ActivateSource("shared-source", 3);
+    Require(
+        formal_owner.ActivateTask("shared-task").accepted,
+        "formal owner should acquire the shared task lease");
+
+    fallback.ActivateSource("shared-source", 3);
+    const specforge::SampleLabelingOperationResult formal_conflict =
+        fallback.ActivateTask("shared-task");
+    Require(
+        !formal_conflict.accepted &&
+            formal_conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "temporary recovery fixture should first observe the formal lease conflict");
+
+    Require(
+        fallback.StartOrResumeTemporaryTask().accepted &&
+            ActiveTask(fallback) != nullptr &&
+            !ActiveTask(fallback)->output_path,
+        "formal lease conflict should allow a same-source temporary task takeover");
+    const std::string temporary_task_id =
+        ActiveTask(fallback)->task_id;
+    Require(
+        fallback.UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        5,
+                        "accepted",
+                        'a'})
+                .changed &&
+            fallback.AssignLabel(0, 5).write.changed &&
+            fallback.state_save_pending(),
+        "temporary recovery edit should remain pending before reopen");
+
+    fallback.ActivateSource("shared-source", 3);
+    Require(
+        ActiveTask(fallback) != nullptr &&
+            ActiveTask(fallback)->task_id == temporary_task_id &&
+            ActiveTask(fallback)->values[0] == 5,
+        "reopening the conflicted source must preserve the pending temporary edit and selection");
+
+    Require(
+        fallback.UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        7,
+                        "reviewed",
+                        'r'})
+                .changed &&
+            fallback.AssignLabel(1, 7).write.changed &&
+            fallback.FlushStateCache(),
+        "temporary recovery edit should remain editable and persist after reopen");
+
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const auto source = loaded.cache.sources.find("shared-source");
+    const specforge::SampleLabelingTask* recovered =
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            temporary_task_id);
+    Require(
+        source != loaded.cache.sources.end() &&
+            source->second.active_task_id &&
+            *source->second.active_task_id == temporary_task_id &&
+            recovered != nullptr &&
+            recovered->values ==
+                std::vector<int>{5, 7, specforge::kUnlabeledSampleLabelCode},
+        "recovered temporary selection and edits should be committed without reverting to the formal snapshot");
+
+    specforge::SampleLabelingController blocked(cache_path);
+    blocked.ActivateSource("shared-source", 3);
+    const specforge::SampleLabelingOperationResult lease_conflict =
+        blocked.ActivateTask(temporary_task_id);
+    Require(
+        !lease_conflict.accepted &&
+            lease_conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "reopened temporary task should retain its lease against a third editor");
+}
+
 void TestOutputPathAliasesShareConflictAndLeaseIdentity()
 {
     const std::filesystem::path directory =
@@ -3165,6 +3266,203 @@ void TestLeaseHandoffRefreshInvalidatesTaskProjectionGeneration()
         stale.active_source_tasks_generation() >
             stale_generation,
         "a substantive handoff refresh must invalidate derived filter and sorting projections");
+}
+
+void TestSameSourceRefreshInvalidatesTaskProjectionGeneration()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_same_source_refresh_generation");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        CreateFormalTask(
+            seed,
+            "shared-source",
+            "shared-task",
+            directory / "shared.npy",
+            5);
+        CreateFormalTask(
+            seed,
+            "shared-source",
+            "deleted-task",
+            directory / "deleted.npy",
+            7);
+    }
+
+    specforge::SampleLabelingController owner(cache_path);
+    owner.ActivateSource("shared-source", 3);
+    Require(
+        owner.ActivateTask("shared-task").state_saved,
+        "same-source refresh fixture should persist the task lease owner selection");
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    const auto contains_active_source_task =
+        [](const std::vector<specforge::SampleLabelingTask>* tasks,
+           std::string_view task_id) {
+            return tasks != nullptr &&
+                std::any_of(
+                    tasks->begin(),
+                    tasks->end(),
+                    [task_id](const specforge::SampleLabelingTask& task) {
+                        return task.task_id == task_id;
+                    });
+        };
+    const specforge::SampleLabelingOperationResult conflict =
+        stale.ActivateTask("shared-task");
+    Require(
+        !conflict.accepted &&
+            conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable &&
+            stale.View().active_task == nullptr &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->size() == 2 &&
+            contains_active_source_task(
+                ActiveSourceTasks(stale),
+                "shared-task") &&
+            contains_active_source_task(
+                ActiveSourceTasks(stale),
+                "deleted-task"),
+        "same-source refresh fixture should leave the stale GUI with a read-only task projection after the lease conflict");
+
+    {
+        specforge::SampleLabelingController deleting(cache_path);
+        deleting.ActivateSource("shared-source", 3);
+        Require(
+            deleting.ActivateTask("deleted-task").accepted,
+            "same-source refresh fixture should acquire the other task for the tombstone");
+        Require(
+            deleting.DeleteActiveTask().state_saved,
+            "same-source refresh fixture should commit the other task tombstone");
+    }
+
+    const std::uint64_t generation_before_refresh =
+        stale.active_source_tasks_generation();
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        stale.active_source_tasks_generation() >
+            generation_before_refresh,
+        "same-source lease-conflict refresh must invalidate derived task projections when the task list changes");
+    Require(
+        ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->size() == 1 &&
+            contains_active_source_task(
+                ActiveSourceTasks(stale),
+                "shared-task") &&
+            !contains_active_source_task(
+                ActiveSourceTasks(stale),
+                "deleted-task"),
+        "same-source lease-conflict refresh must remove a tombstoned task from the stale GUI projection");
+}
+
+void TestSameSourceReopenRemovesMissingTaskProjection()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_same_source_reopen_missing");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask("ghost-task", "Ghost task").state_saved,
+            "missing-task reopen fixture should persist its active task selection");
+    }
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        ActiveTask(stale) != nullptr &&
+            ActiveTask(stale)->task_id == "ghost-task",
+        "missing-task reopen fixture should load the task before the external tombstone");
+
+    specforge::SampleLabelingStateCachePatch tombstone;
+    tombstone.sources["shared-source"].task_tombstones.push_back(
+        "ghost-task");
+    tombstone.sources["shared-source"].active_task_selection_changed =
+        true;
+    tombstone.sources["shared-source"].active_task_id.reset();
+    std::string error;
+    Require(
+        specforge::CommitSampleLabelingStateCachePatch(
+            cache_path,
+            tombstone,
+            &error),
+        error.empty()
+            ? "missing-task reopen fixture should commit the external tombstone"
+            : error);
+
+    stale.ClearActiveSource();
+    const std::uint64_t generation_before_reopen =
+        stale.active_source_tasks_generation();
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        stale.active_source_tasks_generation() >
+            generation_before_reopen &&
+            ActiveTask(stale) == nullptr &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->empty(),
+        "same-source reopen after a missing active task must remove the tombstoned task from the projection");
+}
+
+void TestDirectLeaseConflictRefreshRemovesTombstonedTaskProjection()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_direct_conflict_tombstone");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask("ghost-task", "Ghost task").state_saved,
+            "direct-conflict fixture should create the task");
+        Require(
+            seed.DeactivateActiveTask().state_saved,
+            "direct-conflict fixture should leave the task unselected");
+    }
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        ActiveTask(stale) == nullptr &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->size() == 1,
+        "direct-conflict fixture should preheat a stale unselected task projection");
+
+    specforge::SampleLabelingController owner(cache_path);
+    owner.ActivateSource("shared-source", 3);
+    Require(
+        owner.ActivateTask("ghost-task").state_saved,
+        "direct-conflict fixture should acquire the task lease in the owner");
+    const specforge::SampleLabelingOperationResult conflict =
+        stale.ActivateTask("ghost-task");
+    Require(
+        !conflict.accepted &&
+            conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "direct task activation should observe the owner lease conflict");
+
+    Require(
+        owner.DeleteActiveTask().state_saved,
+        "direct-conflict fixture should commit the tombstone from the lease owner");
+
+    const std::uint64_t generation_before_reopen =
+        stale.active_source_tasks_generation();
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        stale.active_source_tasks_generation() >
+            generation_before_reopen &&
+            ActiveTask(stale) == nullptr &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->empty(),
+        "same-source reopen after a direct lease conflict must refresh away the tombstoned task");
 }
 
 void TestLeaseSetupFailureIsNotReportedAsAnotherEditor()
@@ -5102,6 +5400,7 @@ int main(int argc, char* argv[])
         TestStaleExplicitCreateDoesNotActivateFormalizedDraft();
         TestDuplicateTaskIdsFailClosedBeforeOutputPersistence();
         TestSameTargetLeaseRejectsSecondInstance();
+        TestLeaseConflictTemporaryReopenPreservesPendingEdit();
         TestOutputPathAliasesShareConflictAndLeaseIdentity();
         TestExistingHardLinksShareFileObjectIdentity();
         TestOutputArtifactSetSharesConflictAndLeaseIdentity();
@@ -5115,6 +5414,9 @@ int main(int argc, char* argv[])
         TestTemporaryFormalizationKeepsStableTaskLease();
         TestSequentialLeaseHandoffRefreshesLatestTask();
         TestLeaseHandoffRefreshInvalidatesTaskProjectionGeneration();
+        TestSameSourceRefreshInvalidatesTaskProjectionGeneration();
+        TestSameSourceReopenRemovesMissingTaskProjection();
+        TestDirectLeaseConflictRefreshRemovesTombstonedTaskProjection();
         TestPendingDeletionKeepsTaskLeaseUntilTombstoneCommits();
         TestFailedTaskSwitchDefersPreviousTaskLease();
         TestDeferredTaskLeaseCanBeReusedByItsController();

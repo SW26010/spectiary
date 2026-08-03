@@ -120,6 +120,7 @@ struct SourceCollectionLabelingView {
     bool active_task_is_temporary = false;
     std::string task_id;
     std::string task_name;
+    std::vector<std::string> task_ids;
     SampleLabelSet label_set;
     std::unordered_map<int, std::size_t> label_usage_counts;
     std::size_t labeled_count = 0;
