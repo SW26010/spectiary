@@ -144,6 +144,8 @@ private:
         ScheduleStateSave,
         FlushStateSave,
         PersistOutputIfSelected,
+        // Shortcut writes accept the in-memory overlay and defer lock contention.
+        PersistOutputIfSelectedInteractive,
     };
 
     enum class TaskProjectionEffect {

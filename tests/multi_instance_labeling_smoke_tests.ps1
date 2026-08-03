@@ -1271,6 +1271,50 @@ function Invoke-LabelVerification {
         '--expected-code', [string]$Code)
 }
 
+function Invoke-StateFixtureEventually {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $lastError = $null
+    do {
+        try {
+            Invoke-StateFixture -Arguments $Arguments
+            return
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            Start-Sleep -Milliseconds 100
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "$Description did not converge before the bounded retry deadline. Last error: $lastError"
+}
+
+function Invoke-LabelVerificationEventually {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourcePath,
+        [Parameter(Mandatory = $true)]
+        [int]$Index,
+        [Parameter(Mandatory = $true)]
+        [int]$Code,
+        [Parameter(Mandatory = $true)]
+        [string]$CachePath
+    )
+
+    Invoke-StateFixtureEventually `
+        -Arguments @(
+            '--verify-labeling-state', $CachePath,
+            '--source', $SourcePath,
+            '--spectrum-index', [string]$Index,
+            '--expected-code', [string]$Code) `
+        -Description "labeling state for $SourcePath index $Index"
+}
+
 function Assert-OutputSaveSucceeded {
     param(
         [Parameter(Mandatory = $true)]
@@ -1289,6 +1333,34 @@ function Assert-OutputSaveSucceeded {
             [bool]$persistence.output_save_attempted -and
             [bool]$persistence.output_saved) `
         -Message "$Description should report output_save_attempted=true and output_saved=true. Terminal=$($Terminal | ConvertTo-Json -Compress -Depth 12)"
+}
+
+function Assert-OutputSaveAccepted {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Terminal,
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    Assert-True `
+        -Condition ([string]$Terminal.status -eq 'completed') `
+        -Message "$Description should complete. Terminal=$($Terminal | ConvertTo-Json -Compress -Depth 12)"
+    $persistence = $Terminal.result.persistence
+    $output_saved =
+        $null -ne $persistence -and
+        [bool]$persistence.output_save_attempted -and
+        [bool]$persistence.output_saved
+    $output_pending =
+        $null -ne $persistence -and
+        [bool]$persistence.state_save_scheduled -and
+        [bool]$persistence.output_retry_scheduled -and
+        -not [bool]$persistence.output_save_attempted
+    Assert-True `
+        -Condition ($output_saved -or $output_pending) `
+        -Message (
+            "$Description should either save output or report persistence pending/retrying. " +
+            "Terminal=$($Terminal | ConvertTo-Json -Compress -Depth 12)")
 }
 
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
@@ -1451,10 +1523,10 @@ try {
     Assert-True `
         -Condition ([string]$paired.Left.status -eq 'completed' -and [string]$paired.Right.status -eq 'completed') `
         -Message 'Different formal targets should accept concurrent production label assignments.'
-    Assert-OutputSaveSucceeded `
+    Assert-OutputSaveAccepted `
         -Terminal $paired.Left `
         -Description 'formal-a spectrum 0 label assignment'
-    Assert-OutputSaveSucceeded `
+    Assert-OutputSaveAccepted `
         -Terminal $paired.Right `
         -Description 'formal-b spectrum 0 label assignment'
     [void](Invoke-GuiCommand -Instance $instanceA -Command 'wait.idle')
@@ -1631,27 +1703,27 @@ try {
     [void](Invoke-GuiCommand -Instance $instanceB -Command 'wait.idle')
 
     $script:CurrentStep = 'verify final task values, active selections, outputs, and tombstone'
-    Invoke-LabelVerification `
+    Invoke-LabelVerificationEventually `
         -SourcePath $fixtures['formal-a'].SourcePath `
         -Index 0 `
         -Code 5 `
         -CachePath $cachePath
-    Invoke-LabelVerification `
+    Invoke-LabelVerificationEventually `
         -SourcePath $fixtures['formal-a'].SourcePath `
         -Index 1 `
         -Code 7 `
         -CachePath $cachePath
-    Invoke-LabelVerification `
+    Invoke-LabelVerificationEventually `
         -SourcePath $fixtures['formal-b'].SourcePath `
         -Index 0 `
         -Code 7 `
         -CachePath $cachePath
-    Invoke-LabelVerification `
+    Invoke-LabelVerificationEventually `
         -SourcePath $fixtures['temporary-a'].SourcePath `
         -Index 0 `
         -Code 7 `
         -CachePath $cachePath
-    Invoke-LabelVerification `
+    Invoke-LabelVerificationEventually `
         -SourcePath $fixtures['temporary-b'].SourcePath `
         -Index 0 `
         -Code 5 `
@@ -1670,13 +1742,17 @@ try {
             [string]$deletedEntry.active_task_id -eq '' -and
             @($deletedEntry.tasks).Count -eq 0) `
         -Message 'The deleted task should remain tombstoned after a stale GUI cache patch.'
-    Invoke-StateFixture -Arguments @(
+    Invoke-StateFixtureEventually `
+        -Description 'formal-a durable label output' `
+        -Arguments @(
         '--verify-label-output',
         (Join-Path $sharedStateRoot 'outputs\formal-a.npy'),
         '--source', $fixtures['formal-a'].SourcePath,
         '--expected-values', '5,7,-1',
         '--task-id', 'quality')
-    Invoke-StateFixture -Arguments @(
+    Invoke-StateFixtureEventually `
+        -Description 'formal-b durable label output' `
+        -Arguments @(
         '--verify-label-output',
         (Join-Path $sharedStateRoot 'outputs\formal-b.npy'),
         '--source', $fixtures['formal-b'].SourcePath,

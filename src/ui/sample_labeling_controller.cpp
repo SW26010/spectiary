@@ -1724,14 +1724,20 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
                 *task);
         }
     };
-    if (persistence == PersistencePolicy::PersistOutputIfSelected &&
+    if ((persistence == PersistencePolicy::PersistOutputIfSelected ||
+         persistence ==
+             PersistencePolicy::PersistOutputIfSelectedInteractive) &&
         task != nullptr && task->output_path) {
+        const bool wait_for_commit_lock =
+            persistence == PersistencePolicy::PersistOutputIfSelected;
+        // Interactive shortcut writes use a zero-wait checkpoint attempt;
+        // structural mutations retain the bounded synchronous contract.
         // Persist the newest overlay before publishing the corresponding
         // array. A failed clean-state commit can then replay only this same
         // generation, never an older edit.
         mark_task_upsert();
         result.state_save_attempted = true;
-        result.state_saved = FlushStateCache();
+        result.state_saved = TrySaveStateCache(wait_for_commit_lock);
         if (!result.state_saved) {
             result.output_retry_scheduled =
                 ShouldRetryOutputSave(*task);
@@ -1772,7 +1778,7 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
         }
         mark_task_upsert();
         QueueStateSave();
-        result.state_saved = FlushStateCache();
+        result.state_saved = TrySaveStateCache(wait_for_commit_lock);
     } else if (persistence == PersistencePolicy::FlushStateSave) {
         mark_task_upsert();
         result.state_save_attempted = true;
@@ -1876,7 +1882,8 @@ SampleLabelingWriteOperationResult SampleLabelingController::AssignLabel(
         result.operation =
             CompleteMutation(
                 task,
-                PersistencePolicy::PersistOutputIfSelected,
+                PersistencePolicy::
+                    PersistOutputIfSelectedInteractive,
                 task->output_path
                     ? TaskProjectionEffect::Changed
                     : TaskProjectionEffect::Unchanged);
@@ -1901,7 +1908,8 @@ SampleLabelingWriteOperationResult SampleLabelingController::ClearLabel(std::siz
         result.operation =
             CompleteMutation(
                 task,
-                PersistencePolicy::PersistOutputIfSelected,
+                PersistencePolicy::
+                    PersistOutputIfSelectedInteractive,
                 task->output_path
                     ? TaskProjectionEffect::Changed
                     : TaskProjectionEffect::Unchanged);

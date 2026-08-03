@@ -2028,6 +2028,88 @@ void TestOutputWriteWaitsForPendingOverlayCommit()
         "maintenance should write the label after the pending overlay commit succeeds");
 }
 
+void TestInteractiveOutputLabelWritesDoNotWaitForCacheCommitLock()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_interactive_commit_contention");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "labels.npy";
+    specforge::SampleLabelingController controller(cache_path);
+    CreateFormalTask(
+        controller,
+        "shared-source",
+        "shared-task",
+        output_path,
+        5);
+    Require(
+        controller.ActivateTask("shared-task").accepted,
+        "interactive contention fixture should activate its formal task");
+
+    specforge::ExclusiveFileLeaseAcquireResult commit_lock =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        commit_lock.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "interactive contention fixture should hold the cache commit lock");
+
+    const auto assign_start = std::chrono::steady_clock::now();
+    const specforge::SampleLabelingWriteOperationResult assigned =
+        controller.AssignLabel(0, 5);
+    const auto assign_elapsed =
+        std::chrono::steady_clock::now() - assign_start;
+    Require(
+        assigned.write.changed &&
+            assigned.operation.accepted &&
+            !assigned.operation.state_saved &&
+            !assigned.operation.output_save_attempted &&
+            assigned.operation.output_retry_scheduled &&
+            assign_elapsed < std::chrono::milliseconds(250),
+        "interactive assign should retain its pending label without waiting for the cache lock");
+
+    const auto clear_start = std::chrono::steady_clock::now();
+    const specforge::SampleLabelingWriteOperationResult cleared =
+        controller.ClearLabel(0);
+    const auto clear_elapsed =
+        std::chrono::steady_clock::now() - clear_start;
+    Require(
+        cleared.write.changed &&
+            cleared.operation.accepted &&
+            !cleared.operation.state_saved &&
+            !cleared.operation.output_save_attempted &&
+            cleared.operation.output_retry_scheduled &&
+            clear_elapsed < std::chrono::milliseconds(250),
+        "interactive clear should retain its pending tombstone without waiting for the cache lock");
+
+    Require(
+        ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->values[0] ==
+                specforge::kUnlabeledSampleLabelCode,
+        "interactive edits should keep the newest in-memory label while persistence is pending");
+    commit_lock.lease.Reset();
+
+    RunMaintenanceUntilIdle(controller);
+    Require(
+        ReadTestInt32NpyPayload(output_path)[0] ==
+            specforge::kUnlabeledSampleLabelCode,
+        "maintenance should publish the newest label after the cache checkpoint commits");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const specforge::SampleLabelingTask* task =
+        FindTask(loaded.cache, "shared-source", "shared-task");
+    Require(
+        task != nullptr &&
+            task->pending_sample_indices.empty() &&
+            task->save_state.kind ==
+                specforge::SampleLabelSaveStateKind::AutosavedToOutput,
+        "maintenance should persist the clean output state after retrying the pending overlay");
+}
+
 void TestSuccessfulOutputCannotRetainOlderPendingOverlay()
 {
     const std::filesystem::path directory =
@@ -5393,6 +5475,7 @@ int main(int argc, char* argv[])
         TestFailedExternalOutputPersistsPendingOverlay();
         TestFailedExternalOutputRetriesAfterBackoff();
         TestOutputWriteWaitsForPendingOverlayCommit();
+        TestInteractiveOutputLabelWritesDoNotWaitForCacheCommitLock();
         TestSuccessfulOutputCannotRetainOlderPendingOverlay();
         TestDifferentFormalTargetsMergeAcrossInstances();
         TestDifferentTemporaryTasksMergeAcrossInstances();
