@@ -259,7 +259,7 @@ private:
     void RetirePendingSessionViews();
     void RetireResources(
         std::vector<BackgroundRetirementHandle> resources);
-    void RunMaintenance(
+    [[nodiscard]] SourceCollectionSessionAction RunMaintenance(
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<
         LocalUserStateSaveScheduler::TimePoint>

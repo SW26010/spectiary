@@ -1169,7 +1169,8 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     DrainSourceLoads();
     application_settings_.RunMaintenance(now);
-    source_activation_.RunMaintenance(now);
+    HandleSessionAction(
+        source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);
 }
 
@@ -2024,11 +2025,26 @@ SourceCollectionSessionResult ShellUi::SubmitSessionCommand(
         SourceCollectionActivationTransaction::NavigationIntent>
         navigation)
 {
+    const bool labeling_command =
+        command.intent_kind() ==
+        SourceCollectionSessionIntentKind::ActiveSampleWorkflow;
     SourceCollectionSessionResult result =
         source_activation_.Submit(
             std::move(command),
             std::move(navigation));
     HandleSessionAction(result.action);
+    if (labeling_command ||
+        result.labeling_issue !=
+            SampleLabelingOperationResult::Issue::None ||
+        !result.message.empty()) {
+        sample_workflow_panel_ui_.CaptureLabelingOperationResult(
+            result,
+            application_settings_.View().language);
+    } else if (
+        result.action.source_roster_changed ||
+        result.action.snapshot_changed) {
+        sample_workflow_panel_ui_.ClearLabelingOperationMessage();
+    }
     return result;
 }
 

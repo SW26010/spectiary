@@ -52,8 +52,8 @@ aggregates owner-reported health.
 | Condition | User signal | Continue? | Clear condition |
 | --- | --- | --- | --- |
 | Missing cache | None; use defaults | Yes | Not applicable |
-| Corrupt cache | Non-blocking owner warning | Yes, with defaults | That owner successfully writes valid replacement state |
-| Unsupported schema | Non-blocking owner warning | Yes, without reading unsupported state | That owner successfully writes state after a user mutation |
+| Corrupt cache | Non-blocking owner warning; a later write attempt reports retrying | Yes, with read-only salvage or defaults; labeling cache commits fail closed and preserve the original bytes | The cache is repaired or removed, then that owner successfully commits against the trusted latest state |
+| Unsupported schema | Non-blocking owner warning; a later write attempt reports retrying | Yes, without reading unsupported state; labeling cache commits fail closed and preserve the original bytes | The cache is migrated, replaced, or removed, then that owner successfully commits against the trusted latest state |
 | Partial save | Overall `retrying` health naming each failed owner while retries remain scheduled | Yes; attempt every other dirty cache | Each failed owner succeeds independently |
 | Retrying | Overall `retrying` health; existing retry deadline remains active | Yes | First successful retry |
 | Recovered | Overall recovery health | Yes | Next user mutation owned by the recovered cache |

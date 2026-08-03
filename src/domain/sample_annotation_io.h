@@ -16,6 +16,21 @@ namespace specforge {
 
 using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
+struct SampleAnnotationArtifactIdentitySet {
+    // Non-probing identities keep an offline historical artifact addressable.
+    std::vector<std::string> stable_path_keys;
+    // Physical identities collapse junction, drive-mapping, and UNC aliases
+    // when the target can be probed; they are an optional enhancement over
+    // stable_path_keys, not a prerequisite for editing.
+    std::vector<std::string> physical_path_keys;
+    bool all_paths_physically_resolved = false;
+};
+
+[[nodiscard]] SampleAnnotationArtifactIdentitySet
+SampleAnnotationArtifactIdentities(
+    const std::filesystem::path& result_path,
+    bool resolve_physical_paths = true);
+
 enum class SampleAnnotationKind {
     CategoricalInteger,
     Text,

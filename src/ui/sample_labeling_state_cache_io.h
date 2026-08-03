@@ -2,6 +2,7 @@
 
 #include "domain/sample_labeling.h"
 
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
@@ -25,17 +26,63 @@ struct SampleLabelingStateCache {
     std::unordered_map<std::string, SampleLabelingSourceState> sources;
 };
 
+enum class SampleLabelingStateCacheLoadIssueKind {
+    None,
+    ReadFailed,
+    InvalidDocument,
+    UnsupportedFormatOrSchema,
+};
+
 struct SampleLabelingStateCacheLoadResult {
     SampleLabelingStateCache cache;
     std::string warning;
+    SampleLabelingStateCacheLoadIssueKind issue_kind =
+        SampleLabelingStateCacheLoadIssueKind::None;
+    std::string diagnostic_detail;
+};
+
+struct SampleLabelingSourceMetadataPatch {
+    std::size_t sample_count = 0;
+    std::string source_name;
+    std::string source_fingerprint;
+    std::string context_fingerprint;
+};
+
+struct SampleLabelingSourceStatePatch {
+    std::optional<SampleLabelingSourceMetadataPatch> metadata;
+    std::vector<SampleLabelingTask> task_upserts;
+    // Creation retries must never replace a task that appeared after the
+    // candidate was prepared. These IDs are checked while the commit lock is
+    // held and remain attached to later edits of the same pending task.
+    std::unordered_set<std::string> task_ids_expected_absent;
+    std::vector<std::string> task_tombstones;
+    bool active_task_selection_changed = false;
+    std::optional<std::string> active_task_id;
+};
+
+struct SampleLabelingStateCachePatch {
+    std::unordered_map<std::string, SampleLabelingSourceStatePatch>
+        sources;
 };
 
 enum class SampleLabelingStateCacheLoadPolicy {
     AllowPersistentOutputs,
+    AllowPersistentOutputsWithoutResultHydration,
     InternalDraftsOnly,
 };
 
 [[nodiscard]] std::filesystem::path DefaultSampleLabelingStateCachePath();
+
+[[nodiscard]] std::filesystem::path
+SampleLabelingStateCoordinationDirectory(
+    const std::filesystem::path& state_cache_path);
+
+// Returns the mandatory normalized-path coordination directory followed by
+// any optional physical-identity alias directories. The order is stable and
+// callers that acquire more than one lock must use it as returned.
+[[nodiscard]] std::vector<std::filesystem::path>
+SampleLabelingStateCoordinationDirectories(
+    const std::filesystem::path& state_cache_path);
 
 [[nodiscard]] SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
     const std::filesystem::path& path,
@@ -46,6 +93,20 @@ enum class SampleLabelingStateCacheLoadPolicy {
 
 [[nodiscard]] bool SaveSampleLabelingStateCache(
     const std::filesystem::path& path,
-    const SampleLabelingStateCache& cache);
+    const SampleLabelingStateCache& cache,
+    std::string* error_message = nullptr);
+
+[[nodiscard]] bool CommitSampleLabelingStateCachePatch(
+    const std::filesystem::path& path,
+    const SampleLabelingStateCachePatch& patch,
+    std::string* error_message = nullptr,
+    std::chrono::milliseconds commit_lock_wait =
+        std::chrono::milliseconds::zero());
+
+[[nodiscard]] bool HasSampleLabelingOutputPathConflict(
+    const SampleLabelingStateCache& cache,
+    const std::filesystem::path& output_path,
+    std::string_view source_identity,
+    std::string_view task_id);
 
 }  // namespace specforge

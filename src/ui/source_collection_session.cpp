@@ -637,23 +637,10 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     const NavigationLatencyTimePoint pending_follow_up_started_at =
         target_resolution != nullptr ? NavigationLatencyTrace::Now()
                                      : NavigationLatencyTimePoint{};
-    const std::optional<std::size_t> pending_sample_index_after =
-        workflow_->pending_sample_index();
-    if (pending_sample_index_after == pending_sample_index_before &&
-        pending_background_spectrum_index_ == pending_sample_index_before) {
-        pending_background_spectrum_index_.reset();
-    }
-    result.follow_up_spectrum_index = std::exchange(pending_background_spectrum_index_, std::nullopt);
-    const SpectrumSnapshotHandle active_snapshot_after = roster_->snapshot();
-    const bool previous_source_follow_up_retained =
-        pending_sample_index_before &&
-        pending_sample_index_after == pending_sample_index_before &&
-        pending_source_path_before && active_snapshot_after &&
-        SourcePathIdentityKey(*pending_source_path_before) ==
-            SourcePathIdentityKey(active_snapshot_after->source.path);
-    if (pending_sample_index_before && !previous_source_follow_up_retained) {
-        result.canceled_source_follow_up_path = pending_source_path_before;
-    }
+    FinalizePendingSourceFollowUp(
+        result,
+        pending_sample_index_before,
+        pending_source_path_before);
     if (target_resolution != nullptr) {
         target_resolution->pending_activation_supersede_ns +=
             ElapsedNavigationResolutionNanoseconds(
@@ -676,6 +663,40 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     AppendPendingBackgroundRetirement(
         result.background_retirement);
     return result;
+}
+
+void SourceCollectionSession::FinalizePendingSourceFollowUp(
+    SourceCollectionSessionResult& result,
+    std::optional<std::size_t> pending_sample_index_before,
+    const std::optional<std::filesystem::path>&
+        pending_source_path_before)
+{
+    const std::optional<std::size_t> pending_sample_index_after =
+        workflow_->pending_sample_index();
+    if (pending_sample_index_after == pending_sample_index_before &&
+        pending_background_spectrum_index_ ==
+            pending_sample_index_before) {
+        pending_background_spectrum_index_.reset();
+    }
+    result.follow_up_spectrum_index = std::exchange(
+        pending_background_spectrum_index_,
+        std::nullopt);
+    const SpectrumSnapshotHandle active_snapshot_after =
+        roster_->snapshot();
+    const bool previous_source_follow_up_retained =
+        pending_sample_index_before &&
+        pending_sample_index_after ==
+            pending_sample_index_before &&
+        pending_source_path_before &&
+        active_snapshot_after &&
+        SourcePathIdentityKey(*pending_source_path_before) ==
+            SourcePathIdentityKey(
+                active_snapshot_after->source.path);
+    if (pending_sample_index_before &&
+        !previous_source_follow_up_retained) {
+        result.canceled_source_follow_up_path =
+            pending_source_path_before;
+    }
 }
 
 const SourceCollectionSessionView& SourceCollectionSession::View()
@@ -1200,25 +1221,47 @@ bool SourceCollectionSession::CancelActivePendingSampleNavigation()
     return true;
 }
 
-std::vector<BackgroundRetirementHandle>
+SourceCollectionSessionResult
 SourceCollectionSession::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
 {
+    SourceCollectionSessionResult result;
     const LocalUserStateHealthView persistence_before =
         PersistenceHealth();
+    const std::optional<std::size_t>
+        pending_sample_index_before =
+            workflow_->pending_sample_index();
+    const std::optional<std::filesystem::path>
+        pending_source_path_before =
+            pending_sample_index_before &&
+                roster_->snapshot()
+            ? std::optional<std::filesystem::path>{
+                  roster_->snapshot()->source.path}
+            : std::nullopt;
+    pending_background_spectrum_index_.reset();
     source_session_state_->RunMaintenance(now, SavedSourcesWithAnnotations(), roster_->current_source_index());
-    if (workflow_->RunMaintenance(now)) {
+    ApplyWorkflowTransitionOutcome(
+        result,
+        workflow_->RunMaintenance(
+            now,
+            roster_->snapshot()));
+    FinalizePendingSourceFollowUp(
+        result,
+        pending_sample_index_before,
+        pending_source_path_before);
+    if (result.view_invalidated) {
         InvalidateView();
     }
     const LocalUserStateHealthView persistence_after =
         PersistenceHealth();
     if (persistence_before.kind != persistence_after.kind ||
         persistence_before.messages != persistence_after.messages) {
+        result.view_invalidated = true;
         InvalidateView();
     }
-    std::vector<BackgroundRetirementHandle> retirement;
-    AppendPendingBackgroundRetirement(retirement);
-    return retirement;
+    AppendPendingBackgroundRetirement(
+        result.background_retirement);
+    return result;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SourceCollectionSession::NextMaintenanceDeadline() const
@@ -1416,6 +1459,11 @@ void SourceCollectionSession::ApplyWorkflowTransitionOutcome(
     if (outcome.label_write) {
         result.label_write =
             std::move(outcome.label_write);
+    }
+    if (outcome.labeling_issue !=
+        SampleLabelingOperationResult::Issue::None) {
+        result.labeling_issue =
+            outcome.labeling_issue;
     }
     if (!outcome.message.empty()) {
         result.message = std::move(outcome.message);

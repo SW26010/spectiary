@@ -95,6 +95,7 @@ PreparedSampleWorkflowState PrepareSampleWorkflowStateFromCache(
         throw std::invalid_argument("prepared workflow sample count does not match the source context");
     }
     PreparedSampleWorkflowState prepared;
+    prepared.prepared_index = prepared_index;
 
     if (labeling_state_override != nullptr) {
         prepared.labeling_source_state = *labeling_state_override;

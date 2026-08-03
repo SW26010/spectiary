@@ -14,6 +14,8 @@
 
 namespace specforge {
 
+struct ShellUiTestAccess;
+
 using SourceCollectionPathPicker = std::function<std::optional<std::filesystem::path>()>;
 using SourceCollectionPathOpener = std::function<void(const std::filesystem::path&)>;
 class SourceCollectionPanelUi {
@@ -53,6 +55,8 @@ public:
         const SourceCollectionPathPicker& choose_annotation_file);
 
 private:
+    friend struct ShellUiTestAccess;
+
     struct NavigationNumberInputCommit {
         std::string draft;
         std::uint64_t topology_revision = 0;

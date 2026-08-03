@@ -1,6 +1,7 @@
 #include "ui/sample_workflow_panel.h"
 
 #include "app/local_user_state.h"
+#include "ui/sample_labeling_issue_text.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -905,6 +906,12 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     pending_annotation_activation_relationship_ = SampleAnnotationWorkflowRelationship::PlainAnnotation;
 }
 
+void SampleWorkflowPanelUi::ClearLabelingOperationMessage()
+{
+    labeling_operation_message_.clear();
+    labeling_operation_text_id_.reset();
+}
+
 void SampleWorkflowPanelUi::ResetLabelShortcutCapture()
 {
     label_shortcut_capture_active_ = false;
@@ -972,6 +979,30 @@ void SampleWorkflowPanelUi::RenderLabeling(
         shortcut);
 }
 
+void SampleWorkflowPanelUi::CaptureLabelingOperationResult(
+    const SourceCollectionSessionResult& result,
+    UiLanguage language)
+{
+    const SampleLabelingIssueTextDescriptor issue_text =
+        SampleLabelingIssueTextFor(result.labeling_issue);
+    const UiTextId message_text_id = issue_text.text_id;
+    if (message_text_id != UiTextId::Count) {
+        labeling_operation_text_id_ = message_text_id;
+        labeling_operation_message_ =
+            UiText(
+                language,
+                message_text_id);
+        return;
+    }
+    if (!result.message.empty()) {
+        labeling_operation_text_id_.reset();
+        labeling_operation_message_ =
+            result.message;
+    } else {
+        ClearLabelingOperationMessage();
+    }
+}
+
 void SampleWorkflowPanelUi::RenderLabeling(
     PanelSessionInteraction& interaction,
     UiLanguage language,
@@ -979,14 +1010,29 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
     SampleWorkflowShortcut& shortcut)
 {
-    const auto submit = [&interaction](
-                            SourceCollectionSessionIntent intent) {
-        return interaction.Submit(std::move(intent)).result;
+    const auto capture_result = [this, language](
+                                    SourceCollectionSessionResult result) {
+        CaptureLabelingOperationResult(
+            result,
+            language);
+        return result;
     };
-    const auto submit_auto_advance = [&interaction](
-                                         SourceCollectionSessionIntent intent) {
-        return interaction.SubmitAutoAdvance(
-            std::move(intent)).result;
+    const auto submit = [&interaction, &capture_result](
+                            SourceCollectionSessionIntent intent) {
+        return capture_result(
+            std::move(
+                interaction.Submit(
+                    std::move(intent))
+                    .result));
+    };
+    const auto submit_auto_advance =
+        [&interaction, &capture_result](
+            SourceCollectionSessionIntent intent) {
+            return capture_result(
+                std::move(
+                    interaction.SubmitAutoAdvance(
+                        std::move(intent))
+                        .result));
     };
     shortcut = {};
     const std::string window_label = StableUiLabel(
@@ -1153,6 +1199,15 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::PopID();
         }
         ImGui::EndCombo();
+    }
+    const std::string_view labeling_operation_message =
+        labeling_operation_text_id_
+        ? UiText(language, *labeling_operation_text_id_)
+        : std::string_view(labeling_operation_message_);
+    if (!labeling_operation_message.empty()) {
+        ImGui::TextWrapped(
+            "%s",
+            std::string(labeling_operation_message).c_str());
     }
 
     bool labeling_drop_accepted = false;

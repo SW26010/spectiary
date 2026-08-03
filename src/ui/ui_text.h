@@ -345,6 +345,9 @@ enum class UiTextId {
     SaveFailedValue,
     OutputPathAlreadyUsed,
     CouldNotSaveLabelingOutput,
+    LabelingEditLeaseUnavailable,
+    LabelingEditLeaseFailed,
+    LabelingEditTargetChanged,
     LabelSaveStateInternalDraft,
     LabelSaveStateAutosaved,
     LabelSaveStatePending,
@@ -498,6 +501,10 @@ enum class UiTextId {
 [[nodiscard]] std::string_view UiText(
     UiLanguage language,
     SampleLabelSaveMessageKind message_kind) noexcept;
+// Maps the stable numeric value of SampleLabelingOperationResult::Issue to
+// the single localized message source. The controller enum is intentionally
+// kept out of this low-level text header to avoid a UI dependency cycle.
+[[nodiscard]] UiTextId LabelingIssueTextId(int issue_value) noexcept;
 [[nodiscard]] std::string_view UiText(
     UiLanguage language,
     LocalUserStateArea area) noexcept;

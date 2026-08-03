@@ -40,6 +40,33 @@ Win32FullPath(const std::filesystem::path& path)
 }
 
 [[nodiscard]] inline std::filesystem::path
+Win32ExtendedLengthPath(const std::filesystem::path& path)
+{
+    std::filesystem::path full_path =
+        Win32FullPath(path);
+    if (full_path.empty()) {
+        return {};
+    }
+
+    std::wstring text = full_path.wstring();
+    constexpr std::wstring_view kExtendedPrefix =
+        L"\\\\?\\";
+    constexpr std::wstring_view kUncPrefix =
+        L"\\\\";
+    if (text.starts_with(kExtendedPrefix)) {
+        return full_path;
+    }
+    if (text.starts_with(kUncPrefix)) {
+        text = L"\\\\?\\UNC\\" +
+            text.substr(kUncPrefix.size());
+    } else {
+        text = L"\\\\?\\" + text;
+    }
+    return std::filesystem::path(
+        std::move(text));
+}
+
+[[nodiscard]] inline std::filesystem::path
 Win32FinalPathByHandle(HANDLE handle)
 {
     if (handle == nullptr ||

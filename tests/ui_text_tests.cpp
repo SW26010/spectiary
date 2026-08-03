@@ -1,5 +1,6 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "ui/sample_labeling_issue_text.h"
 #include "ui/source_collection_session_types.h"
 #include "ui/spectral_lines_name_localization.h"
 #include "ui/ui_text.h"
@@ -645,6 +646,18 @@ void TestSampleWorkflowMappingsAreExact()
             UiTextId::CouldNotSaveLabelingOutput,
             "Could not save labeling output.",
             "无法保存标注输出。"},
+        ExpectedText{
+            UiTextId::LabelingEditLeaseUnavailable,
+            "This labeling target is already being edited by another SpecForge instance.",
+            "此标注目标正在由另一个 SpecForge 实例编辑。"},
+        ExpectedText{
+            UiTextId::LabelingEditLeaseFailed,
+            "SpecForge could not secure this labeling target for editing.",
+            "SpecForge 无法取得此标注目标的编辑租约。"},
+        ExpectedText{
+            UiTextId::LabelingEditTargetChanged,
+            "This labeling task changed on disk and could not be activated from the stale view.",
+            "此标注任务已在磁盘上发生变化，无法从过期视图激活。"},
         ExpectedText{
             UiTextId::LabelSaveStateInternalDraft,
             "State: temporary local draft; use Save to... to create a labeling annotation.",
@@ -1422,6 +1435,36 @@ void TestCountSentinelIsNotDisplayable()
         "count sentinel should not be displayable in Chinese");
 }
 
+void TestLabelingIssueDescriptorIsTheSingleMapping()
+{
+    using Issue = specforge::SampleLabelingOperationResult::Issue;
+    constexpr std::array kIssues = {
+        Issue::EditLeaseUnavailable,
+        Issue::EditLeaseFailed,
+        Issue::EditTargetChanged};
+    for (const Issue issue : kIssues) {
+        const specforge::SampleLabelingIssueTextDescriptor descriptor =
+            specforge::SampleLabelingIssueTextFor(issue);
+        Require(
+            descriptor.text_id != specforge::UiTextId::Count &&
+                specforge::LabelingIssueTextId(
+                    static_cast<int>(issue)) == descriptor.text_id,
+            "labeling issue should resolve through the shared text descriptor");
+        Require(
+            specforge::UiText(
+                specforge::UiLanguage::English,
+                descriptor.text_id) == descriptor.english &&
+                specforge::UiText(
+                    specforge::UiLanguage::SimplifiedChinese,
+                    descriptor.text_id) == descriptor.simplified_chinese,
+            "catalog entries should come from the shared labeling issue descriptor");
+    }
+    Require(
+        specforge::SampleLabelingIssueTextFor(Issue::None).text_id ==
+            specforge::UiTextId::Count,
+        "no labeling issue should not produce a display message");
+}
+
 }  // namespace
 
 int main()
@@ -1442,6 +1485,7 @@ int main()
         TestSourceLoadFailuresAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();
         TestCountSentinelIsNotDisplayable();
+        TestLabelingIssueDescriptorIsTheSingleMapping();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';

@@ -433,6 +433,7 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
 
     const SampleLabelResultWriteOutcome write =
         SampleAnnotationIoAdapter{}.SaveLabelResult(*task.output_path, task, source);
+    result.array_saved = write.array_saved;
     if (!write.array_saved) {
         if (write.message.empty()) {
             result.message = "could not save label output";

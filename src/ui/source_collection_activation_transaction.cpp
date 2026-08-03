@@ -320,12 +320,18 @@ SourceCollectionActivationTransaction::Drain(
     return action;
 }
 
-void SourceCollectionActivationTransaction::
+SourceCollectionSessionAction
+SourceCollectionActivationTransaction::
     RunMaintenance(
         LocalUserStateSaveScheduler::TimePoint now)
 {
-    RetireResources(session_.RunMaintenance(now));
+    SourceCollectionSessionResult result =
+        session_.RunMaintenance(now);
+    ApplyPresentationAction(result.action);
+    QueueSessionFollowUp(result);
+    RetireSessionResources(result);
     RetirePendingSessionViews();
+    return result.action;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint>

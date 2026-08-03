@@ -3,6 +3,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "domain/source_path_identity.h"
+#include "ui/sample_labeling_controller.h"
 #include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -78,6 +79,45 @@ struct ShellUiTestAccess {
     static void BeginDeferredRestore(ShellUi& shell)
     {
         shell.BeginDeferredSourceRestore();
+    }
+
+    static void SyncNavigationInputs(ShellUi& shell)
+    {
+        shell.HandleSessionAction(
+            SourceCollectionSessionAction{
+                .navigation_inputs_changed = true});
+    }
+
+    static std::optional<std::uint64_t>
+    SynchronizedNavigationTopologyRevision(
+        const ShellUi& shell)
+    {
+        return shell.source_collection_panel_ui_.
+            synchronized_navigation_topology_revision_;
+    }
+
+    static void CaptureLabelingOperationResult(
+        ShellUi& shell,
+        const SourceCollectionSessionResult& result)
+    {
+        shell.sample_workflow_panel_ui_.
+            CaptureLabelingOperationResult(
+                result,
+                UiLanguage::English);
+    }
+
+    [[nodiscard]] static std::string_view
+    LabelingOperationMessage(const ShellUi& shell)
+    {
+        return shell.sample_workflow_panel_ui_.
+            labeling_operation_message_;
+    }
+
+    static void HandleSessionAction(
+        ShellUi& shell,
+        const SourceCollectionSessionAction& action)
+    {
+        shell.HandleSessionAction(action);
     }
 
     static std::size_t PendingLoadCount(const ShellUi& shell)
@@ -3715,6 +3755,296 @@ void TestAutomationPanelProjectionRequiresExactNormalShellPresent()
         "an immersive frame without a normal Shell panel draw must not publish panel visibility");
 }
 
+void TestMaintenanceResynchronizesRetainedNavigationTopology()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path source_path =
+        UniqueTempPath("_maintenance_navigation_source.npy");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_maintenance_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_maintenance_labeling.json");
+    const std::filesystem::path workflow_cache =
+        UniqueTempPath("_maintenance_workflow.json");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_maintenance_labels.npy");
+    {
+        std::ofstream stream(
+            source_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            stream.good(),
+            "maintenance topology fixture should create its source");
+        stream << "fixture";
+    }
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 1);
+    specforge::SourceCollectionContext context;
+    context.identity =
+        specforge::BuildSourceCollectionIdentity(
+            *snapshot,
+            specforge::CaptureSourceCollectionSingleFileState(
+                source_path));
+    context.manifest.sample_names = {
+        "alpha",
+        "beta",
+        "gamma"};
+    const specforge::SampleWorkflowPreparationPaths paths{
+        labeling_cache,
+        workflow_cache,
+        navigation_cache};
+
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "temporary-labeling-task",
+            "Maintenance task",
+            3);
+    task.label_set.labels.push_back(
+        specforge::SampleLabelDefinition{
+            2,
+            "selected",
+            's'});
+    task.values = {-1, 2, 2};
+    task.output_path = output_path;
+    Require(
+        specforge::PersistSampleLabelingTaskResult(
+            task,
+            nullptr)
+            .output_saved,
+        "maintenance topology fixture should persist its formal artifact set");
+    specforge::SampleLabelingStateCache labeling_state;
+    specforge::SampleLabelingSourceState labeling_source;
+    labeling_source.sample_count = 3;
+    labeling_source.source_name =
+        context.identity.source_name;
+    labeling_source.source_fingerprint =
+        context.identity.source_fingerprint;
+    labeling_source.context_fingerprint =
+        context.identity.context_fingerprint;
+    labeling_source.tasks.push_back(task);
+    labeling_state.sources.emplace(
+        context.identity.id,
+        std::move(labeling_source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            labeling_cache,
+            labeling_state),
+        "maintenance topology fixture should persist its inactive task");
+
+    {
+        specforge::SourceCollectionSession seed(
+            {},
+            navigation_cache,
+            labeling_cache,
+            workflow_cache);
+        specforge::PreparedSampleWorkflowState prepared =
+            specforge::PrepareSampleWorkflowState(
+                *snapshot,
+                context,
+                1,
+                paths);
+        Require(
+            seed.OpenPreparedSource(
+                    source_path,
+                    1,
+                    snapshot,
+                    context,
+                    std::move(prepared))
+                .loaded,
+            "maintenance topology fixture should open its seed source");
+        const std::string filter_source_id =
+            "labeling:temporary-labeling-task";
+        (void)seed.Submit(
+            specforge::SourceCollectionSessionIntent::
+                ApplySampleFiltering(
+                    specforge::SampleFilteringIntent::
+                        AddSource(filter_source_id)));
+        (void)seed.Submit(
+            specforge::SourceCollectionSessionIntent::
+                ApplySampleFiltering(
+                    specforge::SampleFilteringIntent::
+                        SetFilterValueSelected(
+                            filter_source_id,
+                            "2",
+                            true)));
+        Require(
+            seed.FlushStateCaches(),
+            "maintenance topology fixture should persist seed workflow state");
+    }
+
+    specforge::SampleLabelingStateCacheLoadResult pending =
+        specforge::LoadSampleLabelingStateCache(
+            labeling_cache);
+    auto pending_source = pending.cache.sources.find(
+        context.identity.id);
+    Require(
+        pending_source != pending.cache.sources.end() &&
+            pending_source->second.tasks.size() == 1,
+        "maintenance topology fixture should load its task");
+    pending_source->second.active_task_id.reset();
+    pending_source->second.tasks[0]
+        .pending_sample_indices.insert(0);
+    pending_source->second.tasks[0].save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+    pending_source->second.tasks[0].save_state.pending_count = 1;
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            labeling_cache,
+            pending.cache),
+        "maintenance topology fixture should persist a pending retry");
+
+    specforge::SourceCollectionSession session(
+        {},
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    specforge::PreparedSampleWorkflowState prepared =
+        specforge::PrepareSampleWorkflowState(
+            *snapshot,
+            context,
+            1,
+            paths);
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   1,
+                   snapshot,
+                   context,
+                   std::move(prepared))
+            .loaded,
+        "maintenance topology fixture should open its stale source");
+    Require(
+        session.View().navigation.sequence_count == 2 &&
+            session.View().navigation.current_sequence_position == 0,
+        "maintenance topology fixture should preheat the current row and its pending successor");
+    std::promise<void> row_two_entered_promise;
+    std::shared_future<void> row_two_entered =
+        row_two_entered_promise.get_future().share();
+    std::promise<void> release_row_two_promise;
+    std::shared_future<void> release_row_two =
+        release_row_two_promise.get_future().share();
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [&row_two_entered_promise, release_row_two](
+            const std::filesystem::path& source,
+            std::size_t index,
+            const auto& canceled) {
+            if (index == 2) {
+                row_two_entered_promise.set_value();
+                WaitForRelease(
+                    release_row_two,
+                    canceled,
+                    "timed out waiting to cancel the stale maintenance follow-up");
+            }
+            return MakeSnapshot(source, index);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const std::function<void()>& checkpoint) {
+            checkpoint();
+            return specforge::
+                SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = paths;
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            std::move(session),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+    Access::SyncNavigationInputs(*shell);
+    const std::optional<std::uint64_t> old_revision =
+        Access::SynchronizedNavigationTopologyRevision(
+            *shell);
+    const specforge::SourceCollectionSessionResult pending_navigation =
+        Access::Submit(
+            *shell,
+            specforge::SourceCollectionSessionIntent::
+                UpdateSampleNavigation(
+                    specforge::SampleNavigationIntent::Move(
+                        specforge::SampleNavigationRequest::Next())));
+    Require(
+        pending_navigation.follow_up_spectrum_index == 2 &&
+            row_two_entered.wait_for(2s) ==
+                std::future_status::ready,
+        "maintenance topology fixture should start the stale row-two follow-up");
+
+    specforge::SampleLabelingController editor(
+        labeling_cache);
+    editor.ActivateSource(context.identity);
+    Require(
+        editor.ActivateTask(
+                  "temporary-labeling-task")
+            .accepted &&
+            editor.ClearLabel(2).operation.output_saved &&
+            editor.DeactivateActiveTask().state_saved,
+        "maintenance topology editor should publish the latest task and release it");
+
+    const auto deadline =
+        Access::Session(*shell).NextMaintenanceDeadline();
+    Require(
+        deadline.has_value(),
+        "pending output should schedule Shell maintenance");
+    shell->RunMaintenance(*deadline);
+    const specforge::SourceCollectionSessionView latest =
+        Access::Session(*shell).View();
+    const std::optional<std::uint64_t> synchronized_revision =
+        Access::SynchronizedNavigationTopologyRevision(
+            *shell);
+    Require(
+        Access::PendingLoadCount(*shell) == 0 &&
+            latest.navigation.sequence_count == 1 &&
+            latest.navigation.current_index == 1 &&
+            latest.navigation.current_sequence_position == 0,
+        "maintenance topology change should cancel the invalid row-two follow-up and retain the visible row");
+    Require(
+        old_revision &&
+            synchronized_revision &&
+            *synchronized_revision ==
+                latest.navigation.sequence_topology_revision &&
+            *synchronized_revision != *old_revision,
+        "Shell maintenance must route navigation topology actions through retained-input synchronization");
+    release_row_two_promise.set_value();
+}
+
+void TestShellWorkflowResetPreservesSameFrameLabelingIssue()
+{
+    using Access = specforge::ShellUiTestAccess;
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                {},
+                {},
+                {},
+                {}),
+            specforge::
+                MakeSourceCollectionLoadQueueForTesting());
+    specforge::SourceCollectionSessionResult rejected;
+    rejected.labeling_issue =
+        specforge::SampleLabelingOperationResult::Issue::
+            EditTargetChanged;
+    rejected.action.workflow_changed = true;
+    Access::CaptureLabelingOperationResult(
+        *shell,
+        rejected);
+    const std::string expected{
+        specforge::UiText(
+            specforge::UiLanguage::English,
+            specforge::UiTextId::
+                LabelingEditTargetChanged)};
+    Require(
+        Access::LabelingOperationMessage(*shell) ==
+            expected,
+        "Shell notice fixture should capture the structured labeling issue before workflow reset");
+
+    Access::HandleSessionAction(
+        *shell,
+        rejected.action);
+    Require(
+        Access::LabelingOperationMessage(*shell) ==
+            expected,
+        "same-frame Shell workflow reset must not erase the labeling issue captured by the submitting panel");
+}
+
 }  // namespace
 
 int main()
@@ -3743,6 +4073,8 @@ int main()
         TestCanceledPrefetchReportsOnlyAfterWorkerExit();
         TestAutomationSettingsUseApplicationSettingsOwner();
         TestAutomationPanelProjectionRequiresExactNormalShellPresent();
+        TestMaintenanceResynchronizesRetainedNavigationTopology();
+        TestShellWorkflowResetPreservesSameFrameLabelingIssue();
         TestShellFlushResultNamesEveryFailedOwner();
         return 0;
     } catch (const std::exception& error) {

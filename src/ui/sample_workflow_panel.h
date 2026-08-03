@@ -15,6 +15,10 @@
 
 namespace specforge {
 
+struct SampleWorkflowPanelUiTestAccess;
+struct ShellUiTestAccess;
+class ShellUi;
+
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();
@@ -52,6 +56,10 @@ public:
         bool* open);
 
 private:
+    friend struct SampleWorkflowPanelUiTestAccess;
+    friend struct ShellUiTestAccess;
+    friend class ShellUi;
+
     enum class LabelShortcutNoticeKind {
         None,
         CaptureInstructions,
@@ -65,8 +73,14 @@ private:
     void ResetLabelShortcutCapture();
     [[nodiscard]] std::string LabelShortcutNotice(
         UiLanguage language) const;
+    void CaptureLabelingOperationResult(
+        const SourceCollectionSessionResult& result,
+        UiLanguage language);
+    void ClearLabelingOperationMessage();
 
     std::string active_task_id_;
+    std::string labeling_operation_message_;
+    std::optional<UiTextId> labeling_operation_text_id_;
     std::optional<int> editing_label_code_;
     std::string label_name_edit_buffer_;
     std::array<char, 16> label_code_edit_buffer_ = {};

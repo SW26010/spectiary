@@ -3035,7 +3035,11 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
         "  \"schema_version\": 999,\n"
         "  \"sources\": []\n"
         "}\n");
-    WriteTextFile(labeling_cache, "{ invalid json");
+    const std::string corrupt_labeling_cache =
+        "{ invalid json";
+    WriteTextFile(
+        labeling_cache,
+        corrupt_labeling_cache);
     WriteTextFile(
         workflow_cache,
         "{\n"
@@ -3122,19 +3126,186 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
     const specforge::SourceCollectionStateFlushResult flush =
         session.FlushStateCachesWithStatus();
     Require(
-        flush.all_saved(),
-        "healthy cache paths should rewrite all independently loaded states");
+        flush.source_session_saved &&
+            flush.navigation_saved &&
+            !flush.labeling_saved &&
+            flush.workflow_saved,
+        "labeling should fail closed while the other independent cache owners repair their files");
     Require(
-        session.View().persistence.kind ==
-            specforge::LocalUserStateHealthKind::Healthy,
-        "a successful save of each warned owner should clear all load warnings");
+        ReadTextFile(labeling_cache) ==
+            corrupt_labeling_cache,
+        "fail-closed labeling persistence must preserve the corrupt source bytes");
+    Require(
+        HasPersistenceMessage(
+            session.View().persistence,
+            specforge::LocalUserStateArea::
+                SampleLabeling,
+            specforge::
+                LocalUserStateHealthMessageKind::
+                    SaveRetrying),
+        "fail-closed labeling persistence should report a retrying save");
     Require(
         session.Open(second_source_path).loaded,
         "the repaired-cache fixture should open another source");
     Require(
-        session.View().persistence.kind ==
-            specforge::LocalUserStateHealthKind::Healthy,
-        "adopting the same prepared cache snapshot must not resurrect cleared warnings");
+        ReadTextFile(labeling_cache) ==
+            corrupt_labeling_cache,
+        "opening another source must not overwrite the untrusted labeling cache");
+}
+
+void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_lease_switch_source.npy");
+    const std::filesystem::path first_annotation =
+        UniqueTempPath("_lease_switch_first.npy");
+    const std::filesystem::path second_annotation =
+        UniqueTempPath("_lease_switch_second.npy");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_lease_switch_labeling.json");
+    TouchFile(source_path);
+    specforge::SampleLabelSet first_labels;
+    first_labels.labels.push_back(
+        specforge::SampleLabelDefinition{
+            5,
+            "first",
+            'f'});
+    specforge::SampleLabelSet second_labels;
+    second_labels.labels.push_back(
+        specforge::SampleLabelDefinition{
+            7,
+            "second",
+            's'});
+    SaveLabelResultFixture(
+        first_annotation,
+        "first-task",
+        "First task",
+        {5, -1, -1},
+        first_labels,
+        true);
+    SaveLabelResultFixture(
+        second_annotation,
+        "second-task",
+        "Second task",
+        {7, -1, -1},
+        second_labels,
+        true);
+
+    const auto make_session = [&]() {
+        return PreparedSession(
+            [source_path](
+                const std::filesystem::path& path,
+                std::size_t spectrum_index) {
+                Require(
+                    path == source_path,
+                    "lease-switch fixture should load its source");
+                return MakeSnapshot(
+                    source_path,
+                    3,
+                    spectrum_index);
+            },
+            {},
+            UniqueTempPath("_lease_switch_navigation.json"),
+            labeling_cache,
+            UniqueTempPath("_lease_switch_workflow.json"));
+    };
+
+    {
+        PreparedSession seed = make_session();
+        Require(
+            seed.Open(
+                    source_path,
+                    0,
+                    {first_annotation, second_annotation})
+                .loaded,
+            "lease-switch seed should open the source");
+        (void)Submit(
+            seed,
+            ActivateLabelingTaskFromAnnotation(
+                first_annotation));
+        Require(
+            seed.View().labeling.has_active_task &&
+                seed.View().labeling.task_id ==
+                    "first-task",
+            "lease-switch seed should register the first task");
+        (void)Submit(
+            seed,
+            DeactivateActiveLabelingTask());
+        Require(
+            !seed.View().labeling.has_active_task,
+            "lease-switch seed should deactivate the first task");
+        (void)Submit(
+            seed,
+            ActivateLabelingTaskFromAnnotation(
+                second_annotation));
+        Require(
+            seed.View().labeling.has_active_task &&
+                seed.View().labeling.task_id ==
+                    "second-task",
+            "lease-switch seed should register the second task");
+        (void)Submit(
+            seed,
+            DeactivateActiveLabelingTask());
+        Require(
+            !seed.View().labeling.has_active_task,
+            "lease-switch seed should deactivate the second task");
+        Require(
+            seed.FlushStateCaches(),
+            "lease-switch seed should flush both task records");
+    }
+
+    PreparedSession first = make_session();
+    PreparedSession second = make_session();
+    Require(
+        first.Open(
+                source_path,
+                0,
+                {first_annotation, second_annotation})
+            .loaded &&
+            second.Open(
+                source_path,
+                0,
+                {first_annotation, second_annotation})
+                .loaded,
+        "both lease-switch instances should load the source");
+    (void)Submit(
+        first,
+        ActivateLabelingTaskFromAnnotation(
+            first_annotation));
+    Require(
+        first.View().labeling.has_active_task &&
+            first.View().labeling.task_id ==
+                "first-task",
+        "first instance should activate the first task");
+    (void)Submit(
+        second,
+        ActivateLabelingTaskFromAnnotation(
+            second_annotation));
+    Require(
+        second.View().labeling.has_active_task &&
+            second.View().labeling.task_id ==
+                "second-task",
+        "second instance should activate the second task");
+
+    const specforge::SourceCollectionSessionResult rejected =
+        Submit(
+            first,
+            ActivateLabelingTaskFromAnnotation(
+                second_annotation));
+    Require(
+        !rejected.changed &&
+            rejected.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable &&
+            rejected.message.find(
+                "already being edited") !=
+                std::string::npos,
+        "occupied annotation activation should report the target lease conflict");
+    Require(
+        first.View().labeling.has_active_task &&
+            first.View().labeling.task_id ==
+                "first-task",
+        "rejected target activation must keep the current editing selection");
 }
 
 void TestDirectPreparedWorkflowAdoptsCacheHealthAndNavigationBase()
@@ -5238,8 +5409,7 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         workflow_result.action.workflow_changed &&
             workflow_result.view_invalidated,
         "maintenance fixture should create a temporary task");
-    const specforge::SourceCollectionSessionView*
-        maintenance_view_before = &session.View();
+    (void)session.View();
     std::vector<specforge::BackgroundRetirementHandle>
         workflow_retirement =
             session.TakeViewRetirement();
@@ -5252,6 +5422,33 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
             workflow_retirement.begin()),
         std::make_move_iterator(
             workflow_retirement.end()));
+    const specforge::SourceCollectionSessionResult
+        scheduled_labeling_result =
+            Submit(
+                session,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        7,
+                        "scheduled",
+                        's'}));
+    Require(
+        scheduled_labeling_result.changed &&
+            scheduled_labeling_result.view_invalidated,
+        "maintenance fixture should schedule a draft task save");
+    const specforge::SourceCollectionSessionView*
+        maintenance_view_before = &session.View();
+    std::vector<specforge::BackgroundRetirementHandle>
+        scheduled_labeling_retirement =
+            session.TakeViewRetirement();
+    Require(
+        scheduled_labeling_retirement.size() == 1,
+        "scheduled draft mutation should retire one projection generation");
+    retained_view_generations.insert(
+        retained_view_generations.end(),
+        std::make_move_iterator(
+            scheduled_labeling_retirement.begin()),
+        std::make_move_iterator(
+            scheduled_labeling_retirement.end()));
     bool maintenance_changed_projection = false;
     std::vector<specforge::BackgroundRetirementHandle>
         maintenance_retirement;
@@ -5262,12 +5459,15 @@ void TestSessionOwnsStableViewInvalidationAndRetirement()
         Require(
             deadline.has_value(),
             "scheduled labeling state should expose a maintenance deadline");
-        std::vector<specforge::BackgroundRetirementHandle>
-            retired = session.RunMaintenance(*deadline);
+        specforge::SourceCollectionSessionResult
+            maintenance =
+                session.RunMaintenance(*deadline);
         maintenance_retirement.insert(
             maintenance_retirement.end(),
-            std::make_move_iterator(retired.begin()),
-            std::make_move_iterator(retired.end()));
+            std::make_move_iterator(
+                maintenance.background_retirement.begin()),
+            std::make_move_iterator(
+                maintenance.background_retirement.end()));
         if (&session.View() !=
             maintenance_view_before) {
             maintenance_changed_projection = true;
@@ -6241,8 +6441,9 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
             UniqueTempPath("_workflow.json"));
         (void)Submit(reloaded, OpenSourceCollection(source_path, 0));
         Require(
-            reloaded.View().labeling.has_active_task,
-            "workflow flush should save labeling state even when source cache flush fails");
+            !reloaded.View().labeling.has_active_task &&
+                reloaded.View().labeling.has_temporary_task,
+            "workflow flush should save a read-only labeling task while the original instance holds its lease");
     }
 
     std::filesystem::remove(blocker);
@@ -6268,6 +6469,403 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
         session.View().persistence.kind ==
             specforge::LocalUserStateHealthKind::Healthy,
         "the next source-session mutation should clear recovered health");
+}
+
+struct LabelingProjectionHandoffFixture {
+    std::filesystem::path source_path;
+    std::filesystem::path output_path;
+    std::filesystem::path navigation_cache;
+    std::filesystem::path labeling_cache;
+    std::filesystem::path workflow_cache;
+    specforge::SourceCollectionContext context;
+};
+
+LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
+    std::string_view suffix,
+    bool select_first_label)
+{
+    LabelingProjectionHandoffFixture fixture;
+    fixture.source_path =
+        UniqueTempPath(std::string(suffix) + "_source.npy");
+    fixture.output_path =
+        UniqueTempPath(std::string(suffix) + "_labels.npy");
+    fixture.navigation_cache =
+        UniqueTempPath(std::string(suffix) + "_navigation.json");
+    fixture.labeling_cache =
+        UniqueTempPath(std::string(suffix) + "_labeling.json");
+    fixture.workflow_cache =
+        UniqueTempPath(std::string(suffix) + "_workflow.json");
+    TouchFile(fixture.source_path);
+    fixture.context.identity = {
+        std::string(suffix) + "-identity",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        3,
+    };
+    fixture.context.manifest.sample_names = {
+        "alpha",
+        "beta",
+        "gamma",
+    };
+
+    {
+        specforge::SourceCollectionSession seed(
+            {},
+            fixture.navigation_cache,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+        const specforge::SpectrumSnapshotHandle row_zero =
+            MakeSnapshot(fixture.source_path, 3, 0);
+        specforge::PreparedSampleWorkflowState prepared =
+            PrepareWorkflow(
+                row_zero,
+                fixture.context,
+                0,
+                fixture.labeling_cache,
+                fixture.workflow_cache);
+        Require(
+            seed.OpenPreparedSource(
+                    fixture.source_path,
+                    0,
+                    row_zero,
+                    fixture.context,
+                    std::move(prepared))
+                .loaded,
+            "labeling projection handoff fixture should open its source");
+        (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
+        Require(
+            Submit(
+                seed,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        1,
+                        "first",
+                        'f'}))
+                .changed &&
+                Submit(
+                    seed,
+                    UpsertActiveLabel(
+                        specforge::SampleLabelDefinition{
+                            2,
+                            "second",
+                            's'}))
+                    .changed,
+            "labeling projection handoff fixture should define both labels");
+        (void)Submit(seed, AssignActiveLabelToCurrentSample(1));
+        Require(
+            Submit(
+                seed,
+                MoveSampleNavigation(
+                    specforge::SampleNavigationRequest::LocateRow(1)))
+                    .follow_up_spectrum_index == 1,
+            "labeling projection handoff fixture should request row 1");
+        Require(
+            seed.OpenPreparedSource(
+                    fixture.source_path,
+                    1,
+                    MakeSnapshot(fixture.source_path, 3, 1),
+                    specforge::PreparedSourceCollectionReuse{
+                        fixture.context.identity})
+                .loaded,
+            "labeling projection handoff fixture should commit row 1");
+        (void)Submit(seed, AssignActiveLabelToCurrentSample(2));
+        (void)Submit(
+            seed,
+            SetActiveLabelingOutputPath(
+                fixture.output_path));
+        Require(
+            seed.View().labeling.output_path ==
+                std::optional<std::filesystem::path>{
+                    fixture.output_path},
+            "labeling projection handoff fixture should formalize its task");
+
+        const std::string source_id =
+            "labeling:temporary-labeling-task";
+        (void)Submit(seed, AddSampleFilterSource(source_id));
+        (void)Submit(
+            seed,
+            SetFilterValueSelected(
+                source_id,
+                "2",
+                true));
+        if (select_first_label) {
+            (void)Submit(
+                seed,
+                SetFilterValueSelected(
+                    source_id,
+                    "1",
+                    true));
+        }
+        (void)Submit(seed, SetSampleSortSource("sample-name"));
+        const specforge::SourceCollectionSessionView seeded_view =
+            seed.View();
+        Require(
+            seeded_view.filter.evaluation.included_count ==
+                    (select_first_label ? 2 : 1) &&
+                seeded_view.sorting.active &&
+                seeded_view.navigation.current_sequence_position ==
+                    (select_first_label ? 1 : 0),
+            std::string(
+                "labeling projection handoff fixture should persist its old filter and sort projection: included=") +
+                std::to_string(
+                    seeded_view.filter.evaluation.included_count) +
+                ", sorting=" +
+                (seeded_view.sorting.active ? "true" : "false") +
+                ", position=" +
+                (seeded_view.navigation.current_sequence_position
+                     ? std::to_string(
+                           *seeded_view.navigation.current_sequence_position)
+                     : "none"));
+        Require(
+            seed.FlushStateCaches(),
+            "labeling projection handoff fixture should persist its caches");
+    }
+    return fixture;
+}
+
+void WriteLatestLabelingProjection(
+    const LabelingProjectionHandoffFixture& fixture)
+{
+    specforge::SampleLabelingController editor(
+        fixture.labeling_cache);
+    editor.ActivateSource(fixture.context.identity);
+    if (editor.View().active_task == nullptr) {
+        Require(
+            editor.ActivateTask(
+                      "temporary-labeling-task")
+                .accepted,
+            "projection handoff editor should acquire the task");
+    }
+    Require(
+        editor.AssignLabel(0, 2).operation.output_saved &&
+            editor.AssignLabel(1, 1).operation.output_saved &&
+            editor.AssignLabel(2, 1).operation.output_saved,
+        "projection handoff editor should persist the latest values");
+    Require(
+        editor.DeactivateActiveTask().state_saved,
+        "projection handoff editor should release the latest task");
+}
+
+void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
+{
+    const LabelingProjectionHandoffFixture fixture =
+        SeedLabelingProjectionHandoffFixture(
+            "_prepared_labeling_handoff",
+            true);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(fixture.source_path, 3, 1);
+    specforge::PreparedSampleWorkflowState stale_workflow =
+        PrepareWorkflow(
+            snapshot,
+            fixture.context,
+            1,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+
+    WriteLatestLabelingProjection(fixture);
+
+    specforge::SourceCollectionSession session(
+        {},
+        fixture.navigation_cache,
+        fixture.labeling_cache,
+        fixture.workflow_cache);
+    Require(
+        session.OpenPreparedSource(
+                fixture.source_path,
+                1,
+                snapshot,
+                fixture.context,
+                std::move(stale_workflow))
+            .loaded,
+        "prepared labeling handoff should commit the source");
+    const specforge::SourceCollectionSessionView view =
+        session.View();
+    Require(
+        view.labeling.current_code == 1,
+        "lease handoff should expose the latest task values");
+    Require(
+        view.filter.evaluation.included_count == 3 &&
+            view.navigation.sequence_count == 3 &&
+            view.navigation.current_sequence_position == 1,
+        "prepared filter, sorting, and navigation projections must be rebuilt from the lease-refreshed task");
+    const specforge::SourceCollectionSessionResult next =
+        Submit(
+            session,
+            MoveSampleNavigation(
+                specforge::SampleNavigationRequest::Next()));
+    Require(
+        next.follow_up_spectrum_index == 2,
+        "prepared handoff navigation must follow the latest labeling sort order");
+}
+
+void TestRejectedStaleTaskActivationReconcilesNavigation()
+{
+    const LabelingProjectionHandoffFixture fixture =
+        SeedLabelingProjectionHandoffFixture(
+            "_deleted_labeling_handoff",
+            false);
+    specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            fixture.labeling_cache);
+    auto source = cache.cache.sources.find(
+        fixture.context.identity.id);
+    Require(
+        source != cache.cache.sources.end(),
+        "stale deletion fixture should load its source");
+    source->second.active_task_id.reset();
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            fixture.labeling_cache,
+            cache.cache),
+        "stale deletion fixture should leave the task inactive");
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(fixture.source_path, 3, 1);
+    specforge::PreparedSampleWorkflowState stale_workflow =
+        PrepareWorkflow(
+            snapshot,
+            fixture.context,
+            1,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+    specforge::SourceCollectionSession stale(
+        {},
+        fixture.navigation_cache,
+        fixture.labeling_cache,
+        fixture.workflow_cache);
+    Require(
+        stale.OpenPreparedSource(
+                 fixture.source_path,
+                 1,
+                 snapshot,
+                 fixture.context,
+                 std::move(stale_workflow))
+            .loaded,
+        "stale deletion fixture should open its old task projection");
+    Require(
+        stale.View().filter.evaluation.included_count == 1 &&
+            stale.View().navigation.sequence_count == 1,
+        "stale deletion fixture should preheat the old filtered sequence");
+
+    specforge::SampleLabelingController deleting(
+        fixture.labeling_cache);
+    deleting.ActivateSource(fixture.context.identity);
+    Require(
+        deleting.ActivateTask(
+                    "temporary-labeling-task")
+            .accepted,
+        "deleting editor should acquire the inactive task");
+    Require(
+        deleting.DeleteActiveTask().state_saved,
+        "deleting editor should commit the task tombstone");
+
+    const specforge::SourceCollectionSessionResult rejected =
+        Submit(
+            stale,
+            ActivateLabelingTaskFromAnnotation(
+                fixture.output_path));
+    Require(
+        rejected.labeling_issue ==
+            specforge::SampleLabelingOperationResult::Issue::
+                EditTargetChanged,
+        "stale activation should report that the deleted target changed");
+    const specforge::SourceCollectionSessionView reconciled =
+        stale.View();
+    Require(
+        rejected.action.navigation_inputs_changed &&
+            reconciled.filter.evaluation.included_count == 3 &&
+            reconciled.navigation.sequence_count == 3 &&
+            reconciled.navigation.current_sequence_position == 1,
+        "rejected stale activation must remove the ghost projection and rebuild navigation");
+}
+
+void TestOutputRetryRefreshReconcilesActiveLabelingProjections()
+{
+    const LabelingProjectionHandoffFixture fixture =
+        SeedLabelingProjectionHandoffFixture(
+            "_retry_labeling_handoff",
+            false);
+    specforge::SampleLabelingStateCacheLoadResult pending_cache =
+        specforge::LoadSampleLabelingStateCache(
+            fixture.labeling_cache);
+    auto source = pending_cache.cache.sources.find(
+        fixture.context.identity.id);
+    Require(
+        source != pending_cache.cache.sources.end() &&
+            source->second.tasks.size() == 1,
+        "retry projection fixture should load its task");
+    source->second.active_task_id.reset();
+    source->second.tasks[0].pending_sample_indices.insert(0);
+    source->second.tasks[0].save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+    source->second.tasks[0].save_state.pending_count = 1;
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            fixture.labeling_cache,
+            pending_cache.cache),
+        "retry projection fixture should persist its pending task");
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(fixture.source_path, 3, 1);
+    specforge::PreparedSampleWorkflowState workflow =
+        PrepareWorkflow(
+            snapshot,
+            fixture.context,
+            1,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+    specforge::SourceCollectionSession session(
+        {},
+        fixture.navigation_cache,
+        fixture.labeling_cache,
+        fixture.workflow_cache);
+    Require(
+        session.OpenPreparedSource(
+                fixture.source_path,
+                1,
+                snapshot,
+                fixture.context,
+                std::move(workflow))
+            .loaded,
+        "retry projection fixture should commit its stale source");
+    Require(
+        session.View().filter.evaluation.included_count == 1 &&
+            session.View().navigation.current_sequence_position == 0,
+        "retry projection fixture should preheat the stale derived state");
+
+    WriteLatestLabelingProjection(fixture);
+    const auto deadline =
+        session.NextMaintenanceDeadline();
+    Require(
+        deadline.has_value(),
+        "pending output should schedule maintenance");
+    const specforge::SourceCollectionSessionResult maintenance =
+        session.RunMaintenance(*deadline);
+    Require(
+        maintenance.follow_up_spectrum_index == 0,
+        "retry handoff should request the latest filtered row when the visible row is no longer eligible");
+    Require(
+        session.OpenPreparedSource(
+                fixture.source_path,
+                0,
+                MakeSnapshot(
+                    fixture.source_path,
+                    3,
+                    0),
+                specforge::PreparedSourceCollectionReuse{
+                    fixture.context.identity})
+            .loaded,
+        "retry handoff should commit its reconciled row");
+
+    const specforge::SourceCollectionSessionView refreshed =
+        session.View();
+    Require(
+        refreshed.filter.evaluation.included_count == 1 &&
+            refreshed.navigation.sequence_count == 1 &&
+            refreshed.navigation.current_index == 0 &&
+            refreshed.navigation.current_sequence_position == 0,
+        "retry handoff must invalidate and reconcile active filter, sorting, and navigation state");
 }
 
 }  // namespace
@@ -6308,6 +6906,7 @@ void RunAllTests()
     TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
+    TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
     TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing();
     TestAnnotationLocalMatchRequiresSidecarTaskId();
@@ -6355,6 +6954,9 @@ void RunAllTests()
     TestResidentSnapshotByteCapEvictsBeforeCountCap();
     TestFolderListingGenerationFlowsIntoSubsequentLoadHint();
     TestSourceSessionFlushFailureKeepsDirtyState();
+    TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
+    TestRejectedStaleTaskActivationReconcilesNavigation();
+    TestOutputRetryRefreshReconcilesActiveLabelingProjections();
 }
 
 int main()

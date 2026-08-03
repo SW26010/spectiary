@@ -12,6 +12,29 @@
 #include <string>
 #include <string_view>
 
+namespace specforge {
+
+struct SampleWorkflowPanelUiTestAccess {
+    [[nodiscard]] static std::string_view
+    LabelingOperationMessage(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_operation_message_;
+    }
+
+    static void CaptureLabelingOperationResult(
+        SampleWorkflowPanelUi& panel,
+        const SourceCollectionSessionResult& result,
+        UiLanguage language)
+    {
+        panel.CaptureLabelingOperationResult(
+            result,
+            language);
+    }
+};
+
+}  // namespace specforge
+
 namespace {
 
 void Require(bool condition, std::string_view message)
@@ -289,6 +312,7 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
 struct LabelingTaskSwitchFrameObservation {
     specforge::SampleWorkflowShortcut shortcut;
     int submission_count = 0;
+    std::string operation_message;
     bool popup_open = false;
     bool selector_hovered = false;
     bool temporary_action_hovered = false;
@@ -301,7 +325,8 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     const specforge::SourceCollectionSessionView& frame_view,
     specforge::SourceCollectionSessionView& latest_view,
     const specforge::SourceCollectionSessionView& activated_view,
-    bool request_initial_focus)
+    bool request_initial_focus,
+    std::string result_message = {})
 {
     BeginFrame();
     if (request_initial_focus) {
@@ -318,9 +343,14 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
             std::optional<
                 specforge::NavigationLatencyInputKind>) {
             ++observation.submission_count;
-            latest_view = activated_view;
             specforge::SourceCollectionSessionResult result;
-            result.action.workflow_changed = true;
+            if (result_message.empty()) {
+                latest_view = activated_view;
+                result.changed = true;
+                result.action.workflow_changed = true;
+            } else {
+                result.message = result_message;
+            }
             return result;
         },
         [&]() -> const specforge::SourceCollectionSessionView& {
@@ -336,6 +366,9 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
             return std::nullopt;
         },
         observation.shortcut);
+    observation.operation_message =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingOperationMessage(panel);
     observation.popup_open = ImGui::IsPopupOpen(
         nullptr,
         ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
@@ -648,6 +681,186 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
         "the first new shortcut after a task switch should be routed without a settling frame");
 }
 
+void TestLabelingPanelSurfacesRejectedWorkflowMessage()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView inactive_view;
+    inactive_view.labeling.has_active_source = true;
+    inactive_view.labeling.current_index = 0;
+    inactive_view.labeling.sample_count = 1;
+    specforge::SourceCollectionSessionView latest_view =
+        inactive_view;
+    const specforge::SourceCollectionSessionView activated_view =
+        MakeLabelingPanelView(8, 'g');
+    const std::string conflict_message =
+        "This labeling target is already being edited by another SpecForge instance.";
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    LabelingTaskSwitchFrameObservation observation =
+        RenderLabelingTaskSwitchFrame(
+            panel,
+            inactive_view,
+            latest_view,
+            activated_view,
+            true,
+            conflict_message);
+
+    ImVec2 selector_position;
+    for (float y = 25.0f;
+         y <= 150.0f && !observation.selector_hovered;
+         y += 2.0f) {
+        selector_position =
+            ImVec2(
+                observation.content_start.x + 50.0f,
+                y);
+        ImGui::GetIO().AddMousePosEvent(
+            selector_position.x,
+            selector_position.y);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            inactive_view,
+            latest_view,
+            activated_view,
+            false,
+            conflict_message);
+    }
+    Require(
+        observation.selector_hovered,
+        "message integration fixture should locate the labeling task selector");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
+    Require(
+        observation.popup_open,
+        "message integration fixture should open the task selector");
+
+    ImVec2 temporary_action_position;
+    const float popup_x =
+        observation.popup_content_start.x + 50.0f;
+    for (float y = observation.popup_content_start.y - 20.0f;
+         y <= observation.popup_content_start.y + 100.0f &&
+         !observation.temporary_action_hovered;
+         y += 2.0f) {
+        temporary_action_position =
+            ImVec2(popup_x, y);
+        ImGui::GetIO().AddMousePosEvent(
+            temporary_action_position.x,
+            temporary_action_position.y);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            inactive_view,
+            latest_view,
+            activated_view,
+            false,
+            conflict_message);
+    }
+    Require(
+        observation.temporary_action_hovered,
+        "message integration fixture should locate the labeling action");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
+    Require(
+        observation.submission_count == 1 &&
+            observation.operation_message ==
+                conflict_message,
+        "rejected labeling outcome should remain visibly available in the panel that submitted it");
+}
+
+void TestLabelingPanelClearsNoticeAfterActionOnlySuccess()
+{
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionResult rejected;
+    rejected.message =
+        "This labeling target is already being edited by another SpecForge instance.";
+    rejected.labeling_issue =
+        specforge::SampleLabelingOperationResult::Issue::
+            EditLeaseUnavailable;
+    specforge::SampleWorkflowPanelUiTestAccess::
+        CaptureLabelingOperationResult(
+            panel,
+            rejected,
+            specforge::UiLanguage::English);
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::
+             LabelingOperationMessage(panel)
+             .empty(),
+        "rejected operation should establish a visible notice");
+
+    specforge::SourceCollectionSessionResult succeeded;
+    succeeded.action.workflow_changed = true;
+    succeeded.view_invalidated = true;
+    specforge::SampleWorkflowPanelUiTestAccess::
+        CaptureLabelingOperationResult(
+            panel,
+            succeeded,
+            specforge::UiLanguage::English);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingOperationMessage(panel)
+            .empty(),
+        "a successful action-only labeling transition should clear the previous failure notice");
+}
+
+void TestLabelingPanelLocalizesLeaseNotices()
+{
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionResult rejected;
+    rejected.message =
+        "This labeling target is already being edited by another SpecForge instance.";
+    rejected.labeling_issue =
+        specforge::SampleLabelingOperationResult::Issue::
+            EditLeaseUnavailable;
+    specforge::SampleWorkflowPanelUiTestAccess::
+        CaptureLabelingOperationResult(
+            panel,
+            rejected,
+            specforge::UiLanguage::SimplifiedChinese);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingOperationMessage(panel) ==
+        specforge::UiText(
+            specforge::UiLanguage::SimplifiedChinese,
+            specforge::UiTextId::
+                LabelingEditLeaseUnavailable),
+        "lease notices should use the selected UI language instead of coordinator-authored English text");
+}
+
 void TestConsecutiveLabelCommandsDoNotNeedASettlingFrame()
 {
     ScopedImGuiContext context;
@@ -947,6 +1160,9 @@ int main()
     TestNavigationAndLabelCommandsShareOneRouter();
     TestLabelingPanelRoutesTheLatestSessionProjection();
     TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame();
+    TestLabelingPanelSurfacesRejectedWorkflowMessage();
+    TestLabelingPanelLocalizesLeaseNotices();
+    TestLabelingPanelClearsNoticeAfterActionOnlySuccess();
     TestConsecutiveLabelCommandsDoNotNeedASettlingFrame();
     TestUndoThenNavigationDoesNotNeedASettlingFrame();
     TestTopRowThenKeypadDigitDoesNotNeedASettlingFrame();

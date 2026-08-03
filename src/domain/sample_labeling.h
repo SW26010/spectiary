@@ -98,6 +98,7 @@ struct SampleLabelWriteResult {
 
 struct SampleLabelTaskPersistResult {
     bool output_path_selected = false;
+    bool array_saved = false;
     bool output_saved = false;
     std::string message;
 };

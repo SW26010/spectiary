@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/local_user_state.h"
+#include "platform/exclusive_file_lease.h"
 #include "ui/background_retirement.h"
 #include "ui/sample_labeling_state_cache_io.h"
 
@@ -30,8 +31,16 @@ struct SampleLabelingControllerView {
 };
 
 struct SampleLabelingOperationResult {
+    enum class Issue {
+        None,
+        EditLeaseUnavailable,
+        EditLeaseFailed,
+        EditTargetChanged,
+    };
+
     bool accepted = false;
     bool changed = false;
+    bool task_projection_changed = false;
     bool output_save_attempted = false;
     bool output_saved = false;
     bool output_retry_scheduled = false;
@@ -39,11 +48,17 @@ struct SampleLabelingOperationResult {
     bool state_save_attempted = false;
     bool state_saved = false;
     std::uint64_t revision = 0;
+    Issue issue = Issue::None;
 };
 
 struct SampleLabelingWriteOperationResult {
     SampleLabelWriteResult write;
     SampleLabelingOperationResult operation;
+};
+
+struct SampleLabelingPreparedSourceActivationResult {
+    BackgroundRetirementHandle background_retirement;
+    bool prepared_task_projection_changed = false;
 };
 
 class SampleLabelingController {
@@ -67,7 +82,8 @@ public:
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
-    [[nodiscard]] BackgroundRetirementHandle ActivatePreparedSource(
+    [[nodiscard]] SampleLabelingPreparedSourceActivationResult
+        ActivatePreparedSource(
         const SourceCollectionIdentity& identity,
         std::optional<SourceState> prepared_state);
     [[nodiscard]] BackgroundRetirementHandle AdoptPreparedStateCache(
@@ -135,6 +151,86 @@ private:
         Changed,
     };
 
+    struct TaskEditLeaseSet {
+        struct Component {
+            ExclusiveFileLease baseline;
+            std::vector<ExclusiveFileLease> aliases;
+
+            [[nodiscard]] bool Held() const noexcept
+            {
+                if (!baseline) {
+                    return false;
+                }
+                for (const ExclusiveFileLease& alias : aliases) {
+                    if (!alias) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            void Reset() noexcept
+            {
+                baseline.Reset();
+                aliases.clear();
+            }
+        };
+
+        Component task_identity;
+        Component temporary_slot;
+        std::vector<Component> output_artifacts;
+        std::string task_identity_key;
+        std::string temporary_slot_key;
+        std::vector<std::string> output_artifact_keys;
+    };
+
+    struct TaskEditLeaseAcquireResult {
+        TaskEditLeaseSet::Component component;
+        ExclusiveFileLeaseAcquireStatus status =
+            ExclusiveFileLeaseAcquireStatus::Failed;
+        std::string error;
+    };
+
+    enum class TaskRefreshStatus {
+        Ready,
+        Missing,
+        Failed,
+    };
+
+    enum class TaskActivationExpectation {
+        AnyTask,
+        TemporaryTask,
+    };
+
+    struct TaskActivationPreparation {
+        TaskEditLeaseSet leases;
+        SampleLabelingStateCache latest_cache;
+        std::optional<SampleLabelingTask> task;
+        ExclusiveFileLeaseAcquireStatus lease_status =
+            ExclusiveFileLeaseAcquireStatus::Failed;
+        TaskRefreshStatus refresh_status =
+            TaskRefreshStatus::Failed;
+        std::string error;
+    };
+
+    struct TaskCreationPreparation {
+        TaskEditLeaseSet leases;
+        std::string task_id;
+        ExclusiveFileLeaseAcquireStatus lease_status =
+            ExclusiveFileLeaseAcquireStatus::Failed;
+        bool ready = false;
+        std::string error;
+    };
+
+    struct TaskOutputPersistenceAttempt {
+        SampleLabelTaskPersistResult persist_result;
+        bool output_saved = false;
+        bool artifacts_replaced = false;
+        ExclusiveFileLeaseAcquireStatus lease_status =
+            ExclusiveFileLeaseAcquireStatus::Acquired;
+        std::string lease_error;
+    };
+
     [[nodiscard]] SampleLabelingTask* ActiveTask();
     [[nodiscard]] const SampleLabelingTask* ActiveTask() const;
     [[nodiscard]] SampleLabelingTask* TemporaryTask();
@@ -143,13 +239,29 @@ private:
     [[nodiscard]] const SourceState* ActiveSource() const;
     [[nodiscard]] SourceState* MaterializeSource(std::string_view source_identity);
     [[nodiscard]] SampleLabelingOperationResult RejectOperation() const;
+    [[nodiscard]] SampleLabelingOperationResult
+        RejectEditLeaseUnavailable() const;
+    [[nodiscard]] SampleLabelingOperationResult
+        RejectEditLeaseFailed() const;
+    [[nodiscard]] SampleLabelingOperationResult
+        RejectEditTargetChanged() const;
+    [[nodiscard]] SampleLabelingOperationResult
+        RejectLeaseAcquireStatus(
+            ExclusiveFileLeaseAcquireStatus status) const;
     [[nodiscard]] SampleLabelingOperationResult CompleteMutation(
         SampleLabelingTask* task,
         PersistencePolicy persistence,
         TaskProjectionEffect projection_effect);
-    [[nodiscard]] bool PersistTaskOutput(
+    [[nodiscard]] TaskOutputPersistenceAttempt PersistTaskOutput(
         SampleLabelingTask& task,
-        const SourceState* source_state = nullptr);
+        const SourceState* source_state,
+        TaskEditLeaseSet& leases);
+    [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
+        std::string_view source_identity,
+        const SourceState& state,
+        const SampleLabelingTask& task,
+        bool expected_absent,
+        std::string* error_message);
     void BumpActiveSourceTasksGeneration();
     void Touch();
     void EnsureStateCacheLoaded();
@@ -157,7 +269,76 @@ private:
     void QueueOutputRetry();
     [[nodiscard]] bool TryRetryOutputSaves();
     [[nodiscard]] bool MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now);
-    [[nodiscard]] bool TrySaveStateCache();
+    [[nodiscard]] bool TrySaveStateCache(
+        bool wait_for_commit_lock = false);
+    [[nodiscard]] TaskActivationPreparation
+        PrepareTaskActivation(
+            std::string_view source_identity,
+            const SampleLabelingTask& known_task,
+            std::size_t sample_count,
+            bool reuse_deferred_lease);
+    [[nodiscard]] SampleLabelingOperationResult
+        ActivateTaskWithExpectation(
+            std::string_view task_id,
+            TaskActivationExpectation expectation);
+    [[nodiscard]] TaskCreationPreparation
+        PrepareTaskCreation(
+            std::string_view source_identity,
+            std::string_view requested_task_id,
+            std::size_t sample_count,
+            const std::vector<SampleLabelingTask>&
+                known_tasks) const;
+    [[nodiscard]] ExclusiveFileLeaseAcquireResult
+        TryAttachTemporarySlotLease(
+            TaskEditLeaseSet& leases,
+            std::string_view source_identity,
+            const SampleLabelingTask& task) const;
+    [[nodiscard]] TaskEditLeaseAcquireResult
+        TryAcquireTaskEditLease(std::string_view lease_key) const;
+    [[nodiscard]] ExclusiveFileLeaseAcquireResult
+        TryAttachOutputLease(
+            TaskEditLeaseSet& leases,
+            const SampleLabelingTask& task,
+            bool resolve_physical_paths = true) const;
+    [[nodiscard]] bool ActiveTaskLeaseMatches(
+        std::string_view source_identity,
+        const SampleLabelingTask& task) const;
+    [[nodiscard]] bool TaskIdentityLeaseHeld(
+        const TaskEditLeaseSet& leases,
+        std::string_view source_identity,
+        std::string_view task_id) const;
+    void AdoptActiveTaskLeases(
+        TaskEditLeaseSet leases);
+    void TransitionActiveTaskLeases(
+        TaskEditLeaseSet leases,
+        bool pending_patch_saved);
+    void ReleaseUnneededActiveLeaseComponents();
+    void DeferActiveTaskLeases();
+    void ReleaseActiveTaskLeaseForTransition();
+    [[nodiscard]] bool RestoreActiveTaskLease();
+    void ReleaseActiveTaskLease() noexcept;
+    [[nodiscard]] const SampleLabelingTask*
+        PendingTaskUpsert(
+            std::string_view source_identity,
+            std::string_view task_id) const;
+    void MarkSourceMetadataUpsert(
+        std::string_view source_identity,
+        const SourceState& state);
+    void MarkTaskUpsert(
+        std::string_view source_identity,
+        const SourceState& state,
+        const SampleLabelingTask& task,
+        bool expected_absent = false);
+    void MarkTaskTombstone(
+        std::string_view source_identity,
+        const SourceState& state,
+        std::string task_id);
+    void MarkActiveTaskSelection(
+        std::string_view source_identity,
+        const SourceState& state);
+    [[nodiscard]] std::optional<bool>
+        LatestCacheHasOutputConflict(
+            const SampleLabelingTask& candidate) const;
 
     std::unordered_map<std::string, SourceState> sources_;
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> state_cache_snapshot_;
@@ -168,6 +349,9 @@ private:
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
+    TaskEditLeaseSet active_task_leases_;
+    std::vector<TaskEditLeaseSet> deferred_task_leases_;
+    SampleLabelingStateCachePatch pending_cache_patch_;
     std::uint64_t revision_ = 0;
     std::uint64_t active_source_tasks_generation_ = 0;
     bool state_cache_loaded_ = false;

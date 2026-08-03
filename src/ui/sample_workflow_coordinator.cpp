@@ -3,6 +3,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
+#include "ui/sample_labeling_issue_text.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session.h"
 
@@ -159,6 +160,18 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     return view;
 }
 
+void ApplyLabelingLeaseIssue(
+    SampleWorkflowTransitionOutcome& outcome,
+    const SampleLabelingOperationResult& operation)
+{
+    outcome.labeling_issue = operation.issue;
+    const SampleLabelingIssueTextDescriptor text =
+        SampleLabelingIssueTextFor(operation.issue);
+    if (text.text_id != UiTextId::Count) {
+        outcome.message = std::string(text.english);
+    }
+}
+
 }  // namespace
 
 void MergeSampleWorkflowTransitionOutcome(
@@ -182,6 +195,11 @@ void MergeSampleWorkflowTransitionOutcome(
     if (source.label_write) {
         target.label_write =
             std::move(source.label_write);
+    }
+    if (source.labeling_issue !=
+        SampleLabelingOperationResult::Issue::None) {
+        target.labeling_issue =
+            source.labeling_issue;
     }
     if (!source.message.empty()) {
         target.message = std::move(source.message);
@@ -529,10 +547,51 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     if (!active_sample_workflow_identity_ || *active_sample_workflow_identity_ != identity.id) {
         ClearLabelUndoHistory();
     }
-    if (BackgroundRetirementHandle retired_labeling = labeling_.ActivatePreparedSource(
-            identity,
-            std::move(prepared_workflow.labeling_source_state))) {
-        result.background_retirement.push_back(std::move(retired_labeling));
+    SampleLabelingPreparedSourceActivationResult
+        labeling_activation =
+            labeling_.ActivatePreparedSource(
+                identity,
+                std::move(
+                    prepared_workflow
+                        .labeling_source_state));
+    if (labeling_activation.background_retirement) {
+        result.background_retirement.push_back(
+            std::move(
+                labeling_activation
+                    .background_retirement));
+    }
+    if (labeling_activation
+            .prepared_task_projection_changed) {
+        const std::shared_ptr<const
+            SampleWorkflowPreparationCacheBundle>
+            preparation_cache =
+                prepared_workflow.preparation_cache;
+        const SampleWorkflowPreparationCacheBundle
+            empty_cache;
+        const std::optional<SampleLabelingSourceState>
+            latest_labeling_state =
+                labeling_.SourceStateForIdentity(
+                    identity.id);
+        PreparedSampleWorkflowState refreshed =
+            PrepareSampleWorkflowStateFromCache(
+                *snapshot,
+                context,
+                prepared_workflow.prepared_index,
+                preparation_cache
+                    ? *preparation_cache
+                    : empty_cache,
+                &prepared_workflow
+                     .workflow_source_state,
+                latest_labeling_state
+                    ? &*latest_labeling_state
+                    : nullptr);
+        refreshed.preparation_cache =
+            preparation_cache;
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(
+                std::move(prepared_workflow)));
+        prepared_workflow =
+            std::move(refreshed);
     }
     result.background_retirement.push_back(
         MakeBackgroundRetirementHandle(std::move(workflow_sources_)));
@@ -1019,7 +1078,8 @@ SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
     SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingOperationResult result =
         labeling_.StartOrResumeTemporaryTask();
-    if (result.changed) {
+    ApplyLabelingLeaseIssue(outcome, result);
+    if (result.changed || result.task_projection_changed) {
         ClearLabelUndoHistory();
         ApplyNavigationInputEffects(
             outcome,
@@ -1071,13 +1131,18 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     if (active_task != nullptr && active_task->task_id == plan.task_id) {
         return outcome;
     }
-    if (active_task != nullptr &&
-        (!labeling_.CanDeactivateActiveTask() || !labeling_.DeactivateActiveTask().changed)) {
-        return outcome;
-    }
-
     if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
-        if (labeling_.ActivateTask(plan.task_id).accepted) {
+        const SampleLabelingOperationResult activation =
+            labeling_.ActivateTask(plan.task_id);
+        ApplyLabelingLeaseIssue(outcome, activation);
+        if (activation.accepted ||
+            activation.task_projection_changed) {
+            outcome.changed =
+                outcome.changed ||
+                activation.task_projection_changed;
+            outcome.invalidate_view =
+                outcome.invalidate_view ||
+                activation.task_projection_changed;
             ClearLabelUndoHistory();
             ApplyNavigationInputEffects(
                 outcome,
@@ -1098,7 +1163,20 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         std::move(plan.values),
         annotation->path,
         plan.metadata_clean);
+    ApplyLabelingLeaseIssue(outcome, create_result);
     if (!create_result.accepted) {
+        if (create_result.task_projection_changed) {
+            outcome.changed = true;
+            outcome.invalidate_view = true;
+            ApplyNavigationInputEffects(
+                outcome,
+                ReconcileNavigationInputs(
+                    nullptr,
+                    NavigationInputReconcileRequest{
+                        .workflow_changed = true,
+                        .filters_changed = true,
+                        .sorting_changed = true}));
+        }
         return outcome;
     }
     ClearLabelUndoHistory();
@@ -1243,6 +1321,7 @@ SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
         labeling_.SaveActiveTemporaryTaskToOutput(
             std::move(output_path),
             SampleLabelingTaskNameForOutputPath(selected_output_path));
+    ApplyLabelingLeaseIssue(outcome, operation);
     if (operation.output_saved) {
         if (const SourceCollectionManifest* context = navigation_.active_context()) {
             if (const SampleAnnotationResult* annotation =
@@ -1686,15 +1765,34 @@ std::vector<std::size_t> SampleWorkflowCoordinator::AdjacentNavigationRows(
     return navigation_.AdjacentRows(direction, policy);
 }
 
-bool SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RunMaintenance(
+    LocalUserStateSaveScheduler::TimePoint now,
+    const SpectrumSnapshotHandle& snapshot)
 {
     const std::uint64_t labeling_revision_before =
         labeling_.View().revision;
+    const std::uint64_t labeling_generation_before =
+        labeling_.active_source_tasks_generation();
+    SampleWorkflowTransitionOutcome outcome;
     navigation_.RunMaintenance(now);
     labeling_.RunMaintenance(now);
+    if (labeling_.active_source_tasks_generation() !=
+        labeling_generation_before) {
+        DiscardPreparedViewCaches();
+        ApplyNavigationInputEffects(
+            outcome,
+            ReconcileNavigationInputs(
+                snapshot,
+                NavigationInputReconcileRequest{
+                    .filters_changed = true,
+                    .sorting_changed = true}));
+    }
     if (!workflow_state_save_scheduler_.ShouldAttemptSave(now)) {
-        return labeling_.View().revision !=
-               labeling_revision_before;
+        return CompleteTransition(
+            std::move(outcome),
+            snapshot,
+            labeling_revision_before);
     }
     if (SaveWorkflowStateCache()) {
         workflow_state_load_warning_.clear();
@@ -1706,8 +1804,10 @@ bool SampleWorkflowCoordinator::RunMaintenance(LocalUserStateSaveScheduler::Time
             workflow_state_save_status_,
             "Could not save sample workflow state.");
     }
-    return labeling_.View().revision !=
-           labeling_revision_before;
+    return CompleteTransition(
+        std::move(outcome),
+        snapshot,
+        labeling_revision_before);
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator::NextMaintenanceDeadline() const
@@ -2068,6 +2168,7 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult
     const SampleLabelWriteResult& write =
         result.write;
     outcome.label_write = result;
+    ApplyLabelingLeaseIssue(outcome, result.operation);
     if (!write.changed) {
         return outcome;
     }

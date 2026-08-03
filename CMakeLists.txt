@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SpecForge VERSION 0.7.7 LANGUAGES CXX RC)
+project(SpecForge VERSION 0.7.8 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -252,6 +252,7 @@ add_library(specforge_core STATIC
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp
+    src/platform/exclusive_file_lease.cpp
     src/platform/win32_directory_change_generation.cpp
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp

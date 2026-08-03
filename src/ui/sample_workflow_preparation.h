@@ -52,6 +52,7 @@ struct PreparedSampleWorkflowState {
     SampleNavigationSequence navigation_sequence;
     SourceCollectionFilterView filter_view;
     SourceCollectionSampleSortingView sorting_view;
+    std::size_t prepared_index = 0;
     std::optional<std::size_t> current_index;
     std::optional<std::size_t> index_before_active_filter;
 };

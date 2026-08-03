@@ -223,6 +223,10 @@ struct SourceCollectionSessionIntent {
     [[nodiscard]] static SourceCollectionSessionIntent ChangeActiveSampleWorkflow(ActiveSampleWorkflowIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleFiltering(SampleFilteringIntent intent);
     [[nodiscard]] static SourceCollectionSessionIntent ApplySampleSorting(SampleSortingIntent intent);
+    [[nodiscard]] SourceCollectionSessionIntentKind intent_kind() const noexcept
+    {
+        return kind;
+    }
 
 private:
     friend class SourceCollectionSession;
@@ -249,6 +253,8 @@ struct SourceCollectionSessionResult {
     bool view_invalidated = false;
     std::optional<SampleLabelingWriteOperationResult>
         label_write;
+    SampleLabelingOperationResult::Issue labeling_issue =
+        SampleLabelingOperationResult::Issue::None;
     SourceCollectionLoadError load_error;
     std::string message;
 };
@@ -320,7 +326,7 @@ public:
         std::size_t spectrum_index);
     [[nodiscard]] bool CancelActivePendingSampleNavigation();
 
-    [[nodiscard]] std::vector<BackgroundRetirementHandle> RunMaintenance(
+    [[nodiscard]] SourceCollectionSessionResult RunMaintenance(
         LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
@@ -347,6 +353,12 @@ private:
     void ApplyWorkflowTransitionOutcome(
         SourceCollectionSessionResult& result,
         SampleWorkflowTransitionOutcome outcome);
+    void FinalizePendingSourceFollowUp(
+        SourceCollectionSessionResult& result,
+        std::optional<std::size_t>
+            pending_sample_index_before,
+        const std::optional<std::filesystem::path>&
+            pending_source_path_before);
     [[nodiscard]] SourceCollectionSessionAction AdoptRosterOpenResult(
         SourceCollectionRosterOpenResult result);
 

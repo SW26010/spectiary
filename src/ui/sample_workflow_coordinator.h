@@ -42,6 +42,8 @@ struct SampleWorkflowTransitionOutcome {
     bool invalidate_view = false;
     std::optional<SampleLabelingWriteOperationResult>
         label_write;
+    SampleLabelingOperationResult::Issue labeling_issue =
+        SampleLabelingOperationResult::Issue::None;
     std::string message;
 };
 
@@ -175,7 +177,9 @@ public:
         SampleNavigationDirection direction,
         SampleNavigationPrefetchPolicy policy = {}) const;
 
-    [[nodiscard]] bool RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] SampleWorkflowTransitionOutcome RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now,
+        const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCaches();
     [[nodiscard]] SampleWorkflowStateFlushResult

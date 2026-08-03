@@ -3,6 +3,8 @@
 #include "app/local_user_state.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "ui/sample_labeling_controller.h"
+#include "ui/sample_labeling_issue_text.h"
 #include "ui/source_collection_session_types.h"
 
 #include <array>
@@ -527,6 +529,27 @@ constexpr std::array kTextCatalog = {
         "Could not save labeling output.",
         "无法保存标注输出。"},
     UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditLeaseUnavailable).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditLeaseUnavailable).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditLeaseFailed).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditLeaseFailed).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditTargetChanged).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                EditTargetChanged).simplified_chinese},
+    UiTextEntry{
         "State: temporary local draft; use Save to... to create a labeling annotation.",
         "状态：临时本地草稿；使用“另存为…”创建标注结果。"},
     UiTextEntry{
@@ -997,6 +1020,11 @@ std::string_view UiText(
     default:
         return {};
     }
+}
+
+UiTextId LabelingIssueTextId(int issue_value) noexcept
+{
+    return SampleLabelingIssueTextForValue(issue_value).text_id;
 }
 
 std::string_view UiText(

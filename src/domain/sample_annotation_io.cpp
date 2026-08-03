@@ -2,6 +2,7 @@
 
 #include "app/local_user_state_json.h"
 #include "domain/npy_array_io.h"
+#include "domain/source_path_identity.h"
 #include "platform/atomic_file.h"
 
 #include <algorithm>
@@ -521,6 +522,57 @@ SampleAnnotationResult ReadAnnotationNpyValues(
 }
 
 }  // namespace
+
+SampleAnnotationArtifactIdentitySet
+SampleAnnotationArtifactIdentities(
+    const std::filesystem::path& result_path,
+    bool resolve_physical_paths)
+{
+    SampleAnnotationArtifactIdentitySet identities;
+    if (result_path.empty()) {
+        return identities;
+    }
+
+    const std::vector<std::filesystem::path> paths = {
+        result_path,
+        SampleAnnotationIoAdapter::MetadataPathForResult(
+            result_path)};
+    identities.all_paths_physically_resolved =
+        resolve_physical_paths;
+    for (const std::filesystem::path& path : paths) {
+        const std::string stable_key =
+            SourcePathIdentityKey(path);
+        if (!stable_key.empty()) {
+            identities.stable_path_keys.push_back(
+                stable_key);
+        }
+        if (resolve_physical_paths) {
+            std::vector<std::string> physical_keys =
+                OutputPathIdentityKeys(path);
+            if (physical_keys.empty()) {
+                identities.all_paths_physically_resolved =
+                    false;
+            } else {
+                identities.physical_path_keys.insert(
+                    identities.physical_path_keys.end(),
+                    std::make_move_iterator(
+                        physical_keys.begin()),
+                    std::make_move_iterator(
+                        physical_keys.end()));
+            }
+        }
+    }
+    const auto sort_and_deduplicate = [](
+                                          std::vector<std::string>& keys) {
+        std::sort(keys.begin(), keys.end());
+        keys.erase(
+            std::unique(keys.begin(), keys.end()),
+            keys.end());
+    };
+    sort_and_deduplicate(identities.stable_path_keys);
+    sort_and_deduplicate(identities.physical_path_keys);
+    return identities;
+}
 
 std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::Load(
     const std::filesystem::path& path,
