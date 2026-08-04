@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "domain/spectrum_snapshot.h"
+#include "overlays/catalog_user_state_reconciliation.h"
 #include "overlays/spectral_line_catalog.h"
 #include "overlays/spectral_line_user_state.h"
 
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -253,6 +255,8 @@ private:
     CatalogUserState user_state_;
     CatalogPanelState panel_state_;
     std::filesystem::path user_state_cache_path_;
+    CatalogUserState reconciliation_base_state_;
+    CatalogPanelState reconciliation_base_panel_state_;
     LocalUserStateSaveScheduler cache_save_scheduler_;
     LocalUserStateSaveStatus cache_save_status_;
     SpectralLineCacheLoadIssueKind load_issue_kind_ =
@@ -262,8 +266,14 @@ private:
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;
-    int next_view_index_ = 1;
-    int next_group_index_ = 1;
+    std::uint64_t next_view_sequence_ = 1;
+    std::uint64_t next_group_sequence_ = 1;
+    // Canonicalization may change active_view_id after a deletion without
+    // representing a user selection. Keep task provenance separate from the
+    // durable scalar so stale fallback cannot win a real peer selection.
+    bool explicit_selection_intent_pending_ = false;
+    std::unordered_set<std::string> explicit_group_ordering_view_ids_;
+    bool explicit_task_delta_pending_ = false;
 };
 
 }  // namespace specforge

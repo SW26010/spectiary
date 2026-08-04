@@ -160,7 +160,17 @@ private:
                     nesting_depth)) {
                 return false;
             }
-            value.object.emplace(std::move(key), std::move(member));
+            const std::string key_for_error = key;
+            const auto insertion = value.object.emplace(
+                std::move(key),
+                std::move(member));
+            if (!insertion.second) {
+                error =
+                    "duplicate JSON object member \"" +
+                    key_for_error +
+                    "\"";
+                return false;
+            }
 
             SkipWhitespace();
             if (Consume('}')) {
@@ -788,10 +798,12 @@ bool WriteVersionedJsonCacheFile(
     int schema_version,
     std::string_view description,
     const JsonCacheBodyWriter& body_writer,
-    std::string* error_message)
+    std::string* error_message,
+    AtomicFileWriteCheckpoint before_replace)
 {
     AtomicFileWriteOptions options;
     options.target_description = description;
+    options.before_replace = std::move(before_replace);
     return WriteFileAtomically(path, options, [&](std::ostream& stream, std::string& error) {
         stream << "{\n";
         stream << "  \"format_kind\": ";

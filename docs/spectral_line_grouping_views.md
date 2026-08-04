@@ -161,10 +161,14 @@ The cache should be normalized and versioned:
 ```json
 {
   "format_kind": "specforge.catalog_user_state.cache",
-  "schema_version": 3,
+  "schema_version": 4,
   "catalogs": {
     "specforge.public": {
       "active_view_id": "view-1",
+      "next_view_sequence": 2,
+      "next_group_sequence": 1,
+      "reserved_view_ids": ["view-1"],
+      "reserved_group_ids": [],
       "marker_visibility": {
         "h_alpha": true
       },
@@ -174,7 +178,12 @@ The cache should be normalized and versioned:
           "name": "Grouping 1",
           "name_source": "default_grouping_view",
           "name_ordinal": 1,
-          "groups": []
+          "groups": [{
+            "id": "__unassigned__",
+            "name": "Unassigned",
+            "is_unassigned": true,
+            "marker_references": []
+          }]
         }
       ]
     }
@@ -189,7 +198,9 @@ The cache should be normalized and versioned:
 }
 ```
 
-Schema 3 introduces explicit, writer-owned generated-name provenance. Generated
+Schema 3 introduced explicit, writer-owned generated-name provenance. Schema 4
+adds the required monotonic allocator high-water marks and durable identity
+reservation sets. Generated
 names participate in UI localization only when a supported schema stores that
 provenance explicitly.
 
@@ -199,10 +210,21 @@ verbatim in every language, including names shaped like `Grouping 1`, `Group 1`,
 or `Catalog grouping view copy`. Migration must not infer ownership from editable
 text, ids, or array order.
 
-The cache body is validated before migration is scheduled. A successfully loaded
-legacy cache is rewritten once using the current schema, preserving those names
-without adding generated-name provenance. An invalid body is reported and is
-never rewritten merely by opening and closing the application.
+The cache body is validated before migration is scheduled. A legacy cache with
+only the catalog currently being migrated must first pass raw view/group
+identity checks, current-catalog marker-reference checks, and schema-three
+unassigned identity/flag checks; only then is it canonicalized, validated, and
+rewritten once using the current schema, preserving those names without adding
+generated-name provenance. Empty, duplicate, cross-catalog, or mismatched
+legacy identities are therefore preserved as failure evidence rather than
+repaired. A legacy cache containing unrelated
+catalog or panel state entries is not safely migratable without their domain
+definitions and is therefore rejected without a partial schema-four rewrite.
+A current-schema cache missing allocator/history fields, with zero or
+insufficient high-water marks, with an uncovered persisted identity, or with
+duplicate reservation entries is invalid and is never rewritten or merged. An
+invalid body is reported and is never rewritten merely by opening and closing
+the application.
 
 The first implementation should treat this as an internal writer-owned cache,
 not as a public exchange format. Its reader exists to load SpecForge's own

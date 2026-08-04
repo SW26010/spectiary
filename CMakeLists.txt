@@ -249,6 +249,7 @@ add_library(specforge_core STATIC
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_smoothing.cpp
     src/overlays/spectral_line_catalog.cpp
+    src/overlays/catalog_user_state_reconciliation.cpp
     src/overlays/spectral_line_user_state_cache_io.cpp
     src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp

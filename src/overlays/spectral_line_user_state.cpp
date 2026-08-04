@@ -1,9 +1,12 @@
 #include "overlays/spectral_line_user_state.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -18,6 +21,66 @@ constexpr const char* kPublicCatalogIdentity = "specforge.public";
 constexpr const char* kPublicCatalogDisplayName = "Public catalog";
 constexpr const char* kCatalogGroupingViewId = "__catalog_grouping_view__";
 constexpr const char* kUnassignedUserGroupId = "__unassigned__";
+
+std::uint64_t NextSequenceAfterGeneratedId(
+    std::string_view id,
+    std::string_view prefix)
+{
+    if (!id.starts_with(prefix) || id.size() == prefix.size()) {
+        return 0;
+    }
+
+    const std::string_view digits = id.substr(prefix.size());
+    std::uint64_t value = 0;
+    const auto parsed = std::from_chars(
+        digits.data(),
+        digits.data() + digits.size(),
+        value);
+    if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size()) {
+        return 0;
+    }
+    if (value == std::numeric_limits<std::uint64_t>::max()) {
+        return value;
+    }
+    return value + 1;
+}
+
+std::optional<std::uint64_t> ParseGeneratedIdentitySequence(
+    std::string_view id,
+    std::string_view prefix)
+{
+    if (!id.starts_with(prefix) || id.size() == prefix.size()) {
+        return std::nullopt;
+    }
+    const std::string_view digits = id.substr(prefix.size());
+    for (const char digit : digits) {
+        if (digit < '0' || digit > '9') {
+            return std::nullopt;
+        }
+    }
+    std::uint64_t value = 0;
+    const auto parsed = std::from_chars(
+        digits.data(),
+        digits.data() + digits.size(),
+        value);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != digits.data() + digits.size()) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+void RaiseSequenceHighWaterMark(
+    std::uint64_t& sequence,
+    std::uint64_t required)
+{
+    if (sequence == 0) {
+        sequence = 1;
+    }
+    if (required > sequence) {
+        sequence = required;
+    }
+}
 
 std::string LowerAscii(std::string value)
 {
@@ -336,6 +399,305 @@ CatalogPanelState& EnsureCatalogPanelState(CatalogUserStateCache& cache, const C
     return cache.catalog_panel_state[identity.id];
 }
 
+bool ValidateCatalogUserStateCacheForLegacyMigration(
+    const CatalogUserStateCache& cache,
+    std::string& diagnostic,
+    int schema_version)
+{
+    diagnostic.clear();
+    const auto fail = [&](std::string message) {
+        diagnostic =
+            "legacy catalog user-state identity violation: " +
+            std::move(message);
+        return false;
+    };
+
+    for (const auto& [catalog_id, state] : cache.catalogs) {
+        if (catalog_id.empty() || state.catalog_identity.id.empty()) {
+            return fail("catalog identity must not be empty");
+        }
+        if (state.catalog_identity.id != catalog_id) {
+            return fail(
+                "catalog identity " + state.catalog_identity.id +
+                " does not match cache key " + catalog_id);
+        }
+
+        std::unordered_set<std::string> view_ids;
+        std::unordered_set<std::string> global_group_ids;
+        for (const GroupingView& view : state.grouping_views) {
+            if (view.id.empty()) {
+                return fail("grouping view identity must not be empty");
+            }
+            if (!view_ids.insert(view.id).second) {
+                return fail("duplicate grouping view identity " + view.id);
+            }
+
+            std::unordered_set<std::string> view_group_ids;
+            for (const UserGroup& group : view.groups) {
+                if (group.id.empty()) {
+                    return fail(
+                        "group identity must not be empty in view " +
+                        view.id);
+                }
+                if (!view_group_ids.insert(group.id).second) {
+                    return fail(
+                        "duplicate group identity " + group.id +
+                        " in view " + view.id);
+                }
+                if (group.id != UnassignedUserGroupId() &&
+                    !global_group_ids.insert(group.id).second) {
+                    return fail(
+                        "group identity " + group.id +
+                        " is reused across grouping views");
+                }
+
+                std::unordered_set<std::string> reference_ids;
+                for (const MarkerReference& reference : group.marker_references) {
+                    if (reference.marker_id.empty() ||
+                        reference.catalog_identity.id.empty()) {
+                        return fail(
+                            "marker reference identity must not be empty in group " +
+                            group.id);
+                    }
+                    if (reference.catalog_identity.id != catalog_id) {
+                        return fail(
+                            "marker reference catalog identity " +
+                            reference.catalog_identity.id +
+                            " does not match catalog " + catalog_id);
+                    }
+                    if (!reference_ids.insert(reference.marker_id).second) {
+                        return fail(
+                            "duplicate marker reference identity " +
+                            reference.marker_id + " in group " + group.id);
+                    }
+                }
+                if (schema_version >= 3 &&
+                    group.is_unassigned !=
+                        (group.id == UnassignedUserGroupId())) {
+                    return fail(
+                        "unassigned group identity/flag mismatch in view " +
+                        view.id + " for group " + group.id);
+                }
+            }
+        }
+
+        for (const std::string& id : state.reserved_view_ids) {
+            if (id.empty() || id == CatalogGroupingViewId()) {
+                return fail("reserved view identity must be a user identity");
+            }
+        }
+        for (const std::string& id : state.reserved_group_ids) {
+            if (id.empty() || id == UnassignedUserGroupId()) {
+                return fail(
+                    "reserved group identity must be an ordinary identity");
+            }
+        }
+    }
+    return true;
+}
+
+bool ValidateCatalogUserStateCacheForReconciliation(
+    const CatalogUserStateCache& cache,
+    std::string& diagnostic,
+    bool require_allocator_history)
+{
+    diagnostic.clear();
+    const auto fail = [&](std::string message) {
+        diagnostic =
+            "latest catalog user-state semantic identity violation: " +
+            std::move(message);
+        return false;
+    };
+
+    for (const auto& [catalog_id, state] : cache.catalogs) {
+        if (catalog_id.empty() || state.catalog_identity.id.empty()) {
+            return fail("catalog identity must not be empty");
+        }
+        if (state.catalog_identity.id != catalog_id) {
+            return fail(
+                "catalog identity " + state.catalog_identity.id +
+                " does not match cache key " + catalog_id);
+        }
+
+        std::unordered_set<std::string> view_ids;
+        std::unordered_set<std::string> global_group_ids;
+        for (const GroupingView& view : state.grouping_views) {
+            if (view.id.empty()) {
+                return fail("grouping view identity must not be empty");
+            }
+            if (view.id == CatalogGroupingViewId()) {
+                return fail(
+                    "user grouping views must not use the catalog grouping identity");
+            }
+            if (!view_ids.insert(view.id).second) {
+                return fail("duplicate grouping view identity " + view.id);
+            }
+
+            std::size_t unassigned_count = 0;
+            std::unordered_set<std::string> view_group_ids;
+            for (const UserGroup& group : view.groups) {
+                if (group.id.empty()) {
+                    return fail(
+                        "group identity must not be empty in view " + view.id);
+                }
+                const bool is_unassigned_identity =
+                    group.id == UnassignedUserGroupId();
+                if (group.is_unassigned != is_unassigned_identity) {
+                    return fail(
+                        "unassigned group identity/flag mismatch in view " +
+                        view.id);
+                }
+                if (is_unassigned_identity) {
+                    ++unassigned_count;
+                } else {
+                    if (!view_group_ids.insert(group.id).second) {
+                        return fail(
+                            "duplicate group identity " + group.id +
+                            " in view " + view.id);
+                    }
+                    if (!global_group_ids.insert(group.id).second) {
+                        return fail(
+                            "group identity " + group.id +
+                            " is reused across grouping views");
+                    }
+                }
+
+                std::unordered_set<std::string> reference_ids;
+                for (const MarkerReference& reference : group.marker_references) {
+                    if (reference.marker_id.empty() ||
+                        reference.catalog_identity.id.empty()) {
+                        return fail(
+                            "marker reference identity must not be empty in group " +
+                            group.id);
+                    }
+                    if (!SameIdentityValue(
+                            reference.catalog_identity,
+                            state.catalog_identity)) {
+                        return fail(
+                            "marker reference catalog identity does not match " +
+                            state.catalog_identity.id);
+                    }
+                    if (!reference_ids.insert(reference.marker_id).second) {
+                        return fail(
+                            "duplicate marker reference identity " +
+                            reference.marker_id + " in group " + group.id);
+                    }
+                }
+            }
+            if (unassigned_count != 1) {
+                return fail(
+                    "view " + view.id +
+                    " must contain exactly one unassigned group");
+            }
+        }
+
+        if (!state.active_view_id.empty() &&
+            state.active_view_id != CatalogGroupingViewId() &&
+            !view_ids.contains(state.active_view_id)) {
+            return fail(
+                "active view identity " + state.active_view_id +
+                " does not belong to the catalog");
+        }
+        for (const auto& [marker_id, visible] : state.marker_visibility) {
+            (void)visible;
+            if (marker_id.empty()) {
+                return fail("marker visibility identity must not be empty");
+            }
+        }
+        for (const std::string& id : state.reserved_view_ids) {
+            if (id.empty() || id == CatalogGroupingViewId()) {
+                return fail("reserved view identity must be a user identity");
+            }
+        }
+        for (const std::string& id : state.reserved_group_ids) {
+            if (id.empty() || id == UnassignedUserGroupId()) {
+                return fail(
+                    "reserved group identity must be an ordinary identity");
+            }
+        }
+
+        if (!require_allocator_history) {
+            continue;
+        }
+        if (state.next_view_sequence == 0 ||
+            state.next_group_sequence == 0) {
+            return fail(
+                "allocator history high-water marks must be greater than zero");
+        }
+
+        const auto validate_generated_identity =
+            [&](std::string_view id,
+                std::string_view prefix,
+                std::uint64_t next_sequence,
+                std::string_view kind) -> bool {
+            const std::optional<std::uint64_t> sequence =
+                ParseGeneratedIdentitySequence(id, prefix);
+            if (!sequence) {
+                return true;
+            }
+            if (*sequence == 0 || *sequence >= next_sequence) {
+                return fail(
+                    std::string(kind) + " allocator history does not cover " +
+                    std::string(id) + " before next sequence " +
+                    std::to_string(next_sequence));
+            }
+            return true;
+        };
+
+        for (const GroupingView& view : state.grouping_views) {
+            if (view.id != CatalogGroupingViewId() &&
+                !state.reserved_view_ids.contains(view.id)) {
+                return fail(
+                    "view identity " + view.id +
+                    " is not covered by reserved allocator history");
+            }
+            if (!validate_generated_identity(
+                    view.id,
+                    "view-",
+                    state.next_view_sequence,
+                    "view")) {
+                return false;
+            }
+            for (const UserGroup& group : view.groups) {
+                if (group.id == UnassignedUserGroupId()) {
+                    continue;
+                }
+                if (!state.reserved_group_ids.contains(group.id)) {
+                    return fail(
+                        "group identity " + group.id +
+                        " is not covered by reserved allocator history");
+                }
+                if (!validate_generated_identity(
+                        group.id,
+                        "group-",
+                        state.next_group_sequence,
+                        "group")) {
+                    return false;
+                }
+            }
+        }
+        for (const std::string& id : state.reserved_view_ids) {
+            if (!validate_generated_identity(
+                    id,
+                    "view-",
+                    state.next_view_sequence,
+                    "view")) {
+                return false;
+            }
+        }
+        for (const std::string& id : state.reserved_group_ids) {
+            if (!validate_generated_identity(
+                    id,
+                    "group-",
+                    state.next_group_sequence,
+                    "group")) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 const SpectralLineMarker* FindCatalogMarker(
     const SpectralLineCatalog& catalog,
     const CatalogIdentity& identity,
@@ -604,6 +966,74 @@ CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
         normalized_views.push_back(std::move(normalized_view));
     }
     state.grouping_views = std::move(normalized_views);
+
+    std::unordered_set<std::string> normalized_reserved_view_ids;
+    for (const std::string& id : state.reserved_view_ids) {
+        if (!id.empty() && id != CatalogGroupingViewId()) {
+            normalized_reserved_view_ids.insert(id);
+        }
+    }
+    for (const GroupingView& view : state.grouping_views) {
+        normalized_reserved_view_ids.insert(view.id);
+    }
+    if (normalized_reserved_view_ids != state.reserved_view_ids) {
+        state.reserved_view_ids = std::move(normalized_reserved_view_ids);
+        result.changed = true;
+    }
+
+    std::unordered_set<std::string> normalized_reserved_group_ids;
+    for (const std::string& id : state.reserved_group_ids) {
+        if (!id.empty() && id != UnassignedUserGroupId()) {
+            normalized_reserved_group_ids.insert(id);
+        }
+    }
+    for (const GroupingView& view : state.grouping_views) {
+        for (const UserGroup& group : view.groups) {
+            if (!group.is_unassigned && group.id != UnassignedUserGroupId()) {
+                normalized_reserved_group_ids.insert(group.id);
+            }
+        }
+    }
+    if (normalized_reserved_group_ids != state.reserved_group_ids) {
+        state.reserved_group_ids = std::move(normalized_reserved_group_ids);
+        result.changed = true;
+    }
+
+    std::uint64_t required_next_view_sequence = 1;
+    std::uint64_t required_next_group_sequence = 1;
+    for (const GroupingView& view : state.grouping_views) {
+        RaiseSequenceHighWaterMark(
+            required_next_view_sequence,
+            NextSequenceAfterGeneratedId(view.id, "view-"));
+        for (const UserGroup& group : view.groups) {
+            RaiseSequenceHighWaterMark(
+                required_next_group_sequence,
+                NextSequenceAfterGeneratedId(group.id, "group-"));
+        }
+    }
+    for (const std::string& id : state.reserved_view_ids) {
+        RaiseSequenceHighWaterMark(
+            required_next_view_sequence,
+            NextSequenceAfterGeneratedId(id, "view-"));
+    }
+    for (const std::string& id : state.reserved_group_ids) {
+        RaiseSequenceHighWaterMark(
+            required_next_group_sequence,
+            NextSequenceAfterGeneratedId(id, "group-"));
+    }
+    const std::uint64_t previous_next_view_sequence =
+        state.next_view_sequence;
+    const std::uint64_t previous_next_group_sequence =
+        state.next_group_sequence;
+    RaiseSequenceHighWaterMark(
+        state.next_view_sequence,
+        required_next_view_sequence);
+    RaiseSequenceHighWaterMark(
+        state.next_group_sequence,
+        required_next_group_sequence);
+    result.changed = result.changed ||
+                     state.next_view_sequence != previous_next_view_sequence ||
+                     state.next_group_sequence != previous_next_group_sequence;
 
     for (auto iterator = state.marker_visibility.begin();
          iterator != state.marker_visibility.end();) {

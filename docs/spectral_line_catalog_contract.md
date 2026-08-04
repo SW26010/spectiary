@@ -107,6 +107,71 @@ create independent plot state. Hiding every marker in the active catalog is
 represented by marker visibility state, not by a separate "hide public catalog"
 switch.
 
+## Concurrent user-state write contract
+
+Catalog user state is a startup snapshot. Ordinary GUI instances do not live-
+synchronize their panel state, but a task-level write must reconcile that
+snapshot with the durable cache immediately before replacement. Startup
+canonicalization is applied before the reconciliation base snapshot is taken;
+trimming names, repairing references, and selecting a valid fallback are
+normalization, not an explicit task delta. The controller holds the cache's
+short-lived commit lease while it reloads the latest document, merges the task,
+canonicalizes the result, and uses the existing atomic cache writer. The lease
+is named `<cache-path>.commit.lock`; its ownership is the live OS file handle,
+not a stale PID or a best-effort marker.
+
+The merge ownership is intentionally narrow:
+
+- catalog additions are keyed by stable view/group ids. Generated view/group
+  ids use persisted monotonic high-water marks plus durable reservation sets.
+  The reservation sets retain identities allocated before a concurrent
+  create/delete race, so deleting an entity and restarting—or reconciling a
+  stale peer after the entity was deleted—cannot make its id available for
+  reuse. An addition that uses an id concurrently added with different content
+  is retained under a fresh deterministic id; both additions remain visible.
+  A local deletion is a tombstone for that entity and wins over a concurrent
+  edit to the same entity.
+- names, generated-name provenance, unassigned flags, and per-marker visibility
+  are field-owned. A field unchanged by the stale task is taken from the latest
+  durable state; a field changed by the task wins a same-field conflict.
+- marker references are keyed by catalog identity plus marker id. Disjoint
+  additions/removals survive, while a removal from a group is a local tombstone
+  for that group reference.
+- ordering is owned only when the task explicitly issues a reorder. That
+  explicit order includes newly created entities, so a new group moved before
+  an existing group remains there on the first flush; durable-only additions
+  are retained before the first task addition. Without an explicit reorder,
+  concurrent additions remain in durable-addition then task-addition order.
+  Selection is a scalar task field:
+  an explicit task selection wins a conflict, while an unchanged selection is
+  refreshed from durable state. A fallback selected automatically after the
+  active view is deleted is not an explicit task selection and must not
+  override a peer's explicit selection of a surviving view.
+- panel expansion keys use the same view/group identity remapping and are
+  reconciled independently from the catalog data. Labeling leases and unrelated
+  local caches are not part of this contract.
+
+An existing latest document that cannot be parsed, has an unsupported schema,
+fails its body-shape checks, or violates semantic identity invariants (such as
+empty/duplicate view or group identities, group identity reuse, or invalid
+reference identity) is untrusted before any replacement. Maintenance,
+destructor, and explicit task writes fail closed with the parser/semantic
+diagnostic and leave the durable file untouched. Schema-one/two/three
+documents are supported migration inputs only when every persisted catalog
+entry belongs to the catalog being migrated; a legacy multi-catalog document
+without domain definitions for all entries fails closed rather than producing
+a partially migrated schema-four file. A single-catalog legacy document is
+checked for raw view/group identity uniqueness, current-catalog marker
+references, and (for schema three) the unassigned identity/flag pairing before
+canonicalization, then canonicalized under the commit lease and validated again
+before it is atomically rewritten. Current-schema allocator history is also
+validated:
+high-water marks are nonzero and cover every generated/reserved identity, and
+every persisted view/group is covered by its reservation set. Current-schema
+semantic or allocator corruption is never repaired by a write. A missing cache
+is still treated as the normal first-write empty state, preserving
+single-instance startup behavior.
+
 Subtype-specific combinations are a separate, local/private overlay layer and
 are not part of the public default catalog. A future local overlay may select
 from public `id` values, but it must not override the public physical

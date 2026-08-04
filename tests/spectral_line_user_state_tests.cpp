@@ -1,4 +1,6 @@
 #include "overlays/spectral_line_user_state.h"
+#include "overlays/catalog_user_state_reconciliation.h"
+#include "app/local_user_state_json.h"
 #include "overlays/spectral_line_user_state_cache_io.h"
 
 #include <algorithm>
@@ -991,6 +993,23 @@ void TestCorruptCacheIsWarningOnly()
     Require(loaded.cache.catalogs.empty(), "corrupt cache should be ignored");
 }
 
+void TestDuplicateJsonObjectKeysAreRejected()
+{
+    std::string error;
+    const std::optional<specforge::JsonValue> parsed = specforge::ParseJson(
+        R"json({
+  "catalogs": {
+    "specforge.public": {},
+    "specforge.public": {}
+  }
+})json",
+        error);
+    Require(
+        !parsed.has_value() &&
+            error.find("duplicate JSON object member") != std::string::npos,
+        "the JSON parser must reject duplicate object keys with an actionable diagnostic");
+}
+
 void TestUnsupportedCacheSchemaIsWarningOnly()
 {
     const std::filesystem::path path =
@@ -1068,6 +1087,324 @@ void TestSchemaThreeRejectsExcessiveGeneratedCopyCount()
         "schema-three caches must reject generated copy counts above the rendering safety limit");
 }
 
+specforge::GroupingView ReconciliationView(
+    std::string id,
+    std::string name)
+{
+    specforge::GroupingView view;
+    view.id = std::move(id);
+    view.name = std::move(name);
+    specforge::UserGroup unassigned;
+    unassigned.id = specforge::UnassignedUserGroupId();
+    unassigned.name = "Unassigned";
+    unassigned.is_unassigned = true;
+    view.groups.push_back(std::move(unassigned));
+    return view;
+}
+
+void TestCatalogTaskReconciliationMergesDisjointChanges()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState base =
+        specforge::MakeCatalogUserState(identity);
+    base.active_view_id = "view-1";
+    base.grouping_views.push_back(
+        ReconciliationView("view-1", "Base one"));
+    base.grouping_views.push_back(
+        ReconciliationView("view-2", "Base two"));
+    base.grouping_views.front().groups.push_back(
+        specforge::UserGroup{
+            .id = "group-1",
+            .name = "One",
+        });
+    base.grouping_views.front().groups.push_back(
+        specforge::UserGroup{
+            .id = "group-2",
+            .name = "Two",
+        });
+
+    specforge::CatalogUserState local = base;
+    local.marker_visibility["h_alpha"] = false;
+    local.active_view_id = "view-2";
+    local.grouping_views.erase(local.grouping_views.begin());
+
+    specforge::CatalogUserState latest = base;
+    latest.marker_visibility["h_beta"] = false;
+    latest.grouping_views[1].name = "Remote two";
+    latest.grouping_views.push_back(
+        ReconciliationView("view-3", "Remote addition"));
+
+    specforge::CatalogPanelState base_panel;
+    specforge::CatalogPanelState local_panel = base_panel;
+    local_panel.expanded_group_ids.insert("view-2/__unassigned__");
+    specforge::CatalogPanelState latest_panel = base_panel;
+    latest_panel.expanded_group_ids.insert("view-3/__unassigned__");
+
+    specforge::CatalogUserStateReconciliationResult result;
+    std::string diagnostic;
+    Require(
+        specforge::ReconcileCatalogUserStateTask(
+            base,
+            local,
+            latest,
+            base_panel,
+            local_panel,
+            latest_panel,
+            result,
+            diagnostic),
+        diagnostic);
+
+    Require(
+        !result.state.marker_visibility.at("h_alpha") &&
+            !result.state.marker_visibility.at("h_beta"),
+        "task reconciliation should merge disjoint marker visibility changes");
+    Require(
+        result.state.active_view_id == "view-2" &&
+            result.state.grouping_views.size() == 2,
+        "task deletion and explicit selection should not erase the unrelated durable view");
+    Require(
+        result.state.grouping_views.front().name == "Remote two" &&
+            result.state.grouping_views.front().id == "view-2" &&
+            result.state.grouping_views.back().id == "view-3",
+        "task reconciliation should retain the latest edit of a surviving view");
+    Require(
+        result.panel_state.expanded_group_ids.contains("view-2/__unassigned__") &&
+            result.panel_state.expanded_group_ids.contains("view-3/__unassigned__"),
+        "task reconciliation should merge independent panel expansion keys");
+}
+
+void TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState base =
+        specforge::MakeCatalogUserState(identity);
+    specforge::CatalogUserState local = base;
+    local.grouping_views.push_back(
+        ReconciliationView("view-1", "Local addition"));
+    local.active_view_id = "view-1";
+    specforge::CatalogUserState latest = base;
+    latest.grouping_views.push_back(
+        ReconciliationView("view-1", "Durable addition"));
+    latest.active_view_id = "view-1";
+
+    specforge::CatalogUserStateReconciliationResult result;
+    std::string diagnostic;
+    Require(
+        specforge::ReconcileCatalogUserStateTask(
+            base,
+            local,
+            latest,
+            {},
+            {},
+            {},
+            result,
+            diagnostic),
+        diagnostic);
+
+    Require(
+        result.state.grouping_views.size() == 2,
+        "different concurrent additions with the same id should both survive");
+    Require(
+        result.state.grouping_views[0].name == "Durable addition" &&
+            result.state.grouping_views[1].name == "Local addition" &&
+            result.state.active_view_id == result.state.grouping_views[1].id &&
+            result.state.grouping_views[1].id != "view-1",
+        "a colliding task addition should receive a fresh id and retain task selection");
+}
+
+void TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState base =
+        specforge::MakeCatalogUserState(identity);
+    base.active_view_id = "view-1";
+    base.grouping_views.push_back(
+        ReconciliationView("view-1", "Base one"));
+    base.grouping_views.push_back(
+        ReconciliationView("view-2", "Base two"));
+    base.grouping_views[0].groups.push_back(
+        specforge::UserGroup{.id = "group-1", .name = "One"});
+    base.grouping_views[0].groups.push_back(
+        specforge::UserGroup{.id = "group-2", .name = "Two"});
+    base.reserved_view_ids = {"view-1", "view-2"};
+    base.reserved_group_ids = {"group-1", "group-2"};
+
+    specforge::CatalogUserState local = base;
+    std::swap(local.grouping_views[0], local.grouping_views[1]);
+    local.active_view_id = "view-2";
+    local.grouping_views[1].groups.insert(
+        local.grouping_views[1].groups.begin() + 1,
+        local.grouping_views[1].groups.back());
+    local.grouping_views[1].groups.pop_back();
+    local.grouping_views[1].groups.push_back(
+        specforge::UserGroup{.id = "group-3", .name = "Task group"});
+    local.grouping_views.push_back(
+        ReconciliationView("view-3", "Task addition"));
+    local.reserved_view_ids.insert("view-3");
+    local.reserved_group_ids.insert("group-3");
+
+    specforge::CatalogUserState latest = base;
+    latest.grouping_views[0].groups.push_back(
+        specforge::UserGroup{.id = "group-4", .name = "Durable group"});
+    latest.grouping_views.push_back(
+        ReconciliationView("view-4", "Durable addition"));
+    latest.reserved_view_ids.insert("view-4");
+    latest.reserved_group_ids.insert("group-4");
+    latest.active_view_id = "view-1";
+
+    specforge::CatalogUserStateReconciliationResult result;
+    std::string diagnostic;
+    Require(
+        specforge::ReconcileCatalogUserStateTask(
+            base,
+            local,
+            latest,
+            {},
+            {},
+            {},
+            result,
+            diagnostic),
+        diagnostic);
+
+    Require(
+        result.state.grouping_views.size() == 4 &&
+            result.state.grouping_views[0].id == "view-2" &&
+            result.state.grouping_views[1].id == "view-1" &&
+            result.state.grouping_views[2].id == "view-4" &&
+            result.state.grouping_views[3].id == "view-3" &&
+            result.state.active_view_id == "view-2",
+        "local explicit view order and selection must win while durable additions precede task additions");
+    const auto& groups = result.state.grouping_views[1].groups;
+    Require(
+        groups.size() == 5 &&
+            groups[0].id == specforge::UnassignedUserGroupId() &&
+            groups[1].id == "group-2" &&
+            groups[2].id == "group-1" &&
+            groups[3].id == "group-4" &&
+            groups[4].id == "group-3",
+        "local explicit group order must win while durable additions precede task additions");
+    Require(
+        result.state.reserved_view_ids.contains("view-3") &&
+            result.state.reserved_view_ids.contains("view-4") &&
+            result.state.reserved_group_ids.contains("group-3") &&
+            result.state.reserved_group_ids.contains("group-4"),
+        "reconciliation must carry all durable identity reservations");
+}
+
+void TestCatalogTaskReconciliationRemapsIdsDeterministically()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState base =
+        specforge::MakeCatalogUserState(identity);
+    base.active_view_id = "view-base";
+    specforge::GroupingView base_view =
+        ReconciliationView("view-base", "Base");
+    base_view.groups.push_back(
+        specforge::UserGroup{.id = "group-base", .name = "Base group"});
+    base.grouping_views.push_back(std::move(base_view));
+
+    specforge::CatalogUserState local = base;
+    local.grouping_views.front().groups.push_back(
+        specforge::UserGroup{.id = "group-1-2", .name = "Task group 1-2"});
+    local.grouping_views.front().groups.push_back(
+        specforge::UserGroup{.id = "group-1", .name = "Task group 1"});
+    // Deliberately reverse the colliding requests in the task vector. The
+    // allocator contract sorts requested identities before assigning fresh
+    // suffixes, while retaining the task's order in the merged output.
+    local.grouping_views.push_back(
+        ReconciliationView("view-1-2", "Task view 1-2"));
+    local.grouping_views.push_back(
+        ReconciliationView("view-1", "Task view 1"));
+
+    specforge::CatalogUserState latest = base;
+    latest.grouping_views.front().groups.push_back(
+        specforge::UserGroup{.id = "group-1", .name = "Durable group 1"});
+    latest.grouping_views.push_back(
+        ReconciliationView("view-1", "Durable view 1"));
+
+    specforge::CatalogUserStateReconciliationResult result;
+    std::string diagnostic;
+    Require(
+        specforge::ReconcileCatalogUserStateTask(
+            base,
+            local,
+            latest,
+            {},
+            {},
+            {},
+            result,
+            diagnostic),
+        diagnostic);
+
+    const auto task_view_one = std::find_if(
+        result.state.grouping_views.begin(),
+        result.state.grouping_views.end(),
+        [](const auto& view) { return view.name == "Task view 1"; });
+    const auto task_view_one_two = std::find_if(
+        result.state.grouping_views.begin(),
+        result.state.grouping_views.end(),
+        [](const auto& view) { return view.name == "Task view 1-2"; });
+    Require(
+        task_view_one != result.state.grouping_views.end() &&
+            task_view_one_two != result.state.grouping_views.end() &&
+            task_view_one->id == "view-1-2" &&
+            task_view_one_two->id == "view-1-2-2",
+        "view identity remaps must use sorted requested identities");
+
+    const auto group_one = std::find_if(
+        result.state.grouping_views.front().groups.begin(),
+        result.state.grouping_views.front().groups.end(),
+        [](const auto& group) { return group.name == "Task group 1"; });
+    const auto group_one_two = std::find_if(
+        result.state.grouping_views.front().groups.begin(),
+        result.state.grouping_views.front().groups.end(),
+        [](const auto& group) { return group.name == "Task group 1-2"; });
+    Require(
+        group_one != result.state.grouping_views.front().groups.end() &&
+            group_one_two != result.state.grouping_views.front().groups.end() &&
+            group_one->id == "group-1-2" &&
+            group_one_two->id == "group-1-2-2",
+        "group identity remaps must use sorted requested identities");
+}
+
+void TestCatalogReconciliationRejectsInvalidSemanticIdentities()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserStateCache cache;
+    specforge::CatalogUserState state =
+        specforge::MakeCatalogUserState(identity);
+    state.grouping_views.push_back(
+        ReconciliationView("", "Empty identity"));
+    cache.catalogs.emplace(identity.id, state);
+
+    std::string diagnostic;
+    Require(
+        !specforge::ValidateCatalogUserStateCacheForReconciliation(
+            cache,
+            diagnostic) &&
+            diagnostic.find("must not be empty") != std::string::npos,
+        "reconciliation trust validation must reject an empty view identity");
+
+    state.grouping_views.clear();
+    state.grouping_views.push_back(
+        ReconciliationView("view-1", "First"));
+    state.grouping_views.push_back(
+        ReconciliationView("view-1", "Duplicate"));
+    cache.catalogs.at(identity.id) = state;
+    Require(
+        !specforge::ValidateCatalogUserStateCacheForReconciliation(
+            cache,
+            diagnostic) &&
+            diagnostic.find("duplicate grouping view identity") !=
+                std::string::npos,
+        "reconciliation trust validation must reject duplicate view identities");
+}
+
 }  // namespace
 
 int main()
@@ -1094,8 +1431,14 @@ int main()
         TestLegacyExpandedGroupsMigrateToPanelState();
         TestCacheReadsUnicodeEscapes();
         TestCorruptCacheIsWarningOnly();
+        TestDuplicateJsonObjectKeysAreRejected();
         TestUnsupportedCacheSchemaIsWarningOnly();
         TestSchemaThreeRejectsExcessiveGeneratedCopyCount();
+        TestCatalogTaskReconciliationMergesDisjointChanges();
+        TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict();
+        TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations();
+        TestCatalogTaskReconciliationRemapsIdsDeterministically();
+        TestCatalogReconciliationRejectsInvalidSemanticIdentities();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';

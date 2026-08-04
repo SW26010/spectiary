@@ -3,6 +3,7 @@
 #include "overlays/spectral_line_catalog.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -62,6 +63,20 @@ struct CatalogUserState {
     std::string active_view_id;
     std::unordered_map<std::string, bool> marker_visibility;
     std::vector<GroupingView> grouping_views;
+
+    // Persisted high-water marks keep generated identities monotonic across
+    // deletion, restart, and task-level reconciliation.  They are allocator
+    // state, not user-visible ordering or selection state.
+    std::uint64_t next_view_sequence = 1;
+    std::uint64_t next_group_sequence = 1;
+
+    // A high-water mark alone cannot remember an identity that was allocated
+    // by one stale instance, then deleted before another stale instance
+    // committed its own addition.  These durable reservations are the
+    // identity history: an id may remain absent from grouping_views/groups,
+    // but it must never be allocated again.
+    std::unordered_set<std::string> reserved_view_ids;
+    std::unordered_set<std::string> reserved_group_ids;
 };
 
 struct CatalogPanelState {
@@ -104,6 +119,24 @@ CanonicalizeCatalogUserState(
     const SpectralLineCatalog& catalog,
     const CatalogIdentity& identity,
     const std::optional<GroupingView>& catalog_grouping_view);
+
+// Validation used immediately before merging an explicit task into the
+// latest durable cache. Startup migration may canonicalize legacy state, but
+// an explicit task must not silently repair semantic identity corruption and
+// then overwrite the evidence that caused it.
+[[nodiscard]] bool ValidateCatalogUserStateCacheForReconciliation(
+    const CatalogUserStateCache& cache,
+    std::string& diagnostic,
+    bool require_allocator_history = false);
+
+// Legacy schema one/two/three state is validated before startup
+// canonicalization.  It intentionally checks identity and reference
+// invariants only: those schemas predate the explicit unassigned-group flag
+// and allocator history, so those values are migrated after this gate.
+[[nodiscard]] bool ValidateCatalogUserStateCacheForLegacyMigration(
+    const CatalogUserStateCache& cache,
+    std::string& diagnostic,
+    int schema_version = 0);
 
 [[nodiscard]] const SpectralLineMarker* FindCatalogMarker(
     const SpectralLineCatalog& catalog,

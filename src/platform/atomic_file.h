@@ -17,10 +17,18 @@ struct AtomicFileReplaceRetryPolicy {
     std::chrono::milliseconds maximum_retry_delay{0};
 };
 
+using AtomicFileWriteCheckpoint = std::function<void(
+    const std::filesystem::path& temporary_path,
+    const std::filesystem::path& target_path)>;
+
 struct AtomicFileWriteOptions {
     std::ios::openmode open_mode = std::ios::trunc;
     std::string_view target_description = "file";
     AtomicFileReplaceRetryPolicy replace_retry_policy;
+    // Test-only interruption seam.  It runs after the temporary file is
+    // closed and before the target is replaced; production callers leave it
+    // empty.
+    AtomicFileWriteCheckpoint before_replace;
 };
 
 using AtomicFileWriter = std::function<bool(std::ostream& stream, std::string& error)>;

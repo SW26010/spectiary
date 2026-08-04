@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <exception>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -228,6 +229,25 @@ bool WriteFileAtomically(
         RemoveTemporaryFile(temporary_path);
         SetError(error_message, "could not close temporary " + description + ": " + temporary_path.string());
         return false;
+    }
+
+    if (options.before_replace) {
+        try {
+            options.before_replace(temporary_path, target_path);
+        } catch (const std::exception& exception) {
+            RemoveTemporaryFile(temporary_path);
+            SetError(
+                error_message,
+                "atomic " + description + " pre-replace checkpoint failed: " +
+                    std::string(exception.what()));
+            return false;
+        } catch (...) {
+            RemoveTemporaryFile(temporary_path);
+            SetError(
+                error_message,
+                "atomic " + description + " pre-replace checkpoint failed");
+            return false;
+        }
     }
 
     if (!ReplaceFileAtomically(

@@ -1,5 +1,6 @@
 #include "ui/spectral_lines_panel_controller.h"
 
+#include "platform/exclusive_file_lease.h"
 #include "overlays/spectral_line_user_state_cache_io.h"
 
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <thread>
 #include <utility>
 
 namespace specforge {
@@ -16,6 +18,46 @@ using namespace std::chrono_literals;
 
 constexpr auto kSaveDebounce = 500ms;
 constexpr auto kSaveRetry = 10s;
+constexpr auto kCommitLeaseRetryDelay = 10ms;
+constexpr std::size_t kCommitLeaseMaximumAttempts = 200;
+
+std::optional<ExclusiveFileLease> AcquireCatalogCommitLease(
+    const std::filesystem::path& cache_path,
+    std::string& diagnostic)
+{
+    const std::filesystem::path lease_path =
+        CatalogUserStateCacheCommitLeasePath(cache_path);
+    for (std::size_t attempt = 0;
+         attempt < kCommitLeaseMaximumAttempts;
+         ++attempt) {
+        ExclusiveFileLeaseAcquireResult acquired =
+            TryAcquireExclusiveFileLease(lease_path);
+        if (acquired.status ==
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            return std::move(acquired.lease);
+        }
+        if (acquired.status ==
+            ExclusiveFileLeaseAcquireStatus::Failed) {
+            diagnostic =
+                acquired.error.empty()
+                    ? "could not acquire catalog user-state commit lease: " +
+                          lease_path.string()
+                    : "could not acquire catalog user-state commit lease " +
+                          lease_path.string() + ": " + acquired.error;
+            return std::nullopt;
+        }
+        if (attempt + 1 < kCommitLeaseMaximumAttempts) {
+            std::this_thread::sleep_for(kCommitLeaseRetryDelay);
+        }
+    }
+    diagnostic =
+        "catalog user-state commit lease remained busy for the bounded " +
+        std::to_string(
+            (kCommitLeaseMaximumAttempts - 1) *
+            kCommitLeaseRetryDelay.count()) +
+        " ms: " + lease_path.string();
+    return std::nullopt;
+}
 
 SpectralLineCacheLoadIssueKind SpectralLineLoadIssueKind(
     CatalogUserStateCacheLoadIssueKind issue_kind)
@@ -308,6 +350,32 @@ SpectralLinesPanelController::SpectralLinesPanelController(
       cache_save_scheduler_(kSaveDebounce, kSaveRetry)
 {
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
+    if (load_result.issue_kind ==
+            CatalogUserStateCacheLoadIssueKind::None &&
+        load_result.requires_save) {
+        CatalogUserStateCache legacy_validation;
+        if (const auto match =
+                load_result.cache.catalogs.find(catalog_identity_.id);
+            match != load_result.cache.catalogs.end()) {
+            legacy_validation.catalogs.emplace(
+                catalog_identity_.id,
+                match->second);
+        }
+        std::string legacy_validation_error;
+        if (!ValidateCatalogUserStateCacheForLegacyMigration(
+                legacy_validation,
+                legacy_validation_error,
+                load_result.schema_version)) {
+            load_result.issue_kind =
+                CatalogUserStateCacheLoadIssueKind::InvalidDocument;
+            load_result.diagnostic_detail =
+                "legacy catalog user-state cache is not trusted before "
+                "canonicalization: " + legacy_validation_error;
+            load_result.warning =
+                "Ignored invalid legacy spectral-line grouping cache.";
+            load_result.requires_save = false;
+        }
+    }
     const bool loaded_cache_requires_save =
         load_result.requires_save;
     const bool loaded_cache_can_rewrite =
@@ -340,10 +408,19 @@ SpectralLinesPanelController::SpectralLinesPanelController(
          loaded_cache_requires_save)) {
         MarkCacheDirty();
     }
-    next_view_index_ = static_cast<int>(user_state_.grouping_views.size()) + 1;
-    for (const GroupingView& view : user_state_.grouping_views) {
-        next_group_index_ += static_cast<int>(view.groups.size());
-    }
+
+    // Capture the reconciliation base only after startup canonicalization.
+    // Repairs such as trimming names or selecting a valid fallback view are
+    // durable normalization, not an explicit task delta that may overwrite a
+    // later peer write.
+    reconciliation_base_state_ = user_state_;
+    reconciliation_base_panel_state_ = panel_state_;
+    next_view_sequence_ = std::max<std::uint64_t>(
+        1,
+        user_state_.next_view_sequence);
+    next_group_sequence_ = std::max<std::uint64_t>(
+        1,
+        user_state_.next_group_sequence);
 }
 
 SpectralLinesPanelController::~SpectralLinesPanelController()
@@ -376,6 +453,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return NoChange();
         }
         user_state_.active_view_id = std::move(intent.view_id_);
+        explicit_selection_intent_pending_ = true;
         return Applied(true);
 
     case CatalogUserStateIntent::Kind::AcknowledgeGroupingViewSelection:
@@ -403,6 +481,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
                 name,
                 std::move(generated_name)));
         user_state_.active_view_id = id;
+        explicit_selection_intent_pending_ = true;
         RequestGroupingViewSelection();
         return Applied(true);
     }
@@ -417,6 +496,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         user_state_.grouping_views.push_back(
             DuplicateGroupingView(*source, catalog_, catalog_identity_, id, name));
         user_state_.active_view_id = id;
+        explicit_selection_intent_pending_ = true;
         RequestGroupingViewSelection();
         return Applied(true);
     }
@@ -457,6 +537,20 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             return Rejected("Editable grouping view identity does not belong to this catalog user state.");
         }
         const std::string deleted_view_id = match->id;
+        const bool deleted_active_view =
+            user_state_.active_view_id == deleted_view_id;
+        if (deleted_active_view) {
+            // Applied() will canonicalize to a surviving view. That fallback
+            // is derived state, not a competing explicit selection.
+            explicit_selection_intent_pending_ = false;
+        }
+        user_state_.reserved_view_ids.insert(deleted_view_id);
+        for (const UserGroup& group : match->groups) {
+            if (!group.is_unassigned &&
+                group.id != UnassignedUserGroupId()) {
+                user_state_.reserved_group_ids.insert(group.id);
+            }
+        }
         user_state_.grouping_views.erase(match);
         for (auto iterator = panel_state_.expanded_group_ids.begin();
              iterator != panel_state_.expanded_group_ids.end();) {
@@ -477,7 +571,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         const std::string group_id = NextUserGroupId();
         const std::size_t ordinal =
             static_cast<std::size_t>(
-                next_group_index_ - 1);
+                next_group_sequence_ - 1);
         const std::string group_name =
             "Group " + std::to_string(ordinal);
         GeneratedNameMetadata generated_name;
@@ -513,7 +607,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         const std::string group_id = NextUserGroupId();
         const std::size_t ordinal =
             static_cast<std::size_t>(
-                next_group_index_ - 1);
+                next_group_sequence_ - 1);
         const std::string group_name =
             "Group " + std::to_string(ordinal);
         GeneratedNameMetadata generated_name;
@@ -578,6 +672,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         if (view == nullptr || !RemoveUserGroup(*view, intent.group_id_)) {
             return Rejected("Editable user group identity does not belong to the grouping view.");
         }
+        user_state_.reserved_group_ids.insert(intent.group_id_);
         panel_state_.expanded_group_ids.erase(GroupExpansionKey(view->id, intent.group_id_));
         return Applied(true);
     }
@@ -627,6 +722,7 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
             !ReorderUserGroupBefore(*view, intent.source_group_id_, intent.target_group_id_)) {
             return Rejected("User group identities cannot be reordered in this grouping view.");
         }
+        explicit_group_ordering_view_ids_.insert(intent.view_id_);
         return Applied(true);
     }
 
@@ -820,21 +916,226 @@ SpectralLinesPanelController::NextMaintenanceDeadline() const
 bool SpectralLinesPanelController::Flush()
 {
     if (!cache_save_scheduler_.dirty()) {
-        return true;
+        return load_issue_kind_ == SpectralLineCacheLoadIssueKind::None;
     }
-    user_state_cache_.catalogs[catalog_identity_.id] = user_state_;
-    user_state_cache_.catalog_panel_state[catalog_identity_.id] = panel_state_;
+
     std::string error;
-    if (!SaveCatalogUserStateCache(user_state_cache_path_, user_state_cache_, error)) {
+    std::optional<ExclusiveFileLease> commit_lease =
+        AcquireCatalogCommitLease(
+            user_state_cache_path_,
+            error);
+    if (!commit_lease) {
         cache_save_scheduler_.MarkSaveFailed(
             cache_save_status_,
             std::move(error));
         return false;
     }
+
+    std::error_code latest_exists_error;
+    (void)std::filesystem::exists(
+        user_state_cache_path_,
+        latest_exists_error);
+    if (latest_exists_error) {
+        error =
+            "could not inspect latest catalog user-state cache " +
+            user_state_cache_path_.string() + ": " +
+            latest_exists_error.message();
+        cache_save_scheduler_.MarkSaveFailed(
+            cache_save_status_,
+            std::move(error));
+        return false;
+    }
+
+    CatalogUserStateCacheLoadResult latest_load =
+        LoadCatalogUserStateCache(user_state_cache_path_);
+    if (latest_load.issue_kind !=
+        CatalogUserStateCacheLoadIssueKind::None) {
+        error =
+            "latest durable catalog user-state cache is not trusted " +
+            user_state_cache_path_.string() + ": " +
+            (latest_load.diagnostic_detail.empty()
+                 ? latest_load.warning
+                 : latest_load.diagnostic_detail);
+        cache_save_scheduler_.MarkSaveFailed(
+            cache_save_status_,
+            std::move(error));
+        return false;
+    }
+
+    CatalogUserState latest_state =
+        MakeCatalogUserState(catalog_identity_);
+    if (latest_load.requires_save) {
+        // Schema-one/two/three state is a supported migration input only
+        // when every persisted entry belongs to this controller's catalog.
+        // Without the corresponding domain catalog, another legacy entry
+        // cannot be canonicalized and validated before the whole document is
+        // rewritten as schema four.
+        const bool has_unrelated_catalog = std::any_of(
+            latest_load.cache.catalogs.begin(),
+            latest_load.cache.catalogs.end(),
+            [&](const auto& entry) {
+                return entry.first != catalog_identity_.id;
+            });
+        const bool has_unrelated_panel_state = std::any_of(
+            latest_load.cache.catalog_panel_state.begin(),
+            latest_load.cache.catalog_panel_state.end(),
+            [&](const auto& entry) {
+                return entry.first != catalog_identity_.id;
+            });
+        if (has_unrelated_catalog || has_unrelated_panel_state) {
+            error =
+                "legacy catalog user-state cache contains unrelated catalog "
+                "entries and cannot be safely migrated to schema 4";
+            cache_save_scheduler_.MarkSaveFailed(
+                cache_save_status_,
+                std::move(error));
+            return false;
+        }
+
+        CatalogUserStateCache legacy_validation;
+        if (const auto match =
+                latest_load.cache.catalogs.find(catalog_identity_.id);
+            match != latest_load.cache.catalogs.end()) {
+            legacy_validation.catalogs.emplace(
+                catalog_identity_.id,
+                match->second);
+        }
+        if (!ValidateCatalogUserStateCacheForLegacyMigration(
+                legacy_validation,
+                error,
+                latest_load.schema_version)) {
+            error =
+                "latest durable catalog user-state cache is not trusted for "
+                "legacy migration before canonicalization: " + error;
+            cache_save_scheduler_.MarkSaveFailed(
+                cache_save_status_,
+                std::move(error));
+            return false;
+        }
+
+        // Legacy grouping entries predate the explicit unassigned-group flag,
+        // so normalize the current catalog before validating the migration.
+        if (const auto match =
+                latest_load.cache.catalogs.find(catalog_identity_.id);
+            match != latest_load.cache.catalogs.end()) {
+            CatalogPanelState& legacy_panel_state =
+                latest_load.cache.catalog_panel_state[catalog_identity_.id];
+            (void)CanonicalizeCatalogUserState(
+                match->second,
+                legacy_panel_state,
+                catalog_,
+                catalog_identity_,
+                catalog_grouping_view_);
+        }
+
+        legacy_validation.catalogs.clear();
+        if (const auto match =
+                latest_load.cache.catalogs.find(catalog_identity_.id);
+            match != latest_load.cache.catalogs.end()) {
+            legacy_validation.catalogs.emplace(
+                catalog_identity_.id,
+                match->second);
+        }
+        if (!ValidateCatalogUserStateCacheForReconciliation(
+                legacy_validation,
+                error)) {
+            error =
+                "latest durable catalog user-state cache is not trusted for "
+                "legacy migration: " + error;
+            cache_save_scheduler_.MarkSaveFailed(
+                cache_save_status_,
+                std::move(error));
+            return false;
+        }
+    } else if (!ValidateCatalogUserStateCacheForReconciliation(
+                   latest_load.cache,
+                   error,
+                   true)) {
+        // Current-schema state must be trusted before every replacement,
+        // including startup canonicalization and maintenance/destructor
+        // flushes that carry no explicit task delta.
+        error =
+            "latest durable catalog user-state cache is not trusted before "
+            "replacement: " + error;
+        cache_save_scheduler_.MarkSaveFailed(
+            cache_save_status_,
+            std::move(error));
+        return false;
+    }
+    if (const auto match = latest_load.cache.catalogs.find(catalog_identity_.id);
+        match != latest_load.cache.catalogs.end()) {
+        latest_state = match->second;
+    }
+    CatalogPanelState latest_panel_state;
+    if (const auto match = latest_load.cache.catalog_panel_state.find(catalog_identity_.id);
+        match != latest_load.cache.catalog_panel_state.end()) {
+        latest_panel_state = match->second;
+    }
+
+    CatalogUserStateReconciliationResult reconciled;
+    if (!ReconcileCatalogUserStateTask(
+            reconciliation_base_state_,
+            user_state_,
+            latest_state,
+            reconciliation_base_panel_state_,
+            panel_state_,
+            latest_panel_state,
+            reconciled,
+            error,
+            explicit_selection_intent_pending_,
+            explicit_group_ordering_view_ids_)) {
+        cache_save_scheduler_.MarkSaveFailed(
+            cache_save_status_,
+            std::move(error));
+        return false;
+    }
+
+    const CatalogUserStateCanonicalizationResult canonicalization =
+        CanonicalizeCatalogUserState(
+            reconciled.state,
+            reconciled.panel_state,
+            catalog_,
+            catalog_identity_,
+            catalog_grouping_view_);
+    if (canonicalization.active_view_changed) {
+        RequestGroupingViewSelection();
+    }
+
+    CatalogUserStateCache merged_cache =
+        std::move(latest_load.cache);
+    merged_cache.catalogs[catalog_identity_.id] =
+        reconciled.state;
+    merged_cache.catalog_panel_state[catalog_identity_.id] =
+        reconciled.panel_state;
+
+    if (!SaveCatalogUserStateCache(
+            user_state_cache_path_,
+            merged_cache,
+            error)) {
+        cache_save_scheduler_.MarkSaveFailed(
+            cache_save_status_,
+            std::move(error));
+        return false;
+    }
+
+    user_state_cache_ = std::move(merged_cache);
+    user_state_ = user_state_cache_.catalogs.at(catalog_identity_.id);
+    panel_state_ = user_state_cache_.catalog_panel_state.at(catalog_identity_.id);
+    reconciliation_base_state_ = user_state_;
+    reconciliation_base_panel_state_ = panel_state_;
+    next_view_sequence_ = std::max<std::uint64_t>(
+        1,
+        user_state_.next_view_sequence);
+    next_group_sequence_ = std::max<std::uint64_t>(
+        1,
+        user_state_.next_group_sequence);
     load_issue_kind_ =
         SpectralLineCacheLoadIssueKind::None;
     load_warning_.clear();
     load_diagnostic_detail_.clear();
+    explicit_selection_intent_pending_ = false;
+    explicit_group_ordering_view_ids_.clear();
+    explicit_task_delta_pending_ = false;
     cache_save_scheduler_.MarkSaveSucceeded(cache_save_status_);
     return true;
 }
@@ -842,6 +1143,7 @@ bool SpectralLinesPanelController::Flush()
 CatalogUserStateResult SpectralLinesPanelController::Applied(bool persistent_state_changed)
 {
     if (persistent_state_changed) {
+        explicit_task_delta_pending_ = true;
         const CatalogUserStateCanonicalizationResult canonicalization =
             CanonicalizeCatalogUserState(
                 user_state_,
@@ -950,8 +1252,13 @@ const UserGroup* SpectralLinesPanelController::FindUserGroup(
 std::string SpectralLinesPanelController::NextGroupingViewId()
 {
     for (;;) {
-        std::string id = "view-" + std::to_string(next_view_index_++);
-        if (!ViewExists(id) && id != CatalogGroupingViewId()) {
+        const std::uint64_t sequence = next_view_sequence_++;
+        std::string id = "view-" + std::to_string(sequence);
+        if (!ViewExists(id) &&
+            !user_state_.reserved_view_ids.contains(id) &&
+            id != CatalogGroupingViewId()) {
+            user_state_.reserved_view_ids.insert(id);
+            user_state_.next_view_sequence = next_view_sequence_;
             return id;
         }
     }
@@ -960,12 +1267,17 @@ std::string SpectralLinesPanelController::NextGroupingViewId()
 std::string SpectralLinesPanelController::NextUserGroupId()
 {
     for (;;) {
-        std::string id = "group-" + std::to_string(next_group_index_++);
+        const std::uint64_t sequence = next_group_sequence_++;
+        std::string id = "group-" + std::to_string(sequence);
         bool exists = false;
         for (const GroupingView& view : user_state_.grouping_views) {
             exists = exists || FindUserGroup(view, id) != nullptr;
         }
-        if (!exists && id != UnassignedUserGroupId()) {
+        if (!exists &&
+            !user_state_.reserved_group_ids.contains(id) &&
+            id != UnassignedUserGroupId()) {
+            user_state_.reserved_group_ids.insert(id);
+            user_state_.next_group_sequence = next_group_sequence_;
             return id;
         }
     }

@@ -116,7 +116,8 @@ using JsonCacheBodyWriter = std::function<bool(std::ostream& stream, std::string
     int schema_version,
     std::string_view description,
     const JsonCacheBodyWriter& body_writer,
-    std::string* error_message = nullptr);
+    std::string* error_message = nullptr,
+    AtomicFileWriteCheckpoint before_replace = {});
 
 // Structured write seam for migrated cache/settings adapters. Object members
 // are serialized in stable key order; the shell retains ownership of atomic

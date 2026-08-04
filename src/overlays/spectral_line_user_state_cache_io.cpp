@@ -19,7 +19,9 @@ namespace specforge {
 namespace {
 
 constexpr const char* kCacheFormatKind = "specforge.catalog_user_state.cache";
-constexpr int kCacheSchemaVersion = 3;
+constexpr int kCacheSchemaVersion = 4;
+
+CatalogUserStateCacheBeforeReplaceHook g_before_replace_hook_for_tests;
 
 CatalogUserStateCacheLoadIssueKind
 CatalogCacheLoadIssueKind(
@@ -244,12 +246,14 @@ ValidateGeneratedNameMetadataShape(
 
 std::optional<std::string> ValidateStringArrayShape(
     const JsonValue& value,
-    std::string_view array_path)
+    std::string_view array_path,
+    bool require_unique = false)
 {
     if (value.kind != JsonValue::Kind::Array) {
         return std::string(array_path) +
             " must be an array";
     }
+    std::unordered_set<std::string> values;
     for (std::size_t index = 0;
          index < value.array.size();
          ++index) {
@@ -258,6 +262,12 @@ std::optional<std::string> ValidateStringArrayShape(
             return std::string(array_path) +
                 "[" + std::to_string(index) +
                 "] must be a string";
+        }
+        if (require_unique &&
+            !values.insert(value.array[index].string_value).second) {
+            return std::string(array_path) +
+                " contains duplicate identity " +
+                value.array[index].string_value;
         }
     }
     return std::nullopt;
@@ -311,7 +321,8 @@ ValidateMarkerReferencesShape(
 
 std::optional<std::string> ValidateUserGroupsShape(
     const JsonValue& value,
-    std::string_view groups_path)
+    std::string_view groups_path,
+    bool require_unassigned_flag)
 {
     if (value.kind != JsonValue::Kind::Array) {
         return std::string(groups_path) +
@@ -341,11 +352,17 @@ std::optional<std::string> ValidateUserGroupsShape(
             }
         }
         if (std::optional<std::string> issue =
-                ValidateRequiredMemberKind(
-                    group,
-                    "is_unassigned",
-                    JsonValue::Kind::Bool,
-                    group_path)) {
+                (require_unassigned_flag
+                     ? ValidateRequiredMemberKind(
+                           group,
+                           "is_unassigned",
+                           JsonValue::Kind::Bool,
+                           group_path)
+                     : ValidateOptionalMemberKind(
+                           group,
+                           "is_unassigned",
+                           JsonValue::Kind::Bool,
+                           group_path))) {
             return issue;
         }
         if (std::optional<std::string> issue =
@@ -376,7 +393,8 @@ std::optional<std::string> ValidateUserGroupsShape(
 std::optional<std::string>
 ValidateGroupingViewsShape(
     const JsonValue& value,
-    std::string_view views_path)
+    std::string_view views_path,
+    bool require_unassigned_flag)
 {
     if (value.kind != JsonValue::Kind::Array) {
         return std::string(views_path) +
@@ -428,7 +446,8 @@ ValidateGroupingViewsShape(
         if (std::optional<std::string> issue =
                 ValidateUserGroupsShape(
                     *groups,
-                    view_path + ".groups")) {
+                    view_path + ".groups",
+                    require_unassigned_flag)) {
             return issue;
         }
     }
@@ -438,10 +457,15 @@ ValidateGroupingViewsShape(
 std::optional<std::string>
 ValidateCatalogCacheBodyShape(
     const JsonValue& catalogs,
-    const JsonValue* panel_state)
+    const JsonValue* panel_state,
+    bool require_unassigned_flag,
+    bool require_allocator_history)
 {
     for (const auto& [identity_id, catalog] :
          catalogs.object) {
+        if (identity_id.empty()) {
+            return "catalogs contains an empty catalog identity key";
+        }
         const std::string catalog_path =
             "catalogs[" + identity_id + "]";
         if (catalog.kind !=
@@ -456,6 +480,50 @@ ValidateCatalogCacheBodyShape(
                     JsonValue::Kind::String,
                     catalog_path)) {
             return issue;
+        }
+        for (const std::string_view member_name :
+             {"next_view_sequence", "next_group_sequence"}) {
+            if (std::optional<std::string> issue =
+                    (require_allocator_history
+                         ? ValidateRequiredMemberKind(
+                               catalog,
+                               member_name,
+                               JsonValue::Kind::Integer,
+                               catalog_path)
+                         : ValidateOptionalMemberKind(
+                               catalog,
+                               member_name,
+                               JsonValue::Kind::Integer,
+                               catalog_path))) {
+                return issue;
+            }
+            if (const JsonValue* member =
+                    ObjectMember(catalog, member_name);
+                member != nullptr && member->integer_value < 0) {
+                return catalog_path + "." +
+                       std::string(member_name) +
+                       " must not be negative";
+            }
+        }
+        for (const std::string_view member_name :
+             {"reserved_view_ids", "reserved_group_ids"}) {
+            const JsonValue* member =
+                ObjectMember(catalog, member_name);
+            if (member == nullptr && require_allocator_history) {
+                return catalog_path + "." +
+                       std::string(member_name) +
+                       " is missing";
+            }
+            if (member != nullptr) {
+                if (std::optional<std::string> issue =
+                        ValidateStringArrayShape(
+                            *member,
+                            catalog_path + "." +
+                                std::string(member_name),
+                            require_allocator_history)) {
+                    return issue;
+                }
+            }
         }
         const JsonValue* marker_visibility =
             ObjectMember(
@@ -505,7 +573,8 @@ ValidateCatalogCacheBodyShape(
                 ValidateGroupingViewsShape(
                     *grouping_views,
                     catalog_path +
-                        ".grouping_views")) {
+                        ".grouping_views",
+                    require_unassigned_flag)) {
             return issue;
         }
     }
@@ -515,6 +584,9 @@ ValidateCatalogCacheBodyShape(
     }
     for (const auto& [identity_id, panel] :
          panel_state->object) {
+        if (identity_id.empty()) {
+            return "catalog_panel_state contains an empty catalog identity key";
+        }
         const std::string panel_path =
             "catalog_panel_state[" +
             identity_id + "]";
@@ -707,6 +779,20 @@ std::unordered_set<std::string> ReadExpandedGroupIds(const JsonValue& value)
     return expanded;
 }
 
+std::unordered_set<std::string> ReadStringSet(const JsonValue& value)
+{
+    std::unordered_set<std::string> result;
+    if (value.kind != JsonValue::Kind::Array) {
+        return result;
+    }
+    for (const JsonValue& item : value.array) {
+        if (item.kind == JsonValue::Kind::String) {
+            result.insert(item.string_value);
+        }
+    }
+    return result;
+}
+
 std::unordered_map<std::string, bool> ReadMarkerVisibility(const JsonValue& value)
 {
     std::unordered_map<std::string, bool> visibility;
@@ -831,13 +917,34 @@ std::filesystem::path DefaultCatalogUserStateCachePath()
         local_user_state_paths::kSpectralLineUserState);
 }
 
+std::filesystem::path CatalogUserStateCacheCommitLeasePath(
+    const std::filesystem::path& path)
+{
+    if (path.empty()) {
+        return {};
+    }
+    std::filesystem::path lease_path = path;
+#if defined(_WIN32)
+    lease_path += std::filesystem::path::string_type(L".commit.lock");
+#else
+    lease_path += std::filesystem::path::string_type(".commit.lock");
+#endif
+    return lease_path;
+}
+
+void SetCatalogUserStateCacheBeforeReplaceHookForTests(
+    CatalogUserStateCacheBeforeReplaceHook hook)
+{
+    g_before_replace_hook_for_tests = std::move(hook);
+}
+
 CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem::path& path)
 {
     CatalogUserStateCacheLoadResult result;
     VersionedJsonCacheLoadResult cache = LoadVersionedJsonCacheFile(
         path,
         kCacheFormatKind,
-        {1, 2, kCacheSchemaVersion},
+        {1, 2, 3, kCacheSchemaVersion},
         "spectral-line grouping cache");
     if (!cache.document) {
         result.issue_kind =
@@ -851,6 +958,7 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
                 : result.diagnostic_detail;
         return result;
     }
+    result.schema_version = cache.document->schema_version;
 
     const JsonValue* catalogs = ObjectMember(cache.document->root, "catalogs");
     if (catalogs == nullptr || catalogs->kind != JsonValue::Kind::Object) {
@@ -883,7 +991,10 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
     if (std::optional<std::string> body_issue =
             ValidateCatalogCacheBodyShape(
                 *catalogs,
-                panel_state)) {
+                panel_state,
+                cache.document->schema_version >= 3,
+                cache.document->schema_version ==
+                    kCacheSchemaVersion)) {
         result.issue_kind =
             CatalogUserStateCacheLoadIssueKind::
                 InvalidDocument;
@@ -913,6 +1024,20 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
             active_view_id->kind == JsonValue::Kind::String) {
             state.active_view_id = active_view_id->string_value;
         }
+        state.next_view_sequence = static_cast<std::uint64_t>(
+            ReadJsonSizeMember(catalog_value, "next_view_sequence")
+                .value_or(1));
+        state.next_group_sequence = static_cast<std::uint64_t>(
+            ReadJsonSizeMember(catalog_value, "next_group_sequence")
+                .value_or(1));
+        if (const JsonValue* reserved_view_ids =
+                ObjectMember(catalog_value, "reserved_view_ids")) {
+            state.reserved_view_ids = ReadStringSet(*reserved_view_ids);
+        }
+        if (const JsonValue* reserved_group_ids =
+                ObjectMember(catalog_value, "reserved_group_ids")) {
+            state.reserved_group_ids = ReadStringSet(*reserved_group_ids);
+        }
         if (const JsonValue* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
             state.marker_visibility = ReadMarkerVisibility(*marker_visibility);
         }
@@ -924,8 +1049,7 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
                 ReadGroupingViews(
                     *grouping_views,
                     identity,
-                    cache.document->schema_version ==
-                        kCacheSchemaVersion);
+                    cache.document->schema_version >= 3);
         }
         result.cache.catalogs.emplace(identity_id, std::move(state));
     }
@@ -976,6 +1100,35 @@ bool SaveCatalogUserStateCache(
                 stream << "      \"active_view_id\": ";
                 WriteJsonString(stream, state.active_view_id);
                 stream << ",\n";
+                stream << "      \"next_view_sequence\": "
+                       << state.next_view_sequence << ",\n";
+                stream << "      \"next_group_sequence\": "
+                       << state.next_group_sequence << ",\n";
+
+                stream << "      \"reserved_view_ids\": [";
+                const std::vector<std::string> reserved_view_ids =
+                    SortedSetValues(state.reserved_view_ids);
+                for (std::size_t index = 0;
+                     index < reserved_view_ids.size();
+                     ++index) {
+                    if (index != 0) {
+                        stream << ", ";
+                    }
+                    WriteJsonString(stream, reserved_view_ids[index]);
+                }
+                stream << "],\n";
+                stream << "      \"reserved_group_ids\": [";
+                const std::vector<std::string> reserved_group_ids =
+                    SortedSetValues(state.reserved_group_ids);
+                for (std::size_t index = 0;
+                     index < reserved_group_ids.size();
+                     ++index) {
+                    if (index != 0) {
+                        stream << ", ";
+                    }
+                    WriteJsonString(stream, reserved_group_ids[index]);
+                }
+                stream << "],\n";
 
                 stream << "      \"marker_visibility\": {";
                 const std::vector<std::string> marker_ids = SortedCacheKeys(state.marker_visibility);
@@ -1029,7 +1182,9 @@ bool SaveCatalogUserStateCache(
 
             stream << "  }\n";
             return true;
-        }, &error);
+        },
+        &error,
+        g_before_replace_hook_for_tests);
 }
 
 
