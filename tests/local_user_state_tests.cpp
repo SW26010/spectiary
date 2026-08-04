@@ -734,6 +734,192 @@ void TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported()
         "retry backoff should start when the failed I/O reports completion");
 }
 
+void TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation()
+{
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    const Lifecycle::TimePoint start{};
+    Lifecycle lifecycle(30ms, 120ms);
+    lifecycle.SetLoadWarning(
+        "saved state could not be read",
+        "CreateFile: access denied");
+
+    lifecycle.MarkDirtyAt(start + 10ms);
+    Require(
+        lifecycle.NextMaintenanceDeadline() == start + 40ms,
+        "lifecycle should expose the debounced maintenance deadline");
+
+    int attempts = 0;
+    Require(
+        lifecycle.RunMaintenance(
+            start + 39ms,
+            [&attempts] {
+                ++attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::NotNeeded &&
+            attempts == 0,
+        "maintenance before the debounce deadline should not invoke the owner save");
+
+    Require(
+        lifecycle.RunMaintenance(
+            start + 40ms,
+            [&attempts] {
+                ++attempts;
+                return Lifecycle::SaveResult{
+                    .saved = false,
+                    .error = "disk full"};
+            }) == Lifecycle::FlushOutcome::Failed &&
+            attempts == 1,
+        "a due maintenance save should report the owner failure");
+    const specforge::LocalUserStatePersistenceStatus failed =
+        lifecycle.PersistenceStatus();
+    const auto retry_deadline = lifecycle.NextMaintenanceDeadline();
+    Require(
+        lifecycle.dirty() &&
+            retry_deadline.has_value() &&
+            failed.retrying &&
+            failed.load_warning == "saved state could not be read" &&
+            failed.load_diagnostic_detail == "CreateFile: access denied" &&
+            failed.save_message == "disk full" &&
+            failed.save_diagnostic_detail == "disk full",
+        "a failed save should retain warning, retry, and diagnostic state");
+
+    Require(
+        lifecycle.RunMaintenance(
+            *retry_deadline - 1ms,
+            [&attempts] {
+                ++attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::NotNeeded &&
+            attempts == 1,
+        "retry maintenance should respect its backoff");
+
+    Require(
+        lifecycle.RunMaintenance(
+            *retry_deadline,
+            [&attempts] {
+                ++attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::Saved &&
+            attempts == 2,
+        "a retry at its deadline should report a successful save");
+    const specforge::LocalUserStatePersistenceStatus recovered =
+        lifecycle.PersistenceStatus();
+    Require(
+        !lifecycle.dirty() &&
+            !lifecycle.NextMaintenanceDeadline() &&
+            !recovered.retrying && recovered.recovered &&
+            recovered.load_warning.empty() &&
+            recovered.load_diagnostic_detail.empty() &&
+            recovered.save_message == "disk full" &&
+            recovered.save_diagnostic_detail == "disk full",
+        "a successful retry should clear pending warnings and expose recovery");
+
+    lifecycle.MarkDirtyAt(start + 200ms);
+    const specforge::LocalUserStatePersistenceStatus mutated =
+        lifecycle.PersistenceStatus();
+    Require(
+        lifecycle.dirty() && !mutated.recovered &&
+            mutated.save_message.empty() &&
+            lifecycle.NextMaintenanceDeadline() == start + 230ms,
+        "a later mutation should clear recovered state and re-debounce saving");
+}
+
+void TestLocalUserStatePersistenceLifecycleStartsRetryAfterSlowFailureReturns()
+{
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    const Lifecycle::TimePoint start{};
+    Lifecycle lifecycle(0ms, 50ms);
+    lifecycle.MarkDirtyAt(start);
+
+    Lifecycle::TimePoint callback_completed;
+    Require(
+        lifecycle.RunMaintenance(
+            start,
+            [&callback_completed] {
+                std::this_thread::sleep_for(5ms);
+                callback_completed = Lifecycle::Clock::now();
+                return Lifecycle::SaveResult{
+                    .saved = false,
+                    .error = "slow owner I/O failed"};
+            }) == Lifecycle::FlushOutcome::Failed,
+        "a slow failed save should report failure after the callback returns");
+
+    const auto retry_deadline = lifecycle.NextMaintenanceDeadline();
+    Require(
+        retry_deadline.has_value() &&
+            *retry_deadline >= callback_completed + 50ms,
+        "retry backoff should begin after slow save completion");
+}
+
+void TestLocalUserStatePersistenceLifecycleCleanFlushIsNotNeeded()
+{
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    Lifecycle lifecycle(30ms, 120ms);
+    int attempts = 0;
+
+    Require(
+        lifecycle.Flush(
+            [&attempts] {
+                ++attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::NotNeeded &&
+            attempts == 0 && !lifecycle.dirty() &&
+            !lifecycle.NextMaintenanceDeadline(),
+        "a clean flush should report NotNeeded without invoking the save owner");
+}
+
+void TestLocalUserStatePersistenceLifecycleFlushesIndependentOwners()
+{
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    const Lifecycle::TimePoint start{};
+    Lifecycle failed_owner(1s, 120ms);
+    Lifecycle successful_owner(1s, 120ms);
+    failed_owner.MarkDirtyAt(start);
+    successful_owner.MarkDirtyAt(start);
+
+    int failed_attempts = 0;
+    int successful_attempts = 0;
+    Require(
+        failed_owner.Flush(
+            [&failed_attempts] {
+                ++failed_attempts;
+                return Lifecycle::SaveResult{
+                    .saved = false,
+                    .error = "owner A unavailable"};
+            }) == Lifecycle::FlushOutcome::Failed,
+        "one owner flush should report its own failure");
+    Require(
+        successful_owner.Flush(
+            [&successful_attempts] {
+                ++successful_attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::Saved,
+        "another owner flush should still run and report success");
+    Require(
+        failed_attempts == 1 && successful_attempts == 1 &&
+            failed_owner.PersistenceStatus().retrying &&
+            failed_owner.dirty() &&
+            !successful_owner.PersistenceStatus().retrying &&
+            !successful_owner.dirty(),
+        "a failed owner must not suppress an independent owner's flush outcome");
+
+    Require(
+        failed_owner.Flush(
+            [&failed_attempts] {
+                ++failed_attempts;
+                return Lifecycle::SaveResult{
+                    .saved = true};
+            }) == Lifecycle::FlushOutcome::Saved &&
+            failed_attempts == 2 &&
+            failed_owner.PersistenceStatus().recovered,
+        "an owner should recover independently on a later flush");
+}
+
 void TestPanelVisibilityStateCacheRoundTripsHiddenPanels()
 {
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "specforge_panel_visibility_tests";
@@ -1009,6 +1195,10 @@ int main()
         TestLocalUserStateSaveSchedulerExtendsDebounceWhenMarkedAgain();
         TestLocalUserStateSaveSchedulerDoesNotShortenRetryBackoff();
         TestLocalUserStateSaveSchedulerStartsRetryAfterFailureIsReported();
+        TestLocalUserStatePersistenceLifecycleTracksRecoveryAndMutation();
+        TestLocalUserStatePersistenceLifecycleStartsRetryAfterSlowFailureReturns();
+        TestLocalUserStatePersistenceLifecycleCleanFlushIsNotNeeded();
+        TestLocalUserStatePersistenceLifecycleFlushesIndependentOwners();
         TestPanelVisibilityStateCacheRoundTripsHiddenPanels();
         TestPanelVisibilityStateCacheIgnoresCorruptJson();
         TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();

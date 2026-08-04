@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -125,6 +126,63 @@ private:
     Duration retry_ = Duration::zero();
     std::optional<TimePoint> next_attempt_time_;
     bool dirty_ = false;
+};
+
+// Storage owners keep their codecs, paths, and save functions. This concrete
+// lifecycle only centralizes the state transitions shared by those owners.
+class LocalUserStatePersistenceLifecycle {
+public:
+    using Clock = LocalUserStateSaveScheduler::Clock;
+    using TimePoint = LocalUserStateSaveScheduler::TimePoint;
+    using Duration = LocalUserStateSaveScheduler::Duration;
+
+    struct SaveResult {
+        bool saved = false;
+        std::string error;
+    };
+
+    enum class FlushOutcome {
+        NotNeeded,
+        Saved,
+        Failed,
+    };
+
+    using SaveOperation = std::function<SaveResult()>;
+
+    LocalUserStatePersistenceLifecycle() = default;
+    LocalUserStatePersistenceLifecycle(Duration debounce, Duration retry);
+
+    void SetLoadWarning(
+        std::string warning,
+        std::string diagnostic_detail = {});
+    void ClearLoadWarning();
+
+    void MarkDirty();
+    void MarkDirtyAt(TimePoint now);
+    [[nodiscard]] bool ShouldAttemptSave(TimePoint now) const;
+    [[nodiscard]] std::optional<TimePoint>
+        NextMaintenanceDeadline() const;
+
+    [[nodiscard]] FlushOutcome RunMaintenance(
+        TimePoint now,
+        const SaveOperation& save);
+    [[nodiscard]] FlushOutcome Flush(const SaveOperation& save);
+
+    [[nodiscard]] bool dirty() const;
+    [[nodiscard]] LocalUserStatePersistenceStatus
+        PersistenceStatus() const;
+
+private:
+    [[nodiscard]] FlushOutcome CompleteSaveAfterOperation(
+        const SaveOperation& save);
+    [[nodiscard]] FlushOutcome CompleteSave(
+        TimePoint now,
+        SaveResult result);
+
+    LocalUserStateSaveScheduler save_scheduler_;
+    LocalUserStateSaveStatus save_status_;
+    std::string load_warning_;
+    std::string load_diagnostic_detail_;
 };
 
 }  // namespace specforge

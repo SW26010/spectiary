@@ -454,4 +454,114 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> LocalUserStateSaveSchedule
     return dirty_ ? next_attempt_time_ : std::nullopt;
 }
 
+LocalUserStatePersistenceLifecycle::LocalUserStatePersistenceLifecycle(
+    Duration debounce,
+    Duration retry)
+    : save_scheduler_(debounce, retry)
+{
+}
+
+void LocalUserStatePersistenceLifecycle::SetLoadWarning(
+    std::string warning,
+    std::string diagnostic_detail)
+{
+    load_warning_ = std::move(warning);
+    load_diagnostic_detail_ = std::move(diagnostic_detail);
+}
+
+void LocalUserStatePersistenceLifecycle::ClearLoadWarning()
+{
+    load_warning_.clear();
+    load_diagnostic_detail_.clear();
+}
+
+void LocalUserStatePersistenceLifecycle::MarkDirty()
+{
+    MarkDirtyAt(Clock::now());
+}
+
+void LocalUserStatePersistenceLifecycle::MarkDirtyAt(TimePoint now)
+{
+    save_status_.ClearRecovered();
+    save_scheduler_.MarkDirtyAt(now);
+}
+
+bool LocalUserStatePersistenceLifecycle::ShouldAttemptSave(TimePoint now) const
+{
+    return save_scheduler_.ShouldAttemptSave(now);
+}
+
+std::optional<LocalUserStatePersistenceLifecycle::TimePoint>
+LocalUserStatePersistenceLifecycle::NextMaintenanceDeadline() const
+{
+    return save_scheduler_.next_attempt_time();
+}
+
+LocalUserStatePersistenceLifecycle::FlushOutcome
+LocalUserStatePersistenceLifecycle::RunMaintenance(
+    TimePoint now,
+    const SaveOperation& save)
+{
+    if (!ShouldAttemptSave(now)) {
+        return FlushOutcome::NotNeeded;
+    }
+    return CompleteSaveAfterOperation(save);
+}
+
+LocalUserStatePersistenceLifecycle::FlushOutcome
+LocalUserStatePersistenceLifecycle::Flush(const SaveOperation& save)
+{
+    if (!dirty()) {
+        return FlushOutcome::NotNeeded;
+    }
+    return CompleteSaveAfterOperation(save);
+}
+
+bool LocalUserStatePersistenceLifecycle::dirty() const
+{
+    return save_scheduler_.dirty();
+}
+
+LocalUserStatePersistenceStatus
+LocalUserStatePersistenceLifecycle::PersistenceStatus() const
+{
+    return {
+        .retrying = save_status_.failed(),
+        .recovered = save_status_.recovered(),
+        .load_warning = load_warning_,
+        .save_message = save_status_.message(),
+        .load_diagnostic_detail = load_diagnostic_detail_,
+        .save_diagnostic_detail = save_status_.message(),
+    };
+}
+
+LocalUserStatePersistenceLifecycle::FlushOutcome
+LocalUserStatePersistenceLifecycle::CompleteSaveAfterOperation(
+    const SaveOperation& save)
+{
+    SaveResult result = save ? save() : SaveResult{};
+    return CompleteSave(Clock::now(), std::move(result));
+}
+
+LocalUserStatePersistenceLifecycle::FlushOutcome
+LocalUserStatePersistenceLifecycle::CompleteSave(
+    TimePoint now,
+    SaveResult result)
+{
+    if (result.saved) {
+        ClearLoadWarning();
+        save_scheduler_.MarkSaveSucceeded(save_status_);
+        return FlushOutcome::Saved;
+    }
+
+    if (result.error.empty()) {
+        result.error = "Could not save local user state.";
+    }
+    save_scheduler_.MarkSaveFailedAt(
+        now,
+        save_status_,
+        std::move(result.error));
+    return FlushOutcome::Failed;
+}
+
 }  // namespace specforge
