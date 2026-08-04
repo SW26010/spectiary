@@ -1887,6 +1887,12 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
                      .persistence
                      .load_diagnostic_detail.empty(),
             "spectral-line view should expose a typed cache load issue and parser detail");
+        const specforge::LocalUserStatePersistenceStatus warning_status =
+            warned.PersistenceStatus();
+        Require(
+            !warning_status.load_warning.empty() &&
+                !warning_status.load_diagnostic_detail.empty(),
+            "catalog load warning and diagnostic should be owned by the shared persistence lifecycle");
     }
     specforge::SpectralLinesPanelController session(
         GroupedCatalog(),
@@ -1899,8 +1905,18 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
                     "h_alpha",
                     false)),
         "spectral-line state mutation should become dirty");
+    const auto initial_deadline = session.NextMaintenanceDeadline();
     Require(
-        session.Flush(),
+        initial_deadline.has_value(),
+        "a dirty catalog state should publish a maintenance deadline");
+    session.RunMaintenance(*initial_deadline - 1ms);
+    Require(
+        session.NextMaintenanceDeadline() == initial_deadline &&
+            !session.PersistenceStatus().retrying,
+        "catalog maintenance should respect the debounce deadline");
+    session.RunMaintenance(*initial_deadline);
+    Require(
+        !session.NextMaintenanceDeadline().has_value(),
         "the recovery fixture should establish an initial cache");
     std::filesystem::remove_all(blocker, error);
     {
@@ -1914,8 +1930,18 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
                     "h_alpha",
                     true)),
         "a second spectral-line mutation should become dirty");
+    const auto failed_attempt_deadline = session.NextMaintenanceDeadline();
     Require(
-        !session.Flush(),
+        failed_attempt_deadline.has_value(),
+        "a second catalog mutation should publish a fresh maintenance deadline");
+    session.RunMaintenance(*failed_attempt_deadline - 1ms);
+    Require(
+        session.NextMaintenanceDeadline() == failed_attempt_deadline &&
+            !session.PersistenceStatus().retrying,
+        "catalog retry state should remain clean before the maintenance deadline");
+    session.RunMaintenance(*failed_attempt_deadline);
+    Require(
+        session.PersistenceStatus().retrying,
         "blocked spectral-line cache path should fail to flush");
     Require(
         session.View().persistence.retrying &&
@@ -1931,8 +1957,13 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
+    const auto retry_deadline = session.NextMaintenanceDeadline();
     Require(
-        session.Flush(),
+        retry_deadline.has_value(),
+        "a failed catalog save should retain a retry maintenance deadline");
+    session.RunMaintenance(*retry_deadline);
+    Require(
+        !session.PersistenceStatus().retrying,
         "spectral-line cache should retry after repairing its path");
     Require(
         session.View().persistence.recovered,
@@ -1953,6 +1984,39 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
         "the final spectral-line state should flush");
 
     std::filesystem::remove_all(root, error);
+}
+
+void TestDirtyCatalogStateFlushesDuringShutdown()
+{
+    const std::filesystem::path path =
+        TestCachePath("shutdown_flush");
+    RemoveTestCache(path);
+    {
+        specforge::SpectralLinesPanelController session(
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    "h_alpha",
+                    false)),
+            "shutdown-flush fixture should create a dirty catalog state");
+        Require(
+            !std::filesystem::exists(path),
+            "shutdown-flush fixture should remain pending before destruction");
+    }
+
+    const specforge::CatalogUserStateCacheLoadResult loaded =
+        specforge::LoadCatalogUserStateCache(path);
+    Require(
+        loaded.issue_kind ==
+                specforge::CatalogUserStateCacheLoadIssueKind::None &&
+            !specforge::IsMarkerVisible(
+                loaded.cache.catalogs.at("specforge.public"),
+                "h_alpha"),
+        "destruction should flush the dirty catalog state through the shared lifecycle");
+    RemoveTestCache(path);
 }
 
 void TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta()
@@ -3395,6 +3459,7 @@ int main(int argc, char* argv[])
         TestMalformedLegacyCacheBodyIsNotSilentlyOverwritten();
         TestModificationSelectionAndPersistenceRoundTrip();
         TestPersistenceViewReportsLoadWarningRetryAndRecovery();
+        TestDirtyCatalogStateFlushesDuringShutdown();
         TestStartupCanonicalizationIsNotAnExplicitReconciliationDelta();
         TestLegacySchemaFirstExplicitWriteMigratesBeforeReconciliation();
         TestGeneratedCatalogIdsRemainMonotonicAcrossDeletionAndRestart();

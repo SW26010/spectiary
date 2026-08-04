@@ -245,6 +245,8 @@ private:
         std::string_view group_id);
     [[nodiscard]] std::string NextGroupingViewId();
     [[nodiscard]] std::string NextUserGroupId();
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
+        SaveCatalogUserState();
     void MarkCacheDirty();
     void RequestGroupingViewSelection();
 
@@ -257,12 +259,9 @@ private:
     std::filesystem::path user_state_cache_path_;
     CatalogUserState reconciliation_base_state_;
     CatalogPanelState reconciliation_base_panel_state_;
-    LocalUserStateSaveScheduler cache_save_scheduler_;
-    LocalUserStateSaveStatus cache_save_status_;
+    LocalUserStatePersistenceLifecycle cache_persistence_;
     SpectralLineCacheLoadIssueKind load_issue_kind_ =
         SpectralLineCacheLoadIssueKind::None;
-    std::string load_warning_;
-    std::string load_diagnostic_detail_;
     std::string grouping_view_search_;
     bool marker_labels_visible_ = true;
     bool grouping_view_selection_requested_ = true;

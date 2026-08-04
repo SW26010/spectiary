@@ -347,7 +347,7 @@ SpectralLinesPanelController::SpectralLinesPanelController(
       catalog_identity_(std::move(catalog_identity)),
       catalog_grouping_view_(BuildCatalogGroupingView(catalog_, catalog_identity_)),
       user_state_cache_path_(std::move(user_state_cache_path)),
-      cache_save_scheduler_(kSaveDebounce, kSaveRetry)
+      cache_persistence_(kSaveDebounce, kSaveRetry)
 {
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
     if (load_result.issue_kind ==
@@ -385,12 +385,13 @@ SpectralLinesPanelController::SpectralLinesPanelController(
     load_issue_kind_ =
         SpectralLineLoadIssueKind(
             load_result.issue_kind);
-    load_diagnostic_detail_ =
-        std::move(load_result.diagnostic_detail);
-    load_warning_ =
-        load_diagnostic_detail_.empty()
-            ? std::move(load_result.warning)
-            : load_diagnostic_detail_;
+    const std::string load_warning =
+        load_result.diagnostic_detail.empty()
+            ? load_result.warning
+            : load_result.diagnostic_detail;
+    cache_persistence_.SetLoadWarning(
+        load_warning,
+        std::move(load_result.diagnostic_detail));
     user_state_ = EnsureCatalogUserState(user_state_cache_, catalog_identity_);
     panel_state_ = EnsureCatalogPanelState(user_state_cache_, catalog_identity_);
     const CatalogUserStateCanonicalizationResult canonicalization =
@@ -782,19 +783,19 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
 CatalogUserStateView SpectralLinesPanelController::View() const
 {
     CatalogUserStateView result;
+    const LocalUserStatePersistenceStatus persistence =
+        cache_persistence_.PersistenceStatus();
     result.catalog_id = catalog_identity_.id;
     result.catalog_display_name = catalog_identity_.display_name;
     result.catalog_load_error = catalog_.load_error;
-    result.persistence.retrying =
-        cache_save_status_.failed();
-    result.persistence.recovered =
-        cache_save_status_.recovered();
+    result.persistence.retrying = persistence.retrying;
+    result.persistence.recovered = persistence.recovered;
     result.persistence.load_issue =
         load_issue_kind_;
     result.persistence.load_diagnostic_detail =
-        load_diagnostic_detail_;
+        persistence.load_diagnostic_detail;
     result.persistence.save_diagnostic_detail =
-        cache_save_status_.message();
+        persistence.save_diagnostic_detail;
     result.grouping_view_search = grouping_view_search_;
     result.marker_labels_visible = marker_labels_visible_;
     result.has_catalog_grouping_view = catalog_grouping_view_.has_value();
@@ -888,47 +889,49 @@ SpectralLinePlotView SpectralLinesPanelController::PlotView(
 LocalUserStatePersistenceStatus
 SpectralLinesPanelController::PersistenceStatus() const
 {
-    return {
-        .retrying = cache_save_status_.failed(),
-        .recovered = cache_save_status_.recovered(),
-        .load_warning = load_warning_,
-        .save_message = cache_save_status_.message(),
-        .load_diagnostic_detail =
-            load_diagnostic_detail_,
-        .save_diagnostic_detail =
-            cache_save_status_.message(),
-    };
+    return cache_persistence_.PersistenceStatus();
 }
 
 void SpectralLinesPanelController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    if (cache_save_scheduler_.ShouldAttemptSave(now)) {
-        (void)Flush();
-    }
+    (void)cache_persistence_.RunMaintenance(
+        now,
+        [this] {
+            return SaveCatalogUserState();
+        });
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint>
 SpectralLinesPanelController::NextMaintenanceDeadline() const
 {
-    return cache_save_scheduler_.next_attempt_time();
+    return cache_persistence_.NextMaintenanceDeadline();
 }
 
 bool SpectralLinesPanelController::Flush()
 {
-    if (!cache_save_scheduler_.dirty()) {
-        return load_issue_kind_ == SpectralLineCacheLoadIssueKind::None;
-    }
+    const LocalUserStatePersistenceLifecycle::FlushOutcome outcome =
+        cache_persistence_.Flush(
+            [this] {
+                return SaveCatalogUserState();
+            });
+    return outcome !=
+               LocalUserStatePersistenceLifecycle::FlushOutcome::Failed &&
+           load_issue_kind_ == SpectralLineCacheLoadIssueKind::None;
+}
 
+LocalUserStatePersistenceLifecycle::SaveResult
+SpectralLinesPanelController::SaveCatalogUserState()
+{
     std::string error;
     std::optional<ExclusiveFileLease> commit_lease =
         AcquireCatalogCommitLease(
             user_state_cache_path_,
             error);
     if (!commit_lease) {
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
 
     std::error_code latest_exists_error;
@@ -940,10 +943,10 @@ bool SpectralLinesPanelController::Flush()
             "could not inspect latest catalog user-state cache " +
             user_state_cache_path_.string() + ": " +
             latest_exists_error.message();
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
 
     CatalogUserStateCacheLoadResult latest_load =
@@ -956,10 +959,10 @@ bool SpectralLinesPanelController::Flush()
             (latest_load.diagnostic_detail.empty()
                  ? latest_load.warning
                  : latest_load.diagnostic_detail);
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
 
     CatalogUserState latest_state =
@@ -986,10 +989,10 @@ bool SpectralLinesPanelController::Flush()
             error =
                 "legacy catalog user-state cache contains unrelated catalog "
                 "entries and cannot be safely migrated to schema 4";
-            cache_save_scheduler_.MarkSaveFailed(
-                cache_save_status_,
-                std::move(error));
-            return false;
+            return {
+                .saved = false,
+                .error = std::move(error),
+            };
         }
 
         CatalogUserStateCache legacy_validation;
@@ -1007,10 +1010,10 @@ bool SpectralLinesPanelController::Flush()
             error =
                 "latest durable catalog user-state cache is not trusted for "
                 "legacy migration before canonicalization: " + error;
-            cache_save_scheduler_.MarkSaveFailed(
-                cache_save_status_,
-                std::move(error));
-            return false;
+            return {
+                .saved = false,
+                .error = std::move(error),
+            };
         }
 
         // Legacy grouping entries predate the explicit unassigned-group flag,
@@ -1042,10 +1045,10 @@ bool SpectralLinesPanelController::Flush()
             error =
                 "latest durable catalog user-state cache is not trusted for "
                 "legacy migration: " + error;
-            cache_save_scheduler_.MarkSaveFailed(
-                cache_save_status_,
-                std::move(error));
-            return false;
+            return {
+                .saved = false,
+                .error = std::move(error),
+            };
         }
     } else if (!ValidateCatalogUserStateCacheForReconciliation(
                    latest_load.cache,
@@ -1057,10 +1060,10 @@ bool SpectralLinesPanelController::Flush()
         error =
             "latest durable catalog user-state cache is not trusted before "
             "replacement: " + error;
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
     if (const auto match = latest_load.cache.catalogs.find(catalog_identity_.id);
         match != latest_load.cache.catalogs.end()) {
@@ -1084,10 +1087,10 @@ bool SpectralLinesPanelController::Flush()
             error,
             explicit_selection_intent_pending_,
             explicit_group_ordering_view_ids_)) {
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
 
     const CatalogUserStateCanonicalizationResult canonicalization =
@@ -1112,10 +1115,10 @@ bool SpectralLinesPanelController::Flush()
             user_state_cache_path_,
             merged_cache,
             error)) {
-        cache_save_scheduler_.MarkSaveFailed(
-            cache_save_status_,
-            std::move(error));
-        return false;
+        return {
+            .saved = false,
+            .error = std::move(error),
+        };
     }
 
     user_state_cache_ = std::move(merged_cache);
@@ -1131,13 +1134,10 @@ bool SpectralLinesPanelController::Flush()
         user_state_.next_group_sequence);
     load_issue_kind_ =
         SpectralLineCacheLoadIssueKind::None;
-    load_warning_.clear();
-    load_diagnostic_detail_.clear();
     explicit_selection_intent_pending_ = false;
     explicit_group_ordering_view_ids_.clear();
     explicit_task_delta_pending_ = false;
-    cache_save_scheduler_.MarkSaveSucceeded(cache_save_status_);
-    return true;
+    return {.saved = true};
 }
 
 CatalogUserStateResult SpectralLinesPanelController::Applied(bool persistent_state_changed)
@@ -1285,8 +1285,7 @@ std::string SpectralLinesPanelController::NextUserGroupId()
 
 void SpectralLinesPanelController::MarkCacheDirty()
 {
-    cache_save_status_.ClearRecovered();
-    cache_save_scheduler_.MarkDirty();
+    cache_persistence_.MarkDirty();
 }
 
 void SpectralLinesPanelController::RequestGroupingViewSelection()
