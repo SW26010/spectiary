@@ -3132,6 +3132,12 @@ void TestSessionAggregatesCacheLoadWarningsWithoutBlockingSourceOpen()
             flush.workflow_saved,
         "labeling should fail closed while the other independent cache owners repair their files");
     Require(
+        !HasPersistenceMessage(
+            session.View().persistence,
+            specforge::LocalUserStateArea::SourceSession,
+            specforge::LocalUserStateHealthMessageKind::LoadWarning),
+        "a successful source-session flush should clear only its load warning");
+    Require(
         ReadTextFile(labeling_cache) ==
             corrupt_labeling_cache,
         "fail-closed labeling persistence must preserve the corrupt source bytes");
@@ -6425,6 +6431,9 @@ void TestSourceSessionFlushFailureKeepsDirtyState()
                 LocalUserStateHealthMessageKind::
                     SaveRetrying),
         "retrying health should identify the failed cache owner");
+    Require(
+        session.NextMaintenanceDeadline().has_value(),
+        "a failed source-session flush should retain a retry maintenance deadline");
     {
         std::vector<LoadedSourceSnapshot> reloaded_snapshots;
         PreparedSession reloaded(

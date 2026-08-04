@@ -42,7 +42,7 @@ class SourceCollectionSessionStatePersistence {
 public:
     explicit SourceCollectionSessionStatePersistence(std::filesystem::path cache_path)
         : cache_path_(std::move(cache_path)),
-          save_scheduler_(kSourceSessionSaveDebounce, kSourceSessionSaveRetry)
+          persistence_(kSourceSessionSaveDebounce, kSourceSessionSaveRetry)
     {
     }
 
@@ -53,7 +53,7 @@ public:
         }
         SourceCollectionSessionStateCacheLoadResult result =
             LoadSourceCollectionSessionStateCache(cache_path_);
-        load_warning_ = std::move(result.warning);
+        persistence_.SetLoadWarning(std::move(result.warning));
         return std::move(result.cache);
     }
 
@@ -67,16 +67,14 @@ public:
         restoring_ = false;
         if (dirty_after_restore_ && !cache_path_.empty()) {
             dirty_after_restore_ = false;
-            save_status_.ClearRecovered();
-            save_scheduler_.MarkDirty();
+            persistence_.MarkDirty();
         }
     }
 
     void MarkDirty()
     {
         if (!restoring_ && !cache_path_.empty()) {
-            save_status_.ClearRecovered();
-            save_scheduler_.MarkDirty();
+            persistence_.MarkDirty();
         }
     }
 
@@ -85,18 +83,11 @@ public:
         const std::vector<SourceCollectionSavedSource>& sources,
         std::optional<std::size_t> active_source_index)
     {
-        if (!save_scheduler_.ShouldAttemptSave(now)) {
-            return;
-        }
-        if (Save(sources, active_source_index)) {
-            load_warning_.clear();
-            save_scheduler_.MarkSaveSucceeded(save_status_);
-        } else {
-            save_scheduler_.MarkSaveFailedAt(
-                now,
-                save_status_,
-                "Could not save source session state.");
-        }
+        (void)persistence_.RunMaintenance(
+            now,
+            [this, &sources, active_source_index] {
+                return Save(sources, active_source_index);
+            });
     }
 
     void MarkDirtyAfterRestore()
@@ -107,14 +98,13 @@ public:
         if (restoring_) {
             dirty_after_restore_ = true;
         } else {
-            save_status_.ClearRecovered();
-            save_scheduler_.MarkDirty();
+            persistence_.MarkDirty();
         }
     }
 
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const
     {
-        return save_scheduler_.next_attempt_time();
+        return persistence_.NextMaintenanceDeadline();
     }
 
     [[nodiscard]] bool Flush(
@@ -122,55 +112,47 @@ public:
         std::optional<std::size_t> active_source_index)
     {
         if (dirty_after_restore_) {
-            if (!Save(sources, active_source_index)) {
-                save_scheduler_.MarkSaveFailed(
-                    save_status_,
-                    "Could not save source session state.");
+            persistence_.MarkDirty();
+            if (persistence_.Flush(
+                    [this, &sources, active_source_index] {
+                        return Save(sources, active_source_index);
+                    }) ==
+                LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
                 return false;
             }
-            load_warning_.clear();
-            save_scheduler_.MarkSaveSucceeded(save_status_);
             dirty_after_restore_ = false;
         }
-        if (!save_scheduler_.dirty()) {
-            return true;
-        }
-        if (Save(sources, active_source_index)) {
-            load_warning_.clear();
-            save_scheduler_.MarkSaveSucceeded(save_status_);
-            return true;
-        }
-        save_scheduler_.MarkSaveFailed(
-            save_status_,
-            "Could not save source session state.");
-        return false;
+        return persistence_.Flush(
+                   [this, &sources, active_source_index] {
+                       return Save(sources, active_source_index);
+                   }) !=
+            LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
     }
 
     [[nodiscard]] LocalUserStatePersistenceStatus PersistenceStatus() const
     {
-        return {
-            .retrying = save_status_.failed(),
-            .recovered = save_status_.recovered(),
-            .load_warning = load_warning_,
-            .save_message = save_status_.message(),
-        };
+        return persistence_.PersistenceStatus();
     }
 
 private:
-    [[nodiscard]] bool Save(
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult Save(
         const std::vector<SourceCollectionSavedSource>& sources,
         std::optional<std::size_t> active_source_index) const
     {
         SourceCollectionSessionStateCache cache;
         cache.sources = sources;
         cache.active_source_index = active_source_index;
-        return SaveSourceCollectionSessionStateCache(cache_path_, cache);
+        if (SaveSourceCollectionSessionStateCache(cache_path_, cache)) {
+            return {.saved = true};
+        }
+        return {
+            .saved = false,
+            .error = "Could not save source session state.",
+        };
     }
 
     std::filesystem::path cache_path_;
-    LocalUserStateSaveScheduler save_scheduler_;
-    LocalUserStateSaveStatus save_status_;
-    std::string load_warning_;
+    LocalUserStatePersistenceLifecycle persistence_;
     bool restoring_ = false;
     bool dirty_after_restore_ = false;
 };
