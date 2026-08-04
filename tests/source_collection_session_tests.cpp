@@ -3297,10 +3297,8 @@ void TestRejectedAnnotationSwitchKeepsCurrentEditingTask()
             rejected.labeling_issue ==
                 specforge::SampleLabelingOperationResult::Issue::
                     EditLeaseUnavailable &&
-            rejected.message.find(
-                "already being edited") !=
-                std::string::npos,
-        "occupied annotation activation should report the target lease conflict");
+            rejected.message.empty(),
+        "occupied annotation activation should report only the stable target lease issue");
     Require(
         first.View().labeling.has_active_task &&
             first.View().labeling.task_id ==

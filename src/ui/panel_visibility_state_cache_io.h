@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/local_user_state.h"
+#include "app/panel_visibility_state.h"
 
 #include <chrono>
 #include <filesystem>
@@ -8,20 +9,6 @@
 #include <utility>
 
 namespace specforge {
-
-struct PanelVisibilityState {
-    bool files = true;
-    bool navigation = true;
-    bool annotations = true;
-    bool labeling = true;
-    bool filters = true;
-    bool sorting = true;
-    bool smoothing = true;
-    bool information = true;
-    bool spectral_lines = true;
-
-    [[nodiscard]] bool operator==(const PanelVisibilityState&) const = default;
-};
 
 struct PanelVisibilityStateCacheLoadResult {
     PanelVisibilityState state;

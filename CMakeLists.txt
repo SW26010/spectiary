@@ -865,6 +865,12 @@ add_test(
         -File "${CMAKE_SOURCE_DIR}/tests/panel_session_render_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
+add_test(
+    NAME specforge_production_target_dependency_architecture_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/production_target_dependency_architecture_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
 specforge_add_test(
     specforge_win32_compositor_clock_tests
     tests/win32_compositor_clock_tests.cpp

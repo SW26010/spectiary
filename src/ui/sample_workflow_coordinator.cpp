@@ -3,7 +3,6 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_annotation_labeling_rules.h"
-#include "ui/sample_labeling_issue_text.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_session.h"
 
@@ -165,11 +164,6 @@ void ApplyLabelingLeaseIssue(
     const SampleLabelingOperationResult& operation)
 {
     outcome.labeling_issue = operation.issue;
-    const SampleLabelingIssueTextDescriptor text =
-        SampleLabelingIssueTextFor(operation.issue);
-    if (text.text_id != UiTextId::Count) {
-        outcome.message = std::string(text.english);
-    }
 }
 
 }  // namespace

@@ -7,9 +7,9 @@
 
 namespace specforge {
 
-// Keep the semantic issue, stable UI id, and session fallback text together.
-// This is header-only because specforge_sessions intentionally does not link
-// the desktop text catalog, while both targets must use one mapping.
+// Keep the stable UI id and localized display text in the desktop UI module.
+// Session transitions carry the semantic issue enum and do not include this
+// presentation mapping.
 struct SampleLabelingIssueTextDescriptor {
     UiTextId text_id = UiTextId::Count;
     std::string_view english;
