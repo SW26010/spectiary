@@ -571,6 +571,11 @@ target_link_libraries(
         advapi32
         specforge_desktop_ui
 )
+set_tests_properties(
+    specforge_automation_control_tests
+    PROPERTIES
+        LABELS "automation;ci-headless;required"
+)
 specforge_add_test(
     specforge_automation_state_isolation_tests
     tests/automation_state_isolation_tests.cpp
@@ -584,6 +589,47 @@ target_link_libraries(
 add_dependencies(
     specforge_automation_state_isolation_tests
     specforge_metadata
+)
+set_tests_properties(
+    specforge_automation_state_isolation_tests
+    PROPERTIES
+        LABELS "automation;ci-headless;required"
+)
+add_test(
+    NAME specforge_automation_samples_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/automation_samples_contract_tests.ps1"
+        -FixtureDirectory
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/automation/samples"
+        -Documentation
+            "${CMAKE_SOURCE_DIR}/docs/automation_samples.md"
+        -Runner
+            "${CMAKE_SOURCE_DIR}/tests/automation_samples_tests.ps1"
+        -CMakeLists
+            "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+)
+set_tests_properties(
+    specforge_automation_samples_contract_tests
+    PROPERTIES
+        LABELS "automation;ci-headless;required"
+        TIMEOUT 30
+)
+add_test(
+    NAME specforge_automation_ci_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/automation_ci_contract_tests.ps1"
+        -Workflow
+            "${CMAKE_SOURCE_DIR}/.github/workflows/automation.yml"
+        -CMakeLists
+            "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+        -RunnerScript
+            "${CMAKE_SOURCE_DIR}/scripts/run-automation-ci.ps1"
+)
+set_tests_properties(
+    specforge_automation_ci_contract_tests
+    PROPERTIES
+        LABELS "automation;ci-headless;required"
+        TIMEOUT 30
 )
 add_test(
     NAME specforge_automation_launcher_integration_tests
@@ -599,6 +645,29 @@ set_tests_properties(
     PROPERTIES
         RUN_SERIAL TRUE
         TIMEOUT 120
+        LABELS "automation;real-gui"
+)
+add_test(
+    NAME specforge_automation_samples_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/automation_samples_tests.ps1"
+        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
+        -Executable "$<TARGET_FILE:specforge_native>"
+        -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
+        -FixtureDirectory
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/automation/samples"
+        -ArtifactsDirectory
+            "${CMAKE_BINARY_DIR}/test-artifacts/automation-samples"
+)
+set_tests_properties(
+    specforge_automation_samples_tests
+    PROPERTIES
+        RUN_SERIAL TRUE
+        LABELS "automation;real-gui"
+        # Two 60s GUI sequence budgets, two 30s helper budgets, bounded
+        # launcher/output/process cleanup, and evidence preservation must all
+        # complete before CTest terminates the runner's finally block.
+        TIMEOUT 300
 )
 add_test(
     NAME specforge_multi_instance_labeling_smoke_tests
@@ -615,6 +684,7 @@ set_tests_properties(
         # 1s GUI Kill waits, and a shared 10s helper/fallback fixture and
         # alias-directory cleanup budget stay below 240s.
         TIMEOUT 240
+        LABELS "automation;real-gui"
 )
 specforge_add_test(
     specforge_on_demand_frame_capture_tests

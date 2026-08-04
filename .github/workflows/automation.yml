@@ -1,0 +1,552 @@
+name: SpecForge automation
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_real_gui:
+        description: Run the real-GUI suite on the protected master branch
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: specforge-automation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-headless:
+    name: Native/headless automation gate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      AUTOMATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/native-headless
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Prepare run-scoped automation evidence root
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          New-Item -ItemType Directory -Path $env:AUTOMATION_RUN_ROOT -Force | Out-Null
+
+      - name: Select runner vcpkg and MSVC toolchain
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
+            $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+            if ($null -ne $vcpkgCommand) {
+              $vcpkgRoot = Split-Path -Parent $vcpkgCommand.Source
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot) -or
+              -not (Test-Path -LiteralPath (Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
+          }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\specforge-vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars = @(
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
+            throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the hosted runner.'
+          }
+          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Ninja/MSVC Debug
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
+            -TimeoutSec 600
+
+      - name: Build native automation targets
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Target all `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
+            -TimeoutSec 1200
+
+      - name: Run required native/headless CTest gate
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
+            -Mode Headless `
+            -BuildDirectory build\ninja-msvc-debug `
+            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
+
+      - name: Upload headless logs and failure evidence
+        timeout-minutes: 5
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: specforge-automation-headless-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/native-headless/**
+
+  real-gui-preflight:
+    name: Real-GUI runner preflight
+    needs: native-headless
+    if: >-
+      ${{ always() && needs.native-headless.result == 'success' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+    runs-on: windows-latest
+    timeout-minutes: 5
+    outputs:
+      runner_available: ${{ steps.runner_preflight.outputs.runner_available }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check for an online idle desktop runner
+        id: runner_preflight
+        shell: pwsh
+        env:
+          RUNNER_API_TOKEN: ${{ secrets.SPECFORGE_RUNNER_API_TOKEN || github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts\real-gui-preflight'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:RUNNER_API_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "https://api.github.com/repos/${{ github.repository }}/actions/runners?per_page=100"
+          $record = [ordered]@{
+            repository = '${{ github.repository }}'
+            required_labels = @('self-hosted', 'windows', 'desktop')
+            runner_available = $false
+            matching_runners = @()
+            reason = $null
+          }
+          try {
+            $response = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 8
+            $matching = @(
+              @($response.runners) | Where-Object {
+                $labels = @($_.labels | ForEach-Object { [string]$_.name })
+                [string]$_.status -eq 'online' -and
+                -not [bool]$_.busy -and
+                ($labels -contains 'self-hosted') -and
+                ($labels -contains 'windows') -and
+                ($labels -contains 'desktop')
+              })
+            $record.matching_runners = @($matching | ForEach-Object { [string]$_.name })
+            $record.runner_available = $matching.Count -gt 0
+            if (-not $record.runner_available) {
+              $record.reason = 'No online idle self-hosted runner has all required labels.'
+            }
+          }
+          catch {
+            $record.reason = "Runner availability API check failed: $($_.Exception.Message)"
+          }
+          $record.checked_utc = [DateTime]::UtcNow.ToString('O')
+          $record | ConvertTo-Json -Depth 12 |
+            Set-Content -LiteralPath (Join-Path $directory 'preflight.json') -Encoding utf8
+          $availabilityText = ([bool]$record.runner_available).ToString().ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "runner_available=$availabilityText" -Encoding utf8
+          if ($record.runner_available) {
+            Write-Host "Real-GUI preflight found: $($record.matching_runners -join ', ')"
+          }
+          else {
+            Write-Host "SKIPPED: Real-GUI runner is unavailable or cannot be verified. $($record.reason)"
+          }
+
+      - name: Upload Real-GUI preflight diagnostic
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: specforge-automation-real-gui-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: ci-artifacts/real-gui-preflight/preflight.json
+
+  real-gui:
+    name: Real-GUI automation (self-hosted desktop)
+    needs: [native-headless, real-gui-preflight]
+    if: >-
+      ${{ always() && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+    runs-on: [self-hosted, windows, desktop]
+    environment:
+      name: real-gui
+    timeout-minutes: 75
+    env:
+      AUTOMATION_RUN_ROOT: ${{ github.workspace }}/ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/real-gui
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Prepare run-scoped automation evidence root
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          New-Item -ItemType Directory -Path $env:AUTOMATION_RUN_ROOT -Force | Out-Null
+
+      - name: Select runner vcpkg and MSVC toolchain
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
+            $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+            if ($null -ne $vcpkgCommand) {
+              $vcpkgRoot = Split-Path -Parent $vcpkgCommand.Source
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot) -or
+              -not (Test-Path -LiteralPath (Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
+          }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\specforge-vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars = @(
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
+          ) | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace([string]$vcvars)) {
+            throw 'Could not locate a Visual Studio 2022 vcvars64.bat on the self-hosted desktop runner.'
+          }
+          "SPECFORGE_VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Ninja/MSVC Debug
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
+            -TimeoutSec 600
+
+      - name: Build real-GUI automation targets
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Target all `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\build" `
+            -TimeoutSec 1200
+
+      - name: Run real-GUI CTest group
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
+            -Mode RealGui `
+            -BuildDirectory build\ninja-msvc-debug `
+            -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 900 -TestTimeoutSec 300
+
+      - name: Upload real-GUI logs and failure evidence
+        timeout-minutes: 5
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: specforge-automation-real-gui-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ci-artifacts/${{ github.run_id }}-${{ github.run_attempt }}/real-gui/**
+
+  real-gui-watchdog:
+    name: Real-GUI queue watchdog
+    needs: [native-headless, real-gui-preflight]
+    if: >-
+      ${{ always() && needs.native-headless.result == 'success' && needs.real-gui-preflight.result == 'success' && needs.real-gui-preflight.outputs.runner_available == 'true' && vars.SPECFORGE_REAL_GUI_ENABLED == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      watchdog_status: ${{ steps.queue_watchdog.outputs.watchdog_status }}
+    steps:
+      - name: Bound self-hosted queue and environment wait
+        id: queue_watchdog
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts\real-gui-watchdog'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $runId = '${{ github.run_id }}'
+          $jobsUri = "https://api.github.com/repos/${{ github.repository }}/actions/runs/$runId/jobs?per_page=100"
+          $pollIntervalSeconds = 15
+          $apiTimeoutSec = 8
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $record = [ordered]@{
+            run_id = $runId
+            target_job = 'Real-GUI automation (self-hosted desktop)'
+            queue_deadline_utc = $deadline.ToString('O')
+            status = 'not_observed'
+            reason = $null
+            cancel_error = $null
+            cancel_attempted = $false
+            cancel_target = $null
+            cancel_uri = $null
+            cancel_accepted = $false
+            api_failure_count = 0
+            request_timeout_sec = $apiTimeoutSec
+            poll_interval_sec = $pollIntervalSeconds
+            failure = $false
+          }
+          $target = $null
+          $lastApiError = $null
+          while ([DateTime]::UtcNow -lt $deadline) {
+            try {
+              $jobs = Invoke-RestMethod -Method Get -Uri $jobsUri -Headers $headers -TimeoutSec $apiTimeoutSec
+              $matches = @(
+                @($jobs.jobs) | Where-Object {
+                  [string]$_.name -eq $record.target_job
+                } | Select-Object -First 1)
+              $target = if ($matches.Count -gt 0) { $matches[0] } else { $null }
+              $record.api_failure_count = 0
+              if ($null -ne $target) {
+                $status = [string]$target.status
+                $record.status = $status
+                if ($status -eq 'in_progress' -or $status -eq 'completed') {
+                  $record.reason = 'Real-GUI job was assigned or completed before the queue deadline.'
+                  break
+                }
+              }
+            }
+            catch {
+              $record.api_failure_count = [int]$record.api_failure_count + 1
+              $lastApiError = $_.Exception.Message
+              $record.reason = "Actions jobs API check failed ($($record.api_failure_count)/3): $lastApiError"
+              if ([int]$record.api_failure_count -ge 3) {
+                $record.status = 'api_error'
+                $record.failure = $true
+                break
+              }
+            }
+            $remainingSeconds = ($deadline - [DateTime]::UtcNow).TotalSeconds
+            if ($remainingSeconds -gt 0) {
+              Start-Sleep -Seconds ([Math]::Min(
+                  $pollIntervalSeconds,
+                  [Math]::Ceiling($remainingSeconds)))
+            }
+          }
+          $runCancelUri = "https://api.github.com/repos/${{ github.repository }}/actions/runs/$runId/cancel"
+          if ($null -ne $target -and
+              [string]$record.status -in @('queued', 'waiting', 'pending')) {
+            $record.reason = 'Real-GUI job remained queued or waiting for environment approval beyond the bounded deadline.'
+            $record.cancel_attempted = $true
+            $record.cancel_target = 'workflow_run'
+            $record.cancel_uri = $runCancelUri
+            try {
+              # GitHub exposes cancellation for a workflow run, not for an
+              # individual job. Keep this request bounded below the poll interval.
+              Invoke-RestMethod -Method Post -Uri $runCancelUri -Headers $headers -TimeoutSec $apiTimeoutSec | Out-Null
+              $record.cancel_accepted = $true
+              $record.status = 'cancel_requested'
+              $record.reason += ' Workflow run cancellation request was accepted.'
+            }
+            catch {
+              $record.cancel_error = $_.Exception.Message
+              $record.reason += ' Workflow run cancellation could not be confirmed.'
+              $record.failure = $true
+              $record.status = 'cancel_failed'
+            }
+          }
+          elseif ($record.status -eq 'api_error' -or
+              $record.status -eq 'not_observed' -or
+              $null -eq $target) {
+            $lookupStatus = [string]$record.status
+            $record.cancel_attempted = $true
+            $record.cancel_target = 'workflow_run'
+            $record.cancel_uri = $runCancelUri
+            if ($lookupStatus -eq 'api_error') {
+              $record.reason = "Real-GUI job lookup failed repeatedly; bounded workflow-run cancellation was attempted. Last API error: $lastApiError"
+            }
+            else {
+              $record.status = 'target_not_found'
+              $record.reason = 'Real-GUI job did not become observable before the bounded queue deadline.'
+            }
+            try {
+              Invoke-RestMethod -Method Post -Uri $runCancelUri -Headers $headers -TimeoutSec $apiTimeoutSec | Out-Null
+              $record.cancel_accepted = $true
+              $record.reason += ' Workflow run cancellation request was accepted.'
+            }
+            catch {
+              $record.cancel_error = $_.Exception.Message
+              $record.reason += ' Workflow run cancellation could not be confirmed.'
+              $record.status = 'cancel_failed'
+            }
+            # A missing/untrusted job observation is still a watchdog failure,
+            # even when the bounded run cancellation request was accepted.
+            $record.failure = $true
+          }
+          if ($record.status -eq 'not_observed') {
+            $record.reason = 'Real-GUI job did not become observable before the bounded queue deadline.'
+            $record.failure = $true
+          }
+          $record.checked_utc = [DateTime]::UtcNow.ToString('O')
+          $record | ConvertTo-Json -Depth 12 |
+            Set-Content -LiteralPath (Join-Path $directory 'watchdog.json') -Encoding utf8
+          "watchdog_status=$($record.status)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host ($record | ConvertTo-Json -Compress -Depth 12)
+          if ([bool]$record.failure) {
+            throw "Real-GUI queue watchdog failed: $($record.reason)"
+          }
+
+      - name: Upload Real-GUI queue diagnostic
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: specforge-automation-real-gui-watchdog-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: ci-artifacts/real-gui-watchdog/watchdog.json
+
+  real-gui-status-diagnostic:
+    name: Real-GUI status diagnostic
+    if: >-
+      ${{ always() && (vars.SPECFORGE_REAL_GUI_ENABLED != 'true' || !((github.event_name == 'push' && github.ref == 'refs/heads/master' && github.ref_protected == true) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && github.ref_protected == true && inputs.run_real_gui == true)) || needs.native-headless.result != 'success' || needs.real-gui-preflight.result != 'success' || needs.real-gui-preflight.outputs.runner_available != 'true' || needs.real-gui-watchdog.result != 'success' || needs.real-gui.result != 'success') }}
+    needs: [native-headless, real-gui-preflight, real-gui-watchdog, real-gui]
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record real-GUI status and diagnostic
+        shell: pwsh
+        env:
+          REAL_GUI_ENABLED: ${{ vars.SPECFORGE_REAL_GUI_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          BASE_REF: ${{ github.base_ref }}
+          RUN_REAL_GUI: ${{ inputs.run_real_gui }}
+          HEADLESS_RESULT: ${{ needs.native-headless.result }}
+          PREFLIGHT_RESULT: ${{ needs.real-gui-preflight.result }}
+          PREFLIGHT_AVAILABLE: ${{ needs.real-gui-preflight.outputs.runner_available }}
+          WATCHDOG_RESULT: ${{ needs.real-gui-watchdog.result }}
+          WATCHDOG_STATUS: ${{ needs.real-gui-watchdog.outputs.watchdog_status }}
+          REAL_GUI_RESULT: ${{ needs.real-gui.result }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:GITHUB_WORKSPACE 'ci-artifacts\real-gui-status'
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          $policyAuthorized =
+            ($env:EVENT_NAME -eq 'push' -and $env:REF_NAME -eq 'refs/heads/master') -or
+            ($env:EVENT_NAME -eq 'workflow_dispatch' -and
+             $env:REF_NAME -eq 'refs/heads/master' -and
+             $env:RUN_REAL_GUI -eq 'true')
+          $refProtected = $env:REF_PROTECTED -eq 'true'
+          $authorized = $policyAuthorized -and $refProtected
+          $status = 'not_run'
+          $reason = 'Real-GUI did not reach a recognized terminal state.'
+          if ($env:REAL_GUI_ENABLED -ne 'true') {
+            $status = 'skipped'
+            $reason = 'Repository variable SPECFORGE_REAL_GUI_ENABLED is not true.'
+          }
+          elseif (-not $policyAuthorized) {
+            $status = 'skipped'
+            $reason = 'Event/ref/input authorization policy does not permit self-hosted Real-GUI execution.'
+          }
+          elseif (-not $refProtected) {
+            $status = 'unprotected_ref'
+            $reason = 'github.ref_protected is not true; self-hosted Real-GUI execution is blocked for this unprotected ref.'
+          }
+          elseif ($env:HEADLESS_RESULT -ne 'success') {
+            $status = 'blocked'
+            $reason = "Required native/headless gate result was $($env:HEADLESS_RESULT)."
+          }
+          elseif ($env:PREFLIGHT_RESULT -ne 'success' -or
+              $env:PREFLIGHT_AVAILABLE -ne 'true') {
+            $status = 'runner_unavailable'
+            $reason = "Self-hosted desktop preflight was $($env:PREFLIGHT_RESULT); runner_available=$($env:PREFLIGHT_AVAILABLE)."
+          }
+          elseif ($env:WATCHDOG_STATUS -eq 'cancel_failed') {
+            $status = 'watchdog_failure'
+            $reason = 'Real-GUI queue watchdog could not confirm bounded cancellation of the queued job.'
+          }
+          elseif ($env:WATCHDOG_RESULT -ne 'success') {
+            $status = 'watchdog_failure'
+            $reason = "Real-GUI queue watchdog result was $($env:WATCHDOG_RESULT), status=$($env:WATCHDOG_STATUS)."
+          }
+          elseif ($env:WATCHDOG_STATUS -eq 'cancel_requested') {
+            $status = 'approval_timeout'
+            $reason = 'Real-GUI remained queued or waiting for desktop/environment approval until the bounded watchdog deadline.'
+          }
+          elseif ($env:REAL_GUI_RESULT -eq 'failure' -or
+              $env:REAL_GUI_RESULT -eq 'cancelled') {
+            $status = 'failed'
+            $reason = "Authorized Real-GUI execution ended with result $($env:REAL_GUI_RESULT)."
+          }
+          elseif ($env:REAL_GUI_RESULT -eq 'skipped') {
+            $status = 'not_run'
+            $reason = 'Real-GUI was authorized and preflight passed, but the job was skipped unexpectedly.'
+          }
+          $record = [ordered]@{
+            status = $status
+            reason = $reason
+            event_name = $env:EVENT_NAME
+            ref = $env:REF_NAME
+            ref_protected = $refProtected
+            base_ref = $env:BASE_REF
+            repository_variable = $env:REAL_GUI_ENABLED
+            workflow_input_run_real_gui = $env:RUN_REAL_GUI
+            authorization_policy = 'protected master push, or workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true'
+            required_runner_labels = @('self-hosted', 'windows', 'desktop')
+            headless_gate_result = $env:HEADLESS_RESULT
+            preflight_result = $env:PREFLIGHT_RESULT
+            preflight_runner_available = $env:PREFLIGHT_AVAILABLE
+            watchdog_result = $env:WATCHDOG_RESULT
+            watchdog_status = $env:WATCHDOG_STATUS
+            real_gui_job_result = $env:REAL_GUI_RESULT
+            checked_utc = [DateTime]::UtcNow.ToString('O')
+          }
+          $record | ConvertTo-Json -Depth 12 |
+            Set-Content -LiteralPath (Join-Path $directory 'status.json') -Encoding utf8
+          $diagnostic = @(
+            "status: $status"
+            "reason: $reason"
+            "event_name: $($env:EVENT_NAME)"
+            "ref: $($env:REF_NAME)"
+            "ref_protected: $($env:REF_PROTECTED)"
+            "base_ref: $($env:BASE_REF)"
+            "repository_variable: SPECFORGE_REAL_GUI_ENABLED=$($env:REAL_GUI_ENABLED)"
+            "workflow_input_run_real_gui: $($env:RUN_REAL_GUI)"
+            "authorization_policy: protected master push, or workflow_dispatch on protected master with run_real_gui=true; github.ref_protected must be true"
+            "headless_gate_result: $($env:HEADLESS_RESULT)"
+            "preflight_result: $($env:PREFLIGHT_RESULT)"
+            "preflight_runner_available: $($env:PREFLIGHT_AVAILABLE)"
+            "watchdog_result: $($env:WATCHDOG_RESULT)"
+            "watchdog_status: $($env:WATCHDOG_STATUS)"
+            "real_gui_job_result: $($env:REAL_GUI_RESULT)"
+          ) -join [Environment]::NewLine
+          Set-Content -LiteralPath (Join-Path $directory 'diagnostic.txt') -Value $diagnostic -Encoding utf8
+          Write-Host $diagnostic
+          if ($status -in @('failed', 'watchdog_failure', 'unprotected_ref', 'not_run')) {
+            exit 1
+          }
+
+      - name: Upload real-GUI status diagnostic
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: specforge-automation-real-gui-status-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-artifacts/real-gui-status/status.json
+            ci-artifacts/real-gui-status/diagnostic.txt

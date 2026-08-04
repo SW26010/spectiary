@@ -1172,6 +1172,84 @@ bool SendCommandAndDisconnectAfterAccepted(
     }
 }
 
+class LauncherChildJobGuard {
+public:
+    LauncherChildJobGuard() = default;
+
+    ~LauncherChildJobGuard()
+    {
+        if (job_ != nullptr) {
+            CloseHandle(job_);
+            job_ = nullptr;
+        }
+    }
+
+    LauncherChildJobGuard(
+        const LauncherChildJobGuard&) = delete;
+    LauncherChildJobGuard& operator=(
+        const LauncherChildJobGuard&) = delete;
+
+    [[nodiscard]] bool Assign(
+        HANDLE child_process,
+        std::string& error_message)
+    {
+        if (child_process == nullptr) {
+            error_message =
+                "Could not assign an empty GUI process handle to its launcher Job Object.";
+            return false;
+        }
+        job_ = CreateJobObjectW(nullptr, nullptr);
+        if (job_ == nullptr) {
+            error_message =
+                "Could not create the launcher GUI Job Object (Win32 error " +
+                std::to_string(GetLastError()) + ").";
+            return false;
+        }
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(
+                job_,
+                JobObjectExtendedLimitInformation,
+                &limits,
+                sizeof(limits))) {
+            error_message =
+                "Could not configure the launcher GUI Job Object (Win32 error " +
+                std::to_string(GetLastError()) + ").";
+            CloseHandle(job_);
+            job_ = nullptr;
+            return false;
+        }
+        if (!AssignProcessToJobObject(job_, child_process)) {
+            const DWORD assign_error = GetLastError();
+            BOOL already_in_parent_job = FALSE;
+            if (IsProcessInJob(
+                    child_process,
+                    nullptr,
+                    &already_in_parent_job) &&
+                already_in_parent_job) {
+                // A CTest/runner kill-on-close Job may already own this
+                // launcher. Windows does not permit an unrelated nested Job
+                // on all supported hosts; the inherited parent Job still
+                // gives the GUI the same forced-termination ownership.
+                CloseHandle(job_);
+                job_ = nullptr;
+                return true;
+            }
+            error_message =
+                "Could not assign the GUI process to the launcher Job Object (Win32 error " +
+                std::to_string(assign_error) + ").";
+            CloseHandle(job_);
+            job_ = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+private:
+    HANDLE job_ = nullptr;
+};
+
 class LauncherOwnedProcessGuard {
 public:
     LauncherOwnedProcessGuard(
@@ -1466,6 +1544,17 @@ int wmain(int argc, wchar_t** argv)
             << GetLastError() << ").\n";
         return 2;
     }
+    LauncherChildJobGuard child_job;
+    if (!child_job.Assign(process.hProcess, error_message)) {
+        std::cerr << error_message << '\n';
+        (void)TerminateProcess(
+            process.hProcess,
+            ERROR_PROCESS_ABORTED);
+        (void)WaitForSingleObject(process.hProcess, 5000);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return 2;
+    }
     CloseHandle(process.hThread);
     prelaunch_state_root.Release();
 
@@ -1620,6 +1709,15 @@ int wmain(int argc, wchar_t** argv)
                     << "pipeline begin requires one or more commands followed by pipeline end.\n";
                 return 2;
             }
+            const bool pipeline_contains_app_quit =
+                std::any_of(
+                    pipeline.begin(),
+                    pipeline.end(),
+                    [](const HumanCommand& command) {
+                        return command.kind ==
+                            specforge::AutomationCommandKind::
+                                AppQuit;
+                    });
             if (!SendPipelineAndWait(
                     client,
                     pipeline,
@@ -1628,6 +1726,14 @@ int wmain(int argc, wchar_t** argv)
                 std::cerr
                     << error_message << '\n';
                 return 2;
+            }
+            if (pipeline_contains_app_quit) {
+                // An app.quit inside a pipeline already requests normal
+                // shutdown. Do not send the fallback app.quit below after
+                // the pipeline has drained; the second request races the
+                // GUI shutdown and creates a spurious shutting_down result.
+                app_quit_sent = true;
+                child_process.MarkNormalQuitRequested();
             }
             continue;
         }

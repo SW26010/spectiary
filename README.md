@@ -128,6 +128,9 @@ zero dropped events.
 For the explicit test/debug-only console launcher, named-pipe protocol,
 state-isolation contract, and supported automation commands, see
 [docs/automation_control.md](docs/automation_control.md).
+For the checked-in sample command sequences and the native/headless versus
+real-GUI CI split, see [docs/automation_samples.md](docs/automation_samples.md)
+and [docs/automation_ci.md](docs/automation_ci.md).
 
 ## Portable Package
 

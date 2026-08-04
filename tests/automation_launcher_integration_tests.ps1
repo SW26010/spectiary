@@ -1811,26 +1811,84 @@ try {
                 [string]$message.request_id] = $message
         }
     }
+    $profileConflictExpectedRoot =
+        [System.IO.Path]::GetFullPath($profileConflictRoot)
+    $profileConflictReportedRoot = ''
+    foreach ($outputLine in $profileConflictOutput) {
+        if ([string]$outputLine -match '^Automation state root: (.+)$') {
+            $profileConflictReportedRoot = $Matches[1]
+            break
+        }
+    }
+    $profileConflictRootPrefix =
+        $profileConflictExpectedRoot +
+        [System.IO.Path]::DirectorySeparatorChar
+    $profileConflictStartPath =
+        [string]$profileConflictTerminals['request-2'].result.path
+    $profileConflictStatePath =
+        [string]$profileConflictTerminals['request-3'].state.profile.path
+    $profileConflictStopPath =
+        [string]$profileConflictTerminals['request-5'].result.path
+    $profileConflictPathsAreIsolated =
+        $profileConflictReportedRoot -eq
+            $profileConflictExpectedRoot -and
+        $profileConflictStartPath.StartsWith(
+            $profileConflictRootPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase) -and
+        $profileConflictStatePath -eq
+            $profileConflictStartPath -and
+        $profileConflictStopPath -eq
+            $profileConflictStartPath
+    $profileConflictQuitTerminalCount = @(
+        $profileConflictMessages |
+            Where-Object {
+                $commandProperty =
+                    $_.PSObject.Properties['command']
+                $null -ne $commandProperty -and
+                    [string]$commandProperty.Value -eq 'app.quit' -and
+                    [string]$_.status -in @(
+                        'completed',
+                        'failed',
+                        'canceled')
+            }
+    ).Count
+    $profileConflictContractPassed =
+        $profileConflictMessages.Count -eq 17 -and
+        $profileConflictPathsAreIsolated -and
+        $profileConflictQuitTerminalCount -eq 1 -and
+        [string]$profileConflictTerminals['request-1'].error.code -eq
+            'profile_not_recording' -and
+        [string]$profileConflictTerminals['request-2'].status -eq
+            'completed' -and
+        [string]$profileConflictTerminals['request-3'].state.profile.status -eq
+            'recording' -and
+        [string]$profileConflictTerminals['request-4'].error.code -eq
+            'profile_recording_active' -and
+        [string]$profileConflictTerminals['request-5'].status -eq
+            'completed' -and
+        [string]$profileConflictTerminals['request-6'].state.profile.status -in @(
+            'stopping',
+            'succeeded') -and
+        [string]$profileConflictTerminals['request-7'].error.code -eq
+            'profile_stop_in_progress' -and
+        [string]$profileConflictTerminals['request-8'].status -eq
+            'completed'
+    if (-not $profileConflictContractPassed) {
+        $profileConflictDiagnostic = [ordered]@{
+            state_root = $profileConflictRoot
+            reported_state_root = $profileConflictReportedRoot
+            profile_paths_are_isolated = $profileConflictPathsAreIsolated
+            message_count = $profileConflictMessages.Count
+            terminals = $profileConflictTerminals
+            messages = @($profileConflictMessages)
+            raw_output = @($profileConflictOutput | ForEach-Object { [string]$_ })
+        }
+        Write-Host (
+            '[profile-conflict-diagnostic] ' +
+            ($profileConflictDiagnostic | ConvertTo-Json -Compress -Depth 20))
+    }
     Assert-True `
-        -Condition (
-            $profileConflictMessages.Count -eq 17 -and
-            [string]$profileConflictTerminals['request-1'].error.code -eq
-                'profile_not_recording' -and
-            [string]$profileConflictTerminals['request-2'].status -eq
-                'completed' -and
-            [string]$profileConflictTerminals['request-3'].state.profile.status -eq
-                'recording' -and
-            [string]$profileConflictTerminals['request-4'].error.code -eq
-                'profile_recording_active' -and
-            [string]$profileConflictTerminals['request-5'].status -eq
-                'completed' -and
-            [string]$profileConflictTerminals['request-6'].state.profile.status -in @(
-                'stopping',
-                'succeeded') -and
-            [string]$profileConflictTerminals['request-7'].error.code -eq
-                'profile_stop_in_progress' -and
-            [string]$profileConflictTerminals['request-8'].status -eq
-                'completed') `
+        -Condition $profileConflictContractPassed `
         -Message 'Profile conflict workflow should expose not-recording, recording-active and stop-in-progress errors plus stable recording/stopping state without leaving the GUI running.'
 
     $settingsControlRoot =
