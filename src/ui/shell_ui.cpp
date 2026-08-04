@@ -939,30 +939,39 @@ std::string ShellLocalStateFlushResult::FailureMessage(
         language,
         UiTextId::UnsavedAreas);
     const auto append_area = [&](
-                                 UiTextId text_id) {
+                                 LocalUserStateArea area) {
         message += "\n- ";
-        message += UiText(language, text_id);
+        message += UiText(language, area);
     };
-    if (!application_settings_saved) {
-        append_area(
-            UiTextId::ApplicationSettingsArea);
+    if (!application_settings.language_saved) {
+        append_area(LocalUserStateArea::Language);
+    }
+    if (!application_settings.ui_scale_saved) {
+        append_area(LocalUserStateArea::UiScale);
+    }
+    if (!application_settings.input_saved) {
+        append_area(LocalUserStateArea::Input);
+    }
+    if (!application_settings.profile_output_directory_saved) {
+        append_area(LocalUserStateArea::ProfileOutputDirectory);
+    }
+    if (!application_settings.panel_visibility_saved) {
+        append_area(LocalUserStateArea::PanelVisibility);
     }
     if (!source_collection.source_session_saved) {
-        append_area(UiTextId::SourceSessionArea);
+        append_area(LocalUserStateArea::SourceSession);
     }
     if (!source_collection.navigation_saved) {
-        append_area(
-            UiTextId::SampleNavigationArea);
+        append_area(LocalUserStateArea::SampleNavigation);
     }
     if (!source_collection.labeling_saved) {
-        append_area(UiTextId::SampleLabelingArea);
+        append_area(LocalUserStateArea::SampleLabeling);
     }
     if (!source_collection.workflow_saved) {
-        append_area(UiTextId::SampleWorkflowArea);
+        append_area(LocalUserStateArea::SampleWorkflow);
     }
     if (!spectral_lines_saved) {
-        append_area(
-            UiTextId::SpectralLineStateArea);
+        append_area(LocalUserStateArea::SpectralLines);
     }
     message += "\n\n";
     message += UiText(
@@ -1052,7 +1061,7 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
 
     ShellLocalStateFlushResult result;
     if (persist_local_state_) {
-        result.application_settings_saved =
+        result.application_settings =
             application_settings_.Flush();
         result.source_collection =
             session_.FlushStateCachesWithStatus();
@@ -1168,7 +1177,19 @@ void ShellUi::Render(const ShellStatus& status)
 void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
     DrainSourceLoads();
+    const ApplicationSettingsView settings_before =
+        application_settings_.View();
     application_settings_.RunMaintenance(now);
+    const ApplicationSettingsView settings_after =
+        application_settings_.View();
+    if (settings_before.ui_scale_percentage !=
+        settings_after.ui_scale_percentage) {
+        applied_ui_scale_percentage_ =
+            settings_after.ui_scale_percentage;
+    }
+    if (settings_before.language != settings_after.language) {
+        applied_ui_language_ = settings_after.language;
+    }
     HandleSessionAction(
         source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);

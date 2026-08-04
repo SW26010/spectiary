@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/local_user_state.h"
 #include "profile/profile_settings.h"
 #include "ui/input_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
@@ -177,6 +178,23 @@ struct ApplicationSettingsStorage {
     bool persistent = true;
 };
 
+struct ApplicationSettingsFlushResult {
+    bool language_saved = true;
+    bool ui_scale_saved = true;
+    bool input_saved = true;
+    bool profile_output_directory_saved = true;
+    bool panel_visibility_saved = true;
+
+    [[nodiscard]] bool all_saved() const noexcept
+    {
+        return language_saved &&
+               ui_scale_saved &&
+               input_saved &&
+               profile_output_directory_saved &&
+               panel_visibility_saved;
+    }
+};
+
 [[nodiscard]] ApplicationSettingsStorage
 ApplicationSettingsStorageForRuntimePaths(
     const RuntimePaths& paths);
@@ -193,7 +211,7 @@ public:
     void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint>
     NextMaintenanceDeadline() const;
-    [[nodiscard]] bool Flush();
+    [[nodiscard]] ApplicationSettingsFlushResult Flush();
     [[nodiscard]] LocalUserStatePersistenceStatus
         PersistenceStatus(ApplicationSetting setting) const;
 
@@ -220,11 +238,21 @@ private:
     void AdoptLoadWarning(
         ApplicationSetting setting,
         std::string warning);
-    void PrepareSave(ApplicationSetting setting);
-    void MarkSaveFailed(
+    [[nodiscard]] LocalUserStatePersistenceLifecycle& PersistenceFor(
+        ApplicationSetting setting);
+    [[nodiscard]] const LocalUserStatePersistenceLifecycle& PersistenceFor(
+        ApplicationSetting setting) const;
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
+        SavePendingSetting(ApplicationSetting setting);
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::FlushOutcome
+        FlushSetting(ApplicationSetting setting);
+    void RunSettingMaintenance(
         ApplicationSetting setting,
-        const std::string& message);
-    void MarkSaveSucceeded(ApplicationSetting setting);
+        LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] bool HasPendingSetting(
+        ApplicationSetting setting) const;
+    void CommitPendingSetting(ApplicationSetting setting);
+    void SetPersistenceFailureStatus(ApplicationSetting setting);
 
     ApplicationSettingsStorage storage_;
     UiLanguage language_ = UiLanguage::English;
@@ -232,18 +260,21 @@ private:
     bool live_numeric_navigation_ =
         kDefaultLiveNumericNavigation;
     ProfileOutputDirectoryResolution profile_output_directory_;
-    PanelVisibilityStatePersistence panel_visibility_persistence_;
     PanelVisibilityState panel_visibility_;
     std::array<
         ApplicationSettingsStatus,
         kApplicationSettingCount>
         statuses_;
-    std::array<std::string, kApplicationSettingCount>
-        load_warnings_;
     std::array<
-        LocalUserStateSaveStatus,
+        LocalUserStatePersistenceLifecycle,
         kApplicationSettingCount>
-        save_statuses_;
+        persistence_;
+    std::optional<UiLanguage> pending_language_;
+    std::optional<int> pending_ui_scale_percentage_;
+    std::optional<bool> pending_live_numeric_navigation_;
+    std::optional<ProfileSettings> pending_profile_settings_;
+    std::optional<ProfileOutputDirectoryResolution>
+        pending_profile_output_directory_;
 };
 
 }  // namespace specforge

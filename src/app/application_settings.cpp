@@ -3,10 +3,17 @@
 #include "app/runtime_paths.h"
 #include "ui/ui_language_settings.h"
 
+#include <chrono>
+#include <string>
 #include <utility>
 
 namespace specforge {
 namespace {
+
+using namespace std::chrono_literals;
+
+constexpr auto kApplicationSettingsSaveRetry = 2s;
+constexpr auto kPanelVisibilitySaveDebounce = 500ms;
 
 template <typename Visibility>
 decltype(auto) PanelVisibilityValue(
@@ -154,14 +161,19 @@ ApplicationSettingsStorageForRuntimePaths(
 
 ApplicationSettings::ApplicationSettings(
     ApplicationSettingsStorage storage)
-    : storage_(std::move(storage)),
-      panel_visibility_persistence_(storage_.panel_visibility_path)
+    : storage_(std::move(storage))
 {
     for (std::size_t index = 0;
          index < statuses_.size();
          ++index) {
         statuses_[index].setting =
             static_cast<ApplicationSetting>(index);
+        persistence_[index] = LocalUserStatePersistenceLifecycle(
+            static_cast<ApplicationSetting>(index) ==
+                    ApplicationSetting::PanelVisibility
+                ? kPanelVisibilitySaveDebounce
+                : LocalUserStatePersistenceLifecycle::Duration::zero(),
+            kApplicationSettingsSaveRetry);
     }
     if (!storage_.persistent) {
         profile_output_directory_ = ResolveProfileOutputDirectory(
@@ -202,12 +214,13 @@ ApplicationSettings::ApplicationSettings(
     AdoptLoadWarning(
         ApplicationSetting::ProfileOutputDirectory,
         std::move(profile_settings.warning));
-    panel_visibility_ = panel_visibility_persistence_.Load();
+    PanelVisibilityStateCacheLoadResult panel_visibility =
+        LoadPanelVisibilityStateCache(
+            storage_.panel_visibility_path);
+    panel_visibility_ = std::move(panel_visibility.state);
     AdoptLoadWarning(
         ApplicationSetting::PanelVisibility,
-        panel_visibility_persistence_
-            .PersistenceStatus()
-            .load_warning);
+        std::move(panel_visibility.warning));
 }
 
 ApplicationSettingsView ApplicationSettings::View() const
@@ -268,22 +281,13 @@ void ApplicationSettings::RunMaintenance(
     if (!storage_.persistent) {
         return;
     }
-    const std::optional<bool> saved =
-        panel_visibility_persistence_.RunMaintenance(
-            panel_visibility_,
-            now);
-    if (!saved) {
-        return;
-    }
-    if (*saved) {
-        ClearStatus(ApplicationSetting::PanelVisibility);
-        return;
-    }
-    SetStatus(
-        ApplicationSettingsStatusKind::PersistenceError,
-        ApplicationSetting::PanelVisibility,
-        ApplicationSettingsStatusReason::SettingsWriteFailed,
-        "Could not save panel visibility.");
+    RunSettingMaintenance(ApplicationSetting::Language, now);
+    RunSettingMaintenance(ApplicationSetting::UiScale, now);
+    RunSettingMaintenance(ApplicationSetting::Input, now);
+    RunSettingMaintenance(
+        ApplicationSetting::ProfileOutputDirectory,
+        now);
+    RunSettingMaintenance(ApplicationSetting::PanelVisibility, now);
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint>
@@ -292,59 +296,53 @@ ApplicationSettings::NextMaintenanceDeadline() const
     if (!storage_.persistent) {
         return std::nullopt;
     }
-    return panel_visibility_persistence_.NextMaintenanceDeadline();
+    std::optional<LocalUserStateSaveScheduler::TimePoint> deadline;
+    for (const LocalUserStatePersistenceLifecycle& persistence :
+         persistence_) {
+        const std::optional<LocalUserStateSaveScheduler::TimePoint>
+            candidate = persistence.NextMaintenanceDeadline();
+        if (candidate && (!deadline || *candidate < *deadline)) {
+            deadline = candidate;
+        }
+    }
+    return deadline;
 }
 
-bool ApplicationSettings::Flush()
+ApplicationSettingsFlushResult ApplicationSettings::Flush()
 {
+    ApplicationSettingsFlushResult result;
     if (!storage_.persistent) {
-        return true;
+        return result;
     }
-    if (panel_visibility_persistence_.Flush(panel_visibility_)) {
-        if (panel_visibility_persistence_
-                .PersistenceStatus()
-                .load_warning.empty()) {
-            ClearStatus(ApplicationSetting::PanelVisibility);
-        }
-        return true;
-    }
-    SetStatus(
-        ApplicationSettingsStatusKind::PersistenceError,
-        ApplicationSetting::PanelVisibility,
-        ApplicationSettingsStatusReason::SettingsWriteFailed,
-        "Could not save panel visibility.");
-    return false;
+    result.language_saved =
+        FlushSetting(ApplicationSetting::Language) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    result.ui_scale_saved =
+        FlushSetting(ApplicationSetting::UiScale) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    result.input_saved =
+        FlushSetting(ApplicationSetting::Input) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    result.profile_output_directory_saved =
+        FlushSetting(
+            ApplicationSetting::ProfileOutputDirectory) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    result.panel_visibility_saved =
+        FlushSetting(ApplicationSetting::PanelVisibility) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    return result;
 }
 
 LocalUserStatePersistenceStatus
 ApplicationSettings::PersistenceStatus(
     ApplicationSetting setting) const
 {
-    if (setting == ApplicationSetting::PanelVisibility) {
-        return panel_visibility_persistence_.PersistenceStatus();
-    }
     const std::size_t index =
         static_cast<std::size_t>(setting);
     if (index >= kApplicationSettingCount) {
         return {};
     }
-    const LocalUserStateSaveStatus& save_status =
-        save_statuses_[index];
-    const ApplicationSettingsStatus& status =
-        statuses_[index];
-    return {
-        .recovered = save_status.recovered(),
-        .load_warning = load_warnings_[index],
-        .save_message = save_status.message(),
-        .load_diagnostic_detail =
-            status.kind ==
-                    ApplicationSettingsStatusKind::
-                        LoadWarning
-                ? status.detail
-                : std::string{},
-        .save_diagnostic_detail =
-            save_status.message(),
-    };
+    return persistence_[index].PersistenceStatus();
 }
 
 ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
@@ -375,14 +373,22 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
         };
     }
 
-    std::string error;
-    PrepareSave(kSetting);
-    if (storage_.persistent &&
-        !SaveUiScaleSettings(
-            storage_.ui_scale_settings_path,
-            percentage,
-            &error)) {
-        MarkSaveFailed(kSetting, error);
+    pending_ui_scale_percentage_ = percentage;
+    if (!storage_.persistent) {
+        ui_scale_percentage_ = percentage;
+        pending_ui_scale_percentage_.reset();
+        ClearStatus(kSetting);
+        return {
+            .outcome = ApplicationSettingsOutcome::Applied,
+            .setting = kSetting,
+        };
+    }
+
+    PersistenceFor(kSetting).MarkDirty();
+    if (FlushSetting(kSetting) ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const std::string error =
+            PersistenceStatus(kSetting).save_message;
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -391,8 +397,6 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
         };
     }
 
-    ui_scale_percentage_ = percentage;
-    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -426,14 +430,22 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
         };
     }
 
-    std::string error;
-    PrepareSave(kSetting);
-    if (storage_.persistent &&
-        !SaveUiLanguageSettings(
-            storage_.language_settings_path,
-            language,
-            &error)) {
-        MarkSaveFailed(kSetting, error);
+    pending_language_ = language;
+    if (!storage_.persistent) {
+        language_ = language;
+        pending_language_.reset();
+        ClearStatus(kSetting);
+        return {
+            .outcome = ApplicationSettingsOutcome::Applied,
+            .setting = kSetting,
+        };
+    }
+
+    PersistenceFor(kSetting).MarkDirty();
+    if (FlushSetting(kSetting) ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const std::string error =
+            PersistenceStatus(kSetting).save_message;
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -442,8 +454,6 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
         };
     }
 
-    language_ = language;
-    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -464,14 +474,22 @@ ApplicationSettings::ApplyLiveNumericNavigation(bool enabled)
         };
     }
 
-    std::string error;
-    PrepareSave(kSetting);
-    if (storage_.persistent &&
-        !SaveInputSettings(
-            storage_.input_settings_path,
-            {.live_numeric_navigation = enabled},
-            &error)) {
-        MarkSaveFailed(kSetting, error);
+    pending_live_numeric_navigation_ = enabled;
+    if (!storage_.persistent) {
+        live_numeric_navigation_ = enabled;
+        pending_live_numeric_navigation_.reset();
+        ClearStatus(kSetting);
+        return {
+            .outcome = ApplicationSettingsOutcome::Applied,
+            .setting = kSetting,
+        };
+    }
+
+    PersistenceFor(kSetting).MarkDirty();
+    if (FlushSetting(kSetting) ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const std::string error =
+            PersistenceStatus(kSetting).save_message;
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -480,8 +498,6 @@ ApplicationSettings::ApplyLiveNumericNavigation(bool enabled)
         };
     }
 
-    live_numeric_navigation_ = enabled;
-    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -557,14 +573,24 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         };
     }
 
-    std::string error;
-    PrepareSave(kSetting);
-    if (storage_.persistent &&
-        !SaveProfileSettings(
-            storage_.profile_settings_path,
-            settings,
-            &error)) {
-        MarkSaveFailed(kSetting, error);
+    pending_profile_settings_ = settings;
+    pending_profile_output_directory_ = requested;
+    if (!storage_.persistent) {
+        profile_output_directory_ = requested;
+        pending_profile_settings_.reset();
+        pending_profile_output_directory_.reset();
+        ClearStatus(kSetting);
+        return {
+            .outcome = ApplicationSettingsOutcome::Applied,
+            .setting = kSetting,
+        };
+    }
+
+    PersistenceFor(kSetting).MarkDirty();
+    if (FlushSetting(kSetting) ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const std::string error =
+            PersistenceStatus(kSetting).save_message;
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -573,8 +599,6 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         };
     }
 
-    profile_output_directory_ = requested;
-    MarkSaveSucceeded(kSetting);
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
         .setting = kSetting,
@@ -600,9 +624,9 @@ ApplicationSettingsResult ApplicationSettings::ApplyPanelVisibility(
     const PanelVisibilityState previous = panel_visibility_;
     current = visible;
     if (storage_.persistent) {
-        panel_visibility_persistence_.MarkDirtyIfChanged(
-            previous,
-            panel_visibility_);
+        if (!(panel_visibility_ == previous)) {
+            PersistenceFor(kSetting).MarkDirty();
+        }
     }
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
@@ -625,9 +649,9 @@ ApplicationSettingsResult ApplicationSettings::ShowAllPanels()
     const PanelVisibilityState previous = panel_visibility_;
     panel_visibility_ = visible;
     if (storage_.persistent) {
-        panel_visibility_persistence_.MarkDirtyIfChanged(
-            previous,
-            panel_visibility_);
+        if (!(panel_visibility_ == previous)) {
+            PersistenceFor(kSetting).MarkDirty();
+        }
     }
     return {
         .outcome = ApplicationSettingsOutcome::Applied,
@@ -660,46 +684,232 @@ void ApplicationSettings::AdoptLoadWarning(
     ApplicationSetting setting,
     std::string warning)
 {
-    const std::size_t index =
-        static_cast<std::size_t>(setting);
-    load_warnings_[index] = std::move(warning);
-    if (!load_warnings_[index].empty()) {
+    PersistenceFor(setting).SetLoadWarning(warning, warning);
+    if (!warning.empty()) {
         SetStatus(
             ApplicationSettingsStatusKind::LoadWarning,
             setting,
             ApplicationSettingsStatusReason::SavedValueUnreadable,
-            load_warnings_[index]);
+            std::move(warning));
     }
 }
 
-void ApplicationSettings::PrepareSave(
+LocalUserStatePersistenceLifecycle& ApplicationSettings::PersistenceFor(
     ApplicationSetting setting)
 {
-    save_statuses_[static_cast<std::size_t>(setting)]
-        .ClearRecovered();
+    return persistence_[static_cast<std::size_t>(setting)];
 }
 
-void ApplicationSettings::MarkSaveFailed(
-    ApplicationSetting setting,
-    const std::string& message)
+const LocalUserStatePersistenceLifecycle&
+ApplicationSettings::PersistenceFor(
+    ApplicationSetting setting) const
 {
-    save_statuses_[static_cast<std::size_t>(setting)]
-        .MarkFailed(message);
+    return persistence_[static_cast<std::size_t>(setting)];
+}
+
+LocalUserStatePersistenceLifecycle::SaveResult
+ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
+{
+    switch (setting) {
+    case ApplicationSetting::Language: {
+        if (!pending_language_) {
+            return {.error = "No pending language setting save."};
+        }
+        std::string error;
+        if (SaveUiLanguageSettings(
+                storage_.language_settings_path,
+                *pending_language_,
+                &error)) {
+            return {.saved = true};
+        }
+        return {
+            .error = error.empty()
+                ? "Could not save language settings."
+                : std::move(error),
+        };
+    }
+    case ApplicationSetting::UiScale: {
+        if (!pending_ui_scale_percentage_) {
+            return {.error = "No pending UI scale setting save."};
+        }
+        std::string error;
+        if (SaveUiScaleSettings(
+                storage_.ui_scale_settings_path,
+                *pending_ui_scale_percentage_,
+                &error)) {
+            return {.saved = true};
+        }
+        return {
+            .error = error.empty()
+                ? "Could not save UI scale settings."
+                : std::move(error),
+        };
+    }
+    case ApplicationSetting::Input: {
+        if (!pending_live_numeric_navigation_) {
+            return {.error = "No pending input setting save."};
+        }
+        std::string error;
+        if (SaveInputSettings(
+                storage_.input_settings_path,
+                {.live_numeric_navigation =
+                     *pending_live_numeric_navigation_},
+                &error)) {
+            return {.saved = true};
+        }
+        return {
+            .error = error.empty()
+                ? "Could not save input settings."
+                : std::move(error),
+        };
+    }
+    case ApplicationSetting::ProfileOutputDirectory: {
+        if (!pending_profile_settings_) {
+            return {.error = "No pending profile settings save."};
+        }
+        std::string error;
+        if (SaveProfileSettings(
+                storage_.profile_settings_path,
+                *pending_profile_settings_,
+                &error)) {
+            return {.saved = true};
+        }
+        return {
+            .error = error.empty()
+                ? "Could not save profile settings."
+                : std::move(error),
+        };
+    }
+    case ApplicationSetting::PanelVisibility:
+        if (SavePanelVisibilityStateCache(
+                storage_.panel_visibility_path,
+                panel_visibility_)) {
+            return {.saved = true};
+        }
+        return {.error = "Could not save panel visibility."};
+    case ApplicationSetting::None:
+        return {.error = "Unknown application setting."};
+    }
+    return {.error = "Unknown application setting."};
+}
+
+LocalUserStatePersistenceLifecycle::FlushOutcome
+ApplicationSettings::FlushSetting(ApplicationSetting setting)
+{
+    LocalUserStatePersistenceLifecycle& persistence =
+        PersistenceFor(setting);
+    if (!persistence.dirty()) {
+        return LocalUserStatePersistenceLifecycle::FlushOutcome::NotNeeded;
+    }
+    const LocalUserStatePersistenceLifecycle::FlushOutcome outcome =
+        persistence.Flush([this, setting] {
+            return SavePendingSetting(setting);
+        });
+    if (outcome ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Saved) {
+        CommitPendingSetting(setting);
+        ClearStatus(setting);
+    } else if (outcome ==
+               LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        SetPersistenceFailureStatus(setting);
+    }
+    return outcome;
+}
+
+void ApplicationSettings::RunSettingMaintenance(
+    ApplicationSetting setting,
+    LocalUserStateSaveScheduler::TimePoint now)
+{
+    LocalUserStatePersistenceLifecycle& persistence =
+        PersistenceFor(setting);
+    if (!persistence.dirty() || !HasPendingSetting(setting)) {
+        return;
+    }
+    const LocalUserStatePersistenceLifecycle::FlushOutcome outcome =
+        persistence.RunMaintenance(
+            now,
+            [this, setting] {
+                return SavePendingSetting(setting);
+            });
+    if (outcome ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Saved) {
+        CommitPendingSetting(setting);
+        ClearStatus(setting);
+    } else if (outcome ==
+               LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        SetPersistenceFailureStatus(setting);
+    }
+}
+
+bool ApplicationSettings::HasPendingSetting(
+    ApplicationSetting setting) const
+{
+    switch (setting) {
+    case ApplicationSetting::Language:
+        return pending_language_.has_value();
+    case ApplicationSetting::UiScale:
+        return pending_ui_scale_percentage_.has_value();
+    case ApplicationSetting::Input:
+        return pending_live_numeric_navigation_.has_value();
+    case ApplicationSetting::ProfileOutputDirectory:
+        return pending_profile_settings_.has_value() &&
+               pending_profile_output_directory_.has_value();
+    case ApplicationSetting::PanelVisibility:
+        return true;
+    case ApplicationSetting::None:
+        return false;
+    }
+    return false;
+}
+
+void ApplicationSettings::CommitPendingSetting(ApplicationSetting setting)
+{
+    switch (setting) {
+    case ApplicationSetting::Language:
+        if (pending_language_) {
+            language_ = *pending_language_;
+            pending_language_.reset();
+        }
+        return;
+    case ApplicationSetting::UiScale:
+        if (pending_ui_scale_percentage_) {
+            ui_scale_percentage_ = *pending_ui_scale_percentage_;
+            pending_ui_scale_percentage_.reset();
+        }
+        return;
+    case ApplicationSetting::Input:
+        if (pending_live_numeric_navigation_) {
+            live_numeric_navigation_ =
+                *pending_live_numeric_navigation_;
+            pending_live_numeric_navigation_.reset();
+        }
+        return;
+    case ApplicationSetting::ProfileOutputDirectory:
+        if (pending_profile_output_directory_) {
+            profile_output_directory_ =
+                *pending_profile_output_directory_;
+            pending_profile_output_directory_.reset();
+            pending_profile_settings_.reset();
+        }
+        return;
+    case ApplicationSetting::PanelVisibility:
+    case ApplicationSetting::None:
+        return;
+    }
+}
+
+void ApplicationSettings::SetPersistenceFailureStatus(
+    ApplicationSetting setting)
+{
+    std::string detail = PersistenceStatus(setting).save_message;
+    if (detail.empty()) {
+        detail = "Could not save application settings.";
+    }
     SetStatus(
         ApplicationSettingsStatusKind::PersistenceError,
         setting,
         ApplicationSettingsStatusReason::SettingsWriteFailed,
-        message);
-}
-
-void ApplicationSettings::MarkSaveSucceeded(
-    ApplicationSetting setting)
-{
-    const std::size_t index =
-        static_cast<std::size_t>(setting);
-    load_warnings_[index].clear();
-    save_statuses_[index].MarkSaveSucceeded();
-    ClearStatus(setting);
+        std::move(detail));
 }
 
 }  // namespace specforge

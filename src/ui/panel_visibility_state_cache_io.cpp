@@ -1,5 +1,6 @@
 #include "ui/panel_visibility_state_cache_io.h"
 
+#include "app/local_user_state.h"
 #include "app/local_user_state_json.h"
 #include "app/local_user_state_paths.h"
 
@@ -105,84 +106,6 @@ bool SavePanelVisibilityStateCache(
             {"spectral_lines",
              JsonBoolValue(state.spectral_lines)},
         }));
-}
-
-PanelVisibilityStatePersistence::PanelVisibilityStatePersistence(
-    std::filesystem::path cache_path,
-    LocalUserStateSaveScheduler::Duration debounce,
-    LocalUserStateSaveScheduler::Duration retry)
-    : cache_path_(std::move(cache_path)),
-      save_scheduler_(debounce, retry)
-{
-}
-
-PanelVisibilityState PanelVisibilityStatePersistence::Load()
-{
-    PanelVisibilityStateCacheLoadResult loaded =
-        LoadPanelVisibilityStateCache(cache_path_);
-    load_warning_ = std::move(loaded.warning);
-    return std::move(loaded.state);
-}
-
-void PanelVisibilityStatePersistence::MarkDirtyIfChanged(
-    const PanelVisibilityState& previous,
-    const PanelVisibilityState& current)
-{
-    if (!(current == previous)) {
-        save_status_.ClearRecovered();
-        save_scheduler_.MarkDirty();
-    }
-}
-
-std::optional<bool> PanelVisibilityStatePersistence::RunMaintenance(
-    const PanelVisibilityState& state,
-    LocalUserStateSaveScheduler::TimePoint now)
-{
-    if (!save_scheduler_.ShouldAttemptSave(now)) {
-        return std::nullopt;
-    }
-    if (SavePanelVisibilityStateCache(cache_path_, state)) {
-        load_warning_.clear();
-        save_scheduler_.MarkSaveSucceeded(save_status_);
-        return true;
-    }
-    save_scheduler_.MarkSaveFailed(
-        save_status_,
-        "Could not save panel visibility.");
-    return false;
-}
-
-std::optional<LocalUserStateSaveScheduler::TimePoint>
-PanelVisibilityStatePersistence::NextMaintenanceDeadline() const
-{
-    return save_scheduler_.next_attempt_time();
-}
-
-bool PanelVisibilityStatePersistence::Flush(const PanelVisibilityState& state)
-{
-    if (!save_scheduler_.dirty()) {
-        return true;
-    }
-    if (SavePanelVisibilityStateCache(cache_path_, state)) {
-        load_warning_.clear();
-        save_scheduler_.MarkSaveSucceeded(save_status_);
-        return true;
-    }
-    save_scheduler_.MarkSaveFailed(
-        save_status_,
-        "Could not save panel visibility.");
-    return false;
-}
-
-LocalUserStatePersistenceStatus
-PanelVisibilityStatePersistence::PersistenceStatus() const
-{
-    return {
-        .retrying = save_status_.failed(),
-        .recovered = save_status_.recovered(),
-        .load_warning = load_warning_,
-        .save_message = save_status_.message(),
-    };
 }
 
 }  // namespace specforge

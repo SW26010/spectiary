@@ -689,7 +689,7 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
         settings.View().panel_visibility.files,
         "an unrenderable terminal should restore the live production state to the pre-chain value");
     Require(
-        settings.Flush(),
+        settings.Flush().all_saved(),
         "the restored production state should flush through the real panel cache owner");
 
     const specforge::ApplicationSettings reloaded(storage);
@@ -730,7 +730,7 @@ void TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline()
             specforge::ApplicationSettingsOutcome::Applied,
         "a single unpresented generation must exercise a real Applied restoration mutation");
     Require(
-        applied_settings.Flush(),
+        applied_settings.Flush().all_saved(),
         "an Applied restoration should mark the real panel cache dirty and flush successfully");
     const specforge::ApplicationSettings
         applied_reloaded(applied_storage);
@@ -840,6 +840,166 @@ void TestSuccessfulSettingDoesNotClearAnotherSettingsStatus()
         "successful profile change should clear only its own status");
 }
 
+void TestSettingsFlushKeepsIndependentOwnersAndRetries()
+{
+    using namespace std::chrono_literals;
+
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block language settings directory creation";
+    }
+    auto storage = MakeStorage(temporary.path());
+    storage.language_settings_path =
+        blocker / "ui-language.json";
+    specforge::ApplicationSettings settings(storage);
+
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::SimplifiedChinese),
+            {})
+                .outcome ==
+            specforge::ApplicationSettingsOutcome::
+                PersistenceFailed,
+        "a failed language owner should retain a retryable pending save");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetPanelVisibility(
+                specforge::ApplicationPanel::Annotations,
+                false),
+            {})
+            .applied(),
+        "an independent panel owner should still apply after a language failure");
+
+    const specforge::ApplicationSettingsFlushResult flushed =
+        settings.Flush();
+    Require(
+        !flushed.language_saved &&
+            flushed.ui_scale_saved &&
+            flushed.input_saved &&
+            flushed.profile_output_directory_saved &&
+            flushed.panel_visibility_saved,
+        "settings shutdown flush should preserve each owner's independent result");
+    Require(
+        !specforge::LoadPanelVisibilityStateCache(
+             storage.panel_visibility_path)
+             .state.annotations,
+        "a successful panel owner must not be swallowed by a language failure");
+    Require(
+        settings.PersistenceStatus(
+                    specforge::ApplicationSetting::Language)
+                .retrying,
+        "a failed language owner should remain retrying after shutdown flush");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    const auto deadline = settings.NextMaintenanceDeadline();
+    Require(
+        deadline.has_value(),
+        "a failed language owner should expose its maintenance deadline");
+    settings.RunMaintenance(*deadline - 1ms);
+    Require(
+        settings.View().language == specforge::UiLanguage::English,
+        "language should remain unchanged before its retry deadline");
+    settings.RunMaintenance(*deadline);
+    Require(
+        settings.View().language ==
+                specforge::UiLanguage::SimplifiedChinese &&
+            settings.PersistenceStatus(
+                        specforge::ApplicationSetting::Language)
+                .recovered,
+        "the language owner should commit and report recovery at its deadline");
+}
+
+void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
+{
+    using namespace std::chrono_literals;
+
+    TemporaryDirectory temporary;
+    auto storage = MakeStorage(temporary.path());
+    std::filesystem::create_directory(storage.panel_visibility_path);
+    specforge::ApplicationSettings settings(storage);
+
+    Require(
+        settings.View()
+                .StatusFor(specforge::ApplicationSetting::PanelVisibility)
+                .kind == specforge::ApplicationSettingsStatusKind::LoadWarning,
+        "a blocked panel cache should establish an owner load warning");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetPanelVisibility(
+                specforge::ApplicationPanel::Annotations,
+                false),
+            {})
+            .applied(),
+        "panel visibility should remain live-editable before persistence succeeds");
+
+    const auto debounce_deadline = settings.NextMaintenanceDeadline();
+    Require(
+        debounce_deadline.has_value(),
+        "a panel visibility edit should expose its debounce deadline");
+    settings.RunMaintenance(*debounce_deadline - 1ms);
+    Require(
+        std::filesystem::is_directory(storage.panel_visibility_path),
+        "panel visibility should not attempt its save before the debounce deadline");
+
+    const specforge::ApplicationSettingsFlushResult failed =
+        settings.Flush();
+    Require(
+        failed.language_saved &&
+            failed.ui_scale_saved &&
+            failed.input_saved &&
+            failed.profile_output_directory_saved &&
+            !failed.panel_visibility_saved,
+        "panel failure should remain an independent ApplicationSettings flush result");
+    const specforge::LocalUserStatePersistenceStatus retrying =
+        settings.PersistenceStatus(
+            specforge::ApplicationSetting::PanelVisibility);
+    Require(
+        retrying.retrying &&
+            !retrying.save_message.empty() &&
+            !retrying.load_warning.empty(),
+        "panel failure should retain retry, save diagnostic, and load warning health");
+
+    std::filesystem::remove_all(storage.panel_visibility_path);
+    const auto retry_deadline = settings.NextMaintenanceDeadline();
+    Require(
+        retry_deadline.has_value(),
+        "panel failure should replace debounce with a retry deadline");
+    settings.RunMaintenance(*retry_deadline - 1ms);
+    Require(
+        !std::filesystem::exists(storage.panel_visibility_path),
+        "panel retry should not run before its retry deadline");
+    settings.RunMaintenance(*retry_deadline);
+
+    const specforge::LocalUserStatePersistenceStatus recovered =
+        settings.PersistenceStatus(
+            specforge::ApplicationSetting::PanelVisibility);
+    Require(
+        recovered.recovered &&
+            !recovered.retrying &&
+            recovered.load_warning.empty() &&
+            !settings.NextMaintenanceDeadline().has_value() &&
+            settings.View()
+                    .StatusFor(specforge::ApplicationSetting::PanelVisibility)
+                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+        "panel retry should recover the real owner status and clear its deadline");
+    Require(
+        std::filesystem::exists(storage.panel_visibility_path),
+        "panel retry should write the cache through the real owner");
+
+    const specforge::ApplicationSettings reloaded(storage);
+    Require(
+        !reloaded.View().panel_visibility.annotations &&
+            reloaded.View()
+                    .StatusFor(specforge::ApplicationSetting::PanelVisibility)
+                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+        "reloaded ApplicationSettings should retain the recovered panel visibility");
+}
+
 }  // namespace
 
 int main()
@@ -855,5 +1015,7 @@ int main()
     TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline();
     TestProfileDirectoryChangeIsRejectedWhileRecording();
     TestSuccessfulSettingDoesNotClearAnotherSettingsStatus();
+    TestSettingsFlushKeepsIndependentOwnersAndRetries();
+    TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner();
     return 0;
 }

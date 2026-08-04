@@ -1035,7 +1035,7 @@ void TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestPanelVisibilityPersistenceFlushesDirtyUiStateChange()
+void TestSharedLifecycleFlushesPanelVisibilityCodec()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() / "specforge_panel_visibility_persistence_tests";
@@ -1043,23 +1043,35 @@ void TestPanelVisibilityPersistenceFlushesDirtyUiStateChange()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::PanelVisibilityStatePersistence persistence(path, 30ms, 120ms);
-    const specforge::PanelVisibilityState previous = persistence.Load();
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    Lifecycle persistence(30ms, 120ms);
+    const specforge::PanelVisibilityState previous =
+        specforge::LoadPanelVisibilityStateCache(path).state;
     specforge::PanelVisibilityState current = previous;
     current.files = false;
     current.information = false;
 
-    persistence.MarkDirtyIfChanged(previous, current);
-    Require(persistence.Flush(current), "dirty panel visibility should flush");
+    persistence.MarkDirty();
+    Require(
+        persistence.Flush([&] {
+            return Lifecycle::SaveResult{
+                .saved = specforge::SavePanelVisibilityStateCache(
+                    path,
+                    current),
+                .error = "Could not save panel visibility.",
+            };
+        }) != Lifecycle::FlushOutcome::Failed,
+        "dirty panel visibility should flush");
 
-    const specforge::PanelVisibilityState restored = persistence.Load();
+    const specforge::PanelVisibilityState restored =
+        specforge::LoadPanelVisibilityStateCache(path).state;
     Require(!restored.files, "flushed UI-hidden files panel should restore hidden");
     Require(restored.navigation, "unchanged navigation panel should restore visible");
     Require(!restored.information, "flushed UI-hidden information panel should restore hidden");
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
+void TestSharedLifecycleRunsPanelVisibilityCodecAtDeadline()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() / "specforge_panel_visibility_deadline_tests";
@@ -1067,26 +1079,44 @@ void TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
 
-    specforge::PanelVisibilityStatePersistence persistence(path, 30ms, 120ms);
-    const specforge::PanelVisibilityState previous = persistence.Load();
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    Lifecycle persistence(30ms, 120ms);
+    const specforge::PanelVisibilityState previous =
+        specforge::LoadPanelVisibilityStateCache(path).state;
     specforge::PanelVisibilityState current = previous;
     current.smoothing = false;
-    persistence.MarkDirtyIfChanged(previous, current);
+    persistence.MarkDirty();
 
     const auto deadline = persistence.NextMaintenanceDeadline();
     Require(deadline.has_value(), "dirty panel visibility should expose a maintenance deadline");
     (void)persistence.RunMaintenance(
-        current,
-        *deadline - 1ms);
+        *deadline - 1ms,
+        [&] {
+            return Lifecycle::SaveResult{
+                .saved = specforge::SavePanelVisibilityStateCache(
+                    path,
+                    current),
+                .error = "Could not save panel visibility.",
+            };
+        });
     Require(!std::filesystem::exists(path), "panel visibility should not save before its deadline");
-    (void)persistence.RunMaintenance(current, *deadline);
+    (void)persistence.RunMaintenance(
+        *deadline,
+        [&] {
+            return Lifecycle::SaveResult{
+                .saved = specforge::SavePanelVisibilityStateCache(
+                    path,
+                    current),
+                .error = "Could not save panel visibility.",
+            };
+        });
     Require(std::filesystem::exists(path), "panel visibility should save exactly at its deadline");
     Require(!persistence.NextMaintenanceDeadline(), "successful maintenance should clear the deadline");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestPanelVisibilityPersistenceReportsRetryAndRecovery()
+void TestSharedLifecycleReportsPanelVisibilityCodecRecovery()
 {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
@@ -1100,18 +1130,21 @@ void TestPanelVisibilityPersistenceReportsRetryAndRecovery()
     std::filesystem::create_directories(root);
     WriteTextFile(blocker, "block cache directory creation");
 
-    specforge::PanelVisibilityStatePersistence persistence(
-        path,
-        30ms,
-        120ms);
+    using Lifecycle = specforge::LocalUserStatePersistenceLifecycle;
+    Lifecycle persistence(30ms, 120ms);
     specforge::PanelVisibilityState current =
-        persistence.Load();
+        specforge::LoadPanelVisibilityStateCache(path).state;
     current.files = false;
-    persistence.MarkDirtyIfChanged(
-        specforge::PanelVisibilityState{},
-        current);
+    persistence.MarkDirty();
     Require(
-        !persistence.Flush(current),
+        persistence.Flush([&] {
+            return Lifecycle::SaveResult{
+                .saved = specforge::SavePanelVisibilityStateCache(
+                    path,
+                    current),
+                .error = "Could not save panel visibility.",
+            };
+        }) == Lifecycle::FlushOutcome::Failed,
         "blocked panel visibility path should fail to flush");
     Require(
         persistence.PersistenceStatus().retrying &&
@@ -1122,7 +1155,14 @@ void TestPanelVisibilityPersistenceReportsRetryAndRecovery()
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
     Require(
-        persistence.Flush(current),
+        persistence.Flush([&] {
+            return Lifecycle::SaveResult{
+                .saved = specforge::SavePanelVisibilityStateCache(
+                    path,
+                    current),
+                .error = "Could not save panel visibility.",
+            };
+        }) == Lifecycle::FlushOutcome::Saved,
         "panel visibility flush should retry after the path is repaired");
     Require(
         persistence.PersistenceStatus().recovered,
@@ -1130,7 +1170,7 @@ void TestPanelVisibilityPersistenceReportsRetryAndRecovery()
 
     specforge::PanelVisibilityState next = current;
     next.files = true;
-    persistence.MarkDirtyIfChanged(current, next);
+    persistence.MarkDirty();
     Require(
         !persistence.PersistenceStatus().recovered,
         "a later panel visibility mutation should clear recovery");
@@ -1203,9 +1243,9 @@ int main()
         TestPanelVisibilityStateCacheIgnoresCorruptJson();
         TestPanelVisibilityStateCacheDefaultsMissingFieldsToVisible();
         TestPanelVisibilityStateCacheWarnsAboutInvalidFieldTypes();
-        TestPanelVisibilityPersistenceFlushesDirtyUiStateChange();
-        TestPanelVisibilityPersistenceRunsAtItsMaintenanceDeadline();
-        TestPanelVisibilityPersistenceReportsRetryAndRecovery();
+        TestSharedLifecycleFlushesPanelVisibilityCodec();
+        TestSharedLifecycleRunsPanelVisibilityCodecAtDeadline();
+        TestSharedLifecycleReportsPanelVisibilityCodecRecovery();
         TestCancelableTextStreamReadStopsBetweenChunks();
         return 0;
     } catch (const std::exception& error) {

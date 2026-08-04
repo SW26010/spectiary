@@ -2822,7 +2822,7 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
                         .outstanding_count == 0,
             "a disconnected claimed panel mutation must factually rollback and retire its active chain");
         Require(
-            settings.Flush(),
+            settings.Flush().all_saved(),
             "the disconnected panel rollback should flush through the production cache owner");
         const specforge::ApplicationSettings reloaded(
             storage);

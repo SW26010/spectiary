@@ -1,5 +1,6 @@
 #include "ui/shell_ui.h"
 
+#include "app/runtime_paths.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "domain/source_path_identity.h"
@@ -38,6 +39,18 @@ struct ShellUiTestAccess {
     static SourceCollectionSession& Session(ShellUi& shell)
     {
         return shell.session_;
+    }
+
+    static LocalUserStateHealthView PersistenceHealth(ShellUi& shell)
+    {
+        return shell.PersistenceHealth();
+    }
+
+    static CatalogUserStateResult SubmitSpectralLines(
+        ShellUi& shell,
+        CatalogUserStateIntent intent)
+    {
+        return shell.spectral_lines_panel_.Submit(std::move(intent));
     }
 
     static SourceCollectionSessionResult Submit(
@@ -514,6 +527,20 @@ bool CurrentSourceMatches(
         specforge::SourcePathIdentityKey(
             view.sources[*view.current_source_index].path) == expected_key &&
         specforge::SourcePathIdentityKey(snapshot->source.path) == expected_key;
+}
+
+bool HasHealthMessage(
+    const specforge::LocalUserStateHealthView& health,
+    specforge::LocalUserStateArea area,
+    specforge::LocalUserStateHealthMessageKind kind)
+{
+    for (const specforge::LocalUserStateHealthMessage& message :
+         health.messages) {
+        if (message.area == area && message.kind == kind) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
@@ -3277,7 +3304,8 @@ void TestShellFlushResultNamesEveryFailedOwner()
             result.FailureMessage().empty(),
         "a complete shell flush should not produce a warning");
 
-    result.application_settings_saved = false;
+    result.application_settings.language_saved = false;
+    result.application_settings.panel_visibility_saved = false;
     result.source_collection.navigation_saved = false;
     result.source_collection.workflow_saved = false;
     result.spectral_lines_saved = false;
@@ -3286,7 +3314,9 @@ void TestShellFlushResultNamesEveryFailedOwner()
         !result.all_saved(),
         "any failed owner should make the shell flush incomplete");
     Require(
-        message.find("Application settings") !=
+        message.find("Language") !=
+                std::string::npos &&
+            message.find("Panel visibility") !=
                 std::string::npos &&
             message.find("Sample navigation") !=
                 std::string::npos &&
@@ -3296,7 +3326,13 @@ void TestShellFlushResultNamesEveryFailedOwner()
                 std::string::npos,
         "the shutdown warning should name every failed owner");
     Require(
-        message.find("Source session") ==
+        message.find("UI scale") ==
+                std::string::npos &&
+            message.find("Input") ==
+                std::string::npos &&
+            message.find("Profile output directory") ==
+                std::string::npos &&
+            message.find("Source session") ==
                 std::string::npos &&
             message.find("Sample labeling") ==
                 std::string::npos,
@@ -3306,7 +3342,9 @@ void TestShellFlushResultNamesEveryFailedOwner()
         result.FailureMessage(
             specforge::UiLanguage::SimplifiedChinese);
     Require(
-        chinese_message.find("应用设置") !=
+        chinese_message.find("语言") !=
+                std::string::npos &&
+            chinese_message.find("面板可见性") !=
                 std::string::npos &&
             chinese_message.find("样本导航") !=
                 std::string::npos &&
@@ -3316,11 +3354,216 @@ void TestShellFlushResultNamesEveryFailedOwner()
                 std::string::npos,
         "the Chinese shutdown warning should name every failed owner");
     Require(
-        chinese_message.find("源会话") ==
+        chinese_message.find("界面缩放") ==
+                std::string::npos &&
+            chinese_message.find("输入") ==
+                std::string::npos &&
+            chinese_message.find("配置文件输出目录") ==
+                std::string::npos &&
+            chinese_message.find("源会话") ==
                 std::string::npos &&
             chinese_message.find("样本标注") ==
                 std::string::npos,
         "the Chinese shutdown warning should omit successful owners");
+}
+
+void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
+{
+    using namespace std::chrono_literals;
+
+    const std::filesystem::path root =
+        UniqueTempPath("-settings-persistence");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+
+    const std::filesystem::path language_path =
+        root / "ui-language.json";
+    const std::filesystem::path ui_scale_path =
+        root / "ui-scale.json";
+    const std::filesystem::path panel_path =
+        root / "panel-visibility.json";
+    std::filesystem::create_directory(language_path);
+    std::filesystem::create_directory(ui_scale_path);
+    std::filesystem::create_directory(panel_path);
+
+    specforge::RuntimePathInputs inputs;
+    inputs.executable_path = specforge::CurrentExecutablePath();
+    inputs.local_user_state_root_override = root;
+    const specforge::SpecForgeStartup startup =
+        specforge::PrepareSpecForgeStartup(std::move(inputs));
+    const std::filesystem::path spectral_path =
+        startup.runtime_paths().spectral_line_user_state_path;
+    std::filesystem::create_directory(spectral_path);
+
+    {
+        specforge::ShellUi shell(startup);
+        Require(
+            shell.SetUiLanguageForAutomation(
+                     specforge::UiLanguage::SimplifiedChinese)
+                    .outcome ==
+                specforge::ApplicationSettingsOutcome::PersistenceFailed,
+            "real ShellUi language owner should report a blocked save");
+        Require(
+            shell.SetUiScaleForAutomation(125).outcome ==
+                specforge::ApplicationSettingsOutcome::PersistenceFailed,
+            "real ShellUi UI scale owner should report a blocked save");
+        Require(
+            shell.SetPanelVisibilityForAutomation(
+                       specforge::ApplicationPanel::Annotations,
+                       false)
+                .applied(),
+            "real ShellUi panel owner should retain its live mutation while blocked");
+        const specforge::CatalogUserStateResult spectral_result =
+            specforge::ShellUiTestAccess::SubmitSpectralLines(
+                shell,
+                specforge::CatalogUserStateIntent::CreateUserGroupingView());
+        Require(
+            spectral_result.status ==
+                    specforge::CatalogUserStateResultStatus::Applied &&
+                spectral_result.persistent_state_changed,
+            "real spectral-line owner should create a dirty persistent state");
+
+        const specforge::LocalUserStateHealthView warned =
+            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        Require(
+            HasHealthMessage(
+                warned,
+                specforge::LocalUserStateArea::Language,
+                specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                HasHealthMessage(
+                    warned,
+                    specforge::LocalUserStateArea::UiScale,
+                    specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                HasHealthMessage(
+                    warned,
+                    specforge::LocalUserStateArea::PanelVisibility,
+                    specforge::LocalUserStateHealthMessageKind::LoadWarning) &&
+                HasHealthMessage(
+                    warned,
+                    specforge::LocalUserStateArea::SpectralLines,
+                    specforge::LocalUserStateHealthMessageKind::LoadWarning),
+            "real ShellUi health should retain each settings owner's load warning");
+
+        const specforge::ShellLocalStateFlushResult failed =
+            shell.FlushLocalState();
+        Require(
+            !failed.application_settings.language_saved &&
+                !failed.application_settings.ui_scale_saved &&
+                failed.application_settings.input_saved &&
+                failed.application_settings.profile_output_directory_saved &&
+                !failed.application_settings.panel_visibility_saved &&
+                failed.source_collection.all_saved() &&
+                !failed.spectral_lines_saved &&
+                !failed.all_saved(),
+            "real ShellUi shutdown flush should retain independent settings failures");
+        const std::string shutdown_message = failed.FailureMessage();
+        Require(
+            shutdown_message.find("Language") != std::string::npos &&
+                shutdown_message.find("UI scale") != std::string::npos &&
+                shutdown_message.find("Panel visibility") !=
+                    std::string::npos &&
+                shutdown_message.find("Input") == std::string::npos &&
+                shutdown_message.find("Profile output directory") ==
+                    std::string::npos &&
+                shutdown_message.find("Source session") ==
+                    std::string::npos &&
+                shutdown_message.find("Spectral-line state") !=
+                    std::string::npos,
+            "real shutdown aggregation should retain a failed top-level spectral owner");
+
+        const specforge::LocalUserStateHealthView retrying =
+            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        Require(
+            retrying.kind == specforge::LocalUserStateHealthKind::Retrying &&
+                HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::Language,
+                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::UiScale,
+                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::PanelVisibility,
+                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::SpectralLines,
+                    specforge::LocalUserStateHealthMessageKind::SaveRetrying),
+            "real ShellUi health should retain retrying messages per failed owner");
+
+        std::filesystem::remove_all(language_path);
+        std::filesystem::remove_all(ui_scale_path);
+        std::filesystem::remove_all(panel_path);
+        std::filesystem::remove_all(spectral_path);
+        const auto retry_deadline = shell.NextMaintenanceDeadline();
+        Require(
+            retry_deadline.has_value(),
+            "real ShellUi should expose a settings retry deadline after shutdown failure");
+        shell.RunMaintenance(*retry_deadline + 10s);
+
+        const std::optional<specforge::UiLanguage> applied_language =
+            shell.TakeAppliedUiLanguage();
+        const std::optional<int> applied_ui_scale =
+            shell.TakeAppliedUiScalePercentage();
+        Require(
+            applied_language &&
+                *applied_language == specforge::UiLanguage::SimplifiedChinese &&
+                applied_ui_scale && *applied_ui_scale == 125,
+            "the first successful retry should publish one delayed UI update per setting");
+        Require(
+            !shell.TakeAppliedUiLanguage().has_value() &&
+                !shell.TakeAppliedUiScalePercentage().has_value(),
+            "the first successful retry should not publish duplicate delayed UI updates");
+
+        shell.RunMaintenance(
+            specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+        Require(
+            !shell.TakeAppliedUiLanguage().has_value() &&
+                !shell.TakeAppliedUiScalePercentage().has_value(),
+            "later maintenance should not republish already-consumed delayed UI updates");
+        Require(
+            std::filesystem::is_regular_file(spectral_path),
+            "the real spectral owner should write after settings failures are recovered");
+
+        const specforge::LocalUserStateHealthView recovered =
+            specforge::ShellUiTestAccess::PersistenceHealth(shell);
+        Require(
+            HasHealthMessage(
+                recovered,
+                specforge::LocalUserStateArea::Language,
+                specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::UiScale,
+                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::PanelVisibility,
+                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::SpectralLines,
+                    specforge::LocalUserStateHealthMessageKind::Recovered),
+            "real ShellUi health should retain recovery per restored owner");
+    }
+
+    {
+        specforge::ShellUi reloaded(startup);
+        Require(
+            reloaded.ui_language() ==
+                    specforge::UiLanguage::SimplifiedChinese &&
+                reloaded.ui_scale_percentage() == 125 &&
+                !reloaded.PanelVisibilityForAutomation().annotations,
+            "a real ShellUi restart should reload all recovered settings owners");
+        Require(
+            reloaded.FlushLocalState().all_saved(),
+            "a real ShellUi restart should have a clean independent shutdown flush");
+    }
+
+    std::filesystem::remove_all(root, cleanup_error);
 }
 
 void TestAutomationSettingsUseApplicationSettingsOwner()
@@ -4076,6 +4319,7 @@ int main()
         TestMaintenanceResynchronizesRetainedNavigationTopology();
         TestShellWorkflowResetPreservesSameFrameLabelingIssue();
         TestShellFlushResultNamesEveryFailedOwner();
+        TestRealShellFlushAndHealthKeepIndependentSettingsOwners();
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

@@ -92,13 +92,13 @@ struct ShellRuntimeResourceObservation {
 };
 
 struct ShellLocalStateFlushResult {
-    bool application_settings_saved = true;
+    ApplicationSettingsFlushResult application_settings;
     SourceCollectionStateFlushResult source_collection;
     bool spectral_lines_saved = true;
 
     [[nodiscard]] bool all_saved() const noexcept
     {
-        return application_settings_saved &&
+        return application_settings.all_saved() &&
                source_collection.all_saved() &&
                spectral_lines_saved;
     }
