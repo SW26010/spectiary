@@ -317,7 +317,8 @@ private:
     void RestoreActiveWorkflowState(std::string_view source_identity);
     void StoreActiveWorkflowState();
     void MarkActiveWorkflowStateDirty();
-    [[nodiscard]] bool SaveWorkflowStateCache();
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
+        SaveWorkflowStateCache();
     [[nodiscard]] bool FlushWorkflowStateCache();
     [[nodiscard]] SampleWorkflowTransitionOutcome ApplyLabelWriteResult(
         const SpectrumSnapshotHandle& snapshot,
@@ -339,9 +340,7 @@ private:
     SampleWorkflowStateCache workflow_state_cache_;
     std::unordered_set<std::string> workflow_state_tombstones_;
     WorkflowStateCacheLoader workflow_state_cache_loader_;
-    LocalUserStateSaveScheduler workflow_state_save_scheduler_;
-    LocalUserStateSaveStatus workflow_state_save_status_;
-    std::string workflow_state_load_warning_;
+    LocalUserStatePersistenceLifecycle workflow_state_persistence_;
     bool workflow_state_cache_loaded_ = false;
     bool restoring_source_session_ = false;
     bool deferred_sample_navigation_ = false;

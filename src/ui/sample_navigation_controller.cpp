@@ -235,7 +235,7 @@ SampleNavigationController::SampleNavigationController()
 
 SampleNavigationController::SampleNavigationController(std::filesystem::path state_cache_path)
     : state_cache_path_(std::move(state_cache_path)),
-      state_cache_save_scheduler_(kStateCacheSaveDebounce, kStateCacheSaveRetry)
+      state_cache_persistence_(kStateCacheSaveDebounce, kStateCacheSaveRetry)
 {
 }
 
@@ -416,8 +416,8 @@ SampleNavigationController::AdoptPreparedStateCache(
             std::move(cache_snapshot));
     state_cache_loaded_ = true;
     if (first_load) {
-        state_cache_load_warning_ =
-            state_cache_snapshot_->warning;
+        state_cache_persistence_.SetLoadWarning(
+            state_cache_snapshot_->warning);
     }
     return retired;
 }
@@ -1144,51 +1144,32 @@ SampleNavigationController::sequence_topology_revision() const
 
 void SampleNavigationController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
 {
-    if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
-        return;
-    }
-    if (SaveStateCache()) {
-        state_cache_load_warning_.clear();
-        state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
-    } else {
-        state_cache_save_scheduler_.MarkSaveFailedAt(
-            now,
-            state_cache_save_status_,
-            "Could not save sample navigation state.");
-    }
+    (void)state_cache_persistence_.RunMaintenance(
+        now,
+        [this] {
+            return SaveStateCache();
+        });
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint>
 SampleNavigationController::NextMaintenanceDeadline() const
 {
-    return state_cache_save_scheduler_.next_attempt_time();
+    return state_cache_persistence_.NextMaintenanceDeadline();
 }
 
 bool SampleNavigationController::FlushStateCache()
 {
-    if (!state_cache_save_scheduler_.dirty()) {
-        return true;
-    }
-    if (SaveStateCache()) {
-        state_cache_load_warning_.clear();
-        state_cache_save_scheduler_.MarkSaveSucceeded(state_cache_save_status_);
-        return true;
-    }
-    state_cache_save_scheduler_.MarkSaveFailed(
-        state_cache_save_status_,
-        "Could not save sample navigation state.");
-    return false;
+    return state_cache_persistence_.Flush(
+               [this] {
+                   return SaveStateCache();
+               }) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
 }
 
 LocalUserStatePersistenceStatus
 SampleNavigationController::PersistenceStatus() const
 {
-    return {
-        .retrying = state_cache_save_status_.failed(),
-        .recovered = state_cache_save_status_.recovered(),
-        .load_warning = state_cache_load_warning_,
-        .save_message = state_cache_save_status_.message(),
-    };
+    return state_cache_persistence_.PersistenceStatus();
 }
 
 std::unordered_map<std::string, std::vector<std::filesystem::path>>
@@ -1453,7 +1434,7 @@ void SampleNavigationController::EnsureStateCacheLoaded()
     SampleNavigationStateCacheLoadResult result =
         LoadSampleNavigationStateCache(state_cache_path_);
     state_cache_ = std::move(result.cache);
-    state_cache_load_warning_ = std::move(result.warning);
+    state_cache_persistence_.SetLoadWarning(std::move(result.warning));
 }
 
 std::optional<std::size_t>
@@ -1490,12 +1471,12 @@ void SampleNavigationController::PersistActiveIndex()
     }
     state_cache_.last_indices_by_source_identity[session->source_collection_identity] = *session->current_index;
     if (!state_cache_path_.empty()) {
-        state_cache_save_status_.ClearRecovered();
-        state_cache_save_scheduler_.MarkDirty();
+        state_cache_persistence_.MarkDirty();
     }
 }
 
-bool SampleNavigationController::SaveStateCache()
+LocalUserStatePersistenceLifecycle::SaveResult
+SampleNavigationController::SaveStateCache()
 {
     SampleNavigationStateCache merged =
         state_cache_snapshot_
@@ -1505,7 +1486,13 @@ bool SampleNavigationController::SaveStateCache()
          state_cache_.last_indices_by_source_identity) {
         merged.last_indices_by_source_identity[identity] = index;
     }
-    return SaveSampleNavigationStateCache(state_cache_path_, merged);
+    if (SaveSampleNavigationStateCache(state_cache_path_, merged)) {
+        return {.saved = true};
+    }
+    return {
+        .saved = false,
+        .error = "Could not save sample navigation state.",
+    };
 }
 
 void SampleNavigationController::RecomputeMatches(SourceSession& session)

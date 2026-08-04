@@ -241,7 +241,8 @@ private:
     [[nodiscard]] std::optional<std::size_t>
         CachedIndex(std::string_view source_identity) const;
     void PersistActiveIndex();
-    bool SaveStateCache();
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::SaveResult
+        SaveStateCache();
     static void RecomputeMatches(SourceSession& session);
 
     std::unordered_map<std::string, SourceSession> sessions_;
@@ -250,9 +251,7 @@ private:
     std::shared_ptr<const SampleNavigationStateCacheLoadResult>
         state_cache_snapshot_;
     std::filesystem::path state_cache_path_;
-    LocalUserStateSaveScheduler state_cache_save_scheduler_;
-    LocalUserStateSaveStatus state_cache_save_status_;
-    std::string state_cache_load_warning_;
+    LocalUserStatePersistenceLifecycle state_cache_persistence_;
     std::optional<std::string> active_source_key_;
     std::uint64_t active_context_generation_ = 0;
     // Cursor movement does not change the ordered-row topology.

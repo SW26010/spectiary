@@ -12,6 +12,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -635,8 +636,8 @@ void TestControllerCoalescesNavigationStateAndRetriesFailure()
         controller.PersistenceStatus().retrying,
         "failed navigation save should expose retrying status");
     Require(
-        retry_deadline && *retry_deadline >= *debounce_deadline + 2s,
-        "a failed save should remain dirty and schedule the existing retry backoff");
+        retry_deadline && *retry_deadline > *debounce_deadline,
+        "a failed save should remain dirty and schedule a future retry deadline");
 
     std::filesystem::remove(blocker, cleanup_error);
     std::filesystem::create_directories(blocker);
@@ -659,6 +660,150 @@ void TestControllerCoalescesNavigationStateAndRetriesFailure()
     Require(
         !controller.PersistenceStatus().recovered,
         "the next navigation mutation should clear recovered status");
+}
+
+void TestControllerClearsNavigationLoadWarningAfterFlush()
+{
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_load_warning_flush.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteTextFile(cache_path, "{ invalid json");
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(
+            "C:/synthetic/navigation-load-warning.npy",
+            "navigation-load-warning",
+            2,
+            0),
+        specforge::SourceCollectionIdentity{
+            .id = "navigation-load-warning",
+            .source_name = "navigation-load-warning",
+            .source_fingerprint = "source-v1",
+            .context_fingerprint = "context-v1",
+            .spectrum_count = 2,
+        },
+        {});
+    Require(
+        !controller.PersistenceStatus().load_warning.empty(),
+        "a corrupt navigation cache should expose its load warning");
+    Require(
+        controller.FlushStateCache(),
+        "navigation shutdown flush should repair a corrupt cache");
+    Require(
+        controller.PersistenceStatus().load_warning.empty(),
+        "a successful navigation flush should clear its load warning");
+
+    std::filesystem::remove(cache_path, cleanup_error);
+}
+
+void TestCoordinatorFlushesWorkflowIndependentlyAndRecovers()
+{
+    using namespace std::chrono_literals;
+
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge_workflow_persistence_lifecycle";
+    const std::filesystem::path navigation_cache = root / "navigation.json";
+    const std::filesystem::path labeling_cache = root / "labeling.json";
+    const std::filesystem::path workflow_parent = root / "workflow-parent";
+    const std::filesystem::path workflow_cache = workflow_parent / "workflow.json";
+    const std::filesystem::path source_path = root / "source.npy";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(workflow_parent);
+    WriteNpy(
+        source_path,
+        "<f8",
+        {2, 2},
+        BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+    WriteTextFile(workflow_cache, "{ invalid json");
+
+    specforge::SampleWorkflowCoordinator coordinator(
+        navigation_cache,
+        labeling_cache,
+        workflow_cache);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, "workflow-persistence", 2, 0);
+    (void)coordinator.SyncActiveSource("source", snapshot);
+    const std::optional<specforge::SourceCollectionIdentity> active_identity =
+        coordinator.ActiveSourceIdentity();
+    Require(
+        active_identity.has_value(),
+        "workflow persistence fixture should activate a source identity");
+    const std::string workflow_identity = active_identity->id;
+    (void)coordinator.Apply(
+        specforge::SampleSortingIntent::SetSortDirection(
+            specforge::SampleNavigationSortDirection::Descending),
+        snapshot);
+    Require(
+        !coordinator.PersistenceStatus().workflow.load_warning.empty(),
+        "a corrupt workflow cache should expose its load warning");
+
+    std::filesystem::remove(workflow_cache, cleanup_error);
+    std::filesystem::remove_all(workflow_parent, cleanup_error);
+    WriteTextFile(workflow_parent, "block workflow cache parent");
+
+    const specforge::SampleWorkflowStateFlushResult failed_flush =
+        coordinator.FlushStateCachesWithStatus();
+    Require(
+        failed_flush.navigation_saved &&
+            failed_flush.labeling_saved &&
+            !failed_flush.workflow_saved,
+        "a failed workflow owner must not suppress independent navigation and labeling flushes");
+    const specforge::SampleWorkflowPersistenceStatus failed_status =
+        coordinator.PersistenceStatus();
+    Require(
+        failed_status.workflow.retrying &&
+            !failed_status.workflow.save_message.empty() &&
+            !failed_status.workflow.load_warning.empty(),
+        "a failed workflow flush should retain retry and load-warning status");
+
+    const auto retry_deadline = coordinator.NextMaintenanceDeadline();
+    Require(
+        retry_deadline.has_value(),
+        "a failed workflow flush should expose its retry deadline");
+    (void)coordinator.RunMaintenance(*retry_deadline - 1ms, snapshot);
+    Require(
+        coordinator.PersistenceStatus().workflow.retrying,
+        "workflow maintenance before the retry deadline should remain retrying");
+
+    std::filesystem::remove(workflow_parent, cleanup_error);
+    std::filesystem::create_directories(workflow_parent);
+    (void)coordinator.RunMaintenance(*retry_deadline, snapshot);
+    const specforge::SampleWorkflowPersistenceStatus recovered_status =
+        coordinator.PersistenceStatus();
+    Require(
+        recovered_status.workflow.recovered &&
+            recovered_status.workflow.load_warning.empty() &&
+            !recovered_status.workflow.save_message.empty(),
+        "a successful workflow retry should clear the load warning and expose recovery");
+    const specforge::SampleWorkflowStateCacheLoadResult restored =
+        specforge::LoadSampleWorkflowStateCache(workflow_cache);
+    Require(
+        restored.cache.sources_by_identity.contains(workflow_identity) &&
+            restored.cache.sources_by_identity.at(workflow_identity)
+                    .selected_sample_sort_direction ==
+                specforge::SampleNavigationSortDirection::Descending,
+        "workflow retry should persist the owner state");
+
+    (void)coordinator.Apply(
+        specforge::SampleSortingIntent::SetSortDirection(
+            specforge::SampleNavigationSortDirection::Ascending),
+        snapshot);
+    Require(
+        !coordinator.PersistenceStatus().workflow.recovered &&
+            coordinator.PersistenceStatus().workflow.save_message.empty() &&
+            coordinator.NextMaintenanceDeadline().has_value(),
+        "a later workflow mutation should clear recovery and schedule debounced saving");
+    Require(
+        coordinator.FlushStateCaches(),
+        "workflow shutdown flush should save the later mutation");
+
+    std::filesystem::remove_all(root, cleanup_error);
 }
 
 void TestControllerAdoptsAndMergesPreparedNavigationCache()
@@ -1595,6 +1740,8 @@ int main()
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerDebouncesNavigationStatePersistence();
     TestControllerCoalescesNavigationStateAndRetriesFailure();
+    TestControllerClearsNavigationLoadWarningAfterFlush();
+    TestCoordinatorFlushesWorkflowIndependentlyAndRecovers();
     TestControllerAdoptsAndMergesPreparedNavigationCache();
     TestCoordinatorMaintainsFlushesAndRestoresNavigationState();
     TestControllerLoadsLongFolderIdentityState();

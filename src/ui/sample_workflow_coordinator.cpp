@@ -205,7 +205,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator()
       workflow_state_cache_loader_([](const std::filesystem::path& path) {
           return LoadSampleWorkflowStateCache(path);
       }),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
+      workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -217,7 +217,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
       workflow_state_cache_loader_([](const std::filesystem::path& path) {
           return LoadSampleWorkflowStateCache(path);
       }),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
+      workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -246,7 +246,7 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
       labeling_(std::move(labeling_state_cache_path), std::move(labeling_state_cache_loader)),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
-      workflow_state_save_scheduler_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
+      workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
 {
 }
 
@@ -1789,22 +1789,11 @@ SampleWorkflowCoordinator::RunMaintenance(
                     .filters_changed = true,
                     .sorting_changed = true}));
     }
-    if (!workflow_state_save_scheduler_.ShouldAttemptSave(now)) {
-        return CompleteTransition(
-            std::move(outcome),
-            snapshot,
-            labeling_revision_before);
-    }
-    if (SaveWorkflowStateCache()) {
-        workflow_state_load_warning_.clear();
-        workflow_state_save_scheduler_.MarkSaveSucceeded(
-            workflow_state_save_status_);
-    } else {
-        workflow_state_save_scheduler_.MarkSaveFailedAt(
-            now,
-            workflow_state_save_status_,
-            "Could not save sample workflow state.");
-    }
+    (void)workflow_state_persistence_.RunMaintenance(
+        now,
+        [this] {
+            return SaveWorkflowStateCache();
+        });
     return CompleteTransition(
         std::move(outcome),
         snapshot,
@@ -1821,7 +1810,7 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> SampleWorkflowCoordinator:
         deadline = labeling_deadline;
     }
     const std::optional<LocalUserStateSaveScheduler::TimePoint> workflow_deadline =
-        workflow_state_save_scheduler_.next_attempt_time();
+        workflow_state_persistence_.NextMaintenanceDeadline();
     if (workflow_deadline && (!deadline || *workflow_deadline < *deadline)) {
         deadline = workflow_deadline;
     }
@@ -1849,12 +1838,7 @@ SampleWorkflowCoordinator::PersistenceStatus() const
     return {
         .navigation = navigation_.PersistenceStatus(),
         .labeling = labeling_.PersistenceStatus(),
-        .workflow = {
-            .retrying = workflow_state_save_status_.failed(),
-            .recovered = workflow_state_save_status_.recovered(),
-            .load_warning = workflow_state_load_warning_,
-            .save_message = workflow_state_save_status_.message(),
-        },
+        .workflow = workflow_state_persistence_.PersistenceStatus(),
     };
 }
 
@@ -2031,7 +2015,7 @@ void SampleWorkflowCoordinator::EnsureWorkflowStateCacheLoaded()
     SampleWorkflowStateCacheLoadResult result =
         workflow_state_cache_loader_(workflow_state_cache_path_);
     workflow_state_cache_ = std::move(result.cache);
-    workflow_state_load_warning_ = std::move(result.warning);
+    workflow_state_persistence_.SetLoadWarning(std::move(result.warning));
 }
 
 void SampleWorkflowCoordinator::AdoptPreparedCache(
@@ -2057,8 +2041,8 @@ void SampleWorkflowCoordinator::AdoptPreparedCache(
         }
         workflow_state_cache_snapshot_ = std::move(workflow_cache);
         if (first_workflow_load) {
-            workflow_state_load_warning_ =
-                cache->workflow_warning;
+            workflow_state_persistence_.SetLoadWarning(
+                cache->workflow_warning);
         }
     }
     workflow_state_cache_loaded_ = true;
@@ -2121,12 +2105,12 @@ void SampleWorkflowCoordinator::MarkActiveWorkflowStateDirty()
 {
     StoreActiveWorkflowState();
     if (!workflow_state_cache_path_.empty()) {
-        workflow_state_save_status_.ClearRecovered();
-        workflow_state_save_scheduler_.MarkDirty();
+        workflow_state_persistence_.MarkDirty();
     }
 }
 
-bool SampleWorkflowCoordinator::SaveWorkflowStateCache()
+LocalUserStatePersistenceLifecycle::SaveResult
+SampleWorkflowCoordinator::SaveWorkflowStateCache()
 {
     SampleWorkflowStateCache merged = workflow_state_cache_snapshot_
         ? *workflow_state_cache_snapshot_
@@ -2137,24 +2121,22 @@ bool SampleWorkflowCoordinator::SaveWorkflowStateCache()
     for (const std::string& identity : workflow_state_tombstones_) {
         merged.sources_by_identity.erase(identity);
     }
-    return SaveSampleWorkflowStateCache(workflow_state_cache_path_, merged);
+    if (SaveSampleWorkflowStateCache(workflow_state_cache_path_, merged)) {
+        return {.saved = true};
+    }
+    return {
+        .saved = false,
+        .error = "Could not save sample workflow state.",
+    };
 }
 
 bool SampleWorkflowCoordinator::FlushWorkflowStateCache()
 {
-    if (!workflow_state_save_scheduler_.dirty()) {
-        return true;
-    }
-    if (SaveWorkflowStateCache()) {
-        workflow_state_load_warning_.clear();
-        workflow_state_save_scheduler_.MarkSaveSucceeded(
-            workflow_state_save_status_);
-        return true;
-    }
-    workflow_state_save_scheduler_.MarkSaveFailed(
-        workflow_state_save_status_,
-        "Could not save sample workflow state.");
-    return false;
+    return workflow_state_persistence_.Flush(
+               [this] {
+                   return SaveWorkflowStateCache();
+               }) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
 }
 
 SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult(
