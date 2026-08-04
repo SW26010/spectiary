@@ -1868,78 +1868,6 @@ std::string AutomationIntegerSettingResult(
     return body.str();
 }
 
-static std::optional<ApplicationPanel>
-AutomationPanelFromName(std::string_view name)
-{
-    if (name == "files") {
-        return ApplicationPanel::Files;
-    }
-    if (name == "navigation") {
-        return ApplicationPanel::Navigation;
-    }
-    if (name == "annotations") {
-        return ApplicationPanel::Annotations;
-    }
-    if (name == "labeling") {
-        return ApplicationPanel::Labeling;
-    }
-    if (name == "filters") {
-        return ApplicationPanel::Filters;
-    }
-    if (name == "sorting") {
-        return ApplicationPanel::Sorting;
-    }
-    if (name == "smoothing") {
-        return ApplicationPanel::Smoothing;
-    }
-    if (name == "information") {
-        return ApplicationPanel::Information;
-    }
-    if (name == "spectral_lines") {
-        return ApplicationPanel::SpectralLines;
-    }
-    return std::nullopt;
-}
-
-static bool AutomationPanelVisible(
-    const PanelVisibilityState& visibility,
-    ApplicationPanel panel)
-{
-    return ApplicationPanelVisible(
-        visibility,
-        panel);
-}
-
-static std::size_t AutomationPanelIndex(
-    ApplicationPanel panel)
-{
-    return static_cast<std::size_t>(panel);
-}
-
-static std::string AutomationPanelResult(
-    std::string_view name,
-    bool visible,
-    std::optional<bool> changed = std::nullopt,
-    std::optional<std::uint64_t> frame_index =
-        std::nullopt)
-{
-    std::ostringstream body;
-    body << "\"result\":{\"name\":"
-         << JsonString(name)
-         << ",\"visible\":"
-         << JsonBool(visible);
-    if (changed.has_value()) {
-        body << ",\"changed\":"
-             << JsonBool(*changed);
-    }
-    if (frame_index.has_value()) {
-        body << ",\"frame_index\":"
-             << *frame_index;
-    }
-    body << '}';
-    return body.str();
-}
-
 std::pair<std::string_view, std::string_view>
 AutomationNavigationFailure(
     ShellAutomationNavigationError error)
@@ -2263,140 +2191,98 @@ void SpecForgeApp::ServiceAutomationSettingSet(
 void SpecForgeApp::ServiceAutomationPanelGet(
     const AutomationQueuedCommand& command)
 {
-    if (!automation_server_->IsRequestActive(
-            command.request_id)) {
-        return;
-    }
-    const auto* parameters =
-        std::get_if<AutomationPanelGetParameters>(
-            &command.parameters);
-    if (parameters == nullptr) {
-        automation_server_->Fail(
-            command,
-            "invalid_params",
-            "panel.get parameters were not decoded.");
-        return;
-    }
-    const std::optional<ApplicationPanel> panel =
-        AutomationPanelFromName(parameters->name);
-    if (!panel) {
-        automation_server_->Fail(
-            command,
-            "unsupported_panel",
-            "The requested automation panel is not supported.");
-        return;
-    }
-
-    const PanelVisibilityState visibility =
-        ui_.PanelVisibilityForAutomation();
-    automation_server_->Complete(
+    automation_panel_coordinator_.ServicePanelGet(
         command,
-        AutomationPanelResult(
-            parameters->name,
-            AutomationPanelVisible(
-                visibility,
-                *panel)));
+        AutomationPanelCoordinatorCallbacks());
 }
 
 void SpecForgeApp::ServiceAutomationPanelSet(
     const AutomationQueuedCommand& command)
 {
-    const auto* parameters =
-        std::get_if<AutomationPanelSetParameters>(
-            &command.parameters);
-    if (parameters == nullptr) {
-        automation_server_->Fail(
-            command,
-            "invalid_params",
-            "panel.set parameters were not decoded.");
-        return;
-    }
-    const std::optional<ApplicationPanel> panel =
-        AutomationPanelFromName(parameters->name);
-    if (!panel) {
-        automation_server_->Fail(
-            command,
-            "unsupported_panel",
-            "The requested automation panel is not supported.");
-        return;
-    }
-    if (minimized_ || !window_visible_) {
-        automation_server_->Fail(
-            command,
-            "window_not_renderable",
-            "The main application window is hidden or minimized; panel visibility was not changed.");
-        return;
-    }
-    if (ui_.immersive_plot_mode()) {
-        automation_server_->Fail(
-            command,
-            "panel_not_renderable",
-            "Immersive plot mode does not render product panels; panel visibility was not changed.");
-        return;
-    }
-    if (!automation_server_->TryClaimExecution(command)) {
-        return;
-    }
+    automation_panel_coordinator_.ServicePanelSet(
+        command,
+        frame_index_,
+        {
+            .window_renderable = !minimized_ && window_visible_,
+            .immersive_plot_mode = ui_.immersive_plot_mode(),
+            .presentation_available =
+                !minimized_ &&
+                window_visible_ &&
+                !ui_.immersive_plot_mode(),
+        },
+        AutomationPanelCoordinatorCallbacks());
+}
 
-    const bool previous_visible =
-        AutomationPanelVisible(
-            ui_.PanelVisibilityForAutomation(),
-            *panel);
-    const ApplicationSettingsResult result =
-        ui_.SetPanelVisibilityForAutomation(
-            *panel,
-            parameters->visible);
-    if (result.outcome ==
-        ApplicationSettingsOutcome::Rejected) {
-        automation_server_->Fail(
-            command,
-            "panel_visibility_rejected",
-            result.detail.empty()
-                ? "The production settings owner rejected the panel visibility change."
-                : result.detail);
-        return;
-    }
-    if (result.outcome ==
-        ApplicationSettingsOutcome::PersistenceFailed) {
-        automation_server_->Fail(
-            command,
-            "panel_persistence_failed",
-            result.detail.empty()
-                ? "The panel visibility change could not be persisted."
-                : result.detail);
-        return;
-    }
-
-    std::uint64_t& generation =
-        automation_panel_generations_[
-            AutomationPanelIndex(*panel)];
-    if (result.outcome ==
-        ApplicationSettingsOutcome::Applied) {
-        ++generation;
-        automation_panel_mutation_chains_[
-            AutomationPanelIndex(*panel)]
-            .RecordAppliedMutation(
-                previous_visible,
-                parameters->visible,
-                generation,
-                frame_index_);
-    }
-
-    automation_panel_commands_.push_back({
-        .command = command,
-        .panel = *panel,
-        .name = parameters->name,
-        .visible = parameters->visible,
-        .changed =
-            result.outcome ==
-            ApplicationSettingsOutcome::Applied,
-        .generation = generation,
-        .accepted_frame = frame_index_,
-    });
-    automation_poll_deadline_ =
-        RenderWakeScheduler::Clock::now() +
-        kAutomationIdlePollInterval;
-    render_wake_scheduler_.RequestFrame();
+AutomationPanelCommandCoordinator::Callbacks
+SpecForgeApp::AutomationPanelCoordinatorCallbacks()
+{
+    return {
+        .is_request_active = [this](std::string_view request_id) {
+            return automation_server_ &&
+                   automation_server_->IsRequestActive(request_id);
+        },
+        .try_claim_execution = [this](
+                                    const AutomationQueuedCommand& command) {
+            return automation_server_ &&
+                   automation_server_->TryClaimExecution(command);
+        },
+        .current_visibility = [this]() {
+            return ui_.PanelVisibilityForAutomation();
+        },
+        .apply_visibility = [this](ApplicationPanel panel, bool visible) {
+            const ApplicationSettingsResult result =
+                ui_.SetPanelVisibilityForAutomation(panel, visible);
+            AutomationPanelCommandCoordinator::ApplyOutcome outcome =
+                AutomationPanelCommandCoordinator::ApplyOutcome::Unchanged;
+            switch (result.outcome) {
+            case ApplicationSettingsOutcome::Unchanged:
+                outcome =
+                    AutomationPanelCommandCoordinator::ApplyOutcome::
+                        Unchanged;
+                break;
+            case ApplicationSettingsOutcome::Applied:
+                outcome =
+                    AutomationPanelCommandCoordinator::ApplyOutcome::Applied;
+                break;
+            case ApplicationSettingsOutcome::Rejected:
+                outcome =
+                    AutomationPanelCommandCoordinator::ApplyOutcome::Rejected;
+                break;
+            case ApplicationSettingsOutcome::PersistenceFailed:
+                outcome = AutomationPanelCommandCoordinator::ApplyOutcome::
+                    PersistenceFailed;
+                break;
+            }
+            return AutomationPanelCommandCoordinator::ApplyResult{
+                .outcome = outcome,
+                .detail = result.detail,
+            };
+        },
+        .complete = [this](
+                        const AutomationQueuedCommand& command,
+                        std::string_view body_members) {
+            if (automation_server_) {
+                automation_server_->Complete(command, body_members);
+            }
+        },
+        .fail = [this](
+                    const AutomationQueuedCommand& command,
+                    std::string_view error_code,
+                    std::string_view error_message) {
+            if (automation_server_) {
+                automation_server_->Fail(
+                    command,
+                    error_code,
+                    error_message);
+            }
+        },
+        .request_poll = [this]() {
+            automation_poll_deadline_ =
+                RenderWakeScheduler::Clock::now() +
+                kAutomationIdlePollInterval;
+            render_wake_scheduler_.RequestFrame();
+        },
+    };
 }
 
 void SpecForgeApp::BeginAutomationSourceOpen(
@@ -3295,344 +3181,31 @@ void SpecForgeApp::PollAutomationBusinessOperations()
     }
 }
 
-std::optional<
-    SpecForgeApp::AutomationPanelRollbackResolution>
-SpecForgeApp::RollbackAutomationPanelMutationChain(
-    ApplicationPanel panel,
-    AutomationPanelRollbackReason reason)
-{
-    AutomationPanelMutationChain& chain =
-        automation_panel_mutation_chains_[
-            AutomationPanelIndex(panel)];
-    if (!chain.active()) {
-        return std::nullopt;
-    }
-    if (ApplicationPanelVisible(
-            ui_.PanelVisibilityForAutomation(),
-            panel) !=
-        chain.requested_visible()) {
-        chain.Clear();
-        return std::nullopt;
-    }
-
-    const std::uint64_t generation =
-        chain.generation();
-    (void)ui_.SetPanelVisibilityForAutomation(
-        panel,
-        chain.baseline_visible());
-    const bool restored =
-        ApplicationPanelVisible(
-            ui_.PanelVisibilityForAutomation(),
-            panel) ==
-        chain.baseline_visible();
-    chain.Clear();
-    return AutomationPanelRollbackResolution{
-        .generation = generation,
-        .succeeded = restored,
-        .reason = reason,
-    };
-}
-
-SpecForgeApp::AutomationPanelRollbackResolutions
-SpecForgeApp::RollbackActiveAutomationPanelMutationChains(
-    AutomationPanelRollbackReason reason)
-{
-    AutomationPanelRollbackResolutions resolutions;
-    for (std::size_t panel_index = 0;
-         panel_index < kApplicationPanelCount;
-         ++panel_index) {
-        resolutions[panel_index] =
-            RollbackAutomationPanelMutationChain(
-                static_cast<ApplicationPanel>(
-                    panel_index),
-                reason);
-    }
-    return resolutions;
-}
-
 bool SpecForgeApp::SettleAutomationPanelCommandsForShutdown()
 {
-    const AutomationPanelRollbackResolutions resolutions =
-        RollbackActiveAutomationPanelMutationChains(
-            AutomationPanelRollbackReason::Shutdown);
-    const bool restored_panel_state_requires_flush =
-        std::ranges::any_of(
-            resolutions,
-            [](const auto& resolution) {
-                return resolution &&
-                       resolution->succeeded;
-            });
-    if (!automation_server_) {
-        automation_panel_commands_.clear();
-        return restored_panel_state_requires_flush;
-    }
-
-    for (const AutomationPanelCommand& pending :
-         automation_panel_commands_) {
-        if (!automation_server_->IsRequestActive(
-                pending.command.request_id)) {
-            continue;
-        }
-        if (automation_panel_generations_[
-                AutomationPanelIndex(
-                    pending.panel)] !=
-            pending.generation) {
-            automation_server_->Fail(
-                pending.command,
-                "operation_canceled",
-                "Panel visibility changed again before the requested state was presented.");
-            continue;
-        }
-
-        const std::optional<
-            AutomationPanelRollbackResolution>&
-            resolution =
-                resolutions[AutomationPanelIndex(
-                    pending.panel)];
-        if (resolution &&
-            resolution->generation ==
-                pending.generation) {
-            automation_server_->Fail(
-                pending.command,
-                resolution->succeeded
-                    ? "app_shutdown"
-                    : "panel_rollback_failed",
-                resolution->succeeded
-                    ? "The application closed before the requested panel state was presented; the complete unpresented mutation chain was restored before shutdown."
-                    : "The application closed before presentation, and the unpresented panel mutation chain could not be restored before shutdown.");
-            continue;
-        }
-        if (ApplicationPanelVisible(
-                ui_.PanelVisibilityForAutomation(),
-                pending.panel) !=
-            pending.visible) {
-            automation_server_->Fail(
-                pending.command,
-                "operation_canceled",
-                "Panel visibility changed again before the requested state was presented.");
-            continue;
-        }
-        automation_server_->Fail(
-            pending.command,
-            "app_shutdown",
-            "The application closed before the requested panel state was presented; no production mutation remained to restore.");
-    }
-    automation_panel_commands_.clear();
-    return restored_panel_state_requires_flush;
+    return automation_panel_coordinator_.SettleForShutdown(
+        AutomationPanelCoordinatorCallbacks());
 }
 
 void SpecForgeApp::PollAutomationPanelCommands()
 {
-    const ShellAutomationPanelPresentation& presented =
-        ui_.PresentedPanelVisibilityForAutomation();
-    const ShellAutomationPanelPresentationStatus&
-        presentation_status =
-            ui_.PanelPresentationStatusForAutomation();
-    AutomationPanelRollbackResolutions
-        rollback_resolutions;
-
-    const PanelVisibilityState visibility =
-        ui_.PanelVisibilityForAutomation();
-    for (std::size_t panel_index = 0;
-         panel_index < kApplicationPanelCount;
-         ++panel_index) {
-        AutomationPanelMutationChain& chain =
-            automation_panel_mutation_chains_[
-                panel_index];
-        if (!chain.active()) {
-            continue;
-        }
-        const ApplicationPanel panel =
-            static_cast<ApplicationPanel>(
-                panel_index);
-        const bool live_visible =
-            ApplicationPanelVisible(
-                visibility,
-                panel);
-        if (live_visible !=
-            chain.requested_visible()) {
-            chain.Clear();
-            continue;
-        }
-        if (presented.FrameIndex(panel) >
-                chain.accepted_frame() &&
-            ApplicationPanelVisible(
-                presented.visibility,
-                panel) ==
-                chain.requested_visible()) {
-            chain.Clear();
-        }
-    }
-
-    const bool presentation_available =
-        AutomationPanelPresentationAvailable();
-    if (!presentation_available) {
-        rollback_resolutions =
-            RollbackActiveAutomationPanelMutationChains(
-                AutomationPanelRollbackReason::
-                    PresentationUnavailable);
-    } else {
-        for (std::size_t panel_index = 0;
-             panel_index < kApplicationPanelCount;
-             ++panel_index) {
-            AutomationPanelMutationChain& chain =
-                automation_panel_mutation_chains_[
-                    panel_index];
-            if (chain.active() &&
-                presentation_status.BlockedAfter(
-                    static_cast<ApplicationPanel>(
-                        panel_index),
-                    chain.accepted_frame())) {
-                rollback_resolutions[panel_index] =
-                    RollbackAutomationPanelMutationChain(
-                        static_cast<ApplicationPanel>(
-                            panel_index),
-                        AutomationPanelRollbackReason::
-                            ViewportBlocked);
-            }
-        }
-    }
-
-    automation_panel_commands_.erase(
-        std::remove_if(
-            automation_panel_commands_.begin(),
-            automation_panel_commands_.end(),
-            [this,
-             &presented,
-             &presentation_status,
-             &rollback_resolutions,
-             presentation_available](
-                const AutomationPanelCommand& pending) {
-                if (!automation_server_->IsRequestActive(
-                        pending.command.request_id)) {
-                    return true;
-                }
-                if (automation_panel_generations_[
-                        AutomationPanelIndex(
-                            pending.panel)] !=
-                    pending.generation) {
-                    automation_server_->Fail(
-                        pending.command,
-                        "operation_canceled",
-                        "Panel visibility changed again before the requested state was presented.");
-                    return true;
-                }
-                const bool live_visible =
-                    AutomationPanelVisible(
-                        ui_.PanelVisibilityForAutomation(),
-                        pending.panel);
-                const std::uint64_t presented_frame =
-                    presented.FrameIndex(
-                        pending.panel);
-                if (live_visible == pending.visible &&
-                    presented_frame >
-                        pending.accepted_frame &&
-                    AutomationPanelVisible(
-                        presented.visibility,
-                        pending.panel) ==
-                        pending.visible) {
-                    automation_server_->Complete(
-                        pending.command,
-                        AutomationPanelResult(
-                            pending.name,
-                            pending.visible,
-                            pending.changed,
-                            presented_frame));
-                    return true;
-                }
-                const std::size_t panel_index =
-                    AutomationPanelIndex(
-                        pending.panel);
-                const std::optional<
-                    AutomationPanelRollbackResolution>&
-                    rollback =
-                        rollback_resolutions[
-                            panel_index];
-                if (rollback &&
-                    rollback->generation ==
-                        pending.generation) {
-                    if (!rollback->succeeded) {
-                        automation_server_->Fail(
-                            pending.command,
-                            "panel_rollback_failed",
-                            "The unpresented panel mutation chain could not be restored to its pre-chain value through the production settings owner.");
-                        return true;
-                    }
-                    if (rollback->reason ==
-                        AutomationPanelRollbackReason::
-                            ViewportBlocked) {
-                        automation_server_->Fail(
-                            pending.command,
-                            "panel_viewport_not_renderable",
-                            "A detached viewport required to present the panel state is minimized; the complete unpresented mutation chain was rolled back.");
-                        return true;
-                    }
-                    const bool window_renderable =
-                        !minimized_ && window_visible_;
-                    const std::string_view error_code =
-                        window_renderable
-                            ? "panel_not_renderable"
-                            : "window_not_renderable";
-                    const std::string_view error_message =
-                        window_renderable
-                            ? "Immersive plot mode began before the requested panel state was presented; the complete unpresented mutation chain was rolled back."
-                            : "The main application window became hidden or minimized before the requested panel state was presented; the complete unpresented mutation chain was rolled back.";
-                    automation_server_->Fail(
-                        pending.command,
-                        error_code,
-                        error_message);
-                    return true;
-                }
-                if (live_visible != pending.visible) {
-                    automation_server_->Fail(
-                        pending.command,
-                        "operation_canceled",
-                        "Panel visibility changed again before the requested state was presented.");
-                    return true;
-                }
-                if (!presentation_available) {
-                    const bool window_renderable =
-                        !minimized_ && window_visible_;
-                    automation_server_->Fail(
-                        pending.command,
-                        window_renderable
-                            ? "panel_not_renderable"
-                            : "window_not_renderable",
-                        window_renderable
-                            ? "Immersive plot mode does not provide a normal Shell panel frame; no requested panel state was presented."
-                            : "The main application window became hidden or minimized before a requested panel state was presented.");
-                    return true;
-                }
-                if (presentation_status.BlockedAfter(
-                        pending.panel,
-                        pending.accepted_frame)) {
-                    automation_server_->Fail(
-                        pending.command,
-                        "panel_viewport_not_renderable",
-                        "A detached viewport required to present the panel state is minimized; no production mutation required rollback.");
-                    return true;
-                }
-                return false;
-            }),
-        automation_panel_commands_.end());
-}
-
-bool SpecForgeApp::
-AutomationPanelPresentationAvailable() const noexcept
-{
-    return !minimized_ &&
-           window_visible_ &&
-           !ui_.immersive_plot_mode();
+    automation_panel_coordinator_.Poll(
+        ui_.PresentedPanelVisibilityForAutomation(),
+        ui_.PanelPresentationStatusForAutomation(),
+        {
+            .window_renderable = !minimized_ && window_visible_,
+            .immersive_plot_mode = ui_.immersive_plot_mode(),
+            .presentation_available =
+                !minimized_ &&
+                window_visible_ &&
+                !ui_.immersive_plot_mode(),
+        },
+        AutomationPanelCoordinatorCallbacks());
 }
 
 bool SpecForgeApp::AutomationBusinessIdle() const noexcept
 {
-    return automation_panel_commands_.empty() &&
-           std::ranges::none_of(
-               automation_panel_mutation_chains_,
-               [](const auto& chain) {
-                   return chain.active();
-               }) &&
+    return automation_panel_coordinator_.Idle() &&
            automation_source_commands_.empty() &&
            !automation_goto_command_ &&
            !automation_label_command_ &&

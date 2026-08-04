@@ -383,6 +383,7 @@ target_link_libraries(specforge_renderer
 )
 
 add_executable(specforge_native WIN32
+    src/app/automation_panel_command_coordinator.cpp
     src/app/runtime_resource_workload.cpp
     src/app/specforge_app.cpp
     src/main.cpp
@@ -573,6 +574,26 @@ target_link_libraries(
 )
 set_tests_properties(
     specforge_automation_control_tests
+    PROPERTIES
+        LABELS "automation;ci-headless;required"
+)
+specforge_add_test(
+    specforge_automation_panel_command_coordinator_tests
+    tests/automation_panel_command_coordinator_tests.cpp
+    specforge_automation
+)
+target_sources(
+    specforge_automation_panel_command_coordinator_tests
+    PRIVATE
+        src/app/automation_panel_command_coordinator.cpp
+)
+target_link_libraries(
+    specforge_automation_panel_command_coordinator_tests
+    PRIVATE
+        specforge_desktop_ui
+)
+set_tests_properties(
+    specforge_automation_panel_command_coordinator_tests
     PROPERTIES
         LABELS "automation;ci-headless;required"
 )
