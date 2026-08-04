@@ -2648,6 +2648,8 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
                     root / "ui-scale.json",
                 .input_settings_path =
                     root / "input-settings.json",
+                .external_source_settings_path =
+                    root / "external-source-settings.json",
                 .profile_settings_path =
                     root / "profile-settings.json",
                 .panel_visibility_path =

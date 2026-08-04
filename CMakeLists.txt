@@ -334,6 +334,7 @@ add_library(specforge_desktop_ui STATIC
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
     src/ui/input_settings.cpp
+    src/ui/external_source_settings.cpp
     src/ui/panel_session_interaction.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
@@ -1033,6 +1034,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_input_settings_tests
     tests/input_settings_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_external_source_settings_tests
+    tests/external_source_settings_tests.cpp
     specforge_desktop_ui
 )
 add_test(

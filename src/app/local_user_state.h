@@ -37,6 +37,7 @@ enum class LocalUserStateArea {
     Language,
     UiScale,
     Input,
+    ExternalSource,
     ProfileOutputDirectory,
     PanelVisibility,
     SpectralLines,

@@ -172,6 +172,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Choose how SpecForge starts and restores your local workspace.",
         "设置 SpecForge 的启动方式与本地工作区恢复行为。"},
+    UiTextEntry{"File opening", "文件打开"},
     UiTextEntry{
         "Restore the previous session at startup",
         "启动时恢复上次会话"},
@@ -201,6 +202,22 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Other input behavior settings are not available yet.",
         "其他输入行为设置暂不可用。"},
+    UiTextEntry{"External source opening", "外部源打开"},
+    UiTextEntry{
+        "Open external FITS as a folder source",
+        "将外部打开的 FITS 作为文件夹源打开"},
+    UiTextEntry{
+        "When enabled, an externally opened FITS file uses its containing folder as the source collection. In-app source-opening actions are unchanged.",
+        "启用后，从外部打开 FITS 文件时，将其所在文件夹作为源集合。应用内的源打开操作不受影响。"},
+    UiTextEntry{
+        "Include subfolders (not implemented)",
+        "包含子文件夹（尚未实现）"},
+    UiTextEntry{
+        "The saved external FITS folder preference could not be loaded; it is disabled.",
+        "无法加载已保存的外部 FITS 文件夹偏好，当前已关闭。"},
+    UiTextEntry{
+        "The external FITS folder preference could not be saved. The previous behavior is still in use.",
+        "无法保存外部 FITS 文件夹偏好，仍继续使用此前的行为。"},
     UiTextEntry{"Data & Recovery", "数据与恢复"},
     UiTextEntry{
         "Inspect local application storage. Scientific source files and label result files remain user-owned.",
@@ -1054,6 +1071,10 @@ std::string_view UiText(
         return UiText(language, UiTextId::UiScale);
     case LocalUserStateArea::Input:
         return UiText(language, UiTextId::Input);
+    case LocalUserStateArea::ExternalSource:
+        return UiText(
+            language,
+            UiTextId::ExternalSourceOpening);
     case LocalUserStateArea::ProfileOutputDirectory:
         return UiText(
             language,

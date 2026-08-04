@@ -61,6 +61,10 @@ void RequireCompleteLocalUserStatePathMapping(
             root / kInputSettings,
         "input settings should use the canonical name");
     Require(
+        paths.external_source_settings_path ==
+            root / kExternalSourceSettings,
+        "external source settings should use the canonical name");
+    Require(
         paths.profile_settings_path ==
             root / kProfileSettings,
         "profile settings should use the canonical name");

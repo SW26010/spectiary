@@ -8,6 +8,8 @@ inline constexpr char kImGuiIni[] = "specforge-imgui-v2.ini";
 inline constexpr char kUiLanguageSettings[] = "ui-language.json";
 inline constexpr char kUiScaleSettings[] = "ui-scale.json";
 inline constexpr char kInputSettings[] = "input-settings.json";
+inline constexpr char kExternalSourceSettings[] =
+    "external-source-settings.json";
 inline constexpr char kProfileSettings[] = "profile-settings.json";
 inline constexpr char kPanelVisibilityState[] = "panel-visibility.json";
 inline constexpr char kSourceSessionState[] = "source-session.json";

@@ -952,6 +952,9 @@ std::string ShellLocalStateFlushResult::FailureMessage(
     if (!application_settings.input_saved) {
         append_area(LocalUserStateArea::Input);
     }
+    if (!application_settings.external_source_saved) {
+        append_area(LocalUserStateArea::ExternalSource);
+    }
     if (!application_settings.profile_output_directory_saved) {
         append_area(LocalUserStateArea::ProfileOutputDirectory);
     }
@@ -2027,6 +2030,9 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
     append_setting(
         LocalUserStateArea::Input,
         ApplicationSetting::Input);
+    append_setting(
+        LocalUserStateArea::ExternalSource,
+        ApplicationSetting::ExternalSource);
     append_setting(
         LocalUserStateArea::
             ProfileOutputDirectory,

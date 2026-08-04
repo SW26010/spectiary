@@ -112,6 +112,9 @@ void SetLocalUserStatePaths(
     paths.input_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kInputSettings;
+    paths.external_source_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kExternalSourceSettings;
     paths.profile_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kProfileSettings;

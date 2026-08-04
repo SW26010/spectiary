@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "profile/profile_settings.h"
+#include "ui/external_source_settings.h"
 #include "ui/input_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/ui_scale_settings.h"
@@ -23,6 +24,7 @@ enum class ApplicationSetting {
     ProfileOutputDirectory,
     UiScale,
     Input,
+    ExternalSource,
     PanelVisibility,
 };
 
@@ -62,6 +64,8 @@ struct ApplicationSettingsView {
     int ui_scale_percentage = kDefaultUiScalePercentage;
     bool live_numeric_navigation =
         kDefaultLiveNumericNavigation;
+    bool open_external_fits_as_folder =
+        kDefaultOpenExternalFitsAsFolder;
     std::filesystem::path profile_output_directory;
     std::filesystem::path default_profile_output_directory;
     ProfileOutputDirectorySource profile_output_directory_source =
@@ -108,6 +112,7 @@ enum class ApplicationSettingsIntentKind {
     SetLanguage,
     SetUiScale,
     SetLiveNumericNavigation,
+    SetOpenExternalFitsAsFolder,
     SetProfileOutputDirectory,
     RestoreDefaultProfileOutputDirectory,
     SetPanelVisibility,
@@ -122,6 +127,8 @@ struct ApplicationSettingsIntent {
     int ui_scale_percentage = kDefaultUiScalePercentage;
     bool live_numeric_navigation =
         kDefaultLiveNumericNavigation;
+    bool open_external_fits_as_folder =
+        kDefaultOpenExternalFitsAsFolder;
     std::filesystem::path directory;
     ApplicationPanel panel = ApplicationPanel::Files;
     bool visible = true;
@@ -132,6 +139,8 @@ struct ApplicationSettingsIntent {
         int percentage);
     [[nodiscard]] static ApplicationSettingsIntent
     SetLiveNumericNavigation(bool enabled);
+    [[nodiscard]] static ApplicationSettingsIntent
+    SetOpenExternalFitsAsFolder(bool enabled);
     [[nodiscard]] static ApplicationSettingsIntent SetProfileOutputDirectory(
         std::filesystem::path directory);
     [[nodiscard]] static ApplicationSettingsIntent
@@ -171,6 +180,7 @@ struct ApplicationSettingsStorage {
     std::filesystem::path language_settings_path;
     std::filesystem::path ui_scale_settings_path;
     std::filesystem::path input_settings_path;
+    std::filesystem::path external_source_settings_path;
     std::filesystem::path profile_settings_path;
     std::filesystem::path panel_visibility_path;
     std::filesystem::path default_profile_output_directory;
@@ -182,6 +192,7 @@ struct ApplicationSettingsFlushResult {
     bool language_saved = true;
     bool ui_scale_saved = true;
     bool input_saved = true;
+    bool external_source_saved = true;
     bool profile_output_directory_saved = true;
     bool panel_visibility_saved = true;
 
@@ -190,6 +201,7 @@ struct ApplicationSettingsFlushResult {
         return language_saved &&
                ui_scale_saved &&
                input_saved &&
+               external_source_saved &&
                profile_output_directory_saved &&
                panel_visibility_saved;
     }
@@ -222,6 +234,8 @@ private:
         int percentage);
     [[nodiscard]] ApplicationSettingsResult
     ApplyLiveNumericNavigation(bool enabled);
+    [[nodiscard]] ApplicationSettingsResult
+    ApplyOpenExternalFitsAsFolder(bool enabled);
     [[nodiscard]] ApplicationSettingsResult ApplyProfileOutputDirectory(
         std::optional<std::filesystem::path> directory,
         const ApplicationSettingsRuntimeState& runtime);
@@ -259,6 +273,8 @@ private:
     int ui_scale_percentage_ = kDefaultUiScalePercentage;
     bool live_numeric_navigation_ =
         kDefaultLiveNumericNavigation;
+    bool open_external_fits_as_folder_ =
+        kDefaultOpenExternalFitsAsFolder;
     ProfileOutputDirectoryResolution profile_output_directory_;
     PanelVisibilityState panel_visibility_;
     std::array<
@@ -272,6 +288,7 @@ private:
     std::optional<UiLanguage> pending_language_;
     std::optional<int> pending_ui_scale_percentage_;
     std::optional<bool> pending_live_numeric_navigation_;
+    std::optional<bool> pending_open_external_fits_as_folder_;
     std::optional<ProfileSettings> pending_profile_settings_;
     std::optional<ProfileOutputDirectoryResolution>
         pending_profile_output_directory_;

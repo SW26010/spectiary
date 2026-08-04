@@ -66,6 +66,12 @@ struct SettingsPanelUiTestAccess {
     {
         panel.settings_viewport_id_ = viewport_id;
     }
+    static void RenderGeneral(
+        SettingsPanelUi& panel,
+        const ApplicationSettingsView& settings)
+    {
+        panel.RenderGeneral(settings);
+    }
     static void ResetProfileOutputDirectory(SettingsPanelUi& panel)
     {
         panel.ResetProfileOutputDirectory();
@@ -221,6 +227,13 @@ struct UiScaleRenderObservation {
 
 struct InputRenderObservation {
     bool live_numeric_navigation_hovered = false;
+};
+
+struct GeneralRenderObservation {
+    bool open_external_fits_as_folder_hovered = false;
+    bool include_external_subfolders_found = false;
+    bool include_external_subfolders_disabled = false;
+    ImVec2 include_external_subfolders_center;
 };
 
 struct LegalDocumentUiFixture {
@@ -526,6 +539,65 @@ InputRenderObservation RenderInputFrame(
                 "Live numeric navigation###"
                 "SpecForgeLiveNumericNavigation");
     }
+    ImGui::EndFrame();
+    return observation;
+}
+
+GeneralRenderObservation RenderGeneralFrame(
+    specforge::SettingsPanelUi& panel,
+    bool open_external_fits_as_folder = false)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    specforge::ApplicationSettingsView settings =
+        MakeSettingsView();
+    settings.open_external_fits_as_folder =
+        open_external_fits_as_folder;
+    panel.Render(settings);
+
+    GeneralRenderObservation observation;
+    const ImGuiID hovered_id = GImGui->HoveredId;
+    for (ImGuiWindow* window : GImGui->Windows) {
+        observation.open_external_fits_as_folder_hovered =
+            observation.open_external_fits_as_folder_hovered ||
+            hovered_id == window->GetID(
+                "Open external FITS as a folder source###"
+                "SpecForgeOpenExternalFitsAsFolder");
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
+GeneralRenderObservation RenderGeneralContentFrame(
+    specforge::SettingsPanelUi& panel)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1600.0f, 1000.0f);
+    ImGui::NewFrame();
+    ImGui::Begin("General fixture###SpecForgeGeneralFixture");
+    const ImGuiID include_external_subfolders_id =
+        GImGui->CurrentWindow->GetID(
+            "Include subfolders (not implemented)###"
+            "SpecForgeIncludeExternalSubfolders");
+    specforge::SettingsPanelUiTestAccess::RenderGeneral(
+        panel,
+        MakeSettingsView());
+
+    GeneralRenderObservation observation;
+    observation.include_external_subfolders_found =
+        GImGui->LastItemData.ID ==
+        include_external_subfolders_id;
+    if (observation.include_external_subfolders_found) {
+        observation.include_external_subfolders_disabled =
+            (GImGui->LastItemData.ItemFlags &
+             ImGuiItemFlags_Disabled) != 0;
+        observation.include_external_subfolders_center =
+            GImGui->LastItemData.Rect.GetCenter();
+    }
+    ImGui::End();
     ImGui::EndFrame();
     return observation;
 }
@@ -918,6 +990,86 @@ void TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent()
     Require(
         !panel.TakeApplicationSettingsIntent(),
         "live numeric navigation intent should be consumed once");
+}
+
+void TestExternalFitsFolderCheckboxAndDeferredSubfolderPlaceholder()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::General);
+    panel.Open();
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    GeneralRenderObservation observation =
+        RenderGeneralFrame(panel);
+    ImVec2 checkbox_position;
+    for (float y = 80.0f;
+         y <= 900.0f &&
+         !observation.open_external_fits_as_folder_hovered;
+         y += 2.0f) {
+        for (float x = 300.0f;
+             x <= 1300.0f &&
+             !observation.open_external_fits_as_folder_hovered;
+             x += 40.0f) {
+            checkbox_position = ImVec2(x, y);
+            ImGui::GetIO().AddMousePosEvent(
+                checkbox_position.x,
+                checkbox_position.y);
+            observation = RenderGeneralFrame(panel);
+        }
+    }
+    Require(
+        observation.open_external_fits_as_folder_hovered,
+        "fixture should locate the external FITS folder checkbox");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderGeneralFrame(panel);
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "pressing the external FITS folder checkbox should wait for click release");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderGeneralFrame(panel);
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetOpenExternalFitsAsFolder &&
+            intent->open_external_fits_as_folder,
+        "clicking the external FITS folder checkbox should emit the enabled setting");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "external FITS folder intent should be consumed once");
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    observation = RenderGeneralContentFrame(panel);
+    Require(
+        observation.include_external_subfolders_found &&
+            observation.include_external_subfolders_disabled,
+        "the deferred subfolder placeholder should be rendered disabled");
+
+    ImGui::GetIO().AddMousePosEvent(
+        observation.include_external_subfolders_center.x,
+        observation.include_external_subfolders_center.y);
+    observation = RenderGeneralContentFrame(panel);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderGeneralContentFrame(panel);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderGeneralContentFrame(panel);
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "the disabled subfolder placeholder should never emit a setting intent");
 }
 
 void TestUiScaleSliderCommitsOnlyAfterEditDeactivation()
@@ -1739,6 +1891,7 @@ int main()
     TestWarnedFallbacksRemainDirectlyRepairable();
     TestUiScaleControlEmitsOneShotSettingsIntent();
     TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent();
+    TestExternalFitsFolderCheckboxAndDeferredSubfolderPlaceholder();
     TestUiScaleSliderCommitsOnlyAfterEditDeactivation();
     TestLocalizedUiScaleResetEmitsDefaultIntent();
     TestLanguageSelectorEmitsOneShotIntent();

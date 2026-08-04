@@ -57,6 +57,8 @@ specforge::ApplicationSettingsStorage MakeStorage(
         .language_settings_path = root / "ui-language.json",
         .ui_scale_settings_path = root / "ui-scale.json",
         .input_settings_path = root / "input-settings.json",
+        .external_source_settings_path =
+            root / "external-source-settings.json",
         .profile_settings_path = root / "profile-settings.json",
         .panel_visibility_path = root / "panel-visibility.json",
         .default_profile_output_directory = root / "profiles",
@@ -82,6 +84,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         initial.live_numeric_navigation,
         "missing input settings should enable live numeric navigation");
+    Require(
+        !initial.open_external_fits_as_folder,
+        "missing external source settings should disable external FITS folder opening");
     Require(
         initial.profile_output_directory ==
             storage.default_profile_output_directory,
@@ -110,6 +115,14 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         input_result.applied(),
         "live numeric navigation intent should apply");
 
+    const auto external_source_result = settings.Apply(
+        specforge::ApplicationSettingsIntent::
+            SetOpenExternalFitsAsFolder(true),
+        {});
+    Require(
+        external_source_result.applied(),
+        "external FITS folder intent should apply");
+
     const std::filesystem::path custom_directory =
         temporary.path() / "custom profiles";
     const auto directory_result = settings.Apply(
@@ -133,6 +146,9 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         !reloaded_view.live_numeric_navigation,
         "live numeric navigation should reload through the application settings owner");
+    Require(
+        reloaded_view.open_external_fits_as_folder,
+        "external FITS folder preference should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory == custom_directory,
         "profile directory should reload through the application settings owner");
@@ -168,6 +184,8 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
         .language_settings_path = blocker / "ui-language.json",
         .ui_scale_settings_path = blocker / "ui-scale.json",
         .input_settings_path = blocker / "input-settings.json",
+        .external_source_settings_path =
+            blocker / "external-source-settings.json",
         .profile_settings_path = blocker / "profile-settings.json",
         .panel_visibility_path = blocker / "panel-visibility.json",
         .default_profile_output_directory =
@@ -337,6 +355,42 @@ void TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue()
         "input settings save failure should remain visible on the owner view");
 }
 
+void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block external source settings directory creation";
+    }
+
+    auto storage = MakeStorage(temporary.path());
+    storage.external_source_settings_path =
+        blocker / "external-source-settings.json";
+    specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsResult result =
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalFitsAsFolder(true),
+            {});
+    const specforge::ApplicationSettingsView view =
+        settings.View();
+    Require(
+        result.outcome ==
+                specforge::ApplicationSettingsOutcome::
+                    PersistenceFailed &&
+            !view.open_external_fits_as_folder,
+        "external source save failure should retain the disabled runtime value");
+    Require(
+        view.StatusFor(
+                specforge::ApplicationSetting::ExternalSource)
+                .kind ==
+            specforge::ApplicationSettingsStatusKind::
+                PersistenceError,
+        "external source save failure should remain visible on the owner view");
+}
+
 void TestUiScaleResetRepairsDamagedFallbackState()
 {
     TemporaryDirectory temporary;
@@ -477,6 +531,10 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
         stream << R"({"format_kind":)";
     }
     {
+        std::ofstream stream(storage.external_source_settings_path);
+        stream << R"({"format_kind":)";
+    }
+    {
         std::ofstream stream(storage.profile_settings_path);
         stream << R"({"format_kind":)";
     }
@@ -518,6 +576,16 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
                 specforge::ApplicationSettingsStatusKind::
                     LoadWarning,
         "damaged input settings should enable live navigation with a typed load warning");
+    Require(
+        !loaded.open_external_fits_as_folder &&
+            loaded
+                    .StatusFor(
+                        specforge::ApplicationSetting::
+                            ExternalSource)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    LoadWarning,
+        "damaged external source settings should disable the preference with a typed load warning");
     Require(
         loaded
                 .StatusFor(
@@ -1008,6 +1076,7 @@ int main()
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestUiScaleValidationAndPersistenceFirstBehavior();
     TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue();
+    TestExternalFitsFolderPersistenceFailureRetainsDisabledValue();
     TestUiScaleResetRepairsDamagedFallbackState();
     TestLanguageAndProfileFallbacksCanBeReapplied();
     TestLoadWarningAndEnvironmentOverrideAreTyped();

@@ -746,7 +746,7 @@ void SettingsPanelUi::RenderSelectedSection(
 {
     switch (selected_section_) {
     case SettingsSection::General:
-        RenderGeneral(settings.language);
+        RenderGeneral(settings);
         return;
     case SettingsSection::Appearance:
         RenderAppearance(settings);
@@ -769,12 +769,15 @@ void SettingsPanelUi::RenderSelectedSection(
     }
 }
 
-void SettingsPanelUi::RenderGeneral(UiLanguage language)
+void SettingsPanelUi::RenderGeneral(
+    const ApplicationSettingsView& settings)
 {
+    const UiLanguage language = settings.language;
     RenderSectionHeading(
         UiText(language, UiTextId::General),
         UiText(language, UiTextId::GeneralPageDescription));
 
+    ImGui::Spacing();
     bool restore_previous_session = true;
     const std::string restore_label = StableUiLabel(
         language,
@@ -795,6 +798,75 @@ void SettingsPanelUi::RenderGeneral(UiLanguage language)
         static_cast<int>(unavailable.size()),
         unavailable.data());
     ImGui::PopTextWrapPos();
+
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::SeparatorText(
+        UiText(language, UiTextId::FileOpening).data());
+
+    bool open_external_fits_as_folder =
+        settings.open_external_fits_as_folder;
+    const std::string open_external_fits_label =
+        StableUiLabel(
+            language,
+            UiTextId::OpenExternalFitsAsFolder,
+            "SpecForgeOpenExternalFitsAsFolder");
+    if (ImGui::Checkbox(
+            open_external_fits_label.c_str(),
+            &open_external_fits_as_folder)) {
+        SetOpenExternalFitsAsFolder(
+            open_external_fits_as_folder);
+    }
+    ImGui::PushTextWrapPos();
+    const std::string_view open_external_fits_description =
+        UiText(
+            language,
+            UiTextId::OpenExternalFitsAsFolderDescription);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(open_external_fits_description.size()),
+        open_external_fits_description.data());
+    ImGui::PopTextWrapPos();
+
+    bool include_external_subfolders = false;
+    const std::string include_external_subfolders_label =
+        StableUiLabel(
+            language,
+            UiTextId::IncludeExternalSubfolders,
+            "SpecForgeIncludeExternalSubfolders");
+    ImGui::BeginDisabled();
+    ImGui::Checkbox(
+        include_external_subfolders_label.c_str(),
+        &include_external_subfolders);
+    ImGui::EndDisabled();
+
+    const ApplicationSettingsStatus& setting_status =
+        settings.StatusFor(ApplicationSetting::ExternalSource);
+    if (setting_status.kind !=
+        ApplicationSettingsStatusKind::Ready) {
+        ImGui::Spacing();
+        const bool warning =
+            setting_status.kind ==
+            ApplicationSettingsStatusKind::LoadWarning;
+        const ImVec4 feedback_color = warning
+            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
+            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const std::string_view feedback = UiText(
+            language,
+            warning
+                ? UiTextId::ExternalSourceSettingsLoadWarning
+                : UiTextId::ExternalSourceSettingsSaveError);
+        ImGui::PushTextWrapPos();
+        ImGui::TextColored(
+            feedback_color,
+            "%.*s",
+            static_cast<int>(feedback.size()),
+            feedback.data());
+        RenderApplicationSettingsStatusReason(
+            setting_status,
+            language);
+        ImGui::PopTextWrapPos();
+    }
 }
 
 void SettingsPanelUi::RenderAppearance(
@@ -1122,6 +1194,13 @@ void SettingsPanelUi::SetLiveNumericNavigation(bool enabled)
     application_settings_intent_ =
         ApplicationSettingsIntent::
             SetLiveNumericNavigation(enabled);
+}
+
+void SettingsPanelUi::SetOpenExternalFitsAsFolder(bool enabled)
+{
+    application_settings_intent_ =
+        ApplicationSettingsIntent::
+            SetOpenExternalFitsAsFolder(enabled);
 }
 
 void SettingsPanelUi::RenderDataAndRecovery(

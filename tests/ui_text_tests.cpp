@@ -271,6 +271,30 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
+            UiTextId::FileOpening) ==
+            "文件打开",
+        "File opening subsection should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::OpenExternalFitsAsFolder) ==
+            "将外部打开的 FITS 作为文件夹源打开",
+        "external FITS folder preference should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::IncludeExternalSubfolders) ==
+            "包含子文件夹（尚未实现）",
+        "deferred subfolder placeholder should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::ExternalSourceSettingsSaveError) ==
+            "无法保存外部 FITS 文件夹偏好，仍继续使用此前的行为。",
+        "external source persistence feedback should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
             UiTextId::LiveNumericNavigation) ==
             "实时数值导航",
         "live numeric navigation setting should be localized");

@@ -107,7 +107,8 @@ private:
     void RenderSelectedSection(
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
-    void RenderGeneral(UiLanguage language);
+    void RenderGeneral(
+        const ApplicationSettingsView& settings);
     void RenderAppearance(
         const ApplicationSettingsView& settings);
     void RenderLanguage(const ApplicationSettingsView& settings);
@@ -121,6 +122,7 @@ private:
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);
+    void SetOpenExternalFitsAsFolder(bool enabled);
     [[nodiscard]] static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate);
