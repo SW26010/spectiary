@@ -2,7 +2,9 @@
 #include "profile/profile_recording_status.h"
 
 #include <atomic>
+#include <barrier>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,10 +17,25 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 
 struct ProfileSinkTestAccess {
+    static bool StartDefaultWithNameFactory(
+        ProfileSink& sink,
+        const std::filesystem::path& output_directory,
+        ProfileSink::Limits limits,
+        ProfileSink::DefaultProfileNameFactory name_factory,
+        ProfileSink::DefaultProfileOpenCheckpoint before_open = {})
+    {
+        return sink.StartDefaultWithNameFactory(
+            output_directory,
+            limits,
+            std::move(name_factory),
+            std::move(before_open));
+    }
+
     static bool StartWithOutputStreamFactory(
         ProfileSink& sink,
         std::filesystem::path path,
@@ -190,6 +207,164 @@ void TestStopDrainsEventsAndWritesSummary()
         text.find("\"event\":\"profile_recorder_summary\"") != std::string::npos,
         "a drained recording should end with a recorder summary");
     Require(text.ends_with('\n'), "JSONL output should end at a complete record boundary");
+}
+
+void TestConcurrentDefaultStartsUseDistinctPaths()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path existing_path =
+        temporary.path() / "specforge-profile-same-time.jsonl";
+    {
+        std::ofstream existing(existing_path, std::ios::binary);
+        existing << "{\"event\":\"preexisting\"}\n";
+    }
+    const std::string existing_text =
+        ReadTextFile(existing_path);
+    constexpr std::size_t kWorkerCount = 8;
+    std::barrier before_open(static_cast<std::ptrdiff_t>(kWorkerCount));
+    std::barrier before_stop(static_cast<std::ptrdiff_t>(kWorkerCount));
+    struct Result {
+        bool started = false;
+        std::filesystem::path path;
+        std::string error;
+    };
+    std::vector<Result> results(kWorkerCount);
+    std::vector<std::thread> workers;
+    workers.reserve(kWorkerCount);
+
+    for (std::size_t index = 0; index < kWorkerCount; ++index) {
+        workers.emplace_back([&, index]() {
+            specforge::ProfileSink sink;
+            const bool started =
+                specforge::ProfileSinkTestAccess::
+                    StartDefaultWithNameFactory(
+                        sink,
+                        temporary.path(),
+                        GenerousLimits(),
+                        []() {
+                            return std::string("same-time");
+                        },
+                        [&before_open](const std::filesystem::path&) {
+                            before_open.arrive_and_wait();
+                        });
+            results[index].started = started;
+            results[index].path = sink.path();
+            results[index].error = sink.error_message();
+            if (started) {
+                if (!sink.WriteEvent(
+                        "concurrent_owner",
+                        {specforge::ProfileSink::Field::Number(
+                            "worker",
+                            std::to_string(index))})) {
+                    results[index].error =
+                        "owner event was rejected";
+                }
+            }
+            before_stop.arrive_and_wait();
+            sink.Stop();
+        });
+    }
+
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+
+    Require(
+        ReadTextFile(existing_path) == existing_text,
+        "same-time default starts must preserve an existing recording");
+
+    for (std::size_t index = 0; index < kWorkerCount; ++index) {
+        Require(
+            results[index].started,
+            "same-time default recordings should all start: " +
+                results[index].error);
+        Require(
+            !results[index].path.empty(),
+            "each concurrent default recording should publish a path");
+        for (std::size_t other = 0; other < index; ++other) {
+            Require(
+                results[index].path != results[other].path,
+                "same-time default recordings must receive distinct paths");
+        }
+        const std::string text = ReadTextFile(results[index].path);
+        Require(
+            text.find("\"event\":\"concurrent_owner\"") != std::string::npos &&
+                text.find("\"event\":\"profile_recorder_summary\"") !=
+                    std::string::npos,
+            "each concurrent default recording should retain its own event and summary");
+    }
+}
+
+void TestExplicitCollisionAndInterruptedRestartAreSafe()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path interrupted_path =
+        temporary.path() / "specforge-profile-restart.jsonl";
+    {
+        std::ofstream partial(interrupted_path, std::ios::binary);
+        partial << "{\"event\":\"partial\"}\n";
+    }
+    const std::string before = ReadTextFile(interrupted_path);
+    Require(
+        before.find("profile_recorder_summary") == std::string::npos,
+        "the interrupted fixture must not look like a completed recording");
+
+    specforge::ProfileSink explicit_sink(
+        interrupted_path,
+        GenerousLimits());
+    Require(
+        !explicit_sink.is_open() &&
+            explicit_sink.path().empty() &&
+            ReadTextFile(interrupted_path) == before,
+        "an explicit existing output path must fail without truncating the interrupted file");
+
+    specforge::ProfileSink restarted;
+    Require(
+        specforge::ProfileSinkTestAccess::
+            StartDefaultWithNameFactory(
+                restarted,
+                temporary.path(),
+                GenerousLimits(),
+                []() {
+                    return std::string("restart");
+                }),
+        "a default recording should restart beside an interrupted output");
+    const std::filesystem::path expected_restart_path =
+        temporary.path() / "specforge-profile-restart-2.jsonl";
+    Require(
+        restarted.path() == expected_restart_path &&
+            ReadTextFile(interrupted_path) == before,
+        "a default restart must allocate the -2 suffix beside an interrupted output");
+    restarted.Stop();
+    Require(
+        ReadTextFile(expected_restart_path).find(
+            "profile_recorder_summary") != std::string::npos,
+        "the suffixed restart must finalize as a complete recording");
+}
+
+void TestDefaultRecordingSupportsUnicodeOutputDirectory()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path unicode_directory =
+        temporary.path() / L"诊断录制-输出";
+    specforge::ProfileSink sink;
+    Require(
+        specforge::ProfileSinkTestAccess::
+            StartDefaultWithNameFactory(
+                sink,
+                unicode_directory,
+                GenerousLimits(),
+                []() {
+                    return std::string("unicode");
+                }),
+        "a default recording should start in a Unicode output directory");
+    const std::filesystem::path path = sink.path();
+    sink.Stop();
+    Require(
+        path.parent_path() == unicode_directory &&
+            std::filesystem::exists(path) &&
+            ReadTextFile(path).find("profile_recorder_summary") != std::string::npos,
+        "a Unicode output directory should retain a complete recording");
 }
 
 void TestQueueLimitDropsInsteadOfGrowingWithoutBound()
@@ -767,6 +942,9 @@ int main()
 {
     try {
         TestStopDrainsEventsAndWritesSummary();
+        TestConcurrentDefaultStartsUseDistinctPaths();
+        TestExplicitCollisionAndInterruptedRestartAreSafe();
+        TestDefaultRecordingSupportsUnicodeOutputDirectory();
         TestQueueLimitDropsInsteadOfGrowingWithoutBound();
         TestNormalCapacityDoesNotDropOnWriterContention();
         TestFileLimitStopsRecording();

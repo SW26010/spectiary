@@ -179,6 +179,11 @@ Present 仍可能影响整个 UI frame，不能把这种混合场景与主窗口
 `SPECFORGE_PROFILE_DIR`，覆盖 UI 设置并把本次分析日志重定向到仓库 `logs/`，避免和 portable 包内状态
 混在一起。
 
+默认文件名保留 `specforge-profile-` 前缀和本地时间戳，并追加进程 ID 与进程内序列号；文件以
+create-new 语义分配，因而同一时刻的普通实例不会互相截断。重启时遇到未完成的旧 JSONL 会分配新文件，
+分析器仍以末尾的 `profile_recorder_summary` 判断录制是否完整；已有的 `specforge-profile-*.jsonl` 日志
+和按通配符收集的分析流程继续有效。
+
 运行时录制使用 4 MiB 有界队列和后台批量写入，不在输入/UI 热路径同步写磁盘。单次录制达到 5 分钟或
 100 MiB 时自动停止。producer/writer 的普通内存锁争用不会丢事件；只有队列确实达到 4 MiB 容量时才
 拒绝新事件，并在末尾的 `profile_recorder_summary` 中记录 `dropped_events`。设置页停止只请求后台 drain，

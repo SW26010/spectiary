@@ -71,12 +71,16 @@ public:
         Limits limits);
     static const char* StopReasonName(StopReason reason) noexcept;
 
+    // Allocates a new collision-free recording below the selected directory.
+    // A previous or interrupted JSONL is never reused or truncated.
     [[nodiscard]] bool StartDefault(
         const std::filesystem::path& output_directory);
     [[nodiscard]] bool StartDefault(
         const std::filesystem::path& output_directory,
         Limits limits);
     [[nodiscard]] bool Start(std::filesystem::path path);
+    // Explicit paths are create-new: an existing file is preserved and the
+    // start fails instead of silently replacing the caller-selected output.
     [[nodiscard]] bool Start(std::filesystem::path path, Limits limits);
     // Starts the production writer on a caller-opened final file. The stream
     // owns the validated file handle for the complete writer lifetime;
@@ -124,6 +128,10 @@ private:
     struct WriterState;
     using OutputStreamFactory =
         std::function<std::unique_ptr<std::ostream>(const std::filesystem::path&)>;
+    using DefaultProfileNameFactory =
+        std::function<std::string()>;
+    using DefaultProfileOpenCheckpoint =
+        std::function<void(const std::filesystem::path&)>;
     using WriterThreadStarter =
         std::function<std::thread(WriterState*)>;
     using StopTransitionCheckpoint =
@@ -148,6 +156,11 @@ private:
         WriterThreadStarter writer_thread_starter = {},
         StopTransitionCheckpoint
             stop_transition_checkpoint = {});
+    [[nodiscard]] bool StartDefaultWithNameFactory(
+        const std::filesystem::path& output_directory,
+        Limits limits,
+        DefaultProfileNameFactory name_factory,
+        DefaultProfileOpenCheckpoint before_open = {});
     void FinalizeStoppedState();
 
     std::filesystem::path path_;

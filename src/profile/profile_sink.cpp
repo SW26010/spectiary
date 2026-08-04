@@ -1,6 +1,8 @@
 #include "profile/profile_sink.h"
+#include "platform/win32_file_identity.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <cctype>
@@ -9,7 +11,6 @@
 #include <cstdlib>
 #include <ctime>
 #include <deque>
-#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <mutex>
@@ -70,6 +71,163 @@ enum class FrameAdmissionState : std::uint8_t {
     Finalizing,
     Closed,
 };
+
+constexpr unsigned int kMaximumDefaultProfileNameAttempts = 10000;
+
+class ProfileFileStreamBuffer final : public std::streambuf {
+public:
+    explicit ProfileFileStreamBuffer(HANDLE handle)
+        : handle_(handle)
+    {
+        setp(
+            buffer_.data(),
+            buffer_.data() + buffer_.size());
+    }
+
+    ~ProfileFileStreamBuffer() override = default;
+
+protected:
+    int sync() override
+    {
+        if (!FlushPending()) {
+            return -1;
+        }
+        return FlushFileBuffers(handle_) != FALSE
+            ? 0
+            : -1;
+    }
+
+    int_type overflow(int_type character) override
+    {
+        if (!FlushPending()) {
+            return traits_type::eof();
+        }
+        if (!traits_type::eq_int_type(
+                character,
+                traits_type::eof())) {
+            *pptr() = traits_type::to_char_type(character);
+            pbump(1);
+        }
+        return traits_type::not_eof(character);
+    }
+
+private:
+    [[nodiscard]] bool FlushPending()
+    {
+        if (failed_) {
+            return false;
+        }
+        const std::ptrdiff_t pending =
+            pptr() - pbase();
+        std::ptrdiff_t offset = 0;
+        while (offset < pending) {
+            const DWORD remaining =
+                static_cast<DWORD>(pending - offset);
+            DWORD written = 0;
+            if (WriteFile(
+                    handle_,
+                    pbase() + offset,
+                    remaining,
+                    &written,
+                    nullptr) == FALSE ||
+                written == 0) {
+                failed_ = true;
+                setp(
+                    buffer_.data(),
+                    buffer_.data() + buffer_.size());
+                return false;
+            }
+            offset += written;
+        }
+        setp(
+            buffer_.data(),
+            buffer_.data() + buffer_.size());
+        return true;
+    }
+
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+    std::array<char, 64U * 1024U> buffer_ = {};
+    bool failed_ = false;
+};
+
+class ProfileFileOutputStream final : public std::ostream {
+public:
+    explicit ProfileFileOutputStream(HANDLE handle)
+        : std::ostream(nullptr),
+          handle_(handle),
+          buffer_(handle_)
+    {
+        rdbuf(&buffer_);
+        clear();
+    }
+
+    ~ProfileFileOutputStream() override
+    {
+        (void)flush();
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+        }
+    }
+
+private:
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+    ProfileFileStreamBuffer buffer_;
+};
+
+struct ProfileFileOpenResult {
+    std::unique_ptr<std::ostream> stream;
+    bool collision = false;
+    std::string error_message;
+};
+
+ProfileFileOpenResult OpenProfileFileExclusively(
+    const std::filesystem::path& path)
+{
+    const std::filesystem::path extended_path =
+        Win32ExtendedLengthPath(path);
+    if (extended_path.empty()) {
+        return {
+            .error_message =
+                "Could not resolve the profile output path.",
+        };
+    }
+
+    const HANDLE handle =
+        CreateFileW(
+            extended_path.c_str(),
+            GENERIC_WRITE |
+                FILE_READ_ATTRIBUTES |
+                SYNCHRONIZE,
+            FILE_SHARE_READ |
+                FILE_SHARE_WRITE,
+            nullptr,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL |
+                FILE_FLAG_SEQUENTIAL_SCAN,
+            nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_EXISTS ||
+            error == ERROR_ALREADY_EXISTS) {
+            return {
+                .collision = true,
+            };
+        }
+        return {
+            .error_message =
+                "Could not create the profile output file: " +
+                std::error_code(
+                    static_cast<int>(error),
+                    std::system_category())
+                    .message(),
+        };
+    }
+
+    return {
+        .stream = std::make_unique<ProfileFileOutputStream>(handle),
+    };
+}
 
 }  // namespace
 
@@ -201,21 +359,87 @@ bool ProfileSink::StartDefault(
     const std::filesystem::path& output_directory,
     Limits limits)
 {
+    return StartDefaultWithNameFactory(
+        output_directory,
+        limits,
+        []() {
+            return TimestampForFileName();
+        });
+}
+
+bool ProfileSink::StartDefaultWithNameFactory(
+    const std::filesystem::path& output_directory,
+    Limits limits,
+    DefaultProfileNameFactory name_factory,
+    DefaultProfileOpenCheckpoint before_open)
+{
     Stop();
     ResetStoppedOutcome();
-    const std::string stem = "specforge-profile-" + TimestampForFileName();
-    std::filesystem::path path =
-        output_directory / (stem + ".jsonl");
-    std::error_code exists_error;
-    for (unsigned int suffix = 2; std::filesystem::exists(path, exists_error) && !exists_error; ++suffix) {
-        path = output_directory /
-               (stem + "-" + std::to_string(suffix) + ".jsonl");
-    }
-    if (exists_error) {
-        error_message_ = "Could not inspect the profile output directory: " + exists_error.message();
+
+    if (!name_factory) {
+        error_message_ =
+            "The default profile name factory is empty.";
         return false;
     }
-    return Start(std::move(path), limits);
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+        output_directory,
+        directory_error);
+    if (directory_error) {
+        error_message_ =
+            "Could not create the profile output directory: " +
+            directory_error.message();
+        return false;
+    }
+
+    const std::string stem =
+        "specforge-profile-" + name_factory();
+    for (unsigned int suffix = 0;
+         suffix < kMaximumDefaultProfileNameAttempts;
+         ++suffix) {
+        std::string filename = stem;
+        if (suffix != 0) {
+            filename += "-" +
+                std::to_string(suffix + 1);
+        }
+        filename += ".jsonl";
+        const std::filesystem::path path =
+            output_directory / filename;
+        if (before_open && suffix == 0) {
+            before_open(path);
+        }
+
+        ProfileFileOpenResult opened =
+            OpenProfileFileExclusively(path);
+        if (opened.collision) {
+            continue;
+        }
+        if (!opened.stream) {
+            error_message_ =
+                opened.error_message.empty()
+                ? "Could not open the profile output file."
+                : std::move(opened.error_message);
+            return false;
+        }
+
+        const std::filesystem::path discard_path =
+            path;
+        return StartPrepared(
+            path,
+            limits,
+            std::move(opened.stream),
+            [discard_path]() noexcept {
+                std::error_code remove_error;
+                (void)std::filesystem::remove(
+                    discard_path,
+                    remove_error);
+            });
+    }
+
+    error_message_ =
+        "Could not allocate a collision-free profile output filename.";
+    return false;
 }
 
 bool ProfileSink::Start(std::filesystem::path path)
@@ -225,14 +449,27 @@ bool ProfileSink::Start(std::filesystem::path path)
 
 bool ProfileSink::Start(std::filesystem::path path, Limits limits)
 {
-    return StartWithOutputStreamFactory(
+    std::string open_error;
+    const bool started =
+        StartWithOutputStreamFactory(
         std::move(path),
         limits,
-        [](const std::filesystem::path& output_path) {
-            return std::make_unique<std::ofstream>(
-                output_path,
-                std::ios::binary | std::ios::out | std::ios::trunc);
+        [&open_error](const std::filesystem::path& output_path) {
+            ProfileFileOpenResult opened =
+                OpenProfileFileExclusively(output_path);
+            if (opened.collision) {
+                open_error =
+                    "The explicit profile output path already exists.";
+            } else if (!opened.stream) {
+                open_error =
+                    opened.error_message;
+            }
+            return std::move(opened.stream);
         });
+    if (!started && !open_error.empty()) {
+        error_message_ = std::move(open_error);
+    }
+    return started;
 }
 
 bool ProfileSink::StartPrepared(
@@ -910,6 +1147,7 @@ void ProfileSink::AppendEscapedJson(std::string& output, std::string_view value)
 
 std::string ProfileSink::TimestampForFileName()
 {
+    static std::atomic_uint32_t process_sequence = 0;
     const auto now = std::chrono::system_clock::now();
     const std::time_t time = std::chrono::system_clock::to_time_t(now);
     const auto milliseconds =
@@ -920,7 +1158,8 @@ std::string ProfileSink::TimestampForFileName()
 
     std::ostringstream timestamp;
     timestamp << std::put_time(&local_time, "%Y%m%d-%H%M%S") << '-' << std::setw(3) << std::setfill('0')
-              << milliseconds;
+              << milliseconds << '-' << GetCurrentProcessId()
+              << '-' << ++process_sequence;
     return timestamp.str();
 }
 
