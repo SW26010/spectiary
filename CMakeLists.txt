@@ -241,6 +241,7 @@ add_library(specforge_core STATIC
     src/domain/sample_labeling.cpp
     src/domain/source_collection_identity_digest.cpp
     src/domain/source_collection_manifest.cpp
+    src/domain/source_open_resolution.cpp
     src/domain/source_path_identity.cpp
     src/domain/stable_sha256.cpp
     src/domain/spectrum_fixture.cpp
@@ -910,6 +911,11 @@ specforge_add_test(
     specforge_core
 )
 target_link_libraries(specforge_loader_tests PRIVATE ZLIB::ZLIB)
+specforge_add_test(
+    specforge_source_open_resolution_tests
+    tests/source_open_resolution_tests.cpp
+    specforge_core
+)
 specforge_add_test(
     specforge_sample_navigation_controller_tests
     tests/sample_navigation_controller_tests.cpp
