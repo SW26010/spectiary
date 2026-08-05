@@ -468,9 +468,21 @@ add_custom_command(TARGET specforge_native POST_BUILD
     COMMENT "Finalizing schema 5 SpecForge metadata"
     VERBATIM
 )
+set(SPECFORGE_METADATA_BYPRODUCT
+    "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/specforge_metadata.json")
 add_custom_target(specforge_metadata
+    COMMAND "${CMAKE_COMMAND}"
+        "-DSPECFORGE_EXECUTABLE=$<TARGET_FILE:specforge_native>"
+        "-DSPECFORGE_METADATA=$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+        "-DSPECFORGE_FINALIZER=$<TARGET_FILE:specforge_metadata_finalizer_tool>"
+        -P "${CMAKE_SOURCE_DIR}/cmake/ensure_specforge_metadata.cmake"
     DEPENDS specforge_native
+        specforge_metadata_finalizer_tool
+        "${CMAKE_SOURCE_DIR}/cmake/ensure_specforge_metadata.cmake"
+    BYPRODUCTS
+        "${SPECFORGE_METADATA_BYPRODUCT}"
     COMMENT "Building and finalizing SpecForge metadata"
+    VERBATIM
 )
 
 enable_testing()
@@ -877,6 +889,7 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja")
             -CMakeCommand "${CMAKE_COMMAND}"
             -BuildDirectory "${CMAKE_BINARY_DIR}"
             -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+            -BuildTarget specforge_metadata
             -Configuration "$<CONFIG>"
             -BuildWrapper
                 "${CMAKE_SOURCE_DIR}/scripts/build-ninja-msvc-debug.ps1"
@@ -892,6 +905,7 @@ else()
             -CMakeCommand "${CMAKE_COMMAND}"
             -BuildDirectory "${CMAKE_BINARY_DIR}"
             -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+            -BuildTarget specforge_metadata
             -Configuration "$<CONFIG>"
     )
 endif()

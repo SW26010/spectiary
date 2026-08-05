@@ -469,6 +469,75 @@ function Assert-ScriptFails {
     }
 }
 
+function Copy-ZipWithTamperedEntry {
+    param(
+        [Parameter(Mandatory = $true)] [string]$SourcePath,
+        [Parameter(Mandatory = $true)] [string]$DestinationPath,
+        [Parameter(Mandatory = $true)] [string]$EntryName
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    $sourceArchive = [IO.Compression.ZipFile]::OpenRead($SourcePath)
+    $destinationStream = $null
+    $destinationArchive = $null
+    try {
+        $destinationStream = [IO.File]::Open(
+            $DestinationPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None)
+        $destinationArchive = [IO.Compression.ZipArchive]::new(
+            $destinationStream,
+            [IO.Compression.ZipArchiveMode]::Create,
+            $false)
+        foreach ($sourceEntry in $sourceArchive.Entries) {
+            $destinationEntry = $destinationArchive.CreateEntry(
+                $sourceEntry.FullName)
+            $inputStream = $sourceEntry.Open()
+            try {
+                $memoryStream = [IO.MemoryStream]::new()
+                try {
+                    $inputStream.CopyTo($memoryStream)
+                    $entryBytes = $memoryStream.ToArray()
+                }
+                finally {
+                    $memoryStream.Dispose()
+                }
+            }
+            finally {
+                $inputStream.Dispose()
+            }
+
+            if ($sourceEntry.FullName -ceq $EntryName) {
+                if ($entryBytes.Length -eq 0) {
+                    throw "Cannot tamper with empty ZIP entry '$EntryName'."
+                }
+                $entryBytes[0] = [byte]($entryBytes[0] -bxor 1)
+            }
+
+            $outputStream = $destinationEntry.Open()
+            try {
+                $outputStream.Write(
+                    $entryBytes,
+                    0,
+                    $entryBytes.Length)
+            }
+            finally {
+                $outputStream.Dispose()
+            }
+        }
+    }
+    finally {
+        if ($null -ne $destinationArchive) {
+            $destinationArchive.Dispose()
+        }
+        if ($null -ne $destinationStream) {
+            $destinationStream.Dispose()
+        }
+        $sourceArchive.Dispose()
+    }
+}
+
 function Assert-BuildSourceCMakeContract {
     param(
         [Parameter(Mandatory = $true)] [string]$ContractPath,
@@ -625,6 +694,9 @@ $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $aboutTextSourcePath = Join-Path $RepoRoot 'src\ui\ui_text.cpp'
 $mainSourcePath = Join-Path $RepoRoot 'src\main.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
+$metadataEnsureScriptPath = Join-Path `
+    $RepoRoot `
+    'cmake\ensure_specforge_metadata.cmake'
 $buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
@@ -647,6 +719,7 @@ foreach ($requiredPath in @(
     $aboutTextSourcePath,
     $mainSourcePath,
     $cmakeSourcePath,
+    $metadataEnsureScriptPath,
     $buildIdentityTemplatePath,
     $buildSourceContractPath,
     $buildIdentityFixturePath,
@@ -803,6 +876,7 @@ $aboutSource = @(
 ) -join "`n"
 $mainSource = Get-Content -Raw -LiteralPath $mainSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
+$metadataEnsureScript = Get-Content -Raw -LiteralPath $metadataEnsureScriptPath
 $buildIdentityTemplate = Get-Content -Raw -LiteralPath $buildIdentityTemplatePath
 $manifestTemplate = Get-Content -Raw -LiteralPath $manifestTemplatePath
 $resourceHeader = Get-Content -Raw -LiteralPath $resourceHeaderPath
@@ -865,7 +939,7 @@ Assert-Contains $packageScript `
     "`$sourceExecutableDirectory = Split-Path -Parent `$sourceExecutable" `
     'Portable packaging executable binding'
 Assert-Contains $packageScript `
-    '& cmake --build --preset $Preset --config $Configuration' `
+    '& cmake --build --preset $Preset --config $Configuration --target specforge_metadata' `
     'Portable packaging configuration binding'
 Assert-Contains $packageScript `
     '"-DSPECFORGE_BUILD_SOURCE_MODE=$SourceMode"' `
@@ -937,6 +1011,21 @@ Assert-Contains $cmakeSource `
 Assert-Contains $cmakeSource `
     'Invalidating stale SpecForge metadata before linking' `
     'CMake stale-sidecar invalidation command'
+Assert-Contains $cmakeSource `
+    'ensure_specforge_metadata.cmake' `
+    'CMake metadata freshness verifier'
+Assert-Contains $cmakeSource `
+    'BYPRODUCTS' `
+    'CMake metadata byproduct declaration'
+Assert-Contains $cmakeSource `
+    '-BuildTarget specforge_metadata' `
+    'CMake metadata regression target binding'
+Assert-Contains $metadataEnsureScript `
+    'file(SHA256' `
+    'Metadata freshness executable hash check'
+Assert-Contains $metadataEnsureScript `
+    'execute_process(' `
+    'Metadata freshness finalizer invocation'
 Assert-Contains $cmakeSource `
     'specforge_metadata_build_regression_tests' `
     'CMake repeated/no-op metadata build regression test'
@@ -1293,6 +1382,57 @@ try {
         [IO.File]::WriteAllBytes(
             $verifiedPackageExecutablePath,
             $originalPackageExecutableBytes)
+    }
+
+    $tamperedZipPath = Join-Path `
+        $testDistRoot `
+        "$($verifiedPackage.PackageName)-tampered-metadata.zip"
+    Copy-ZipWithTamperedEntry `
+        -SourcePath $verifiedPackageZip `
+        -DestinationPath $tamperedZipPath `
+        -EntryName 'specforge_metadata.json'
+    Assert-ScriptFails `
+        -ScriptPath $portableVerifierPath `
+        -Arguments @(
+            '-BuildExecutable',
+            $resolvedBuiltExecutable,
+            '-PackageRoot',
+            $verifiedPackageRoot,
+            '-ZipPath',
+            $tamperedZipPath
+        ) `
+        -ExpectedMessage 'Portable ZIP metadata ZIP entry' `
+        -Description 'Published Portable ZIP metadata tamper is detected'
+
+    $originalPortableMetadataBytes = [IO.File]::ReadAllBytes(
+        $verifiedPackageMetadataPath)
+    try {
+        $invalidPortableMetadata =
+            Get-Content -Raw -LiteralPath $verifiedPackageMetadataPath |
+            ConvertFrom-Json
+        $invalidPortableMetadata.build.windows_sdk_version = $null
+        [IO.File]::WriteAllText(
+            $verifiedPackageMetadataPath,
+            (($invalidPortableMetadata | ConvertTo-Json -Depth 10) +
+                [Environment]::NewLine),
+            (New-Object Text.UTF8Encoding($false)))
+        Assert-ScriptFails `
+            -ScriptPath $portableVerifierPath `
+            -Arguments @(
+                '-BuildExecutable',
+                $resolvedBuiltExecutable,
+                '-PackageRoot',
+                $verifiedPackageRoot,
+                '-ZipPath',
+                $verifiedPackageZip
+            ) `
+            -ExpectedMessage 'windows_sdk_version must be a non-empty dotted numeric version' `
+            -Description 'Portable verifier rejects missing Windows SDK version'
+    }
+    finally {
+        [IO.File]::WriteAllBytes(
+            $verifiedPackageMetadataPath,
+            $originalPortableMetadataBytes)
     }
 
     $invalidMetadataCases = @(

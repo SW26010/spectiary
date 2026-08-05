@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Configuration,
 
-    [string]$BuildTarget = 'specforge_native',
+    [string]$BuildTarget = 'specforge_metadata',
 
     [string]$BuildWrapper = '',
 

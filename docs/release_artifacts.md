@@ -85,19 +85,21 @@ failure before replacement removes the metadata target and the temporary file.
 A failed finalizer makes the build fail rather than publishing metadata that the runtime
 would reject; a later native relink can recreate the sidecar.
 
-Finalization occurs only when `specforge_native` actually relinks and its
-post-build commands run. The `specforge_metadata` build target is a convenience
-dependency on `specforge_native`; it does not declare the sidecar as an output
-or byproduct and is not a sidecar-freshness verifier. If the executable is
-already up to date, invoking this target alone does not rerun the finalizer for
-a missing, modified, or stale metadata file. Release automation must use the
-actual native build and the Portable validation steps below to establish a
-fresh metadata/EXE pair. The CTest metadata build regression removes only the
-EXE to force one real relink/finalization, then runs a second real no-op build;
-it verifies the executable hash is unchanged by a metadata timestamp change
-and that the no-op build does not rewrite the sidecar. Ninja/MSVC rebuilds use
-the repository's bounded build wrapper so each nested build initializes the
-MSVC and Windows SDK environment.
+Finalization occurs after `specforge_native` links and its post-build commands
+run. The post-build finalizer command declares the executable-adjacent sidecar
+as a byproduct. The `specforge_metadata` target depends on the native
+executable and finalizer tool and runs a freshness check. That check proves
+the sidecar is schema 5, has a completion timestamp, names `SpecForge.exe`,
+and records the current EXE hash;
+if any of those checks fail or the sidecar is missing, it invokes the finalizer
+again. Release automation builds this target so an up-to-date EXE cannot cause
+a missing, modified, or stale sidecar to be silently accepted. The CTest
+metadata build regression removes only the EXE to force one real
+relink/finalization, then runs a second real no-op build; it verifies the
+executable hash is unchanged by a metadata timestamp change and that the no-op
+build does not rewrite the sidecar. Ninja/MSVC rebuilds use the repository's
+bounded build wrapper so each nested build initializes the MSVC and Windows SDK
+environment.
 
 ## Portable packaging and verification
 

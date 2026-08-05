@@ -196,7 +196,7 @@ if (-not $PackageUnverifiedTestFixture) {
             throw "CMake configure failed for preset $Preset."
         }
 
-        & cmake --build --preset $Preset --config $Configuration
+        & cmake --build --preset $Preset --config $Configuration --target specforge_metadata
         if ($LASTEXITCODE -ne 0) {
             throw "CMake build failed for preset $Preset."
         }

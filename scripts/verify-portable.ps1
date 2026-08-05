@@ -129,6 +129,23 @@ if (($schemaVersion -isnot [int] -and
     throw 'Portable metadata schema_version must be the integer 5.'
 }
 
+$build = Get-RequiredProperty `
+    -Object $metadata `
+    -Name 'build' `
+    -Description 'Portable metadata'
+if ($build -isnot [pscustomobject]) {
+    throw 'Portable metadata build must be an object.'
+}
+$windowsSdkVersion = Get-RequiredProperty `
+    -Object $build `
+    -Name 'windows_sdk_version' `
+    -Description 'Portable build metadata'
+if ($windowsSdkVersion -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($windowsSdkVersion) -or
+    $windowsSdkVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
+    throw 'Portable build metadata windows_sdk_version must be a non-empty dotted numeric version.'
+}
+
 $deployment = Get-RequiredProperty `
     -Object $metadata `
     -Name 'deployment' `
