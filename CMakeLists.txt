@@ -768,6 +768,11 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_atomic_file_tests
+    tests/atomic_file_tests.cpp
+    specforge_core
+)
+specforge_add_test(
     specforge_embedded_legal_documents_tests
     tests/embedded_legal_documents_tests.cpp
     specforge_core

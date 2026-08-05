@@ -40,11 +40,30 @@ std::string DescriptionText(std::string_view description)
     return description.empty() ? std::string("file") : std::string(description);
 }
 
-void RemoveTemporaryFile(const std::filesystem::path& temporary_path)
-{
-    std::error_code remove_error;
-    std::filesystem::remove(temporary_path, remove_error);
-}
+class TemporaryFileGuard {
+public:
+    explicit TemporaryFileGuard(std::filesystem::path path)
+        : path_(std::move(path))
+    {
+    }
+
+    ~TemporaryFileGuard()
+    {
+        if (!released_) {
+            std::error_code remove_error;
+            std::filesystem::remove(path_, remove_error);
+        }
+    }
+
+    void Release() noexcept
+    {
+        released_ = true;
+    }
+
+private:
+    std::filesystem::path path_;
+    bool released_ = false;
+};
 
 bool IsTransientReplaceError(const std::error_code& error)
 {
@@ -201,65 +220,100 @@ bool WriteFileAtomically(
     }
 
     const std::filesystem::path temporary_path = TemporarySiblingPath(target_path);
-    std::ofstream stream(temporary_path, options.open_mode);
-    if (!stream.good()) {
-        SetError(error_message, "could not open temporary " + description + " for writing: " + temporary_path.string());
-        return false;
-    }
-
-    std::string writer_error;
-    if (!writer(stream, writer_error)) {
-        stream.close();
-        RemoveTemporaryFile(temporary_path);
-        SetError(
-            error_message,
-            writer_error.empty() ? "could not write temporary " + description + ": " + temporary_path.string()
-                                 : std::move(writer_error));
-        return false;
-    }
-
-    if (!stream.good()) {
-        stream.close();
-        RemoveTemporaryFile(temporary_path);
-        SetError(error_message, "could not write temporary " + description + ": " + temporary_path.string());
-        return false;
-    }
-    stream.close();
-    if (!stream.good()) {
-        RemoveTemporaryFile(temporary_path);
-        SetError(error_message, "could not close temporary " + description + ": " + temporary_path.string());
-        return false;
-    }
-
-    if (options.before_replace) {
-        try {
-            options.before_replace(temporary_path, target_path);
-        } catch (const std::exception& exception) {
-            RemoveTemporaryFile(temporary_path);
+    TemporaryFileGuard temporary_file_guard(temporary_path);
+    try {
+        std::ofstream stream(temporary_path, options.open_mode);
+        if (!stream.good()) {
             SetError(
                 error_message,
-                "atomic " + description + " pre-replace checkpoint failed: " +
+                "could not open temporary " + description +
+                    " for writing: " + temporary_path.string());
+            return false;
+        }
+
+        std::string writer_error;
+        bool writer_succeeded = false;
+        try {
+            writer_succeeded = writer(stream, writer_error);
+        } catch (const std::exception& exception) {
+            SetError(
+                error_message,
+                "could not write temporary " + description + ": " +
                     std::string(exception.what()));
             return false;
         } catch (...) {
-            RemoveTemporaryFile(temporary_path);
             SetError(
                 error_message,
-                "atomic " + description + " pre-replace checkpoint failed");
+                "could not write temporary " + description);
             return false;
         }
-    }
+        if (!writer_succeeded) {
+            SetError(
+                error_message,
+                writer_error.empty()
+                    ? "could not write temporary " + description + ": " +
+                          temporary_path.string()
+                    : std::move(writer_error));
+            return false;
+        }
 
-    if (!ReplaceFileAtomically(
-            temporary_path,
-            target_path,
+        if (!stream.good()) {
+            SetError(
+                error_message,
+                "could not write temporary " + description + ": " +
+                    temporary_path.string());
+            return false;
+        }
+        stream.close();
+        if (!stream.good()) {
+            SetError(
+                error_message,
+                "could not close temporary " + description + ": " +
+                    temporary_path.string());
+            return false;
+        }
+
+        if (options.before_replace) {
+            try {
+                options.before_replace(temporary_path, target_path);
+            } catch (const std::exception& exception) {
+                SetError(
+                    error_message,
+                    "atomic " + description +
+                        " pre-replace checkpoint failed: " +
+                        std::string(exception.what()));
+                return false;
+            } catch (...) {
+                SetError(
+                    error_message,
+                    "atomic " + description +
+                        " pre-replace checkpoint failed");
+                return false;
+            }
+        }
+
+        if (!ReplaceFileAtomically(
+                temporary_path,
+                target_path,
+                error_message,
+                description,
+                options.replace_retry_policy)) {
+            return false;
+        }
+        temporary_file_guard.Release();
+        return true;
+    } catch (const std::exception& exception) {
+        SetError(
             error_message,
-            description,
-            options.replace_retry_policy)) {
-        RemoveTemporaryFile(temporary_path);
+            "atomic " + description + " write failed: " +
+                std::string(exception.what()));
+        return false;
+    } catch (...) {
+        SetError(
+            error_message,
+            "atomic " + description + " write failed");
         return false;
     }
-    return true;
 }
 
 }  // namespace specforge
