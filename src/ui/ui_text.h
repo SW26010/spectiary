@@ -192,6 +192,7 @@ enum class UiTextId {
     BuildMetadataUnavailable,
     BuildMetadataMismatch,
     ArtifactIdentity,
+    ArtifactIdentityPending,
     MetadataCompletedAt,
     MetadataSha256,
     ExecutableSha256,

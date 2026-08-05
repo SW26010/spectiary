@@ -300,6 +300,9 @@ constexpr std::array kTextCatalog = {
         "Executable artifact identity",
         "可执行文件身份"},
     UiTextEntry{
+        "Verifying executable identity",
+        "正在验证可执行文件身份"},
+    UiTextEntry{
         "Executable finalized at",
         "可执行文件最终化时间"},
     UiTextEntry{

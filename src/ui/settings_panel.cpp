@@ -3,7 +3,7 @@
 #include "app/embedded_legal_documents.h"
 #include "app/runtime_paths.h"
 #include "app/specforge_metadata_validation.h"
-#include "domain/stable_sha256.h"
+#include "platform/file_sha256.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
 #include "ui/ui_scale_settings.h"
@@ -17,10 +17,11 @@
 #include <array>
 #include <cstdio>
 #include <cstdint>
-#include <fstream>
 #include <optional>
+#include <mutex>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,8 @@ namespace {
 constexpr float kMinimumNavigationWidth = 190.0f;
 constexpr float kInitialSettingsWidth = 860.0f;
 constexpr float kInitialSettingsHeight = 560.0f;
+constexpr auto kArtifactIdentityRetryDelay =
+    std::chrono::milliseconds{250};
 
 constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::General,
@@ -338,42 +341,14 @@ void RenderReadOnlyValue(const char* label, const char* value)
     ImGui::TextUnformatted(value);
 }
 
-std::optional<std::string> ComputeFileSha256(
-    const std::filesystem::path& path)
-{
-    constexpr std::size_t kHashBufferSize = 64U * 1024U;
-    try {
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream.good()) {
-            return std::nullopt;
-        }
-
-        StableSha256 sha256;
-        std::array<char, kHashBufferSize> buffer = {};
-        for (;;) {
-            stream.read(
-                buffer.data(),
-                static_cast<std::streamsize>(buffer.size()));
-            const std::streamsize read_count = stream.gcount();
-            if (read_count > 0) {
-                sha256.Append(std::string_view(
-                    buffer.data(),
-                    static_cast<std::size_t>(read_count)));
-            }
-            if (stream.eof()) {
-                break;
-            }
-            if (stream.fail()) {
-                return std::nullopt;
-            }
-        }
-        return sha256.FinishHex();
-    } catch (...) {
-        return std::nullopt;
-    }
-}
-
 }  // namespace
+
+struct SettingsPanelUi::ArtifactIdentityComputation {
+    std::mutex mutex;
+    bool running = false;
+    std::optional<ArtifactIdentityResult> completed;
+    std::jthread worker;
+};
 
 SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
     const SpecForgeStartup& startup)
@@ -490,6 +465,10 @@ std::string_view FormatArtifactIdentityStatusForAbout(
     UiLanguage language)
 {
     switch (status) {
+    case ArtifactIdentityStatus::Pending:
+        return UiText(
+            language,
+            UiTextId::ArtifactIdentityPending);
     case ArtifactIdentityStatus::Available:
         return UiText(
             language,
@@ -700,13 +679,92 @@ SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
 {
 }
 
+SettingsPanelUi::~SettingsPanelUi() = default;
+
+void SettingsPanelUi::StartArtifactIdentityComputation()
+{
+    if (!artifact_identity_computation_) {
+        artifact_identity_computation_ =
+            std::make_unique<ArtifactIdentityComputation>();
+    }
+
+    ArtifactIdentityComputation* computation =
+        artifact_identity_computation_.get();
+    {
+        std::lock_guard lock(computation->mutex);
+        if (computation->running) {
+            return;
+        }
+        computation->running = true;
+    }
+
+    const std::filesystem::path executable_path =
+        environment_.executable_path;
+    const BuildMetadataReadResult build_metadata =
+        environment_.build_metadata;
+    try {
+        computation->worker = std::jthread(
+            [computation,
+             executable_path = std::move(executable_path),
+             build_metadata = std::move(build_metadata)](
+                std::stop_token) {
+                ArtifactIdentityResult result;
+                try {
+                    result = VerifyExecutableArtifactIdentity(
+                        executable_path,
+                        build_metadata);
+                } catch (...) {
+                    result = ArtifactIdentityResult{};
+                }
+
+                std::lock_guard lock(computation->mutex);
+                computation->completed = std::move(result);
+                computation->running = false;
+            });
+    } catch (...) {
+        std::lock_guard lock(computation->mutex);
+        computation->completed = ArtifactIdentityResult{};
+        computation->running = false;
+    }
+}
+
 const ArtifactIdentityResult&
 SettingsPanelUi::ArtifactIdentityForAbout()
 {
+    if (!artifact_identity_computation_) {
+        artifact_identity_computation_ =
+            std::make_unique<ArtifactIdentityComputation>();
+    }
+
+    std::optional<ArtifactIdentityResult> completed;
+    {
+        std::lock_guard lock(artifact_identity_computation_->mutex);
+        completed = std::move(
+            artifact_identity_computation_->completed);
+    }
+    if (completed) {
+        artifact_identity_ = std::move(completed);
+        artifact_identity_retry_at_ =
+            artifact_identity_->status ==
+                    ArtifactIdentityStatus::Unavailable
+                ? std::chrono::steady_clock::now() +
+                    kArtifactIdentityRetryDelay
+                : std::chrono::steady_clock::time_point::max();
+    }
+
     if (!artifact_identity_) {
-        artifact_identity_ = VerifyExecutableArtifactIdentity(
-            environment_.executable_path,
-            environment_.build_metadata);
+        artifact_identity_ = ArtifactIdentityResult{
+            .status = ArtifactIdentityStatus::Pending,
+        };
+        StartArtifactIdentityComputation();
+    }
+    else if (
+        artifact_identity_->status == ArtifactIdentityStatus::Unavailable &&
+        std::chrono::steady_clock::now() >= artifact_identity_retry_at_) {
+        artifact_identity_ = ArtifactIdentityResult{
+            .status = ArtifactIdentityStatus::Pending,
+        };
+        StartArtifactIdentityComputation();
     }
     return *artifact_identity_;
 }
@@ -717,6 +775,12 @@ void SettingsPanelUi::Open()
         action_failed_ = false;
         action_status_.clear();
         ui_scale_draft_percentage_.reset();
+        if (artifact_identity_ &&
+            artifact_identity_->status ==
+                ArtifactIdentityStatus::Unavailable) {
+            artifact_identity_retry_at_ =
+                std::chrono::steady_clock::now();
+        }
     }
     open_ = true;
     focus_requested_ = true;

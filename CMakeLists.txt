@@ -245,6 +245,7 @@ add_library(specforge_core STATIC
     src/overlays/spectral_line_user_state.cpp
     src/platform/atomic_file.cpp
     src/platform/exclusive_file_lease.cpp
+    src/platform/file_sha256.cpp
     src/platform/win32_directory_change_generation.cpp
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp

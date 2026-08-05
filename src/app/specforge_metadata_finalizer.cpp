@@ -2,25 +2,20 @@
 
 #include "app/local_user_state_json.h"
 #include "app/specforge_metadata_validation.h"
-#include "domain/stable_sha256.h"
+#include "platform/file_sha256.h"
 
-#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cwctype>
 #include <ctime>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <string>
-#include <string_view>
 #include <system_error>
 #include <utility>
 
 namespace specforge {
 namespace {
-
-constexpr std::size_t kHashBufferSize = 64U * 1024U;
 
 void SetError(std::string* error_message, std::string message)
 {
@@ -206,44 +201,6 @@ bool ValidatePaths(
     return true;
 }
 
-bool ComputeExecutableSha256(
-    const std::filesystem::path& executable_path,
-    std::string& digest,
-    std::string& error)
-{
-    std::ifstream stream(executable_path, std::ios::binary);
-    if (!stream.good()) {
-        error =
-            "could not open final executable for hashing: " +
-            PathToUtf8(executable_path);
-        return false;
-    }
-
-    StableSha256 sha256;
-    std::array<char, kHashBufferSize> buffer = {};
-    for (;;) {
-        stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-        const std::streamsize read_count = stream.gcount();
-        if (read_count > 0) {
-            sha256.Append(std::string_view(
-                buffer.data(),
-                static_cast<std::size_t>(read_count)));
-        }
-        if (stream.eof()) {
-            break;
-        }
-        if (stream.fail()) {
-            error =
-                "could not read final executable completely: " +
-                PathToUtf8(executable_path);
-            return false;
-        }
-    }
-
-    digest = sha256.FinishHex();
-    return true;
-}
-
 bool FormatUtcTimestamp(
     std::chrono::system_clock::time_point time_point,
     std::string& timestamp,
@@ -419,13 +376,18 @@ bool FinalizeSpecForgeMetadata(
 
     std::string executable_sha256;
     try {
-        if (!ComputeExecutableSha256(
-                options.executable_path,
-                executable_sha256,
-                error)) {
+        const std::optional<std::string> digest = ComputeFileSha256(
+            options.executable_path,
+            &error);
+        if (!digest) {
+            if (error.empty()) {
+                error = "could not hash final executable: " +
+                    PathToUtf8(options.executable_path);
+            }
             return fail_after_path_validation(
                 "cannot finalize SpecForge metadata: " + error);
         }
+        executable_sha256 = *digest;
     } catch (const std::exception& exception) {
         return fail_after_path_validation(
             "cannot finalize SpecForge metadata: executable hashing failed: " +

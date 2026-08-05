@@ -295,7 +295,7 @@ void TestHashFailureDoesNotCreateMetadataOrTemporaryFile()
         specforge::FinalizeSpecForgeMetadata(options, &error);
     Require(!finalized, "missing executable should fail finalization");
     Require(
-        error.find("could not open final executable") != std::string::npos,
+        error.find("could not open file for hashing") != std::string::npos,
         "missing executable should report the hash input failure");
     Require(
         !std::filesystem::exists(metadata_path),

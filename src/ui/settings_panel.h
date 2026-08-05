@@ -4,7 +4,9 @@
 #include "app/on_demand_frame_capture.h"
 #include "app/runtime_paths.h"
 
+#include <chrono>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,6 +29,7 @@ struct BuildSourceIdentity {
 };
 
 enum class ArtifactIdentityStatus {
+    Pending,
     Available,
     Unavailable,
     Mismatch,
@@ -103,6 +106,7 @@ FormatApplicationSettingsStatusReason(
 class SettingsPanelUi {
 public:
     explicit SettingsPanelUi(SettingsPanelEnvironment environment);
+    ~SettingsPanelUi();
 
     void Open();
     void Render(
@@ -142,8 +146,10 @@ private:
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
     void RenderAbout(const ApplicationSettingsView& settings);
+    struct ArtifactIdentityComputation;
     [[nodiscard]] const ArtifactIdentityResult&
     ArtifactIdentityForAbout();
+    void StartArtifactIdentityComputation();
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);
@@ -185,6 +191,10 @@ private:
         application_settings_intent_;
     std::optional<int> ui_scale_draft_percentage_;
     std::optional<ArtifactIdentityResult> artifact_identity_;
+    std::unique_ptr<ArtifactIdentityComputation>
+        artifact_identity_computation_;
+    std::chrono::steady_clock::time_point artifact_identity_retry_at_ =
+        std::chrono::steady_clock::time_point::max();
 
     friend struct SettingsPanelUiTestAccess;
 };

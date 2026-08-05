@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 
 #ifndef SPECFORGE_EXPECTED_VERSION
@@ -130,6 +132,19 @@ struct SettingsPanelUiTestAccess {
     {
         return panel.artifact_identity_.has_value();
     }
+    static ArtifactIdentityStatus ArtifactIdentityStatusForTest(
+        const SettingsPanelUi& panel)
+    {
+        return panel.artifact_identity_
+            ? panel.artifact_identity_->status
+            : ArtifactIdentityStatus::Unavailable;
+    }
+    static ArtifactIdentityResult ArtifactIdentityResultForTest(
+        const SettingsPanelUi& panel)
+    {
+        return panel.artifact_identity_.value_or(
+            ArtifactIdentityResult{});
+    }
 };
 
 }  // namespace specforge
@@ -216,6 +231,16 @@ specforge::ApplicationSettingsView MakeSettingsView(
         .profile_output_directory = "Data/logs",
         .default_profile_output_directory = "Data/logs",
     };
+}
+
+void RenderSettingsFrame(specforge::SettingsPanelUi& panel)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    ImGui::NewFrame();
+    panel.Render(MakeSettingsView());
+    ImGui::EndFrame();
 }
 
 specforge::BuildMetadataReadResult MakeArtifactMetadata(
@@ -892,6 +917,9 @@ void TestArtifactIdentityVerification()
 
     Require(
         specforge::FormatArtifactIdentityStatusForAbout(
+            specforge::ArtifactIdentityStatus::Pending) ==
+            "Verifying executable identity" &&
+            specforge::FormatArtifactIdentityStatusForAbout(
             specforge::ArtifactIdentityStatus::Available) ==
                 "Executable matches metadata" &&
             specforge::FormatArtifactIdentityStatusForAbout(
@@ -941,12 +969,7 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
     });
     panel.Open();
 
-    ImGuiIO& io = ImGui::GetIO();
-    io.DeltaTime = 1.0f / 60.0f;
-    io.DisplaySize = ImVec2(1280.0f, 720.0f);
-    ImGui::NewFrame();
-    panel.Render(MakeSettingsView());
-    ImGui::EndFrame();
+    RenderSettingsFrame(panel);
     Require(
         !specforge::SettingsPanelUiTestAccess::
             ArtifactIdentityEvaluated(panel),
@@ -955,13 +978,124 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
     specforge::SettingsPanelUiTestAccess::SelectSection(
         panel,
         specforge::SettingsSection::About);
-    ImGui::NewFrame();
-    panel.Render(MakeSettingsView());
-    ImGui::EndFrame();
+    RenderSettingsFrame(panel);
     Require(
         specforge::SettingsPanelUiTestAccess::
             ArtifactIdentityEvaluated(panel),
         "About rendering should evaluate artifact identity on demand");
+    Require(
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
+            panel) == specforge::ArtifactIdentityStatus::Pending,
+        "the first About frame should publish pending identity verification");
+
+    bool identity_available = false;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        RenderSettingsFrame(panel);
+        if (specforge::SettingsPanelUiTestAccess::
+                ArtifactIdentityStatusForTest(panel) ==
+            specforge::ArtifactIdentityStatus::Available) {
+            identity_available = true;
+            break;
+        }
+    }
+    Require(
+        identity_available,
+        "background identity verification should eventually complete");
+
+    const specforge::ArtifactIdentityResult identity =
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+            panel);
+    Require(
+        identity.completed_at_utc == "2026-08-05T09:21:32Z",
+        "background identity verification should publish the verified completion time");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestArtifactIdentityRetriesAfterHashFailure()
+{
+    ScopedImGuiContext imgui;
+    constexpr std::string_view kAbcSha256 =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-settings-artifact-identity-retry";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path executable_path =
+        root / "SpecForge.exe";
+
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .distribution = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "amd64",
+        .executable_path = executable_path,
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
+        .build_metadata = MakeArtifactMetadata(
+            std::string(kAbcSha256)),
+        .data_directory = "Data",
+    });
+    panel.Open();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    RenderSettingsFrame(panel);
+    Require(
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
+            panel) == specforge::ArtifactIdentityStatus::Pending,
+        "a failed identity check should begin in the pending state");
+
+    bool identity_unavailable = false;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        RenderSettingsFrame(panel);
+        if (specforge::SettingsPanelUiTestAccess::
+                ArtifactIdentityStatusForTest(panel) ==
+            specforge::ArtifactIdentityStatus::Unavailable) {
+            identity_unavailable = true;
+            break;
+        }
+    }
+    Require(
+        identity_unavailable,
+        "an unreadable executable should publish a retryable unavailable state");
+
+    {
+        std::ofstream stream(executable_path, std::ios::binary);
+        Require(stream.good(), "retry identity fixture should open");
+        stream << "abc";
+    }
+    specforge::SettingsPanelUiTestAccess::Close(panel);
+    panel.Open();
+    RenderSettingsFrame(panel);
+    const specforge::ArtifactIdentityStatus reopened_status =
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
+            panel);
+    Require(
+        reopened_status == specforge::ArtifactIdentityStatus::Pending ||
+            reopened_status == specforge::ArtifactIdentityStatus::Available,
+        "reopening About should retry a previously unavailable identity");
+
+    bool identity_available = false;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        RenderSettingsFrame(panel);
+        if (specforge::SettingsPanelUiTestAccess::
+                ArtifactIdentityStatusForTest(panel) ==
+            specforge::ArtifactIdentityStatus::Available) {
+            identity_available = true;
+            break;
+        }
+    }
+    Require(
+        identity_available,
+        "a later About render should recover after the executable appears");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -2057,6 +2191,7 @@ int main()
     TestBuildMetadataStatusPresentation();
     TestArtifactIdentityVerification();
     TestArtifactIdentityIsComputedOnAboutDemand();
+    TestArtifactIdentityRetriesAfterHashFailure();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();
