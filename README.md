@@ -45,6 +45,8 @@ The product target is an elegant, responsive, dockable desktop spectrum viewer:
 See [docs/product_requirements.md](docs/product_requirements.md),
 [docs/technical_direction.md](docs/technical_direction.md), and
 [docs/spectral_line_catalog_contract.md](docs/spectral_line_catalog_contract.md).
+For the build and release artifact contract, see
+[docs/release_artifacts.md](docs/release_artifacts.md).
 
 ## Environment
 
@@ -137,12 +139,16 @@ and [docs/automation_ci.md](docs/automation_ci.md).
 The first portable package is a no-launcher zip with `SpecForge.exe`,
 `specforge_metadata.json`, and `Data/` at the zip root. The complete EULA,
 third-party notices, and data-source attributions are embedded in the shared
-executable and are available from About. Schema 4 keeps product, build
-provenance, and deployment separate. The Portable packager adds
+executable and are available from About. Schema 5 keeps product, build
+provenance, executable artifact identity, and deployment separate. After the
+final EXE link, the build finalizer computes the EXE SHA-256 and UTC completion
+timestamp and atomically publishes the adjacent metadata. The Portable packager
+adds to its metadata copy
 `deployment.distribution: "portable"` and
-`deployment.storage_profile: "portable"` to the build-output metadata without
-modifying the EXE; it verifies that the pre-package and packaged EXE SHA-256
-values match. The same EXE without metadata or without `deployment` is
+`deployment.storage_profile: "portable"` without modifying the EXE; it verifies
+that the build-directory EXE hash, metadata
+`artifact.sha256`, packaged EXE hash, and ZIP entries agree. The same EXE
+without metadata or without `deployment` is
 Standalone and uses `%LOCALAPPDATA%\SpecForge`. A structurally invalid
 deployment declaration fails during startup before application state objects
 are constructed. Build-provenance mismatch is still reported in About but does
@@ -155,10 +161,16 @@ files or an isolated committed `HEAD` snapshot and records compiler, CMake,
 generator, target architecture, Windows SDK, and dependency versions. Ninja and
 other configurations without an authoritative CMake SDK value record
 `windows_sdk_version: null`; formal Portable packaging requires a non-null SDK
-version. The executable architecture is recorded as `amd64`; Visual Studio,
+version. Schema 5's `completed_at_utc` is the finalization time, not a compile
+timestamp. Its `artifact.file` is exactly `SpecForge.exe`, and
+`artifact.sha256` is the lowercase digest of that final executable. The
+executable architecture is recorded as `amd64`; Visual Studio,
 vcpkg, and preset inputs retain their native `x64` spelling. This tuple is
-diagnostic, not an artifact identity or reproducibility guarantee; the packaged
-ZIP SHA-256 identifies the final artifact.
+diagnostic rather than a reproducibility guarantee; the schema 5 artifact
+digest binds the sidecar to the EXE, while the packaged ZIP SHA-256 identifies
+the complete release package. See
+[the release artifact finalization contract](docs/release_artifacts.md) for the
+field and verification rules.
 
 Build current workspace files without claiming a Git revision:
 

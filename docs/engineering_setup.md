@@ -233,33 +233,37 @@ checkout 被误标为 HEAD，它在源码根仍包含 `.git` 时拒绝 `head` �
 `Data\`，不要求 EXE 旁存在外部法律文档目录。仓库 `legal\` 中的三份文本仍是
 可审查、可维护的唯一来源，构建时原样嵌入 EXE。
 
-第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。构建成功后，
-CMake 将 schema 4 `specforge_metadata.json` 复制到实际 EXE 旁；`product`、`build` 和可选
-`deployment` 是独立维度。普通 build 输出只含 product/build，因此运行身份为 Standalone，数据目录为
-`%LOCALAPPDATA%\SpecForge`。`build` 中的构建环境字段为
-`compiler_id`、`compiler_version`、`cmake_version`、`generator`、
-`target_architecture` 和 `windows_sdk_version`。这些值来自实际配置当前 target 的 CMake；
-其中制品 ISA 统一记录为 `amd64`，Visual Studio platform、vcpkg triplet 和 preset 中仍保留工具原生的
-`x64` 拼写。
-若生成器没有提供权威的 Windows SDK 选择（例如 Ninja），开发构建写入
-`windows_sdk_version: null`，不会从 SDK 工具安装路径猜测。正式 Portable 打包仍要求
-MSVC、x64 和非空合法的 Windows SDK 版本；PowerShell 不会从调用 shell 的环境重复推导构建信息。
-Portable 打包阶段只为复制出的 metadata 增加
-`deployment: { distribution: "portable", storage_profile: "portable" }`，并比较 build 输出与包内
-`SpecForge.exe` 的 SHA-256；EXE 本身不含渠道或存储 profile 差异。共同打包脚本接受两种
-严格组合：`working_tree` 必须使用 JSON `null` revision；`head` 必须显式携带完整
-40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口负责
-解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，将 build provenance 原样保留到 Portable metadata，
-并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态
-目录 `Data\`。仅重新 configure 不会改变可打包 EXE
-对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包必须失败，
-而不是发布过期版本声明。
+第三方版本号来自当前构建实际安装的 vcpkg SPDX 元数据。`specforge_native` 完成最终链接后，
+CMake 的 post-build finalizer tool 读取实际 `SpecForge.exe`，计算 SHA-256 和 UTC 完成时间，
+并原子发布 schema 5 `specforge_metadata.json` 到 EXE 旁；`product`、`build`、`artifact` 和可选
+`deployment` 是独立维度。普通 build 输出只含 product/build/artifact，因此运行身份为 Standalone，
+数据目录为 `%LOCALAPPDATA%\SpecForge`。
+
+`build` 中的构建环境字段为 `compiler_id`、`compiler_version`、`cmake_version`、`generator`、
+`target_architecture` 和 `windows_sdk_version`，另有严格的 `completed_at_utc`；这些值来自实际配置
+当前 target 的 CMake 或 finalizer。制品 ISA 统一记录为 `amd64`，Visual Studio platform、vcpkg triplet
+和 preset 中仍保留工具原生的 `x64` 拼写。`artifact.file` 必须是 `SpecForge.exe`，
+`artifact.sha256` 必须是该最终 EXE 的小写 64 字符十六进制 SHA-256。`completed_at_utc` 必须是
+`YYYY-MM-DDTHH:mm:ssZ` 的有效 UTC 时间；它表示 link 后 finalization 完成时间，不是可复现构建输入。
+
+若生成器没有提供权威的 Windows SDK 选择（例如 Ninja），开发构建写入 `windows_sdk_version: null`，
+不会从 SDK 工具安装路径猜测。正式 Portable 打包仍要求 MSVC、x64 和非空合法的 Windows SDK 版本；
+PowerShell 不会从调用 shell 的环境重复推导构建信息。Portable 打包阶段只为复制出的 metadata 增加
+`deployment: { distribution: "portable", storage_profile: "portable" }`，并验证 build 目录 EXE、
+metadata artifact digest、包内 `SpecForge.exe` 以及 ZIP 对应 entry 的 SHA-256 一致；EXE 本身不含渠道或
+storage profile 差异。共同打包脚本接受两种严格组合：`working_tree` 必须使用 JSON `null` revision；
+`head` 必须显式携带完整 40 位小写十六进制 Git object ID。共同脚本不自行读取 Git；只有隔离 HEAD 入口
+负责解析 revision 并将其传入快照构建。打包脚本校验这个旁置文件，将 build provenance 原样保留到 Portable
+metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 不写入可变用户状态目录 `Data\`。
+仅重新 configure 不会改变可打包 EXE 对应的元数据。升级依赖后如未同步审查并更新 notice 标题，配置或打包
+必须失败，而不是发布过期版本声明。完整字段、finalizer 顺序和失败清理规则见
+[`docs/release_artifacts.md`](release_artifacts.md)。
 
 同一组 CMake build-source 变量还生成
 按实际配置生成的
 `build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
 并编译进 EXE。该身份包含产品版本、configuration、目标架构和构建来源，不包含 distribution 或
-storage profile。About 以这些 EXE 内字段为 build provenance 权威；它只读取一次 EXE 同目录 metadata，
+storage profile。About 以这些 EXE 内字段为 build provenance 权威；它只读取一次 EXE 同目录 schema 5 metadata，
 且仅在版本、configuration、架构、source mode/revision 全部匹配时显示
 compiler、CMake、generator、Windows SDK 和依赖版本。文件缺失或无效显示
 `Build metadata unavailable`，核心字段不同显示 `Build metadata mismatch`，两者都不
@@ -268,14 +272,16 @@ compiler、CMake、generator、Windows SDK 和依赖版本。文件缺失或无�
 `Source: Working tree`，对 HEAD 构建显示完整
 revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
 40 位 revision。About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
-无 metadata 或 schema 4 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
-仅兼容映射到 `portable|local_app_data` 存储。合法 storage selection 不受 build provenance mismatch 影响；
-deployment 存在但字段缺失、类型错误或值未知时，`wWinMain` 在构造任何应用状态对象前明确失败。
+无 metadata 或 schema 4/5 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
+仅兼容映射到 `portable|local_app_data` 存储。About 另外按需校验当前 EXE 的 SHA-256，并显示 schema 5
+的完成时间与 digest；无法读取或缺少 identity 时与 digest mismatch 分开显示。合法 storage selection 不受
+build provenance 或 artifact identity mismatch 影响；deployment 存在但字段缺失、类型错误或值未知时，
+`wWinMain` 在构造任何应用状态对象前明确失败。
 
-metadata 有意不记录构建时间：configure、link 与 package 时间尚未形成稳定语义，直接嵌入
-当前时间也会破坏受控构建输入下的二进制可复现性。这些 schema 4 build 字段只用于诊断和比较，
-不是完整 artifact identity 或可复现性保证；最终 Portable ZIP 由 SHA-256 标识。CI build
-number、artifact manifest 和 Windows `VERSIONINFO` 分别属于后续独立契约。
+schema 5 只记录 link 完成后的 finalization 时间，不把 configure、compile 或 package 时间混为一谈；
+该 UTC 时间不参与 EXE 输入，因此不会改变受控构建下的二进制内容。schema 5 build provenance 字段仍只用于
+诊断和比较，`artifact.sha256` 提供 sidecar 与最终 EXE 的 identity binding，最终 Portable ZIP 仍由自己的
+SHA-256 标识。CI build number、artifact manifest 和 Windows `VERSIONINFO` 分别属于独立契约。
 
 ## 仓库卫生
 

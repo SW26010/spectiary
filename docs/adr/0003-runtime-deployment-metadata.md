@@ -29,12 +29,13 @@ compile definition participates in the executable. Debug, Release, static, and
 dynamic dependency choices remain build-shape concerns, not deployment
 profiles.
 
-The adjacent application-prefixed file is `specforge_metadata.json`. Schema 4
-separates product, build, and optional deployment data:
+The adjacent application-prefixed file is `specforge_metadata.json`. Schema 5
+separates product, build, finalized executable identity, and optional deployment
+data:
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "product": {
     "name": "SpecForge",
     "version": "0.7.1"
@@ -51,7 +52,12 @@ separates product, build, and optional deployment data:
     "windows_sdk_version": "...",
     "dear_imgui": "...",
     "implot": "...",
-    "zlib": "..."
+    "zlib": "...",
+    "completed_at_utc": "2026-08-05T09:21:32Z"
+  },
+  "artifact": {
+    "file": "SpecForge.exe",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
   "deployment": {
     "distribution": "portable",
@@ -73,20 +79,22 @@ The allowed storage profiles are:
 - `portable`: use `<package-root>\Data`;
 - `local_app_data`: use `%LOCALAPPDATA%\SpecForge`.
 
-Missing metadata, or schema 4 metadata without `deployment`, means Standalone
-distribution with `local_app_data` storage. When `deployment` exists, both
-fields are mandatory, string-typed, and restricted to the allowed values.
-Malformed JSON, an unsupported or indeterminate schema, an invalid deployment
-object, or an unknown deployment value fails startup. `wWinMain` performs this
-preflight before constructing `SpecForgeApp`, so no application user-state
-object can load, create, or write state after an invalid declaration.
+Missing metadata, or schema 4/5 metadata without `deployment`, means Standalone
+distribution with `local_app_data` storage. Schema 5 additionally requires a valid UTC
+`completed_at_utc` and an `artifact` containing the canonical `SpecForge.exe`
+filename and a lowercase SHA-256 digest. When `deployment` exists, both fields
+are mandatory, string-typed, and restricted to the allowed values. Malformed
+JSON, an unsupported or indeterminate schema, an invalid deployment object, or
+an unknown deployment value fails startup. `wWinMain` performs this preflight
+before constructing `SpecForgeApp`, so no application user-state object can
+load, create, or write state after an invalid declaration.
 
 Schema 3 remains a compatibility input under the legacy
 `specforge_build_metadata.json` filename. `release_profile=Portable` maps to
 `portable`; `release_profile=Installed` maps to `local_app_data`. Schema 3 has
 no independent distribution declaration, so About displays Standalone. Its
-legacy `target_architecture=x64` value is treated as equivalent to schema 4
-`amd64` for provenance matching. The current filename takes precedence when
+legacy `target_architecture=x64` value is treated as equivalent to schema 4 or
+5 `amd64` for provenance matching. The current filename takes precedence when
 both files exist, and an invalid current file never falls back to the legacy
 file.
 
@@ -95,13 +103,22 @@ deployment controls storage even when the sidecar's product/build tuple is
 unavailable or does not match the executable. About continues to report build
 metadata unavailable or mismatch without changing the selected state root.
 
-The Portable packaging flow consumes schema 4 build-output metadata without a
+The production build links the final EXE before a post-build finalizer computes
+its SHA-256 and UTC completion time. The finalizer validates the complete schema
+5 model, writes a temporary sidecar, and atomically replaces
+`specforge_metadata.json`. It rejects a non-canonical executable filename and
+an executable/metadata path alias; a failed replacement leaves the previous
+metadata intact and cleans the temporary file.
+
+The Portable packaging flow consumes schema 5 build-output metadata without a
 deployment section, adds the Portable deployment declaration only to the
-package metadata, creates `Data`, and copies the unchanged EXE. The EULA,
+package metadata, creates `Data`, and copies the unchanged EXE. Formal Portable
+packaging requires a non-null valid Windows SDK version even though development
+metadata may use `windows_sdk_version: null`. It verifies that the build EXE,
+metadata artifact digest, packaged EXE, and ZIP entries agree. The EULA,
 third-party notices, and data-source attributions are embedded in that shared
-executable and remain available through About without adjacent documents.
-Packaging and artifact tests compare the build-output and packaged EXE bytes
-and SHA-256. The ZIP root is exactly:
+executable and remain available through About without adjacent documents. The
+ZIP root is exactly:
 
 - `SpecForge.exe`
 - `specforge_metadata.json`
