@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -27,6 +28,41 @@ struct SampleLabelingControllerView {
     const SampleLabelingTask* active_task = nullptr;
     const SampleLabelingTask* temporary_task = nullptr;
     const std::vector<SampleLabelingTask>* active_source_tasks = nullptr;
+    std::uint64_t revision = 0;
+};
+
+// Recovery classification is conservative and does not probe leases. Stale
+// takes precedence over every other status when the source state came from an
+// untrusted loaded/prepared cache snapshot or the task shape is invalid.
+// Conflicting takes precedence for duplicate task identities or a known
+// unavailable target; a lease conflict is an observed, expiring observation,
+// not a live lease probe, and expires on the next trusted source refresh. With
+// multiple temporary drafts, only a uniquely selected current draft remains
+// Current. Current is the uniquely selected temporary draft in the current
+// in-memory source. Recoverable means that the draft is structurally valid,
+// trusted, not the current selection, and has no current conflict observation.
+// It is an optimistic retryable state; it does not mean that a lease has been
+// positively acquired.
+enum class SampleLabelingRecoveryDraftStatus {
+    Current,
+    Conflicting,
+    Stale,
+    Recoverable,
+};
+
+// Borrowed read-only recovery projection. The task pointers remain valid only
+// until the controller's next mutation or destruction; callers must not retain
+// them across command submission or maintenance. Building this projection does
+// not acquire, refresh, or release any lease.
+struct SampleLabelingRecoveryDraftView {
+    const SampleLabelingTask* task = nullptr;
+    SampleLabelingRecoveryDraftStatus status =
+        SampleLabelingRecoveryDraftStatus::Stale;
+};
+
+struct SampleLabelingRecoveryView {
+    std::string source_identity;
+    std::vector<SampleLabelingRecoveryDraftView> temporary_drafts;
     std::uint64_t revision = 0;
 };
 
@@ -93,6 +129,7 @@ public:
     void RemoveSource(std::string_view source_identity);
 
     [[nodiscard]] SampleLabelingControllerView View() const;
+    [[nodiscard]] SampleLabelingRecoveryView RecoveryView() const;
     [[nodiscard]] std::uint64_t
         active_source_tasks_generation() const;
     [[nodiscard]] std::optional<SourceState> SourceStateForIdentity(
@@ -270,6 +307,20 @@ private:
         std::string* error_message);
     void BumpActiveSourceTasksGeneration();
     void Touch();
+    void UpdateRecoveryTaskTrustFromSnapshot(
+        const SampleLabelingStateCacheLoadResult& snapshot);
+    void ReconcileRecoveryTaskTrust(
+        std::string_view source_identity,
+        const SourceState& state,
+        const std::unordered_set<std::string>& prepared_task_ids,
+        const std::unordered_set<std::string>&
+            preserved_local_task_ids,
+        std::optional<bool> prepared_snapshot_trusted);
+    void ClearRecoveryTaskTrust(
+        std::string_view source_identity,
+        std::string_view task_id);
+    void ExpireTaskLeaseConflictsOnTrustedRefresh(
+        std::string_view source_identity);
     void EnsureStateCacheLoaded();
     void QueueStateSave();
     void QueueOutputRetry();
@@ -311,6 +362,9 @@ private:
         const SampleLabelingTask& task) const;
     [[nodiscard]] bool TaskIdentityLeaseHeld(
         const TaskEditLeaseSet& leases,
+        std::string_view source_identity,
+        std::string_view task_id) const;
+    [[nodiscard]] bool LocalTaskProjectionProtected(
         std::string_view source_identity,
         std::string_view task_id) const;
     void AdoptActiveTaskLeases(
@@ -355,8 +409,20 @@ private:
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;
     std::optional<std::string> active_source_identity_;
+    // Source-level entries are retained only as cache-refresh hints. Recovery
+    // classification uses the task-target entries below.
     std::unordered_set<std::string>
         lease_unavailable_source_identities_;
+    // Task-level entries are transient lease observations. A trusted source
+    // refresh expires them so a later activation can re-probe the target.
+    std::unordered_set<std::string>
+        lease_unavailable_task_targets_;
+    // Task IDs materialized from an untrusted cache snapshot remain stale in
+    // the recovery projection until that task is adopted from a trusted
+    // snapshot or successfully validated/persisted. Metadata-only patches do
+    // not clear these task-level provenance markers.
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        recovery_untrusted_task_ids_by_source_;
     TaskEditLeaseSet active_task_leases_;
     std::vector<TaskEditLeaseSet> deferred_task_leases_;
     SampleLabelingStateCachePatch pending_cache_patch_;
