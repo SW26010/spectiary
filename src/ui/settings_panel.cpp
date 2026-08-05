@@ -739,8 +739,9 @@ SettingsPanelUi::ArtifactIdentityForAbout()
     std::optional<ArtifactIdentityResult> completed;
     {
         std::lock_guard lock(artifact_identity_computation_->mutex);
-        completed = std::move(
-            artifact_identity_computation_->completed);
+        completed = std::exchange(
+            artifact_identity_computation_->completed,
+            std::nullopt);
     }
     if (completed) {
         artifact_identity_ = std::move(completed);

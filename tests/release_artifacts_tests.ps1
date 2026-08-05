@@ -1050,6 +1050,30 @@ Assert-Contains $cmakeSource `
 Assert-Contains $cmakeSource `
     'DEPENDS specforge_native' `
     'CMake metadata target dependency'
+$portableMetadataTargetStart = $cmakeSource.IndexOf(
+    'add_custom_target(specforge_portable_test_metadata',
+    [StringComparison]::Ordinal)
+if ($portableMetadataTargetStart -lt 0) {
+    throw 'Could not locate the Portable metadata fixture target.'
+}
+$portableMetadataTargetEnd = $cmakeSource.IndexOf(
+    'function(specforge_add_test',
+    $portableMetadataTargetStart,
+    [StringComparison]::Ordinal)
+if ($portableMetadataTargetEnd -lt 0) {
+    throw 'Could not locate the end of the Portable metadata fixture target.'
+}
+$portableMetadataTargetSource = $cmakeSource.Substring(
+    $portableMetadataTargetStart,
+    $portableMetadataTargetEnd - $portableMetadataTargetStart)
+if ($portableMetadataTargetSource -notmatch
+    '(?ms)DEPENDS\s+specforge_metadata(?:\s|$)') {
+    throw 'Portable metadata fixture must depend on specforge_metadata freshness target.'
+}
+if ($portableMetadataTargetSource -match
+    '(?ms)DEPENDS\s+specforge_native(?:\s|$)') {
+    throw 'Portable metadata fixture must not bypass specforge_metadata freshness target.'
+}
 Assert-NotContains $cmakeSource 'SPECFORGE_RELEASE_PROFILE' 'CMake unified executable'
 Assert-NotContains $buildIdentityTemplate 'ReleaseProfile' 'Build identity header template'
 Assert-Contains $buildIdentityTemplate `

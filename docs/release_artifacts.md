@@ -91,9 +91,13 @@ as a byproduct, depends on the native executable and finalizer tool, and runs a
 freshness check. That check proves
 the sidecar is schema 5, has a completion timestamp, names `SpecForge.exe`,
 and records the current EXE hash;
-if any of those checks fail or the sidecar is missing, it invokes the finalizer
-again. Release automation builds this target so an up-to-date EXE cannot cause
-a missing, modified, or stale sidecar to be silently accepted. The CTest
+if the sidecar is missing, invalid, has a non-5 schema, lacks a non-empty
+completion timestamp, names a non-canonical artifact, or records a hash that
+does not match the current EXE, it invokes the finalizer again. A timestamp-only
+edit that leaves those identity checks valid is intentionally preserved by a
+CMake no-op; the CTest regression verifies that it does not rewrite the sidecar
+or alter the EXE. Release automation builds this target so an up-to-date EXE
+cannot cause an identity-invalid or stale sidecar to be silently accepted. The CTest
 metadata build regression removes only the EXE to force one real
 relink/finalization, then runs a second real no-op build; it verifies the
 executable hash is unchanged by a metadata timestamp change and that the no-op

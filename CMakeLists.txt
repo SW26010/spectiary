@@ -511,7 +511,7 @@ add_custom_target(specforge_portable_test_metadata
         "-DOUTPUT=${SPECFORGE_PORTABLE_TEST_METADATA}"
         -P "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     DEPENDS
-        specforge_native
+        specforge_metadata
         "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     COMMENT "Preparing schema 5 Portable runtime metadata for deterministic tests"
     VERBATIM

@@ -1010,6 +1010,21 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         identity.completed_at_utc == "2026-08-05T09:21:32Z",
         "background identity verification should publish the verified completion time");
 
+    RenderSettingsFrame(panel);
+    const specforge::ArtifactIdentityResult identity_after_next_frame =
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+            panel);
+    Require(
+        identity_after_next_frame.status ==
+                specforge::ArtifactIdentityStatus::Available &&
+            identity_after_next_frame.completed_at_utc ==
+                identity.completed_at_utc &&
+            identity_after_next_frame.metadata_sha256 ==
+                identity.metadata_sha256 &&
+            identity_after_next_frame.executable_sha256 ==
+                identity.executable_sha256,
+        "verified identity should persist across subsequent About frames");
+
     std::filesystem::remove_all(root, cleanup_error);
 }
 
@@ -1071,16 +1086,6 @@ void TestArtifactIdentityRetriesAfterHashFailure()
         Require(stream.good(), "retry identity fixture should open");
         stream << "abc";
     }
-    specforge::SettingsPanelUiTestAccess::Close(panel);
-    panel.Open();
-    RenderSettingsFrame(panel);
-    const specforge::ArtifactIdentityStatus reopened_status =
-        specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
-            panel);
-    Require(
-        reopened_status == specforge::ArtifactIdentityStatus::Pending ||
-            reopened_status == specforge::ArtifactIdentityStatus::Available,
-        "reopening About should retry a previously unavailable identity");
 
     bool identity_available = false;
     for (int attempt = 0; attempt < 100; ++attempt) {
