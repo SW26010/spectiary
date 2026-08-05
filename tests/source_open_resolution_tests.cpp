@@ -85,13 +85,13 @@ specforge::SourceOpenResolution Resolve(
     const std::filesystem::path& path,
     specforge::SourceOpenOrigin origin =
         specforge::SourceOpenOrigin::ExternalStartup,
-    bool open_external_fits_as_folder = true)
+    bool open_external_source_as_folder = true)
 {
     const specforge::SourceOpenRequest request{
         .source_path = path,
         .origin = origin,
-        .open_external_fits_as_folder =
-            open_external_fits_as_folder,
+        .open_external_source_as_folder =
+            open_external_source_as_folder,
     };
     return specforge::ResolveSourceOpenRequest(
         request,

@@ -277,7 +277,7 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
-            UiTextId::OpenExternalFitsAsFolder) ==
+            UiTextId::OpenExternalSourceAsFolder) ==
             "将外部打开的 FITS 作为文件夹源打开",
         "external FITS folder preference should be localized");
     Require(

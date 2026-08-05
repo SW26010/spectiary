@@ -122,7 +122,7 @@ private:
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);
-    void SetOpenExternalFitsAsFolder(bool enabled);
+    void SetOpenExternalSourceAsFolder(bool enabled);
     [[nodiscard]] static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate);

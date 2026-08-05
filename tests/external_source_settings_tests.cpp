@@ -77,12 +77,12 @@ void TestMissingSettingsDefaultToDisabled()
         specforge::LoadExternalSourceSettings(
             temporary.path() / "missing.json");
     Require(
-        !loaded.settings.open_external_fits_as_folder &&
+        !loaded.settings.open_external_source_as_folder &&
             loaded.warning.empty(),
         "missing external source settings should default to disabled");
 }
 
-void TestExternalFitsFolderPreferenceRoundTrips()
+void TestExternalSourceFolderPreferenceRoundTrips()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path path =
@@ -93,7 +93,7 @@ void TestExternalFitsFolderPreferenceRoundTrips()
         Require(
             specforge::SaveExternalSourceSettings(
                 path,
-                {.open_external_fits_as_folder = enabled},
+                {.open_external_source_as_folder = enabled},
                 &error),
             "external source settings should save");
         Require(
@@ -102,10 +102,10 @@ void TestExternalFitsFolderPreferenceRoundTrips()
         const std::string document = ReadFile(path);
         Require(
             document.find(
-                std::string{"\"open_external_fits_as_folder\": "} +
+                std::string{"\"open_external_source_as_folder\": "} +
                 (enabled ? "true" : "false")) !=
                 std::string::npos,
-            "external FITS folder preference should persist as a boolean");
+            "external source folder preference should persist as a boolean");
         Require(
             document.find("include_subfolders") ==
                 std::string::npos,
@@ -114,10 +114,43 @@ void TestExternalFitsFolderPreferenceRoundTrips()
         const specforge::ExternalSourceSettingsLoadResult loaded =
             specforge::LoadExternalSourceSettings(path);
         Require(
-            loaded.settings.open_external_fits_as_folder == enabled &&
+            loaded.settings.open_external_source_as_folder == enabled &&
                 loaded.warning.empty(),
             "external FITS folder preference should round-trip without warning");
     }
+}
+
+void TestLegacyExternalFitsFolderPreferenceLoadsAndMigrates()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path path =
+        temporary.path() / "external-source-settings.json";
+    WriteFile(
+        path,
+        R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_fits_as_folder":true})");
+
+    const specforge::ExternalSourceSettingsLoadResult loaded =
+        specforge::LoadExternalSourceSettings(path);
+    Require(
+        loaded.settings.open_external_source_as_folder &&
+            loaded.warning.empty(),
+        "the legacy external FITS folder key should preserve an enabled preference");
+
+    std::string error;
+    Require(
+        specforge::SaveExternalSourceSettings(
+            path,
+            loaded.settings,
+            &error),
+        "a legacy external source preference should be rewriteable");
+    Require(error.empty(), "migrating the external source preference should not report an error");
+    const std::string document = ReadFile(path);
+    Require(
+        document.find("\"open_external_source_as_folder\": true") !=
+            std::string::npos &&
+            document.find("open_external_fits_as_folder") ==
+                std::string::npos,
+        "saving a legacy external source preference should use the generic key");
 }
 
 void TestInvalidSettingsWarnAndUseDisabledDefault()
@@ -130,16 +163,16 @@ void TestInvalidSettingsWarnAndUseDisabledDefault()
     specforge::ExternalSourceSettingsLoadResult loaded =
         specforge::LoadExternalSourceSettings(path);
     Require(
-        !loaded.settings.open_external_fits_as_folder &&
+        !loaded.settings.open_external_source_as_folder &&
             !loaded.warning.empty(),
         "damaged external source settings should warn and disable the preference");
 
     WriteFile(
         path,
-        R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_fits_as_folder":"true"})");
+        R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_source_as_folder":"true"})");
     loaded = specforge::LoadExternalSourceSettings(path);
     Require(
-        !loaded.settings.open_external_fits_as_folder &&
+        !loaded.settings.open_external_source_as_folder &&
             !loaded.warning.empty(),
         "a non-boolean external source preference should warn and use the disabled default");
 }
@@ -149,7 +182,8 @@ void TestInvalidSettingsWarnAndUseDisabledDefault()
 int main()
 {
     TestMissingSettingsDefaultToDisabled();
-    TestExternalFitsFolderPreferenceRoundTrips();
+    TestExternalSourceFolderPreferenceRoundTrips();
+    TestLegacyExternalFitsFolderPreferenceLoadsAndMigrates();
     TestInvalidSettingsWarnAndUseDisabledDefault();
     return 0;
 }

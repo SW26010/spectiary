@@ -113,7 +113,7 @@ public:
         std::size_t spectrum_index = 0);
     [[nodiscard]] bool OpenExternalSource(
         const std::filesystem::path& path,
-        bool open_external_fits_as_folder,
+        bool open_external_source_as_folder,
         std::size_t spectrum_index = 0);
     [[nodiscard]] SourceOpenOperation
     OpenSourceForAutomation(

@@ -230,7 +230,7 @@ struct InputRenderObservation {
 };
 
 struct GeneralRenderObservation {
-    bool open_external_fits_as_folder_hovered = false;
+    bool open_external_source_as_folder_hovered = false;
     bool include_external_subfolders_found = false;
     bool include_external_subfolders_disabled = false;
     ImVec2 include_external_subfolders_center;
@@ -545,7 +545,7 @@ InputRenderObservation RenderInputFrame(
 
 GeneralRenderObservation RenderGeneralFrame(
     specforge::SettingsPanelUi& panel,
-    bool open_external_fits_as_folder = false)
+    bool open_external_source_as_folder = false)
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
@@ -553,18 +553,18 @@ GeneralRenderObservation RenderGeneralFrame(
     ImGui::NewFrame();
     specforge::ApplicationSettingsView settings =
         MakeSettingsView();
-    settings.open_external_fits_as_folder =
-        open_external_fits_as_folder;
+    settings.open_external_source_as_folder =
+        open_external_source_as_folder;
     panel.Render(settings);
 
     GeneralRenderObservation observation;
     const ImGuiID hovered_id = GImGui->HoveredId;
     for (ImGuiWindow* window : GImGui->Windows) {
-        observation.open_external_fits_as_folder_hovered =
-            observation.open_external_fits_as_folder_hovered ||
+        observation.open_external_source_as_folder_hovered =
+            observation.open_external_source_as_folder_hovered ||
             hovered_id == window->GetID(
                 "Open external FITS as a folder source###"
-                "SpecForgeOpenExternalFitsAsFolder");
+                "SpecForgeOpenExternalSourceAsFolder");
     }
     ImGui::EndFrame();
     return observation;
@@ -1007,11 +1007,11 @@ void TestExternalFitsFolderCheckboxAndDeferredSubfolderPlaceholder()
     ImVec2 checkbox_position;
     for (float y = 80.0f;
          y <= 900.0f &&
-         !observation.open_external_fits_as_folder_hovered;
+         !observation.open_external_source_as_folder_hovered;
          y += 2.0f) {
         for (float x = 300.0f;
              x <= 1300.0f &&
-             !observation.open_external_fits_as_folder_hovered;
+             !observation.open_external_source_as_folder_hovered;
              x += 40.0f) {
             checkbox_position = ImVec2(x, y);
             ImGui::GetIO().AddMousePosEvent(
@@ -1021,7 +1021,7 @@ void TestExternalFitsFolderCheckboxAndDeferredSubfolderPlaceholder()
         }
     }
     Require(
-        observation.open_external_fits_as_folder_hovered,
+        observation.open_external_source_as_folder_hovered,
         "fixture should locate the external FITS folder checkbox");
 
     ImGui::GetIO().AddMouseButtonEvent(
@@ -1041,8 +1041,8 @@ void TestExternalFitsFolderCheckboxAndDeferredSubfolderPlaceholder()
         intent &&
             intent->kind ==
                 specforge::ApplicationSettingsIntentKind::
-                    SetOpenExternalFitsAsFolder &&
-            intent->open_external_fits_as_folder,
+                    SetOpenExternalSourceAsFolder &&
+            intent->open_external_source_as_folder,
         "clicking the external FITS folder checkbox should emit the enabled setting");
     Require(
         !panel.TakeApplicationSettingsIntent(),

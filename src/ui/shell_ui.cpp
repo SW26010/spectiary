@@ -1318,7 +1318,7 @@ void ShellUi::OpenExternalSource(
 {
     (void)source_activation_.OpenExternalSource(
         path,
-        application_settings_.View().open_external_fits_as_folder,
+        application_settings_.View().open_external_source_as_folder,
         spectrum_index);
 }
 

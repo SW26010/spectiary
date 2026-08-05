@@ -56,7 +56,7 @@ bool SourceOpenRequestExpandsAsFolder(
     const SourceOpenRequest& request) noexcept
 {
     return request.origin == SourceOpenOrigin::ExternalStartup &&
-           request.open_external_fits_as_folder &&
+           request.open_external_source_as_folder &&
            IsSupportedFitsSourcePath(request.source_path);
 }
 

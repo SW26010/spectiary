@@ -85,7 +85,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         initial.live_numeric_navigation,
         "missing input settings should enable live numeric navigation");
     Require(
-        !initial.open_external_fits_as_folder,
+        !initial.open_external_source_as_folder,
         "missing external source settings should disable external FITS folder opening");
     Require(
         initial.profile_output_directory ==
@@ -117,7 +117,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
 
     const auto external_source_result = settings.Apply(
         specforge::ApplicationSettingsIntent::
-            SetOpenExternalFitsAsFolder(true),
+            SetOpenExternalSourceAsFolder(true),
         {});
     Require(
         external_source_result.applied(),
@@ -147,7 +147,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         !reloaded_view.live_numeric_navigation,
         "live numeric navigation should reload through the application settings owner");
     Require(
-        reloaded_view.open_external_fits_as_folder,
+        reloaded_view.open_external_source_as_folder,
         "external FITS folder preference should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory == custom_directory,
@@ -168,6 +168,24 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         reloaded.View().profile_output_directory ==
             storage.default_profile_output_directory,
         "restore-default should update the owned view");
+}
+
+void TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.external_source_settings_path);
+        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_fits_as_folder":true})";
+    }
+
+    const specforge::ApplicationSettings settings(storage);
+    Require(
+        settings.View().open_external_source_as_folder &&
+            settings.View()
+                    .StatusFor(specforge::ApplicationSetting::ExternalSource)
+                    .kind == specforge::ApplicationSettingsStatusKind::Ready,
+        "the application settings owner should retain an enabled legacy external source preference");
 }
 
 void TestPersistenceFailureRetainsThePreviousValueAndStatus()
@@ -383,7 +401,7 @@ void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
     const specforge::ApplicationSettingsResult result =
         settings.Apply(
             specforge::ApplicationSettingsIntent::
-                SetOpenExternalFitsAsFolder(true),
+                SetOpenExternalSourceAsFolder(true),
             {});
     const specforge::ApplicationSettingsView view =
         settings.View();
@@ -391,7 +409,7 @@ void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
         result.outcome ==
                 specforge::ApplicationSettingsOutcome::
                     PersistenceFailed &&
-            !view.open_external_fits_as_folder,
+            !view.open_external_source_as_folder,
         "external source save failure should retain the disabled runtime value");
     Require(
         view.StatusFor(
@@ -406,17 +424,17 @@ void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
     settings.RunMaintenance(
         specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
     Require(
-        !settings.View().open_external_fits_as_folder,
+        !settings.View().open_external_source_as_folder,
         "external source save failure should remain disabled after crossing the maintenance deadline");
 
     const specforge::ApplicationSettingsResult retry =
         settings.Apply(
             specforge::ApplicationSettingsIntent::
-                SetOpenExternalFitsAsFolder(true),
+                SetOpenExternalSourceAsFolder(true),
             {});
     Require(
         retry.applied() &&
-            settings.View().open_external_fits_as_folder,
+            settings.View().open_external_source_as_folder,
         "only an explicit external source retry should enable the setting after repair");
 }
 
@@ -606,7 +624,7 @@ void TestLoadWarningAndEnvironmentOverrideAreTyped()
                     LoadWarning,
         "damaged input settings should enable live navigation with a typed load warning");
     Require(
-        !loaded.open_external_fits_as_folder &&
+        !loaded.open_external_source_as_folder &&
             loaded
                     .StatusFor(
                         specforge::ApplicationSetting::
@@ -1171,6 +1189,7 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
 int main()
 {
     TestSettingsIntentsPersistAndReloadThroughOneOwner();
+    TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings();
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestUiScaleValidationAndPersistenceFirstBehavior();
     TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue();

@@ -90,12 +90,12 @@ ApplicationSettingsIntent::SetLiveNumericNavigation(bool enabled)
 }
 
 ApplicationSettingsIntent
-ApplicationSettingsIntent::SetOpenExternalFitsAsFolder(bool enabled)
+ApplicationSettingsIntent::SetOpenExternalSourceAsFolder(bool enabled)
 {
     return {
         .kind = ApplicationSettingsIntentKind::
-            SetOpenExternalFitsAsFolder,
-        .open_external_fits_as_folder = enabled,
+            SetOpenExternalSourceAsFolder,
+        .open_external_source_as_folder = enabled,
     };
 }
 
@@ -220,8 +220,8 @@ ApplicationSettings::ApplicationSettings(
     ExternalSourceSettingsLoadResult external_source_settings =
         LoadExternalSourceSettings(
             storage_.external_source_settings_path);
-    open_external_fits_as_folder_ =
-        external_source_settings.settings.open_external_fits_as_folder;
+    open_external_source_as_folder_ =
+        external_source_settings.settings.open_external_source_as_folder;
     AdoptLoadWarning(
         ApplicationSetting::ExternalSource,
         std::move(external_source_settings.warning));
@@ -251,8 +251,8 @@ ApplicationSettingsView ApplicationSettings::View() const
         .ui_scale_percentage = ui_scale_percentage_,
         .live_numeric_navigation =
             live_numeric_navigation_,
-        .open_external_fits_as_folder =
-            open_external_fits_as_folder_,
+        .open_external_source_as_folder =
+            open_external_source_as_folder_,
         .profile_output_directory =
             profile_output_directory_.directory,
         .default_profile_output_directory =
@@ -278,9 +278,9 @@ ApplicationSettingsResult ApplicationSettings::Apply(
         return ApplyLiveNumericNavigation(
             intent.live_numeric_navigation);
     case ApplicationSettingsIntentKind::
-        SetOpenExternalFitsAsFolder:
-        return ApplyOpenExternalFitsAsFolder(
-            intent.open_external_fits_as_folder);
+        SetOpenExternalSourceAsFolder:
+        return ApplyOpenExternalSourceAsFolder(
+            intent.open_external_source_as_folder);
     case ApplicationSettingsIntentKind::SetProfileOutputDirectory:
         return ApplyProfileOutputDirectory(
             std::move(intent.directory),
@@ -541,11 +541,11 @@ ApplicationSettings::ApplyLiveNumericNavigation(bool enabled)
 }
 
 ApplicationSettingsResult
-ApplicationSettings::ApplyOpenExternalFitsAsFolder(bool enabled)
+ApplicationSettings::ApplyOpenExternalSourceAsFolder(bool enabled)
 {
     constexpr ApplicationSetting kSetting =
         ApplicationSetting::ExternalSource;
-    if (enabled == open_external_fits_as_folder_ &&
+    if (enabled == open_external_source_as_folder_ &&
         statuses_[static_cast<std::size_t>(kSetting)].kind ==
             ApplicationSettingsStatusKind::Ready) {
         return {
@@ -554,10 +554,10 @@ ApplicationSettings::ApplyOpenExternalFitsAsFolder(bool enabled)
         };
     }
 
-    pending_open_external_fits_as_folder_ = enabled;
+    pending_open_external_source_as_folder_ = enabled;
     if (!storage_.persistent) {
-        open_external_fits_as_folder_ = enabled;
-        pending_open_external_fits_as_folder_.reset();
+        open_external_source_as_folder_ = enabled;
+        pending_open_external_source_as_folder_.reset();
         ClearStatus(kSetting);
         return {
             .outcome = ApplicationSettingsOutcome::Applied,
@@ -846,7 +846,7 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
         };
     }
     case ApplicationSetting::ExternalSource: {
-        if (!pending_open_external_fits_as_folder_) {
+        if (!pending_open_external_source_as_folder_) {
             return {
                 .error =
                     "No pending external source setting save."};
@@ -854,8 +854,8 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
         std::string error;
         if (SaveExternalSourceSettings(
                 storage_.external_source_settings_path,
-                {.open_external_fits_as_folder =
-                     *pending_open_external_fits_as_folder_},
+                {.open_external_source_as_folder =
+                     *pending_open_external_source_as_folder_},
                 &error)) {
             return {.saved = true};
         }
@@ -954,7 +954,7 @@ bool ApplicationSettings::HasPendingSetting(
     case ApplicationSetting::Input:
         return pending_live_numeric_navigation_.has_value();
     case ApplicationSetting::ExternalSource:
-        return pending_open_external_fits_as_folder_.has_value();
+        return pending_open_external_source_as_folder_.has_value();
     case ApplicationSetting::ProfileOutputDirectory:
         return pending_profile_settings_.has_value() &&
                pending_profile_output_directory_.has_value();
@@ -989,10 +989,10 @@ void ApplicationSettings::CommitPendingSetting(ApplicationSetting setting)
         }
         return;
     case ApplicationSetting::ExternalSource:
-        if (pending_open_external_fits_as_folder_) {
-            open_external_fits_as_folder_ =
-                *pending_open_external_fits_as_folder_;
-            pending_open_external_fits_as_folder_.reset();
+        if (pending_open_external_source_as_folder_) {
+            open_external_source_as_folder_ =
+                *pending_open_external_source_as_folder_;
+            pending_open_external_source_as_folder_.reset();
         }
         return;
     case ApplicationSetting::ProfileOutputDirectory:
@@ -1023,7 +1023,7 @@ void ApplicationSettings::CancelPendingSetting(
         pending_live_numeric_navigation_.reset();
         break;
     case ApplicationSetting::ExternalSource:
-        pending_open_external_fits_as_folder_.reset();
+        pending_open_external_source_as_folder_.reset();
         break;
     case ApplicationSetting::ProfileOutputDirectory:
         pending_profile_settings_.reset();

@@ -3463,7 +3463,7 @@ void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
         Access::ApplySettingsUiIntent(
             *shell,
             specforge::ApplicationSettingsIntent::
-                SetOpenExternalFitsAsFolder(true))
+                SetOpenExternalSourceAsFolder(true))
             .applied(),
         "external FITS folder setting should apply in the startup shell");
     constexpr std::uint64_t external_presentation_frame = 500;
@@ -3517,7 +3517,7 @@ void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
         Access::ApplySettingsUiIntent(
             *shell,
             specforge::ApplicationSettingsIntent::
-                SetOpenExternalFitsAsFolder(false))
+                SetOpenExternalSourceAsFolder(false))
             .applied(),
         "external FITS folder setting should be disableable");
     shell->OpenExternalSource(preferred);
@@ -3536,7 +3536,7 @@ void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
         Access::ApplySettingsUiIntent(
             *shell,
             specforge::ApplicationSettingsIntent::
-                SetOpenExternalFitsAsFolder(true))
+                SetOpenExternalSourceAsFolder(true))
             .applied(),
         "external FITS folder setting should be re-enabled for origin checks");
     shell->OpenSource(preferred);
@@ -3727,7 +3727,7 @@ void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
         Access::ApplySettingsUiIntent(
                 *shell,
                 specforge::ApplicationSettingsIntent::
-                    SetOpenExternalFitsAsFolder(true))
+                    SetOpenExternalSourceAsFolder(true))
             .applied(),
         "filtered external FITS folder setting should apply");
     shell->OpenExternalSource(preferred);
@@ -3896,7 +3896,7 @@ void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
         Access::ApplySettingsUiIntent(
                 *shell,
                 specforge::ApplicationSettingsIntent::
-                    SetOpenExternalFitsAsFolder(true))
+                    SetOpenExternalSourceAsFolder(true))
             .applied(),
         "live-filter external FITS folder setting should apply");
 
@@ -4068,7 +4068,7 @@ void TestSourceOpenResolutionRunsOnWorkerAndCancels()
         Access::ApplySettingsUiIntent(
                 *shell,
                 specforge::ApplicationSettingsIntent::
-                    SetOpenExternalFitsAsFolder(true))
+                    SetOpenExternalSourceAsFolder(true))
             .applied(),
         "worker resolver test should enable external FITS folder opening");
 
@@ -4343,7 +4343,7 @@ void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
         Access::ApplySettingsUiIntent(
                 *shell,
                 specforge::ApplicationSettingsIntent::
-                    SetOpenExternalFitsAsFolder(true))
+                    SetOpenExternalSourceAsFolder(true))
             .applied(),
         "deferred external FITS folder setting should apply");
     shell->RegisterSourceLoadCompletionReadyCallback(
@@ -4465,7 +4465,7 @@ void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
         Access::ApplySettingsUiIntent(
                 *shell,
                 specforge::ApplicationSettingsIntent::
-                    SetOpenExternalFitsAsFolder(true))
+                    SetOpenExternalSourceAsFolder(true))
             .applied(),
         "superseded external FITS folder setting should apply");
 

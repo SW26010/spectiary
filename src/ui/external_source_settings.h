@@ -5,11 +5,11 @@
 
 namespace specforge {
 
-inline constexpr bool kDefaultOpenExternalFitsAsFolder = false;
+inline constexpr bool kDefaultOpenExternalSourceAsFolder = false;
 
 struct ExternalSourceSettings {
-    bool open_external_fits_as_folder =
-        kDefaultOpenExternalFitsAsFolder;
+    bool open_external_source_as_folder =
+        kDefaultOpenExternalSourceAsFolder;
 };
 
 struct ExternalSourceSettingsLoadResult {

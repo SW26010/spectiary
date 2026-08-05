@@ -69,7 +69,7 @@ bool SourceCollectionActivationTransaction::OpenSource(
 
 bool SourceCollectionActivationTransaction::OpenExternalSource(
     const std::filesystem::path& path,
-    bool open_external_fits_as_folder,
+    bool open_external_source_as_folder,
     std::size_t spectrum_index)
 {
     ++latest_automation_open_sequence_;
@@ -77,8 +77,8 @@ bool SourceCollectionActivationTransaction::OpenExternalSource(
                SourceOpenRequest{
                    .source_path = path,
                    .origin = SourceOpenOrigin::ExternalStartup,
-                   .open_external_fits_as_folder =
-                       open_external_fits_as_folder,
+                   .open_external_source_as_folder =
+                       open_external_source_as_folder,
                },
                spectrum_index,
                true,

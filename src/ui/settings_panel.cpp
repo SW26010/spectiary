@@ -804,28 +804,28 @@ void SettingsPanelUi::RenderGeneral(
     ImGui::SeparatorText(
         UiText(language, UiTextId::FileOpening).data());
 
-    bool open_external_fits_as_folder =
-        settings.open_external_fits_as_folder;
-    const std::string open_external_fits_label =
+    bool open_external_source_as_folder =
+        settings.open_external_source_as_folder;
+    const std::string open_external_source_label =
         StableUiLabel(
             language,
-            UiTextId::OpenExternalFitsAsFolder,
-            "SpecForgeOpenExternalFitsAsFolder");
+            UiTextId::OpenExternalSourceAsFolder,
+            "SpecForgeOpenExternalSourceAsFolder");
     if (ImGui::Checkbox(
-            open_external_fits_label.c_str(),
-            &open_external_fits_as_folder)) {
-        SetOpenExternalFitsAsFolder(
-            open_external_fits_as_folder);
+            open_external_source_label.c_str(),
+            &open_external_source_as_folder)) {
+        SetOpenExternalSourceAsFolder(
+            open_external_source_as_folder);
     }
     ImGui::PushTextWrapPos();
-    const std::string_view open_external_fits_description =
+    const std::string_view open_external_source_description =
         UiText(
             language,
-            UiTextId::OpenExternalFitsAsFolderDescription);
+            UiTextId::OpenExternalSourceAsFolderDescription);
     ImGui::TextDisabled(
         "%.*s",
-        static_cast<int>(open_external_fits_description.size()),
-        open_external_fits_description.data());
+        static_cast<int>(open_external_source_description.size()),
+        open_external_source_description.data());
     ImGui::PopTextWrapPos();
 
     bool include_external_subfolders = false;
@@ -1196,11 +1196,11 @@ void SettingsPanelUi::SetLiveNumericNavigation(bool enabled)
             SetLiveNumericNavigation(enabled);
 }
 
-void SettingsPanelUi::SetOpenExternalFitsAsFolder(bool enabled)
+void SettingsPanelUi::SetOpenExternalSourceAsFolder(bool enabled)
 {
     application_settings_intent_ =
         ApplicationSettingsIntent::
-            SetOpenExternalFitsAsFolder(enabled);
+            SetOpenExternalSourceAsFolder(enabled);
 }
 
 void SettingsPanelUi::RenderDataAndRecovery(

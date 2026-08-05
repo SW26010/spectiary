@@ -12,7 +12,9 @@ namespace {
 constexpr const char* kSettingsFormatKind =
     "specforge.external_source.settings";
 constexpr int kSettingsSchemaVersion = 1;
-constexpr const char* kOpenExternalFitsAsFolderMember =
+constexpr const char* kOpenExternalSourceAsFolderMember =
+    "open_external_source_as_folder";
+constexpr const char* kLegacyOpenExternalFitsAsFolderMember =
     "open_external_fits_as_folder";
 
 }  // namespace
@@ -38,21 +40,30 @@ ExternalSourceSettingsLoadResult LoadExternalSourceSettings(
         return loaded;
     }
 
-    const JsonValue* open_external_fits_as_folder =
+    const JsonValue* open_external_source_as_folder =
         JsonObjectMember(
             cache.document->root,
-            kOpenExternalFitsAsFolderMember);
-    if (open_external_fits_as_folder == nullptr ||
-        open_external_fits_as_folder->kind !=
+            kOpenExternalSourceAsFolderMember);
+    const char* setting_member =
+        kOpenExternalSourceAsFolderMember;
+    if (open_external_source_as_folder == nullptr) {
+        open_external_source_as_folder = JsonObjectMember(
+            cache.document->root,
+            kLegacyOpenExternalFitsAsFolderMember);
+        setting_member = kLegacyOpenExternalFitsAsFolderMember;
+    }
+    if (open_external_source_as_folder == nullptr ||
+        open_external_source_as_folder->kind !=
             JsonValue::Kind::Bool) {
         loaded.warning =
             "Ignored external source settings: "
-            "open_external_fits_as_folder must be boolean.";
+            + std::string(setting_member) +
+            " must be boolean.";
         return loaded;
     }
 
-    loaded.settings.open_external_fits_as_folder =
-        open_external_fits_as_folder->bool_value;
+    loaded.settings.open_external_source_as_folder =
+        open_external_source_as_folder->bool_value;
     return loaded;
 }
 
@@ -67,9 +78,9 @@ bool SaveExternalSourceSettings(
         kSettingsSchemaVersion,
         "external source settings",
         JsonObjectValue({
-            {kOpenExternalFitsAsFolderMember,
+            {kOpenExternalSourceAsFolderMember,
              JsonBoolValue(
-                 settings.open_external_fits_as_folder)},
+                 settings.open_external_source_as_folder)},
         }),
         error_message);
 }

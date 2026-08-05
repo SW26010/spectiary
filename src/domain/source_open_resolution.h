@@ -17,7 +17,7 @@ enum class SourceOpenOrigin {
 struct SourceOpenRequest {
     std::filesystem::path source_path;
     SourceOpenOrigin origin = SourceOpenOrigin::InApp;
-    bool open_external_fits_as_folder = false;
+    bool open_external_source_as_folder = false;
 };
 
 struct SourceOpenFilesystemProbe {
