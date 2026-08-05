@@ -101,6 +101,56 @@ std::string Schema4Metadata(
     return document;
 }
 
+std::string Schema5Metadata(
+    std::string_view completed_at_json =
+        R"("2026-08-05T09:21:32Z")",
+    std::string_view artifact_json =
+        R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})",
+    bool include_completed_at = true,
+    bool include_artifact = true)
+{
+    if (completed_at_json.empty()) {
+        completed_at_json = R"("2026-08-05T09:21:32Z")";
+    }
+    if (artifact_json.empty()) {
+        artifact_json =
+            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})";
+    }
+    std::string document =
+        "{\n"
+        "  \"schema_version\": 5,\n"
+        "  \"product\": {\n"
+        "    \"name\": \"SpecForge\",\n"
+        "    \"version\": \"0.4.1\"\n"
+        "  },\n"
+        "  \"build\": {\n"
+        "    \"source_mode\": \"working_tree\",\n"
+        "    \"source_revision\": null,\n"
+        "    \"configuration\": \"Debug\",\n"
+        "    \"compiler_id\": \"MSVC\",\n"
+        "    \"compiler_version\": \"19.44\",\n"
+        "    \"cmake_version\": \"4.1.0\",\n"
+        "    \"generator\": \"Ninja\",\n"
+        "    \"target_architecture\": \"amd64\",\n"
+        "    \"windows_sdk_version\": null,\n"
+        "    \"dear_imgui\": \"1.92.5\",\n"
+        "    \"implot\": \"0.17\",\n"
+        "    \"zlib\": \"1.3.1\"";
+    if (include_completed_at) {
+        document +=
+            ",\n    \"completed_at_utc\": " +
+            std::string(completed_at_json);
+    }
+    document += "\n  }";
+    if (include_artifact) {
+        document +=
+            ",\n  \"artifact\": " +
+            std::string(artifact_json);
+    }
+    document += "\n}\n";
+    return document;
+}
+
 void RequireDefaultDeployment(
     const specforge::SpecForgeMetadataReadResult& result,
     std::string_view description)
@@ -258,6 +308,11 @@ void TestSchema4DeploymentSelection()
         standalone.build_metadata.status ==
             specforge::BuildMetadataStatus::Available,
         "schema 4 without deployment should still expose build provenance");
+    Require(
+        standalone.build_metadata.metadata &&
+            !standalone.build_metadata.metadata->completed_at_utc &&
+            !standalone.build_metadata.metadata->artifact,
+        "schema 4 should not invent schema 5 finalized-artifact fields");
 
     WriteTextFile(
         path,
@@ -310,6 +365,80 @@ void TestSchema4DeploymentSelection()
                 result.deployment.distribution == expected,
             std::string(value) +
                 " should map to its display identity");
+    }
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestSchema5StrictParsing()
+{
+    const specforge::SpecForgeMetadataReadResult fixture =
+        specforge::ReadSpecForgeMetadata(
+            FixturePath("available-schema5-working-tree.json"),
+            WorkingTreeIdentity());
+    RequireDefaultDeployment(fixture, "schema 5 fixture");
+    Require(
+        fixture.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available &&
+            fixture.build_metadata.metadata,
+        "matching schema 5 build provenance should be available");
+    const specforge::BuildMetadata& metadata =
+        *fixture.build_metadata.metadata;
+    Require(
+        metadata.completed_at_utc &&
+            *metadata.completed_at_utc ==
+                "2026-08-05T09:21:32Z" &&
+            metadata.artifact &&
+            metadata.artifact->file == "SpecForge.exe" &&
+            metadata.artifact->sha256 ==
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "schema 5 should expose the finalized timestamp and artifact identity");
+
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-metadata-schema5-strict";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    const std::filesystem::path path = root / "metadata.json";
+
+    const std::vector<std::string> invalid_documents = {
+        Schema5Metadata({}, {}, false, true),
+        Schema5Metadata({}, {}, true, false),
+        Schema5Metadata("false"),
+        Schema5Metadata(R"("2026-02-29T00:00:00Z")"),
+        Schema5Metadata(R"("2024-04-31T00:00:00Z")"),
+        Schema5Metadata(R"("2024-01-01T24:00:00Z")"),
+        Schema5Metadata(R"("2024-01-01T00:00:00+00:00")"),
+        Schema5Metadata(R"("2024-01-01T00:00:00.000Z")"),
+        Schema5Metadata(
+            R"("2024-02-29T23:59:59Z")",
+            R"({"file":"specforge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
+        Schema5Metadata(
+            {},
+            R"({"file":"SpecForge.exe","sha256":"0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"})"),
+        Schema5Metadata(
+            {},
+            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef"})"),
+        Schema5Metadata(
+            {},
+            R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"})"),
+        Schema5Metadata(
+            {},
+            R"({"file":false,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})"),
+        Schema5Metadata({}, "false"),
+    };
+    for (const std::string& document : invalid_documents) {
+        WriteTextFile(path, document);
+        const specforge::SpecForgeMetadataReadResult result =
+            specforge::ReadSpecForgeMetadata(
+                path,
+                WorkingTreeIdentity());
+        Require(
+            !result.startup_error &&
+                result.build_metadata.status ==
+                    specforge::BuildMetadataStatus::Unavailable &&
+                !result.build_metadata.metadata,
+            "malformed schema 5 build fields should make provenance unavailable without changing deployment");
     }
 
     std::filesystem::remove_all(root, cleanup_error);
@@ -462,7 +591,21 @@ void TestAdjacentMetadataSelectionAndLegacyFallback()
         schema3_current.startup_error.has_value() &&
             schema3_current.startup_error->find("schema 4") !=
                 std::string::npos,
-        "the current metadata filename should accept only schema 4");
+        "the current metadata filename should reject legacy schema 3");
+
+    WriteTextFile(
+        root / "specforge_metadata.json",
+        ReadTextFile(
+            FixturePath("available-schema5-working-tree.json")));
+    const specforge::SpecForgeMetadataReadResult schema5_current =
+        specforge::ReadAdjacentSpecForgeMetadata(
+            root,
+            WorkingTreeIdentity());
+    Require(
+        !schema5_current.startup_error &&
+            schema5_current.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available,
+        "the current metadata filename should accept schema 5");
 
     std::filesystem::remove(
         root / "specforge_metadata.json",
@@ -583,6 +726,7 @@ int main()
     TestSchema3Compatibility();
     TestSchema3BuildValidationRemainsIndependent();
     TestSchema4DeploymentSelection();
+    TestSchema5StrictParsing();
     TestInvalidDeploymentFailsClosed();
     TestBuildProvenanceDoesNotControlDeployment();
     TestAdjacentMetadataSelectionAndLegacyFallback();

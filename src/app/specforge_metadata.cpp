@@ -15,11 +15,18 @@ namespace specforge {
 namespace {
 
 constexpr int kLegacySchemaVersion = 3;
-constexpr int kCurrentSchemaVersion = 4;
+constexpr int kSchema4Version = 4;
+constexpr int kSchema5Version = 5;
 constexpr std::string_view kMetadataFileName =
     "specforge_metadata.json";
 constexpr std::string_view kLegacyMetadataFileName =
     "specforge_build_metadata.json";
+
+enum class MetadataSchemaRequirement {
+    Any,
+    CurrentFilename,
+    LegacyFilename,
+};
 
 bool IsRequiredMetadataString(std::string_view value)
 {
@@ -65,6 +72,82 @@ bool ContainsControlCharacter(std::string_view value)
         }
     }
     return false;
+}
+
+int ParseFixedDecimal(
+    std::string_view value,
+    std::size_t offset,
+    std::size_t length)
+{
+    int result = 0;
+    for (std::size_t index = 0; index < length; ++index) {
+        result = result * 10 +
+            (value[offset + index] - '0');
+    }
+    return result;
+}
+
+bool IsLeapYear(int year)
+{
+    return year % 4 == 0 &&
+        (year % 100 != 0 || year % 400 == 0);
+}
+
+bool IsValidUtcTimestamp(std::string_view value)
+{
+    if (value.size() != 20U ||
+        value[4] != '-' ||
+        value[7] != '-' ||
+        value[10] != 'T' ||
+        value[13] != ':' ||
+        value[16] != ':' ||
+        value[19] != 'Z') {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (index == 4U || index == 7U || index == 10U ||
+            index == 13U || index == 16U || index == 19U) {
+            continue;
+        }
+        if (value[index] < '0' || value[index] > '9') {
+            return false;
+        }
+    }
+
+    const int year = ParseFixedDecimal(value, 0U, 4U);
+    const int month = ParseFixedDecimal(value, 5U, 2U);
+    const int day = ParseFixedDecimal(value, 8U, 2U);
+    const int hour = ParseFixedDecimal(value, 11U, 2U);
+    const int minute = ParseFixedDecimal(value, 14U, 2U);
+    const int second = ParseFixedDecimal(value, 17U, 2U);
+    if (month < 1 || month > 12 ||
+        hour > 23 || minute > 59 || second > 59) {
+        return false;
+    }
+
+    constexpr int kDaysInMonth[] = {
+        31, 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    };
+    const int days_in_month =
+        kDaysInMonth[month - 1] +
+        (month == 2 && IsLeapYear(year) ? 1 : 0);
+    return day >= 1 && day <= days_in_month;
+}
+
+bool IsValidSha256(std::string_view value)
+{
+    if (value.size() != 64U) {
+        return false;
+    }
+    for (const char character : value) {
+        if (!((character >= '0' && character <= '9') ||
+              (character >= 'a' && character <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::optional<std::string> ReadRequiredMetadataString(
@@ -169,7 +252,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     const JsonValue* product = &root;
     const JsonValue* build = &root;
     std::optional<std::string> product_name = std::string("SpecForge");
-    if (schema_version == kCurrentSchemaVersion) {
+    if (schema_version >= kSchema4Version) {
         product = JsonObjectMember(root, "product");
         build = JsonObjectMember(root, "build");
         if (product == nullptr || product->kind != JsonValue::Kind::Object ||
@@ -182,7 +265,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     const std::optional<std::string> specforge_version =
         ReadRequiredMetadataString(
             *product,
-            schema_version == kCurrentSchemaVersion
+            schema_version >= kSchema4Version
                 ? "version"
                 : "specforge_version");
     const std::optional<std::string> configuration =
@@ -211,6 +294,35 @@ BuildMetadataReadResult ReadBuildMetadata(
         ReadRequiredMetadataString(*build, "implot");
     const std::optional<std::string> zlib =
         ReadRequiredMetadataString(*build, "zlib");
+
+    std::optional<std::string> completed_at_utc;
+    std::optional<BuildArtifactMetadata> artifact;
+    if (schema_version == kSchema5Version) {
+        completed_at_utc =
+            ReadRequiredMetadataString(*build, "completed_at_utc");
+        const JsonValue* artifact_value =
+            JsonObjectMember(root, "artifact");
+        const std::optional<std::string> artifact_file =
+            artifact_value != nullptr &&
+                artifact_value->kind == JsonValue::Kind::Object
+            ? ReadRequiredMetadataString(*artifact_value, "file")
+            : std::nullopt;
+        const std::optional<std::string> artifact_sha256 =
+            artifact_value != nullptr &&
+                artifact_value->kind == JsonValue::Kind::Object
+            ? ReadRequiredMetadataString(*artifact_value, "sha256")
+            : std::nullopt;
+        if (!completed_at_utc ||
+            !IsValidUtcTimestamp(*completed_at_utc) ||
+            !artifact_file || *artifact_file != "SpecForge.exe" ||
+            !artifact_sha256 || !IsValidSha256(*artifact_sha256)) {
+            return {};
+        }
+        artifact = BuildArtifactMetadata{
+            .file = *artifact_file,
+            .sha256 = *artifact_sha256,
+        };
+    }
 
     if (!product_name || !specforge_version || !configuration ||
         !target_architecture || !source_mode || !source_revision ||
@@ -255,6 +367,8 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.dear_imgui_version = *dear_imgui;
     metadata.implot_version = *implot;
     metadata.zlib_version = *zlib;
+    metadata.completed_at_utc = std::move(completed_at_utc);
+    metadata.artifact = std::move(artifact);
     return {
         .status = BuildMetadataStatus::Available,
         .metadata = std::move(metadata),
@@ -330,6 +444,40 @@ SpecForgeMetadataReadResult MissingMetadataResult()
     return {};
 }
 
+bool IsSchemaAllowedForRequirement(
+    int schema_version,
+    MetadataSchemaRequirement requirement)
+{
+    switch (requirement) {
+    case MetadataSchemaRequirement::Any:
+        return schema_version == kLegacySchemaVersion ||
+            schema_version == kSchema4Version ||
+            schema_version == kSchema5Version;
+    case MetadataSchemaRequirement::CurrentFilename:
+        // Production builds still emit schema 4 until the finalizer work
+        // lands, while the canonical filename also carries schema 5.
+        return schema_version == kSchema4Version ||
+            schema_version == kSchema5Version;
+    case MetadataSchemaRequirement::LegacyFilename:
+        return schema_version == kLegacySchemaVersion;
+    }
+    return false;
+}
+
+std::string SchemaRequirementDescription(
+    MetadataSchemaRequirement requirement)
+{
+    switch (requirement) {
+    case MetadataSchemaRequirement::Any:
+        return "schema 3, 4, or 5";
+    case MetadataSchemaRequirement::CurrentFilename:
+        return "schema 4 or 5";
+    case MetadataSchemaRequirement::LegacyFilename:
+        return "schema 3";
+    }
+    return "a supported schema";
+}
+
 bool PathExists(
     const std::filesystem::path& path,
     std::optional<std::string>& error)
@@ -381,7 +529,7 @@ namespace {
 SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
     const std::filesystem::path& path,
     const BuildIdentity& expected_identity,
-    std::optional<int> required_schema_version)
+    MetadataSchemaRequirement schema_requirement)
 {
     SpecForgeMetadataReadResult result;
     result.metadata_path = path;
@@ -420,19 +568,21 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadataForSchema(
     const std::optional<int> schema_version =
         ReadJsonIntMember(*root, "schema_version");
     if (!schema_version ||
-        (*schema_version != kLegacySchemaVersion &&
-         *schema_version != kCurrentSchemaVersion)) {
+        !IsSchemaAllowedForRequirement(
+            *schema_version,
+            MetadataSchemaRequirement::Any)) {
         result.startup_error = MetadataError(
             path,
-            "schema_version must be exactly 3 or 4");
+            "schema_version must be exactly 3, 4, or 5");
         return result;
     }
-    if (required_schema_version &&
-        *schema_version != *required_schema_version) {
+    if (!IsSchemaAllowedForRequirement(
+            *schema_version,
+            schema_requirement)) {
         result.startup_error = MetadataError(
             path,
-            "this metadata filename requires schema " +
-                std::to_string(*required_schema_version));
+            "this metadata filename requires " +
+                SchemaRequirementDescription(schema_requirement));
         return result;
     }
 
@@ -454,7 +604,7 @@ SpecForgeMetadataReadResult ReadSpecForgeMetadata(
     return ReadSpecForgeMetadataForSchema(
         path,
         expected_identity,
-        std::nullopt);
+        MetadataSchemaRequirement::Any);
 }
 
 SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
@@ -468,7 +618,7 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
         return ReadSpecForgeMetadataForSchema(
             current_path,
             expected_identity,
-            kCurrentSchemaVersion);
+            MetadataSchemaRequirement::CurrentFilename);
     }
     if (exists_error) {
         SpecForgeMetadataReadResult result;
@@ -483,7 +633,7 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
         return ReadSpecForgeMetadataForSchema(
             legacy_path,
             expected_identity,
-            kLegacySchemaVersion);
+            MetadataSchemaRequirement::LegacyFilename);
     }
     if (exists_error) {
         SpecForgeMetadataReadResult result;

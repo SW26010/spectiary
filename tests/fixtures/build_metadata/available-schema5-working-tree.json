@@ -1,0 +1,26 @@
+{
+  "schema_version": 5,
+  "product": {
+    "name": "SpecForge",
+    "version": "0.4.1"
+  },
+  "build": {
+    "source_mode": "working_tree",
+    "source_revision": null,
+    "configuration": "Debug",
+    "compiler_id": "MSVC",
+    "compiler_version": "19.44",
+    "cmake_version": "4.1.0",
+    "generator": "Ninja",
+    "target_architecture": "amd64",
+    "windows_sdk_version": null,
+    "dear_imgui": "1.92.5",
+    "implot": "0.17",
+    "zlib": "1.3.1",
+    "completed_at_utc": "2026-08-05T09:21:32Z"
+  },
+  "artifact": {
+    "file": "SpecForge.exe",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}
