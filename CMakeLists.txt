@@ -398,6 +398,15 @@ target_link_libraries(specforge_native PRIVATE
     ole32
     uuid
 )
+if(MSVC)
+    target_link_options(
+        specforge_native
+        PRIVATE
+            /Brepro
+            /INCREMENTAL:NO
+            "$<$<CONFIG:Debug>:/DEBUG:FASTLINK>"
+    )
+endif()
 
 add_executable(specforge_metadata_finalizer_tool
     src/app/specforge_metadata_finalizer_main.cpp

@@ -86,9 +86,9 @@ A failed finalizer makes the build fail rather than publishing metadata that the
 would reject; a later native relink can recreate the sidecar.
 
 Finalization occurs after `specforge_native` links and its post-build commands
-run. The post-build finalizer command declares the executable-adjacent sidecar
-as a byproduct. The `specforge_metadata` target depends on the native
-executable and finalizer tool and runs a freshness check. That check proves
+run. The `specforge_metadata` target declares the executable-adjacent sidecar
+as a byproduct, depends on the native executable and finalizer tool, and runs a
+freshness check. That check proves
 the sidecar is schema 5, has a completion timestamp, names `SpecForge.exe`,
 and records the current EXE hash;
 if any of those checks fail or the sidecar is missing, it invokes the finalizer

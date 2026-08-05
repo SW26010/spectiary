@@ -1006,6 +1006,15 @@ Assert-Contains $cmakeSource `
     'add_dependencies(specforge_native specforge_metadata_finalizer_tool)' `
     'CMake post-link finalizer dependency'
 Assert-Contains $cmakeSource `
+    '/Brepro' `
+    'CMake reproducible native link'
+Assert-Contains $cmakeSource `
+    '/INCREMENTAL:NO' `
+    'CMake non-incremental native link'
+Assert-Contains $cmakeSource `
+    '$<$<CONFIG:Debug>:/DEBUG:FASTLINK>' `
+    'CMake deterministic debug PDB link'
+Assert-Contains $cmakeSource `
     'add_custom_command(TARGET specforge_native PRE_LINK' `
     'CMake pre-link metadata invalidation'
 Assert-Contains $cmakeSource `
