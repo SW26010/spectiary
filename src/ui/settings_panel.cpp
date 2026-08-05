@@ -760,10 +760,12 @@ SettingsPanelUi::ArtifactIdentityForAbout()
     }
     else if (
         artifact_identity_->status == ArtifactIdentityStatus::Unavailable &&
-        std::chrono::steady_clock::now() >= artifact_identity_retry_at_) {
+        (artifact_identity_retry_requested_ ||
+         std::chrono::steady_clock::now() >= artifact_identity_retry_at_)) {
         artifact_identity_ = ArtifactIdentityResult{
             .status = ArtifactIdentityStatus::Pending,
         };
+        artifact_identity_retry_requested_ = false;
         StartArtifactIdentityComputation();
     }
     return *artifact_identity_;
@@ -778,6 +780,7 @@ void SettingsPanelUi::Open()
         if (artifact_identity_ &&
             artifact_identity_->status ==
                 ArtifactIdentityStatus::Unavailable) {
+            artifact_identity_retry_requested_ = true;
             artifact_identity_retry_at_ =
                 std::chrono::steady_clock::now();
         }

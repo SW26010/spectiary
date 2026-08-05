@@ -193,6 +193,7 @@ private:
     std::optional<ArtifactIdentityResult> artifact_identity_;
     std::unique_ptr<ArtifactIdentityComputation>
         artifact_identity_computation_;
+    bool artifact_identity_retry_requested_ = false;
     std::chrono::steady_clock::time_point artifact_identity_retry_at_ =
         std::chrono::steady_clock::time_point::max();
 
