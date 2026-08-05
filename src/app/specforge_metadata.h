@@ -3,8 +3,19 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace specforge {
+
+namespace metadata_contract {
+
+inline constexpr int kSchema5Version = 5;
+inline constexpr std::string_view kCanonicalExecutableFileName =
+    "SpecForge.exe";
+inline constexpr std::string_view kCanonicalMetadataFileName =
+    "specforge_metadata.json";
+
+}  // namespace metadata_contract
 
 enum class Distribution {
     Standalone,

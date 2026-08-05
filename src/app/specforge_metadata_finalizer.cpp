@@ -20,11 +20,6 @@
 namespace specforge {
 namespace {
 
-constexpr int kSchema5Version = 5;
-constexpr std::string_view kArtifactFileName = "SpecForge.exe";
-constexpr std::string_view kMetadataFileName = "specforge_metadata.json";
-constexpr std::size_t kHashBufferSize = 64U * 1024U;
-
 void SetError(std::string* error_message, std::string message)
 {
     if (error_message != nullptr) {
@@ -64,7 +59,10 @@ bool IsCanonicalExecutableFilename(const std::filesystem::path& path)
 {
 #ifdef _WIN32
     const std::wstring actual = path.filename().native();
-    constexpr std::wstring_view expected = L"SpecForge.exe";
+    const std::wstring expected = std::filesystem::path(
+        std::string(metadata_contract::kCanonicalExecutableFileName))
+        .filename()
+        .native();
     if (actual.size() != expected.size()) {
         return false;
     }
@@ -76,14 +74,16 @@ bool IsCanonicalExecutableFilename(const std::filesystem::path& path)
     }
     return true;
 #else
-    return path.filename() == std::filesystem::path("SpecForge.exe");
+    return path.filename() == std::filesystem::path(
+        std::string(metadata_contract::kCanonicalExecutableFileName));
 #endif
 }
 
 bool IsCanonicalMetadataFilename(const std::filesystem::path& path)
 {
     return path.filename() ==
-        std::filesystem::path(std::string(kMetadataFileName));
+        std::filesystem::path(std::string(
+            metadata_contract::kCanonicalMetadataFileName));
 }
 
 bool IsExpectedMissingPathError(const std::error_code& error)
@@ -97,7 +97,8 @@ std::filesystem::path MetadataPathForExecutable(
 {
     return (
         executable_path.parent_path() /
-        std::filesystem::path(std::string(kMetadataFileName)))
+        std::filesystem::path(std::string(
+            metadata_contract::kCanonicalMetadataFileName)))
         .lexically_normal();
 }
 
@@ -304,7 +305,8 @@ bool WriteSchema5Metadata(
     std::string&)
 {
     stream << "{\n"
-           << "  \"schema_version\": " << kSchema5Version << ",\n"
+           << "  \"schema_version\": " <<
+               metadata_contract::kSchema5Version << ",\n"
            << "  \"product\": {\n"
            << "    \"name\": ";
     WriteJsonString(stream, identity.product_name);
@@ -358,7 +360,9 @@ bool WriteSchema5Metadata(
     stream << "\n  },\n"
            << "  \"artifact\": {\n"
            << "    \"file\": ";
-    WriteJsonString(stream, kArtifactFileName);
+    WriteJsonString(
+        stream,
+        metadata_contract::kCanonicalExecutableFileName);
     stream << ",\n"
            << "    \"sha256\": ";
     WriteJsonString(stream, build.artifact->sha256);
@@ -448,7 +452,8 @@ bool FinalizeSpecForgeMetadata(
     BuildMetadata finalized_build = options.configured_build_metadata;
     finalized_build.completed_at_utc = completed_at_utc;
     finalized_build.artifact = BuildArtifactMetadata{
-        .file = std::string(kArtifactFileName),
+        .file = std::string(
+            metadata_contract::kCanonicalExecutableFileName),
         .sha256 = executable_sha256,
     };
     if (!metadata_validation::ValidateSchema5BuildMetadata(

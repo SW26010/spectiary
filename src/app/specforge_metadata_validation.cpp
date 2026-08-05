@@ -7,8 +7,6 @@
 namespace specforge::metadata_validation {
 namespace {
 
-constexpr std::string_view kArtifactFileName = "SpecForge.exe";
-
 void SetError(std::string* error_message, std::string message)
 {
     if (error_message != nullptr) {
@@ -224,7 +222,8 @@ bool ValidateSchema5BuildMetadata(
         return fail("completed_at_utc must be a valid UTC ISO 8601 timestamp");
     }
     if (!metadata.artifact ||
-        metadata.artifact->file != kArtifactFileName ||
+        metadata.artifact->file !=
+            metadata_contract::kCanonicalExecutableFileName ||
         !IsValidSha256(metadata.artifact->sha256)) {
         return fail("artifact must contain SpecForge.exe and a lowercase SHA-256 digest");
     }

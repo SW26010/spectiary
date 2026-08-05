@@ -16,9 +16,6 @@ namespace {
 
 constexpr int kLegacySchemaVersion = 3;
 constexpr int kSchema4Version = 4;
-constexpr int kSchema5Version = 5;
-constexpr std::string_view kMetadataFileName =
-    "specforge_metadata.json";
 constexpr std::string_view kLegacyMetadataFileName =
     "specforge_build_metadata.json";
 
@@ -156,7 +153,7 @@ BuildMetadataReadResult ReadBuildMetadata(
 
     std::optional<std::string> completed_at_utc;
     std::optional<BuildArtifactMetadata> artifact;
-    if (schema_version == kSchema5Version) {
+    if (schema_version == metadata_contract::kSchema5Version) {
         completed_at_utc =
             ReadRequiredMetadataString(*build, "completed_at_utc");
         const JsonValue* artifact_value =
@@ -196,7 +193,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.completed_at_utc = std::move(completed_at_utc);
     metadata.artifact = std::move(artifact);
 
-    if (schema_version == kSchema5Version) {
+    if (schema_version == metadata_contract::kSchema5Version) {
         const BuildIdentity actual_identity = {
             .product_name = *product_name,
             .specforge_version = *specforge_version,
@@ -330,12 +327,12 @@ bool IsSchemaAllowedForRequirement(
     case MetadataSchemaRequirement::Any:
         return schema_version == kLegacySchemaVersion ||
             schema_version == kSchema4Version ||
-            schema_version == kSchema5Version;
+            schema_version == metadata_contract::kSchema5Version;
     case MetadataSchemaRequirement::CurrentFilename:
         // Production builds still emit schema 4 until the finalizer work
         // lands, while the canonical filename also carries schema 5.
         return schema_version == kSchema4Version ||
-            schema_version == kSchema5Version;
+            schema_version == metadata_contract::kSchema5Version;
     case MetadataSchemaRequirement::LegacyFilename:
         return schema_version == kLegacySchemaVersion;
     }
@@ -490,7 +487,9 @@ SpecForgeMetadataReadResult ReadAdjacentSpecForgeMetadata(
     const BuildIdentity& expected_identity)
 {
     const std::filesystem::path current_path =
-        package_root / kMetadataFileName;
+        package_root /
+        std::filesystem::path(std::string(
+            metadata_contract::kCanonicalMetadataFileName));
     std::optional<std::string> exists_error;
     if (PathExists(current_path, exists_error)) {
         return ReadSpecForgeMetadataForSchema(
