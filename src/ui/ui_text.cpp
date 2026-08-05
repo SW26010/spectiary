@@ -299,12 +299,18 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Executable artifact identity",
         "可执行文件身份"},
-    UiTextEntry{"Metadata completed at", "元数据完成时间"},
-    UiTextEntry{"Metadata SHA-256", "元数据 SHA-256"},
-    UiTextEntry{"Executable SHA-256", "可执行文件 SHA-256"},
     UiTextEntry{
-        "Executable identity verified",
-        "可执行文件身份已验证"},
+        "Executable finalized at",
+        "可执行文件最终化时间"},
+    UiTextEntry{
+        "Recorded executable SHA-256",
+        "元数据记录的可执行文件 SHA-256"},
+    UiTextEntry{
+        "Current executable SHA-256",
+        "当前可执行文件 SHA-256"},
+    UiTextEntry{
+        "Executable matches metadata",
+        "可执行文件与元数据匹配"},
     UiTextEntry{
         "Executable identity unavailable",
         "可执行文件身份不可用"},

@@ -346,15 +346,15 @@ void TestShellAndSettingsMappingsAreExact()
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::MetadataCompletedAt) ==
-                "元数据完成时间" &&
+                "可执行文件最终化时间" &&
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::MetadataSha256) ==
-                "元数据 SHA-256" &&
+                "元数据记录的可执行文件 SHA-256" &&
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::ExecutableSha256) ==
-                "可执行文件 SHA-256",
+                "当前可执行文件 SHA-256",
         "artifact identity labels should be localized");
     Require(
         UiText(

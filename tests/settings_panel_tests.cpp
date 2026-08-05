@@ -887,7 +887,7 @@ void TestArtifactIdentityVerification()
     Require(
         specforge::FormatArtifactIdentityStatusForAbout(
             specforge::ArtifactIdentityStatus::Available) ==
-                "Executable identity verified" &&
+                "Executable matches metadata" &&
             specforge::FormatArtifactIdentityStatusForAbout(
                 specforge::ArtifactIdentityStatus::Unavailable) ==
                 "Executable identity unavailable" &&
