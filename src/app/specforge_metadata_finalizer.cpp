@@ -86,6 +86,12 @@ bool IsCanonicalMetadataFilename(const std::filesystem::path& path)
         std::filesystem::path(std::string(kMetadataFileName));
 }
 
+bool IsExpectedMissingPathError(const std::error_code& error)
+{
+    return error == std::errc::no_such_file_or_directory ||
+        error == std::errc::not_a_directory;
+}
+
 std::filesystem::path MetadataPathForExecutable(
     const std::filesystem::path& executable_path)
 {
@@ -104,6 +110,9 @@ std::optional<std::filesystem::path> NormalizePathForComparison(
         std::filesystem::weakly_canonical(path, error);
     if (!error) {
         return canonical;
+    }
+    if (!IsExpectedMissingPathError(error)) {
+        return std::nullopt;
     }
     error.clear();
     const std::filesystem::path absolute =
@@ -131,10 +140,18 @@ bool ValidatePaths(
         return false;
     }
     std::error_code equivalent_error;
-    if (std::filesystem::equivalent(
+    const bool equivalent = std::filesystem::equivalent(
             options.executable_path,
             options.metadata_path,
-            equivalent_error)) {
+            equivalent_error);
+    if (equivalent_error &&
+        !IsExpectedMissingPathError(equivalent_error)) {
+        error =
+            "could not compare executable and metadata paths safely: " +
+            equivalent_error.message();
+        return false;
+    }
+    if (!equivalent_error && equivalent) {
         error =
             "the executable and metadata paths must not refer to the same file";
         return false;
