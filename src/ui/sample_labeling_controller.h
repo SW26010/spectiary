@@ -147,6 +147,21 @@ public:
         std::filesystem::path output_path,
         bool metadata_clean);
     [[nodiscard]] SampleLabelingOperationResult ActivateTask(std::string_view task_id);
+    // Recover a temporary draft identified by a recovery projection. The
+    // source identity is part of the command so a stale projection cannot
+    // activate a task from a different source; the task is revalidated from
+    // the latest cache and receives the same edit leases as normal task
+    // activation.
+    [[nodiscard]] SampleLabelingOperationResult RecoverTemporaryTask(
+        std::string_view source_identity,
+        std::string_view task_id);
+    // Delete an identified temporary draft. A paused draft is revalidated and
+    // leased before its tombstone is committed; those leases are released
+    // only after the commit succeeds. The current temporary task may use the
+    // existing active-task deletion path.
+    [[nodiscard]] SampleLabelingOperationResult DeleteTemporaryTask(
+        std::string_view source_identity,
+        std::string_view task_id);
     [[nodiscard]] SampleLabelingOperationResult UpsertActiveLabel(SampleLabelDefinition label);
     [[nodiscard]] SampleLabelingOperationResult UpdateActiveLabel(
         int original_code,
@@ -291,6 +306,9 @@ private:
     [[nodiscard]] SampleLabelingOperationResult
         RejectLeaseAcquireStatus(
             ExclusiveFileLeaseAcquireStatus status) const;
+    void NoteTaskLeaseUnavailable(
+        std::string_view source_identity,
+        std::string_view task_id);
     [[nodiscard]] SampleLabelingOperationResult CompleteMutation(
         SampleLabelingTask* task,
         PersistencePolicy persistence,
@@ -381,6 +399,9 @@ private:
         PendingTaskUpsert(
             std::string_view source_identity,
             std::string_view task_id) const;
+    [[nodiscard]] bool PendingTaskExpectedAbsent(
+        std::string_view source_identity,
+        std::string_view task_id) const;
     void MarkSourceMetadataUpsert(
         std::string_view source_identity,
         const SourceState& state);

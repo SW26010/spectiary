@@ -1370,6 +1370,157 @@ SampleLabelingOperationResult SampleLabelingController::ActivateTask(std::string
 }
 
 SampleLabelingOperationResult
+SampleLabelingController::RecoverTemporaryTask(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    const std::string owned_task_id{task_id};
+    if (source_identity.empty() ||
+        owned_task_id.empty() ||
+        !active_source_identity_ ||
+        *active_source_identity_ != source_identity ||
+        ActiveSource() == nullptr) {
+        return RejectEditTargetChanged();
+    }
+    const SourceState* state = ActiveSource();
+    const auto match = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [&owned_task_id](const SampleLabelingTask& task) {
+            return task.task_id == owned_task_id;
+        });
+    if (match == state->tasks.end()) {
+        return RejectEditTargetChanged();
+    }
+    return ActivateTaskWithExpectation(
+        owned_task_id,
+        TaskActivationExpectation::TemporaryTask);
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::DeleteTemporaryTask(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    const std::string owned_task_id{task_id};
+    if (source_identity.empty() ||
+        owned_task_id.empty() ||
+        !active_source_identity_ ||
+        *active_source_identity_ != source_identity) {
+        return RejectEditTargetChanged();
+    }
+
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return RejectEditTargetChanged();
+    }
+    auto match = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [&owned_task_id](const SampleLabelingTask& task) {
+            return task.task_id == owned_task_id;
+        });
+    if (match == state->tasks.end() || match->output_path) {
+        return RejectEditTargetChanged();
+    }
+
+    if (state->active_task_id &&
+        *state->active_task_id == owned_task_id) {
+        return DeleteActiveTask();
+    }
+
+    if (!CanDeleteTask(*match)) {
+        return RejectOperation();
+    }
+
+    TaskActivationPreparation preparation =
+        PrepareTaskActivation(
+            source_identity,
+            *match,
+            state->sample_count,
+            true);
+    if (preparation.lease_status !=
+        ExclusiveFileLeaseAcquireStatus::Acquired) {
+        if (preparation.lease_status ==
+            ExclusiveFileLeaseAcquireStatus::Unavailable) {
+            NoteTaskLeaseUnavailable(
+                source_identity,
+                owned_task_id);
+        }
+        return RejectLeaseAcquireStatus(
+            preparation.lease_status);
+    }
+    if (preparation.refresh_status ==
+        TaskRefreshStatus::Missing) {
+        const bool cancel_pending_create =
+            PendingTaskExpectedAbsent(
+                source_identity,
+                owned_task_id);
+        ClearRecoveryTaskTrust(
+            source_identity,
+            owned_task_id);
+        lease_unavailable_task_targets_.erase(
+            TaskIdentityEditLeaseKey(
+                source_identity,
+                owned_task_id));
+        state->tasks.erase(match);
+        if (cancel_pending_create) {
+            MarkTaskTombstone(
+                source_identity,
+                *state,
+                owned_task_id);
+        }
+        BumpActiveSourceTasksGeneration();
+        Touch();
+        SampleLabelingOperationResult result =
+            RejectEditTargetChanged();
+        result.task_projection_changed = true;
+        return result;
+    }
+    if (preparation.refresh_status !=
+            TaskRefreshStatus::Ready ||
+        !preparation.task) {
+        return RejectEditTargetChanged();
+    }
+
+    const bool latest_task_is_formal =
+        preparation.task->output_path.has_value();
+    const bool task_projection_changed =
+        !SameTaskProjection(
+            *match,
+            *preparation.task);
+    *match = std::move(*preparation.task);
+    ClearRecoveryTaskTrust(
+        source_identity,
+        owned_task_id);
+    if (latest_task_is_formal) {
+        if (task_projection_changed) {
+            BumpActiveSourceTasksGeneration();
+        }
+        Touch();
+        SampleLabelingOperationResult result =
+            RejectEditTargetChanged();
+        result.task_projection_changed =
+            task_projection_changed;
+        return result;
+    }
+    state->tasks.erase(match);
+    MarkTaskTombstone(
+        source_identity,
+        *state,
+        owned_task_id);
+    SampleLabelingOperationResult result = CompleteMutation(
+        nullptr,
+        PersistencePolicy::FlushStateSave,
+        TaskProjectionEffect::Unchanged);
+    if (!result.state_saved) {
+        deferred_task_leases_.push_back(
+            std::move(preparation.leases));
+    }
+    return result;
+}
+
+SampleLabelingOperationResult
 SampleLabelingController::ActivateTaskWithExpectation(
     std::string_view task_id,
     TaskActivationExpectation expectation)
@@ -1384,6 +1535,10 @@ SampleLabelingController::ActivateTaskWithExpectation(
     });
     if (match == state->tasks.end()) {
         return RejectOperation();
+    }
+    if (expectation == TaskActivationExpectation::TemporaryTask &&
+        match->output_path) {
+        return RejectEditTargetChanged();
     }
     if (state->active_task_id && *state->active_task_id == match->task_id) {
         SampleLabelingOperationResult result = RejectOperation();
@@ -1408,18 +1563,9 @@ SampleLabelingController::ActivateTaskWithExpectation(
         if (active_source_identity_ &&
             preparation.lease_status ==
                 ExclusiveFileLeaseAcquireStatus::Unavailable) {
-            lease_unavailable_source_identities_.insert(
-                *active_source_identity_);
-            const std::string task_identity_key =
-                TaskIdentityEditLeaseKey(
-                    *active_source_identity_,
-                    match->task_id);
-            if (!task_identity_key.empty() &&
-                lease_unavailable_task_targets_.insert(
-                    task_identity_key)
-                    .second) {
-                Touch();
-            }
+            NoteTaskLeaseUnavailable(
+                *active_source_identity_,
+                match->task_id);
         }
         return RejectLeaseAcquireStatus(
             preparation.lease_status);
@@ -1904,6 +2050,24 @@ SampleLabelingController::RejectLeaseAcquireStatus(
             ExclusiveFileLeaseAcquireStatus::Unavailable
         ? RejectEditLeaseUnavailable()
         : RejectEditLeaseFailed();
+}
+
+void SampleLabelingController::NoteTaskLeaseUnavailable(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    lease_unavailable_source_identities_.insert(
+        std::string(source_identity));
+    const std::string task_identity_key =
+        TaskIdentityEditLeaseKey(
+            source_identity,
+            task_id);
+    if (!task_identity_key.empty() &&
+        lease_unavailable_task_targets_.insert(
+            task_identity_key)
+            .second) {
+        Touch();
+    }
 }
 
 SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
@@ -2629,6 +2793,16 @@ SampleLabelingController::PrepareTaskActivation(
     // avoid a second full-cache pass when no external result needs hydration.
     if (!structural_task->output_path) {
         preparation.task = *structural_task;
+        if (deferred != deferred_task_leases_.end()) {
+            if (const SampleLabelingTask* pending =
+                    PendingTaskUpsert(
+                        source_identity,
+                        known_task.task_id);
+                pending != nullptr &&
+                !pending->output_path) {
+                preparation.task = *pending;
+            }
+        }
         preparation.refresh_status = TaskRefreshStatus::Ready;
         adopt_deferred_leases();
         return preparation;
@@ -3424,6 +3598,17 @@ SampleLabelingController::PendingTaskUpsert(
     return task == source->second.task_upserts.end()
         ? nullptr
         : &*task;
+}
+
+bool SampleLabelingController::PendingTaskExpectedAbsent(
+    std::string_view source_identity,
+    std::string_view task_id) const
+{
+    const auto source = pending_cache_patch_.sources.find(
+        std::string(source_identity));
+    return source != pending_cache_patch_.sources.end() &&
+        source->second.task_ids_expected_absent.contains(
+            std::string(task_id));
 }
 
 void SampleLabelingController::MarkSourceMetadataUpsert(

@@ -2667,6 +2667,575 @@ void TestSameTargetLeaseRejectsSecondInstance()
         "second instance should acquire the released target");
 }
 
+void TestTemporaryDraftRecoveryRevalidatesSourceAndTask()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_activation");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "paused-draft",
+                        "Paused draft")
+                .accepted &&
+                seed.DeactivateActiveTask().state_saved,
+            "temporary recovery fixture should persist a paused draft");
+    }
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    const specforge::SampleLabelingOperationResult wrong_source =
+        stale.RecoverTemporaryTask(
+            "other-source",
+            "paused-draft");
+    Require(
+        !wrong_source.accepted &&
+            wrong_source.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            ActiveTask(stale) == nullptr,
+        "temporary recovery must reject a command from another source");
+
+    {
+        specforge::SampleLabelingController deleting(cache_path);
+        deleting.ActivateSource("shared-source", 3);
+        Require(
+            deleting.ActivateTask("paused-draft").accepted &&
+                deleting.DeleteActiveTask().state_saved,
+            "replacement instance should remove the stale recovery target");
+    }
+
+    const specforge::SampleLabelingOperationResult missing =
+        stale.RecoverTemporaryTask(
+            "shared-source",
+            "paused-draft");
+    Require(
+        !missing.accepted &&
+            missing.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            ActiveTask(stale) == nullptr &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->empty(),
+        "temporary recovery must revalidate the latest source/task identity before activation");
+
+    stale.ActivateSource("shared-source", 3);
+    Require(
+        stale.CreateTask(
+                    "paused-draft",
+                    "Paused draft")
+                .accepted &&
+            stale.DeactivateActiveTask().state_saved,
+        "temporary recovery fixture should recreate a paused draft");
+    const specforge::SampleLabelingOperationResult recovered =
+        stale.RecoverTemporaryTask(
+            "shared-source",
+            "paused-draft");
+    Require(
+        recovered.accepted &&
+            recovered.state_saved &&
+            ActiveTask(stale) != nullptr &&
+            ActiveTask(stale)->task_id == "paused-draft" &&
+            !ActiveTask(stale)->output_path,
+        "temporary recovery should acquire the normal edit lease and activate the latest draft");
+
+    specforge::SampleLabelingController blocked(cache_path);
+    blocked.ActivateSource("shared-source", 3);
+    const specforge::SampleLabelingOperationResult lease_conflict =
+        blocked.ActivateTask("paused-draft");
+    Require(
+        !lease_conflict.accepted &&
+            lease_conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "a recovered temporary draft should retain its normal edit lease");
+}
+
+void TestTemporaryDraftRecoveryDeletionKeepsLeaseUntilTombstoneCommits()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_delete");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "paused-draft",
+                        "Paused draft")
+                .accepted &&
+                seed.DeactivateActiveTask().state_saved,
+            "temporary deletion fixture should persist a paused draft");
+    }
+
+    specforge::SampleLabelingController deleting(cache_path);
+    specforge::SampleLabelingController stale_second(cache_path);
+    deleting.ActivateSource("shared-source", 3);
+    stale_second.ActivateSource("shared-source", 3);
+    const specforge::SampleLabelingRecoveryView recovery =
+        deleting.RecoveryView();
+    Require(
+        recovery.source_identity == "shared-source" &&
+            recovery.temporary_drafts.size() == 1 &&
+            recovery.temporary_drafts.front().task != nullptr,
+        "temporary deletion fixture should expose a borrowed recovery task");
+    specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        blocked_commit.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "temporary deletion fixture should hold the cache commit lock");
+
+    const specforge::SampleLabelingOperationResult pending =
+        deleting.DeleteTemporaryTask(
+            recovery.source_identity,
+            recovery.temporary_drafts.front().task->task_id);
+    Require(
+        pending.accepted &&
+            !pending.state_saved &&
+            ActiveTask(deleting) == nullptr &&
+            ActiveSourceTasks(deleting) != nullptr &&
+            ActiveSourceTasks(deleting)->empty(),
+        "temporary deletion should remove the local draft while retaining a pending tombstone");
+
+    const specforge::SampleLabelingOperationResult lease_conflict =
+        stale_second.ActivateTask("paused-draft");
+    Require(
+        !lease_conflict.accepted &&
+            lease_conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "a pending temporary tombstone must retain its edit lease");
+
+    blocked_commit.lease.Reset();
+    Require(
+        deleting.FlushStateCache(),
+        "temporary deletion tombstone should commit after the lock is released");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            "paused-draft") == nullptr,
+        "committed temporary deletion should persist a tombstone");
+
+    stale_second.ActivateSource("shared-source", 3);
+    Require(
+        ActiveSourceTasks(stale_second) != nullptr &&
+            ActiveSourceTasks(stale_second)->empty() &&
+            stale_second.StartOrResumeTemporaryTask().accepted,
+        "a released temporary deletion lease should allow the draft slot to be recreated");
+}
+
+void TestTemporaryDraftRecoveryCancelsPendingCreateBeforeFlush()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_pending_create_delete");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("shared-source", 3);
+
+    specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        blocked_commit.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "pending-create deletion fixture should hold the cache commit lock");
+    const specforge::SampleLabelingOperationResult created =
+        controller.CreateTask(
+            "pending-draft",
+            "Pending draft");
+    Require(
+        created.accepted &&
+            !created.state_saved &&
+            ActiveTask(controller) != nullptr,
+        "pending-create fixture should retain a locally created draft after a failed save");
+    const specforge::SampleLabelingOperationResult deactivated =
+        controller.DeactivateActiveTask();
+    Require(
+        deactivated.accepted &&
+            !deactivated.state_saved &&
+            ActiveTask(controller) == nullptr,
+        "pending-create fixture should retain its deferred lease after deactivation fails");
+
+    const specforge::SampleLabelingOperationResult deleted =
+        controller.DeleteTemporaryTask(
+            "shared-source",
+            "pending-draft");
+    Require(
+        !deleted.accepted &&
+            deleted.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            ActiveSourceTasks(controller) != nullptr &&
+            ActiveSourceTasks(controller)->empty(),
+        "deleting a not-yet-durable draft should remove only its local projection");
+
+    blocked_commit.lease.Reset();
+    Require(
+        controller.FlushStateCache(),
+        "pending-create deletion should flush after the cache lock is released");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    Require(
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            "pending-draft") == nullptr,
+        "deleting a failed create must not resurrect its expected-absent upsert");
+}
+
+void TestTemporaryDraftRecoveryMissingTargetDoesNotTombstoneRecreatedTask()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_missing_delete");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "missing-draft",
+                        "Missing draft")
+                .accepted &&
+                seed.DeactivateActiveTask().state_saved,
+            "missing-delete fixture should persist the initial draft");
+    }
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    {
+        specforge::SampleLabelingController deleting(cache_path);
+        deleting.ActivateSource("shared-source", 3);
+        Require(
+            deleting.ActivateTask("missing-draft").accepted &&
+                deleting.DeleteActiveTask().state_saved,
+            "missing-delete fixture should remove the original draft");
+    }
+    const specforge::SampleLabelingOperationResult missing =
+        stale.DeleteTemporaryTask(
+            "shared-source",
+            "missing-draft");
+    Require(
+        !missing.accepted &&
+            missing.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged,
+        "deleting a stale-missing target should only converge the local projection");
+
+    {
+        specforge::SampleLabelingController recreated(cache_path);
+        recreated.ActivateSource("shared-source", 3);
+        Require(
+            recreated.CreateTask(
+                            "missing-draft",
+                            "Recreated draft")
+                    .accepted &&
+                recreated.DeactivateActiveTask().state_saved,
+            "missing-delete fixture should recreate the same task ID");
+    }
+
+    const specforge::SourceCollectionIdentity identity{
+        .id = "shared-source",
+        .spectrum_count = 3};
+    stale.ActivateSource(identity);
+    Require(
+        stale.FlushStateCache(),
+        "ordinary source metadata refresh should flush any pending projection work");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const specforge::SampleLabelingTask* task =
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            "missing-draft");
+    Require(
+        task != nullptr &&
+            task->task_name == "Recreated draft",
+        "a stale-missing delete must not tombstone a same-ID task recreated later");
+}
+
+void TestTemporaryDraftRecoveryRetainsDeferredPendingEdit()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_pending_edit");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "paused-draft",
+                        "Paused draft")
+                .accepted &&
+                seed.UpsertActiveLabel(
+                           specforge::SampleLabelDefinition{
+                               5,
+                               "accepted",
+                               'a'})
+                    .changed &&
+                seed.FlushStateCache() &&
+                seed.DeactivateActiveTask().state_saved,
+            "pending-edit fixture should persist a clean paused draft");
+    }
+
+    specforge::SampleLabelingController editor(cache_path);
+    editor.ActivateSource("shared-source", 3);
+    Require(
+        editor.ActivateTask("paused-draft").accepted,
+        "pending-edit fixture should acquire the draft lease");
+    specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        blocked_commit.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "pending-edit fixture should hold the cache commit lock");
+    Require(
+        editor.AssignLabel(0, 5).write.changed &&
+            ActiveTask(editor) != nullptr &&
+            ActiveTask(editor)->values[0] == 5,
+        "pending-edit fixture should create a newer local edit");
+    Require(
+        editor.DeactivateActiveTask().accepted &&
+            editor.state_save_failed() &&
+            editor.state_save_pending() &&
+            ActiveTask(editor) == nullptr,
+        "pending-edit fixture should retain the newer edit after deactivation save fails");
+
+    const specforge::SampleLabelingOperationResult recovered =
+        editor.RecoverTemporaryTask(
+            "shared-source",
+            "paused-draft");
+    Require(
+        recovered.accepted &&
+            !recovered.state_saved &&
+            ActiveTask(editor) != nullptr &&
+            ActiveTask(editor)->values[0] == 5,
+        "recovering a deferred temporary draft must retain its pending local edit");
+    Require(
+        editor.AssignLabel(1, 5).write.changed &&
+            ActiveTask(editor) != nullptr &&
+            ActiveTask(editor)->values[0] == 5 &&
+            ActiveTask(editor)->values[1] == 5,
+        "editing after deferred temporary recovery must build on the retained pending value");
+
+    blocked_commit.lease.Reset();
+    Require(
+        editor.FlushStateCache(),
+        "pending temporary edit should flush after the cache lock is released");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const specforge::SampleLabelingTask* task =
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            "paused-draft");
+    Require(
+        task != nullptr &&
+            task->values.size() == 3 &&
+            task->values[0] == 5 &&
+            task->values[1] == 5,
+        "the recovered pending temporary edit must remain durable");
+}
+
+void TestTemporaryDraftRecoveryDeleteConvergesFormalizedProjection()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_formalized_delete");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "formalized.npy";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "formalized-draft",
+                        "Draft")
+                .accepted &&
+                seed.DeactivateActiveTask().state_saved,
+            "formalized-delete fixture should persist a temporary draft");
+    }
+
+    specforge::SampleLabelingController stale(cache_path);
+    stale.ActivateSource("shared-source", 3);
+    specforge::SampleLabelingController formalizer(cache_path);
+    formalizer.ActivateSource("shared-source", 3);
+    Require(
+        formalizer.ActivateTask("formalized-draft").accepted &&
+            formalizer
+                .SaveActiveTemporaryTaskToOutput(
+                    output_path,
+                    "Formalized")
+                .state_saved &&
+            formalizer.DeactivateActiveTask().state_saved,
+        "formalized-delete fixture should convert and release the latest task");
+
+    const specforge::SampleLabelingRecoveryView before =
+        stale.RecoveryView();
+    Require(
+        before.temporary_drafts.size() == 1 &&
+            before.temporary_drafts.front().task != nullptr,
+        "formalized-delete fixture should start with a stale temporary projection");
+    const specforge::SampleLabelingOperationResult deleted =
+        stale.DeleteTemporaryTask(
+            before.source_identity,
+            before.temporary_drafts.front().task->task_id);
+    Require(
+        !deleted.accepted &&
+            deleted.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            ActiveSourceTasks(stale) != nullptr &&
+            ActiveSourceTasks(stale)->size() == 1 &&
+            ActiveSourceTasks(stale)->front().output_path &&
+            stale.RecoveryView().temporary_drafts.empty(),
+        "deleting a task formalized elsewhere should converge the local projection instead of retaining a temporary ghost");
+}
+
+void TestTemporaryRecoveryRejectsAlreadyActiveFormalTask()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_active_formal");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "formalized.npy";
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("shared-source", 3);
+    Require(
+        controller.CreateTask(
+                        "draft",
+                        "Draft")
+                .accepted,
+        "active-formal recovery fixture should create a draft");
+    const specforge::SampleLabelingRecoveryView before =
+        controller.RecoveryView();
+    Require(
+        before.temporary_drafts.size() == 1 &&
+            before.temporary_drafts.front().task != nullptr,
+        "active-formal recovery fixture should expose the draft");
+    const std::string stale_task_id =
+        before.temporary_drafts.front().task->task_id;
+    Require(
+        controller.SaveActiveTemporaryTaskToOutput(
+                         output_path,
+                         "Formalized")
+            .output_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->output_path,
+        "active-formal recovery fixture should formalize the draft in place");
+
+    const specforge::SampleLabelingOperationResult recovered =
+        controller.RecoverTemporaryTask(
+            before.source_identity,
+            stale_task_id);
+    Require(
+        !recovered.accepted &&
+            recovered.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == stale_task_id &&
+            ActiveTask(controller)->output_path,
+        "an old temporary recovery command must reject an already-active formal task");
+}
+
+void TestTemporaryDraftDeleteIgnoresUnrelatedFailedActiveFormalTask()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_delete_active_formal_failure");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "formal.npy";
+    {
+        specforge::SampleLabelingController seed(cache_path);
+        CreateFormalTask(
+            seed,
+            "shared-source",
+            "formal-task",
+            output_path,
+            5);
+        seed.ActivateSource("shared-source", 3);
+        Require(
+            seed.CreateTask(
+                        "paused-draft",
+                        "Paused draft")
+                .accepted &&
+                seed.DeactivateActiveTask().state_saved,
+            "active-formal deletion fixture should persist a paused draft");
+    }
+
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource*) {
+            specforge::MarkSampleLabelTaskSaveFailed(
+                task,
+                "simulated output failure");
+            return specforge::SampleLabelTaskPersistResult{
+                .output_path_selected = task.output_path.has_value(),
+                .output_saved = false,
+                .message = "simulated output failure"};
+        });
+    controller.ActivateSource("shared-source", 3);
+    Require(
+        controller.ActivateTask("formal-task").accepted,
+        "active-formal deletion fixture should activate the formal task");
+    const specforge::SampleLabelingWriteOperationResult failed_write =
+        controller.AssignLabel(0, 5);
+    Require(
+        failed_write.write.changed &&
+            failed_write.operation.output_save_attempted &&
+            !failed_write.operation.output_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->save_state.kind ==
+                specforge::SampleLabelSaveStateKind::Failed,
+        "active-formal deletion fixture should leave the unrelated active task failed");
+
+    const specforge::SampleLabelingOperationResult deleted =
+        controller.DeleteTemporaryTask(
+            "shared-source",
+            "paused-draft");
+    Require(
+        deleted.accepted &&
+            deleted.state_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == "formal-task" &&
+            controller.RecoveryView().temporary_drafts.empty(),
+        "a failed active formal task must not block deletion of an independent paused draft");
+}
+
 void TestLeaseConflictTemporaryReopenPreservesPendingEdit()
 {
     const std::filesystem::path directory =
@@ -6201,6 +6770,14 @@ int main(int argc, char* argv[])
         TestStaleExplicitCreateDoesNotActivateFormalizedDraft();
         TestDuplicateTaskIdsFailClosedBeforeOutputPersistence();
         TestSameTargetLeaseRejectsSecondInstance();
+        TestTemporaryDraftRecoveryRevalidatesSourceAndTask();
+        TestTemporaryDraftRecoveryDeletionKeepsLeaseUntilTombstoneCommits();
+        TestTemporaryDraftRecoveryCancelsPendingCreateBeforeFlush();
+        TestTemporaryDraftRecoveryMissingTargetDoesNotTombstoneRecreatedTask();
+        TestTemporaryDraftRecoveryRetainsDeferredPendingEdit();
+        TestTemporaryDraftRecoveryDeleteConvergesFormalizedProjection();
+        TestTemporaryRecoveryRejectsAlreadyActiveFormalTask();
+        TestTemporaryDraftDeleteIgnoresUnrelatedFailedActiveFormalTask();
         TestLeaseConflictTemporaryReopenPreservesPendingEdit();
         TestFormalLeaseConflictDoesNotPoisonRecoverableDraft();
         TestRecoveryViewMarksOwnDraftLeaseConflictAndAdvancesRevision();
