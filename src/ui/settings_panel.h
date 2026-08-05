@@ -26,11 +26,26 @@ struct BuildSourceIdentity {
     std::string revision;
 };
 
+enum class ArtifactIdentityStatus {
+    Available,
+    Unavailable,
+    Mismatch,
+};
+
+struct ArtifactIdentityResult {
+    ArtifactIdentityStatus status =
+        ArtifactIdentityStatus::Unavailable;
+    std::string completed_at_utc;
+    std::string metadata_sha256;
+    std::string executable_sha256;
+};
+
 struct SettingsPanelEnvironment {
     std::string version;
     std::string distribution;
     std::string configuration;
     std::string target_architecture;
+    std::filesystem::path executable_path;
     BuildSourceIdentity build_source;
     BuildMetadataReadResult build_metadata;
     std::filesystem::path data_directory;
@@ -63,6 +78,14 @@ SettingsPanelEnvironmentForStartup(
     UiLanguage language = UiLanguage::English);
 [[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
     BuildMetadataStatus status,
+    UiLanguage language = UiLanguage::English);
+[[nodiscard]] ArtifactIdentityResult
+VerifyExecutableArtifactIdentity(
+    const std::filesystem::path& executable_path,
+    const BuildMetadataReadResult& build_metadata);
+[[nodiscard]] std::string_view
+FormatArtifactIdentityStatusForAbout(
+    ArtifactIdentityStatus status,
     UiLanguage language = UiLanguage::English);
 [[nodiscard]] std::string_view
 FormatProfileOutputDirectoryStatus(
@@ -119,6 +142,8 @@ private:
         const ApplicationSettingsView& settings,
         const SettingsPanelStatus& status);
     void RenderAbout(const ApplicationSettingsView& settings);
+    [[nodiscard]] const ArtifactIdentityResult&
+    ArtifactIdentityForAbout();
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);
@@ -159,6 +184,7 @@ private:
     std::optional<ApplicationSettingsIntent>
         application_settings_intent_;
     std::optional<int> ui_scale_draft_percentage_;
+    std::optional<ArtifactIdentityResult> artifact_identity_;
 
     friend struct SettingsPanelUiTestAccess;
 };

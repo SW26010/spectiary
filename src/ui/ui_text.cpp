@@ -296,6 +296,21 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Build details", "构建详情"},
     UiTextEntry{"Build metadata unavailable", "构建元数据不可用"},
     UiTextEntry{"Build metadata mismatch", "构建元数据不匹配"},
+    UiTextEntry{
+        "Executable artifact identity",
+        "可执行文件身份"},
+    UiTextEntry{"Metadata completed at", "元数据完成时间"},
+    UiTextEntry{"Metadata SHA-256", "元数据 SHA-256"},
+    UiTextEntry{"Executable SHA-256", "可执行文件 SHA-256"},
+    UiTextEntry{
+        "Executable identity verified",
+        "可执行文件身份已验证"},
+    UiTextEntry{
+        "Executable identity unavailable",
+        "可执行文件身份不可用"},
+    UiTextEntry{
+        "Executable identity mismatch",
+        "可执行文件身份不匹配"},
     UiTextEntry{"Compiler", "编译器"},
     UiTextEntry{"CMake", "CMake"},
     UiTextEntry{"Generator", "生成器"},

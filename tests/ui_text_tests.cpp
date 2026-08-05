@@ -341,6 +341,24 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
+            UiTextId::ArtifactIdentity) ==
+                "可执行文件身份" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::MetadataCompletedAt) ==
+                "元数据完成时间" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::MetadataSha256) ==
+                "元数据 SHA-256" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::ExecutableSha256) ==
+                "可执行文件 SHA-256",
+        "artifact identity labels should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
             UiTextId::EndUserLicenseAgreement) ==
             "最终用户许可协议" &&
             UiText(

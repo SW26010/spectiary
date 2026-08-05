@@ -107,7 +107,8 @@ std::string Schema5Metadata(
     std::string_view artifact_json =
         R"({"file":"SpecForge.exe","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})",
     bool include_completed_at = true,
-    bool include_artifact = true)
+    bool include_artifact = true,
+    std::string_view deployment = {})
 {
     if (completed_at_json.empty()) {
         completed_at_json = R"("2026-08-05T09:21:32Z")";
@@ -146,6 +147,11 @@ std::string Schema5Metadata(
         document +=
             ",\n  \"artifact\": " +
             std::string(artifact_json);
+    }
+    if (!deployment.empty()) {
+        document +=
+            ",\n  \"deployment\": " +
+            std::string(deployment);
     }
     document += "\n}\n";
     return document;
@@ -522,6 +528,30 @@ void TestBuildProvenanceDoesNotControlDeployment()
             unavailable.build_metadata.status ==
                 specforge::BuildMetadataStatus::Unavailable,
         "malformed build provenance must not discard valid storage selection");
+
+    WriteTextFile(
+        path,
+        Schema5Metadata(
+            {},
+            R"({"file":"SpecForge.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000"})",
+            true,
+            true,
+            portable_deployment));
+    const specforge::SpecForgeMetadataReadResult artifact_mismatch =
+        specforge::ReadSpecForgeMetadata(
+            path,
+            WorkingTreeIdentity());
+    Require(
+        !artifact_mismatch.startup_error &&
+            artifact_mismatch.deployment.storage_profile ==
+                specforge::StorageProfile::Portable &&
+            artifact_mismatch.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available &&
+            artifact_mismatch.build_metadata.metadata &&
+            artifact_mismatch.build_metadata.metadata->artifact &&
+            artifact_mismatch.build_metadata.metadata->artifact->sha256 ==
+                "0000000000000000000000000000000000000000000000000000000000000000",
+        "an artifact digest mismatch must not discard valid Portable deployment selection");
 
     std::filesystem::remove_all(root, cleanup_error);
 }

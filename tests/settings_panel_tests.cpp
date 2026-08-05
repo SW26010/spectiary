@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -124,6 +125,11 @@ struct SettingsPanelUiTestAccess {
                 settings,
                 status);
     }
+    static bool ArtifactIdentityEvaluated(
+        const SettingsPanelUi& panel)
+    {
+        return panel.artifact_identity_.has_value();
+    }
 };
 
 }  // namespace specforge
@@ -209,6 +215,21 @@ specforge::ApplicationSettingsView MakeSettingsView(
         .language = language,
         .profile_output_directory = "Data/logs",
         .default_profile_output_directory = "Data/logs",
+    };
+}
+
+specforge::BuildMetadataReadResult MakeArtifactMetadata(
+    std::string sha256)
+{
+    specforge::BuildMetadata metadata;
+    metadata.completed_at_utc = "2026-08-05T09:21:32Z";
+    metadata.artifact = specforge::BuildArtifactMetadata{
+        .file = "SpecForge.exe",
+        .sha256 = std::move(sha256),
+    };
+    return {
+        .status = specforge::BuildMetadataStatus::Available,
+        .metadata = std::move(metadata),
     };
 }
 
@@ -621,6 +642,9 @@ void TestDefaultEnvironmentDescribesThisBuild()
         environment.target_architecture == SPECFORGE_EXPECTED_ARCHITECTURE,
         "settings should expose the target architecture");
     Require(
+        !environment.executable_path.empty(),
+        "settings should expose the current executable path");
+    Require(
         environment.build_source.mode ==
             SPECFORGE_EXPECTED_SOURCE_MODE,
         "settings should expose the configured build source mode");
@@ -794,6 +818,146 @@ void TestBuildMetadataStatusPresentation()
             specforge::BuildMetadataStatus::Mismatch) ==
             "Build metadata mismatch",
         "mismatched metadata should render its fallback status");
+}
+
+void TestArtifactIdentityVerification()
+{
+    constexpr std::string_view kAbcSha256 =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-settings-artifact-identity";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path executable_path =
+        root / "SpecForge.exe";
+    {
+        std::ofstream stream(executable_path, std::ios::binary);
+        Require(stream.good(), "artifact identity fixture should open");
+        stream << "abc";
+    }
+
+    const specforge::ArtifactIdentityResult available =
+        specforge::VerifyExecutableArtifactIdentity(
+            executable_path,
+            MakeArtifactMetadata(std::string(kAbcSha256)));
+    Require(
+        available.status ==
+                specforge::ArtifactIdentityStatus::Available &&
+            available.completed_at_utc ==
+                "2026-08-05T09:21:32Z" &&
+            available.metadata_sha256 == kAbcSha256 &&
+            available.executable_sha256 == kAbcSha256,
+        "matching executable and metadata digests should be available");
+
+    const std::string mismatched_sha256(64, '0');
+    const specforge::ArtifactIdentityResult mismatch =
+        specforge::VerifyExecutableArtifactIdentity(
+            executable_path,
+            MakeArtifactMetadata(mismatched_sha256));
+    Require(
+        mismatch.status ==
+                specforge::ArtifactIdentityStatus::Mismatch &&
+            mismatch.metadata_sha256 == mismatched_sha256 &&
+            mismatch.executable_sha256 == kAbcSha256,
+        "different executable and metadata digests should be a mismatch");
+
+    const specforge::ArtifactIdentityResult unavailable =
+        specforge::VerifyExecutableArtifactIdentity(
+            root / "missing.exe",
+            MakeArtifactMetadata(std::string(kAbcSha256)));
+    Require(
+        unavailable.status ==
+                specforge::ArtifactIdentityStatus::Unavailable &&
+            unavailable.metadata_sha256 == kAbcSha256 &&
+            unavailable.executable_sha256.empty(),
+        "an unreadable executable should make identity unavailable");
+
+    const specforge::ArtifactIdentityResult missing_metadata =
+        specforge::VerifyExecutableArtifactIdentity(
+            executable_path,
+            {});
+    Require(
+        missing_metadata.status ==
+                specforge::ArtifactIdentityStatus::Unavailable &&
+            missing_metadata.metadata_sha256.empty(),
+        "missing metadata should make identity unavailable");
+
+    Require(
+        specforge::FormatArtifactIdentityStatusForAbout(
+            specforge::ArtifactIdentityStatus::Available) ==
+                "Executable identity verified" &&
+            specforge::FormatArtifactIdentityStatusForAbout(
+                specforge::ArtifactIdentityStatus::Unavailable) ==
+                "Executable identity unavailable" &&
+            specforge::FormatArtifactIdentityStatusForAbout(
+                specforge::ArtifactIdentityStatus::Mismatch,
+                specforge::UiLanguage::SimplifiedChinese) ==
+                "可执行文件身份不匹配",
+        "About should distinguish verified, unavailable, and mismatched identity");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestArtifactIdentityIsComputedOnAboutDemand()
+{
+    ScopedImGuiContext imgui;
+    constexpr std::string_view kAbcSha256 =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-settings-artifact-identity-demand";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path executable_path =
+        root / "SpecForge.exe";
+    {
+        std::ofstream stream(executable_path, std::ios::binary);
+        Require(stream.good(), "on-demand identity fixture should open");
+        stream << "abc";
+    }
+
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .distribution = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "amd64",
+        .executable_path = executable_path,
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
+        .build_metadata = MakeArtifactMetadata(
+            std::string(kAbcSha256)),
+        .data_directory = "Data",
+    });
+    panel.Open();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    ImGui::NewFrame();
+    panel.Render(MakeSettingsView());
+    ImGui::EndFrame();
+    Require(
+        !specforge::SettingsPanelUiTestAccess::
+            ArtifactIdentityEvaluated(panel),
+        "non-About rendering should not hash the executable");
+
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    ImGui::NewFrame();
+    panel.Render(MakeSettingsView());
+    ImGui::EndFrame();
+    Require(
+        specforge::SettingsPanelUiTestAccess::
+            ArtifactIdentityEvaluated(panel),
+        "About rendering should evaluate artifact identity on demand");
+
+    std::filesystem::remove_all(root, cleanup_error);
 }
 
 void TestOpenIsIdempotent()
@@ -1885,6 +2049,8 @@ int main()
         TestHeadBuildSourcePresentation();
         TestChineseBuildAndDiagnosticsPresentation();
     TestBuildMetadataStatusPresentation();
+    TestArtifactIdentityVerification();
+    TestArtifactIdentityIsComputedOnAboutDemand();
     TestOpenIsIdempotent();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();

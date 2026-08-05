@@ -2,6 +2,8 @@
 
 #include "app/embedded_legal_documents.h"
 #include "app/runtime_paths.h"
+#include "app/specforge_metadata_validation.h"
+#include "domain/stable_sha256.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
 #include "ui/ui_scale_settings.h"
@@ -15,6 +17,8 @@
 #include <array>
 #include <cstdio>
 #include <cstdint>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -334,6 +338,41 @@ void RenderReadOnlyValue(const char* label, const char* value)
     ImGui::TextUnformatted(value);
 }
 
+std::optional<std::string> ComputeFileSha256(
+    const std::filesystem::path& path)
+{
+    constexpr std::size_t kHashBufferSize = 64U * 1024U;
+    try {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream.good()) {
+            return std::nullopt;
+        }
+
+        StableSha256 sha256;
+        std::array<char, kHashBufferSize> buffer = {};
+        for (;;) {
+            stream.read(
+                buffer.data(),
+                static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize read_count = stream.gcount();
+            if (read_count > 0) {
+                sha256.Append(std::string_view(
+                    buffer.data(),
+                    static_cast<std::size_t>(read_count)));
+            }
+            if (stream.eof()) {
+                break;
+            }
+            if (stream.fail()) {
+                return std::nullopt;
+            }
+        }
+        return sha256.FinishHex();
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 }  // namespace
 
 SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
@@ -346,6 +385,7 @@ SettingsPanelEnvironment SettingsPanelEnvironmentForStartup(
             DistributionName(paths.distribution),
         .configuration = build_info::kBuildConfiguration,
         .target_architecture = build_info::kTargetArchitecture,
+        .executable_path = paths.executable_path,
         .build_source = {
             .mode = build_info::kBuildSourceMode,
             .revision = build_info::kBuildSourceRevision,
@@ -402,6 +442,64 @@ std::string_view FormatBuildMetadataStatusForAbout(
     return UiText(
         language,
         UiTextId::BuildMetadataUnavailable);
+}
+
+ArtifactIdentityResult VerifyExecutableArtifactIdentity(
+    const std::filesystem::path& executable_path,
+    const BuildMetadataReadResult& build_metadata)
+{
+    ArtifactIdentityResult result;
+    if (build_metadata.status != BuildMetadataStatus::Available ||
+        !build_metadata.metadata) {
+        return result;
+    }
+
+    const BuildMetadata& metadata = *build_metadata.metadata;
+    if (!metadata.completed_at_utc || !metadata.artifact ||
+        !metadata_validation::IsValidUtcTimestamp(
+            *metadata.completed_at_utc) ||
+        metadata.artifact->file != "SpecForge.exe" ||
+        !metadata_validation::IsValidSha256(
+            metadata.artifact->sha256)) {
+        return result;
+    }
+
+    result.completed_at_utc = *metadata.completed_at_utc;
+    result.metadata_sha256 = metadata.artifact->sha256;
+    const std::optional<std::string> executable_sha256 =
+        ComputeFileSha256(executable_path);
+    if (!executable_sha256) {
+        return result;
+    }
+
+    result.executable_sha256 = *executable_sha256;
+    result.status = result.metadata_sha256 == result.executable_sha256
+        ? ArtifactIdentityStatus::Available
+        : ArtifactIdentityStatus::Mismatch;
+    return result;
+}
+
+std::string_view FormatArtifactIdentityStatusForAbout(
+    ArtifactIdentityStatus status,
+    UiLanguage language)
+{
+    switch (status) {
+    case ArtifactIdentityStatus::Available:
+        return UiText(
+            language,
+            UiTextId::ArtifactIdentityVerified);
+    case ArtifactIdentityStatus::Unavailable:
+        return UiText(
+            language,
+            UiTextId::ArtifactIdentityUnavailable);
+    case ArtifactIdentityStatus::Mismatch:
+        return UiText(
+            language,
+            UiTextId::ArtifactIdentityMismatch);
+    }
+    return UiText(
+        language,
+        UiTextId::ArtifactIdentityUnavailable);
 }
 
 std::string_view FormatProfileOutputDirectoryStatus(
@@ -594,6 +692,17 @@ float SettingsPanelUi::VisibleLabelWidth(std::string_view label)
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
     : environment_(std::move(environment))
 {
+}
+
+const ArtifactIdentityResult&
+SettingsPanelUi::ArtifactIdentityForAbout()
+{
+    if (!artifact_identity_) {
+        artifact_identity_ = VerifyExecutableArtifactIdentity(
+            environment_.executable_path,
+            environment_.build_metadata);
+    }
+    return *artifact_identity_;
 }
 
 void SettingsPanelUi::Open()
@@ -1790,6 +1899,38 @@ void SettingsPanelUi::RenderAbout(
                       UiTextId::NotReported)
                       .data());
     }
+
+    ImGui::Spacing();
+    const std::string artifact_identity_heading = StableUiLabel(
+        language,
+        UiTextId::ArtifactIdentity,
+        "SpecForgeArtifactIdentity");
+    ImGui::SeparatorText(artifact_identity_heading.c_str());
+    const ArtifactIdentityResult& artifact_identity =
+        ArtifactIdentityForAbout();
+    if (!artifact_identity.completed_at_utc.empty()) {
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::MetadataCompletedAt).data(),
+            artifact_identity.completed_at_utc.c_str());
+    }
+    if (!artifact_identity.metadata_sha256.empty()) {
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::MetadataSha256).data(),
+            artifact_identity.metadata_sha256.c_str());
+    }
+    if (!artifact_identity.executable_sha256.empty()) {
+        RenderReadOnlyValue(
+            UiText(language, UiTextId::ExecutableSha256).data(),
+            artifact_identity.executable_sha256.c_str());
+    }
+    const std::string_view artifact_identity_status =
+        FormatArtifactIdentityStatusForAbout(
+            artifact_identity.status,
+            language);
+    ImGui::TextDisabled(
+        "%.*s",
+        static_cast<int>(artifact_identity_status.size()),
+        artifact_identity_status.data());
 
     ImGui::Spacing();
     const std::string third_party_heading =
