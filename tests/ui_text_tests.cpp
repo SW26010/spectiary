@@ -278,8 +278,20 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::OpenExternalSourceAsFolder) ==
-            "将外部打开的 FITS 作为文件夹源打开",
-        "external FITS folder preference should be localized");
+            "将外部打开的 CSV 与 FITS 文件族作为文件夹源打开",
+        "external CSV/FITS folder preference should be localized");
+    const std::string_view external_source_description =
+        UiText(
+            UiLanguage::English,
+            UiTextId::OpenExternalSourceAsFolderDescription);
+    Require(
+        external_source_description.find("CSV") !=
+                std::string_view::npos &&
+            external_source_description.find("FITS-family") !=
+                std::string_view::npos &&
+            external_source_description.find("automation") !=
+                std::string_view::npos,
+        "external source preference description should name CSV, FITS-family, and automation scope");
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
@@ -290,7 +302,7 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::ExternalSourceSettingsSaveError) ==
-            "无法保存外部 FITS 文件夹偏好，仍继续使用此前的行为。",
+            "无法保存外部源文件夹偏好，仍继续使用此前的行为。",
         "external source persistence feedback should be localized");
     Require(
         UiText(

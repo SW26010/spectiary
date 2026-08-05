@@ -9,6 +9,8 @@
 #include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
+#include <imgui_internal.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -81,6 +83,16 @@ struct ShellUiTestAccess {
         return shell.ApplyApplicationSettingsIntent(
             std::move(intent),
             {});
+    }
+
+    static void RenderMainMenuBar(
+        ShellUi& shell,
+        const ShellStatus& status,
+        const SourceCollectionPathPicker& choose_source_file)
+    {
+        shell.RenderMainMenuBar(
+            status,
+            choose_source_file);
     }
 
     static void Drain(
@@ -305,6 +317,68 @@ void Require(bool condition, std::string_view message)
     if (!condition) {
         throw std::runtime_error(std::string(message));
     }
+}
+
+class ScopedImGuiContext {
+public:
+    ScopedImGuiContext()
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        unsigned char* font_pixels = nullptr;
+        int font_width = 0;
+        int font_height = 0;
+        io.Fonts->GetTexDataAsRGBA32(
+            &font_pixels,
+            &font_width,
+            &font_height);
+        Require(
+            font_pixels != nullptr &&
+                font_width > 0 &&
+                font_height > 0,
+            "shell menu test font atlas should build");
+    }
+
+    ~ScopedImGuiContext()
+    {
+        ImGui::DestroyContext();
+    }
+
+    ScopedImGuiContext(const ScopedImGuiContext&) = delete;
+    ScopedImGuiContext& operator=(const ScopedImGuiContext&) = delete;
+};
+
+constexpr const char* kFileMenuTestHost =
+    "File menu test host###SpecForgeFileMenuTestHost";
+
+void RenderShellFileMenuFrame(
+    specforge::ShellUi& shell,
+    const specforge::SourceCollectionPathPicker& choose_source_file)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = ImVec2(900.0f, 700.0f);
+    ImGui::NewFrame();
+    constexpr ImGuiWindowFlags kHostFlags =
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_MenuBar;
+    ImGui::SetNextWindowPos(
+        ImVec2(20.0f, 20.0f),
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        ImVec2(700.0f, 500.0f),
+        ImGuiCond_Always);
+    ImGui::Begin(kFileMenuTestHost, nullptr, kHostFlags);
+    specforge::ShellUiTestAccess::RenderMainMenuBar(
+        shell,
+        specforge::ShellStatus{},
+        choose_source_file);
+    ImGui::End();
+    ImGui::EndFrame();
 }
 
 template <typename Future, typename CancellationCheck>
@@ -3379,7 +3453,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
         "the Chinese shutdown warning should omit successful owners");
 }
 
-void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
+void TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect()
 {
     using Access = specforge::ShellUiTestAccess;
     const std::filesystem::path folder =
@@ -3503,6 +3577,16 @@ void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
             !external_reports.front().attempts.front().preparation_rounds.front().context_reused,
         "preferred FITS preparation should report that its rebuilt context was not reused");
 
+    const std::filesystem::path csv_folder =
+        UniqueTempPath("_external_csv_folder");
+    std::filesystem::remove_all(csv_folder);
+    std::filesystem::create_directory(csv_folder);
+    WriteFixture(csv_folder / "first.csv");
+    const std::filesystem::path csv_preferred =
+        csv_folder / "selected.CSV";
+    WriteFixture(csv_preferred);
+    WriteFixture(csv_folder / "zzz.fits");
+
     shell->OpenExternalSource(folder / "missing.fits");
     Require(
         DrainAllSourceLoads(*shell),
@@ -3563,8 +3647,196 @@ void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
             automation_snapshot->collection.current_index == 0,
         "automation FITS open should remain a single-file source");
 
+    folder_decode_indices.clear();
+    shell->OpenExternalSource(csv_preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "external CSV startup source should finish loading");
+    const specforge::SpectrumSnapshotHandle external_csv_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        external_csv_snapshot &&
+            external_csv_snapshot->source.path == csv_folder &&
+            folder_decode_indices.size() == 1 &&
+            folder_decode_indices.front() == 1 &&
+            external_csv_snapshot->collection.current_index == 1,
+        "external CSV startup should retain the requested non-first folder member");
+
+    shell->OpenExternalSource(csv_folder / "missing.CSV");
+    Require(
+        DrainAllSourceLoads(*shell),
+        "missing external CSV startup should report after background resolution");
+    const std::string missing_csv_error(Access::LoadError(*shell));
+    Require(
+        missing_csv_error.find("does not exist") != std::string::npos &&
+            missing_csv_error.find("missing.CSV") != std::string::npos,
+        "missing external CSV startup target should retain a clear diagnostic");
+
+    Require(
+        Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalSourceAsFolder(false))
+            .applied(),
+        "external CSV folder setting should be disableable");
+    shell->OpenExternalSource(csv_preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "disabled external CSV startup should finish loading");
+    const specforge::SpectrumSnapshotHandle disabled_csv_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        disabled_csv_snapshot &&
+            disabled_csv_snapshot->source.path == csv_preferred &&
+            disabled_csv_snapshot->collection.current_index == 0,
+        "disabled external CSV startup should retain single-file semantics");
+
+    Require(
+        Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalSourceAsFolder(true))
+            .applied(),
+        "external CSV folder setting should be re-enabled for origin checks");
+
+    folder_decode_indices.clear();
+    bool file_picker_called = false;
+    {
+        ScopedImGuiContext menu_context;
+        const specforge::SourceCollectionPathPicker choose_source_file =
+            [&]() -> std::optional<std::filesystem::path> {
+                file_picker_called = true;
+                return csv_preferred;
+            };
+        RenderShellFileMenuFrame(*shell, choose_source_file);
+        ImGuiWindow* host_window = ImGui::FindWindowByName(
+            kFileMenuTestHost);
+        Require(
+            host_window != nullptr,
+            "File menu test should render its host window");
+        bool file_menu_hovered = false;
+        ImVec2 file_menu_click_pos;
+        for (float y = 20.0f;
+             y <= 70.0f && !file_menu_hovered;
+             y += 2.0f) {
+            for (float x = 20.0f;
+                 x <= 220.0f && !file_menu_hovered;
+                 x += 4.0f) {
+                ImGui::GetIO().AddMousePosEvent(x, y);
+                RenderShellFileMenuFrame(
+                    *shell,
+                    choose_source_file);
+                file_menu_hovered =
+                    GImGui->HoveredWindow == host_window &&
+                    GImGui->HoveredId != 0;
+                if (file_menu_hovered) {
+                    file_menu_click_pos = ImVec2(x, y);
+                }
+            }
+        }
+        Require(
+            file_menu_hovered,
+            "File menu test should hover the File menu item");
+
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        ImGui::GetIO().AddMousePosEvent(
+            file_menu_click_pos.x,
+            file_menu_click_pos.y);
+        RenderShellFileMenuFrame(*shell, choose_source_file);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        RenderShellFileMenuFrame(*shell, choose_source_file);
+
+        Require(
+            !GImGui->OpenPopupStack.empty(),
+            "File menu test should open the File menu popup");
+        ImGuiWindow* file_popup =
+            GImGui->OpenPopupStack.back().Window;
+        Require(
+            file_popup != nullptr,
+            "File menu test should expose its popup window");
+        bool open_file_hovered = false;
+        ImVec2 open_file_click_pos;
+        for (float y = file_popup->Pos.y;
+             y <= file_popup->Pos.y + 42.0f && !open_file_hovered;
+             y += 2.0f) {
+            for (float x = file_popup->Pos.x;
+                 x <= file_popup->Pos.x + file_popup->Size.x &&
+                     !open_file_hovered;
+                 x += 4.0f) {
+                ImGui::GetIO().AddMousePosEvent(x, y);
+                RenderShellFileMenuFrame(
+                    *shell,
+                    choose_source_file);
+                open_file_hovered =
+                    GImGui->HoveredWindow == file_popup &&
+                    GImGui->HoveredId != 0;
+                if (open_file_hovered) {
+                    open_file_click_pos = ImVec2(x, y);
+                }
+            }
+        }
+        Require(
+            open_file_hovered,
+            "File menu test should hover the Open File menu item");
+
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        ImGui::GetIO().AddMousePosEvent(
+            open_file_click_pos.x,
+            open_file_click_pos.y);
+        RenderShellFileMenuFrame(*shell, choose_source_file);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        RenderShellFileMenuFrame(*shell, choose_source_file);
+    }
+    Require(
+        file_picker_called,
+        "File > Open File should invoke the injected file picker");
+    Require(
+        DrainAllSourceLoads(*shell),
+        "File > Open File CSV should finish loading");
+    const specforge::SpectrumSnapshotHandle file_menu_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        file_menu_snapshot &&
+            file_menu_snapshot->source.path == csv_preferred &&
+            file_menu_snapshot->collection.current_index == 0 &&
+            folder_decode_indices.empty(),
+        "File > Open File CSV should use an in-app single-file source despite the external folder preference");
+
+    shell->OpenSource(csv_preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "in-app CSV open should finish loading");
+    const specforge::SpectrumSnapshotHandle in_app_csv_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        in_app_csv_snapshot &&
+            in_app_csv_snapshot->source.path == csv_preferred &&
+            in_app_csv_snapshot->collection.current_index == 0,
+        "in-app CSV open should remain a single-file source");
+
+    (void)shell->OpenSourceForAutomation(csv_preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "automation CSV open should finish loading");
+    const specforge::SpectrumSnapshotHandle automation_csv_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        automation_csv_snapshot &&
+            automation_csv_snapshot->source.path == csv_preferred &&
+            automation_csv_snapshot->collection.current_index == 0,
+        "automation CSV open should remain a single-file source");
+
     shell.reset();
     std::filesystem::remove_all(folder);
+    std::filesystem::remove_all(csv_folder);
 }
 
 void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
@@ -5480,7 +5752,7 @@ int main()
         TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter();
         TestSourceOpenResolutionRunsOnWorkerAndCancels();
         TestExternalStartupPreservesDeferredRestoreAnnotationContext();
-        TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect();
+        TestExternalStartupPreservesPreferredMemberForFitsAndCsvAndOtherOriginsStayDirect();
         TestFailedExplicitOpenProducesTerminalSourceLoadReport();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();
         TestAcceptedNavigationUsesLatestMatchingRawKeyInput();

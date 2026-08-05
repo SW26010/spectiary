@@ -345,11 +345,16 @@ private:
         SourceCollectionSession session,
         SourceCollectionLoadQueue source_load_queue);
     void OpenSourceFromFilePicker();
+    void OpenSourceFromFilePicker(
+        const SourceCollectionPathPicker& choose_source_file);
     void OpenSourceFromFolderPicker();
     void OpenAnnotationFromFilePicker();
     void RenderDockHost(const ShellStatus& status);
     void RenderImmersivePlot(const ShellStatus& status);
     void RenderMainMenuBar(const ShellStatus& status);
+    void RenderMainMenuBar(
+        const ShellStatus& status,
+        const SourceCollectionPathPicker& choose_source_file);
     void RenderFilesPanel(
         bool panel_open,
         UiLanguage language);

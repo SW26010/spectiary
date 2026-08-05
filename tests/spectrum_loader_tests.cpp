@@ -480,6 +480,18 @@ std::string_view MetadataValue(const SpectrumSnapshotHandle& snapshot, std::stri
     return {};
 }
 
+std::string_view DiagnosticMetadataValue(
+    const specforge::SpectrumDiagnostic& diagnostic,
+    std::string_view key)
+{
+    for (const specforge::SpectrumMetadataEntry& entry : diagnostic.metadata) {
+        if (entry.key == key) {
+            return entry.value;
+        }
+    }
+    return {};
+}
+
 double MetadataDouble(const SpectrumSnapshotHandle& snapshot, std::string_view key)
 {
     const std::string_view value = MetadataValue(snapshot, key);
@@ -1510,6 +1522,18 @@ void TestLoadsFolderCollectionWithWarnings()
         stream << "wav,flux\n5000,1\n5001,2\n";
         Require(stream.good(), "could not write folder CSV fixture");
     }
+    {
+        std::ofstream stream(path / "C.CSV");
+        Require(stream.good(), "could not open uppercase folder CSV fixture");
+        stream << "wav,flux\n5002,3\n5003,4\n";
+        Require(stream.good(), "could not write uppercase folder CSV fixture");
+    }
+    {
+        std::ofstream stream(path / "nested" / "inside.csv");
+        Require(stream.good(), "could not open nested folder CSV fixture");
+        stream << "wav,flux\n5004,5\n5005,6\n";
+        Require(stream.good(), "could not write nested folder CSV fixture");
+    }
     WriteFitsScalarTable(path / "b.fits");
     {
         std::ofstream stream(path / "notes.txt");
@@ -1520,14 +1544,40 @@ void TestLoadsFolderCollectionWithWarnings()
 
     const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     Require(first->capabilities.can_plot_current_spectrum, "folder CSV/FITS collection should be plottable");
-    Require(first->collection.spectrum_count == 2, "folder should count CSV/FITS spectra only");
+    Require(first->collection.spectrum_count == 3, "folder should count first-level CSV/FITS spectra only");
     Require(first->collection.current_index == 0, "folder should select first spectrum");
     Require(first->collection.can_move_next, "folder should allow next file navigation");
     Require(MetadataValue(first, "source_type") == "folder_collection", "folder collection source type should come from domain");
     Require(MetadataValue(first, "format") == "folder", "folder collection format should come from domain");
-    Require(HasDiagnosticCode(first, SpectrumDiagnosticCode::UnsupportedFormat), "folder warnings should be reported");
+    const auto mixed_format_diagnostic = std::find_if(
+        first->diagnostics.begin(),
+        first->diagnostics.end(),
+        [](const specforge::SpectrumDiagnostic& diagnostic) {
+            return diagnostic.code ==
+                       SpectrumDiagnosticCode::UnsupportedFormat &&
+                   diagnostic.message.find(
+                       "Folder mixes CSV and FITS spectra") !=
+                       std::string::npos;
+        });
+    Require(
+        mixed_format_diagnostic != first->diagnostics.end(),
+        "folder warnings should include a distinct mixed CSV/FITS diagnostic");
+    Require(
+        DiagnosticMetadataValue(
+            *mixed_format_diagnostic,
+            "csv_file_count") == "2" &&
+            DiagnosticMetadataValue(
+                *mixed_format_diagnostic,
+                "fits_file_count") == "1",
+        "mixed CSV/FITS diagnostic should retain both format counts");
 
     const specforge::SourceCollectionFolderListing listing = specforge::ScanSourceCollectionFolder(path);
+    Require(
+        listing.csv_count == 2 &&
+            listing.fits_count == 1 &&
+            listing.ignored_directory_count == 1 &&
+            listing.ignored_file_count == 1,
+        "folder scan should classify uppercase CSV, FITS, subfolders, and unrelated files");
     Require(
         std::all_of(listing.spectra.begin(), listing.spectra.end(), [](const auto& sample) {
             return !sample.stat_fingerprint.empty();
@@ -1563,14 +1613,15 @@ void TestLoadsFolderCollectionWithWarnings()
         context.identity.source_fingerprint == specforge::VersionedSha256Digest(legacy_fingerprint),
         "streamed folder fingerprints must preserve the exact legacy identity semantics");
     const std::string legacy_identity =
-        "name=" + PathToUtf8(path.filename()) + "|fingerprint=" + legacy_fingerprint + "|count=2";
+        "name=" + PathToUtf8(path.filename()) + "|fingerprint=" + legacy_fingerprint + "|count=3";
     Require(
         context.identity.id == specforge::NormalizePersistedSourceCollectionIdentity(legacy_identity),
         "legacy folder cache identities should migrate to the same fixed-size key");
     Require(context.identity.id.size() == 74, "versioned SHA-256 identities should remain fixed-size");
-    Require(context.manifest.sample_names.size() == 2, "source context should build folder sample names in the same pass");
+    Require(context.manifest.sample_names.size() == 3, "source context should build folder sample names in the same pass");
     Require(context.manifest.sample_names[0] == "a.csv", "folder source context should preserve stable filename order");
     Require(context.manifest.sample_names[1] == "b.fits", "folder source context should include FITS sample names");
+    Require(context.manifest.sample_names[2] == "C.CSV", "folder source context should retain uppercase CSV in stable order");
     Require(
         specforge::BuildSourceCollectionIdentity(*first).id == context.identity.id,
         "combined source context must preserve the existing folder identity format");
@@ -1580,6 +1631,10 @@ void TestLoadsFolderCollectionWithWarnings()
     Require(second->collection.current_index == 1, "folder should select second spectrum");
     Require(second->collection.can_move_previous, "folder should allow previous file navigation");
     Require(second->current_spectrum.point_count == 2, "folder FITS file should preserve selected file loader behavior");
+
+    const SpectrumSnapshotHandle third = specforge::LoadSpectrumSnapshotFromPath(path, 2);
+    Require(third->capabilities.can_plot_current_spectrum, "folder uppercase CSV should be plottable");
+    Require(third->collection.current_index == 2, "folder should select the third spectrum by stable order");
 
     std::filesystem::remove_all(path, error);
 }

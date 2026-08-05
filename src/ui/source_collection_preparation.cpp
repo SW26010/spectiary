@@ -410,7 +410,7 @@ public:
         }
         if (resolved_request.preferred_member_path) {
             throw std::runtime_error(
-                "The external FITS source folder is no longer "
+                "The external source folder is no longer "
                 "available as a directory: " +
                 PathText(resolved_request.path));
         }
@@ -636,7 +636,7 @@ private:
              !workflow.filter_evaluation
                    .included_samples[work.spectrum_index])) {
             throw std::runtime_error(
-                "The requested external FITS member is excluded by "
+                "The requested external source member is excluded by "
                 "the active sample filter: " +
                 PathText(
                     *work.request.preferred_member_path));
@@ -769,7 +769,7 @@ private:
                         continue;
                     }
                     throw std::runtime_error(
-                        "The requested external FITS member was not "
+                        "The requested external source member was not "
                         "found in the source folder after the first-level "
                         "scan: " +
                         PathText(
@@ -783,7 +783,7 @@ private:
                         continue;
                     }
                     throw std::runtime_error(
-                        "The requested external FITS member is no longer "
+                        "The requested external source member is no longer "
                         "a valid member of the source folder: " +
                         PathText(
                             *work.request.preferred_member_path));

@@ -1058,7 +1058,7 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
             SourceCollectionLoadErrorKind::
                 BackgroundLoadingFailed;
         result.load_error.diagnostic_detail =
-            "The requested external FITS member is excluded by "
+            "The requested external source member is excluded by "
             "the active sample filter: " +
             preferred_member_path;
         return result;

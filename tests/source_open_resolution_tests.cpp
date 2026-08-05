@@ -127,6 +127,29 @@ void TestSupportedFitsExtensionsExpandAndRetainPreferredMember()
     }
 }
 
+void TestSupportedCsvExtensionsExpandAndRetainPreferredMember()
+{
+    TemporaryDirectory temporary;
+    std::size_t index = 0;
+    for (const std::string_view suffix : {".csv", ".CSV", ".CsV"}) {
+        const std::filesystem::path member =
+            temporary.path() /
+            ("selected-csv-" + std::to_string(index++) +
+             std::string(suffix));
+        WriteFixture(member);
+
+        const specforge::SourceOpenResolution resolution =
+            Resolve(member);
+        Require(
+            resolution.kind ==
+                specforge::SourceOpenResolutionKind::Folder &&
+                resolution.source_path == temporary.path() &&
+                resolution.preferred_member_path == member &&
+                !resolution.failed(),
+            "supported CSV suffix should resolve to a folder source and retain the requested member");
+    }
+}
+
 void TestRelativeFitsUsesCurrentDirectoryAsParent()
 {
     TemporaryDirectory temporary;
@@ -143,11 +166,11 @@ void TestRelativeFitsUsesCurrentDirectoryAsParent()
         "relative FITS should use the current directory and retain its member path");
 }
 
-void TestNonFitsStayDirect()
+void TestNpyStaysDirect()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path member =
-        temporary.path() / "selected.csv";
+        temporary.path() / "selected.npy";
     WriteFixture(member);
 
     const specforge::SourceOpenResolution resolution = Resolve(member);
@@ -155,7 +178,38 @@ void TestNonFitsStayDirect()
         resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
             resolution.source_path == member &&
             !resolution.preferred_member_path,
-        "non-FITS external source should retain single-file semantics");
+        "external NPY source should retain single-file semantics");
+}
+
+void TestTxtStaysDirect()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path member =
+        temporary.path() / "selected.txt";
+    WriteFixture(member);
+
+    const specforge::SourceOpenResolution resolution = Resolve(member);
+    Require(
+        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+            resolution.source_path == member &&
+            !resolution.preferred_member_path,
+        "external TXT source should retain single-file semantics");
+}
+
+void TestDisabledCsvPreferenceStaysDirect()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path member =
+        temporary.path() / "selected.CSV";
+    WriteFixture(member);
+
+    const specforge::SourceOpenResolution resolution =
+        Resolve(member, specforge::SourceOpenOrigin::ExternalStartup, false);
+    Require(
+        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+            resolution.source_path == member &&
+            !resolution.preferred_member_path,
+        "disabled external CSV preference should retain single-file semantics");
 }
 
 void TestDisabledPreferenceStaysDirect()
@@ -204,6 +258,38 @@ void TestAutomationOriginStaysDirect()
             resolution.source_path == member &&
             !resolution.preferred_member_path,
         "automation FITS open should retain single-file semantics");
+}
+
+void TestInAppCsvOriginStaysDirect()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path member =
+        temporary.path() / "selected.CSV";
+    WriteFixture(member);
+
+    const specforge::SourceOpenResolution resolution =
+        Resolve(member, specforge::SourceOpenOrigin::InApp);
+    Require(
+        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+            resolution.source_path == member &&
+            !resolution.preferred_member_path,
+        "in-app CSV open should retain single-file semantics");
+}
+
+void TestAutomationCsvOriginStaysDirect()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path member =
+        temporary.path() / "selected.CSV";
+    WriteFixture(member);
+
+    const specforge::SourceOpenResolution resolution =
+        Resolve(member, specforge::SourceOpenOrigin::Automation);
+    Require(
+        resolution.kind == specforge::SourceOpenResolutionKind::Direct &&
+            resolution.source_path == member &&
+            !resolution.preferred_member_path,
+        "automation CSV open should retain single-file semantics");
 }
 
 void TestEmptySourcePathFailsWithDiagnostic()
@@ -353,16 +439,42 @@ void TestInvalidParentFailsWithoutChoosingAnotherMember()
         "invalid parent should fail without selecting a sorted member");
 }
 
+void TestInvalidCsvParentFailsWithoutChoosingAnotherMember()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path parent_file =
+        temporary.path() / "not-a-csv-folder";
+    WriteFixture(parent_file);
+    const std::filesystem::path missing =
+        parent_file / "member.CSV";
+
+    const specforge::SourceOpenResolution resolution = Resolve(missing);
+
+    Require(
+        resolution.failed() &&
+            resolution.failure ==
+                specforge::SourceOpenResolutionFailure::ParentPathNotDirectory &&
+            !resolution.preferred_member_path &&
+            resolution.diagnostic.find(PathText(parent_file)) !=
+                std::string::npos,
+        "invalid CSV parent should fail without selecting a sorted member");
+}
+
 }  // namespace
 
 int main()
 {
     TestSupportedFitsExtensionsExpandAndRetainPreferredMember();
+    TestSupportedCsvExtensionsExpandAndRetainPreferredMember();
     TestRelativeFitsUsesCurrentDirectoryAsParent();
-    TestNonFitsStayDirect();
+    TestNpyStaysDirect();
+    TestTxtStaysDirect();
     TestDisabledPreferenceStaysDirect();
+    TestDisabledCsvPreferenceStaysDirect();
     TestInAppOriginStaysDirect();
     TestAutomationOriginStaysDirect();
+    TestInAppCsvOriginStaysDirect();
+    TestAutomationCsvOriginStaysDirect();
     TestEmptySourcePathFailsWithDiagnostic();
     TestMissingTargetFailsWithoutExpansion();
     TestMissingTargetWithDisabledPreferenceFailsDirectly();
@@ -371,5 +483,6 @@ int main()
     TestNonRegularFitsTargetFailsWithDiagnostic();
     TestMissingParentFailsWithDiagnostic();
     TestInvalidParentFailsWithoutChoosingAnotherMember();
+    TestInvalidCsvParentFailsWithoutChoosingAnotherMember();
     return 0;
 }

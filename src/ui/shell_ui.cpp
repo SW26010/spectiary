@@ -1982,9 +1982,19 @@ void ShellUi::PresentFrame(
 
 void ShellUi::OpenSourceFromFilePicker()
 {
+    const UiLanguage language =
+        application_settings_.View().language;
+    OpenSourceFromFilePicker(
+        [language]() {
+            return ShowSourceFilePicker(language);
+        });
+}
+
+void ShellUi::OpenSourceFromFilePicker(
+    const SourceCollectionPathPicker& choose_source_file)
+{
     if (std::optional<std::filesystem::path> path =
-            ShowSourceFilePicker(
-                application_settings_.View().language)) {
+            choose_source_file()) {
         OpenSource(*path);
     }
 }
@@ -2233,6 +2243,13 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
 
 void ShellUi::RenderMainMenuBar(const ShellStatus& status)
 {
+    RenderMainMenuBar(status, {});
+}
+
+void ShellUi::RenderMainMenuBar(
+    const ShellStatus& status,
+    const SourceCollectionPathPicker& choose_source_file)
+{
     if (!ImGui::BeginMenuBar()) {
         return;
     }
@@ -2250,7 +2267,12 @@ void ShellUi::RenderMainMenuBar(const ShellStatus& status)
             UiTextId::OpenFile,
             "SpecForgeOpenFile");
         if (ImGui::MenuItem(open_file.c_str())) {
-            OpenSourceFromFilePicker();
+            if (choose_source_file) {
+                OpenSourceFromFilePicker(
+                    choose_source_file);
+            } else {
+                OpenSourceFromFilePicker();
+            }
         }
         const std::string open_folder = StableUiLabel(
             language,

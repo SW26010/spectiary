@@ -1038,7 +1038,7 @@ void TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic()
 
     Require(
         failed &&
-            diagnostic.find("requested external FITS member") !=
+            diagnostic.find("requested external source member") !=
                 std::string::npos &&
             diagnostic.find("missing.fits") !=
                 std::string::npos,
@@ -1100,7 +1100,7 @@ void TestUnreadableFolderListingPreservesEnumerationDiagnostic()
             diagnostic.find(
                 "Could not enumerate the input folder: injected ACL failure.") !=
                 std::string::npos &&
-            diagnostic.find("requested external FITS member") ==
+            diagnostic.find("requested external source member") ==
                 std::string::npos,
         "an unreadable folder listing should preserve its enumeration diagnostic");
     std::filesystem::remove_all(folder);

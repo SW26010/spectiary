@@ -74,7 +74,7 @@ struct SourceCollectionLoadRequest {
     // so filesystem probing stays inside the cancellable load worker. Restore,
     // follow-up, and prefetch requests already carry a resolved source path.
     std::optional<SourceOpenRequest> source_open_request;
-    // External FITS-as-folder opens retain the originally requested member
+    // External source folder opens retain the originally requested member
     // until the first-level folder listing has been prepared. Ordinary file,
     // in-app folder, automation, restore, and prefetch requests leave this
     // empty and keep their existing index semantics.

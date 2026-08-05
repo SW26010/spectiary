@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -76,6 +77,94 @@ public:
         ImGui::DestroyContext();
     }
 };
+
+void TestFilesPanelAddFileForwardsCsvToInAppOpener()
+{
+    ScopedImGuiContext context;
+    specforge::SourceCollectionSessionView view;
+    specforge::PanelSessionInteraction interaction(
+        [](specforge::SourceCollectionSessionIntent,
+           std::optional<specforge::NavigationLatencyInputKind>) {
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    specforge::SourceCollectionPanelUi panel;
+    const std::filesystem::path selected_path =
+        std::filesystem::path{"selected.CSV"};
+    std::optional<std::filesystem::path> opened_path;
+    int choose_file_count = 0;
+    int choose_folder_count = 0;
+    bool open = true;
+
+    const auto render_frame = [&]() {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DeltaTime = 1.0f / 60.0f;
+        io.DisplaySize = ImVec2(900.0f, 700.0f);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(
+            ImVec2(20.0f, 20.0f),
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(700.0f, 500.0f),
+            ImGuiCond_Always);
+        panel.RenderFiles(
+            interaction,
+            specforge::UiLanguage::English,
+            &open,
+            [&]() -> std::optional<std::filesystem::path> {
+                ++choose_file_count;
+                return selected_path;
+            },
+            [&]() -> std::optional<std::filesystem::path> {
+                ++choose_folder_count;
+                return std::nullopt;
+            },
+            [&](const std::filesystem::path& path) {
+                opened_path = path;
+            });
+        ImGui::EndFrame();
+    };
+
+    render_frame();
+    ImGuiWindow* window = ImGui::FindWindowByName(
+        specforge::SourceCollectionPanelUi::FilesWindowName());
+    Require(
+        window != nullptr,
+        "Files panel should render its window for the Add file test");
+    const ImGuiID add_file_id = window->GetID(
+        "Add file...###SpecForgeFilesAddFile");
+    bool hovered = false;
+    for (float y = 20.0f;
+         y <= 220.0f && !hovered;
+         y += 2.0f) {
+        for (float x = 20.0f;
+             x <= 420.0f && !hovered;
+             x += 4.0f) {
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            render_frame();
+            hovered = GImGui->HoveredId == add_file_id;
+        }
+    }
+    Require(
+        hovered,
+        "Files panel should expose a clickable Add file button");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    render_frame();
+    Require(
+        choose_file_count == 1 &&
+            choose_folder_count == 0 &&
+            opened_path == selected_path,
+        "Files panel Add file should forward the selected CSV to its source opener");
+}
 
 class NavigationFixture {
 public:
@@ -1421,6 +1510,7 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 
 int main()
 {
+    TestFilesPanelAddFileForwardsCsvToInAppOpener();
     TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync();
     TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent();
     TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange();

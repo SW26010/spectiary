@@ -204,20 +204,20 @@ constexpr std::array kTextCatalog = {
         "其他输入行为设置暂不可用。"},
     UiTextEntry{"External source opening", "外部源打开"},
     UiTextEntry{
-        "Open external FITS as a folder source",
-        "将外部打开的 FITS 作为文件夹源打开"},
+        "Open external CSV and FITS-family files as folder sources",
+        "将外部打开的 CSV 与 FITS 文件族作为文件夹源打开"},
     UiTextEntry{
-        "When enabled, an externally opened FITS file uses its containing folder as the source collection. In-app source-opening actions are unchanged.",
-        "启用后，从外部打开 FITS 文件时，将其所在文件夹作为源集合。应用内的源打开操作不受影响。"},
+        "When enabled, an externally opened CSV or FITS-family file uses its containing folder as the source collection. In-app source-opening actions and automation are unchanged.",
+        "启用后，从外部打开 CSV 或 FITS 文件族时，将其所在文件夹作为源集合。应用内的源打开操作和自动化打开不受影响。"},
     UiTextEntry{
         "Include subfolders (not implemented)",
         "包含子文件夹（尚未实现）"},
     UiTextEntry{
-        "The saved external FITS folder preference could not be loaded; it is disabled.",
-        "无法加载已保存的外部 FITS 文件夹偏好，当前已关闭。"},
+        "The saved external source folder preference could not be loaded; it is disabled.",
+        "无法加载已保存的外部源文件夹偏好，当前已关闭。"},
     UiTextEntry{
-        "The external FITS folder preference could not be saved. The previous behavior is still in use.",
-        "无法保存外部 FITS 文件夹偏好，仍继续使用此前的行为。"},
+        "The external source folder preference could not be saved. The previous behavior is still in use.",
+        "无法保存外部源文件夹偏好，仍继续使用此前的行为。"},
     UiTextEntry{"Data & Recovery", "数据与恢复"},
     UiTextEntry{
         "Inspect local application storage. Scientific source files and label result files remain user-owned.",

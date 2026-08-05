@@ -35,11 +35,11 @@ SourceOpenResolution MakeFailure(
     };
 }
 
-bool IsSupportedFitsSourcePath(
+bool IsSupportedExternalSourcePath(
     const std::filesystem::path& path)
 {
     const std::string format = detail::SourceFormatLabel(path);
-    return format == "fits" || format == "fits.gz";
+    return format == "csv" || format == "fits" || format == "fits.gz";
 }
 
 void Checkpoint(
@@ -57,7 +57,7 @@ bool SourceOpenRequestExpandsAsFolder(
 {
     return request.origin == SourceOpenOrigin::ExternalStartup &&
            request.open_external_source_as_folder &&
-           IsSupportedFitsSourcePath(request.source_path);
+           IsSupportedExternalSourcePath(request.source_path);
 }
 
 std::filesystem::path SourceOpenRequestCandidatePath(
@@ -146,7 +146,7 @@ SourceOpenResolution ResolveSourceOpenRequest(
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::ParentPathUnavailable,
-            "The external FITS source parent folder is unavailable: " +
+            "The external source parent folder is unavailable: " +
                 PathText(request.source_path));
     }
 
@@ -156,7 +156,7 @@ SourceOpenResolution ResolveSourceOpenRequest(
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::ParentPathUnavailable,
-            "The external FITS source parent folder does not exist or "
+            "The external source parent folder does not exist or "
             "cannot be accessed: " +
                 PathText(parent_path));
     }
@@ -165,7 +165,7 @@ SourceOpenResolution ResolveSourceOpenRequest(
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::ParentPathNotDirectory,
-            "The external FITS source parent path is not a folder: " +
+            "The external source parent path is not a folder: " +
                 PathText(parent_path));
     }
 
@@ -183,7 +183,7 @@ SourceOpenResolution ResolveSourceOpenRequest(
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::SourcePathNotRegularFile,
-            "The external FITS source is not a regular file: " +
+            "The external source is not a regular file: " +
                 PathText(request.source_path));
     }
 

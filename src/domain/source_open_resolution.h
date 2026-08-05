@@ -45,7 +45,7 @@ enum class SourceOpenResolutionFailure {
 struct SourceOpenResolution {
     // Direct keeps the requested source path unchanged. Folder is the
     // existing first-level folder-source contract and carries the requested
-    // FITS member separately.
+    // external source member separately.
     SourceOpenResolutionKind kind =
         SourceOpenResolutionKind::Failed;
     std::filesystem::path source_path;

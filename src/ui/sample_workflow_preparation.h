@@ -61,7 +61,7 @@ struct PreparedSourceCollectionPlan {
     SourceCollectionContext context;
     PreparedSampleWorkflowState workflow;
     std::optional<std::uint64_t> base_live_workflow_revision;
-    // A startup FITS-as-folder request remains authoritative through live
+    // A startup external source-folder request remains authoritative through live
     // workflow reconciliation at session admission.
     std::optional<std::filesystem::path> preferred_member_path;
 };
