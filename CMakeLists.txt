@@ -233,6 +233,8 @@ add_library(specforge_core STATIC
     src/app/render_wake_scheduler.cpp
     src/app/runtime_paths.cpp
     src/app/specforge_metadata.cpp
+    src/app/specforge_metadata_finalizer.cpp
+    src/app/specforge_metadata_validation.cpp
     src/domain/fits_file_reader.cpp
     src/domain/fits_spectrum_loader.cpp
     src/domain/npy_array_io.cpp
@@ -758,6 +760,11 @@ specforge_add_test(
 )
 target_compile_definitions(specforge_metadata_tests PRIVATE
     SPECFORGE_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
+)
+specforge_add_test(
+    specforge_metadata_finalizer_tests
+    tests/specforge_metadata_finalizer_tests.cpp
+    specforge_core
 )
 specforge_add_test(
     specforge_embedded_legal_documents_tests

@@ -1,9 +1,9 @@
 #include "app/specforge_metadata.h"
 
 #include "app/local_user_state_json.h"
+#include "app/specforge_metadata_validation.h"
 #include "specforge/specforge_build_identity.h"
 
-#include <cctype>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -28,135 +28,14 @@ enum class MetadataSchemaRequirement {
     LegacyFilename,
 };
 
-bool IsRequiredMetadataString(std::string_view value)
-{
-    if (value.empty()) {
-        return false;
-    }
-    const auto is_whitespace = [](char character) {
-        return std::isspace(
-                   static_cast<unsigned char>(character)) != 0;
-    };
-    return !is_whitespace(value.front()) &&
-        !is_whitespace(value.back());
-}
-
-bool IsDottedNumericVersion(
-    std::string_view value,
-    std::size_t minimum_separators,
-    std::size_t maximum_separators)
-{
-    std::size_t separator_count = 0;
-    bool segment_has_digit = false;
-    for (const char character : value) {
-        if (character >= '0' && character <= '9') {
-            segment_has_digit = true;
-            continue;
-        }
-        if (character != '.' || !segment_has_digit) {
-            return false;
-        }
-        ++separator_count;
-        segment_has_digit = false;
-    }
-    return segment_has_digit &&
-        separator_count >= minimum_separators &&
-        separator_count <= maximum_separators;
-}
-
-bool ContainsControlCharacter(std::string_view value)
-{
-    for (const unsigned char character : value) {
-        if (character <= 0x1fU) {
-            return true;
-        }
-    }
-    return false;
-}
-
-int ParseFixedDecimal(
-    std::string_view value,
-    std::size_t offset,
-    std::size_t length)
-{
-    int result = 0;
-    for (std::size_t index = 0; index < length; ++index) {
-        result = result * 10 +
-            (value[offset + index] - '0');
-    }
-    return result;
-}
-
-bool IsLeapYear(int year)
-{
-    return year % 4 == 0 &&
-        (year % 100 != 0 || year % 400 == 0);
-}
-
-bool IsValidUtcTimestamp(std::string_view value)
-{
-    if (value.size() != 20U ||
-        value[4] != '-' ||
-        value[7] != '-' ||
-        value[10] != 'T' ||
-        value[13] != ':' ||
-        value[16] != ':' ||
-        value[19] != 'Z') {
-        return false;
-    }
-
-    for (std::size_t index = 0; index < value.size(); ++index) {
-        if (index == 4U || index == 7U || index == 10U ||
-            index == 13U || index == 16U || index == 19U) {
-            continue;
-        }
-        if (value[index] < '0' || value[index] > '9') {
-            return false;
-        }
-    }
-
-    const int year = ParseFixedDecimal(value, 0U, 4U);
-    const int month = ParseFixedDecimal(value, 5U, 2U);
-    const int day = ParseFixedDecimal(value, 8U, 2U);
-    const int hour = ParseFixedDecimal(value, 11U, 2U);
-    const int minute = ParseFixedDecimal(value, 14U, 2U);
-    const int second = ParseFixedDecimal(value, 17U, 2U);
-    if (month < 1 || month > 12 ||
-        hour > 23 || minute > 59 || second > 59) {
-        return false;
-    }
-
-    constexpr int kDaysInMonth[] = {
-        31, 28, 31, 30, 31, 30,
-        31, 31, 30, 31, 30, 31,
-    };
-    const int days_in_month =
-        kDaysInMonth[month - 1] +
-        (month == 2 && IsLeapYear(year) ? 1 : 0);
-    return day >= 1 && day <= days_in_month;
-}
-
-bool IsValidSha256(std::string_view value)
-{
-    if (value.size() != 64U) {
-        return false;
-    }
-    for (const char character : value) {
-        if (!((character >= '0' && character <= '9') ||
-              (character >= 'a' && character <= 'f'))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 std::optional<std::string> ReadRequiredMetadataString(
     const JsonValue& root,
     std::string_view key)
 {
     std::optional<std::string> value =
         ReadJsonStringMember(root, key);
-    if (!value || !IsRequiredMetadataString(*value)) {
+    if (!value ||
+        !metadata_validation::IsRequiredMetadataString(*value)) {
         return std::nullopt;
     }
     return value;
@@ -176,31 +55,11 @@ std::optional<std::optional<std::string>> ReadNullableStringMember(
     if (member->kind != JsonValue::Kind::String) {
         return std::nullopt;
     }
-    if (!IsRequiredMetadataString(member->string_value)) {
+    if (!metadata_validation::IsRequiredMetadataString(
+            member->string_value)) {
         return std::nullopt;
     }
     return member->string_value;
-}
-
-bool IsValidSidecarSourceTuple(
-    std::string_view source_mode,
-    const std::optional<std::string>& source_revision)
-{
-    if (source_mode == "working_tree") {
-        return !source_revision;
-    }
-    if (source_mode != "head" ||
-        !source_revision ||
-        source_revision->size() != 40U) {
-        return false;
-    }
-    for (const char character : *source_revision) {
-        if (!((character >= '0' && character <= '9') ||
-              (character >= 'a' && character <= 'f'))) {
-            return false;
-        }
-    }
-    return true;
 }
 
 bool MatchesSourceRevision(
@@ -312,16 +171,12 @@ BuildMetadataReadResult ReadBuildMetadata(
                 artifact_value->kind == JsonValue::Kind::Object
             ? ReadRequiredMetadataString(*artifact_value, "sha256")
             : std::nullopt;
-        if (!completed_at_utc ||
-            !IsValidUtcTimestamp(*completed_at_utc) ||
-            !artifact_file || *artifact_file != "SpecForge.exe" ||
-            !artifact_sha256 || !IsValidSha256(*artifact_sha256)) {
-            return {};
+        if (artifact_file && artifact_sha256) {
+            artifact = BuildArtifactMetadata{
+                .file = *artifact_file,
+                .sha256 = *artifact_sha256,
+            };
         }
-        artifact = BuildArtifactMetadata{
-            .file = *artifact_file,
-            .sha256 = *artifact_sha256,
-        };
     }
 
     if (!product_name || !specforge_version || !configuration ||
@@ -330,17 +185,50 @@ BuildMetadataReadResult ReadBuildMetadata(
         !windows_sdk_version || !dear_imgui || !implot || !zlib) {
         return {};
     }
-    if (!IsDottedNumericVersion(*compiler_version, 1U, 3U) ||
-        !IsDottedNumericVersion(*cmake_version, 2U, 3U) ||
-        ContainsControlCharacter(*generator) ||
-        (*windows_sdk_version &&
-         !IsDottedNumericVersion(
-             **windows_sdk_version,
-             2U,
-             3U))) {
-        return {};
-    }
-    if (!IsValidSidecarSourceTuple(*source_mode, *source_revision)) {
+    metadata.compiler_id = *compiler_id;
+    metadata.compiler_version = *compiler_version;
+    metadata.cmake_version = *cmake_version;
+    metadata.generator = *generator;
+    metadata.windows_sdk_version = *windows_sdk_version;
+    metadata.dear_imgui_version = *dear_imgui;
+    metadata.implot_version = *implot;
+    metadata.zlib_version = *zlib;
+    metadata.completed_at_utc = std::move(completed_at_utc);
+    metadata.artifact = std::move(artifact);
+
+    if (schema_version == kSchema5Version) {
+        const BuildIdentity actual_identity = {
+            .product_name = *product_name,
+            .specforge_version = *specforge_version,
+            .configuration = *configuration,
+            .target_architecture = *target_architecture,
+            .source_mode = *source_mode,
+            .source_revision = *source_revision
+                ? **source_revision
+                : "",
+        };
+        if (!metadata_validation::ValidateSchema5BuildMetadata(
+                actual_identity,
+                metadata)) {
+            return {};
+        }
+    } else if (!metadata_validation::IsDottedNumericVersion(
+                   *compiler_version,
+                   1U,
+                   3U) ||
+               !metadata_validation::IsDottedNumericVersion(
+                   *cmake_version,
+                   2U,
+                   3U) ||
+               metadata_validation::ContainsControlCharacter(*generator) ||
+               (*windows_sdk_version &&
+                !metadata_validation::IsDottedNumericVersion(
+                    **windows_sdk_version,
+                    2U,
+                    3U)) ||
+               !metadata_validation::IsValidSidecarSourceTuple(
+                   *source_mode,
+                   *source_revision)) {
         return {};
     }
 
@@ -359,16 +247,6 @@ BuildMetadataReadResult ReadBuildMetadata(
         };
     }
 
-    metadata.compiler_id = *compiler_id;
-    metadata.compiler_version = *compiler_version;
-    metadata.cmake_version = *cmake_version;
-    metadata.generator = *generator;
-    metadata.windows_sdk_version = *windows_sdk_version;
-    metadata.dear_imgui_version = *dear_imgui;
-    metadata.implot_version = *implot;
-    metadata.zlib_version = *zlib;
-    metadata.completed_at_utc = std::move(completed_at_utc);
-    metadata.artifact = std::move(artifact);
     return {
         .status = BuildMetadataStatus::Available,
         .metadata = std::move(metadata),
