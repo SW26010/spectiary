@@ -1,0 +1,197 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$BuildExecutable,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PackageRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ZipPath
+)
+
+$ErrorActionPreference = 'Stop'
+
+Import-Module `
+    (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
+    -Force `
+    -ErrorAction Stop
+
+function Get-RequiredProperty {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Object,
+        [Parameter(Mandatory = $true)] [string]$Name,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or
+        $Object.PSObject.Properties.Name -cnotcontains $Name) {
+        throw "$Description is missing '$Name'."
+    }
+    return $property.Value
+}
+
+function Get-Sha256 {
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    return (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $Path
+    ).Hash.ToLowerInvariant()
+}
+
+function Get-StreamSha256 {
+    param([Parameter(Mandatory = $true)] [IO.Stream]$Stream)
+
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (
+            [BitConverter]::ToString($algorithm.ComputeHash($Stream)) -replace '-', ''
+        ).ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Assert-ExactEntries {
+    param(
+        [Parameter(Mandatory = $true)] [string[]]$Expected,
+        [Parameter(Mandatory = $true)] [string[]]$Actual,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    if (($Actual | Sort-Object) -join "`n" -cne
+        (($Expected | Sort-Object) -join "`n")) {
+        throw "$Description entries are wrong: $($Actual -join ', ')."
+    }
+}
+
+function Assert-ZipEntryMatchesFile {
+    param(
+        [Parameter(Mandatory = $true)] [IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory = $true)] [string]$EntryName,
+        [Parameter(Mandatory = $true)] [string]$FilePath,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $entry = $Archive.GetEntry($EntryName)
+    if ($null -eq $entry) {
+        throw "$Description is missing ZIP entry '$EntryName'."
+    }
+    $stream = $entry.Open()
+    try {
+        $entryHash = Get-StreamSha256 -Stream $stream
+    }
+    finally {
+        $stream.Dispose()
+    }
+    $fileHash = Get-Sha256 -Path $FilePath
+    if ($entryHash -cne $fileHash) {
+        throw "$Description ZIP entry '$EntryName' hash '$entryHash' does not match '$FilePath' hash '$fileHash'."
+    }
+}
+
+if (-not (Test-Path -LiteralPath $BuildExecutable -PathType Leaf)) {
+    throw "Build executable is missing: $BuildExecutable"
+}
+if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
+    throw "Portable package root is missing: $PackageRoot"
+}
+if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+    throw "Portable ZIP is missing: $ZipPath"
+}
+
+$expectedPackageEntries = @(
+    'Data',
+    'SpecForge.exe',
+    'specforge_metadata.json'
+)
+$actualPackageEntries = @(
+    Get-ChildItem -LiteralPath $PackageRoot |
+        ForEach-Object { $_.Name }
+)
+Assert-ExactEntries `
+    -Expected $expectedPackageEntries `
+    -Actual $actualPackageEntries `
+    -Description 'Portable package root'
+
+$packageExecutable = Join-Path $PackageRoot 'SpecForge.exe'
+$packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
+$metadata = Get-Content -Raw -LiteralPath $packageMetadataPath | ConvertFrom-Json
+$schemaVersion = Get-RequiredProperty `
+    -Object $metadata `
+    -Name 'schema_version' `
+    -Description 'Portable metadata'
+if (($schemaVersion -isnot [int] -and
+     $schemaVersion -isnot [long]) -or
+    $schemaVersion -ne 5) {
+    throw 'Portable metadata schema_version must be the integer 5.'
+}
+
+$deployment = Get-RequiredProperty `
+    -Object $metadata `
+    -Name 'deployment' `
+    -Description 'Portable metadata'
+if ($deployment -isnot [pscustomobject]) {
+    throw 'Portable metadata deployment must be an object.'
+}
+if ((Get-RequiredProperty $deployment 'distribution' 'Portable deployment') -cne 'portable' -or
+    (Get-RequiredProperty $deployment 'storage_profile' 'Portable deployment') -cne 'portable') {
+    throw 'Portable metadata must declare portable distribution and storage_profile.'
+}
+
+$artifact = Get-RequiredProperty `
+    -Object $metadata `
+    -Name 'artifact' `
+    -Description 'Portable metadata'
+if ($artifact -isnot [pscustomobject]) {
+    throw 'Portable metadata artifact must be an object.'
+}
+if ((Get-RequiredProperty $artifact 'file' 'Portable artifact') -cne 'SpecForge.exe') {
+    throw "Portable artifact file must be 'SpecForge.exe'."
+}
+$artifactSha256 = [string](Get-RequiredProperty $artifact 'sha256' 'Portable artifact')
+if ($artifactSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'Portable artifact sha256 must be a lowercase SHA-256 digest.'
+}
+
+$buildExecutableHash = Get-Sha256 -Path $BuildExecutable
+$packageExecutableHash = Get-Sha256 -Path $packageExecutable
+if ($artifactSha256 -cne $buildExecutableHash) {
+    throw "Portable metadata artifact sha256 '$artifactSha256' does not match build executable hash '$buildExecutableHash'."
+}
+if ($artifactSha256 -cne $packageExecutableHash) {
+    throw "Portable metadata artifact sha256 '$artifactSha256' does not match packaged executable hash '$packageExecutableHash'."
+}
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+try {
+    $expectedZipEntries = @(
+        'Data/',
+        'SpecForge.exe',
+        'specforge_metadata.json'
+    )
+    $actualZipEntries = @($archive.Entries.FullName)
+    Assert-ExactEntries `
+        -Expected $expectedZipEntries `
+        -Actual $actualZipEntries `
+        -Description 'Portable ZIP'
+    Assert-ZipEntryMatchesFile `
+        -Archive $archive `
+        -EntryName 'SpecForge.exe' `
+        -FilePath $packageExecutable `
+        -Description 'Portable ZIP executable'
+    Assert-ZipEntryMatchesFile `
+        -Archive $archive `
+        -EntryName 'specforge_metadata.json' `
+        -FilePath $packageMetadataPath `
+        -Description 'Portable ZIP metadata'
+}
+finally {
+    $archive.Dispose()
+}
+
+Write-Output 'Portable artifact verification passed'

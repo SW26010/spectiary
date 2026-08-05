@@ -38,6 +38,15 @@ string(JSON portable_metadata
     SET "${portable_metadata}" deployment storage_profile "\"portable\""
 )
 
+string(JSON schema_version
+    GET "${portable_metadata}" schema_version
+)
+if(NOT schema_version STREQUAL "5")
+    message(FATAL_ERROR
+        "Portable runtime metadata must use schema 5; found ${schema_version}."
+    )
+endif()
+
 get_filename_component(output_directory "${OUTPUT}" DIRECTORY)
 file(MAKE_DIRECTORY "${output_directory}")
 file(WRITE "${OUTPUT}" "${portable_metadata}\n")

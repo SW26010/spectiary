@@ -56,6 +56,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Import-Module `
+    (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') `
+    -Force `
+    -ErrorAction Stop
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -107,7 +112,7 @@ function Assert-NotContains {
     }
 }
 
-function Assert-SchemaVersionFour {
+function Assert-SchemaVersionFive {
     param(
         [Parameter(Mandatory = $true)] [psobject]$Metadata,
         [Parameter(Mandatory = $true)] [string]$Description
@@ -116,13 +121,13 @@ function Assert-SchemaVersionFour {
     $property = $Metadata.PSObject.Properties['schema_version']
     if ($null -eq $property -or
         $Metadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
-        throw "$Description schema_version must be the integer 4."
+        throw "$Description schema_version must be the integer 5."
     }
     $schemaVersion = $property.Value
     if (($schemaVersion -isnot [int] -and
          $schemaVersion -isnot [long]) -or
-        $schemaVersion -ne 4) {
-        throw "$Description schema_version must be the integer 4."
+        $schemaVersion -ne 5) {
+        throw "$Description schema_version must be the integer 5."
     }
 }
 
@@ -260,6 +265,43 @@ function Assert-BuildToolchainContract {
     }
 }
 
+function Assert-ArtifactHashContract {
+    param(
+        [Parameter(Mandatory = $true)] [psobject]$Metadata,
+        [Parameter(Mandatory = $true)] [string]$ExecutablePath,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    $artifactProperty = $Metadata.PSObject.Properties['artifact']
+    if ($null -eq $artifactProperty -or
+        $Metadata.PSObject.Properties.Name -cnotcontains 'artifact' -or
+        $artifactProperty.Value -isnot [pscustomobject]) {
+        throw "$Description is missing artifact metadata."
+    }
+    $artifact = $artifactProperty.Value
+    $fileProperty = $artifact.PSObject.Properties['file']
+    $shaProperty = $artifact.PSObject.Properties['sha256']
+    if ($null -eq $fileProperty -or
+        $artifact.PSObject.Properties.Name -cnotcontains 'file' -or
+        $fileProperty.Value -isnot [string] -or
+        $fileProperty.Value -cne 'SpecForge.exe') {
+        throw "$Description artifact.file must be 'SpecForge.exe'."
+    }
+    if ($null -eq $shaProperty -or
+        $artifact.PSObject.Properties.Name -cnotcontains 'sha256' -or
+        $shaProperty.Value -isnot [string] -or
+        $shaProperty.Value -cnotmatch '^[0-9a-f]{64}$') {
+        throw "$Description artifact.sha256 must be a lowercase SHA-256 digest."
+    }
+    $executableHash = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $ExecutablePath
+    ).Hash.ToLowerInvariant()
+    if ($shaProperty.Value -cne $executableHash) {
+        throw "$Description artifact.sha256 '$($shaProperty.Value)' does not match executable hash '$executableHash'."
+    }
+    return $executableHash
+}
+
 function Assert-PortablePackage {
     param(
         [Parameter(Mandatory = $true)] [string]$ExpectedExecutablePath,
@@ -281,16 +323,27 @@ function Assert-PortablePackage {
     if (($actualPackageEntries -join "`n") -cne (($expectedPackageEntries | Sort-Object) -join "`n")) {
         throw "$Description package root entries are wrong: $($actualPackageEntries -join ', ')."
     }
+    $packagedExecutablePath = Join-Path $PackageRoot 'SpecForge.exe'
     Assert-FilesMatch `
         -ExpectedPath $ExpectedExecutablePath `
-        -ActualPath (Join-Path $PackageRoot 'SpecForge.exe') `
+        -ActualPath $packagedExecutablePath `
         -Description "$Description packaged executable"
     $packageMetadataPath = Join-Path $PackageRoot 'specforge_metadata.json'
     $packageMetadata = Get-Content -Raw -LiteralPath $packageMetadataPath |
         ConvertFrom-Json
-    Assert-SchemaVersionFour `
+    Assert-SchemaVersionFive `
         -Metadata $packageMetadata `
         -Description "$Description package metadata"
+    $packagedExecutableHash = Assert-ArtifactHashContract `
+        -Metadata $packageMetadata `
+        -ExecutablePath $packagedExecutablePath `
+        -Description "$Description package artifact"
+    $expectedExecutableHash = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $ExpectedExecutablePath
+    ).Hash.ToLowerInvariant()
+    if ($packagedExecutableHash -cne $expectedExecutableHash) {
+        throw "$Description package artifact hash '$packagedExecutableHash' does not match build executable hash '$expectedExecutableHash'."
+    }
     $deploymentProperty =
         $packageMetadata.PSObject.Properties['deployment']
     if ($null -eq $deploymentProperty -or
@@ -512,9 +565,13 @@ if (-not (Test-Path -LiteralPath $buildMetadataPath -PathType Leaf)) {
 }
 
 $buildMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath | ConvertFrom-Json
-Assert-SchemaVersionFour `
+Assert-SchemaVersionFive `
     -Metadata $buildMetadata `
     -Description 'Built executable metadata'
+Assert-ArtifactHashContract `
+    -Metadata $buildMetadata `
+    -ExecutablePath $resolvedBuiltExecutable `
+    -Description 'Built executable artifact'
 if ($buildMetadata.PSObject.Properties.Name -ccontains 'deployment') {
     throw 'Build-output metadata must not contain a deployment declaration.'
 }
@@ -563,11 +620,11 @@ $noticesPath = Join-Path $legalRoot 'THIRD_PARTY_NOTICES.txt'
 $dataSourcesPath = Join-Path $legalRoot 'DATA_SOURCES.txt'
 $catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.tsv'
 $packageScriptPath = Join-Path $RepoRoot 'scripts\build-portable.ps1'
+$portableVerifierPath = Join-Path $RepoRoot 'scripts\verify-portable.ps1'
 $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $aboutTextSourcePath = Join-Path $RepoRoot 'src\ui\ui_text.cpp'
 $mainSourcePath = Join-Path $RepoRoot 'src\main.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
-$buildMetadataTemplatePath = Join-Path $RepoRoot 'cmake\specforge_metadata.json.in'
 $buildIdentityTemplatePath = Join-Path $RepoRoot 'cmake\specforge_build_identity.h.in'
 $buildSourceContractPath = Join-Path $RepoRoot 'cmake\specforge_build_source.cmake'
 $buildIdentityFixturePath = Join-Path $RepoRoot 'tests\fixtures\configure_build_identity_header.cmake'
@@ -582,11 +639,11 @@ foreach ($requiredPath in @(
     $dataSourcesPath,
     $catalogPath,
     $packageScriptPath,
+    $portableVerifierPath,
     $aboutSourcePath,
     $aboutTextSourcePath,
     $mainSourcePath,
     $cmakeSourcePath,
-    $buildMetadataTemplatePath,
     $buildIdentityTemplatePath,
     $buildSourceContractPath,
     $buildIdentityFixturePath,
@@ -742,7 +799,6 @@ $aboutSource = @(
 ) -join "`n"
 $mainSource = Get-Content -Raw -LiteralPath $mainSourcePath
 $cmakeSource = Get-Content -Raw -LiteralPath $cmakeSourcePath
-$buildMetadataTemplate = Get-Content -Raw -LiteralPath $buildMetadataTemplatePath
 $buildIdentityTemplate = Get-Content -Raw -LiteralPath $buildIdentityTemplatePath
 $manifestTemplate = Get-Content -Raw -LiteralPath $manifestTemplatePath
 $resourceHeader = Get-Content -Raw -LiteralPath $resourceHeaderPath
@@ -817,6 +873,9 @@ Assert-Contains $packageScript `
     "Join-Path `$sourceExecutableDirectory 'specforge_metadata.json'" `
     'Portable packaging metadata binding'
 Assert-Contains $packageScript `
+    "Join-Path `$scriptRoot 'verify-portable.ps1'" `
+    'Portable artifact verifier binding'
+Assert-Contains $packageScript `
     "distribution = 'portable'" `
     'Portable deployment identity'
 Assert-Contains $packageScript `
@@ -825,6 +884,15 @@ Assert-Contains $packageScript `
 Assert-Contains $packageScript `
     'Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable' `
     'Portable executable hash verification'
+Assert-Contains $packageScript `
+    "artifactSha256 -cne `$buildExecutableHash" `
+    'Portable metadata/build executable hash verification'
+Assert-Contains $packageScript `
+    "packagedArtifactSha256 -cne `$packagedExecutableHash" `
+    'Portable packaged metadata/executable hash verification'
+Assert-Contains (Get-Content -Raw -LiteralPath $portableVerifierPath) `
+    'build executable hash' `
+    'Portable artifact verifier build hash check'
 Assert-NotContains $packageScript `
     '[switch]$SkipBuild' `
     'Portable packaging public parameters'
@@ -835,6 +903,7 @@ Assert-NotContains $packageScript `
     "Join-Path `$buildRoot 'generated\specforge\third_party_versions.json'" `
     'Portable packaging script'
 Assert-Contains $cmakeSource 'specforge_metadata.json' 'CMake metadata'
+Assert-NotContains $cmakeSource 'specforge_metadata.json.in' 'CMake obsolete pre-link metadata template'
 Assert-Contains $cmakeSource 'specforge_build_identity.h.in' 'CMake build identity'
 Assert-NotContains `
     $cmakeSource `
@@ -856,29 +925,14 @@ Assert-NotContains $cmakeSource `
     'specforge_release_documents' `
     'CMake obsolete release-document copy target'
 Assert-Contains $cmakeSource `
-    'add_dependencies(specforge_native specforge_metadata)' `
-    'CMake executable metadata dependency'
-foreach ($propertyName in @(
-    'product',
-    'name',
-    'version',
-    'build',
-    'source_mode',
-    'source_revision',
-    'configuration',
-    'compiler_id',
-    'compiler_version',
-    'cmake_version',
-    'generator',
-    'target_architecture',
-    'windows_sdk_version',
-    'dear_imgui',
-    'implot',
-    'zlib'
-)) {
-    Assert-Contains $buildMetadataTemplate "`"$propertyName`"" 'Build metadata template'
-}
-Assert-NotContains $buildMetadataTemplate '"deployment"' 'Build-output metadata template'
+    'add_dependencies(specforge_native specforge_metadata_finalizer_tool)' `
+    'CMake post-link finalizer dependency'
+Assert-Contains $cmakeSource `
+    'Finalizing schema 5 SpecForge metadata' `
+    'CMake post-link finalizer command'
+Assert-Contains $cmakeSource `
+    'DEPENDS specforge_native' `
+    'CMake metadata target dependency'
 Assert-NotContains $cmakeSource 'SPECFORGE_RELEASE_PROFILE' 'CMake unified executable'
 Assert-NotContains $buildIdentityTemplate 'ReleaseProfile' 'Build identity header template'
 Assert-Contains $buildIdentityTemplate `
@@ -1018,6 +1072,9 @@ try {
         'build-portable.ps1'
     Copy-Item -LiteralPath $packageScriptPath -Destination $snapshotPackageScriptPath
     Copy-Item `
+        -LiteralPath $portableVerifierPath `
+        -Destination (Join-Path $snapshotPackageScriptsRoot 'verify-portable.ps1')
+    Copy-Item `
         -LiteralPath $noticesPath `
         -Destination (Join-Path $snapshotPackageLegalRoot 'THIRD_PARTY_NOTICES.txt')
 
@@ -1091,13 +1148,141 @@ try {
             -Description "$($fixture.Mode) packaged metadata"
     }
 
+    $wrongArtifactHash = ('0' * 64) -join ''
+    $tamperedMetadataBuildRoot = Join-Path $testRoot 'tampered-metadata-build'
+    New-Item -ItemType Directory -Path $tamperedMetadataBuildRoot -Force | Out-Null
+    Copy-Item `
+        -LiteralPath $resolvedBuiltExecutable `
+        -Destination (Join-Path $tamperedMetadataBuildRoot 'SpecForge.exe')
+    $tamperedMetadata = Get-Content -Raw -LiteralPath $buildMetadataPath |
+        ConvertFrom-Json
+    $tamperedMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
+    $tamperedMetadata.artifact.sha256 = $wrongArtifactHash
+    $tamperedMetadata |
+        ConvertTo-Json -Depth 10 |
+        Set-Content `
+            -LiteralPath (Join-Path $tamperedMetadataBuildRoot 'specforge_metadata.json') `
+            -Encoding UTF8
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments @(
+            '-PackageUnverifiedTestFixture',
+            '-BuildRoot',
+            $tamperedMetadataBuildRoot,
+            '-DistRoot',
+            $testDistRoot,
+            '-PackageName',
+            'SpecForge-portable-tampered-metadata',
+            '-Configuration',
+            $Configuration
+        ) `
+        -ExpectedMessage 'does not match build directory SpecForge.exe hash' `
+        -Description 'Portable packaging rejects tampered metadata hash'
+
+    $tamperedExecutableBuildRoot = Join-Path $testRoot 'tampered-executable-build'
+    New-Item -ItemType Directory -Path $tamperedExecutableBuildRoot -Force | Out-Null
+    $tamperedExecutablePath = Join-Path $tamperedExecutableBuildRoot 'SpecForge.exe'
+    Copy-Item -LiteralPath $resolvedBuiltExecutable -Destination $tamperedExecutablePath
+    Add-Content -LiteralPath $tamperedExecutablePath -Value 'tampered' -Encoding ASCII
+    $tamperedExecutableMetadata =
+        Get-Content -Raw -LiteralPath $buildMetadataPath |
+        ConvertFrom-Json
+    $tamperedExecutableMetadata.build.windows_sdk_version = $packageWindowsSdkVersion
+    $tamperedExecutableMetadata |
+        ConvertTo-Json -Depth 10 |
+        Set-Content `
+            -LiteralPath (Join-Path $tamperedExecutableBuildRoot 'specforge_metadata.json') `
+            -Encoding UTF8
+    Assert-ScriptFails `
+        -ScriptPath $packageScriptPath `
+        -Arguments @(
+            '-PackageUnverifiedTestFixture',
+            '-BuildRoot',
+            $tamperedExecutableBuildRoot,
+            '-DistRoot',
+            $testDistRoot,
+            '-PackageName',
+            'SpecForge-portable-tampered-executable',
+            '-Configuration',
+            $Configuration
+        ) `
+        -ExpectedMessage 'does not match build directory SpecForge.exe hash' `
+        -Description 'Portable packaging rejects tampered build executable'
+
+    $verifiedPackage = $packageFixtures[0]
+    $verifiedPackageRoot = Join-Path $testDistRoot $verifiedPackage.PackageName
+    $verifiedPackageZip = Join-Path $testDistRoot "$($verifiedPackage.PackageName).zip"
+    $verifiedPackageMetadataPath = Join-Path $verifiedPackageRoot 'specforge_metadata.json'
+    $originalPackageMetadataBytes = [IO.File]::ReadAllBytes($verifiedPackageMetadataPath)
+    try {
+        $tamperedPackageMetadata =
+            Get-Content -Raw -LiteralPath $verifiedPackageMetadataPath |
+            ConvertFrom-Json
+        $tamperedPackageMetadata.artifact.sha256 = $wrongArtifactHash
+        [IO.File]::WriteAllText(
+            $verifiedPackageMetadataPath,
+            (($tamperedPackageMetadata | ConvertTo-Json -Depth 10) + [Environment]::NewLine),
+            (New-Object Text.UTF8Encoding($false)))
+        Assert-ScriptFails `
+            -ScriptPath $portableVerifierPath `
+            -Arguments @(
+                '-BuildExecutable',
+                $resolvedBuiltExecutable,
+                '-PackageRoot',
+                $verifiedPackageRoot,
+                '-ZipPath',
+                $verifiedPackageZip
+            ) `
+            -ExpectedMessage 'does not match build executable hash' `
+            -Description 'Published Portable metadata tamper is detected'
+    }
+    finally {
+        [IO.File]::WriteAllBytes(
+            $verifiedPackageMetadataPath,
+            $originalPackageMetadataBytes)
+    }
+
+    $verifiedPackageExecutablePath = Join-Path $verifiedPackageRoot 'SpecForge.exe'
+    $originalPackageExecutableBytes = [IO.File]::ReadAllBytes(
+        $verifiedPackageExecutablePath)
+    try {
+        $tamperedPackageExecutableBytes = New-Object byte[] (
+            $originalPackageExecutableBytes.Length + 1)
+        [Array]::Copy(
+            $originalPackageExecutableBytes,
+            $tamperedPackageExecutableBytes,
+            $originalPackageExecutableBytes.Length)
+        $tamperedPackageExecutableBytes[
+            $tamperedPackageExecutableBytes.Length - 1] = 0
+        [IO.File]::WriteAllBytes(
+            $verifiedPackageExecutablePath,
+            $tamperedPackageExecutableBytes)
+        Assert-ScriptFails `
+            -ScriptPath $portableVerifierPath `
+            -Arguments @(
+                '-BuildExecutable',
+                $resolvedBuiltExecutable,
+                '-PackageRoot',
+                $verifiedPackageRoot,
+                '-ZipPath',
+                $verifiedPackageZip
+            ) `
+            -ExpectedMessage 'does not match packaged executable hash' `
+            -Description 'Published Portable executable tamper is detected'
+    }
+    finally {
+        [IO.File]::WriteAllBytes(
+            $verifiedPackageExecutablePath,
+            $originalPackageExecutableBytes)
+    }
+
     $invalidMetadataCases = @(
         [pscustomobject]@{
             Description = 'Metadata schema as string'
             PropertyName = 'schema_version'
             Remove = $false
             Value = '4'
-            ExpectedMessage = 'schema_version must be the integer 4'
+            ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
             Description = 'Metadata schema as decimal'
@@ -1105,21 +1290,21 @@ try {
             Remove = $false
             Value = 4
             RawSchemaJson = '4.0'
-            ExpectedMessage = 'schema_version must be the integer 4'
+            ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
             Description = 'Metadata schema as array'
             PropertyName = 'schema_version'
             Remove = $false
             Value = @(4)
-            ExpectedMessage = 'schema_version must be the integer 4'
+            ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
             Description = 'Metadata legacy schema'
             PropertyName = 'schema_version'
             Remove = $false
             Value = 2
-            ExpectedMessage = 'schema_version must be the integer 4'
+            ExpectedMessage = 'schema_version must be the integer 5'
         },
         [pscustomobject]@{
             Description = 'Metadata missing compiler ID'

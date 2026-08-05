@@ -7,5 +7,13 @@ inline constexpr char kBuildConfiguration[] = "$<CONFIG>";
 inline constexpr char kTargetArchitecture[] = "@SPECFORGE_BUILD_TARGET_ARCHITECTURE@";
 inline constexpr char kBuildSourceMode[] = "@SPECFORGE_BUILD_SOURCE_MODE@";
 inline constexpr char kBuildSourceRevision[] = "@SPECFORGE_BUILD_SOURCE_REVISION@";
+inline constexpr char kBuildCompilerId[] = "@SPECFORGE_BUILD_COMPILER_ID@";
+inline constexpr char kBuildCompilerVersion[] = "@SPECFORGE_BUILD_COMPILER_VERSION@";
+inline constexpr char kBuildCMakeVersion[] = "@SPECFORGE_BUILD_CMAKE_VERSION@";
+inline constexpr char kBuildGenerator[] = "@SPECFORGE_BUILD_GENERATOR@";
+inline constexpr char kBuildWindowsSdkVersion[] = "@SPECFORGE_BUILD_WINDOWS_SDK_VERSION@";
+inline constexpr char kBuildDearImguiVersion[] = "@SPECFORGE_IMGUI_VERSION@";
+inline constexpr char kBuildImPlotVersion[] = "@SPECFORGE_IMPLOT_VERSION@";
+inline constexpr char kBuildZlibVersion[] = "@SPECFORGE_ZLIB_VERSION@";
 
 }  // namespace specforge::build_info

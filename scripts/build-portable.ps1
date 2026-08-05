@@ -109,8 +109,32 @@ function Get-RequiredMetadataObject {
     return $property.Value
 }
 
+function Assert-ValidUtcTimestamp {
+    param(
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$Value,
+        [Parameter(Mandatory = $true)] [string]$Description
+    )
+
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
+        throw "$Description must be a strict UTC timestamp: $Value"
+    }
+    $parsed = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParseExact(
+        $Value,
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$parsed)) {
+        throw "$Description must be a valid UTC timestamp: $Value"
+    }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot '..')).Path
+$portableVerifierPath = Join-Path $scriptRoot 'verify-portable.ps1'
+if (-not (Test-Path -LiteralPath $portableVerifierPath -PathType Leaf)) {
+    throw "Portable artifact verifier was not found: $portableVerifierPath"
+}
 
 if ($SourceMode -cnotin @('working_tree', 'head')) {
     throw "SourceMode must be exactly 'working_tree' or 'head'."
@@ -196,18 +220,21 @@ $sourceMetadataPath = Join-Path $sourceExecutableDirectory 'specforge_metadata.j
 if (-not (Test-Path -LiteralPath $sourceMetadataPath -PathType Leaf)) {
     throw "SpecForge metadata was not found beside SpecForge.exe: $sourceMetadataPath"
 }
+$buildExecutableHash = (
+    Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
+).Hash.ToLowerInvariant()
 $sourceMetadata = Get-Content -Raw -LiteralPath $sourceMetadataPath | ConvertFrom-Json
 $schemaVersionProperty =
     $sourceMetadata.PSObject.Properties['schema_version']
 if ($null -eq $schemaVersionProperty -or
     $sourceMetadata.PSObject.Properties.Name -cnotcontains 'schema_version') {
-    throw 'SpecForge metadata schema_version must be the integer 4.'
+    throw 'SpecForge metadata schema_version must be the integer 5.'
 }
 $schemaVersion = $schemaVersionProperty.Value
 if (($schemaVersion -isnot [int] -and
      $schemaVersion -isnot [long]) -or
-    $schemaVersion -ne 4) {
-    throw 'SpecForge metadata schema_version must be the integer 4.'
+    $schemaVersion -ne 5) {
+    throw 'SpecForge metadata schema_version must be the integer 5.'
 }
 if ($sourceMetadata.PSObject.Properties.Name -ccontains 'deployment') {
     throw 'Build-output SpecForge metadata must not contain deployment; the packaging flow owns distribution identity.'
@@ -284,8 +311,39 @@ if ($buildMetadata.generator -match '[\x00-\x1f]') {
 if ($buildMetadata.target_architecture -cne 'amd64') {
     throw "SpecForge.exe has target architecture '$($buildMetadata.target_architecture)'; expected 'amd64'."
 }
-if ($buildMetadata.windows_sdk_version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
-    throw "Build metadata has invalid windows_sdk_version '$($buildMetadata.windows_sdk_version)'."
+$windowsSdkProperty = $buildMetadata.PSObject.Properties['windows_sdk_version']
+if ($null -eq $windowsSdkProperty -or
+    $buildMetadata.PSObject.Properties.Name -cnotcontains 'windows_sdk_version') {
+    throw "Build metadata is missing 'windows_sdk_version'."
+}
+if ($null -ne $windowsSdkProperty.Value -and
+    ($windowsSdkProperty.Value -isnot [string] -or
+     $windowsSdkProperty.Value -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$')) {
+    throw "Build metadata has invalid windows_sdk_version '$($windowsSdkProperty.Value)'."
+}
+$completedAtUtc = Get-RequiredMetadataString `
+    -Metadata $buildMetadata `
+    -PropertyName 'completed_at_utc'
+Assert-ValidUtcTimestamp `
+    -Value $completedAtUtc `
+    -Description 'Build metadata completed_at_utc'
+$artifactMetadata = Get-RequiredMetadataObject `
+    -Metadata $sourceMetadata `
+    -PropertyName 'artifact'
+$artifactFile = Get-RequiredMetadataString `
+    -Metadata $artifactMetadata `
+    -PropertyName 'file'
+if ($artifactFile -cne 'SpecForge.exe') {
+    throw "Build metadata artifact file '$artifactFile'; expected 'SpecForge.exe'."
+}
+$artifactSha256 = Get-RequiredMetadataString `
+    -Metadata $artifactMetadata `
+    -PropertyName 'sha256'
+if ($artifactSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw "Build metadata artifact sha256 is not a lowercase SHA-256 digest: '$artifactSha256'."
+}
+if ($artifactSha256 -cne $buildExecutableHash) {
+    throw "Build metadata artifact sha256 '$artifactSha256' does not match build directory SpecForge.exe hash '$buildExecutableHash'."
 }
 
 if (-not (Test-Path -LiteralPath $thirdPartyNoticesPath -PathType Leaf)) {
@@ -322,16 +380,13 @@ if (Test-Path -LiteralPath $packageRoot) {
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $packageRoot 'Data') -Force | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination (Join-Path $packageRoot 'SpecForge.exe') -Force
-$sourceExecutableHash = (
-    Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable
-).Hash.ToLowerInvariant()
 $packagedExecutableHash = (
     Get-FileHash `
         -Algorithm SHA256 `
         -LiteralPath (Join-Path $packageRoot 'SpecForge.exe')
 ).Hash.ToLowerInvariant()
-if ($sourceExecutableHash -cne $packagedExecutableHash) {
-    throw "Packaged SpecForge.exe hash '$packagedExecutableHash' does not match source executable hash '$sourceExecutableHash'."
+if ($buildExecutableHash -cne $packagedExecutableHash) {
+    throw "Packaged SpecForge.exe hash '$packagedExecutableHash' does not match build directory SpecForge.exe hash '$buildExecutableHash'."
 }
 $packageMetadataPath = Join-Path $packageRoot 'specforge_metadata.json'
 $portableMetadata = $sourceMetadata |
@@ -353,6 +408,16 @@ $portableMetadataJson = (
     $packageMetadataPath,
     $portableMetadataJson,
     (New-Object Text.UTF8Encoding($false)))
+$packagedMetadata = Get-Content -Raw -LiteralPath $packageMetadataPath | ConvertFrom-Json
+$packagedArtifactMetadata = Get-RequiredMetadataObject `
+    -Metadata $packagedMetadata `
+    -PropertyName 'artifact'
+$packagedArtifactSha256 = Get-RequiredMetadataString `
+    -Metadata $packagedArtifactMetadata `
+    -PropertyName 'sha256'
+if ($packagedArtifactSha256 -cne $packagedExecutableHash) {
+    throw "Packaged metadata artifact sha256 '$packagedArtifactSha256' does not match packaged SpecForge.exe hash '$packagedExecutableHash'."
+}
 
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
@@ -387,6 +452,11 @@ finally {
 
 $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath
 Set-Content -LiteralPath $hashPath -Value ("{0}  {1}" -f $hash.Hash.ToLowerInvariant(), (Split-Path -Leaf $zipPath)) -Encoding ASCII
+
+& $portableVerifierPath `
+    -BuildExecutable $sourceExecutable `
+    -PackageRoot $packageRoot `
+    -ZipPath $zipPath
 
 Write-Host "Portable package: $packageRoot"
 Write-Host "Portable zip: $zipPath"

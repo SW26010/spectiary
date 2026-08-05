@@ -153,18 +153,6 @@ file(GENERATE
     INPUT
         "${CMAKE_BINARY_DIR}/generated/specforge/specforge_build_identity.h.in"
 )
-configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/specforge_metadata.json.in"
-    "${CMAKE_BINARY_DIR}/generated/specforge/specforge_metadata.json.in"
-    @ONLY
-)
-file(GENERATE
-    OUTPUT
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
-    INPUT
-        "${CMAKE_BINARY_DIR}/generated/specforge/specforge_metadata.json.in"
-)
-
 if(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     set(SPECFORGE_EMBEDDED_PUBLIC_SPECTRAL_LINES_HEADER
         "${CMAKE_BINARY_DIR}/generated/specforge/public_spectral_lines_embedded.h"
@@ -410,16 +398,22 @@ target_link_libraries(specforge_native PRIVATE
     uuid
 )
 
+add_executable(specforge_metadata_finalizer_tool
+    src/app/specforge_metadata_finalizer_main.cpp
+)
+specforge_configure_production_target(specforge_metadata_finalizer_tool)
+target_include_directories(specforge_metadata_finalizer_tool PRIVATE
+    "${CMAKE_BINARY_DIR}/generated/$<CONFIG>"
+)
+target_link_libraries(specforge_metadata_finalizer_tool PRIVATE
+    specforge_core
+)
+add_dependencies(specforge_native specforge_metadata_finalizer_tool)
+
 set_target_properties(specforge_native PROPERTIES
     OUTPUT_NAME SpecForge
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
-
-if(CMAKE_CONFIGURATION_TYPES)
-    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>")
-else()
-    set(SPECFORGE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-endif()
 
 if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET specforge_native POST_BUILD
@@ -429,16 +423,6 @@ if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
             "$<TARGET_FILE_DIR:specforge_native>/config/spectral_lines.public.tsv"
     )
 endif()
-
-add_custom_target(specforge_metadata
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
-        "${SPECFORGE_RUNTIME_OUTPUT_DIRECTORY}/specforge_metadata.json"
-    DEPENDS
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
-    COMMENT "Synchronizing SpecForge metadata"
-    VERBATIM
-)
 
 add_executable(specforge_automation_launcher
     src/automation/automation_launcher_main.cpp
@@ -460,7 +444,6 @@ set_target_properties(
         VS_DEBUGGER_WORKING_DIRECTORY
             "${CMAKE_SOURCE_DIR}"
 )
-add_dependencies(specforge_native specforge_metadata)
 add_custom_command(TARGET specforge_native POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf
         "$<TARGET_FILE_DIR:specforge_native>/Legal"
@@ -470,6 +453,17 @@ add_custom_command(TARGET specforge_native POST_BUILD
         "$<TARGET_FILE_DIR:specforge_native>/DATA_SOURCES.txt"
     COMMENT "Removing obsolete executable-adjacent legal documents"
     VERBATIM
+)
+add_custom_command(TARGET specforge_native POST_BUILD
+    COMMAND "$<TARGET_FILE:specforge_metadata_finalizer_tool>"
+        "$<TARGET_FILE:specforge_native>"
+        "$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+    COMMENT "Finalizing schema 5 SpecForge metadata"
+    VERBATIM
+)
+add_custom_target(specforge_metadata
+    DEPENDS specforge_native
+    COMMENT "Building and finalizing SpecForge metadata"
 )
 
 enable_testing()
@@ -484,13 +478,13 @@ add_custom_target(specforge_portable_test_metadata
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY}"
     COMMAND "${CMAKE_COMMAND}"
-        "-DINPUT=${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+        "-DINPUT=$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
         "-DOUTPUT=${SPECFORGE_PORTABLE_TEST_METADATA}"
         -P "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
     DEPENDS
-        "${CMAKE_BINARY_DIR}/generated/specforge/$<CONFIG>/specforge_metadata.json"
+        specforge_native
         "${CMAKE_SOURCE_DIR}/tests/fixtures/create_portable_runtime_metadata.cmake"
-    COMMENT "Preparing Portable runtime metadata for deterministic tests"
+    COMMENT "Preparing schema 5 Portable runtime metadata for deterministic tests"
     VERBATIM
 )
 
