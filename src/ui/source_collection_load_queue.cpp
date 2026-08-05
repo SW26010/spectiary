@@ -1,5 +1,6 @@
 #include "ui/source_collection_load_queue.h"
 
+#include "profile/source_load_latency_trace.h"
 #include "ui/source_collection_preparation_internal.h"
 
 #include <algorithm>
@@ -359,6 +360,9 @@ private:
         const std::size_t failure_spectrum_index = request.spectrum_index;
         LoadLatencyAttemptHandle failure_latency_attempt =
             request.latency_attempt;
+        std::shared_ptr<SourceLoadLatencyTrace>
+            failure_source_load_trace =
+                request.source_load_trace;
         std::shared_ptr<BatchState> failure_batch = batch;
         std::shared_ptr<BatchCompletionSlot> failure_ordered_completion = ordered_completion;
         const bool wait_at_runtime_resource_checkpoint =
@@ -398,6 +402,8 @@ private:
             completion.error_message =
                 std::string("Could not start the source loading thread: ") + error.what();
             completion.latency_attempt = std::move(failure_latency_attempt);
+            completion.source_load_trace =
+                std::move(failure_source_load_trace);
             if (completion.latency_attempt) {
                 completion.latency_attempt->MarkCompletionReady();
             }
@@ -780,8 +786,20 @@ private:
         completion.path = task.request.path;
         completion.spectrum_index = task.request.spectrum_index;
         completion.latency_attempt = task.request.latency_attempt;
+        completion.source_load_trace =
+            task.request.source_load_trace;
         try {
             completion.prepared = Prepare(task, stop_token);
+            if (completion.prepared) {
+                if (task.request.latency_attempt) {
+                    task.request.latency_attempt->SetTargetIndex(
+                        completion.prepared->spectrum_index);
+                }
+                if (task.request.source_load_trace) {
+                    task.request.source_load_trace->SetTargetIndex(
+                        completion.prepared->spectrum_index);
+                }
+            }
             if (task.request.latency_attempt) {
                 task.request.latency_attempt->MarkWorkerPrepared();
             }

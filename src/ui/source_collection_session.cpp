@@ -36,6 +36,12 @@ std::int64_t ElapsedNavigationResolutionNanoseconds(
         .count();
 }
 
+std::string PathText(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 }  // namespace
 
 class SourceCollectionSessionStatePersistence {
@@ -752,7 +758,31 @@ SpectrumSnapshotHandle SourceCollectionSession::CurrentSourceSnapshot() const
 std::vector<std::filesystem::path> SourceCollectionSession::AnnotationPathsForSource(
     const std::filesystem::path& path) const
 {
-    return workflow_->AnnotationPathsForSourceKey(SourcePathIdentityKey(path));
+    const std::string source_key = SourcePathIdentityKey(path);
+    std::vector<std::filesystem::path> paths =
+        workflow_->AnnotationPathsForSourceKey(source_key);
+    for (const SourceCollectionSavedSource& unresolved :
+         unresolved_deferred_restore_sources_) {
+        if (SourcePathIdentityKey(unresolved.path) != source_key) {
+            continue;
+        }
+        for (const std::filesystem::path& annotation_path :
+             unresolved.annotation_paths) {
+            if (annotation_path.empty() ||
+                std::any_of(
+                    paths.begin(),
+                    paths.end(),
+                    [&annotation_path](
+                        const std::filesystem::path& existing) {
+                        return SourcePathIdentityKey(existing) ==
+                               SourcePathIdentityKey(annotation_path);
+                    })) {
+                continue;
+            }
+            paths.push_back(annotation_path);
+        }
+    }
+    return paths;
 }
 
 std::optional<SourceCollectionLoadHint> SourceCollectionSession::LoadHintForSource(
@@ -1010,6 +1040,28 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         result.background_retirement.push_back(
             MakeBackgroundRetirementHandle(std::move(prepared_plan->workflow)));
         prepared_plan->workflow = std::move(reconciled_workflow);
+    }
+
+    if (prepared_plan != nullptr &&
+        prepared_plan->preferred_member_path &&
+        (!prepared_plan->workflow.current_index ||
+         *prepared_plan->workflow.current_index != spectrum_index)) {
+        const std::string preferred_member_path =
+            PathText(*prepared_plan->preferred_member_path);
+        if (snapshot) {
+            result.background_retirement.push_back(std::move(snapshot));
+        }
+        result.background_retirement.push_back(
+            MakeBackgroundRetirementHandle(std::move(payload)));
+        retire_folder_listing_generation();
+        result.load_error.kind =
+            SourceCollectionLoadErrorKind::
+                BackgroundLoadingFailed;
+        result.load_error.diagnostic_detail =
+            "The requested external FITS member is excluded by "
+            "the active sample filter: " +
+            preferred_member_path;
+        return result;
     }
 
     if (prepared_plan != nullptr && completes_pending_navigation &&

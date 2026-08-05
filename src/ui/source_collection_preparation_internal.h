@@ -35,6 +35,9 @@ struct SourceCollectionPreparationAdapters {
     using FolderScanner = std::function<SourceCollectionFolderListing(
         const std::filesystem::path&,
         const SourceCollectionCancellationCheckpoint&)>;
+    using SourceOpenProbe = std::function<SourceOpenFilesystemProbe(
+        const SourceOpenRequest&,
+        const SourceCollectionCancellationCheckpoint&)>;
     using FolderChangeGenerationFactory =
         std::function<DirectoryChangeGenerationHandle(
             const std::filesystem::path&,
@@ -55,6 +58,7 @@ struct SourceCollectionPreparationAdapters {
     SnapshotLoader snapshot_loader;
     FolderSnapshotLoader folder_snapshot_loader;
     FolderScanner folder_scanner;
+    SourceOpenProbe source_open_probe;
     FolderChangeGenerationFactory folder_change_generation_factory;
     // Lower-level lifecycle seam for the default monitor. Ignored when a
     // complete folder_change_generation_factory is injected.

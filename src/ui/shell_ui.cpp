@@ -1312,6 +1312,16 @@ void ShellUi::OpenSource(const std::filesystem::path& path, std::size_t spectrum
         spectrum_index);
 }
 
+void ShellUi::OpenExternalSource(
+    const std::filesystem::path& path,
+    std::size_t spectrum_index)
+{
+    (void)source_activation_.OpenExternalSource(
+        path,
+        application_settings_.View().open_external_fits_as_folder,
+        spectrum_index);
+}
+
 SourceCollectionActivationTransaction::
     SourceOpenOperation
 ShellUi::OpenSourceForAutomation(

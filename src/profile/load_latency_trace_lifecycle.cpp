@@ -20,6 +20,11 @@ LoadLatencyAttempt::LoadLatencyAttempt(
     preparation_rounds_.reserve(2);
 }
 
+void LoadLatencyAttempt::SetTargetIndex(std::size_t target_index) noexcept
+{
+    target_index_.store(target_index, std::memory_order_relaxed);
+}
+
 void LoadLatencyAttempt::MarkSourceTaskId(std::uint64_t task_id) noexcept
 {
     source_task_id_.store(task_id, std::memory_order_relaxed);
@@ -178,7 +183,8 @@ LoadLatencyAttemptReport LoadLatencyAttempt::Report() const noexcept
 {
     LoadLatencyAttemptReport report;
     report.attempt_index = attempt_index_;
-    report.target_index = target_index_;
+    report.target_index =
+        target_index_.load(std::memory_order_relaxed);
     report.source_task_id =
         source_task_id_.load(std::memory_order_relaxed);
     report.source_is_folder =

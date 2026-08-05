@@ -95,6 +95,12 @@ bool AllWorkflowCachePathsEmpty(
            paths.navigation_state_cache_path.empty();
 }
 
+std::string PathText(const std::filesystem::path& path)
+{
+    const std::u8string utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
 bool AllWorkflowCachePathsPresent(
     const SampleWorkflowPreparationPaths& paths)
 {
@@ -119,6 +125,8 @@ SourceCollectionPreparationAdapters DefaultAdapters(
                 {},
                 checkpoint);
         };
+    adapters.source_open_probe =
+        ProbeSourceOpenRequest;
     adapters.workflow_cache_loader =
         LoadSampleWorkflowPreparationCacheBundle;
     adapters.file_context_builder =
@@ -176,6 +184,10 @@ void FillMissingAdapters(
     if (!adapters.folder_scanner) {
         adapters.folder_scanner =
             std::move(defaults.folder_scanner);
+    }
+    if (!adapters.source_open_probe) {
+        adapters.source_open_probe =
+            std::move(defaults.source_open_probe);
     }
     if (!adapters.workflow_cache_loader) {
         adapters.workflow_cache_loader =
@@ -334,6 +346,7 @@ public:
         const SourceCollectionCancellationCheckpoint& checkpoint;
         const SourceCollectionWorkflowCacheProvider&
             workflow_cache_provider;
+        std::size_t spectrum_index = 0;
     };
 
     std::shared_ptr<const SampleWorkflowPreparationCacheBundle>
@@ -355,24 +368,51 @@ public:
             workflow_cache_provider)
     {
         checkpoint();
+        SourceCollectionLoadRequest resolved_request =
+            request;
+        if (request.source_open_request) {
+            const SourceOpenFilesystemProbe probe =
+                adapters_.source_open_probe(
+                    *request.source_open_request,
+                    checkpoint);
+            const SourceOpenResolution resolution =
+                ResolveSourceOpenRequest(
+                    *request.source_open_request,
+                    probe);
+            if (resolution.failed()) {
+                throw std::runtime_error(
+                    resolution.diagnostic);
+            }
+            resolved_request.path = resolution.source_path;
+            resolved_request.preferred_member_path =
+                resolution.preferred_member_path;
+            resolved_request.source_open_request.reset();
+        }
         if (request.snapshot_only &&
-            (!request.reuse ||
-             !request.reuse->context_reuse_proof())) {
+            (!resolved_request.reuse ||
+             !resolved_request.reuse->context_reuse_proof())) {
             throw SourceCollectionPreparationStale();
         }
         const Work work{
             task_id,
-            request,
+            resolved_request,
             checkpoint,
             workflow_cache_provider,
+            request.spectrum_index,
         };
         std::error_code directory_error;
         const bool is_directory =
             std::filesystem::is_directory(
-                request.path,
+                resolved_request.path,
                 directory_error);
         if (!directory_error && is_directory) {
             return PrepareFolder(work);
+        }
+        if (resolved_request.preferred_member_path) {
+            throw std::runtime_error(
+                "The external FITS source folder is no longer "
+                "available as a directory: " +
+                PathText(resolved_request.path));
         }
         return PrepareFile(work);
     }
@@ -400,7 +440,7 @@ private:
             PrepareSampleWorkflowStateFromCache(
                 snapshot,
                 context,
-                work.request.spectrum_index,
+                work.spectrum_index,
                 *cache,
                 nullptr,
                 nullptr,
@@ -485,9 +525,9 @@ private:
                reuse->context_reuse_proof() &&
                resident.snapshot &&
                resident.spectrum_index ==
-                   work.request.spectrum_index &&
+                   work.spectrum_index &&
                resident.snapshot->collection.current_index ==
-                   work.request.spectrum_index &&
+                   work.spectrum_index &&
                resident.context_reuse_proof ==
                    *reuse->context_reuse_proof() &&
                resident.folder_listing_generation ==
@@ -522,7 +562,7 @@ private:
         PreparedSourceCollection prepared{
             work.task_id,
             work.request.path,
-            work.request.spectrum_index,
+            work.spectrum_index,
             std::move(snapshot),
             PreparedSourceCollectionReuse{identity},
         };
@@ -558,7 +598,8 @@ private:
             work.request.reuse
             ? &*work.request.reuse
             : nullptr;
-        if (CanReusePreparedWorkflow(
+        if (!work.request.preferred_member_path &&
+            CanReusePreparedWorkflow(
                 context.identity,
                 reuse)) {
             if (work.request.latency_attempt) {
@@ -571,7 +612,7 @@ private:
             PreparedSourceCollection prepared{
                 work.task_id,
                 work.request.path,
-                work.request.spectrum_index,
+                work.spectrum_index,
                 std::move(snapshot),
                 PreparedSourceCollectionReuse{
                     reuse_proof.identity},
@@ -588,13 +629,25 @@ private:
         }
         PreparedSampleWorkflowState workflow =
             PrepareWorkflow(work, *snapshot, context);
+        if (work.request.preferred_member_path &&
+            workflow.filter_evaluation.active &&
+            (work.spectrum_index >=
+                 workflow.filter_evaluation.included_samples.size() ||
+             !workflow.filter_evaluation
+                   .included_samples[work.spectrum_index])) {
+            throw std::runtime_error(
+                "The requested external FITS member is excluded by "
+                "the active sample filter: " +
+                PathText(
+                    *work.request.preferred_member_path));
+        }
         SourceCollectionContextReuseProof reuse_proof{
             context.identity,
             verified_state};
         PreparedSourceCollection prepared{
             work.task_id,
             work.request.path,
-            work.request.spectrum_index,
+            work.spectrum_index,
             std::move(snapshot),
             PreparedSourceCollectionPlan{
                 std::move(context),
@@ -602,7 +655,8 @@ private:
                 reuse
                     ? std::optional<std::uint64_t>{
                           reuse->live_workflow_revision()}
-                    : std::nullopt},
+                    : std::nullopt,
+                work.request.preferred_member_path},
         };
         prepared.context_reuse_proof =
             std::move(reuse_proof);
@@ -630,7 +684,7 @@ private:
             });
     }
 
-    PreparedSourceCollection PrepareFolder(const Work& work)
+    PreparedSourceCollection PrepareFolder(Work work)
     {
         constexpr std::size_t kMaximumAttempts = 2;
         const SourceCollectionReuseCandidate* reuse =
@@ -658,12 +712,13 @@ private:
             if (listing_generation &&
                 ((listing_generation->change_generation &&
                   !generation_current_at_start) ||
-                 work.request.spectrum_index >=
-                     listing_generation->listing.spectra.size() ||
-                 !SourceCollectionFolderSpectrumFileMatchesCurrentState(
-                     listing_generation
-                         ->listing
-                         .spectra[work.request.spectrum_index]))) {
+                 (!work.request.preferred_member_path &&
+                  (work.spectrum_index >=
+                       listing_generation->listing.spectra.size() ||
+                   !SourceCollectionFolderSpectrumFileMatchesCurrentState(
+                       listing_generation
+                           ->listing
+                           .spectra[work.spectrum_index]))))) {
                 listing_generation.reset();
             }
             if (work.request.snapshot_only &&
@@ -680,6 +735,64 @@ private:
             }
             const SourceCollectionFolderListing& listing =
                 listing_generation->listing;
+            if (work.request.preferred_member_path) {
+                if (!listing.readable) {
+                    const std::string diagnostic =
+                        listing.error_message.empty()
+                            ? "Could not enumerate the input folder: " +
+                                  PathText(work.request.path)
+                            : listing.error_message;
+                    throw std::runtime_error(
+                        diagnostic);
+                }
+                const std::string preferred_member_key =
+                    SourcePathIdentityKey(
+                        *work.request.preferred_member_path);
+                std::optional<std::size_t> preferred_index;
+                for (std::size_t index = 0;
+                     index < listing.spectra.size();
+                     ++index) {
+                    if ((index & 0xffU) == 0U) {
+                        work.checkpoint();
+                    }
+                    if (SourcePathIdentityKey(
+                            listing.spectra[index].path) ==
+                        preferred_member_key) {
+                        preferred_index = index;
+                        break;
+                    }
+                }
+                if (!preferred_index) {
+                    if (listing_generation &&
+                        !listing_scan_performed) {
+                        listing_generation.reset();
+                        continue;
+                    }
+                    throw std::runtime_error(
+                        "The requested external FITS member was not "
+                        "found in the source folder after the first-level "
+                        "scan: " +
+                        PathText(
+                            *work.request.preferred_member_path));
+                }
+                if (!SourceCollectionFolderSpectrumFileMatchesCurrentState(
+                        listing.spectra[*preferred_index])) {
+                    if (listing_generation &&
+                        !listing_scan_performed) {
+                        listing_generation.reset();
+                        continue;
+                    }
+                    throw std::runtime_error(
+                        "The requested external FITS member is no longer "
+                        "a valid member of the source folder: " +
+                        PathText(
+                            *work.request.preferred_member_path));
+                }
+                work.spectrum_index = *preferred_index;
+            } else {
+                work.spectrum_index =
+                    work.request.spectrum_index;
+            }
             const SourceCollectionSingleFileState initial_state =
                 CaptureSourceCollectionSingleFileState(
                     work.request.path,
@@ -689,6 +802,7 @@ private:
                 const SourceCollectionResidentSnapshot& resident =
                     *reuse->resident_snapshot();
                 const bool resident_current =
+                    !work.request.preferred_member_path &&
                     !listing_scan_performed &&
                     generation_current_at_start &&
                     listing_generation ==
@@ -768,7 +882,7 @@ private:
             SpectrumSnapshotHandle snapshot =
                 adapters_.folder_snapshot_loader(
                     work.request.path,
-                    work.request.spectrum_index,
+                    work.spectrum_index,
                     listing,
                     [&checkpoint = work.checkpoint]() {
                         try {
@@ -794,9 +908,12 @@ private:
                         !listing_scan_performed &&
                         reuse &&
                         listing_generation ==
-                            reuse->folder_listing_generation());
+                        reuse->folder_listing_generation());
+            const bool reuse_context =
+                can_reuse_context &&
+                !work.request.preferred_member_path;
             std::optional<SourceCollectionContext> context;
-            if (!can_reuse_context) {
+            if (!reuse_context) {
                 if (work.request.snapshot_only) {
                     throw SourceCollectionPreparationStale();
                 }
@@ -809,7 +926,7 @@ private:
             }
             if (work.request.latency_attempt) {
                 work.request.latency_attempt
-                    ->MarkContextPrepared(can_reuse_context);
+                    ->MarkContextPrepared(reuse_context);
             }
             const SourceCollectionSingleFileState verified_state =
                 CaptureSourceCollectionSingleFileState(
@@ -850,7 +967,7 @@ private:
                         revalidation_succeeded);
             }
             if (revalidation_succeeded) {
-                if (can_reuse_context) {
+                if (reuse_context) {
                     return BuildReusedPrepared(
                         work,
                         std::move(snapshot),
@@ -962,7 +1079,7 @@ private:
             SpectrumSnapshotHandle snapshot =
                 adapters_.snapshot_loader(
                     work.request.path,
-                    work.request.spectrum_index,
+                    work.spectrum_index,
                     [&checkpoint = work.checkpoint]() {
                         try {
                             checkpoint();

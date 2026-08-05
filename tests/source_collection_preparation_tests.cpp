@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -895,6 +896,216 @@ void TestStaleFolderListingRefreshesBeforeDecode()
     std::filesystem::remove_all(folder);
 }
 
+void TestPreferredFolderMemberResolvesAfterFirstLevelScan()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_preferred_member");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    std::atomic_size_t decoded_index =
+        std::numeric_limits<std::size_t>::max();
+    specforge::SourceCollectionPreparationAdapters adapters =
+        Adapters(
+            [](const auto& source,
+               std::size_t index,
+               const auto&) {
+                return MakeSnapshot(source, index, 3);
+            });
+    adapters.folder_snapshot_loader =
+        [&decoded_index](
+            const auto& path,
+            std::size_t index,
+            const auto& listing,
+            const auto&) {
+            decoded_index.store(
+                index,
+                std::memory_order_relaxed);
+            return MakeSnapshot(
+                path,
+                index,
+                listing.spectra.size());
+        };
+    adapters.folder_scanner =
+        [](const auto& path, const auto& checkpoint) {
+            const auto listing = specforge::ScanSourceCollectionFolder(
+                path,
+                {},
+                checkpoint);
+            return listing;
+        };
+    adapters.folder_change_generation_factory =
+        [](const auto&, const auto& checkpoint) {
+            checkpoint();
+            return std::make_shared<
+                MutableDirectoryChangeGeneration>();
+        };
+    adapters.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+
+    specforge::SourceCollectionPreparation preparation(
+        std::move(adapters));
+    const specforge::PreparedSourceCollection prepared =
+        Prepare(
+            preparation,
+            1,
+            {
+                .path = folder,
+                .preferred_member_path = preferred,
+            });
+    Require(
+        decoded_index.load(std::memory_order_relaxed) == 1 &&
+            prepared.spectrum_index == 1 &&
+            prepared.snapshot &&
+            prepared.snapshot->collection.current_index == 1,
+        "preferred folder member should select its stable first-level listing index");
+    std::filesystem::remove_all(folder);
+}
+
+void TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_missing_preferred_member");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "missing.fits";
+
+    specforge::SourceCollectionPreparationAdapters adapters =
+        Adapters(
+            [](const auto& source,
+               std::size_t index,
+               const auto&) {
+                return MakeSnapshot(source, index, 1);
+            });
+    adapters.folder_snapshot_loader =
+        [](const auto& path,
+           std::size_t index,
+           const auto& listing,
+           const auto&) {
+            return MakeSnapshot(
+                path,
+                index,
+                listing.spectra.size());
+        };
+    adapters.folder_change_generation_factory =
+        [](const auto&, const auto& checkpoint) {
+            checkpoint();
+            return std::make_shared<
+                MutableDirectoryChangeGeneration>();
+        };
+    adapters.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+
+    specforge::SourceCollectionPreparation preparation(
+        std::move(adapters));
+    bool failed = false;
+    std::string diagnostic;
+    try {
+        (void)Prepare(
+            preparation,
+            1,
+            {
+                .path = folder,
+                .preferred_member_path = preferred,
+            });
+    } catch (const std::runtime_error& error) {
+        failed = true;
+        diagnostic = error.what();
+    }
+
+    Require(
+        failed &&
+            diagnostic.find("requested external FITS member") !=
+                std::string::npos &&
+            diagnostic.find("missing.fits") !=
+                std::string::npos,
+        "a preferred member missing from the first-level scan should fail with its diagnostic");
+    std::filesystem::remove_all(folder);
+}
+
+void TestUnreadableFolderListingPreservesEnumerationDiagnostic()
+{
+    const std::filesystem::path folder =
+        UniqueTempPath("_unreadable_preferred_member");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+
+    specforge::SourceCollectionPreparationAdapters adapters =
+        Adapters(
+            [](const auto& source,
+               std::size_t index,
+               const auto&) {
+                return MakeSnapshot(source, index, 1);
+            });
+    adapters.folder_scanner =
+        [](const auto&, const auto& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionFolderListing listing;
+            listing.readable = false;
+            listing.error_message =
+                "Could not enumerate the input folder: injected ACL failure.";
+            return listing;
+        };
+    adapters.folder_change_generation_factory =
+        [](const auto&, const auto& checkpoint) {
+            checkpoint();
+            return std::make_shared<MutableDirectoryChangeGeneration>();
+        };
+
+    specforge::SourceCollectionPreparation preparation(
+        std::move(adapters));
+    bool failed = false;
+    std::string diagnostic;
+    try {
+        (void)Prepare(
+            preparation,
+            1,
+            {
+                .path = folder,
+                .preferred_member_path = preferred,
+            });
+    } catch (const std::runtime_error& error) {
+        failed = true;
+        diagnostic = error.what();
+    }
+
+    Require(
+        failed &&
+            diagnostic.find(
+                "Could not enumerate the input folder: injected ACL failure.") !=
+                std::string::npos &&
+            diagnostic.find("requested external FITS member") ==
+                std::string::npos,
+        "an unreadable folder listing should preserve its enumeration diagnostic");
+    std::filesystem::remove_all(folder);
+}
+
 void TestChangedFolderRetriesOneStableGeneration()
 {
     const std::filesystem::path folder =
@@ -1153,6 +1364,9 @@ int main()
     TestInvalidatedFolderGenerationRefreshes();
     TestUnavailableFolderGenerationUsesFallbackScan();
     TestStaleFolderListingRefreshesBeforeDecode();
+    TestPreferredFolderMemberResolvesAfterFirstLevelScan();
+    TestPreferredFolderMemberMissingAfterScanFailsWithDiagnostic();
+    TestUnreadableFolderListingPreservesEnumerationDiagnostic();
     TestChangedFolderRetriesOneStableGeneration();
     TestPublishedGenerationInvalidatesOnPreparationDestruction();
     TestCanceledBlockedRegistrationStopsOnDestruction();

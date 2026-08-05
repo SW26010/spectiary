@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/source_open_resolution.h"
 #include "profile/navigation_latency_trace.h"
 #include "profile/navigation_prefetch_trace.h"
 #include "profile/source_load_latency_trace.h"
@@ -109,6 +110,10 @@ public:
     // the session.
     [[nodiscard]] bool OpenSource(
         const std::filesystem::path& path,
+        std::size_t spectrum_index = 0);
+    [[nodiscard]] bool OpenExternalSource(
+        const std::filesystem::path& path,
+        bool open_external_fits_as_folder,
         std::size_t spectrum_index = 0);
     [[nodiscard]] SourceOpenOperation
     OpenSourceForAutomation(
@@ -229,9 +234,13 @@ private:
         SourceLoadLatencyTraceHandle source_load_trace = {},
         std::optional<SampleNavigationDirection> prefetch_direction =
             std::nullopt,
-        std::uint64_t automation_sequence = 0);
+        std::uint64_t automation_sequence = 0,
+        std::optional<std::filesystem::path>
+            preferred_member_path = std::nullopt,
+        std::optional<SourceOpenRequest>
+            source_open_request = std::nullopt);
     [[nodiscard]] SourceOpenOperation OpenSourceWithPolicy(
-        const std::filesystem::path& path,
+        const SourceOpenRequest& request,
         std::size_t spectrum_index,
         bool preserve_pending_explicit_opens,
         std::uint64_t automation_sequence);

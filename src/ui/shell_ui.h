@@ -264,6 +264,9 @@ public:
         SourceCollectionLoadQueue::CompletionReadyCallback callback);
     void UnregisterSourceLoadCompletionReadyCallback();
     void OpenSource(const std::filesystem::path& path, std::size_t spectrum_index = 0);
+    void OpenExternalSource(
+        const std::filesystem::path& path,
+        std::size_t spectrum_index = 0);
     [[nodiscard]] SourceCollectionActivationTransaction::
         SourceOpenOperation
     OpenSourceForAutomation(

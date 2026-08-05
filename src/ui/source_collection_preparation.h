@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/source_collection_manifest.h"
+#include "domain/source_open_resolution.h"
 #include "domain/spectrum_snapshot.h"
 #include "profile/load_latency_trace_lifecycle.h"
 #include "ui/sample_navigation_sequence.h"
@@ -11,11 +12,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
 namespace specforge {
+
+class SourceLoadLatencyTrace;
 
 class SourceCollectionReuseCandidate {
 public:
@@ -66,11 +70,21 @@ struct SourceCollectionLoadRequest {
     std::filesystem::path path;
     std::size_t spectrum_index = 0;
     std::vector<std::filesystem::path> annotation_paths;
+    // External, in-app, and automation opens carry their logical request here
+    // so filesystem probing stays inside the cancellable load worker. Restore,
+    // follow-up, and prefetch requests already carry a resolved source path.
+    std::optional<SourceOpenRequest> source_open_request;
+    // External FITS-as-folder opens retain the originally requested member
+    // until the first-level folder listing has been prepared. Ordinary file,
+    // in-app folder, automation, restore, and prefetch requests leave this
+    // empty and keep their existing index semantics.
+    std::optional<std::filesystem::path> preferred_member_path;
     std::optional<SourceCollectionReuseCandidate> reuse;
     // Prefetch requests may only publish a snapshot under an already-proven
     // context. They never materialize or publish workflow state.
     bool snapshot_only = false;
     LoadLatencyAttemptHandle latency_attempt;
+    std::shared_ptr<SourceLoadLatencyTrace> source_load_trace;
 };
 
 struct PreparedSourceCollection {

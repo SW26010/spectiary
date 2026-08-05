@@ -5,6 +5,7 @@
 #include "domain/sample_labeling.h"
 #include "domain/source_path_identity.h"
 #include "ui/sample_labeling_controller.h"
+#include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_load_queue_internal.h"
 #include "ui/source_collection_session_state_cache_io.h"
 
@@ -329,6 +330,17 @@ std::filesystem::path UniqueTempPath(std::string_view suffix)
     return std::filesystem::temp_directory_path() /
            ("specforge_shell_activation_" + std::to_string(next_id.fetch_add(1)) +
             std::string(suffix));
+}
+
+void WriteFixture(const std::filesystem::path& path)
+{
+    std::ofstream stream(
+        path,
+        std::ios::binary | std::ios::trunc);
+    Require(
+        stream.good(),
+        "shell activation fixture should be writable");
+    stream << "fixture";
 }
 
 specforge::SpectrumSnapshotHandle MakeSnapshot(
@@ -3367,6 +3379,1145 @@ void TestShellFlushResultNamesEveryFailedOwner()
         "the Chinese shutdown warning should omit successful owners");
 }
 
+void TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_external_fits_folder");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    std::vector<std::size_t> folder_decode_indices;
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [](const auto& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_snapshot_loader =
+        [&folder_decode_indices](
+            const auto& source,
+            std::size_t index,
+            const auto& listing,
+            const auto&) {
+            (void)listing;
+            folder_decode_indices.push_back(index);
+            return MakeSnapshot(
+                source,
+                index);
+        };
+    dependencies.file_context_builder =
+        [](const auto& snapshot,
+           const auto& state,
+           const auto& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionContext context;
+            context.identity =
+                specforge::BuildSourceCollectionIdentity(
+                    snapshot,
+                    state);
+            context.manifest.sample_names = {"file"};
+            return context;
+        };
+    dependencies.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&, const auto& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession({}, {}, {}, {}),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+
+    shell->OpenSource(folder);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "an existing folder source should finish loading before the external open");
+    const specforge::SpectrumSnapshotHandle existing_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        existing_snapshot &&
+            existing_snapshot->source.path == folder &&
+            existing_snapshot->collection.current_index == 0,
+        "the external-open regression should start from an existing folder source at its first member");
+    folder_decode_indices.clear();
+
+    Require(
+        Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "external FITS folder setting should apply in the startup shell");
+    constexpr std::uint64_t external_presentation_frame = 500;
+    Access::EnableNavigationTracing(
+        *shell,
+        external_presentation_frame);
+    shell->OpenExternalSource(preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "external FITS startup source should finish loading");
+    const specforge::SpectrumSnapshotHandle external_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        external_snapshot &&
+            external_snapshot->source.path == folder,
+        "external FITS startup should keep the containing folder as the source");
+    Require(
+        folder_decode_indices.size() == 1 &&
+            folder_decode_indices.front() == 1,
+        "external FITS preparation should decode the requested non-first folder member");
+    Require(
+        external_snapshot->collection.current_index == 1,
+        "external FITS startup should present the requested non-first folder member");
+    const std::vector<specforge::SourceLoadLatencyReport>
+        external_reports =
+            Access::CompleteSourceLoadFramePresentation(
+                *shell,
+                external_presentation_frame + 1);
+    Require(
+        external_reports.size() == 1 &&
+            external_reports.front().target_index == 1 &&
+            external_reports.front().attempts.size() == 1 &&
+            external_reports.front().attempts.front().target_index == 1,
+        "external FITS source-load tracing should report the resolved preferred member index");
+    Require(
+        external_reports.front().attempts.front().preparation_rounds.size() == 1 &&
+            !external_reports.front().attempts.front().preparation_rounds.front().context_reused,
+        "preferred FITS preparation should report that its rebuilt context was not reused");
+
+    shell->OpenExternalSource(folder / "missing.fits");
+    Require(
+        DrainAllSourceLoads(*shell),
+        "missing external FITS startup should report after background resolution");
+    const std::string missing_error(Access::LoadError(*shell));
+    Require(
+        missing_error.find("does not exist") != std::string::npos &&
+            missing_error.find("missing.fits") != std::string::npos,
+        "missing external FITS startup target should retain a clear diagnostic");
+
+    Require(
+        Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalFitsAsFolder(false))
+            .applied(),
+        "external FITS folder setting should be disableable");
+    shell->OpenExternalSource(preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "disabled external FITS startup should finish loading");
+    const specforge::SpectrumSnapshotHandle disabled_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        disabled_snapshot &&
+            disabled_snapshot->source.path == preferred &&
+            disabled_snapshot->collection.current_index == 0,
+        "disabled external FITS startup should retain single-file semantics");
+
+    Require(
+        Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "external FITS folder setting should be re-enabled for origin checks");
+    shell->OpenSource(preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "in-app FITS open should finish loading");
+    const specforge::SpectrumSnapshotHandle in_app_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        in_app_snapshot &&
+            in_app_snapshot->source.path == preferred &&
+            in_app_snapshot->collection.current_index == 0,
+        "in-app FITS open should remain a single-file source");
+
+    (void)shell->OpenSourceForAutomation(preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "automation FITS open should finish loading");
+    const specforge::SpectrumSnapshotHandle automation_snapshot =
+        Access::Session(*shell).CurrentSampleSnapshot();
+    Require(
+        automation_snapshot &&
+            automation_snapshot->source.path == preferred &&
+            automation_snapshot->collection.current_index == 0,
+        "automation FITS open should remain a single-file source");
+
+    shell.reset();
+    std::filesystem::remove_all(folder);
+}
+
+void TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_external_fits_filtered_folder");
+    const std::filesystem::path state_root =
+        UniqueTempPath("_external_fits_filtered_state");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::remove_all(state_root, cleanup_error);
+    std::filesystem::create_directory(folder);
+    std::filesystem::create_directory(state_root);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    const std::filesystem::path annotation_path =
+        state_root / "external-filter_y.npy";
+    std::string annotation_error;
+    Require(
+        SaveAnnotationFixture(
+            annotation_path,
+            {1, 0, 1},
+            &annotation_error),
+        annotation_error.empty()
+            ? "filtered external FITS annotation should save"
+            : annotation_error);
+    const std::optional<specforge::SampleAnnotationResult>
+        annotation =
+            specforge::SampleAnnotationIoAdapter{}.Load(
+                annotation_path,
+                3,
+                &annotation_error);
+    Require(
+        annotation.has_value(),
+        "filtered external FITS annotation should load");
+    const std::string filter_source_id =
+        specforge::BuildAnnotationFilterSourceId(*annotation);
+    const std::filesystem::path workflow_cache_path =
+        state_root / "workflow.json";
+
+    std::vector<std::size_t> folder_decode_indices;
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [](const auto& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_snapshot_loader =
+        [&folder_decode_indices](
+            const auto& source,
+            std::size_t index,
+            const auto& listing,
+            const auto&) {
+            (void)listing;
+            folder_decode_indices.push_back(index);
+            return MakeSnapshot(source, index);
+        };
+    dependencies.file_context_builder =
+        [](const auto& snapshot,
+           const auto& state,
+           const auto& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionContext context;
+            context.identity =
+                specforge::BuildSourceCollectionIdentity(
+                    snapshot,
+                    state);
+            context.manifest.sample_names = {
+                "first",
+                "selected",
+                "zzz"};
+            return context;
+        };
+    dependencies.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+    dependencies.workflow_cache_loader =
+        [&workflow_cache_path, &state_root](
+            const auto&,
+            const auto& checkpoint) {
+            return specforge::LoadSampleWorkflowPreparationCacheBundle(
+                specforge::SampleWorkflowPreparationPaths{
+                    .labeling_state_cache_path =
+                        state_root / "labeling.json",
+                    .workflow_state_cache_path =
+                        workflow_cache_path,
+                    .navigation_state_cache_path =
+                        state_root / "navigation.json"},
+                checkpoint);
+        };
+    dependencies.workflow_cache_paths = {
+        .labeling_state_cache_path =
+            state_root / "labeling.json",
+        .workflow_state_cache_path = workflow_cache_path,
+        .navigation_state_cache_path =
+            state_root / "navigation.json"};
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                state_root / "source-session.json",
+                state_root / "navigation.json",
+                state_root / "labeling.json",
+                workflow_cache_path),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+
+    shell->OpenSource(folder);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "filtered external FITS fixture should open its folder source");
+    specforge::SourceCollectionSession& session =
+        Access::Session(*shell);
+    Require(
+        session.Submit(
+                   specforge::SourceCollectionSessionIntent::
+                       EditSourceCollection(
+                           specforge::SourceCollectionIntent::
+                               AddReadOnlyAnnotationResult(
+                                   annotation_path)))
+            .loaded,
+        "filtered external FITS fixture should attach its annotation");
+    (void)session.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    AddSource(filter_source_id)));
+    (void)session.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    SetFilterValueSelected(
+                        filter_source_id,
+                        "1",
+                        true)));
+    const specforge::SourceCollectionSessionView filtered_view =
+        session.View();
+    Require(
+        filtered_view.filter.evaluation.active &&
+            filtered_view.filter.evaluation.included_count == 2 &&
+            filtered_view.navigation.sequence_count == 2 &&
+            filtered_view.navigation.current_index == 0,
+        "filtered external FITS fixture should exclude the preferred member");
+    Require(
+        session.FlushStateCaches(),
+        "filtered external FITS fixture should persist its workflow state");
+
+    folder_decode_indices.clear();
+    Require(
+        Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "filtered external FITS folder setting should apply");
+    shell->OpenExternalSource(preferred);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "filtered external FITS startup should settle after rejection");
+    const std::string load_error(Access::LoadError(*shell));
+    const specforge::SpectrumSnapshotHandle snapshot =
+        session.CurrentSampleSnapshot();
+    Require(
+        load_error.find("excluded by the active sample filter") !=
+            std::string::npos,
+        "a preferred member excluded by filtering should fail closed with a diagnostic");
+    Require(
+        folder_decode_indices.size() == 1 &&
+            folder_decode_indices.front() == 1 &&
+            snapshot &&
+            snapshot->source.path == folder &&
+            snapshot->collection.current_index == 0,
+        "filter rejection must not silently activate the filtered first member");
+
+    shell.reset();
+    std::filesystem::remove_all(folder);
+    std::filesystem::remove_all(state_root);
+}
+
+void TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_external_fits_live_filter_folder");
+    const std::filesystem::path state_root =
+        UniqueTempPath("_external_fits_live_filter_state");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::remove_all(state_root, cleanup_error);
+    std::filesystem::create_directory(folder);
+    std::filesystem::create_directory(state_root);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    const std::filesystem::path annotation_path =
+        state_root / "external-live-filter_y.npy";
+    std::string annotation_error;
+    Require(
+        SaveAnnotationFixture(
+            annotation_path,
+            {1, 0, 1},
+            &annotation_error),
+        annotation_error.empty()
+            ? "live-filter external FITS annotation should save"
+            : annotation_error);
+    const std::optional<specforge::SampleAnnotationResult>
+        annotation =
+            specforge::SampleAnnotationIoAdapter{}.Load(
+                annotation_path,
+                3,
+                &annotation_error);
+    Require(
+        annotation.has_value(),
+        "live-filter external FITS annotation should load");
+    const std::string filter_source_id =
+        specforge::BuildAnnotationFilterSourceId(*annotation);
+
+    std::promise<void> external_decode_entered_promise;
+    std::shared_future<void> external_decode_entered =
+        external_decode_entered_promise.get_future().share();
+    std::promise<void> release_external_decode_promise;
+    std::shared_future<void> release_external_decode =
+        release_external_decode_promise.get_future().share();
+    std::atomic_size_t folder_loader_calls = 0;
+    std::vector<std::size_t> folder_decode_indices;
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [](const auto& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_snapshot_loader =
+        [&external_decode_entered_promise,
+         &release_external_decode,
+         &folder_loader_calls,
+         &folder_decode_indices](
+            const auto& source,
+            std::size_t index,
+            const auto& listing,
+            const auto& canceled) {
+            (void)listing;
+            const bool is_external_decode =
+                folder_loader_calls.fetch_add(
+                    1,
+                    std::memory_order_relaxed) == 1;
+            if (is_external_decode) {
+                external_decode_entered_promise.set_value();
+                while (release_external_decode.wait_for(2ms) !=
+                       std::future_status::ready) {
+                    if (canceled()) {
+                        return MakeSnapshot(source, index);
+                    }
+                }
+            }
+            folder_decode_indices.push_back(index);
+            return MakeSnapshot(source, index);
+        };
+    dependencies.file_context_builder =
+        [](const auto& snapshot,
+           const auto& state,
+           const auto& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionContext context;
+            context.identity =
+                specforge::BuildSourceCollectionIdentity(
+                    snapshot,
+                    state);
+            context.manifest.sample_names = {
+                "first",
+                "selected",
+                "zzz"};
+            return context;
+        };
+    dependencies.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                {},
+                {},
+                {},
+                {}),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+    shell->OpenSource(folder);
+    Require(
+        DrainAllSourceLoads(*shell),
+        "live-filter external FITS fixture should open its folder source");
+    specforge::SourceCollectionSession& session =
+        Access::Session(*shell);
+    Require(
+        session.Submit(
+                   specforge::SourceCollectionSessionIntent::
+                       EditSourceCollection(
+                           specforge::SourceCollectionIntent::
+                               AddReadOnlyAnnotationResult(
+                                   annotation_path)))
+            .loaded,
+        "live-filter external FITS fixture should attach its annotation");
+    folder_decode_indices.clear();
+    Require(
+        Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "live-filter external FITS folder setting should apply");
+
+    shell->OpenExternalSource(preferred);
+    Require(
+        external_decode_entered.wait_for(2s) ==
+            std::future_status::ready,
+        "external FITS worker should reach its folder decoder before the live filter update");
+    (void)session.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    AddSource(filter_source_id)));
+    (void)session.Submit(
+        specforge::SourceCollectionSessionIntent::
+            ApplySampleFiltering(
+                specforge::SampleFilteringIntent::
+                    SetFilterValueSelected(
+                        filter_source_id,
+                        "1",
+                        true)));
+    Require(
+        session.View().filter.evaluation.active &&
+            session.View().filter.evaluation.included_count == 2 &&
+            session.View().navigation.current_index == 0,
+        "live sample filter should exclude the preferred member while its worker is running");
+    release_external_decode_promise.set_value();
+    Require(
+        DrainAllSourceLoads(*shell),
+        "live-filter external FITS startup should settle after the worker update");
+
+    const std::string load_error(Access::LoadError(*shell));
+    const specforge::SpectrumSnapshotHandle snapshot =
+        session.CurrentSampleSnapshot();
+    Require(
+        load_error.find("excluded by the active sample filter") !=
+            std::string::npos,
+        "a live sample filter excluding the preferred member should fail closed with a diagnostic");
+    Require(
+        folder_decode_indices.size() == 1 &&
+            folder_decode_indices.front() == 1 &&
+            snapshot &&
+            snapshot->source.path == folder &&
+            snapshot->collection.current_index == 0,
+        "live sample filtering must not queue the first visible member over the preferred request");
+
+    shell.reset();
+    std::filesystem::remove_all(folder);
+    std::filesystem::remove_all(state_root);
+}
+
+void TestSourceOpenResolutionRunsOnWorkerAndCancels()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_source_open_worker_folder");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+
+    std::promise<void> probe_entered_promise;
+    std::shared_future<void> probe_entered =
+        probe_entered_promise.get_future().share();
+    std::promise<void> probe_canceled_promise;
+    std::shared_future<void> probe_canceled =
+        probe_canceled_promise.get_future().share();
+    std::promise<void> release_probe_promise;
+    std::shared_future<void> release_probe =
+        release_probe_promise.get_future().share();
+    std::promise<void> first_open_returned_promise;
+    std::shared_future<void> first_open_returned =
+        first_open_returned_promise.get_future().share();
+    std::atomic_bool probe_started = false;
+    std::atomic_bool probe_cancel_was_observed = false;
+    std::atomic_bool release_signaled = false;
+    const auto signal_release = [&]() {
+        if (!release_signaled.exchange(
+                true,
+                std::memory_order_relaxed)) {
+            release_probe_promise.set_value();
+        }
+    };
+
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [](const auto& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& source,
+           std::size_t index,
+           const auto& listing,
+           const auto&) {
+            (void)listing;
+            return MakeSnapshot(source, index);
+        };
+    dependencies.file_context_builder =
+        [](const auto& snapshot,
+           const auto& state,
+           const auto& checkpoint) {
+            checkpoint();
+            specforge::SourceCollectionContext context;
+            context.identity =
+                specforge::BuildSourceCollectionIdentity(
+                    snapshot,
+                    state);
+            context.manifest.sample_names = {
+                "first",
+                "selected"};
+            return context;
+        };
+    dependencies.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+    dependencies.source_open_probe =
+        [&probe_entered_promise,
+         &probe_canceled_promise,
+         &release_probe,
+         &probe_started,
+         &probe_cancel_was_observed](
+            const specforge::SourceOpenRequest& request,
+            const auto& checkpoint) {
+            if (!probe_started.exchange(
+                    true,
+                    std::memory_order_relaxed)) {
+                probe_entered_promise.set_value();
+            }
+            try {
+                while (release_probe.wait_for(2ms) !=
+                       std::future_status::ready) {
+                    checkpoint();
+                }
+            } catch (const specforge::SourceCollectionPreparationCanceled&) {
+                if (!probe_cancel_was_observed.exchange(
+                        true,
+                        std::memory_order_relaxed)) {
+                    probe_canceled_promise.set_value();
+                }
+                throw;
+            }
+            return specforge::ProbeSourceOpenRequest(
+                request,
+                checkpoint);
+        };
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession({}, {}, {}, {}),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+    Require(
+        Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "worker resolver test should enable external FITS folder opening");
+
+    std::thread first_open_thread([&]() {
+        shell->OpenExternalSource(preferred);
+        first_open_returned_promise.set_value();
+    });
+    const bool probe_was_entered =
+        probe_entered.wait_for(2s) ==
+        std::future_status::ready;
+    const bool open_was_returned =
+        first_open_returned.wait_for(2s) ==
+        std::future_status::ready;
+    if (!open_was_returned) {
+        signal_release();
+    }
+    first_open_thread.join();
+    Require(
+        probe_was_entered,
+        "source-open filesystem probe should run on the load worker");
+    Require(
+        open_was_returned,
+        "external source-open request should return while the worker probe is blocked");
+
+    shell->OpenExternalSource(preferred);
+    Require(
+        probe_canceled.wait_for(2s) ==
+            std::future_status::ready,
+        "replacing an external source-open should cancel its worker probe");
+    signal_release();
+    Require(
+        DrainAllSourceLoads(*shell),
+        "the replacement source-open should settle after probe cancellation");
+    Require(
+        Access::LoadError(*shell).empty(),
+        "a canceled resolver probe must not publish a load error for the replacement request");
+
+    shell.reset();
+    std::filesystem::remove_all(folder);
+}
+
+void TestExternalStartupPreservesDeferredRestoreAnnotationContext()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_external_fits_deferred_context_folder");
+    const std::filesystem::path state_root =
+        UniqueTempPath("_external_fits_deferred_context_state");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::remove_all(state_root, cleanup_error);
+    std::filesystem::create_directory(folder);
+    std::filesystem::create_directory(state_root);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    const std::filesystem::path annotation_path =
+        state_root / "deferred-filter_y.npy";
+    std::string annotation_error;
+    Require(
+        SaveAnnotationFixture(
+            annotation_path,
+            {1, 0, 1},
+            &annotation_error),
+        annotation_error.empty()
+            ? "deferred external FITS annotation should save"
+            : annotation_error);
+    const std::optional<specforge::SampleAnnotationResult>
+        annotation =
+            specforge::SampleAnnotationIoAdapter{}.Load(
+                annotation_path,
+                3,
+                &annotation_error);
+    Require(
+        annotation.has_value(),
+        "deferred external FITS annotation should load");
+    const std::string filter_source_id =
+        specforge::BuildAnnotationFilterSourceId(*annotation);
+    const SourceSessionCachePaths cache_paths{
+        state_root / "source-session.json",
+        state_root / "navigation.json",
+        state_root / "labeling.json",
+        state_root / "workflow.json"};
+
+    const auto configure_common_dependencies =
+        [&cache_paths](
+            specforge::SourceCollectionPreparationAdapters& dependencies) {
+        dependencies.snapshot_loader =
+            [](const auto& source, std::size_t index, const auto&) {
+                return MakeSnapshot(source, index);
+            };
+        dependencies.file_context_builder =
+            [](const auto& snapshot,
+               const auto& state,
+               const auto& checkpoint) {
+                checkpoint();
+                specforge::SourceCollectionContext context;
+                context.identity =
+                    specforge::BuildSourceCollectionIdentity(
+                        snapshot,
+                        state);
+                context.manifest.sample_names = {
+                    "first",
+                    "selected",
+                    "zzz"};
+                return context;
+            };
+        dependencies.folder_context_builder =
+            [](const auto& snapshot,
+               const auto& listing,
+               const auto& checkpoint) {
+                checkpoint();
+                return specforge::BuildFolderSourceCollectionContext(
+                    snapshot,
+                    listing);
+            };
+        dependencies.workflow_cache_loader =
+            [&cache_paths](
+                const auto&,
+                const auto& checkpoint) {
+                return specforge::LoadSampleWorkflowPreparationCacheBundle(
+                    specforge::SampleWorkflowPreparationPaths{
+                        .labeling_state_cache_path =
+                            cache_paths.labeling,
+                        .workflow_state_cache_path =
+                            cache_paths.workflow,
+                        .navigation_state_cache_path =
+                            cache_paths.navigation},
+                    checkpoint);
+            };
+        dependencies.workflow_cache_paths = {
+            .labeling_state_cache_path =
+                cache_paths.labeling,
+            .workflow_state_cache_path =
+                cache_paths.workflow,
+            .navigation_state_cache_path =
+                cache_paths.navigation};
+    };
+
+    // Persist the same folder annotation and Sample Filter context that a
+    // previous application run would leave for deferred startup restore.
+    {
+        specforge::SourceCollectionPreparationAdapters dependencies;
+        configure_common_dependencies(dependencies);
+        dependencies.folder_snapshot_loader =
+            [](const auto& source,
+               std::size_t index,
+               const auto& listing,
+               const auto&) {
+                (void)listing;
+                return MakeSnapshot(
+                    source,
+                    index);
+            };
+        std::unique_ptr<specforge::ShellUi> seed_shell =
+            Access::Create(
+                MakeCachedSession(cache_paths),
+                specforge::MakeSourceCollectionLoadQueueForTesting(
+                    std::move(dependencies)));
+        seed_shell->OpenSource(folder);
+        Require(
+            DrainAllSourceLoads(*seed_shell),
+            "deferred external FITS seed folder should open");
+        specforge::SourceCollectionSession& seed_session =
+            Access::Session(*seed_shell);
+        Require(
+            seed_session.Submit(
+                       specforge::SourceCollectionSessionIntent::
+                           EditSourceCollection(
+                               specforge::SourceCollectionIntent::
+                                   AddReadOnlyAnnotationResult(
+                                       annotation_path)))
+                .loaded,
+            "deferred external FITS seed annotation should attach");
+        (void)seed_session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                ApplySampleFiltering(
+                    specforge::SampleFilteringIntent::
+                        AddSource(filter_source_id)));
+        (void)seed_session.Submit(
+            specforge::SourceCollectionSessionIntent::
+                ApplySampleFiltering(
+                    specforge::SampleFilteringIntent::
+                        SetFilterValueSelected(
+                            filter_source_id,
+                            "1",
+                            true)));
+        const specforge::SourceCollectionSessionView seed_view =
+            seed_session.View();
+        Require(
+            seed_view.filter.evaluation.active &&
+                seed_view.filter.evaluation.included_count == 2,
+            "deferred external FITS seed should persist an active Sample Filter");
+        Require(
+            seed_session.FlushStateCaches(),
+            "deferred external FITS seed caches should flush");
+        seed_shell.reset();
+    }
+
+    std::promise<void> restore_decode_entered_promise;
+    std::shared_future<void> restore_decode_entered =
+        restore_decode_entered_promise.get_future().share();
+    std::promise<void> restore_canceled_promise;
+    std::shared_future<void> restore_canceled =
+        restore_canceled_promise.get_future().share();
+    std::promise<void> release_restore_promise;
+    std::shared_future<void> release_restore =
+        release_restore_promise.get_future().share();
+    std::promise<void> external_completion_ready_promise;
+    std::shared_future<void> external_completion_ready =
+        external_completion_ready_promise.get_future().share();
+    std::atomic_bool restore_decode_started = false;
+    std::atomic_bool restore_cancel_was_observed = false;
+    std::atomic_bool external_completion_was_signaled = false;
+    std::vector<std::size_t> folder_decode_indices;
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    configure_common_dependencies(dependencies);
+    dependencies.folder_snapshot_loader =
+        [&restore_decode_entered_promise,
+         &restore_canceled_promise,
+         &release_restore,
+         &restore_decode_started,
+         &restore_cancel_was_observed,
+         &folder_decode_indices](
+            const auto& source,
+            std::size_t index,
+            const auto& listing,
+            const auto& canceled) {
+            (void)listing;
+            const bool is_deferred_restore =
+                !restore_decode_started.exchange(
+                    true,
+                    std::memory_order_relaxed);
+            if (is_deferred_restore) {
+                restore_decode_entered_promise.set_value();
+                for (;;) {
+                    if (canceled()) {
+                        if (!restore_cancel_was_observed.exchange(
+                                true,
+                                std::memory_order_relaxed)) {
+                            restore_canceled_promise.set_value();
+                        }
+                        return MakeSnapshot(
+                            source,
+                            index);
+                    }
+                    if (release_restore.wait_for(2ms) ==
+                        std::future_status::ready) {
+                        break;
+                    }
+                }
+            }
+            folder_decode_indices.push_back(index);
+            return MakeSnapshot(
+                source,
+                index);
+        };
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        MakeDeferredShell(cache_paths, std::move(dependencies));
+    Require(
+        restore_decode_entered.wait_for(2s) ==
+            std::future_status::ready,
+        "deferred startup restore should enter its folder decoder before external open");
+    Require(
+        Access::PendingLoadCount(*shell) == 1,
+        "deferred startup restore should own the initial folder ticket");
+    Require(
+        Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "deferred external FITS folder setting should apply");
+    shell->RegisterSourceLoadCompletionReadyCallback(
+        [&external_completion_ready_promise,
+         &external_completion_was_signaled]() {
+            if (!external_completion_was_signaled.exchange(
+                    true,
+                    std::memory_order_relaxed)) {
+                external_completion_ready_promise.set_value();
+            }
+        });
+
+    shell->OpenExternalSource(preferred);
+    Require(
+        restore_canceled.wait_for(2s) ==
+            std::future_status::ready,
+        "external open should cancel the replaced deferred restore worker");
+    Require(
+        external_completion_ready.wait_for(2s) ==
+            std::future_status::ready,
+        "deferred external FITS completion should publish after replacing restore");
+    Access::Drain(*shell);
+    release_restore_promise.set_value();
+
+    specforge::SourceCollectionSession& session =
+        Access::Session(*shell);
+    const std::string load_error(Access::LoadError(*shell));
+    const bool unresolved_source_retained =
+        session.HasUnresolvedSourceIntent(folder);
+    Require(
+        load_error.find("excluded by the active sample filter") !=
+            std::string::npos,
+        "external startup should inherit deferred restore annotation/filter context and fail closed");
+    Require(
+        folder_decode_indices.size() == 1 &&
+            folder_decode_indices.front() == 1,
+        "deferred external FITS should decode only its preferred member");
+    Require(
+        unresolved_source_retained,
+        "a failed replacement must retain the unresolved deferred source intent");
+    Require(
+        session.FlushStateCaches(),
+        "deferred external FITS failure should preserve source session state");
+    const specforge::SourceCollectionSessionStateCache persisted =
+        specforge::LoadSourceCollectionSessionStateCache(
+            cache_paths.source_session)
+            .cache;
+    const auto persisted_source = std::find_if(
+        persisted.sources.begin(),
+        persisted.sources.end(),
+        [&folder](const auto& source) {
+            return specforge::SourcePathIdentityKey(source.path) ==
+                specforge::SourcePathIdentityKey(folder);
+        });
+    Require(
+        persisted_source != persisted.sources.end() &&
+            persisted_source->annotation_paths.size() == 1 &&
+            specforge::SourcePathIdentityKey(
+                persisted_source->annotation_paths.front()) ==
+                specforge::SourcePathIdentityKey(annotation_path),
+        "deferred restore annotation path should remain persisted after replacement failure");
+
+    shell->UnregisterSourceLoadCompletionReadyCallback();
+    shell.reset();
+    std::filesystem::remove_all(folder);
+    std::filesystem::remove_all(state_root);
+}
+
+void TestSupersededExternalPreferredTraceUsesResolvedMemberIndex()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path folder =
+        UniqueTempPath("_external_fits_superseded_folder");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(folder, cleanup_error);
+    std::filesystem::create_directory(folder);
+    WriteFixture(folder / "first.csv");
+    const std::filesystem::path preferred =
+        folder / "selected.fits";
+    WriteFixture(preferred);
+    WriteFixture(folder / "zzz.csv");
+
+    specforge::SourceCollectionPreparationAdapters dependencies;
+    dependencies.snapshot_loader =
+        [](const auto& source, std::size_t index, const auto&) {
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_snapshot_loader =
+        [](const auto& source,
+           std::size_t index,
+           const auto& listing,
+           const auto&) {
+            (void)listing;
+            return MakeSnapshot(source, index);
+        };
+    dependencies.folder_context_builder =
+        [](const auto& snapshot,
+           const auto& listing,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::BuildFolderSourceCollectionContext(
+                snapshot,
+                listing);
+        };
+    dependencies.workflow_cache_loader =
+        [](const auto&,
+           const auto& checkpoint) {
+            checkpoint();
+            return specforge::SampleWorkflowPreparationCacheBundle{};
+        };
+    dependencies.workflow_cache_paths = {{}, {}};
+
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            specforge::SourceCollectionSession({}, {}, {}, {}),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                std::move(dependencies)));
+    Require(
+        Access::ApplySettingsUiIntent(
+                *shell,
+                specforge::ApplicationSettingsIntent::
+                    SetOpenExternalFitsAsFolder(true))
+            .applied(),
+        "superseded external FITS folder setting should apply");
+
+    constexpr std::uint64_t presentation_frame = 700;
+    Access::EnableNavigationTracing(*shell, presentation_frame);
+    std::promise<void> completion_ready_promise;
+    std::shared_future<void> completion_ready =
+        completion_ready_promise.get_future().share();
+    std::atomic_bool completion_ready_signaled = false;
+    shell->RegisterSourceLoadCompletionReadyCallback(
+        [&completion_ready_promise,
+         &completion_ready_signaled]() {
+            if (!completion_ready_signaled.exchange(true)) {
+                completion_ready_promise.set_value();
+            }
+        });
+
+    shell->OpenExternalSource(preferred);
+    Require(
+        completion_ready.wait_for(2s) ==
+            std::future_status::ready,
+        "the preferred external FITS completion should publish before supersession");
+    shell->OpenExternalSource(preferred);
+    // The first completion is now stale by admission, so drain it through the
+    // activation transaction before collecting its superseded trace.
+    Access::Drain(*shell);
+
+    const std::vector<specforge::SourceLoadLatencyReport> reports =
+        Access::CompleteSourceLoadFramePresentationWithoutSpectrumDraw(
+            *shell,
+            presentation_frame + 1);
+    const auto superseded = std::find_if(
+        reports.begin(),
+        reports.end(),
+        [](const specforge::SourceLoadLatencyReport& report) {
+            return report.outcome ==
+                specforge::SourceLoadLatencyOutcome::Superseded;
+        });
+    const bool resolved_trace =
+        superseded != reports.end() &&
+        superseded->target_index == 1 &&
+        superseded->attempts.size() == 1 &&
+        superseded->attempts.front().target_index == 1;
+
+    shell.reset();
+    std::filesystem::remove_all(folder);
+
+    Require(
+        resolved_trace,
+        "a superseded external FITS trace should retain the resolved preferred member index");
+}
+
 void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
 {
     using namespace std::chrono_literals;
@@ -4295,6 +5446,12 @@ int main()
     try {
         TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence();
         TestExplicitOpenTracesAcceptedPathThroughFirstPresent();
+        TestSupersededExternalPreferredTraceUsesResolvedMemberIndex();
+        TestExternalStartupPreferredMemberDoesNotYieldFilteredFallback();
+        TestExternalStartupPreferredMemberCannotBeOverriddenByLiveSampleFilter();
+        TestSourceOpenResolutionRunsOnWorkerAndCancels();
+        TestExternalStartupPreservesDeferredRestoreAnnotationContext();
+        TestExternalStartupPreservesPreferredMemberAndOtherOriginsStayDirect();
         TestFailedExplicitOpenProducesTerminalSourceLoadReport();
         TestRealDrainCommitsOnlyTheLatestRapidNavigation();
         TestAcceptedNavigationUsesLatestMatchingRawKeyInput();

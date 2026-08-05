@@ -514,7 +514,7 @@ void SpecForgeApp::Initialize(
     frame_capture_ = OnDemandFrameCapture(
         std::move(frame_capture_configuration));
     if (initial_source) {
-        ui_.OpenSource(*initial_source);
+        ui_.OpenExternalSource(*initial_source);
     }
 
     profile_ = ProfileSink::CreateDefault(

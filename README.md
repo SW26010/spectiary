@@ -191,6 +191,17 @@ Launch with a spectrum source path to smoke-test the real-data loader:
 .\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
 ```
 
+The external FITS-as-folder preference is off by default. When enabled in
+Settings, it applies only to a source passed at application startup from
+outside SpecForge: the containing folder becomes the first-level folder
+source, while the FITS file passed by Windows remains the active member after
+the scan. This behavior is non-recursive and keeps the existing CSV/FITS
+family folder contract. File > Open and the Files panel `Add file...` action
+retain their existing behavior, and `source.open` automation remains
+unchanged: when it is given a FITS file, that file still opens as a
+single-file source. Disabling the preference also keeps external startup
+opens as single files.
+
 Inside the app, the Files panel `Add file...` button opens source files through
 the same domain snapshot loader, and `Add folder...` opens the native Windows
 folder picker to add a directory source to the session list. Folder loading is

@@ -30,6 +30,7 @@ struct SourceCollectionLoadCompletion {
     bool canceled = false;
     LoadLatencyTimePoint worker_terminal_at;
     LoadLatencyAttemptHandle latency_attempt;
+    std::shared_ptr<SourceLoadLatencyTrace> source_load_trace;
 };
 
 struct SourceCollectionLoadActivitySnapshot {

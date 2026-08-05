@@ -87,12 +87,15 @@ specforge::SourceOpenResolution Resolve(
         specforge::SourceOpenOrigin::ExternalStartup,
     bool open_external_fits_as_folder = true)
 {
-    return specforge::ResolveSourceOpenRequest({
+    const specforge::SourceOpenRequest request{
         .source_path = path,
         .origin = origin,
         .open_external_fits_as_folder =
             open_external_fits_as_folder,
-    });
+    };
+    return specforge::ResolveSourceOpenRequest(
+        request,
+        specforge::ProbeSourceOpenRequest(request));
 }
 
 void TestSupportedFitsExtensionsExpandAndRetainPreferredMember()

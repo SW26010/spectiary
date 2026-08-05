@@ -42,10 +42,81 @@ bool IsSupportedFitsSourcePath(
     return format == "fits" || format == "fits.gz";
 }
 
+void Checkpoint(
+    const std::function<void()>& cancellation_checkpoint)
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+}
+
 }  // namespace
 
-SourceOpenResolution ResolveSourceOpenRequest(
+bool SourceOpenRequestExpandsAsFolder(
+    const SourceOpenRequest& request) noexcept
+{
+    return request.origin == SourceOpenOrigin::ExternalStartup &&
+           request.open_external_fits_as_folder &&
+           IsSupportedFitsSourcePath(request.source_path);
+}
+
+std::filesystem::path SourceOpenRequestCandidatePath(
     const SourceOpenRequest& request)
+{
+    if (!SourceOpenRequestExpandsAsFolder(request)) {
+        return request.source_path;
+    }
+    std::filesystem::path parent_path =
+        request.source_path.parent_path();
+    if (!parent_path.empty()) {
+        return parent_path;
+    }
+    std::error_code current_path_error;
+    parent_path = std::filesystem::current_path(
+        current_path_error);
+    return parent_path.empty() || current_path_error
+        ? std::filesystem::path{"."}
+        : parent_path;
+}
+
+SourceOpenFilesystemProbe ProbeSourceOpenRequest(
+    const SourceOpenRequest& request,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    SourceOpenFilesystemProbe probe;
+    if (request.source_path.empty()) {
+        return probe;
+    }
+
+    if (SourceOpenRequestExpandsAsFolder(request)) {
+        Checkpoint(cancellation_checkpoint);
+        probe.parent_path = request.source_path.parent_path();
+        if (probe.parent_path.empty()) {
+            probe.parent_path = std::filesystem::current_path(
+                probe.parent_error);
+        }
+        Checkpoint(cancellation_checkpoint);
+        if (!probe.parent_error && !probe.parent_path.empty()) {
+            probe.parent_status = std::filesystem::status(
+                probe.parent_path,
+                probe.parent_error);
+        }
+        Checkpoint(cancellation_checkpoint);
+        if (probe.parent_error || probe.parent_path.empty()) {
+            return probe;
+        }
+    }
+
+    probe.source_status = std::filesystem::status(
+        request.source_path,
+        probe.source_error);
+    Checkpoint(cancellation_checkpoint);
+    return probe;
+}
+
+SourceOpenResolution ResolveSourceOpenRequest(
+    const SourceOpenRequest& request,
+    const SourceOpenFilesystemProbe& probe)
 {
     if (request.source_path.empty()) {
         return MakeFailure(
@@ -55,15 +126,11 @@ SourceOpenResolution ResolveSourceOpenRequest(
     }
 
     const bool should_expand_as_folder =
-        request.origin == SourceOpenOrigin::ExternalStartup &&
-        request.open_external_fits_as_folder &&
-        IsSupportedFitsSourcePath(request.source_path);
+        SourceOpenRequestExpandsAsFolder(request);
     if (!should_expand_as_folder) {
-        std::error_code source_error;
-        const std::filesystem::file_status source_status =
-            std::filesystem::status(request.source_path, source_error);
-        if (source_error ||
-            source_status.type() == std::filesystem::file_type::not_found) {
+        if (probe.source_error ||
+            probe.source_status.type() ==
+                std::filesystem::file_type::not_found) {
             return MakeFailure(
                 request,
                 SourceOpenResolutionFailure::SourcePathUnavailable,
@@ -73,13 +140,9 @@ SourceOpenResolution ResolveSourceOpenRequest(
         return MakeDirectResolution(request);
     }
 
-    std::error_code parent_error;
-    std::filesystem::path parent_path =
-        request.source_path.parent_path();
-    if (parent_path.empty()) {
-        parent_path = std::filesystem::current_path(parent_error);
-    }
-    if (parent_error || parent_path.empty()) {
+    const std::filesystem::path& parent_path =
+        probe.parent_path;
+    if (probe.parent_error || parent_path.empty()) {
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::ParentPathUnavailable,
@@ -87,10 +150,9 @@ SourceOpenResolution ResolveSourceOpenRequest(
                 PathText(request.source_path));
     }
 
-    const std::filesystem::file_status parent_status =
-        std::filesystem::status(parent_path, parent_error);
-    if (parent_error ||
-        parent_status.type() == std::filesystem::file_type::not_found) {
+    if (probe.parent_error ||
+        probe.parent_status.type() ==
+            std::filesystem::file_type::not_found) {
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::ParentPathUnavailable,
@@ -98,7 +160,7 @@ SourceOpenResolution ResolveSourceOpenRequest(
             "cannot be accessed: " +
                 PathText(parent_path));
     }
-    if (parent_status.type() !=
+    if (probe.parent_status.type() !=
         std::filesystem::file_type::directory) {
         return MakeFailure(
             request,
@@ -107,18 +169,16 @@ SourceOpenResolution ResolveSourceOpenRequest(
                 PathText(parent_path));
     }
 
-    std::error_code source_error;
-    const std::filesystem::file_status source_status =
-        std::filesystem::status(request.source_path, source_error);
-    if (source_error ||
-        source_status.type() == std::filesystem::file_type::not_found) {
+    if (probe.source_error ||
+        probe.source_status.type() ==
+            std::filesystem::file_type::not_found) {
         return MakeFailure(
             request,
             SourceOpenResolutionFailure::SourcePathUnavailable,
             "The source path does not exist or cannot be accessed: " +
                 PathText(request.source_path));
     }
-    if (source_status.type() !=
+    if (probe.source_status.type() !=
         std::filesystem::file_type::regular) {
         return MakeFailure(
             request,

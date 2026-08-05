@@ -57,7 +57,29 @@ bool SourceCollectionActivationTransaction::OpenSource(
 {
     ++latest_automation_open_sequence_;
     return OpenSourceWithPolicy(
-               path,
+               SourceOpenRequest{
+                   .source_path = path,
+                   .origin = SourceOpenOrigin::InApp,
+               },
+               spectrum_index,
+               true,
+               0)
+        .session_changed;
+}
+
+bool SourceCollectionActivationTransaction::OpenExternalSource(
+    const std::filesystem::path& path,
+    bool open_external_fits_as_folder,
+    std::size_t spectrum_index)
+{
+    ++latest_automation_open_sequence_;
+    return OpenSourceWithPolicy(
+               SourceOpenRequest{
+                   .source_path = path,
+                   .origin = SourceOpenOrigin::ExternalStartup,
+                   .open_external_fits_as_folder =
+                       open_external_fits_as_folder,
+               },
                spectrum_index,
                true,
                0)
@@ -73,7 +95,10 @@ SourceCollectionActivationTransaction::
     const std::uint64_t automation_sequence =
         ++latest_automation_open_sequence_;
     return OpenSourceWithPolicy(
-        path,
+        SourceOpenRequest{
+            .source_path = path,
+            .origin = SourceOpenOrigin::Automation,
+        },
         spectrum_index,
         false,
         automation_sequence);
@@ -82,7 +107,7 @@ SourceCollectionActivationTransaction::
 SourceCollectionActivationTransaction::SourceOpenOperation
 SourceCollectionActivationTransaction::
     OpenSourceWithPolicy(
-        const std::filesystem::path& path,
+        const SourceOpenRequest& request,
         std::size_t spectrum_index,
         bool preserve_pending_explicit_opens,
         std::uint64_t automation_sequence)
@@ -96,6 +121,9 @@ SourceCollectionActivationTransaction::
         preserve_pending_explicit_opens);
     const bool session_changed =
         session_.CancelActivePendingSampleNavigation();
+
+    const std::filesystem::path path =
+        SourceOpenRequestCandidatePath(request);
     if (deferred_restore_active_) {
         deferred_restore_active_path_ = path;
     }
@@ -107,7 +135,9 @@ SourceCollectionActivationTransaction::
         {},
         std::move(source_load_trace),
         std::nullopt,
-        automation_sequence);
+        automation_sequence,
+        std::nullopt,
+        request);
     return {
         .path_key = SourcePathIdentityKey(path),
         .generation =
@@ -769,7 +799,11 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
     SourceLoadLatencyTraceHandle source_load_trace,
     std::optional<SampleNavigationDirection>
         prefetch_direction,
-    std::uint64_t automation_sequence)
+    std::uint64_t automation_sequence,
+    std::optional<std::filesystem::path>
+        preferred_member_path,
+    std::optional<SourceOpenRequest>
+        source_open_request)
 {
     CancelSnapshotPrefetch();
     std::optional<SourceCollectionLoadHint> hint =
@@ -786,6 +820,9 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
             source_load_trace->BeginLoadAttempt(
                 spectrum_index);
     }
+    const SourceLoadLatencyTraceHandle
+        source_load_trace_for_request =
+            source_load_trace;
 
     Ticket ticket = ReserveLoad(
         path,
@@ -799,11 +836,17 @@ SourceCollectionActivationTransaction::QueueSourceLoad(
         .path = path,
         .spectrum_index = spectrum_index,
         .annotation_paths = std::move(annotation_paths),
+        .source_open_request =
+            std::move(source_open_request),
+        .preferred_member_path =
+            std::move(preferred_member_path),
         .reuse =
             hint ? std::optional<SourceCollectionReuseCandidate>{
                        std::move(hint->reuse)}
                  : std::nullopt,
         .latency_attempt = std::move(latency_attempt),
+        .source_load_trace =
+            source_load_trace_for_request,
     });
     CancelPendingTasks(
         RegisterOrReplaceLoad(task_id, std::move(ticket)));
@@ -903,12 +946,25 @@ void SourceCollectionActivationTransaction::DrainCompletions(
             continue;
         }
 
+        if (completion.prepared) {
+            if (completion.latency_attempt) {
+                completion.latency_attempt->SetTargetIndex(
+                    completion.prepared->spectrum_index);
+            }
+            if (completion.source_load_trace) {
+                completion.source_load_trace->SetTargetIndex(
+                    completion.prepared->spectrum_index);
+            }
+        }
         std::optional<CompletionAdmission> admission =
             TakeCompletion(
                 completion.task_id,
                 completion.path,
                 completion.spectrum_index);
         if (!admission || !admission->accepted) {
+            if (completion.latency_attempt) {
+                completion.latency_attempt->MarkCompletionDrained();
+            }
             if (admission) {
                 MarkTicketSuperseded(admission->ticket);
             }
@@ -966,6 +1022,18 @@ void SourceCollectionActivationTransaction::DrainCompletions(
 
         PreparedSourceCollection prepared =
             std::move(*completion.prepared);
+        if (completion.latency_attempt) {
+            completion.latency_attempt->SetTargetIndex(
+                prepared.spectrum_index);
+        }
+        if (ticket.navigation_trace) {
+            ticket.navigation_trace->SetTargetIndex(
+                prepared.spectrum_index);
+        }
+        if (ticket.source_load_trace) {
+            ticket.source_load_trace->SetTargetIndex(
+                prepared.spectrum_index);
+        }
         if (ticket.navigation_trace) {
             NavigationSnapshotCacheKind cache_kind =
                 NavigationSnapshotCacheKind::None;

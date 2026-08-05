@@ -62,6 +62,7 @@ struct LoadLatencyAttemptReport {
 
 class LoadLatencyAttempt {
 public:
+    void SetTargetIndex(std::size_t target_index) noexcept;
     void MarkSourceTaskId(std::uint64_t task_id) noexcept;
     void MarkWorkerStarted(
         LoadLatencyTimePoint at = LoadLatencyClock::now()) noexcept;
@@ -109,7 +110,7 @@ private:
         LoadLatencyTimePoint at);
 
     std::size_t attempt_index_ = 0;
-    std::size_t target_index_ = 0;
+    std::atomic_size_t target_index_ = 0;
     std::int64_t load_enqueued_ns_ = 0;
     std::atomic_uint64_t source_task_id_ = 0;
     std::atomic_bool source_is_folder_ = false;
