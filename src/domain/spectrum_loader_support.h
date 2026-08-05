@@ -31,6 +31,10 @@ std::string FileNameToUtf8(const std::filesystem::path& path);
 std::string LowerAscii(std::string value);
 std::string ExtensionLower(const std::filesystem::path& path);
 std::string SourceFormatLabel(const std::filesystem::path& path);
+// Product-level capability used by folder sources and external folder-open
+// resolution. Matrix/collection-oriented formats such as NPY are not members
+// of this capability even though they have a direct file loader.
+bool IsSupportedSingleFileSpectrumPath(const std::filesystem::path& path);
 std::string TrimAscii(std::string value);
 std::string UpperAscii(std::string value);
 std::string NormalizedColumnName(std::string value);

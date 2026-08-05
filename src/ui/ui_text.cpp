@@ -204,11 +204,11 @@ constexpr std::array kTextCatalog = {
         "其他输入行为设置暂不可用。"},
     UiTextEntry{"External source opening", "外部源打开"},
     UiTextEntry{
-        "Open external CSV and FITS-family files as folder sources",
-        "将外部打开的 CSV 与 FITS 文件族作为文件夹源打开"},
+        "Open external spectrum files as folder sources",
+        "将外部打开的光谱文件作为文件夹源打开"},
     UiTextEntry{
-        "When enabled, an externally opened CSV or FITS-family file uses its containing folder as the source collection. In-app source-opening actions and automation are unchanged.",
-        "启用后，从外部打开 CSV 或 FITS 文件族时，将其所在文件夹作为源集合。应用内的源打开操作和自动化打开不受影响。"},
+        "When enabled, an externally opened supported single-file spectrum file uses its containing folder as the source collection. In-app source-opening actions and automation are unchanged.",
+        "启用后，从外部打开受支持的单文件光谱文件时，将其所在文件夹作为源集合。应用内的源打开操作和自动化打开不受影响。"},
     UiTextEntry{
         "Include subfolders (not implemented)",
         "包含子文件夹（尚未实现）"},

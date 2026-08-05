@@ -107,6 +107,12 @@ std::string SourceFormatLabel(const std::filesystem::path& path)
     return "file";
 }
 
+bool IsSupportedSingleFileSpectrumPath(const std::filesystem::path& path)
+{
+    const std::string format = SourceFormatLabel(path);
+    return format == "csv" || format == "fits" || format == "fits.gz";
+}
+
 std::string TrimAscii(std::string value)
 {
     const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {

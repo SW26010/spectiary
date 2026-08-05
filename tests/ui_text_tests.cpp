@@ -278,20 +278,18 @@ void TestShellAndSettingsMappingsAreExact()
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::OpenExternalSourceAsFolder) ==
-            "将外部打开的 CSV 与 FITS 文件族作为文件夹源打开",
-        "external CSV/FITS folder preference should be localized");
+            "将外部打开的光谱文件作为文件夹源打开",
+        "external spectrum folder preference should be localized");
     const std::string_view external_source_description =
         UiText(
             UiLanguage::English,
             UiTextId::OpenExternalSourceAsFolderDescription);
     Require(
-        external_source_description.find("CSV") !=
-                std::string_view::npos &&
-            external_source_description.find("FITS-family") !=
+        external_source_description.find("supported single-file spectrum") !=
                 std::string_view::npos &&
             external_source_description.find("automation") !=
                 std::string_view::npos,
-        "external source preference description should name CSV, FITS-family, and automation scope");
+        "external source preference description should name the capability and automation scope");
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,

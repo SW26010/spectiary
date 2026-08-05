@@ -86,7 +86,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         "missing input settings should enable live numeric navigation");
     Require(
         !initial.open_external_source_as_folder,
-        "missing external source settings should disable external FITS folder opening");
+        "missing external source settings should disable external spectrum folder opening");
     Require(
         initial.profile_output_directory ==
             storage.default_profile_output_directory,
@@ -121,7 +121,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         {});
     Require(
         external_source_result.applied(),
-        "external FITS folder intent should apply");
+        "external source folder intent should apply");
 
     const std::filesystem::path custom_directory =
         temporary.path() / "custom profiles";
@@ -148,7 +148,7 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         "live numeric navigation should reload through the application settings owner");
     Require(
         reloaded_view.open_external_source_as_folder,
-        "external FITS folder preference should reload through the application settings owner");
+        "external source folder preference should reload through the application settings owner");
     Require(
         reloaded_view.profile_output_directory == custom_directory,
         "profile directory should reload through the application settings owner");
@@ -382,7 +382,7 @@ void TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue()
         "input settings save failure should remain visible on the owner view");
 }
 
-void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
+void TestExternalSourceFolderPersistenceFailureRetainsDisabledValue()
 {
     using namespace std::chrono_literals;
 
@@ -1193,7 +1193,7 @@ int main()
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
     TestUiScaleValidationAndPersistenceFirstBehavior();
     TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue();
-    TestExternalFitsFolderPersistenceFailureRetainsDisabledValue();
+    TestExternalSourceFolderPersistenceFailureRetainsDisabledValue();
     TestUiScaleResetRepairsDamagedFallbackState();
     TestLanguageAndProfileFallbacksCanBeReapplied();
     TestLoadWarningAndEnvironmentOverrideAreTyped();

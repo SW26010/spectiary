@@ -35,13 +35,6 @@ SourceOpenResolution MakeFailure(
     };
 }
 
-bool IsSupportedExternalSourcePath(
-    const std::filesystem::path& path)
-{
-    const std::string format = detail::SourceFormatLabel(path);
-    return format == "csv" || format == "fits" || format == "fits.gz";
-}
-
 void Checkpoint(
     const std::function<void()>& cancellation_checkpoint)
 {
@@ -57,7 +50,7 @@ bool SourceOpenRequestExpandsAsFolder(
 {
     return request.origin == SourceOpenOrigin::ExternalStartup &&
            request.open_external_source_as_folder &&
-           IsSupportedExternalSourcePath(request.source_path);
+           detail::IsSupportedSingleFileSpectrumPath(request.source_path);
 }
 
 std::filesystem::path SourceOpenRequestCandidatePath(

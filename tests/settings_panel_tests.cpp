@@ -563,7 +563,7 @@ GeneralRenderObservation RenderGeneralFrame(
         observation.open_external_source_as_folder_hovered =
             observation.open_external_source_as_folder_hovered ||
             hovered_id == window->GetID(
-                "Open external CSV and FITS-family files as folder sources###"
+                "Open external spectrum files as folder sources###"
                 "SpecForgeOpenExternalSourceAsFolder");
     }
     ImGui::EndFrame();
@@ -1022,7 +1022,7 @@ void TestExternalSourceFolderCheckboxAndDeferredSubfolderPlaceholder()
     }
     Require(
         observation.open_external_source_as_folder_hovered,
-        "fixture should locate the external CSV/FITS folder checkbox");
+        "fixture should locate the external spectrum folder checkbox");
 
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
@@ -1030,7 +1030,7 @@ void TestExternalSourceFolderCheckboxAndDeferredSubfolderPlaceholder()
     (void)RenderGeneralFrame(panel);
     Require(
         !panel.TakeApplicationSettingsIntent(),
-        "pressing the external CSV/FITS folder checkbox should wait for click release");
+        "pressing the external spectrum folder checkbox should wait for click release");
     ImGui::GetIO().AddMouseButtonEvent(
         ImGuiMouseButton_Left,
         false);
@@ -1043,10 +1043,10 @@ void TestExternalSourceFolderCheckboxAndDeferredSubfolderPlaceholder()
                 specforge::ApplicationSettingsIntentKind::
                     SetOpenExternalSourceAsFolder &&
             intent->open_external_source_as_folder,
-        "clicking the external CSV/FITS folder checkbox should emit the enabled setting");
+        "clicking the external spectrum folder checkbox should emit the enabled setting");
     Require(
         !panel.TakeApplicationSettingsIntent(),
-        "external CSV/FITS folder intent should be consumed once");
+        "external spectrum folder intent should be consumed once");
 
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     observation = RenderGeneralContentFrame(panel);

@@ -3,6 +3,7 @@
 #include "domain/npy_array_io.h"
 #include "domain/source_path_identity.h"
 #include "domain/stable_sha256.h"
+#include "domain/spectrum_loader_support.h"
 
 #include <algorithm>
 #include <array>
@@ -65,32 +66,6 @@ std::string LowerAscii(std::string value)
 std::string ExtensionLower(const std::filesystem::path& path)
 {
     return LowerAscii(PathToUtf8(path.extension()));
-}
-
-bool IsFitsExtension(std::string_view extension)
-{
-    return extension == ".fits" || extension == ".fit" || extension == ".fts";
-}
-
-bool IsFitsSourceFile(const std::filesystem::path& path)
-{
-    const std::string extension = ExtensionLower(path);
-    return IsFitsExtension(extension) || (extension == ".gz" && IsFitsExtension(ExtensionLower(path.stem())));
-}
-
-std::string SourceCollectionFileFormat(const std::filesystem::path& path)
-{
-    const std::string extension = ExtensionLower(path);
-    if (extension == ".csv") {
-        return "csv";
-    }
-    if (IsFitsExtension(extension)) {
-        return "fits";
-    }
-    if (extension == ".gz" && IsFitsExtension(ExtensionLower(path.stem()))) {
-        return "fits.gz";
-    }
-    return "file";
 }
 
 std::optional<std::filesystem::path> CompanionNpyPath(
@@ -855,21 +830,23 @@ SourceCollectionFolderListing ScanSourceCollectionFolder(
             continue;
         }
 
-        if (ExtensionLower(entry.path()) == ".csv") {
-            ++listing.csv_count;
-            listing.spectra.push_back(
-                SourceCollectionFolderSpectrumFile{entry.path(), "csv", DirectoryEntryStatFingerprint(entry)});
-        } else if (IsFitsSourceFile(entry.path())) {
-            ++listing.fits_count;
-            listing.spectra.push_back(SourceCollectionFolderSpectrumFile{
-                entry.path(),
-                SourceCollectionFileFormat(entry.path()),
-                DirectoryEntryStatFingerprint(entry),
-            });
-        } else {
+        const std::string format = detail::SourceFormatLabel(entry.path());
+        if (!detail::IsSupportedSingleFileSpectrumPath(entry.path())) {
             ++listing.ignored_file_count;
             PushExample(listing.ignored_file_examples, entry.path());
+            continue;
         }
+
+        if (format == "csv") {
+            ++listing.csv_count;
+        } else if (format == "fits" || format == "fits.gz") {
+            ++listing.fits_count;
+        }
+        listing.spectra.push_back(SourceCollectionFolderSpectrumFile{
+            entry.path(),
+            format,
+            DirectoryEntryStatFingerprint(entry),
+        });
     }
 
     std::size_t comparison_count = 0;

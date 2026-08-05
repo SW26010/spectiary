@@ -191,25 +191,26 @@ Launch with a spectrum source path to smoke-test the real-data loader:
 .\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
 ```
 
-The external CSV and FITS-family folder-source preference is off by default. When
-enabled in Settings, it applies only to a CSV or FITS-family source passed at
-application startup from outside SpecForge: the containing folder becomes the
-first-level folder source, while the CSV or FITS-family file passed by Windows
-remains the active member after the scan. This behavior is non-recursive and
-keeps the existing CSV/FITS family folder contract. File > Open and the Files
-panel `Add file...` action retain their existing behavior, and `source.open`
-automation remains unchanged: when it is given a CSV or FITS-family file, that
-file still opens as a single-file source. Disabling the preference also keeps
-external startup opens as single files.
+The external spectrum-file folder-source preference is off by default. When
+enabled in Settings, it applies only to a supported single-file spectrum source
+passed at application startup from outside SpecForge: the containing folder
+becomes the first-level folder source, while the file passed by Windows remains
+the active member after the scan. This behavior is non-recursive and keeps the
+existing folder-source contract. File > Open and the Files panel `Add file...`
+action retain their existing behavior, and `source.open` automation remains
+unchanged: it still opens a file as a single-file source. Disabling the
+preference also keeps external startup opens as single files. Eligibility comes
+from the domain loader/source-member capability; NPY spectrum matrices are not
+included in this preference.
 
 Inside the app, the Files panel `Add file...` button opens source files through
 the same domain snapshot loader, and `Add folder...` opens the native Windows
 folder picker to add a directory source to the session list. Folder loading is
-non-recursive and treats first-level `.csv` and FITS files as one navigable
-collection. Subfolders, unrelated file types, and mixed CSV/FITS folders are
-reported as diagnostics. The file picker exposes common candidate source
-suffixes such as `.npy`, `.csv`, and FITS variants. Unsupported files and
-catalog FITS files stay visible in the Files panel as domain-produced error
+non-recursive. The current folder-source member contract includes first-level
+`.csv` and FITS files; subfolders, unrelated file types, and mixed CSV/FITS
+folders are reported as diagnostics. The file picker exposes common candidate
+source suffixes such as `.npy`, `.csv`, and FITS variants. Unsupported files
+and catalog FITS files stay visible in the Files panel as domain-produced error
 snapshots with diagnostics.
 
 A 3909-column `.npy` matrix uses the fixed loglam wavelength grid; other column

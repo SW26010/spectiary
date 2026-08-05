@@ -1541,6 +1541,12 @@ void TestLoadsFolderCollectionWithWarnings()
         stream << "not a spectrum\n";
         Require(stream.good(), "could not write ignored folder fixture");
     }
+    {
+        std::ofstream stream(path / "matrix.npy");
+        Require(stream.good(), "could not open ignored NPY folder fixture");
+        stream << "not a folder member\n";
+        Require(stream.good(), "could not write ignored NPY folder fixture");
+    }
 
     const SpectrumSnapshotHandle first = specforge::LoadSpectrumSnapshotFromPath(path, 0);
     Require(first->capabilities.can_plot_current_spectrum, "folder CSV/FITS collection should be plottable");
@@ -1556,12 +1562,12 @@ void TestLoadsFolderCollectionWithWarnings()
             return diagnostic.code ==
                        SpectrumDiagnosticCode::UnsupportedFormat &&
                    diagnostic.message.find(
-                       "Folder mixes CSV and FITS spectra") !=
+                       "Folder mixes supported spectrum formats") !=
                        std::string::npos;
         });
     Require(
         mixed_format_diagnostic != first->diagnostics.end(),
-        "folder warnings should include a distinct mixed CSV/FITS diagnostic");
+        "folder warnings should include a distinct mixed-format diagnostic");
     Require(
         DiagnosticMetadataValue(
             *mixed_format_diagnostic,
@@ -1576,8 +1582,8 @@ void TestLoadsFolderCollectionWithWarnings()
         listing.csv_count == 2 &&
             listing.fits_count == 1 &&
             listing.ignored_directory_count == 1 &&
-            listing.ignored_file_count == 1,
-        "folder scan should classify uppercase CSV, FITS, subfolders, and unrelated files");
+            listing.ignored_file_count == 2,
+        "folder scan should classify supported members, NPY, subfolders, and unrelated files");
     Require(
         std::all_of(listing.spectra.begin(), listing.spectra.end(), [](const auto& sample) {
             return !sample.stat_fingerprint.empty();

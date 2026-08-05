@@ -116,7 +116,7 @@ void TestExternalSourceFolderPreferenceRoundTrips()
         Require(
             loaded.settings.open_external_source_as_folder == enabled &&
                 loaded.warning.empty(),
-            "external FITS folder preference should round-trip without warning");
+            "external source folder preference should round-trip without warning");
     }
 }
 

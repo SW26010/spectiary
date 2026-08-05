@@ -47,14 +47,15 @@ Folder source 是一个由多个文件组成的光谱集合，只读取目录第
 
 目录中的子文件夹不会递归加载，应写入 warning diagnostic。其它文件类型也应忽略并写入 warning diagnostic。CSV 和 FITS 混在同一个目录时仍可加载，但也应写入 warning diagnostic，因为这通常表示数据批次不纯，需要业务侧确认。集合内部按文件名稳定排序，UI 的上一条/下一条在这些文件之间切换。
 
-从 Windows 外部启动并传入单个 CSV 或 FITS family 文件时，设置中的“将
-外部打开的 CSV 与 FITS 文件族作为文件夹源打开”选项默认关闭。开启后只
-影响这种外部启动请求：先把文件所在目录作为上述第一层 folder source，
-完成扫描后仍定位到用户从 Windows 打开的那个 CSV 或 FITS/FITS.GZ 成员，
-而不是按排序选择其它文件。该选项不递归子目录，也不改变 CSV/FITS family
-的既有集合合同；File > Open、Files 面板 `Add file...` 保持既有行为，
-automation 的 `source.open` 也不改变既有合同，传入 CSV 或 FITS family 文件
-时仍按单文件打开。关闭选项时，外部启动也保持单文件语义。
+从 Windows 外部启动并传入受支持的单文件光谱格式时，设置中的“将外部
+打开的光谱文件作为文件夹源打开”选项默认关闭。开启后只影响这种外部
+启动请求：先把文件所在目录作为上述第一层 folder source，完成扫描后仍
+定位到用户从 Windows 打开的那个成员，而不是按排序选择其它文件。该
+选项不递归子目录，也不改变 folder source 的既有集合合同；File > Open、
+Files 面板 `Add file...` 保持既有行为，automation 的 `source.open` 也不
+改变既有合同，传入文件时仍按单文件打开。关闭选项时，外部启动也保持
+单文件语义。具体哪些格式属于受支持的单文件光谱格式，由 domain 的
+loader/source-member 能力决定；NPY 光谱矩阵不属于本设置的资格范围。
 
 ## 统一波长网格
 

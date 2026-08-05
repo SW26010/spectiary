@@ -571,7 +571,7 @@ std::vector<SpectrumDiagnostic> FolderWarnings(const SourceCollectionFolderListi
         warnings.push_back(MakeDiagnostic(
             SpectrumDiagnosticSeverity::Warning,
             SpectrumDiagnosticCode::UnsupportedFormat,
-            "Folder contains files that are not CSV or FITS spectra; they were ignored.",
+            "Folder contains files that are not supported single-file spectra; they were ignored.",
             {{"ignored_file_count", std::to_string(scan.ignored_file_count), "domain"},
              {"examples", JoinExamples(scan.ignored_file_examples), "domain"}}));
     }
@@ -579,7 +579,7 @@ std::vector<SpectrumDiagnostic> FolderWarnings(const SourceCollectionFolderListi
         warnings.push_back(MakeDiagnostic(
             SpectrumDiagnosticSeverity::Warning,
             SpectrumDiagnosticCode::UnsupportedFormat,
-            "Folder mixes CSV and FITS spectra; files were loaded in filename order.",
+            "Folder mixes supported spectrum formats; files were loaded in filename order.",
             {{"csv_file_count", std::to_string(scan.csv_count), "domain"},
              {"fits_file_count", std::to_string(scan.fits_count), "domain"}}));
     }
@@ -629,7 +629,7 @@ SpectrumSnapshotHandle LoadFolderSnapshot(
         SpectrumSnapshotHandle snapshot = MakeErrorSnapshot(
             path,
             SpectrumDiagnosticCode::UnsupportedFormat,
-            "Folder does not contain CSV or FITS spectrum files.",
+            "Folder does not contain supported single-file spectrum files.",
             {},
             "folder",
             FolderSourceMetadata(scan, nullptr));
@@ -655,9 +655,10 @@ SpectrumSnapshotHandle LoadFolderSnapshot(
     const SourceCollectionFolderSpectrumFile& selected = scan.spectra[spectrum_index];
     SpectrumSnapshotHandle selected_snapshot;
     try {
-        selected_snapshot = selected.format == "csv"
-            ? LoadCsvSnapshot(selected.path, cancellation_requested)
-            : LoadFitsSnapshotCancelable(selected.path, 0, cancellation_requested);
+        selected_snapshot = LoadSpectrumSnapshotFromPathImplCancelable(
+            selected.path,
+            0,
+            cancellation_requested);
     } catch (const SpectrumLoadCanceled&) {
         return nullptr;
     }
