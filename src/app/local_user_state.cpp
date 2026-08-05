@@ -417,6 +417,12 @@ void LocalUserStateSaveScheduler::MarkSaveSucceeded(LocalUserStateSaveStatus& st
     status.MarkSaveSucceeded();
 }
 
+void LocalUserStateSaveScheduler::CancelPendingSave()
+{
+    dirty_ = false;
+    next_attempt_time_.reset();
+}
+
 void LocalUserStateSaveScheduler::MarkSaveFailed()
 {
     MarkSaveFailedAt(Clock::now());
@@ -486,6 +492,11 @@ void LocalUserStatePersistenceLifecycle::MarkDirtyAt(TimePoint now)
     save_scheduler_.MarkDirtyAt(now);
 }
 
+void LocalUserStatePersistenceLifecycle::CancelPendingSave()
+{
+    save_scheduler_.CancelPendingSave();
+}
+
 bool LocalUserStatePersistenceLifecycle::ShouldAttemptSave(TimePoint now) const
 {
     return save_scheduler_.ShouldAttemptSave(now);
@@ -526,7 +537,7 @@ LocalUserStatePersistenceStatus
 LocalUserStatePersistenceLifecycle::PersistenceStatus() const
 {
     return {
-        .retrying = save_status_.failed(),
+        .retrying = save_scheduler_.dirty() && save_status_.failed(),
         .recovered = save_status_.recovered(),
         .load_warning = load_warning_,
         .save_message = save_status_.message(),

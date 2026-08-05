@@ -2651,6 +2651,7 @@ try {
             -Message 'A production UI-scale write failure must map to setting_persistence_failed, retain the old model and live UI value, emit no setting notification, and preserve idle-barrier semantics.'
         [System.IO.Directory]::Delete(
             $uiScaleWriteBlocker)
+        Start-Sleep -Milliseconds 5000
 
         $profileDirectoryBlocker =
             Join-Path $windowContractRoot 'logs'
@@ -2708,10 +2709,12 @@ try {
                     'none' -and
                 [uint64]$initialOutsideProfileState.state.profile.dropped_events -eq
                     0 -and
+                [int]$initialOutsideProfileState.state.settings.
+                    ui_scale_percentage -eq 100 -and
                 $null -eq $initialOutsideProfilePath -and
                 (Get-TreeFingerprint -Path $externalProfileDirectory) -eq
                     $externalProfileFingerprint) `
-            -Message 'An initial production profile resolver outside the isolated root must publish a fresh failed/none/0/no-path state without changing the external directory.'
+            -Message 'An initial production profile resolver outside the isolated root must publish a fresh failed/none/0/no-path state without changing the external directory, while a repaired UI-scale path must not publish the earlier failed setting after its retry deadline.'
         Remove-TestDirectoryJunction `
             -Path $profileDirectoryBlocker
         $profileDirectoryJunctionActive = $false

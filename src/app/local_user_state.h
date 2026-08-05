@@ -114,6 +114,7 @@ public:
     [[nodiscard]] bool ShouldAttemptSave(TimePoint now) const;
     void MarkSaveSucceeded();
     void MarkSaveSucceeded(LocalUserStateSaveStatus& status);
+    void CancelPendingSave();
     void MarkSaveFailed();
     void MarkSaveFailedAt(TimePoint now);
     void MarkSaveFailed(LocalUserStateSaveStatus& status, std::string message);
@@ -160,6 +161,10 @@ public:
 
     void MarkDirty();
     void MarkDirtyAt(TimePoint now);
+    // Abandon the current pending save while retaining its diagnostic.
+    // The owner may use this for a terminal, transactional write failure;
+    // ordinary cache owners should continue using the retry lifecycle.
+    void CancelPendingSave();
     [[nodiscard]] bool ShouldAttemptSave(TimePoint now) const;
     [[nodiscard]] std::optional<TimePoint>
         NextMaintenanceDeadline() const;

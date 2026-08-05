@@ -422,6 +422,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyUiScale(
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
         const std::string error =
             PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -479,6 +480,7 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
         const std::string error =
             PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -523,6 +525,7 @@ ApplicationSettings::ApplyLiveNumericNavigation(bool enabled)
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
         const std::string error =
             PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -567,6 +570,7 @@ ApplicationSettings::ApplyOpenExternalFitsAsFolder(bool enabled)
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
         const std::string error =
             PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -668,6 +672,7 @@ ApplicationSettings::ApplyProfileOutputDirectory(
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
         const std::string error =
             PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
         return {
             .outcome =
                 ApplicationSettingsOutcome::PersistenceFailed,
@@ -1002,6 +1007,33 @@ void ApplicationSettings::CommitPendingSetting(ApplicationSetting setting)
     case ApplicationSetting::None:
         return;
     }
+}
+
+void ApplicationSettings::CancelPendingSetting(
+    ApplicationSetting setting)
+{
+    switch (setting) {
+    case ApplicationSetting::Language:
+        pending_language_.reset();
+        break;
+    case ApplicationSetting::UiScale:
+        pending_ui_scale_percentage_.reset();
+        break;
+    case ApplicationSetting::Input:
+        pending_live_numeric_navigation_.reset();
+        break;
+    case ApplicationSetting::ExternalSource:
+        pending_open_external_fits_as_folder_.reset();
+        break;
+    case ApplicationSetting::ProfileOutputDirectory:
+        pending_profile_settings_.reset();
+        pending_profile_output_directory_.reset();
+        break;
+    case ApplicationSetting::PanelVisibility:
+    case ApplicationSetting::None:
+        return;
+    }
+    PersistenceFor(setting).CancelPendingSave();
 }
 
 void ApplicationSettings::SetPersistenceFailureStatus(

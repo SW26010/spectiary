@@ -266,6 +266,7 @@ private:
     [[nodiscard]] bool HasPendingSetting(
         ApplicationSetting setting) const;
     void CommitPendingSetting(ApplicationSetting setting);
+    void CancelPendingSetting(ApplicationSetting setting);
     void SetPersistenceFailureStatus(ApplicationSetting setting);
 
     ApplicationSettingsStorage storage_;

@@ -4599,8 +4599,8 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
         const specforge::ShellLocalStateFlushResult failed =
             shell.FlushLocalState();
         Require(
-            !failed.application_settings.language_saved &&
-                !failed.application_settings.ui_scale_saved &&
+            failed.application_settings.language_saved &&
+                failed.application_settings.ui_scale_saved &&
                 failed.application_settings.input_saved &&
                 failed.application_settings.profile_output_directory_saved &&
                 !failed.application_settings.panel_visibility_saved &&
@@ -4610,8 +4610,8 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
             "real ShellUi shutdown flush should retain independent settings failures");
         const std::string shutdown_message = failed.FailureMessage();
         Require(
-            shutdown_message.find("Language") != std::string::npos &&
-                shutdown_message.find("UI scale") != std::string::npos &&
+            shutdown_message.find("Language") == std::string::npos &&
+                shutdown_message.find("UI scale") == std::string::npos &&
                 shutdown_message.find("Panel visibility") !=
                     std::string::npos &&
                 shutdown_message.find("Input") == std::string::npos &&
@@ -4630,8 +4630,16 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
                 HasHealthMessage(
                     retrying,
                     specforge::LocalUserStateArea::Language,
-                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
                 HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::UiScale,
+                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                !HasHealthMessage(
+                    retrying,
+                    specforge::LocalUserStateArea::Language,
+                    specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
+                !HasHealthMessage(
                     retrying,
                     specforge::LocalUserStateArea::UiScale,
                     specforge::LocalUserStateHealthMessageKind::SaveRetrying) &&
@@ -4660,21 +4668,22 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
         const std::optional<int> applied_ui_scale =
             shell.TakeAppliedUiScalePercentage();
         Require(
-            applied_language &&
-                *applied_language == specforge::UiLanguage::SimplifiedChinese &&
-                applied_ui_scale && *applied_ui_scale == 125,
-            "the first successful retry should publish one delayed UI update per setting");
+            !applied_language && !applied_ui_scale &&
+                shell.ui_language() == specforge::UiLanguage::English &&
+                shell.ui_scale_percentage() ==
+                    specforge::kDefaultUiScalePercentage,
+            "crossing the retry deadline must not publish a terminally failed automation setting");
         Require(
             !shell.TakeAppliedUiLanguage().has_value() &&
                 !shell.TakeAppliedUiScalePercentage().has_value(),
-            "the first successful retry should not publish duplicate delayed UI updates");
+            "a terminally failed automation setting must not publish delayed duplicate updates");
 
         shell.RunMaintenance(
             specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
         Require(
             !shell.TakeAppliedUiLanguage().has_value() &&
                 !shell.TakeAppliedUiScalePercentage().has_value(),
-            "later maintenance should not republish already-consumed delayed UI updates");
+            "later maintenance should not publish a terminally failed automation setting");
         Require(
             std::filesystem::is_regular_file(spectral_path),
             "the real spectral owner should write after settings failures are recovered");
@@ -4682,11 +4691,19 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
         const specforge::LocalUserStateHealthView recovered =
             specforge::ShellUiTestAccess::PersistenceHealth(shell);
         Require(
-            HasHealthMessage(
-                recovered,
-                specforge::LocalUserStateArea::Language,
-                specforge::LocalUserStateHealthMessageKind::Recovered) &&
                 HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::Language,
+                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::UiScale,
+                    specforge::LocalUserStateHealthMessageKind::SaveWarning) &&
+                !HasHealthMessage(
+                    recovered,
+                    specforge::LocalUserStateArea::Language,
+                    specforge::LocalUserStateHealthMessageKind::Recovered) &&
+                !HasHealthMessage(
                     recovered,
                     specforge::LocalUserStateArea::UiScale,
                     specforge::LocalUserStateHealthMessageKind::Recovered) &&
@@ -4698,7 +4715,19 @@ void TestRealShellFlushAndHealthKeepIndependentSettingsOwners()
                     recovered,
                     specforge::LocalUserStateArea::SpectralLines,
                     specforge::LocalUserStateHealthMessageKind::Recovered),
-            "real ShellUi health should retain recovery per restored owner");
+            "real ShellUi health should retain terminal setting warnings and cache-owner recovery");
+
+        Require(
+            shell.SetUiLanguageForAutomation(
+                       specforge::UiLanguage::SimplifiedChinese)
+                    .applied() &&
+                shell.TakeAppliedUiLanguage() ==
+                    specforge::UiLanguage::SimplifiedChinese,
+            "a new explicit automation language request should retry after repair");
+        Require(
+            shell.SetUiScaleForAutomation(125).applied() &&
+                shell.TakeAppliedUiScalePercentage() == 125,
+            "a new explicit automation UI-scale request should retry after repair");
     }
 
     {

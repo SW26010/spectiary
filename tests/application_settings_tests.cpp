@@ -224,6 +224,15 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
                  specforge::ApplicationSetting::Language)
              .save_message.empty(),
         "application persistence health should retain a failed setting save");
+    Require(
+        !settings
+             .PersistenceStatus(
+                 specforge::ApplicationSetting::Language)
+             .retrying,
+        "a terminal setting failure should not remain scheduled for retry");
+    Require(
+        !settings.NextMaintenanceDeadline().has_value(),
+        "a terminal setting failure should cancel its maintenance deadline");
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
@@ -357,6 +366,8 @@ void TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue()
 
 void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
 {
+    using namespace std::chrono_literals;
+
     TemporaryDirectory temporary;
     const std::filesystem::path blocker =
         temporary.path() / "not-a-directory";
@@ -389,6 +400,24 @@ void TestExternalFitsFolderPersistenceFailureRetainsDisabledValue()
             specforge::ApplicationSettingsStatusKind::
                 PersistenceError,
         "external source save failure should remain visible on the owner view");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    settings.RunMaintenance(
+        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+    Require(
+        !settings.View().open_external_fits_as_folder,
+        "external source save failure should remain disabled after crossing the maintenance deadline");
+
+    const specforge::ApplicationSettingsResult retry =
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalFitsAsFolder(true),
+            {});
+    Require(
+        retry.applied() &&
+            settings.View().open_external_fits_as_folder,
+        "only an explicit external source retry should enable the setting after repair");
 }
 
 void TestUiScaleResetRepairsDamagedFallbackState()
@@ -908,7 +937,7 @@ void TestSuccessfulSettingDoesNotClearAnotherSettingsStatus()
         "successful profile change should clear only its own status");
 }
 
-void TestSettingsFlushKeepsIndependentOwnersAndRetries()
+void TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure()
 {
     using namespace std::chrono_literals;
 
@@ -932,7 +961,7 @@ void TestSettingsFlushKeepsIndependentOwnersAndRetries()
                 .outcome ==
             specforge::ApplicationSettingsOutcome::
                 PersistenceFailed,
-        "a failed language owner should retain a retryable pending save");
+        "a failed language owner should become a terminal setting failure");
     Require(
         settings.Apply(
             specforge::ApplicationSettingsIntent::SetPanelVisibility(
@@ -945,41 +974,110 @@ void TestSettingsFlushKeepsIndependentOwnersAndRetries()
     const specforge::ApplicationSettingsFlushResult flushed =
         settings.Flush();
     Require(
-        !flushed.language_saved &&
+        flushed.language_saved &&
             flushed.ui_scale_saved &&
             flushed.input_saved &&
             flushed.profile_output_directory_saved &&
             flushed.panel_visibility_saved,
-        "settings shutdown flush should preserve each owner's independent result");
+        "settings shutdown flush should not retry a terminal transactional setting failure");
     Require(
         !specforge::LoadPanelVisibilityStateCache(
              storage.panel_visibility_path)
              .state.annotations,
         "a successful panel owner must not be swallowed by a language failure");
     Require(
-        settings.PersistenceStatus(
-                    specforge::ApplicationSetting::Language)
-                .retrying,
-        "a failed language owner should remain retrying after shutdown flush");
+        !settings.PersistenceStatus(
+                     specforge::ApplicationSetting::Language)
+             .retrying &&
+            !settings.PersistenceStatus(
+                     specforge::ApplicationSetting::Language)
+                 .save_message.empty(),
+        "a terminal language failure should remain a warning without retrying after shutdown flush");
 
     std::filesystem::remove(blocker);
     std::filesystem::create_directories(blocker);
-    const auto deadline = settings.NextMaintenanceDeadline();
     Require(
-        deadline.has_value(),
-        "a failed language owner should expose its maintenance deadline");
-    settings.RunMaintenance(*deadline - 1ms);
+        !settings.NextMaintenanceDeadline().has_value(),
+        "repairing the path must not resurrect a terminal language retry deadline");
+    settings.RunMaintenance(
+        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
     Require(
         settings.View().language == specforge::UiLanguage::English,
-        "language should remain unchanged before its retry deadline");
-    settings.RunMaintenance(*deadline);
+        "maintenance after a repaired path must not publish the failed language setting");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::SimplifiedChinese),
+            {})
+            .applied(),
+        "a new explicit language request should be allowed to retry after repair");
     Require(
         settings.View().language ==
                 specforge::UiLanguage::SimplifiedChinese &&
             settings.PersistenceStatus(
                         specforge::ApplicationSetting::Language)
                 .recovered,
-        "the language owner should commit and report recovery at its deadline");
+        "the language owner should commit and report recovery after an explicit reapply");
+}
+
+void TestProfileDirectoryPersistenceFailureDoesNotRetryIntoRecording()
+{
+    using namespace std::chrono_literals;
+
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "not-a-directory";
+    {
+        std::ofstream stream(blocker);
+        stream << "block profile settings directory creation";
+    }
+    auto storage = MakeStorage(temporary.path());
+    storage.profile_settings_path =
+        blocker / "profile-settings.json";
+    specforge::ApplicationSettings settings(storage);
+    const std::filesystem::path requested_directory =
+        temporary.path() / "recording-target";
+
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetProfileOutputDirectory(requested_directory),
+            {})
+            .outcome ==
+            specforge::ApplicationSettingsOutcome::PersistenceFailed,
+        "a blocked profile directory save should fail before publishing");
+    Require(
+        settings.View().profile_output_directory ==
+            storage.default_profile_output_directory &&
+            !settings.NextMaintenanceDeadline().has_value(),
+        "a failed profile directory save should retain the old value without a retry deadline");
+
+    std::filesystem::remove(blocker);
+    std::filesystem::create_directories(blocker);
+    settings.RunMaintenance(
+        specforge::LocalUserStateSaveScheduler::Clock::now() + 10s);
+    Require(
+        settings.View().profile_output_directory ==
+            storage.default_profile_output_directory,
+        "maintenance after repair must not publish the failed profile directory");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetProfileOutputDirectory(requested_directory),
+            {.profile_recording_in_progress = true})
+            .outcome ==
+            specforge::ApplicationSettingsOutcome::Rejected &&
+            settings.View().profile_output_directory ==
+                storage.default_profile_output_directory,
+        "a new profile directory request must still honor recording protection");
+    Require(
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetProfileOutputDirectory(requested_directory),
+            {})
+            .applied() &&
+            settings.View().profile_output_directory == requested_directory,
+        "an explicit profile directory request after recording stops should apply normally");
 }
 
 void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
@@ -1083,8 +1181,9 @@ int main()
     TestPanelVisibilitySharesTheSettingsLifecycle();
     TestUnpresentedPanelMutationChainRestoresItsOriginalBaseline();
     TestProfileDirectoryChangeIsRejectedWhileRecording();
+    TestProfileDirectoryPersistenceFailureDoesNotRetryIntoRecording();
     TestSuccessfulSettingDoesNotClearAnotherSettingsStatus();
-    TestSettingsFlushKeepsIndependentOwnersAndRetries();
+    TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure();
     TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner();
     return 0;
 }
