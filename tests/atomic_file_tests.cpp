@@ -53,10 +53,9 @@ void TestWriterExceptionCleansTemporaryFile()
     const bool written = specforge::WriteFileAtomically(
         target,
         options,
-        [](std::ostream& stream, std::string&) {
+        [](std::ostream& stream, std::string&) -> bool {
             stream << "partial metadata";
             throw std::runtime_error("serialization failed");
-            return false;
         },
         &error);
 
