@@ -20,6 +20,8 @@
 namespace specforge {
 namespace {
 
+constexpr std::size_t kHashBufferSize = 64U * 1024U;
+
 void SetError(std::string* error_message, std::string message)
 {
     if (error_message != nullptr) {
@@ -356,7 +358,9 @@ bool WriteSchema5Metadata(
     WriteJsonString(stream, build.zlib_version);
     stream << ",\n"
            << "    \"completed_at_utc\": ";
-    WriteJsonString(stream, *build.completed_at_utc);
+    WriteJsonString(
+        stream,
+        build.finalized_artifact->completed_at_utc);
     stream << "\n  },\n"
            << "  \"artifact\": {\n"
            << "    \"file\": ";
@@ -365,7 +369,9 @@ bool WriteSchema5Metadata(
         metadata_contract::kCanonicalExecutableFileName);
     stream << ",\n"
            << "    \"sha256\": ";
-    WriteJsonString(stream, build.artifact->sha256);
+    WriteJsonString(
+        stream,
+        build.finalized_artifact->artifact.sha256);
     stream << "\n  }\n}\n";
     return true;
 }
@@ -450,11 +456,13 @@ bool FinalizeSpecForgeMetadata(
     }
 
     BuildMetadata finalized_build = options.configured_build_metadata;
-    finalized_build.completed_at_utc = completed_at_utc;
-    finalized_build.artifact = BuildArtifactMetadata{
-        .file = std::string(
-            metadata_contract::kCanonicalExecutableFileName),
-        .sha256 = executable_sha256,
+    finalized_build.finalized_artifact = FinalizedArtifactMetadata{
+        .completed_at_utc = completed_at_utc,
+        .artifact = BuildArtifactMetadata{
+            .file = std::string(
+                metadata_contract::kCanonicalExecutableFileName),
+            .sha256 = executable_sha256,
+        },
     };
     if (!metadata_validation::ValidateSchema5BuildMetadata(
             options.build_identity,

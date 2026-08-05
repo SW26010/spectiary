@@ -55,6 +55,11 @@ struct BuildArtifactMetadata {
     std::string sha256;
 };
 
+struct FinalizedArtifactMetadata {
+    std::string completed_at_utc;
+    BuildArtifactMetadata artifact;
+};
+
 struct BuildMetadata {
     std::string compiler_id;
     std::string compiler_version;
@@ -64,8 +69,7 @@ struct BuildMetadata {
     std::string dear_imgui_version;
     std::string implot_version;
     std::string zlib_version;
-    std::optional<std::string> completed_at_utc;
-    std::optional<BuildArtifactMetadata> artifact;
+    std::optional<FinalizedArtifactMetadata> finalized_artifact;
 };
 
 struct BuildMetadataReadResult {

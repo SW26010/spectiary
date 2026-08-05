@@ -149,12 +149,11 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
     const specforge::BuildMetadata& metadata =
         *result.build_metadata.metadata;
     Require(
-        metadata.completed_at_utc &&
-            *metadata.completed_at_utc ==
+        metadata.finalized_artifact &&
+            metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
-            metadata.artifact &&
-            metadata.artifact->file == "SpecForge.exe" &&
-            metadata.artifact->sha256 ==
+            metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
+            metadata.finalized_artifact->artifact.sha256 ==
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         "finalizer should record the fixed UTC time and SHA-256 of abc");
 

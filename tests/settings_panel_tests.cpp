@@ -222,10 +222,12 @@ specforge::BuildMetadataReadResult MakeArtifactMetadata(
     std::string sha256)
 {
     specforge::BuildMetadata metadata;
-    metadata.completed_at_utc = "2026-08-05T09:21:32Z";
-    metadata.artifact = specforge::BuildArtifactMetadata{
-        .file = "SpecForge.exe",
-        .sha256 = std::move(sha256),
+    metadata.finalized_artifact = specforge::FinalizedArtifactMetadata{
+        .completed_at_utc = "2026-08-05T09:21:32Z",
+        .artifact = specforge::BuildArtifactMetadata{
+            .file = "SpecForge.exe",
+            .sha256 = std::move(sha256),
+        },
     };
     return {
         .status = specforge::BuildMetadataStatus::Available,

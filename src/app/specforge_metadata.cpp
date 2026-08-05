@@ -151,10 +151,9 @@ BuildMetadataReadResult ReadBuildMetadata(
     const std::optional<std::string> zlib =
         ReadRequiredMetadataString(*build, "zlib");
 
-    std::optional<std::string> completed_at_utc;
-    std::optional<BuildArtifactMetadata> artifact;
+    std::optional<FinalizedArtifactMetadata> finalized_artifact;
     if (schema_version == metadata_contract::kSchema5Version) {
-        completed_at_utc =
+        const std::optional<std::string> completed_at_utc =
             ReadRequiredMetadataString(*build, "completed_at_utc");
         const JsonValue* artifact_value =
             JsonObjectMember(root, "artifact");
@@ -168,10 +167,13 @@ BuildMetadataReadResult ReadBuildMetadata(
                 artifact_value->kind == JsonValue::Kind::Object
             ? ReadRequiredMetadataString(*artifact_value, "sha256")
             : std::nullopt;
-        if (artifact_file && artifact_sha256) {
-            artifact = BuildArtifactMetadata{
-                .file = *artifact_file,
-                .sha256 = *artifact_sha256,
+        if (completed_at_utc && artifact_file && artifact_sha256) {
+            finalized_artifact = FinalizedArtifactMetadata{
+                .completed_at_utc = *completed_at_utc,
+                .artifact = BuildArtifactMetadata{
+                    .file = *artifact_file,
+                    .sha256 = *artifact_sha256,
+                },
             };
         }
     }
@@ -190,8 +192,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.dear_imgui_version = *dear_imgui;
     metadata.implot_version = *implot;
     metadata.zlib_version = *zlib;
-    metadata.completed_at_utc = std::move(completed_at_utc);
-    metadata.artifact = std::move(artifact);
+    metadata.finalized_artifact = std::move(finalized_artifact);
 
     if (schema_version == metadata_contract::kSchema5Version) {
         const BuildIdentity actual_identity = {

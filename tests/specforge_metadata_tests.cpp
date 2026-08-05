@@ -312,12 +312,11 @@ void TestSchema4DeploymentSelection()
         "schema 4 without deployment");
     Require(
         standalone.build_metadata.status ==
-            specforge::BuildMetadataStatus::Available,
+                specforge::BuildMetadataStatus::Available,
         "schema 4 without deployment should still expose build provenance");
     Require(
         standalone.build_metadata.metadata &&
-            !standalone.build_metadata.metadata->completed_at_utc &&
-            !standalone.build_metadata.metadata->artifact,
+            !standalone.build_metadata.metadata->finalized_artifact,
         "schema 4 should not invent schema 5 finalized-artifact fields");
 
     WriteTextFile(
@@ -391,12 +390,11 @@ void TestSchema5StrictParsing()
     const specforge::BuildMetadata& metadata =
         *fixture.build_metadata.metadata;
     Require(
-        metadata.completed_at_utc &&
-            *metadata.completed_at_utc ==
+        metadata.finalized_artifact &&
+            metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
-            metadata.artifact &&
-            metadata.artifact->file == "SpecForge.exe" &&
-            metadata.artifact->sha256 ==
+            metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
+            metadata.finalized_artifact->artifact.sha256 ==
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "schema 5 should expose the finalized timestamp and artifact identity");
 
@@ -406,6 +404,24 @@ void TestSchema5StrictParsing()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path path = root / "metadata.json";
+
+    WriteTextFile(
+        path,
+        Schema5Metadata(R"("2024-02-29T23:59:59Z")"));
+    const specforge::SpecForgeMetadataReadResult leap_day =
+        specforge::ReadSpecForgeMetadata(
+            path,
+            WorkingTreeIdentity());
+    Require(
+        !leap_day.startup_error &&
+            leap_day.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available &&
+            leap_day.build_metadata.metadata &&
+            leap_day.build_metadata.metadata->finalized_artifact &&
+            leap_day.build_metadata.metadata->finalized_artifact
+                    ->completed_at_utc ==
+                "2024-02-29T23:59:59Z",
+        "schema 5 should accept the valid leap day 2024-02-29");
 
     const std::vector<std::string> invalid_documents = {
         Schema5Metadata({}, {}, false, true),
@@ -548,8 +564,9 @@ void TestBuildProvenanceDoesNotControlDeployment()
             artifact_mismatch.build_metadata.status ==
                 specforge::BuildMetadataStatus::Available &&
             artifact_mismatch.build_metadata.metadata &&
-            artifact_mismatch.build_metadata.metadata->artifact &&
-            artifact_mismatch.build_metadata.metadata->artifact->sha256 ==
+            artifact_mismatch.build_metadata.metadata->finalized_artifact &&
+            artifact_mismatch.build_metadata.metadata->finalized_artifact
+                    ->artifact.sha256 ==
                 "0000000000000000000000000000000000000000000000000000000000000000",
         "an artifact digest mismatch must not discard valid Portable deployment selection");
 

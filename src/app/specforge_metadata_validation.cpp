@@ -217,14 +217,14 @@ bool ValidateSchema5BuildMetadata(
         return fail("windows_sdk_version must be a dotted numeric version");
     }
 
-    if (!metadata.completed_at_utc ||
-        !IsValidUtcTimestamp(*metadata.completed_at_utc)) {
+    if (!metadata.finalized_artifact ||
+        !IsValidUtcTimestamp(
+            metadata.finalized_artifact->completed_at_utc)) {
         return fail("completed_at_utc must be a valid UTC ISO 8601 timestamp");
     }
-    if (!metadata.artifact ||
-        metadata.artifact->file !=
+    if (metadata.finalized_artifact->artifact.file !=
             metadata_contract::kCanonicalExecutableFileName ||
-        !IsValidSha256(metadata.artifact->sha256)) {
+        !IsValidSha256(metadata.finalized_artifact->artifact.sha256)) {
         return fail("artifact must contain SpecForge.exe and a lowercase SHA-256 digest");
     }
     return true;

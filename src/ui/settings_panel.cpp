@@ -455,16 +455,18 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
     }
 
     const BuildMetadata& metadata = *build_metadata.metadata;
-    if (!metadata.completed_at_utc || !metadata.artifact ||
+    if (!metadata.finalized_artifact ||
         !metadata_validation::IsValidUtcTimestamp(
-            *metadata.completed_at_utc) ||
-        metadata.artifact->file != "SpecForge.exe" ||
+            metadata.finalized_artifact->completed_at_utc) ||
+        metadata.finalized_artifact->artifact.file !=
+            metadata_contract::kCanonicalExecutableFileName ||
         !metadata_validation::IsValidSha256(
-            metadata.artifact->sha256)) {
+            metadata.finalized_artifact->artifact.sha256)) {
         return result;
     }
 
-    result.metadata_sha256 = metadata.artifact->sha256;
+    result.metadata_sha256 =
+        metadata.finalized_artifact->artifact.sha256;
     const std::optional<std::string> executable_sha256 =
         ComputeFileSha256(executable_path);
     if (!executable_sha256) {
@@ -478,7 +480,8 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
     }
 
     result.status = ArtifactIdentityStatus::Available;
-    result.completed_at_utc = *metadata.completed_at_utc;
+    result.completed_at_utc =
+        metadata.finalized_artifact->completed_at_utc;
     return result;
 }
 
