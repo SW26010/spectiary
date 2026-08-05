@@ -464,7 +464,6 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
         return result;
     }
 
-    result.completed_at_utc = *metadata.completed_at_utc;
     result.metadata_sha256 = metadata.artifact->sha256;
     const std::optional<std::string> executable_sha256 =
         ComputeFileSha256(executable_path);
@@ -473,9 +472,13 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
     }
 
     result.executable_sha256 = *executable_sha256;
-    result.status = result.metadata_sha256 == result.executable_sha256
-        ? ArtifactIdentityStatus::Available
-        : ArtifactIdentityStatus::Mismatch;
+    if (result.metadata_sha256 != result.executable_sha256) {
+        result.status = ArtifactIdentityStatus::Mismatch;
+        return result;
+    }
+
+    result.status = ArtifactIdentityStatus::Available;
+    result.completed_at_utc = *metadata.completed_at_utc;
     return result;
 }
 
@@ -1908,7 +1911,8 @@ void SettingsPanelUi::RenderAbout(
     ImGui::SeparatorText(artifact_identity_heading.c_str());
     const ArtifactIdentityResult& artifact_identity =
         ArtifactIdentityForAbout();
-    if (!artifact_identity.completed_at_utc.empty()) {
+    if (artifact_identity.status == ArtifactIdentityStatus::Available &&
+        !artifact_identity.completed_at_utc.empty()) {
         RenderReadOnlyValue(
             UiText(language, UiTextId::MetadataCompletedAt).data(),
             artifact_identity.completed_at_utc.c_str());

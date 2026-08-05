@@ -22,6 +22,7 @@ namespace {
 
 constexpr int kSchema5Version = 5;
 constexpr std::string_view kArtifactFileName = "SpecForge.exe";
+constexpr std::string_view kMetadataFileName = "specforge_metadata.json";
 constexpr std::size_t kHashBufferSize = 64U * 1024U;
 
 void SetError(std::string* error_message, std::string message)
@@ -79,6 +80,21 @@ bool IsCanonicalExecutableFilename(const std::filesystem::path& path)
 #endif
 }
 
+bool IsCanonicalMetadataFilename(const std::filesystem::path& path)
+{
+    return path.filename() ==
+        std::filesystem::path(std::string(kMetadataFileName));
+}
+
+std::filesystem::path MetadataPathForExecutable(
+    const std::filesystem::path& executable_path)
+{
+    return (
+        executable_path.parent_path() /
+        std::filesystem::path(std::string(kMetadataFileName)))
+        .lexically_normal();
+}
+
 std::optional<std::filesystem::path> NormalizePathForComparison(
     const std::filesystem::path& path,
     std::error_code& error)
@@ -114,7 +130,6 @@ bool ValidatePaths(
         error = "the executable filename must be SpecForge.exe";
         return false;
     }
-
     std::error_code equivalent_error;
     if (std::filesystem::equivalent(
             options.executable_path,
@@ -142,6 +157,30 @@ bool ValidatePaths(
     if (PathsEqualForComparison(*executable_path, *metadata_path)) {
         error =
             "the executable and metadata paths must not refer to the same file";
+        return false;
+    }
+    if (!IsCanonicalMetadataFilename(options.metadata_path)) {
+        error =
+            "the metadata filename must be specforge_metadata.json";
+        return false;
+    }
+
+    const std::filesystem::path expected_metadata_path =
+        MetadataPathForExecutable(options.executable_path);
+    const std::optional<std::filesystem::path> normalized_expected_metadata_path =
+        NormalizePathForComparison(
+            expected_metadata_path,
+            normalization_error);
+    if (!normalized_expected_metadata_path) {
+        error = "could not resolve the executable-adjacent metadata path";
+        return false;
+    }
+    if (!PathsEqualForComparison(
+            *metadata_path,
+            *normalized_expected_metadata_path)) {
+        error =
+            "the metadata path must be the executable-adjacent "
+            "specforge_metadata.json";
         return false;
     }
     return true;
@@ -310,6 +349,20 @@ bool WriteSchema5Metadata(
     return true;
 }
 
+void RemoveStaleMetadataTarget(
+    const std::filesystem::path& metadata_path,
+    std::string& failure_message)
+{
+    std::error_code remove_error;
+    std::filesystem::remove(metadata_path, remove_error);
+    if (remove_error) {
+        failure_message +=
+            "; could not remove stale SpecForge metadata target " +
+            PathToUtf8(metadata_path) + ": " +
+            remove_error.message();
+    }
+}
+
 }  // namespace
 
 bool FinalizeSpecForgeMetadata(
@@ -326,26 +379,33 @@ bool FinalizeSpecForgeMetadata(
         return false;
     }
 
+    const std::filesystem::path metadata_path =
+        MetadataPathForExecutable(options.executable_path);
+    const auto fail_after_path_validation =
+        [&](std::string failure_message) {
+            RemoveStaleMetadataTarget(
+                metadata_path,
+                failure_message);
+            SetError(error_message, std::move(failure_message));
+            return false;
+        };
+
     std::string executable_sha256;
     try {
         if (!ComputeExecutableSha256(
                 options.executable_path,
                 executable_sha256,
                 error)) {
-            SetError(error_message, "cannot finalize SpecForge metadata: " + error);
-            return false;
+            return fail_after_path_validation(
+                "cannot finalize SpecForge metadata: " + error);
         }
     } catch (const std::exception& exception) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: executable hashing failed: " +
                 std::string(exception.what()));
-        return false;
     } catch (...) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: executable hashing failed");
-        return false;
     }
 
     std::chrono::system_clock::time_point now;
@@ -354,22 +414,18 @@ bool FinalizeSpecForgeMetadata(
             ? options.utc_now()
             : std::chrono::system_clock::now();
     } catch (const std::exception& exception) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: UTC clock failed: " +
                 std::string(exception.what()));
-        return false;
     } catch (...) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: UTC clock failed");
-        return false;
     }
 
     std::string completed_at_utc;
     if (!FormatUtcTimestamp(now, completed_at_utc, error)) {
-        SetError(error_message, "cannot finalize SpecForge metadata: " + error);
-        return false;
+        return fail_after_path_validation(
+            "cannot finalize SpecForge metadata: " + error);
     }
 
     BuildMetadata finalized_build = options.configured_build_metadata;
@@ -382,10 +438,8 @@ bool FinalizeSpecForgeMetadata(
             options.build_identity,
             finalized_build,
             &error)) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: " + error);
-        return false;
     }
 
     AtomicFileWriteOptions write_options;
@@ -393,8 +447,9 @@ bool FinalizeSpecForgeMetadata(
     write_options.replace_retry_policy = options.replace_retry_policy;
     write_options.before_replace = options.before_replace;
     try {
+        std::string atomic_write_error;
         if (!WriteFileAtomically(
-                options.metadata_path,
+                metadata_path,
                 write_options,
                 [&](std::ostream& stream, std::string& writer_error) {
                     return WriteSchema5Metadata(
@@ -403,20 +458,19 @@ bool FinalizeSpecForgeMetadata(
                         finalized_build,
                         writer_error);
                 },
-                error_message)) {
-            return false;
+                &atomic_write_error)) {
+            return fail_after_path_validation(
+                atomic_write_error.empty()
+                    ? "cannot finalize SpecForge metadata: atomic write failed"
+                    : std::move(atomic_write_error));
         }
     } catch (const std::exception& exception) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: atomic write failed: " +
                 std::string(exception.what()));
-        return false;
     } catch (...) {
-        SetError(
-            error_message,
+        return fail_after_path_validation(
             "cannot finalize SpecForge metadata: atomic write failed");
-        return false;
     }
     return true;
 }

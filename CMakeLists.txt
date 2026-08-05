@@ -415,6 +415,13 @@ set_target_properties(specforge_native PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
 
+add_custom_command(TARGET specforge_native PRE_LINK
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
+        "$<TARGET_FILE_DIR:specforge_native>/specforge_metadata.json"
+    COMMENT "Invalidating stale SpecForge metadata before linking"
+    VERBATIM
+)
+
 if(NOT SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES)
     add_custom_command(TARGET specforge_native POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:specforge_native>/config"
@@ -852,6 +859,44 @@ set_tests_properties(
         SKIP_RETURN_CODE 125
         TIMEOUT 1900
 )
+if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja")
+    get_filename_component(
+        SPECFORGE_METADATA_BUILD_REGRESSION_PRESET
+        "${CMAKE_BINARY_DIR}"
+        NAME
+    )
+    add_test(
+        NAME specforge_metadata_build_regression_tests
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_SOURCE_DIR}/tests/specforge_metadata_build_regression_tests.ps1"
+            -CMakeCommand "${CMAKE_COMMAND}"
+            -BuildDirectory "${CMAKE_BINARY_DIR}"
+            -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+            -Configuration "$<CONFIG>"
+            -BuildWrapper
+                "${CMAKE_SOURCE_DIR}/scripts/build-ninja-msvc-debug.ps1"
+            -BuildPreset
+                "${SPECFORGE_METADATA_BUILD_REGRESSION_PRESET}"
+            -BuildTimeoutSec 180
+    )
+else()
+    add_test(
+        NAME specforge_metadata_build_regression_tests
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_SOURCE_DIR}/tests/specforge_metadata_build_regression_tests.ps1"
+            -CMakeCommand "${CMAKE_COMMAND}"
+            -BuildDirectory "${CMAKE_BINARY_DIR}"
+            -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+            -Configuration "$<CONFIG>"
+    )
+endif()
+set_tests_properties(
+    specforge_metadata_build_regression_tests
+    PROPERTIES
+        LABELS "release;required"
+        RUN_SERIAL TRUE
+        TIMEOUT 900
+)
 add_test(
     NAME specforge_release_artifacts_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
@@ -874,6 +919,11 @@ add_test(
         -Generator "${SPECFORGE_BUILD_GENERATOR}"
         -TargetArchitecture "${SPECFORGE_BUILD_TARGET_ARCHITECTURE}"
         -WindowsSdkVersion "${SPECFORGE_BUILD_WINDOWS_SDK_VERSION}"
+)
+set_tests_properties(
+    specforge_release_artifacts_tests
+    PROPERTIES
+        RUN_SERIAL TRUE
 )
 add_test(
     NAME specforge_head_snapshot_build_tests

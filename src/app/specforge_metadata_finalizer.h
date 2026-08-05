@@ -22,6 +22,11 @@ struct SpecForgeMetadataFinalizerOptions {
     AtomicFileWriteCheckpoint before_replace;
 };
 
+// The metadata path must resolve to the executable-adjacent canonical
+// specforge_metadata.json. Once the paths pass validation, a failed
+// finalization removes that constrained target so a newly linked executable
+// cannot retain a stale sidecar. The atomic writer still owns temporary-file
+// cleanup and replacement semantics.
 [[nodiscard]] bool FinalizeSpecForgeMetadata(
     const SpecForgeMetadataFinalizerOptions& options,
     std::string* error_message = nullptr);

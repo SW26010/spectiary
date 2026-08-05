@@ -103,12 +103,24 @@ deployment controls storage even when the sidecar's product/build tuple is
 unavailable or does not match the executable. About continues to report build
 metadata unavailable or mismatch without changing the selected state root.
 
-The production build links the final EXE before a post-build finalizer computes
-its SHA-256 and UTC completion time. The finalizer validates the complete schema
-5 model, writes a temporary sidecar, and atomically replaces
-`specforge_metadata.json`. It rejects a non-canonical executable filename and
-an executable/metadata path alias; a failed replacement leaves the previous
-metadata intact and cleans the temporary file.
+The production build removes the executable-adjacent
+`specforge_metadata.json` before linking the final EXE and running any
+post-link work. The post-build finalizer then computes the EXE's SHA-256 and UTC
+completion time, validates the complete schema 5 model, writes a temporary
+sidecar, and atomically replaces the target. It rejects a non-canonical
+executable filename and any metadata path that is not exactly the normalized,
+executable-adjacent `specforge_metadata.json`. Once path validation succeeds,
+the finalizer derives the write and cleanup target from the executable path;
+any failed finalization removes only that constrained target after cleaning the
+temporary file. Path-validation failures occur before cleanup and remain
+side-effect free. Together, pre-link invalidation and finalizer cleanup prevent
+link or post-link failures from retaining a valid-looking sidecar for an older
+EXE.
+
+Future signed artifacts must preserve the release ordering
+`link → sign → hash → metadata finalization → package`. Signing therefore
+precedes the finalizer's SHA-256; the recorded artifact digest must cover the
+signed executable bytes, and packaging consumes that already-bound pair.
 
 The Portable packaging flow consumes schema 5 build-output metadata without a
 deployment section, adds the Portable deployment declaration only to the

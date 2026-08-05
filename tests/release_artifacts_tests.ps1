@@ -632,6 +632,9 @@ $manifestTemplatePath = Join-Path $RepoRoot 'src\platform\specforge.exe.manifest
 $resourceHeaderPath = Join-Path $RepoRoot 'src\platform\specforge_resource.h'
 $resourceTemplatePath = Join-Path $RepoRoot 'src\platform\specforge_resources.rc.in'
 $embeddedLegalSourcePath = Join-Path $RepoRoot 'src\app\embedded_legal_documents.cpp'
+$metadataBuildRegressionTestPath = Join-Path `
+    $RepoRoot `
+    'tests\specforge_metadata_build_regression_tests.ps1'
 
 foreach ($requiredPath in @(
     $eulaPath,
@@ -651,6 +654,7 @@ foreach ($requiredPath in @(
     $resourceHeaderPath,
     $resourceTemplatePath,
     $embeddedLegalSourcePath,
+    $metadataBuildRegressionTestPath,
     $GeneratedManifest,
     $GeneratedBuildIdentity
 )) {
@@ -927,6 +931,21 @@ Assert-NotContains $cmakeSource `
 Assert-Contains $cmakeSource `
     'add_dependencies(specforge_native specforge_metadata_finalizer_tool)' `
     'CMake post-link finalizer dependency'
+Assert-Contains $cmakeSource `
+    'add_custom_command(TARGET specforge_native PRE_LINK' `
+    'CMake pre-link metadata invalidation'
+Assert-Contains $cmakeSource `
+    'Invalidating stale SpecForge metadata before linking' `
+    'CMake stale-sidecar invalidation command'
+Assert-Contains $cmakeSource `
+    'specforge_metadata_build_regression_tests' `
+    'CMake repeated/no-op metadata build regression test'
+Assert-Contains $cmakeSource `
+    '-BuildDirectory "${CMAKE_BINARY_DIR}"' `
+    'CMake build regression directory binding'
+Assert-Contains $cmakeSource `
+    'scripts/build-ninja-msvc-debug.ps1' `
+    'CMake Ninja/MSVC build regression wrapper binding'
 Assert-Contains $cmakeSource `
     'Finalizing schema 5 SpecForge metadata' `
     'CMake post-link finalizer command'

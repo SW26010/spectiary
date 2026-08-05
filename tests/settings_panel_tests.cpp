@@ -859,9 +859,11 @@ void TestArtifactIdentityVerification()
     Require(
         mismatch.status ==
                 specforge::ArtifactIdentityStatus::Mismatch &&
+            mismatch.completed_at_utc.empty() &&
             mismatch.metadata_sha256 == mismatched_sha256 &&
             mismatch.executable_sha256 == kAbcSha256,
-        "different executable and metadata digests should be a mismatch");
+        "different executable and metadata digests should preserve digest "
+        "diagnostics without exposing an unverified completion time");
 
     const specforge::ArtifactIdentityResult unavailable =
         specforge::VerifyExecutableArtifactIdentity(
@@ -870,9 +872,11 @@ void TestArtifactIdentityVerification()
     Require(
         unavailable.status ==
                 specforge::ArtifactIdentityStatus::Unavailable &&
+            unavailable.completed_at_utc.empty() &&
             unavailable.metadata_sha256 == kAbcSha256 &&
             unavailable.executable_sha256.empty(),
-        "an unreadable executable should make identity unavailable");
+        "an unreadable executable should make identity unavailable without "
+        "exposing an unverified completion time");
 
     const specforge::ArtifactIdentityResult missing_metadata =
         specforge::VerifyExecutableArtifactIdentity(

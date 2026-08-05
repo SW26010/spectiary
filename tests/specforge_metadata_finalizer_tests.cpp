@@ -161,20 +161,25 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestPreReplaceFailureRemovesTemporaryAndPreservesTarget()
+void TestFailedFinalizationRemovesStaleTargetAndRecovers()
 {
     const std::filesystem::path root = TestRoot("pre-replace-failure");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
+    const std::filesystem::path executable_path = root / "SpecForge.exe";
     const std::filesystem::path metadata_path =
         root / "specforge_metadata.json";
-    const std::string original_metadata = "old schema 4 metadata\n";
-    WriteTextFile(root / "SpecForge.exe", "abc");
-    WriteTextFile(metadata_path, original_metadata);
+    WriteTextFile(executable_path, "old executable bytes");
 
     specforge::SpecForgeMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
+    Require(
+        specforge::FinalizeSpecForgeMetadata(options),
+        "fixture finalization should create the old schema 5 sidecar");
+    const std::string original_metadata = ReadTextFile(metadata_path);
+
+    WriteTextFile(executable_path, "new executable bytes");
     std::filesystem::path temporary_path;
     bool temporary_existed_at_checkpoint = false;
     options.before_replace =
@@ -199,11 +204,77 @@ void TestPreReplaceFailureRemovesTemporaryAndPreservesTarget()
             !std::filesystem::exists(temporary_path),
         "pre-replace failure should remove the temporary metadata file");
     Require(
-        ReadTextFile(metadata_path) == original_metadata,
-        "pre-replace failure should preserve the existing metadata target");
+        !std::filesystem::exists(metadata_path),
+        "pre-replace failure should remove the stale metadata target");
     Require(
         error.find("pre-replace checkpoint failed") != std::string::npos,
         "pre-replace failure should report the atomic write diagnostic");
+
+    options.before_replace = {};
+    options.utc_now = [] {
+        return FixedUtcTime() + std::chrono::seconds{1};
+    };
+    Require(
+        specforge::FinalizeSpecForgeMetadata(options),
+        "a later finalization should recover after the stale target is removed");
+    Require(
+        std::filesystem::exists(metadata_path) &&
+            ReadTextFile(metadata_path) != original_metadata,
+        "recovery should publish fresh metadata for the new executable");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestReplacementFailureRemovesStaleTargetAndRecovers()
+{
+    const std::filesystem::path root = TestRoot("replacement-failure");
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    const std::filesystem::path executable_path = root / "SpecForge.exe";
+    const std::filesystem::path metadata_path =
+        root / "specforge_metadata.json";
+    WriteTextFile(executable_path, "old executable bytes");
+
+    specforge::SpecForgeMetadataFinalizerOptions options =
+        OptionsFor(root);
+    options.utc_now = [] { return FixedUtcTime(); };
+    Require(
+        specforge::FinalizeSpecForgeMetadata(options),
+        "replacement fixture should create the old schema 5 sidecar");
+
+    Require(
+        std::filesystem::remove(metadata_path, cleanup_error) &&
+            !cleanup_error,
+        "replacement fixture should remove the old sidecar");
+    Require(
+        std::filesystem::create_directory(metadata_path, cleanup_error) &&
+            !cleanup_error,
+        "replacement fixture should create a blocking metadata directory");
+    WriteTextFile(executable_path, "new executable bytes");
+
+    std::string error;
+    const bool finalized =
+        specforge::FinalizeSpecForgeMetadata(options, &error);
+    Require(!finalized, "an atomic replacement failure should fail finalization");
+    Require(
+        error.find("could not replace") != std::string::npos,
+        "replacement failure should report the atomic replacement diagnostic");
+    Require(
+        !std::filesystem::exists(metadata_path),
+        "replacement failure should remove the stale metadata target");
+    Require(
+        !HasTemporarySibling(root),
+        "replacement failure should remove the temporary metadata file");
+
+    options.utc_now = [] {
+        return FixedUtcTime() + std::chrono::seconds{1};
+    };
+    Require(
+        specforge::FinalizeSpecForgeMetadata(options),
+        "a later finalization should recover after replacement failure");
+    Require(
+        std::filesystem::exists(metadata_path),
+        "replacement recovery should publish a metadata file");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -228,8 +299,8 @@ void TestHashFailureDoesNotCreateMetadataOrTemporaryFile()
         error.find("could not open final executable") != std::string::npos,
         "missing executable should report the hash input failure");
     Require(
-        ReadTextFile(metadata_path) == "old metadata\n",
-        "hash failure should preserve the existing metadata target");
+        !std::filesystem::exists(metadata_path),
+        "hash failure should remove the stale metadata target");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -281,6 +352,52 @@ void TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects()
     Require(
         !HasTemporarySibling(root),
         "wrong executable filename failure should not leave a temporary file");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestRejectsArbitraryMetadataPathsBeforeSideEffects()
+{
+    const std::filesystem::path root = TestRoot("arbitrary-metadata-path");
+    std::error_code cleanup_error;
+    const std::string original_metadata = "unrelated file contents\n";
+
+    for (const std::filesystem::path& metadata_path : {
+             root / "unrelated.txt",
+             root / "elsewhere" / "specforge_metadata.json",
+         }) {
+        std::filesystem::remove_all(root, cleanup_error);
+        WriteTextFile(metadata_path, original_metadata);
+
+        specforge::SpecForgeMetadataFinalizerOptions options =
+            OptionsFor(root);
+        options.executable_path = root / "app" / "SpecForge.exe";
+        options.metadata_path = metadata_path;
+        bool clock_called = false;
+        options.utc_now = [&] {
+            clock_called = true;
+            return FixedUtcTime();
+        };
+
+        std::string error;
+        const bool finalized =
+            specforge::FinalizeSpecForgeMetadata(options, &error);
+        Require(
+            !finalized,
+            "an arbitrary metadata path should fail validation");
+        Require(
+            error.find("specforge_metadata.json") != std::string::npos,
+            "arbitrary metadata path failure should identify the canonical sidecar");
+        Require(
+            !clock_called,
+            "arbitrary metadata path should fail before finalization starts");
+        Require(
+            ReadTextFile(metadata_path) == original_metadata,
+            "arbitrary metadata path validation must preserve the caller's file");
+        Require(
+            !HasTemporarySibling(metadata_path.parent_path()),
+            "arbitrary metadata path validation should not create a temporary file");
+    }
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -345,14 +462,14 @@ void TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects()
     std::filesystem::remove_all(root, cleanup_error);
 }
 
-void TestRejectsSchema5InvalidBuildValuesWithoutReplacingMetadata()
+void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
 {
     const std::filesystem::path root = TestRoot("schema5-validation-failure");
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path metadata_path =
         root / "specforge_metadata.json";
-    const std::string original_metadata = "old schema 4 metadata\n";
+    const std::string original_metadata = "old schema 5 metadata\n";
 
     const std::vector<std::function<void(specforge::BuildMetadata&)>> invalid_cases = {
         [](specforge::BuildMetadata& build) {
@@ -389,8 +506,8 @@ void TestRejectsSchema5InvalidBuildValuesWithoutReplacingMetadata()
             !error.empty(),
             "schema 5 validation failure should report a diagnostic");
         Require(
-            ReadTextFile(metadata_path) == original_metadata,
-            "schema 5 validation failure should preserve existing metadata");
+            !std::filesystem::exists(metadata_path),
+            "schema 5 validation failure should remove stale metadata");
         Require(
             !HasTemporarySibling(root),
             "schema 5 validation failure should not leave a temporary file");
@@ -404,11 +521,13 @@ void TestRejectsSchema5InvalidBuildValuesWithoutReplacingMetadata()
 int main()
 {
     TestFinalizerWritesSchema5AndHashesFinalExecutable();
-    TestPreReplaceFailureRemovesTemporaryAndPreservesTarget();
+    TestFailedFinalizationRemovesStaleTargetAndRecovers();
+    TestReplacementFailureRemovesStaleTargetAndRecovers();
     TestHashFailureDoesNotCreateMetadataOrTemporaryFile();
     TestRejectsNonCanonicalExecutableFilenameBeforeSideEffects();
+    TestRejectsArbitraryMetadataPathsBeforeSideEffects();
     TestRejectsEquivalentExecutableAndMetadataPathsBeforeSideEffects();
-    TestRejectsSchema5InvalidBuildValuesWithoutReplacingMetadata();
+    TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata();
     std::cout << "SpecForge metadata finalizer tests passed\n";
     return 0;
 }

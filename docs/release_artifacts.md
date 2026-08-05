@@ -46,7 +46,9 @@ local development possible without allowing a release to omit SDK provenance.
 The artifact digest is an identity binding for the executable sidecar, not an
 authentication signature. The build provenance tuple remains diagnostic; the
 digest is what detects an EXE/metadata mix-up, while the final ZIP digest covers
-the complete Portable package.
+the complete Portable package. When executable signing is introduced, the
+signature is applied before the artifact digest is computed so the metadata
+binds to the signed bytes.
 
 ## Finalization order
 
@@ -54,19 +56,34 @@ The production build has an explicit ordering contract:
 
 1. CMake builds `specforge_metadata_finalizer_tool` as a dependency of the
    native target.
-2. `specforge_native` links the final `SpecForge.exe`.
-3. A post-build command invokes the finalizer with the finished EXE and its
+2. A pre-link command removes the executable-adjacent
+   `specforge_metadata.json`, invalidating any sidecar from an older EXE.
+3. `specforge_native` links the final `SpecForge.exe`.
+4. A future signing step signs the finished `SpecForge.exe`.
+5. A post-build command invokes the finalizer with the signed EXE and its
    adjacent `specforge_metadata.json` path.
-4. The finalizer hashes the finished EXE, obtains the UTC completion time,
+6. The finalizer hashes the signed EXE, obtains the UTC completion time,
    fills the schema 5 fields, and runs the same strict validation used by the
    metadata reader.
-5. It writes a temporary JSON file and atomically replaces the metadata target.
+7. It writes a temporary JSON file and atomically replaces the metadata target.
 
-The executable path must name the canonical `SpecForge.exe` artifact and must
-not be the same file as, or an alias of, the metadata path. A failure before
-replacement leaves an existing metadata file unchanged and removes the
-temporary file. A failed finalizer makes the build fail rather than publishing
-metadata that the runtime would reject.
+The release sequence is therefore `link → sign → hash → metadata finalization
+→ package`. Until signing is implemented, the current native build executes
+the equivalent unsigned path `link → hash/finalize`; signing must not be added
+after metadata finalization or packaging.
+
+The executable path must name the canonical `SpecForge.exe` artifact. The
+metadata path must be exactly its normalized, executable-adjacent
+`specforge_metadata.json`; another filename or a path resolving anywhere else
+is rejected before any cleanup. After validation, the finalizer derives its
+write and cleanup target from the executable path rather than deleting the
+caller-provided path. The pre-link invalidation occurs before the linker and
+all post-link commands, so a link, app-local deployment, resource copy,
+obsolete-file cleanup, or finalizer failure cannot leave an older sidecar
+beside a new EXE. Once the finalizer has accepted the constrained paths, a
+failure before replacement removes the metadata target and the temporary file.
+A failed finalizer makes the build fail rather than publishing metadata that the runtime
+would reject; a later native relink can recreate the sidecar.
 
 Finalization occurs only when `specforge_native` actually relinks and its
 post-build commands run. The `specforge_metadata` build target is a convenience
@@ -75,7 +92,12 @@ or byproduct and is not a sidecar-freshness verifier. If the executable is
 already up to date, invoking this target alone does not rerun the finalizer for
 a missing, modified, or stale metadata file. Release automation must use the
 actual native build and the Portable validation steps below to establish a
-fresh metadata/EXE pair.
+fresh metadata/EXE pair. The CTest metadata build regression removes only the
+EXE to force one real relink/finalization, then runs a second real no-op build;
+it verifies the executable hash is unchanged by a metadata timestamp change
+and that the no-op build does not rewrite the sidecar. Ninja/MSVC rebuilds use
+the repository's bounded build wrapper so each nested build initializes the
+MSVC and Windows SDK environment.
 
 ## Portable packaging and verification
 
@@ -91,9 +113,11 @@ Run the working-tree or isolated-`HEAD` entrypoint described in
    executable, metadata, and `Data/`;
 5. adds `deployment.distribution: "portable"` and
    `deployment.storage_profile: "portable"` to the package metadata copy;
-6. checks the metadata digest against the packaged EXE, then checks both files
-   against their corresponding ZIP entries; and
-7. writes the ZIP and its lowercase SHA-256 sidecar.
+6. checks the metadata digest against the packaged EXE;
+7. writes the ZIP and its lowercase SHA-256 sidecar; and
+8. invokes `scripts/verify-portable.ps1` to verify the ZIP entry set and check
+   that the ZIP entries for the executable and metadata have the same SHA-256
+   digests as their package-root counterparts.
 
 The three executable values below must be identical before a package is
 accepted:
