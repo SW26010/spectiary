@@ -11,6 +11,9 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace specforge {
@@ -18,6 +21,16 @@ namespace specforge {
 struct SampleWorkflowPanelUiTestAccess;
 struct ShellUiTestAccess;
 class ShellUi;
+
+[[nodiscard]] std::string SampleWorkflowTemporaryDraftTaskName(
+    UiLanguage language,
+    std::string_view task_name);
+[[nodiscard]] std::string SampleWorkflowSaveStateText(
+    UiLanguage language,
+    const SampleLabelSaveState& save_state);
+[[nodiscard]] std::string SampleWorkflowSaveMessageText(
+    UiLanguage language,
+    const SampleLabelSaveState& save_state);
 
 class SampleWorkflowPanelUi {
 public:
@@ -77,6 +90,9 @@ private:
         const SourceCollectionSessionResult& result,
         UiLanguage language);
     void ClearLabelingOperationMessage();
+    [[nodiscard]] static std::string RecoveryDraftRowToken(
+        const SourceCollectionLabelingView& labeling_view,
+        std::size_t draft_index);
 
     std::string active_task_id_;
     std::string labeling_operation_message_;
@@ -102,6 +118,22 @@ private:
     std::string pending_annotation_activation_name_;
     std::string pending_delete_task_name_;
     bool pending_delete_task_is_temporary_ = false;
+    bool pending_delete_task_is_recovery_ = false;
+    std::string pending_delete_task_source_identity_;
+    std::string pending_delete_task_id_;
+    std::unordered_set<std::string> retained_recovery_drafts_;
+    std::unordered_map<std::string, std::string>
+        recovery_draft_fingerprints_;
+    std::optional<std::array<float, 4>> labeling_selector_rect_;
+    std::optional<std::array<float, 4>> labeling_pause_rect_;
+    std::optional<std::array<float, 4>> labeling_delete_rect_;
+    std::optional<std::array<float, 4>> labeling_recovery_rect_;
+    std::optional<std::array<float, 4>> temporary_labeling_action_rect_;
+    std::optional<std::array<float, 4>> labeling_delete_confirmation_rect_;
+    std::unordered_map<std::string, std::array<float, 4>>
+        recovery_action_rects_;
+    std::unordered_map<std::string, std::array<float, 4>>
+        recovery_identity_rects_;
     SampleAnnotationWorkflowRelationship pending_annotation_activation_relationship_ =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
 };

@@ -25,6 +25,26 @@ constexpr auto kWorkflowStateSaveDebounce = 500ms;
 constexpr auto kWorkflowStateSaveRetry = 2s;
 constexpr std::size_t kMaxLabelUndoEntries = 256;
 
+struct ActiveSampleWorkflowIdentity {
+    bool present = false;
+    std::string source_identity;
+    std::string task_id;
+
+    friend bool operator==(
+        const ActiveSampleWorkflowIdentity& left,
+        const ActiveSampleWorkflowIdentity& right) = default;
+};
+
+ActiveSampleWorkflowIdentity CaptureActiveSampleWorkflowIdentity(
+    const std::optional<std::string>& source_identity,
+    const SampleLabelingTask* task)
+{
+    return ActiveSampleWorkflowIdentity{
+        .present = source_identity.has_value() && task != nullptr,
+        .source_identity = source_identity.value_or(std::string{}),
+        .task_id = task == nullptr ? std::string{} : task->task_id};
+}
+
 std::string LowerAscii(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -322,6 +342,16 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     switch (intent.kind) {
     case ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask:
         outcome = StartOrResumeTemporaryLabelingTask();
+        break;
+    case ActiveSampleWorkflowIntentKind::RecoverTemporaryLabelingTask:
+        outcome = RecoverTemporaryLabelingTask(
+            std::move(intent.source_identity),
+            std::move(intent.task_id));
+        break;
+    case ActiveSampleWorkflowIntentKind::DeleteTemporaryLabelingTask:
+        outcome = DeleteTemporaryLabelingTask(
+            std::move(intent.source_identity),
+            std::move(intent.task_id));
         break;
     case ActiveSampleWorkflowIntentKind::ActivateLabelingTaskFromAnnotation:
         outcome = ActivateLabelingTaskFromAnnotation(
@@ -1088,6 +1118,98 @@ SampleWorkflowCoordinator::StartOrResumeTemporaryLabelingTask()
 }
 
 SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::RecoverTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    SampleWorkflowTransitionOutcome outcome;
+    const ActiveSampleWorkflowIdentity active_identity_before =
+        CaptureActiveSampleWorkflowIdentity(
+            active_sample_workflow_identity_,
+            labeling_.View().active_task);
+    const SampleLabelingOperationResult result =
+        labeling_.RecoverTemporaryTask(
+            source_identity,
+            task_id);
+    ApplyLabelingLeaseIssue(outcome, result);
+    if (result.accepted || result.task_projection_changed) {
+        outcome.changed =
+            result.changed ||
+            result.task_projection_changed;
+        const ActiveSampleWorkflowIdentity active_identity_after =
+            CaptureActiveSampleWorkflowIdentity(
+                active_sample_workflow_identity_,
+                labeling_.View().active_task);
+        if (active_identity_before != active_identity_after) {
+            ClearLabelUndoHistory();
+            ApplyNavigationInputEffects(
+                outcome,
+                ReconcileNavigationInputs(
+                    nullptr,
+                    NavigationInputReconcileRequest{
+                        .workflow_changed = true,
+                        .filters_changed = true,
+                        .sorting_changed = true}));
+        } else if (result.task_projection_changed) {
+            ApplyNavigationInputEffects(
+                outcome,
+                ReconcileNavigationInputs(
+                    nullptr,
+                    NavigationInputReconcileRequest{
+                        .filters_changed = true,
+                        .sorting_changed = true}));
+        }
+    }
+    return outcome;
+}
+
+SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::DeleteTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    SampleWorkflowTransitionOutcome outcome;
+    const ActiveSampleWorkflowIdentity active_identity_before =
+        CaptureActiveSampleWorkflowIdentity(
+            active_sample_workflow_identity_,
+            labeling_.View().active_task);
+    const SampleLabelingOperationResult result =
+        labeling_.DeleteTemporaryTask(
+            source_identity,
+            task_id);
+    ApplyLabelingLeaseIssue(outcome, result);
+    if (result.accepted || result.task_projection_changed) {
+        outcome.changed =
+            result.changed ||
+            result.task_projection_changed;
+        const ActiveSampleWorkflowIdentity active_identity_after =
+            CaptureActiveSampleWorkflowIdentity(
+                active_sample_workflow_identity_,
+                labeling_.View().active_task);
+        if (active_identity_before != active_identity_after) {
+            ClearLabelUndoHistory();
+            ApplyNavigationInputEffects(
+                outcome,
+                ReconcileNavigationInputs(
+                    nullptr,
+                    NavigationInputReconcileRequest{
+                        .workflow_changed = true,
+                        .filters_changed = true,
+                        .sorting_changed = true}));
+        } else if (result.task_projection_changed) {
+            ApplyNavigationInputEffects(
+                outcome,
+                ReconcileNavigationInputs(
+                    nullptr,
+                    NavigationInputReconcileRequest{
+                        .filters_changed = true,
+                        .sorting_changed = true}));
+        }
+    }
+    return outcome;
+}
+
+SampleWorkflowTransitionOutcome
 SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     std::filesystem::path annotation_path)
 {
@@ -1671,7 +1793,25 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
 {
     SourceCollectionLabelingView view;
     const SampleLabelingControllerView labeling_view = labeling_.View();
+    const SampleLabelingRecoveryView recovery_view = labeling_.RecoveryView();
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
+    view.source_identity = recovery_view.source_identity;
+    view.recovery_revision = recovery_view.revision;
+    view.recovery_drafts.reserve(recovery_view.temporary_drafts.size());
+    for (const SampleLabelingRecoveryDraftView& draft :
+         recovery_view.temporary_drafts) {
+        if (draft.task == nullptr) {
+            continue;
+        }
+        view.recovery_drafts.push_back(
+            SourceCollectionLabelingRecoveryDraftView{
+                .task_id = draft.task->task_id,
+                .task_name = draft.task->task_name,
+                .status = draft.status,
+                .labeled_count = draft.task->labeled_count,
+                .sample_count = draft.task->values.size(),
+                .save_state = draft.task->save_state});
+    }
     view.current_index = ActiveSampleIndex(snapshot);
     view.has_temporary_task = labeling_view.temporary_task != nullptr;
     if (labeling_view.active_source_tasks != nullptr) {

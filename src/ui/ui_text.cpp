@@ -567,6 +567,9 @@ constexpr std::array kTextCatalog = {
             SampleLabelingOperationResult::Issue::
                 EditTargetChanged).simplified_chinese},
     UiTextEntry{
+        "This labeling task changed on disk and could not be deleted from the stale view.",
+        "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
+    UiTextEntry{
         "State: temporary local draft; use Save to... to create a labeling annotation.",
         "状态：临时本地草稿；使用“另存为…”创建标注结果。"},
     UiTextEntry{
@@ -601,6 +604,32 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Resume labeling draft",
         "继续标注草稿"},
+    UiTextEntry{
+        "Temporary draft recovery",
+        "临时标注草稿恢复"},
+    UiTextEntry{
+        "Source identity: %s",
+        "源身份：%s"},
+    UiTextEntry{
+        "Task identity: %s",
+        "任务身份：%s"},
+    UiTextEntry{"Task", "任务"},
+    UiTextEntry{"Identity", "身份"},
+    UiTextEntry{"Status", "状态"},
+    UiTextEntry{"Progress", "进度"},
+    UiTextEntry{"Save state", "保存状态"},
+    UiTextEntry{"Actions", "操作"},
+    UiTextEntry{"Current", "当前"},
+    UiTextEntry{"Recoverable", "可恢复"},
+    UiTextEntry{"Conflicting", "冲突"},
+    UiTextEntry{"Stale", "陈旧"},
+    UiTextEntry{
+        "Duplicate task identity; Recover and Delete are disabled. Keep is local to this row.",
+        "任务身份重复；恢复和删除已禁用。保留仅作用于此行。"},
+    UiTextEntry{"Recover draft", "恢复草稿"},
+    UiTextEntry{"Keep draft", "保留草稿"},
+    UiTextEntry{"Draft kept", "草稿已保留"},
+    UiTextEntry{"Delete draft", "删除草稿"},
     UiTextEntry{
         "Output autosave must finish before this task can be closed.",
         "必须等待输出自动保存完成，才能关闭此任务。"},

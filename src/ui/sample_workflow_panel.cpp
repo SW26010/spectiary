@@ -1,6 +1,7 @@
 #include "ui/sample_workflow_panel.h"
 
 #include "app/local_user_state.h"
+#include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_labeling_issue_text.h"
 
 #include <imgui.h>
@@ -15,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -117,6 +119,112 @@ std::string LabelingTaskDisplayName(
                   language,
                   UiTextId::TemporaryLabelingTask))
         : std::string(stable_name);
+}
+
+std::string TemporaryDraftIdentityKey(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    std::string key;
+    key.reserve(source_identity.size() + task_id.size() + 1);
+    key.append(source_identity);
+    key.push_back('\n');
+    key.append(task_id);
+    return key;
+}
+
+void AppendRecoveryFingerprintField(
+    std::string& fingerprint,
+    std::string_view value)
+{
+    fingerprint += std::to_string(value.size());
+    fingerprint.push_back(':');
+    fingerprint.append(value);
+    fingerprint.push_back('|');
+}
+
+void AppendRecoveryFingerprintField(
+    std::string& fingerprint,
+    std::size_t value)
+{
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        std::to_string(value));
+}
+
+std::string TemporaryDraftRecoveryFingerprint(
+    const SourceCollectionLabelingRecoveryDraftView& draft)
+{
+    std::string fingerprint;
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        static_cast<std::size_t>(draft.status));
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        draft.task_name);
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        draft.labeled_count);
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        draft.sample_count);
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        static_cast<std::size_t>(draft.save_state.kind));
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        draft.save_state.pending_count);
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        static_cast<std::size_t>(draft.save_state.message_kind));
+    AppendRecoveryFingerprintField(
+        fingerprint,
+        draft.save_state.message);
+    return fingerprint;
+}
+
+std::string TemporaryDraftRecoveryRowToken(
+    const SourceCollectionLabelingView& labeling_view,
+    std::size_t draft_index)
+{
+    const SourceCollectionLabelingRecoveryDraftView& draft =
+        labeling_view.recovery_drafts.at(draft_index);
+    const std::string fingerprint =
+        TemporaryDraftRecoveryFingerprint(draft);
+    std::size_t duplicate_ordinal = 0;
+    for (std::size_t index = 0; index < draft_index; ++index) {
+        const SourceCollectionLabelingRecoveryDraftView& previous =
+            labeling_view.recovery_drafts[index];
+        if (previous.task_id == draft.task_id &&
+            TemporaryDraftRecoveryFingerprint(previous) == fingerprint) {
+            ++duplicate_ordinal;
+        }
+    }
+
+    std::string token = TemporaryDraftIdentityKey(
+        labeling_view.source_identity,
+        draft.task_id);
+    token.push_back('\n');
+    token.append(fingerprint);
+    token.push_back('\n');
+    token.append(std::to_string(duplicate_ordinal));
+    return token;
+}
+
+UiTextId TemporaryDraftStatusTextId(
+    SampleLabelingRecoveryDraftStatus status)
+{
+    switch (status) {
+    case SampleLabelingRecoveryDraftStatus::Current:
+        return UiTextId::TemporaryDraftCurrent;
+    case SampleLabelingRecoveryDraftStatus::Conflicting:
+        return UiTextId::TemporaryDraftConflicting;
+    case SampleLabelingRecoveryDraftStatus::Stale:
+        return UiTextId::TemporaryDraftStale;
+    case SampleLabelingRecoveryDraftStatus::Recoverable:
+    default:
+        return UiTextId::TemporaryDraftRecoverable;
+    }
 }
 
 std::string LocalizedSampleLabelShortcut(
@@ -829,6 +937,29 @@ std::string_view SaveStateLabel(
     }
 }
 
+std::string SaveStateStatusText(
+    UiLanguage language,
+    const SampleLabelSaveState& save_state)
+{
+    const std::string save_state_text(
+        SaveStateLabel(
+            language,
+            save_state.kind));
+    std::string save_status =
+        FormatUiText(
+            language,
+            UiTextId::SaveStatus,
+            save_state_text.c_str());
+    if (save_state.kind == SampleLabelSaveStateKind::Pending ||
+        save_state.kind == SampleLabelSaveStateKind::Failed) {
+        save_status +=
+            " (" +
+            std::to_string(save_state.pending_count) +
+            ")";
+    }
+    return save_status;
+}
+
 std::string_view SaveStateReminder(
     UiLanguage language,
     const SourceCollectionLabelingView& labeling_view)
@@ -869,6 +1000,42 @@ bool AnnotationActivationNeedsConfirmation(SampleAnnotationWorkflowRelationship 
 
 }  // namespace
 
+std::string SampleWorkflowPanelUi::RecoveryDraftRowToken(
+    const SourceCollectionLabelingView& labeling_view,
+    std::size_t draft_index)
+{
+    return TemporaryDraftRecoveryRowToken(
+        labeling_view,
+        draft_index);
+}
+
+std::string SampleWorkflowTemporaryDraftTaskName(
+    UiLanguage language,
+    std::string_view task_name)
+{
+    return task_name.empty() ||
+            task_name == kTemporarySampleLabelingTaskName
+        ? std::string(
+              UiText(
+                  language,
+                  UiTextId::TemporaryLabelingTask))
+        : std::string(task_name);
+}
+
+std::string SampleWorkflowSaveStateText(
+    UiLanguage language,
+    const SampleLabelSaveState& save_state)
+{
+    return SaveStateStatusText(language, save_state);
+}
+
+std::string SampleWorkflowSaveMessageText(
+    UiLanguage language,
+    const SampleLabelSaveState& save_state)
+{
+    return SampleLabelSaveMessageText(language, save_state);
+}
+
 const char* SampleWorkflowPanelUi::LabelingWindowName()
 {
     return kLabelingWindow;
@@ -903,6 +1070,9 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     pending_annotation_activation_name_.clear();
     pending_delete_task_name_.clear();
     pending_delete_task_is_temporary_ = false;
+    pending_delete_task_is_recovery_ = false;
+    pending_delete_task_source_identity_.clear();
+    pending_delete_task_id_.clear();
     pending_annotation_activation_relationship_ = SampleAnnotationWorkflowRelationship::PlainAnnotation;
 }
 
@@ -1010,6 +1180,14 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
     SampleWorkflowShortcut& shortcut)
 {
+    labeling_selector_rect_.reset();
+    labeling_pause_rect_.reset();
+    labeling_delete_rect_.reset();
+    labeling_recovery_rect_.reset();
+    temporary_labeling_action_rect_.reset();
+    labeling_delete_confirmation_rect_.reset();
+    recovery_action_rects_.clear();
+    recovery_identity_rects_.clear();
     const auto capture_result = [this, language](
                                     SourceCollectionSessionResult result) {
         CaptureLabelingOperationResult(
@@ -1024,6 +1202,19 @@ void SampleWorkflowPanelUi::RenderLabeling(
                 interaction.Submit(
                     std::move(intent))
                     .result));
+    };
+    const auto capture_delete_result = [this, language](
+                                          SourceCollectionSessionResult result) {
+        if (result.labeling_issue ==
+            SampleLabelingOperationResult::Issue::EditTargetChanged) {
+            labeling_operation_text_id_ =
+                UiTextId::LabelingDeleteTargetChanged;
+            labeling_operation_message_ =
+                UiText(
+                    language,
+                    UiTextId::LabelingDeleteTargetChanged);
+        }
+        return result;
     };
     const auto submit_auto_advance =
         [&interaction, &capture_result](
@@ -1083,9 +1274,609 @@ void SampleWorkflowPanelUi::RenderLabeling(
         interaction.View();
     const SourceCollectionLabelingView labeling_view = session_view.labeling;
     const std::optional<std::size_t> current_index = labeling_view.current_index;
+    std::unordered_map<std::string, std::size_t> labeling_task_id_counts;
+    if (!labeling_view.task_ids.empty()) {
+        for (const std::string& task_id : labeling_view.task_ids) {
+            ++labeling_task_id_counts[task_id];
+        }
+    } else {
+        // Keep lightweight panel fixtures useful while production projections
+        // are expected to include every formal and temporary task identity.
+        for (const SourceCollectionLabelingRecoveryDraftView& draft :
+             labeling_view.recovery_drafts) {
+            ++labeling_task_id_counts[draft.task_id];
+        }
+    }
+    const auto recovery_task_id_is_ambiguous =
+        [&labeling_task_id_counts](std::string_view task_id) {
+            const auto found = labeling_task_id_counts.find(std::string(task_id));
+            return found != labeling_task_id_counts.end() && found->second > 1;
+        };
+    bool recovery_action_submitted = false;
+    bool open_delete_task_popup = false;
+    const auto render_recovery_drafts = [&]() {
+        const ImVec2 recovery_top = ImGui::GetCursorScreenPos();
+        const auto finish_recovery_layout =
+            [this, &recovery_top](const ImVec2 recovery_bottom) {
+                labeling_recovery_rect_ = {
+                    recovery_top.x,
+                    recovery_top.y,
+                    recovery_bottom.x,
+                    recovery_bottom.y};
+            };
+        const std::string current_source_prefix =
+            labeling_view.source_identity + "\n";
+        const auto render_recovery_task_identity =
+            [this, language](std::string_view task_id, std::string_view key) {
+                const std::string task_id_value(task_id);
+                const std::string task_identity = FormatUiText(
+                    language,
+                    UiTextId::TemporaryDraftTaskIdentity,
+                    task_id_value.c_str());
+                RenderDisabledText(task_identity);
+                const ImRect rect = GImGui->LastItemData.Rect;
+                recovery_identity_rects_.insert_or_assign(
+                    std::string(key),
+                    std::array<float, 4>{
+                        rect.Min.x,
+                        rect.Min.y,
+                        rect.Max.x,
+                        rect.Max.y});
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "%s",
+                        task_identity.c_str());
+                }
+            };
+        if (labeling_view.recovery_drafts.empty()) {
+            std::erase_if(
+                retained_recovery_drafts_,
+                [&current_source_prefix](const std::string& key) {
+                    return key.compare(
+                               0,
+                               current_source_prefix.size(),
+                               current_source_prefix) == 0;
+                });
+            std::erase_if(
+                recovery_draft_fingerprints_,
+                [&current_source_prefix](const auto& entry) {
+                    return entry.first.compare(
+                               0,
+                               current_source_prefix.size(),
+                               current_source_prefix) == 0;
+                });
+            finish_recovery_layout(ImGui::GetCursorScreenPos());
+            return;
+        }
+
+        std::unordered_set<std::string> visible_recovery_drafts;
+        std::unordered_map<std::string, std::string>
+            visible_recovery_fingerprints;
+        visible_recovery_drafts.reserve(
+            labeling_view.recovery_drafts.size());
+        visible_recovery_fingerprints.reserve(
+            labeling_view.recovery_drafts.size());
+        for (std::size_t draft_index = 0;
+             draft_index < labeling_view.recovery_drafts.size();
+             ++draft_index) {
+            const SourceCollectionLabelingRecoveryDraftView& draft =
+                labeling_view.recovery_drafts[draft_index];
+            const std::string key = RecoveryDraftRowToken(
+                labeling_view,
+                draft_index);
+            visible_recovery_drafts.insert(key);
+            visible_recovery_fingerprints.insert_or_assign(
+                key,
+                TemporaryDraftRecoveryFingerprint(draft));
+        }
+        std::erase_if(
+            retained_recovery_drafts_,
+            [
+                &current_source_prefix,
+                &visible_recovery_drafts,
+                &visible_recovery_fingerprints,
+                this](const std::string& key) {
+                if (key.compare(
+                        0,
+                        current_source_prefix.size(),
+                        current_source_prefix) != 0) {
+                    return false;
+                }
+                if (!visible_recovery_drafts.contains(key)) {
+                    return true;
+                }
+                const auto current =
+                    visible_recovery_fingerprints.find(key);
+                const auto previous =
+                    recovery_draft_fingerprints_.find(key);
+                return current != visible_recovery_fingerprints.end() &&
+                       previous != recovery_draft_fingerprints_.end() &&
+                       current->second != previous->second;
+            });
+        std::erase_if(
+            recovery_draft_fingerprints_,
+            [
+                &current_source_prefix,
+                &visible_recovery_drafts](const auto& entry) {
+                return entry.first.compare(
+                           0,
+                           current_source_prefix.size(),
+                           current_source_prefix) == 0 &&
+                       !visible_recovery_drafts.contains(entry.first);
+            });
+        for (const auto& [key, fingerprint] : visible_recovery_fingerprints) {
+            recovery_draft_fingerprints_.insert_or_assign(key, fingerprint);
+        }
+
+        ImGui::Separator();
+        RenderText(
+            UiText(
+                language,
+                UiTextId::TemporaryDraftRecovery));
+        const std::string source_identity = FormatUiText(
+            language,
+            UiTextId::TemporaryDraftSourceIdentity,
+            labeling_view.source_identity.c_str());
+        RenderDisabledText(source_identity);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", source_identity.c_str());
+        }
+        const bool compact_layout =
+            ImGui::GetContentRegionAvail().x < 720.0f;
+        const auto render_recovery_actions = [&](
+                                                const SourceCollectionLabelingRecoveryDraftView& draft,
+                                                std::string_view key,
+                                                bool retained,
+                                                bool duplicate_task_id) {
+            if (draft.status ==
+                SampleLabelingRecoveryDraftStatus::Current) {
+                RenderDisabledText(
+                    UiText(
+                        language,
+                        UiTextId::TemporaryDraftCurrent));
+                return;
+            }
+
+            const auto record_action_rect =
+                [this, key](std::string_view stable_id) {
+                    const ImRect rect = GImGui->LastItemData.Rect;
+                    std::string action_key(key);
+                    action_key.push_back('\n');
+                    action_key.append(stable_id);
+                    recovery_action_rects_.insert_or_assign(
+                        std::move(action_key),
+                        std::array<float, 4>{
+                            rect.Min.x,
+                            rect.Min.y,
+                            rect.Max.x,
+                            rect.Max.y});
+                };
+            const bool recovery_activation_disabled =
+                labeling_view.has_active_task &&
+                !labeling_view.can_deactivate_task;
+            const bool recover_disabled =
+                recovery_activation_disabled || duplicate_task_id;
+            const std::string recover_label = StableUiLabel(
+                language,
+                UiTextId::RecoverTemporaryDraft,
+                "SpecForgeRecoverTemporaryDraft");
+            if (recover_disabled) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(recover_label.c_str())) {
+                (void)submit(
+                    ChangeActiveSampleWorkflow(
+                        ActiveSampleWorkflowIntent::
+                            RecoverTemporaryLabelingTask(
+                                labeling_view.source_identity,
+                        draft.task_id)));
+                recovery_action_submitted = true;
+            }
+            record_action_rect("SpecForgeRecoverTemporaryDraft");
+            if (recover_disabled) {
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(
+                        ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    const std::string_view tooltip = duplicate_task_id
+                        ? UiText(
+                              language,
+                              UiTextId::TemporaryDraftDuplicateIdentity)
+                        : UiText(
+                              language,
+                              UiTextId::OutputAutosaveCloseBlocked);
+                    ImGui::SetTooltip(
+                        "%.*s",
+                        static_cast<int>(tooltip.size()),
+                        tooltip.data());
+                }
+            }
+            if (!compact_layout) {
+                ImGui::SameLine();
+            }
+            const std::string keep_label = StableUiLabel(
+                language,
+                retained
+                    ? UiTextId::TemporaryDraftKept
+                    : UiTextId::KeepTemporaryDraft,
+                "SpecForgeKeepTemporaryDraft");
+            if (retained) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(keep_label.c_str())) {
+                retained_recovery_drafts_.insert(std::string(key));
+            }
+            if (retained) {
+                ImGui::EndDisabled();
+            }
+            record_action_rect("SpecForgeKeepTemporaryDraft");
+            if (!compact_layout) {
+                ImGui::SameLine();
+            }
+            const std::string delete_draft_label = StableUiLabel(
+                language,
+                UiTextId::DeleteTemporaryDraft,
+                "SpecForgeDeleteTemporaryDraft");
+            if (duplicate_task_id) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(delete_draft_label.c_str())) {
+                pending_delete_task_name_ = draft.task_name;
+                pending_delete_task_is_temporary_ = true;
+                pending_delete_task_is_recovery_ = true;
+                pending_delete_task_source_identity_ =
+                    labeling_view.source_identity;
+                pending_delete_task_id_ = draft.task_id;
+                open_delete_task_popup = true;
+            }
+            record_action_rect("SpecForgeDeleteTemporaryDraft");
+            if (duplicate_task_id) {
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(
+                        ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    const std::string_view tooltip = UiText(
+                        language,
+                        UiTextId::TemporaryDraftDuplicateIdentity);
+                    ImGui::SetTooltip(
+                        "%.*s",
+                        static_cast<int>(tooltip.size()),
+                        tooltip.data());
+                }
+                RenderDisabledText(
+                    UiText(
+                        language,
+                        UiTextId::TemporaryDraftDuplicateIdentity));
+            }
+        };
+        if (compact_layout) {
+            for (std::size_t draft_index = 0;
+                 draft_index < labeling_view.recovery_drafts.size();
+                 ++draft_index) {
+                const SourceCollectionLabelingRecoveryDraftView& draft =
+                    labeling_view.recovery_drafts[draft_index];
+                const std::string key = RecoveryDraftRowToken(
+                    labeling_view,
+                    draft_index);
+                const std::string row_id =
+                    key + "#row";
+                const bool retained =
+                    retained_recovery_drafts_.contains(key);
+                const bool duplicate_task_id =
+                    recovery_task_id_is_ambiguous(draft.task_id);
+                ImGui::PushID(row_id.c_str());
+                ImGui::BeginGroup();
+                RenderText(
+                    SampleWorkflowTemporaryDraftTaskName(
+                        language,
+                        draft.task_name));
+                render_recovery_task_identity(
+                    draft.task_id,
+                    key);
+                RenderText(
+                    UiText(
+                        language,
+                        TemporaryDraftStatusTextId(draft.status)));
+                RenderText(
+                    FormatUiText(
+                        language,
+                        UiTextId::LabelingProgress,
+                        static_cast<unsigned long long>(draft.labeled_count),
+                        static_cast<unsigned long long>(draft.sample_count)));
+                RenderText(
+                    SampleWorkflowSaveStateText(
+                        language,
+                        draft.save_state));
+                const std::string save_message =
+                    SampleWorkflowSaveMessageText(
+                        language,
+                        draft.save_state);
+                if (!save_message.empty()) {
+                    RenderDisabledText(save_message);
+                }
+                render_recovery_actions(
+                    draft,
+                    key,
+                    retained,
+                    duplicate_task_id);
+                ImGui::EndGroup();
+                ImGui::Separator();
+                ImGui::PopID();
+            }
+            finish_recovery_layout(ImGui::GetCursorScreenPos());
+            return;
+        }
+        if (ImGui::BeginTable(
+                "temporary_draft_recovery",
+                6,
+                ImGuiTableFlags_BordersInnerV |
+                    ImGuiTableFlags_RowBg |
+                    ImGuiTableFlags_Resizable |
+                    ImGuiTableFlags_SizingStretchProp |
+                    ImGuiTableFlags_NoHostExtendX)) {
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftTaskColumn)
+                    .data());
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftIdentityColumn)
+                    .data());
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftStatusColumn)
+                    .data());
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftProgressColumn)
+                    .data());
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftSaveColumn)
+                    .data());
+            ImGui::TableSetupColumn(
+                UiText(
+                    language,
+                    UiTextId::TemporaryDraftActionsColumn)
+                    .data(),
+                ImGuiTableColumnFlags_WidthFixed,
+                400.0f);
+            ImGui::TableHeadersRow();
+
+            for (std::size_t draft_index = 0;
+                 draft_index < labeling_view.recovery_drafts.size();
+                 ++draft_index) {
+                const SourceCollectionLabelingRecoveryDraftView& draft =
+                    labeling_view.recovery_drafts[draft_index];
+                const std::string key = RecoveryDraftRowToken(
+                    labeling_view,
+                    draft_index);
+                const std::string row_id =
+                    key + "#row";
+                const bool retained =
+                    retained_recovery_drafts_.contains(key);
+                const bool duplicate_task_id =
+                    recovery_task_id_is_ambiguous(draft.task_id);
+                ImGui::PushID(row_id.c_str());
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                const std::string task_name =
+                    SampleWorkflowTemporaryDraftTaskName(
+                        language,
+                        draft.task_name);
+                RenderText(task_name);
+                ImGui::TableSetColumnIndex(1);
+                render_recovery_task_identity(
+                    draft.task_id,
+                    key);
+                ImGui::TableSetColumnIndex(2);
+                RenderText(
+                    UiText(
+                        language,
+                        TemporaryDraftStatusTextId(draft.status)));
+                ImGui::TableSetColumnIndex(3);
+                const std::string progress = FormatUiText(
+                    language,
+                    UiTextId::LabelingProgress,
+                    static_cast<unsigned long long>(draft.labeled_count),
+                    static_cast<unsigned long long>(draft.sample_count));
+                RenderText(progress);
+                ImGui::TableSetColumnIndex(4);
+                RenderText(
+                    SampleWorkflowSaveStateText(
+                        language,
+                        draft.save_state));
+                const std::string save_message =
+                    SampleWorkflowSaveMessageText(
+                        language,
+                        draft.save_state);
+                if (!save_message.empty()) {
+                    RenderDisabledText(save_message);
+                }
+                ImGui::TableSetColumnIndex(5);
+                render_recovery_actions(
+                    draft,
+                    key,
+                    retained,
+                    duplicate_task_id);
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        finish_recovery_layout(ImGui::GetCursorScreenPos());
+    };
+    const auto clear_pending_delete = [this]() {
+        pending_delete_task_name_.clear();
+        pending_delete_task_is_temporary_ = false;
+        pending_delete_task_is_recovery_ = false;
+        pending_delete_task_source_identity_.clear();
+        pending_delete_task_id_.clear();
+    };
+    const auto render_delete_task_popup = [&]() {
+        if (!ImGui::BeginPopupModal(
+                delete_labeling_task_popup.c_str(),
+                nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize)) {
+            return false;
+        }
+
+        const std::string pending_delete_task_display_name =
+            pending_delete_task_is_recovery_
+            ? SampleWorkflowTemporaryDraftTaskName(
+                  language,
+                  pending_delete_task_name_)
+            : LabelingTaskDisplayName(
+                  language,
+                  pending_delete_task_is_temporary_,
+                  pending_delete_task_name_);
+        const std::string delete_task_message =
+            FormatUiText(
+                language,
+                UiTextId::DeleteLocalTaskMessage,
+                pending_delete_task_display_name.c_str());
+        ImGui::TextWrapped(
+            "%s",
+            delete_task_message.c_str());
+        if (pending_delete_task_is_recovery_) {
+            RenderDisabledText(
+                FormatUiText(
+                    language,
+                    UiTextId::TemporaryDraftTaskIdentity,
+                    pending_delete_task_id_.c_str()));
+            RenderDisabledText(
+                FormatUiText(
+                    language,
+                    UiTextId::TemporaryDraftSourceIdentity,
+                    pending_delete_task_source_identity_.c_str()));
+        }
+        const std::string delete_task_label =
+            StableUiLabel(
+                language,
+                UiTextId::DeleteTask,
+                "SpecForgeConfirmDeleteLabelingTask");
+        if (ImGui::Button(
+                delete_task_label.c_str())) {
+            const bool deleting_recovery_draft =
+                pending_delete_task_is_recovery_;
+            const SourceCollectionLabelingView& latest_labeling =
+                interaction.View().labeling;
+            if (!deleting_recovery_draft &&
+                (!latest_labeling.has_active_source ||
+                 !latest_labeling.has_active_task ||
+                 latest_labeling.source_identity !=
+                     pending_delete_task_source_identity_ ||
+                 latest_labeling.task_id != pending_delete_task_id_)) {
+                labeling_operation_text_id_ =
+                    UiTextId::LabelingDeleteTargetChanged;
+                labeling_operation_message_ =
+                    UiText(
+                        language,
+                        UiTextId::LabelingDeleteTargetChanged);
+                clear_pending_delete();
+                ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+                return true;
+            }
+
+            const bool had_active_task =
+                latest_labeling.has_active_source &&
+                latest_labeling.has_active_task;
+            const std::string active_source_before =
+                had_active_task ? latest_labeling.source_identity : std::string{};
+            const std::string active_task_before =
+                had_active_task ? latest_labeling.task_id : std::string{};
+            SourceCollectionSessionResult delete_result;
+            if (deleting_recovery_draft) {
+                delete_result = capture_delete_result(
+                    submit(
+                        ChangeActiveSampleWorkflow(
+                            ActiveSampleWorkflowIntent::
+                                DeleteTemporaryLabelingTask(
+                                    pending_delete_task_source_identity_,
+                                    pending_delete_task_id_))));
+            } else {
+                delete_result = capture_delete_result(
+                    submit(
+                        ChangeActiveSampleWorkflow(
+                            ActiveSampleWorkflowIntent::
+                                DeleteActiveLabelingTask())));
+            }
+            const SourceCollectionLabelingView& after_delete_labeling =
+                interaction.View().labeling;
+            const bool active_identity_changed =
+                had_active_task !=
+                    (after_delete_labeling.has_active_source &&
+                     after_delete_labeling.has_active_task) ||
+                (had_active_task &&
+                 (after_delete_labeling.source_identity != active_source_before ||
+                  after_delete_labeling.task_id != active_task_before));
+            if ((!deleting_recovery_draft &&
+                 (delete_result.action.workflow_changed ||
+                  active_identity_changed)) ||
+                (deleting_recovery_draft && active_identity_changed)) {
+                editing_label_code_.reset();
+                ResetLabelShortcutCapture();
+            }
+            clear_pending_delete();
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return true;
+        }
+        const ImRect delete_confirmation_rect = GImGui->LastItemData.Rect;
+        labeling_delete_confirmation_rect_ = {
+            delete_confirmation_rect.Min.x,
+            delete_confirmation_rect.Min.y,
+            delete_confirmation_rect.Max.x,
+            delete_confirmation_rect.Max.y};
+        ImGui::SameLine();
+        const std::string cancel_delete_task_label =
+            StableUiLabel(
+                language,
+                UiTextId::Cancel,
+                "SpecForgeCancelDeleteLabelingTask");
+        if (ImGui::Button(
+                cancel_delete_task_label.c_str())) {
+            clear_pending_delete();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+        return true;
+    };
+    const auto render_labeling_operation_message = [&]() {
+        const std::string_view labeling_operation_message =
+            labeling_operation_text_id_
+            ? UiText(language, *labeling_operation_text_id_)
+            : std::string_view(labeling_operation_message_);
+        if (!labeling_operation_message.empty()) {
+            ImGui::TextWrapped(
+                "%s",
+                std::string(labeling_operation_message).c_str());
+        }
+    };
+    const auto render_labeling_state_diagnostics = [&]() {
+        if (labeling_view.state_save_failed) {
+            RenderDisabledText(
+                FormatUiText(
+                    language,
+                    UiTextId::LocalTaskRecord,
+                    labeling_view.state_save_error.c_str()));
+        }
+        if (!labeling_view.state_load_warning.empty()) {
+            RenderDisabledText(
+                FormatUiText(
+                    language,
+                    UiTextId::LocalTaskRecord,
+                    labeling_view.state_load_warning.c_str()));
+        }
+    };
     if (!labeling_view.has_active_source || !current_index) {
         editing_label_code_.reset();
         ResetLabelShortcutCapture();
+        render_labeling_operation_message();
+        render_labeling_state_diagnostics();
         RenderDisabledText(
             UiText(
                 language,
@@ -1138,35 +1929,89 @@ void SampleWorkflowPanelUi::RenderLabeling(
         selector_preview.c_str());
     const ImRect selector_rect = GImGui->LastItemData.Rect;
     const ImGuiID selector_id = GImGui->LastItemData.ID;
+    labeling_selector_rect_ = {
+        selector_rect.Min.x,
+        selector_rect.Min.y,
+        selector_rect.Max.x,
+        selector_rect.Max.y};
     if (selector_open) {
         const bool temporary_selected =
             labeling_view.has_active_task && labeling_view.active_task_is_temporary;
+        const bool has_recovery_drafts =
+            !labeling_view.recovery_drafts.empty();
+        const bool ambiguous_recovery_identity = std::any_of(
+            labeling_view.recovery_drafts.begin(),
+            labeling_view.recovery_drafts.end(),
+            [&recovery_task_id_is_ambiguous](
+                const SourceCollectionLabelingRecoveryDraftView& draft) {
+                return recovery_task_id_is_ambiguous(draft.task_id);
+            });
         const UiTextId temporary_action_text_id =
-            !labeling_view.has_temporary_task
+            (!labeling_view.has_temporary_task && !has_recovery_drafts)
             ? UiTextId::NewLabelingTask
             : temporary_selected
             ? UiTextId::TemporaryLabelingDraft
             : UiTextId::ResumeLabelingDraft;
-        const std::string temporary_action =
-            StableUiLabel(
-                language,
-                temporary_action_text_id,
-                "SpecForgeTemporaryLabelingTaskAction");
-        const bool temporary_action_disabled = task_switch_locked && !temporary_selected;
-        if (temporary_action_disabled) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Selectable(
-                temporary_action.c_str(),
-                temporary_selected) &&
-            !temporary_selected) {
-            (void)submit(
-                ChangeActiveSampleWorkflow(
-                    ActiveSampleWorkflowIntent::
-                        StartOrResumeTemporaryLabelingTask()));
-        }
-        if (temporary_action_disabled) {
-            ImGui::EndDisabled();
+        const bool show_generic_temporary_action =
+            (!labeling_view.has_temporary_task && !has_recovery_drafts) ||
+            temporary_selected ||
+            labeling_view.recovery_drafts.size() <= 1;
+        if (show_generic_temporary_action) {
+            const std::string temporary_action =
+                StableUiLabel(
+                    language,
+                    temporary_action_text_id,
+                    "SpecForgeTemporaryLabelingTaskAction");
+            const bool temporary_action_disabled =
+                (task_switch_locked && !temporary_selected) ||
+                ambiguous_recovery_identity;
+            if (temporary_action_disabled) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Selectable(
+                    temporary_action.c_str(),
+                    temporary_selected) &&
+                !temporary_selected &&
+                !temporary_action_disabled) {
+                if (has_recovery_drafts) {
+                    (void)submit(
+                        ChangeActiveSampleWorkflow(
+                            ActiveSampleWorkflowIntent::
+                                RecoverTemporaryLabelingTask(
+                                    labeling_view.source_identity,
+                                    labeling_view.recovery_drafts.front().task_id)));
+                } else {
+                    (void)submit(
+                        ChangeActiveSampleWorkflow(
+                            ActiveSampleWorkflowIntent::
+                                StartOrResumeTemporaryLabelingTask()));
+                }
+            }
+            const ImVec2 temporary_action_min = ImGui::GetItemRectMin();
+            const ImVec2 temporary_action_max = ImGui::GetItemRectMax();
+            temporary_labeling_action_rect_ = {
+                temporary_action_min.x,
+                temporary_action_min.y,
+                temporary_action_max.x,
+                temporary_action_max.y};
+            if (temporary_action_disabled) {
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(
+                        ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    const std::string_view tooltip =
+                        ambiguous_recovery_identity
+                        ? UiText(
+                              language,
+                              UiTextId::TemporaryDraftDuplicateIdentity)
+                        : UiText(
+                              language,
+                              UiTextId::OutputAutosaveCloseBlocked);
+                    ImGui::SetTooltip(
+                        "%.*s",
+                        static_cast<int>(tooltip.size()),
+                        tooltip.data());
+                }
+            }
         }
 
         bool separated_annotations = false;
@@ -1200,16 +2045,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
         }
         ImGui::EndCombo();
     }
-    const std::string_view labeling_operation_message =
-        labeling_operation_text_id_
-        ? UiText(language, *labeling_operation_text_id_)
-        : std::string_view(labeling_operation_message_);
-    if (!labeling_operation_message.empty()) {
-        ImGui::TextWrapped(
-            "%s",
-            std::string(labeling_operation_message).c_str());
-    }
-
     bool labeling_drop_accepted = false;
     const SourceCollectionAnnotationValueView* dropped_annotation = nullptr;
     if (ImGui::BeginDragDropTargetCustom(selector_rect, selector_id)) {
@@ -1258,6 +2093,12 @@ void SampleWorkflowPanelUi::RenderLabeling(
             ImGui::End();
             return;
         }
+        const ImRect pause_rect = GImGui->LastItemData.Rect;
+        labeling_pause_rect_ = {
+            pause_rect.Min.x,
+            pause_rect.Min.y,
+            pause_rect.Max.x,
+            pause_rect.Max.y};
         if (!labeling_view.can_deactivate_task) {
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1279,9 +2120,19 @@ void SampleWorkflowPanelUi::RenderLabeling(
             pending_delete_task_name_ = labeling_view.task_name;
             pending_delete_task_is_temporary_ =
                 labeling_view.active_task_is_temporary;
+            pending_delete_task_is_recovery_ = false;
+            pending_delete_task_source_identity_ =
+                labeling_view.source_identity;
+            pending_delete_task_id_ = labeling_view.task_id;
             ImGui::OpenPopup(
                 delete_labeling_task_popup.c_str());
         }
+        const ImRect delete_rect = GImGui->LastItemData.Rect;
+        labeling_delete_rect_ = {
+            delete_rect.Min.x,
+            delete_rect.Min.y,
+            delete_rect.Max.x,
+            delete_rect.Max.y};
         if (!labeling_view.can_delete_task) {
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1295,6 +2146,28 @@ void SampleWorkflowPanelUi::RenderLabeling(
             }
         }
     }
+
+    render_recovery_drafts();
+    if (open_delete_task_popup) {
+        ImGui::OpenPopup(
+            delete_labeling_task_popup.c_str());
+    }
+    const bool delete_task_popup_visible = render_delete_task_popup();
+    if (open_delete_task_popup || delete_task_popup_visible ||
+        !pending_delete_task_id_.empty()) {
+        route_latest_labeling_shortcuts(false);
+        ImGui::End();
+        return;
+    }
+    if (recovery_action_submitted &&
+        interaction.PendingAction().workflow_changed) {
+        editing_label_code_.reset();
+        ResetLabelShortcutCapture();
+        route_latest_labeling_shortcuts(false);
+        ImGui::End();
+        return;
+    }
+    render_labeling_operation_message();
 
     if (ImGui::BeginPopupModal(
             annotation_to_labeling_popup.c_str(),
@@ -1363,58 +2236,6 @@ void SampleWorkflowPanelUi::RenderLabeling(
         ImGui::EndPopup();
     }
 
-    if (ImGui::BeginPopupModal(
-            delete_labeling_task_popup.c_str(),
-            nullptr,
-            ImGuiWindowFlags_AlwaysAutoResize)) {
-        const std::string pending_delete_task_display_name =
-            LabelingTaskDisplayName(
-                language,
-                pending_delete_task_is_temporary_,
-                pending_delete_task_name_);
-        const std::string delete_task_message =
-            FormatUiText(
-                language,
-                UiTextId::DeleteLocalTaskMessage,
-                pending_delete_task_display_name.c_str());
-        ImGui::TextWrapped(
-            "%s",
-            delete_task_message.c_str());
-        const std::string delete_task_label =
-            StableUiLabel(
-                language,
-                UiTextId::DeleteTask,
-                "SpecForgeConfirmDeleteLabelingTask");
-        if (ImGui::Button(
-                delete_task_label.c_str())) {
-            (void)submit(
-                ChangeActiveSampleWorkflow(
-                    ActiveSampleWorkflowIntent::
-                        DeleteActiveLabelingTask()));
-            pending_delete_task_name_.clear();
-            pending_delete_task_is_temporary_ = false;
-            editing_label_code_.reset();
-            ResetLabelShortcutCapture();
-            ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-            route_latest_labeling_shortcuts(false);
-            ImGui::End();
-            return;
-        }
-        ImGui::SameLine();
-        const std::string cancel_delete_task_label =
-            StableUiLabel(
-                language,
-                UiTextId::Cancel,
-                "SpecForgeCancelDeleteLabelingTask");
-        if (ImGui::Button(
-                cancel_delete_task_label.c_str())) {
-            pending_delete_task_name_.clear();
-            pending_delete_task_is_temporary_ = false;
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
     if (interaction.PendingAction().workflow_changed) {
         editing_label_code_.reset();
         ResetLabelShortcutCapture();
@@ -1425,6 +2246,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     if (!labeling_view.has_active_task) {
         editing_label_code_.reset();
         ResetLabelShortcutCapture();
+        render_labeling_state_diagnostics();
         route_latest_labeling_shortcuts(false);
         ImGui::End();
         return;
@@ -1493,27 +2315,13 @@ void SampleWorkflowPanelUi::RenderLabeling(
         }
     }
 
-    const std::string_view save_state =
-        SaveStateLabel(
+    const std::string save_status =
+        SampleWorkflowSaveStateText(
             language,
-            labeling_view.save_state.kind);
-    const std::string save_state_text(save_state);
-    std::string save_status =
-        FormatUiText(
-            language,
-            UiTextId::SaveStatus,
-            save_state_text.c_str());
-    if (labeling_view.save_state.kind == SampleLabelSaveStateKind::Pending ||
-        labeling_view.save_state.kind == SampleLabelSaveStateKind::Failed) {
-        save_status +=
-            " (" +
-            std::to_string(
-                labeling_view.save_state.pending_count) +
-            ")";
-    }
+            labeling_view.save_state);
     RenderText(save_status);
     const std::string save_message =
-        SampleLabelSaveMessageText(
+        SampleWorkflowSaveMessageText(
             language,
             labeling_view.save_state);
     if (!save_message.empty()) {
@@ -1524,20 +2332,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
             language,
             labeling_view);
     RenderDisabledText(save_state_reminder);
-    if (labeling_view.state_save_failed) {
-        RenderDisabledText(
-            FormatUiText(
-                language,
-                UiTextId::LocalTaskRecord,
-                labeling_view.state_save_error.c_str()));
-    }
-    if (!labeling_view.state_load_warning.empty()) {
-        RenderDisabledText(
-            FormatUiText(
-                language,
-                UiTextId::LocalTaskRecord,
-                labeling_view.state_load_warning.c_str()));
-    }
+    render_labeling_state_diagnostics();
     if (labeling_view.output_path) {
         const std::string path = UserPathDisplayText(*labeling_view.output_path);
         ImGui::TextDisabled("%s", path.c_str());

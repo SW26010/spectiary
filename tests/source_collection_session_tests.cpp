@@ -720,6 +720,26 @@ specforge::SourceCollectionSessionIntent StartOrResumeTemporaryLabelingTask()
         specforge::ActiveSampleWorkflowIntent::StartOrResumeTemporaryLabelingTask());
 }
 
+specforge::SourceCollectionSessionIntent RecoverTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
+            std::move(source_identity),
+            std::move(task_id)));
+}
+
+specforge::SourceCollectionSessionIntent DeleteTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
+        specforge::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
+            std::move(source_identity),
+            std::move(task_id)));
+}
+
 specforge::SourceCollectionSessionIntent ActivateLabelingTaskFromAnnotation(std::filesystem::path annotation_path)
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
@@ -2201,6 +2221,305 @@ void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
     Require(session.View().labeling.current_code == 3, "resumed task should keep its draft values");
 }
 
+void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_recovery_restart.npy");
+    TouchFile(source_path);
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath("_recovery_restart_sources.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_recovery_restart_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_recovery_restart_labeling.json");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    const auto make_session = [&]() {
+        return MakePersistentSession(
+            loaded_snapshots,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            {{source_path, 3}});
+    };
+
+    std::string source_identity;
+    std::string task_id;
+    {
+        PreparedSession seed = make_session();
+        Require(
+            seed.Open(source_path, 0).loaded,
+            "restart recovery fixture should open the source");
+        (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
+        Require(
+            seed.View().labeling.has_active_task,
+            "restart recovery fixture should create a temporary draft");
+        source_identity = seed.View().labeling.source_identity;
+        task_id = seed.View().labeling.task_id;
+        (void)Submit(
+            seed,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    3,
+                    "review",
+                    'r'}));
+        (void)Submit(seed, AssignActiveLabelToCurrentSample(3));
+        Require(
+            seed.View().labeling.current_code == 3,
+            "restart recovery fixture should save a draft value");
+        Require(
+            Submit(seed, DeactivateActiveLabelingTask()).action.workflow_changed,
+            "restart recovery fixture should pause the draft");
+        Require(
+            seed.FlushStateCaches(),
+            "restart recovery fixture should flush its source and draft state");
+    }
+
+    {
+        PreparedSession restarted = make_session();
+        const specforge::SourceCollectionLabelingView& recovery_view =
+            restarted.View().labeling;
+        Require(
+            recovery_view.source_identity == source_identity &&
+                recovery_view.recovery_drafts.size() == 1 &&
+                recovery_view.recovery_drafts[0].task_id == task_id &&
+                recovery_view.recovery_drafts[0].status ==
+                    specforge::SampleLabelingRecoveryDraftStatus::Recoverable &&
+                recovery_view.recovery_drafts[0].labeled_count == 1,
+            "restart should expose the paused draft with its source/task identity and recoverable status");
+
+        const specforge::SourceCollectionSessionResult recovered = Submit(
+            restarted,
+            RecoverTemporaryLabelingTask(source_identity, task_id));
+        Require(
+            recovered.action.workflow_changed &&
+                restarted.View().labeling.has_active_task &&
+                restarted.View().labeling.task_id == task_id &&
+                restarted.View().labeling.current_code == 3,
+            "restart should recover the original draft values before deletion");
+        Require(
+            Submit(restarted, DeactivateActiveLabelingTask()).action.workflow_changed &&
+                restarted.FlushStateCaches(),
+            "the original recovered draft fixture should be paused before the replacement fixture");
+    }
+
+    {
+        PreparedSession restarted = make_session();
+        const specforge::SourceCollectionSessionResult deleted = Submit(
+            restarted,
+            DeleteTemporaryLabelingTask(source_identity, task_id));
+        Require(
+            !deleted.action.workflow_changed &&
+                deleted.view_invalidated &&
+                restarted.View().labeling.recovery_drafts.empty(),
+            "the recovery delete intent should refresh only the paused draft projection");
+
+        (void)Submit(restarted, StartOrResumeTemporaryLabelingTask());
+        Require(
+            restarted.View().labeling.has_active_task &&
+                restarted.View().labeling.task_id == task_id &&
+                Submit(restarted, DeactivateActiveLabelingTask()).action.workflow_changed,
+            "restart recovery fixture should create and pause a replacement draft with the stable ID");
+        const specforge::SourceCollectionSessionResult recovered = Submit(
+            restarted,
+            RecoverTemporaryLabelingTask(source_identity, task_id));
+        Require(
+            recovered.action.workflow_changed &&
+                restarted.View().labeling.has_active_task &&
+                restarted.View().labeling.task_id == task_id &&
+                restarted.View().labeling.current_code ==
+                    specforge::kUnlabeledSampleLabelCode,
+            "the replacement recovery fixture should activate an empty same-ID draft");
+    }
+}
+
+void TestTemporaryDraftRecoveryViewReportsLeaseConflict()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_recovery_conflict.npy");
+    TouchFile(source_path);
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_recovery_conflict_labeling.json");
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    {
+        PreparedSession seed = MakePersistentSession(
+            loaded_snapshots,
+            {},
+            UniqueTempPath("_recovery_conflict_seed_navigation.json"),
+            labeling_cache,
+            {{source_path, 3}});
+        Require(
+            seed.Open(source_path, 0).loaded,
+            "conflict recovery fixture should open the source");
+        (void)Submit(seed, StartOrResumeTemporaryLabelingTask());
+        Require(
+            seed.View().labeling.has_active_task &&
+                Submit(seed, DeactivateActiveLabelingTask()).action.workflow_changed &&
+                seed.FlushStateCaches(),
+            "conflict recovery fixture should persist a paused draft");
+    }
+
+    PreparedSession first = MakePersistentSession(
+        loaded_snapshots,
+        {},
+        UniqueTempPath("_recovery_conflict_first_navigation.json"),
+        labeling_cache,
+        {{source_path, 3}});
+    PreparedSession second = MakePersistentSession(
+        loaded_snapshots,
+        {},
+        UniqueTempPath("_recovery_conflict_second_navigation.json"),
+        labeling_cache,
+        {{source_path, 3}});
+    Require(
+        first.Open(source_path, 0).loaded &&
+            second.Open(source_path, 0).loaded,
+        "conflict recovery instances should open the same source");
+    const std::string source_identity =
+        second.View().labeling.source_identity;
+    const std::string task_id =
+        second.View().labeling.recovery_drafts.front().task_id;
+    Require(
+        Submit(first, RecoverTemporaryLabelingTask(source_identity, task_id)).action.workflow_changed,
+        "the first recovery instance should acquire the draft lease");
+
+    const specforge::SourceCollectionSessionResult conflict = Submit(
+        second,
+        RecoverTemporaryLabelingTask(source_identity, task_id));
+    Require(
+        conflict.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable &&
+            !second.View().labeling.has_active_task &&
+            second.View().labeling.recovery_drafts.size() == 1 &&
+            second.View().labeling.recovery_drafts[0].status ==
+                specforge::SampleLabelingRecoveryDraftStatus::Conflicting,
+        "a recovery attempt held by another instance should expose a conflicting draft and an error issue");
+}
+
+void TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts()
+{
+    const std::filesystem::path source_path = UniqueTempPath("_recovery_stale.npy");
+    TouchFile(source_path);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_recovery_stale_labeling.json");
+
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = 3;
+    source_state.tasks = {
+        specforge::CreateSampleLabelingTask(
+            "stale-draft",
+            "Recovered draft A",
+            3),
+        specforge::CreateSampleLabelingTask(
+            "stale-draft",
+            "Recovered draft B",
+            3)};
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(identity.id, std::move(source_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(labeling_cache, cache),
+        "stale recovery fixture should write its damaged cache");
+    const specforge::SampleLabelingStateCacheLoadResult salvaged =
+        specforge::LoadSampleLabelingStateCache(labeling_cache);
+    Require(
+        salvaged.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::
+                    InvalidDocument &&
+            salvaged.cache.sources.at(identity.id).tasks.size() == 2,
+        "stale recovery fixture should preserve duplicate drafts in an untrusted snapshot");
+
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    PreparedSession session = MakePersistentSession(
+        loaded_snapshots,
+        {},
+        UniqueTempPath("_recovery_stale_navigation.json"),
+        labeling_cache,
+        {{source_path, 3}});
+    Require(
+        session.Open(source_path, 0).loaded,
+        "stale recovery fixture should open the source");
+    const specforge::SourceCollectionLabelingView& recovery_view =
+        session.View().labeling;
+    Require(
+        recovery_view.source_identity == identity.id &&
+            recovery_view.recovery_drafts.size() == 2 &&
+            std::all_of(
+                recovery_view.recovery_drafts.begin(),
+                recovery_view.recovery_drafts.end(),
+                [](const auto& draft) {
+                    return draft.status ==
+                        specforge::SampleLabelingRecoveryDraftStatus::Stale;
+                }) &&
+            !recovery_view.state_load_warning.empty(),
+        "untrusted salvaged drafts should remain visible as stale recovery rows");
+}
+
+void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
+    TouchFile(source_path);
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_recovery_formal_task_identity_conflict_labeling.json");
+
+    specforge::SampleLabelingTask formal_task =
+        specforge::CreateSampleLabelingTask(
+            "shared-task-id",
+            "Formal task",
+            3);
+    formal_task.output_path =
+        UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = 3;
+    source_state.tasks = {
+        std::move(formal_task),
+        specforge::CreateSampleLabelingTask(
+            "shared-task-id",
+            "Temporary draft",
+            3)};
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(identity.id, std::move(source_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(labeling_cache, cache),
+        "formal/temp identity conflict fixture should write its damaged cache");
+    const specforge::SampleLabelingStateCacheLoadResult salvaged =
+        specforge::LoadSampleLabelingStateCache(labeling_cache);
+    Require(
+        salvaged.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::
+                    InvalidDocument &&
+            salvaged.cache.sources.at(identity.id).tasks.size() == 2,
+        "formal/temp identity conflict fixture should preserve both tasks");
+
+    std::vector<LoadedSourceSnapshot> loaded_snapshots;
+    PreparedSession session = MakePersistentSession(
+        loaded_snapshots,
+        {},
+        UniqueTempPath("_recovery_formal_task_identity_conflict_navigation.json"),
+        labeling_cache,
+        {{source_path, 3}});
+    Require(
+        session.Open(source_path, 0).loaded,
+        "formal/temp identity conflict fixture should open the source");
+    const specforge::SourceCollectionLabelingView& view =
+        session.View().labeling;
+    const std::size_t shared_id_count = static_cast<std::size_t>(std::count(
+        view.task_ids.begin(),
+        view.task_ids.end(),
+        std::string{"shared-task-id"}));
+    Require(
+        view.recovery_drafts.size() == 1 &&
+            view.recovery_drafts.front().task_id == "shared-task-id" &&
+            shared_id_count == 2,
+        "formal/temp identity conflict should project one recovery row and both task IDs");
+}
+
 void TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -2321,6 +2640,39 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
         !session.View().labeling.active_task_is_temporary && session.View().labeling.output_path == output_path,
         "selecting a labeling annotation should safely switch away from the active draft");
     Require(session.View().labeling.has_temporary_task, "switching annotations should retain the paused draft");
+
+    (void)Submit(session, ClearActiveLabelForCurrentSample());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{11, "formal-review", 'f'}))
+            .changed,
+        "formal task should accept a label before deleting an unrelated paused draft");
+    const specforge::SourceCollectionSessionResult formal_assignment =
+        Submit(session, AssignActiveLabelToCurrentSample(11));
+    Require(
+        formal_assignment.label_write &&
+            formal_assignment.label_write->write.changed,
+        "formal task should record a label before deleting an unrelated paused draft");
+    const specforge::SourceCollectionSessionResult deleted_paused_draft =
+        Submit(
+            session,
+            DeleteTemporaryLabelingTask(
+                session.View().labeling.source_identity,
+                fresh_temporary_task_id));
+    Require(
+        !deleted_paused_draft.action.workflow_changed &&
+            deleted_paused_draft.view_invalidated &&
+            session.View().labeling.has_active_task &&
+            !session.View().labeling.active_task_is_temporary,
+        "deleting a paused draft should refresh recovery projection without resetting the unrelated formal task");
+    (void)Submit(session, UndoLastLabelWrite());
+    Require(
+        session.View().labeling.current_code ==
+            specforge::kUnlabeledSampleLabelCode,
+        "deleting an unrelated paused draft must preserve the formal task undo history");
+
     result = Submit(session, StartOrResumeTemporaryLabelingTask());
     Require(
         session.View().labeling.active_task_is_temporary &&
@@ -6654,6 +7006,320 @@ void WriteLatestLabelingProjection(
         "projection handoff editor should release the latest task");
 }
 
+struct TemporaryDraftNavigationRefreshFixture {
+    std::filesystem::path source_path;
+    std::filesystem::path formal_output_path;
+    std::filesystem::path draft_output_path;
+    std::filesystem::path navigation_cache;
+    std::filesystem::path labeling_cache;
+    std::filesystem::path workflow_cache;
+    specforge::SourceCollectionContext context;
+    std::string draft_task_id;
+};
+
+TemporaryDraftNavigationRefreshFixture
+SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
+{
+    TemporaryDraftNavigationRefreshFixture fixture;
+    fixture.source_path = UniqueTempPath(std::string(suffix) + "_source.npy");
+    fixture.formal_output_path = UniqueTempPath(std::string(suffix) + "_formal.npy");
+    fixture.draft_output_path = UniqueTempPath(std::string(suffix) + "_draft.npy");
+    fixture.navigation_cache = UniqueTempPath(std::string(suffix) + "_navigation.json");
+    fixture.labeling_cache = UniqueTempPath(std::string(suffix) + "_labeling.json");
+    fixture.workflow_cache = UniqueTempPath(std::string(suffix) + "_workflow.json");
+    TouchFile(fixture.source_path);
+    fixture.context.identity = {
+        std::string(suffix) + "-identity",
+        "source",
+        "source-fingerprint",
+        "context-fingerprint",
+        3,
+    };
+    fixture.context.manifest.sample_names = {
+        "alpha",
+        "beta",
+        "gamma",
+    };
+
+    {
+        specforge::SampleLabelingController seed(fixture.labeling_cache);
+        seed.ActivateSource(fixture.context.identity);
+        Require(
+            seed.CreateTask("formal-task", "Formal task").accepted &&
+                seed.UpsertActiveLabel(
+                       specforge::SampleLabelDefinition{1, "one", 'o'})
+                    .changed,
+            "navigation refresh fixture should create the unrelated formal task");
+        Require(
+            seed.AssignLabel(0, 1).write.changed &&
+                seed.SaveActiveTemporaryTaskToOutput(
+                       fixture.formal_output_path,
+                       "Formal task")
+                    .output_saved &&
+                seed.DeactivateActiveTask().state_saved,
+            "navigation refresh fixture should persist the active formal task");
+
+        Require(
+            seed.StartOrResumeTemporaryTask().accepted,
+            "navigation refresh fixture should create the paused draft");
+        Require(
+            seed.View().active_task != nullptr,
+            "navigation refresh fixture should expose the draft task");
+        fixture.draft_task_id = seed.View().active_task->task_id;
+        Require(
+            seed.UpsertActiveLabel(
+                       specforge::SampleLabelDefinition{1, "one", 'o'})
+                    .changed &&
+                seed.UpsertActiveLabel(
+                       specforge::SampleLabelDefinition{2, "two", 't'})
+                    .changed &&
+                seed.AssignLabel(0, 1).write.changed &&
+                seed.AssignLabel(1, 2).write.changed &&
+                seed.AssignLabel(2, 1).write.changed &&
+                seed.SaveActiveTemporaryTaskToOutput(
+                       fixture.draft_output_path,
+                       "Formalized draft")
+                    .output_saved &&
+                seed.DeactivateActiveTask().state_saved &&
+                seed.ActivateTask("formal-task").accepted,
+            "navigation refresh fixture should persist and select the formal task");
+    }
+
+    std::string annotation_error;
+    Require(
+        IngestReadOnlySampleAnnotation(
+            fixture.context.manifest,
+            fixture.draft_output_path,
+            fixture.context.identity.spectrum_count,
+            &annotation_error),
+        annotation_error.empty()
+            ? "navigation refresh fixture should load the draft annotation"
+            : annotation_error);
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(fixture.source_path, 3, 0);
+    {
+        specforge::SourceCollectionSession configured(
+            {},
+            fixture.navigation_cache,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+        const specforge::PreparedSampleWorkflowState prepared =
+            PrepareWorkflow(
+                snapshot,
+                fixture.context,
+                0,
+                fixture.labeling_cache,
+                fixture.workflow_cache);
+        Require(
+            configured.OpenPreparedSource(
+                    fixture.source_path,
+                    0,
+                    snapshot,
+                    fixture.context,
+                    prepared)
+                .loaded,
+            "navigation refresh fixture should open the formalized projection");
+
+        const std::string filter_source_id =
+            "labeling:" + fixture.draft_task_id;
+        Require(
+            Submit(configured, AddSampleFilterSource(filter_source_id))
+                .action.workflow_changed,
+            "navigation refresh fixture should add the draft filter source");
+        Require(
+            Submit(
+                configured,
+                SetFilterValueSelected(filter_source_id, "2", true))
+                .action.navigation_inputs_changed &&
+                configured.View().filter.evaluation.included_count == 1,
+            "navigation refresh fixture should select one draft filter value");
+        Require(
+            Submit(configured, SetSampleSortSource("sample-name"))
+                .action.navigation_inputs_changed &&
+                configured.View().sorting.active,
+            "navigation refresh fixture should activate sample-name sorting");
+        Require(
+            configured.FlushStateCaches(),
+            "navigation refresh fixture should persist its workflow caches");
+    }
+
+    specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(fixture.labeling_cache);
+    auto source = cache.cache.sources.find(fixture.context.identity.id);
+    Require(
+        source != cache.cache.sources.end(),
+        "navigation refresh fixture should reload its source state");
+    auto draft = std::find_if(
+        source->second.tasks.begin(),
+        source->second.tasks.end(),
+        [&fixture](const specforge::SampleLabelingTask& task) {
+            return task.task_id == fixture.draft_task_id;
+        });
+    Require(
+        draft != source->second.tasks.end() && draft->output_path,
+        "navigation refresh fixture should find its formalized draft");
+    draft->output_path.reset();
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            fixture.labeling_cache,
+            cache.cache),
+        "navigation refresh fixture should restore the draft-only projection");
+
+    std::error_code metadata_error;
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(
+            fixture.draft_output_path),
+        metadata_error);
+    Require(
+        !metadata_error,
+        "navigation refresh fixture should remove the formal metadata sidecar");
+    Require(
+        fixture.context.manifest.annotations.size() == 1,
+        "navigation refresh fixture should retain one plain annotation");
+    fixture.context.manifest.annotations.front().label_metadata.reset();
+    fixture.context.manifest.annotations.front().relationship =
+        specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    return fixture;
+}
+
+void FormalizeTemporaryDraftFromAnotherInstance(
+    const TemporaryDraftNavigationRefreshFixture& fixture)
+{
+    specforge::SampleLabelingController formalizer(fixture.labeling_cache);
+    formalizer.ActivateSource(fixture.context.identity);
+    Require(
+        formalizer.ActivateTask(fixture.draft_task_id).accepted &&
+            formalizer
+                .SaveActiveTemporaryTaskToOutput(
+                    fixture.draft_output_path,
+                    "Formalized draft")
+                .output_saved &&
+            formalizer.DeactivateActiveTask().state_saved,
+        "the external instance should formalize the recovery draft");
+}
+
+void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
+    bool delete_temporary_draft)
+{
+    const TemporaryDraftNavigationRefreshFixture fixture =
+        SeedTemporaryDraftNavigationRefreshFixture(
+            delete_temporary_draft
+                ? "_coordinator_delete_formalized_draft"
+                : "_coordinator_recover_formalized_draft");
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(fixture.source_path, 3, 0);
+    specforge::SampleWorkflowCoordinator coordinator(
+        fixture.navigation_cache,
+        fixture.labeling_cache,
+        fixture.workflow_cache);
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(
+            snapshot,
+            fixture.context,
+            0,
+            fixture.labeling_cache,
+            fixture.workflow_cache);
+    Require(
+        coordinator
+                .SyncPreparedActiveSource(
+                    std::string{"source"},
+                    snapshot,
+                    fixture.context,
+                    std::move(prepared))
+                .action.workflow_changed,
+        "coordinator recovery fixture should open the paused-draft projection");
+    const specforge::SourceCollectionFilterView initial_filter =
+        coordinator.BuildFilterView(snapshot);
+    const specforge::SourceCollectionSampleSortingView initial_sorting =
+        coordinator.BuildSortingView(snapshot);
+    Require(
+        coordinator.LabelingView(snapshot).has_active_task &&
+            coordinator.LabelingView(snapshot).task_id == "formal-task" &&
+            !coordinator.LabelingView(snapshot).active_task_is_temporary,
+        "the unrelated formal task should remain active");
+    (void)initial_filter;
+    (void)initial_sorting;
+    Require(
+        coordinator.NavigationView(snapshot).current_index.has_value(),
+        "the paused-draft projection should retain a current sample for active editing");
+    const int active_code_before_edit =
+        coordinator.LabelingView(snapshot).current_code;
+    Require(
+        coordinator
+                .Apply(
+                    specforge::ActiveSampleWorkflowIntent::UpsertActiveLabel(
+                        specforge::SampleLabelDefinition{7, "seven", 's'}),
+                    snapshot)
+                .changed,
+        "the active formal task should accept the undo test label");
+    const specforge::SampleWorkflowTransitionOutcome edit_result =
+        coordinator.Apply(
+            specforge::ActiveSampleWorkflowIntent::AssignActiveLabelToCurrentSample(7),
+            snapshot);
+    Require(
+        edit_result.label_write && edit_result.label_write->write.changed,
+        "the active formal task should have undoable local editing");
+
+    FormalizeTemporaryDraftFromAnotherInstance(fixture);
+    const specforge::SampleWorkflowTransitionOutcome result =
+        coordinator.Apply(
+            delete_temporary_draft
+                ? specforge::ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
+                      fixture.context.identity.id,
+                      fixture.draft_task_id)
+                : specforge::ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
+                      fixture.context.identity.id,
+                      fixture.draft_task_id),
+            snapshot);
+    Require(
+        result.labeling_issue ==
+            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged,
+        "external formalization should reject the stale recovery command");
+    Require(
+        result.action.navigation_inputs_changed &&
+            !result.action.workflow_changed,
+        "task projection convergence should reconcile filter, sort, and navigation inputs");
+
+    const specforge::SourceCollectionFilterView refreshed_filter =
+        coordinator.BuildFilterView(snapshot);
+    const specforge::SourceCollectionSampleSortingView refreshed_sorting =
+        coordinator.BuildSortingView(snapshot);
+    const specforge::SourceCollectionNavigationView refreshed_navigation =
+        coordinator.NavigationView(snapshot);
+    Require(
+        refreshed_filter.evaluation.included_count == 1,
+        "task projection convergence should publish the latest filter values");
+    Require(
+        refreshed_sorting.active,
+        "task projection convergence should retain the selected sorting input");
+    Require(
+        refreshed_navigation.sequence_count == 1,
+        "task projection convergence should publish the final sequence count");
+    Require(
+        result.snapshot_index_to_load == 1,
+        "task projection convergence should request the filtered sample row");
+    const specforge::SampleWorkflowTransitionOutcome undone =
+        coordinator.Apply(
+            specforge::ActiveSampleWorkflowIntent::UndoLastLabelWrite(),
+            snapshot);
+    Require(
+        undone.label_write && undone.label_write->write.changed &&
+            coordinator.LabelingView(snapshot).current_code ==
+                active_code_before_edit,
+        "recovering or deleting an unrelated draft must preserve active-task undo history");
+}
+
+void TestRecoveringFormalizedTemporaryDraftReconcilesNavigation()
+{
+    AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(false);
+}
+
+void TestDeletingFormalizedTemporaryDraftReconcilesNavigation()
+{
+    AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(true);
+}
+
 void TestPreparedLeaseHandoffRebuildsLatestLabelingProjections()
 {
     const LabelingProjectionHandoffFixture fixture =
@@ -6906,6 +7572,10 @@ void RunAllTests()
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
     TestTemporaryLabelingTaskUsesDefaultNameAndResumes();
+    TestTemporaryDraftRecoveryViewRestoresAfterRestart();
+    TestTemporaryDraftRecoveryViewReportsLeaseConflict();
+    TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts();
+    TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict();
     TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel();
     TestDiscardingTemporaryLabelingTaskAllowsFreshStart();
     TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask();
@@ -6964,6 +7634,8 @@ void RunAllTests()
     TestPreparedLeaseHandoffRebuildsLatestLabelingProjections();
     TestRejectedStaleTaskActivationReconcilesNavigation();
     TestOutputRetryRefreshReconcilesActiveLabelingProjections();
+    TestRecoveringFormalizedTemporaryDraftReconcilesNavigation();
+    TestDeletingFormalizedTemporaryDraftReconcilesNavigation();
 }
 
 int main()

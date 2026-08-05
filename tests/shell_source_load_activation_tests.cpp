@@ -63,6 +63,33 @@ struct ShellUiTestAccess {
         return shell.SubmitSessionCommand(std::move(intent));
     }
 
+    static SourceCollectionSessionResult SubmitThroughPanel(
+        ShellUi& shell,
+        SourceCollectionSessionIntent intent)
+    {
+        PanelSessionInteraction::Update update =
+            shell.panel_session_interaction_.Submit(
+                std::move(intent));
+        return std::move(update.result);
+    }
+
+    static SourceCollectionSessionAction TakePanelAction(ShellUi& shell)
+    {
+        return shell.panel_session_interaction_.TakeAction();
+    }
+
+    static void SetLabelEditingState(ShellUi& shell)
+    {
+        shell.sample_workflow_panel_ui_.editing_label_code_ = 8;
+        shell.sample_workflow_panel_ui_.label_shortcut_capture_active_ = true;
+    }
+
+    [[nodiscard]] static bool HasLabelEditingState(const ShellUi& shell)
+    {
+        return shell.sample_workflow_panel_ui_.editing_label_code_.has_value() &&
+               shell.sample_workflow_panel_ui_.label_shortcut_capture_active_;
+    }
+
     static SourceCollectionSessionResult SubmitNavigation(
         ShellUi& shell,
         SourceCollectionSessionIntent intent,
@@ -493,7 +520,9 @@ specforge::SourceCollectionSession MakePreparedDeferredSession(
 void OpenPreparedFixtureSource(
     specforge::SourceCollectionSession& session,
     const std::filesystem::path& path,
-    std::size_t spectrum_index = 0)
+    std::size_t spectrum_index = 0,
+    std::optional<std::filesystem::path> annotation_path = std::nullopt,
+    specforge::SampleWorkflowPreparationPaths preparation_paths = {})
 {
     const specforge::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(path, spectrum_index);
@@ -502,12 +531,26 @@ void OpenPreparedFixtureSource(
         *snapshot,
         specforge::CaptureSourceCollectionSingleFileState(path));
     context.manifest.sample_names = {"alpha", "beta", "gamma"};
+    if (annotation_path) {
+        std::string annotation_error;
+        std::optional<specforge::SampleAnnotationResult> annotation =
+            specforge::SampleAnnotationIoAdapter{}.Load(
+                *annotation_path,
+                context.identity.spectrum_count,
+                &annotation_error);
+        Require(
+            annotation.has_value(),
+            annotation_error.empty()
+                ? "fixture annotation should load"
+                : annotation_error);
+        context.manifest.annotations.push_back(std::move(*annotation));
+    }
     specforge::PreparedSampleWorkflowState workflow =
         specforge::PrepareSampleWorkflowState(
             *snapshot,
             context,
             spectrum_index,
-            {{}, {}});
+            preparation_paths);
     Require(
         session.OpenPreparedSource(
                    path,
@@ -5740,6 +5783,313 @@ void TestShellWorkflowResetPreservesSameFrameLabelingIssue()
         "same-frame Shell workflow reset must not erase the labeling issue captured by the submitting panel");
 }
 
+void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_shell_recovery_projection.npy");
+    const std::filesystem::path formal_output_path =
+        UniqueTempPath("_shell_recovery_projection_labels.npy");
+    const SourceSessionCachePaths cache_paths{
+        .source_session = UniqueTempPath("_shell_recovery_projection_sources.json"),
+        .navigation = UniqueTempPath("_shell_recovery_projection_navigation.json"),
+        .labeling = UniqueTempPath("_shell_recovery_projection_labeling.json"),
+        .workflow = UniqueTempPath("_shell_recovery_projection_workflow.json")};
+    std::error_code cleanup_error;
+    for (const std::filesystem::path& path : {
+             source_path,
+             formal_output_path,
+             specforge::SampleAnnotationIoAdapter::
+                 MetadataPathForResult(formal_output_path),
+             cache_paths.source_session,
+             cache_paths.navigation,
+             cache_paths.labeling,
+             cache_paths.workflow,
+             std::filesystem::path(cache_paths.labeling.string() + ".locks")}) {
+        std::filesystem::remove_all(path, cleanup_error);
+    }
+    WriteFixture(source_path);
+    specforge::SampleLabelingTask annotation_seed =
+        specforge::CreateSampleLabelingTask(
+            "temporary-labeling-task",
+            "Formal task",
+            3);
+    annotation_seed.label_set.labels.push_back(
+        specforge::SampleLabelDefinition{
+            8,
+            "Review",
+            'r'});
+    const specforge::SampleLabelResultWriteOutcome annotation_write =
+        specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
+            formal_output_path,
+            annotation_seed);
+    Require(
+        annotation_write.array_saved && annotation_write.metadata_saved,
+        "Shell recovery fixture should seed a formal annotation file");
+
+    const auto change_workflow = [](
+                                      specforge::ActiveSampleWorkflowIntent intent) {
+        return specforge::SourceCollectionSessionIntent::
+            ChangeActiveSampleWorkflow(std::move(intent));
+    };
+    std::string source_identity;
+    std::string draft_task_id;
+    {
+        specforge::SourceCollectionSession editor =
+            MakeCachedSession(cache_paths);
+        OpenPreparedFixtureSource(
+            editor,
+            source_path,
+            0,
+            formal_output_path,
+            specforge::SampleWorkflowPreparationPaths{
+                .labeling_state_cache_path = cache_paths.labeling,
+                .workflow_state_cache_path = cache_paths.workflow,
+                .navigation_state_cache_path = cache_paths.navigation});
+        Require(
+            editor.FlushStateCaches(),
+            "Shell recovery fixture should seed its persistent cache before task output save");
+        (void)editor.Submit(
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    StartOrResumeTemporaryLabelingTask()));
+        Require(
+            editor.View().labeling.has_active_task &&
+                editor.View().labeling.active_task_is_temporary,
+            "Shell recovery fixture should create its formal precursor draft");
+        source_identity = editor.View().labeling.source_identity;
+        (void)editor.Submit(
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    SetActiveLabelingOutputPath(
+                        formal_output_path)));
+        Require(
+            !editor.View().labeling.active_task_is_temporary,
+            "Shell recovery fixture should formalize the precursor task");
+        Require(
+            editor.Submit(
+                       change_workflow(
+                           specforge::ActiveSampleWorkflowIntent::
+                               UpsertActiveLabel(
+                                   specforge::SampleLabelDefinition{
+                                       8,
+                                       "Review",
+                                       'r'})))
+                .changed,
+            "Shell recovery fixture should seed a formal label");
+        Require(
+            editor.Submit(
+                       change_workflow(
+                           specforge::ActiveSampleWorkflowIntent::
+                               AssignActiveLabelToCurrentSample(8)))
+                .label_write
+                .has_value(),
+            "Shell recovery fixture should seed formal undo history");
+        (void)editor.Submit(
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    StartOrResumeTemporaryLabelingTask()));
+        Require(
+            editor.View().labeling.active_task_is_temporary,
+            "Shell recovery fixture should create a paused-draft companion");
+        draft_task_id = editor.View().labeling.task_id;
+        (void)editor.Submit(
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    ActivateLabelingTaskFromAnnotation(
+                        formal_output_path)));
+        Require(
+            !editor.View().labeling.active_task_is_temporary &&
+                editor.View().labeling.task_id != draft_task_id,
+            "Shell recovery fixture should restore the formal task while retaining the draft");
+        Require(
+            editor.FlushStateCaches(),
+            "Shell recovery fixture should persist its formal task and paused draft");
+    }
+
+    std::unique_ptr<specforge::ShellUi> shell;
+    {
+        specforge::SourceCollectionSession session =
+            MakeCachedSession(cache_paths);
+        OpenPreparedFixtureSource(
+            session,
+            source_path,
+            0,
+            formal_output_path,
+            specforge::SampleWorkflowPreparationPaths{
+                .labeling_state_cache_path = cache_paths.labeling,
+                .workflow_state_cache_path = cache_paths.workflow,
+                .navigation_state_cache_path = cache_paths.navigation});
+        shell = specforge::ShellUiTestAccess::Create(
+            std::move(session),
+            specforge::MakeSourceCollectionLoadQueueForTesting());
+    }
+    const auto& shell_initial_view =
+        specforge::ShellUiTestAccess::Session(*shell).View();
+    Require(
+        shell_initial_view.labeling.has_active_task &&
+            !shell_initial_view.labeling.active_task_is_temporary,
+        "Shell recovery fixture should restore the formal active task");
+
+    (void)specforge::ShellUiTestAccess::Submit(
+        *shell,
+        change_workflow(
+            specforge::ActiveSampleWorkflowIntent::
+                ClearActiveLabelForCurrentSample()));
+    const specforge::SourceCollectionSessionResult shell_assignment =
+        specforge::ShellUiTestAccess::Submit(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    AssignActiveLabelToCurrentSample(8)));
+    Require(
+        shell_assignment.label_write &&
+            shell_assignment.label_write->write.changed &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8,
+        "Shell recovery fixture should seed undo history on the restored formal task");
+
+    const std::string active_task_id_before_delete =
+        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const specforge::SourceCollectionSessionResult deleted =
+        specforge::ShellUiTestAccess::SubmitThroughPanel(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    DeleteTemporaryLabelingTask(
+                        source_identity,
+                        draft_task_id)));
+    const specforge::SourceCollectionSessionAction delete_action =
+        specforge::ShellUiTestAccess::TakePanelAction(*shell);
+    specforge::ShellUiTestAccess::HandleSessionAction(
+        *shell,
+        delete_action);
+    const std::string active_task_id_after_delete =
+        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+    Require(
+        deleted.changed &&
+            deleted.view_invalidated &&
+            !delete_action.workflow_changed &&
+            specforge::ShellUiTestAccess::HasLabelEditingState(*shell) &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.has_active_task &&
+            !specforge::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
+            active_task_id_after_delete == active_task_id_before_delete &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code == 8 &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
+        "Shell delete of an unrelated draft should refresh only recovery projection and preserve editing state");
+
+    const specforge::SourceCollectionSessionResult undone =
+        specforge::ShellUiTestAccess::Submit(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    UndoLastLabelWrite()));
+    Require(
+        undone.label_write &&
+            undone.label_write->write.changed &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.current_code ==
+                specforge::kUnlabeledSampleLabelCode,
+        "Shell delete of an unrelated draft should preserve formal undo history");
+
+    const specforge::SourceCollectionSessionResult replacement_started =
+        specforge::ShellUiTestAccess::Submit(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    StartOrResumeTemporaryLabelingTask()));
+    const auto& replacement_view =
+        specforge::ShellUiTestAccess::Session(*shell).View().labeling;
+    Require(
+        replacement_started.view_invalidated &&
+            replacement_view.has_active_task &&
+            replacement_view.active_task_is_temporary &&
+            replacement_view.task_id != active_task_id_before_delete,
+        "Shell recovery fixture should recreate a replacement draft");
+    const std::string replacement_task_id =
+        specforge::ShellUiTestAccess::Session(*shell).View().labeling.task_id;
+    const specforge::SourceCollectionSessionResult paused_replacement =
+        specforge::ShellUiTestAccess::Submit(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    ActivateLabelingTaskFromAnnotation(
+                        formal_output_path)));
+    Require(
+        paused_replacement.view_invalidated &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.has_temporary_task &&
+            !specforge::ShellUiTestAccess::Session(*shell).View().labeling.active_task_is_temporary &&
+            specforge::ShellUiTestAccess::Session(*shell).FlushStateCaches(),
+        "Shell recovery fixture should pause the replacement draft beside the formal task");
+
+    specforge::SampleLabelingController holder(cache_paths.labeling);
+    holder.ActivateSource(source_identity, 3);
+    Require(
+        holder.ActivateTask(replacement_task_id).accepted,
+        "Shell recovery fixture should hold the replacement draft lease externally");
+
+    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const specforge::SourceCollectionSessionResult rejected_delete =
+        specforge::ShellUiTestAccess::SubmitThroughPanel(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    DeleteTemporaryLabelingTask(
+                        source_identity,
+                        replacement_task_id)));
+    const specforge::SourceCollectionSessionAction rejected_delete_action =
+        specforge::ShellUiTestAccess::TakePanelAction(*shell);
+    specforge::ShellUiTestAccess::HandleSessionAction(
+        *shell,
+        rejected_delete_action);
+    Require(
+        rejected_delete.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable &&
+            !rejected_delete_action.workflow_changed &&
+            specforge::ShellUiTestAccess::HasLabelEditingState(*shell),
+        "Shell should preserve editing state when an unrelated draft delete is lease-rejected");
+
+    Require(
+        holder.DeleteActiveTask().accepted,
+        "Shell recovery fixture should delete the externally held replacement draft");
+    specforge::ShellUiTestAccess::SetLabelEditingState(*shell);
+    const specforge::SourceCollectionSessionResult reconciled_recovery =
+        specforge::ShellUiTestAccess::SubmitThroughPanel(
+            *shell,
+            change_workflow(
+                specforge::ActiveSampleWorkflowIntent::
+                    RecoverTemporaryLabelingTask(
+                        source_identity,
+                        replacement_task_id)));
+    const specforge::SourceCollectionSessionAction recovery_action =
+        specforge::ShellUiTestAccess::TakePanelAction(*shell);
+    specforge::ShellUiTestAccess::HandleSessionAction(
+        *shell,
+        recovery_action);
+    Require(
+        reconciled_recovery.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            reconciled_recovery.view_invalidated &&
+            !recovery_action.workflow_changed &&
+            specforge::ShellUiTestAccess::HasLabelEditingState(*shell) &&
+            specforge::ShellUiTestAccess::Session(*shell).View().labeling.recovery_drafts.empty(),
+        "Shell recovery projection convergence should not reset an unchanged formal workflow");
+
+    shell.reset();
+    for (const std::filesystem::path& path : {
+             source_path,
+             formal_output_path,
+             specforge::SampleAnnotationIoAdapter::
+                 MetadataPathForResult(formal_output_path),
+             cache_paths.source_session,
+             cache_paths.navigation,
+             cache_paths.labeling,
+             cache_paths.workflow,
+             std::filesystem::path(cache_paths.labeling.string() + ".locks")}) {
+        std::filesystem::remove_all(path, cleanup_error);
+    }
+}
+
 }  // namespace
 
 int main()
@@ -5776,6 +6126,7 @@ int main()
         TestAutomationPanelProjectionRequiresExactNormalShellPresent();
         TestMaintenanceResynchronizesRetainedNavigationTopology();
         TestShellWorkflowResetPreservesSameFrameLabelingIssue();
+        TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState();
         TestShellFlushResultNamesEveryFailedOwner();
         TestRealShellFlushAndHealthKeepIndependentSettingsOwners();
         return 0;

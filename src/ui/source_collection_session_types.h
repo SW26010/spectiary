@@ -6,6 +6,7 @@
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/background_retirement.h"
+#include "ui/sample_labeling_controller.h"
 #include "ui/sample_navigation_sequence.h"
 
 #include <cstddef>
@@ -112,8 +113,19 @@ struct SourceCollectionNavigationView {
     std::vector<SourceCollectionAnnotationValueView> current_annotations;
 };
 
+struct SourceCollectionLabelingRecoveryDraftView {
+    std::string task_id;
+    std::string task_name;
+    SampleLabelingRecoveryDraftStatus status =
+        SampleLabelingRecoveryDraftStatus::Stale;
+    std::size_t labeled_count = 0;
+    std::size_t sample_count = 0;
+    SampleLabelSaveState save_state;
+};
+
 struct SourceCollectionLabelingView {
     bool has_active_source = false;
+    std::string source_identity;
     std::optional<std::size_t> current_index;
     bool has_active_task = false;
     bool has_temporary_task = false;
@@ -137,6 +149,9 @@ struct SourceCollectionLabelingView {
     bool state_save_failed = false;
     std::string state_save_error;
     std::string state_load_warning;
+    std::uint64_t recovery_revision = 0;
+    std::vector<SourceCollectionLabelingRecoveryDraftView>
+        recovery_drafts;
 
     [[nodiscard]] bool HasConflictingLabelCode(int original_code, int requested_code) const
     {

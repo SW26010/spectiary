@@ -1,9 +1,13 @@
 #include "ui/sample_workflow_panel.h"
+#include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_workflow_shortcut.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -11,8 +15,30 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace specforge {
+
+struct SourceCollectionPanelUiTestAccess {
+    [[nodiscard]] static ActiveSampleWorkflowIntentKind
+    ActiveWorkflowKind(const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.kind;
+    }
+
+    [[nodiscard]] static std::string_view
+    ActiveWorkflowSourceIdentity(const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.source_identity;
+    }
+
+    [[nodiscard]] static std::string_view
+    ActiveWorkflowTaskId(const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.task_id;
+    }
+};
 
 struct SampleWorkflowPanelUiTestAccess {
     [[nodiscard]] static std::string_view
@@ -30,6 +56,150 @@ struct SampleWorkflowPanelUiTestAccess {
         panel.CaptureLabelingOperationResult(
             result,
             language);
+    }
+
+    [[nodiscard]] static bool IsRecoveryDraftRetained(
+        const SampleWorkflowPanelUi& panel,
+        std::string_view source_identity,
+        std::string_view task_id)
+    {
+        std::string key;
+        key.reserve(source_identity.size() + task_id.size() + 2);
+        key.append(source_identity);
+        key.push_back('\n');
+        key.append(task_id);
+        key.push_back('\n');
+        return std::any_of(
+            panel.retained_recovery_drafts_.begin(),
+            panel.retained_recovery_drafts_.end(),
+            [&key](const std::string& retained_key) {
+                return retained_key.compare(
+                           0,
+                           key.size(),
+                           key) == 0;
+            });
+    }
+
+    [[nodiscard]] static std::string RecoveryDraftRowToken(
+        const SourceCollectionSessionView& view,
+        std::size_t draft_index)
+    {
+        return SampleWorkflowPanelUi::RecoveryDraftRowToken(
+            view.labeling,
+            draft_index);
+    }
+
+    [[nodiscard]] static bool IsRecoveryDraftRetainedAt(
+        const SampleWorkflowPanelUi& panel,
+        const SourceCollectionSessionView& view,
+        std::size_t draft_index)
+    {
+        return panel.retained_recovery_drafts_.contains(
+            RecoveryDraftRowToken(view, draft_index));
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingSelectorRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_selector_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingPauseRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_pause_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingDeleteRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_delete_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingRecoveryRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_recovery_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    TemporaryLabelingActionRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.temporary_labeling_action_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingDeleteConfirmationRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_delete_confirmation_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    RecoveryActionRect(
+        const SampleWorkflowPanelUi& panel,
+        const SourceCollectionSessionView& view,
+        std::size_t draft_index,
+        std::string_view stable_id)
+    {
+        std::string key = RecoveryDraftRowToken(
+            view,
+            draft_index);
+        key.push_back('\n');
+        key.append(stable_id);
+        const auto found = panel.recovery_action_rects_.find(key);
+        if (found == panel.recovery_action_rects_.end()) {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    RecoveryIdentityRect(
+        const SampleWorkflowPanelUi& panel,
+        const SourceCollectionSessionView& view,
+        std::size_t draft_index)
+    {
+        const std::string key = RecoveryDraftRowToken(
+            view,
+            draft_index);
+        const auto found = panel.recovery_identity_rects_.find(key);
+        if (found == panel.recovery_identity_rects_.end()) {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+    static void SetEditingLabelCode(
+        SampleWorkflowPanelUi& panel,
+        std::optional<int> code)
+    {
+        panel.editing_label_code_ = code;
+    }
+
+    static void SetShortcutCaptureActive(
+        SampleWorkflowPanelUi& panel,
+        bool active)
+    {
+        panel.label_shortcut_capture_active_ = active;
+    }
+
+    static void SetActiveTaskId(
+        SampleWorkflowPanelUi& panel,
+        std::string task_id)
+    {
+        panel.active_task_id_ = std::move(task_id);
+    }
+
+    [[nodiscard]] static bool IsEditingLabelCode(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.editing_label_code_.has_value();
+    }
+
+    [[nodiscard]] static bool IsShortcutCaptureActive(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.label_shortcut_capture_active_;
     }
 };
 
@@ -313,6 +483,10 @@ struct LabelingTaskSwitchFrameObservation {
     specforge::SampleWorkflowShortcut shortcut;
     int submission_count = 0;
     std::string operation_message;
+    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+        submitted_workflow_kind;
+    std::string submitted_source_identity;
+    std::string submitted_task_id;
     bool popup_open = false;
     bool selector_hovered = false;
     bool temporary_action_hovered = false;
@@ -320,13 +494,230 @@ struct LabelingTaskSwitchFrameObservation {
     ImVec2 popup_content_start;
 };
 
+struct RecoveryFrameObservation {
+    int submission_count = 0;
+    bool popup_open = false;
+    ImGuiID hovered_id = 0;
+    ImGuiID popup_confirm_id = 0;
+    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+        submitted_workflow_kind;
+    std::string submitted_source_identity;
+    std::string submitted_task_id;
+    std::string logged_text;
+    float cursor_max_y = 0.0f;
+};
+
+specforge::SourceCollectionSessionView MakeRecoveryPanelView()
+{
+    specforge::SourceCollectionSessionView view;
+    view.labeling.has_active_source = true;
+    view.labeling.source_identity = "source/recovery";
+    view.labeling.current_index = 0;
+    view.labeling.sample_count = 5;
+    view.labeling.has_temporary_task = true;
+    view.labeling.recovery_drafts.push_back(
+        {
+            .task_id = "draft-1",
+            .task_name = "Recovered draft",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Recoverable,
+            .labeled_count = 2,
+            .sample_count = 5,
+        });
+    return view;
+}
+
+specforge::SourceCollectionSessionView MakeActiveTemporaryRecoveryPanelView()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    view.labeling.has_active_task = true;
+    view.labeling.active_task_is_temporary = true;
+    view.labeling.task_id =
+        view.labeling.recovery_drafts.front().task_id;
+    view.labeling.task_name =
+        view.labeling.recovery_drafts.front().task_name;
+    view.labeling.can_deactivate_task = true;
+    view.labeling.can_delete_task = true;
+    view.labeling.recovery_drafts.front().status =
+        specforge::SampleLabelingRecoveryDraftStatus::Current;
+    return view;
+}
+
+specforge::SourceCollectionSessionView MakeFormalTaskWithRecoveryDraftView()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    view.labeling.has_active_task = true;
+    view.labeling.active_task_is_temporary = false;
+    view.labeling.task_id = "formal-task";
+    view.labeling.task_name = "Formal task";
+    view.labeling.can_deactivate_task = true;
+    view.labeling.can_delete_task = true;
+    return view;
+}
+
+specforge::SourceCollectionSessionView
+MakeFormalTaskWithAmbiguousRecoveryDraftView()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeFormalTaskWithRecoveryDraftView();
+    constexpr std::string_view shared_task_id = "shared-task";
+    view.labeling.task_id = std::string(shared_task_id);
+    view.labeling.task_ids = {
+        std::string(shared_task_id),
+        std::string(shared_task_id)};
+    view.labeling.has_temporary_task = true;
+    view.labeling.recovery_drafts.front().task_id =
+        std::string(shared_task_id);
+    return view;
+}
+
+specforge::SourceCollectionSessionView MakeDuplicateRecoveryPanelView()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    view.labeling.recovery_drafts = {
+        {
+            .task_id = "duplicate-draft",
+            .task_name = "Recovered draft A",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .labeled_count = 1,
+            .sample_count = 5,
+        },
+        {
+            .task_id = "duplicate-draft",
+            .task_name = "Recovered draft B",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .labeled_count = 4,
+            .sample_count = 5,
+        },
+    };
+    return view;
+}
+
+specforge::SourceCollectionSessionView MakeFailedRecoveryPanelView()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    auto& save_state =
+        view.labeling.recovery_drafts.front().save_state;
+    save_state.kind = specforge::SampleLabelSaveStateKind::Failed;
+    save_state.pending_count = 1;
+    save_state.message_kind =
+        specforge::SampleLabelSaveMessageKind::SystemDetail;
+    save_state.message = "Save to failed for the paused draft";
+    return view;
+}
+
+RecoveryFrameObservation RenderRecoveryFrame(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& frame_view,
+    specforge::SourceCollectionSessionView& latest_view,
+    bool request_initial_focus,
+    specforge::UiLanguage language = specforge::UiLanguage::English,
+    ImVec2 window_size = ImVec2(900.0f, 500.0f),
+    specforge::SampleLabelingOperationResult::Issue submitted_issue =
+        specforge::SampleLabelingOperationResult::Issue::None,
+    bool capture_text = false,
+    const specforge::SourceCollectionSessionView* submitted_view = nullptr);
+
+RecoveryFrameObservation RenderRecoveryFrame(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& frame_view,
+    specforge::SourceCollectionSessionView& latest_view,
+    bool request_initial_focus,
+    specforge::UiLanguage language,
+    ImVec2 window_size,
+    specforge::SampleLabelingOperationResult::Issue submitted_issue,
+    bool capture_text,
+    const specforge::SourceCollectionSessionView* submitted_view)
+{
+    BeginFrame();
+    if (request_initial_focus) {
+        ImGui::SetNextWindowFocus();
+    }
+    ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f));
+    ImGui::SetNextWindowSize(window_size);
+    bool open = true;
+    RecoveryFrameObservation observation;
+    if (capture_text) {
+        ImGui::LogToBuffer();
+    }
+    int view_reads = 0;
+    specforge::PanelSessionInteraction interaction(
+        [&](specforge::SourceCollectionSessionIntent intent,
+            std::optional<specforge::NavigationLatencyInputKind>) {
+            ++observation.submission_count;
+            if (intent.intent_kind() ==
+                specforge::SourceCollectionSessionIntentKind::
+                    ActiveSampleWorkflow) {
+                observation.submitted_workflow_kind =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowKind(intent);
+                observation.submitted_source_identity =
+                    std::string(
+                        specforge::SourceCollectionPanelUiTestAccess::
+                            ActiveWorkflowSourceIdentity(intent));
+                observation.submitted_task_id =
+                    std::string(
+                        specforge::SourceCollectionPanelUiTestAccess::
+                            ActiveWorkflowTaskId(intent));
+            }
+            latest_view = submitted_view != nullptr
+                ? *submitted_view
+                : frame_view;
+            specforge::SourceCollectionSessionResult result;
+            result.changed = submitted_issue ==
+                specforge::SampleLabelingOperationResult::Issue::None;
+            result.action.workflow_changed = result.changed;
+            result.labeling_issue = submitted_issue;
+            return result;
+        },
+        [&]() -> const specforge::SourceCollectionSessionView& {
+            return view_reads++ == 0 ? frame_view : latest_view;
+        });
+    specforge::SampleWorkflowShortcut shortcut;
+    panel.RenderLabeling(
+        interaction,
+        language,
+        &open,
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
+        shortcut);
+    if (capture_text) {
+        observation.logged_text = GImGui->LogBuffer.c_str();
+        ImGui::LogFinish();
+    }
+    observation.popup_open = ImGui::IsPopupOpen(
+        nullptr,
+        ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    observation.hovered_id = GImGui->HoveredId;
+    if (!GImGui->OpenPopupStack.empty()) {
+        if (ImGuiWindow* popup_window =
+                GImGui->OpenPopupStack.back().Window) {
+            observation.popup_confirm_id = popup_window->GetID(
+                "SpecForgeConfirmDeleteLabelingTask");
+        }
+    }
+    if (ImGuiWindow* window = ImGui::FindWindowByName(
+            specforge::SampleWorkflowPanelUi::LabelingWindowName())) {
+        observation.cursor_max_y = window->DC.CursorMaxPos.y;
+    }
+    ImGui::EndFrame();
+    return observation;
+}
+
 LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     specforge::SampleWorkflowPanelUi& panel,
     const specforge::SourceCollectionSessionView& frame_view,
     specforge::SourceCollectionSessionView& latest_view,
     const specforge::SourceCollectionSessionView& activated_view,
     bool request_initial_focus,
-    std::string result_message = {})
+    std::string result_message = {},
+    specforge::SampleLabelingOperationResult::Issue submitted_issue =
+        specforge::SampleLabelingOperationResult::Issue::None,
+    const specforge::SourceCollectionSessionView* rejected_view = nullptr)
 {
     BeginFrame();
     if (request_initial_focus) {
@@ -339,15 +730,34 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     int view_reads = 0;
     specforge::PanelSessionInteraction interaction(
         [&](
-            specforge::SourceCollectionSessionIntent,
+            specforge::SourceCollectionSessionIntent intent,
             std::optional<
                 specforge::NavigationLatencyInputKind>) {
             ++observation.submission_count;
+            if (intent.intent_kind() ==
+                specforge::SourceCollectionSessionIntentKind::
+                    ActiveSampleWorkflow) {
+                observation.submitted_workflow_kind =
+                    specforge::SourceCollectionPanelUiTestAccess::
+                        ActiveWorkflowKind(intent);
+                observation.submitted_source_identity =
+                    std::string(
+                        specforge::SourceCollectionPanelUiTestAccess::
+                            ActiveWorkflowSourceIdentity(intent));
+                observation.submitted_task_id =
+                    std::string(
+                        specforge::SourceCollectionPanelUiTestAccess::
+                            ActiveWorkflowTaskId(intent));
+            }
             specforge::SourceCollectionSessionResult result;
             if (result_message.empty()) {
-                latest_view = activated_view;
-                result.changed = true;
-                result.action.workflow_changed = true;
+                result.labeling_issue = submitted_issue;
+                result.changed = submitted_issue ==
+                    specforge::SampleLabelingOperationResult::Issue::None;
+                result.action.workflow_changed = result.changed;
+                latest_view = result.changed
+                    ? activated_view
+                    : (rejected_view != nullptr ? *rejected_view : frame_view);
             } else {
                 result.message = result_message;
             }
@@ -641,12 +1051,16 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
     LabelingTaskSwitchFrameObservation observation =
         RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, true);
 
-    ImVec2 selector_position;
-    for (float y = 25.0f; y <= 150.0f && !observation.selector_hovered; y += 2.0f) {
-        selector_position = ImVec2(observation.content_start.x + 50.0f, y);
-        ImGui::GetIO().AddMousePosEvent(selector_position.x, selector_position.y);
-        observation = RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
-    }
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "integration fixture should expose a deterministic labeling task selector rectangle");
+    const ImVec2 selector_position(
+        ((*selector_rect)[0] + (*selector_rect)[2]) * 0.5f,
+        ((*selector_rect)[1] + (*selector_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(selector_position.x, selector_position.y);
+    observation = RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
     Require(observation.selector_hovered, "integration fixture should locate the labeling task selector");
     ImGui::GetIO().AddMousePosEvent(selector_position.x, selector_position.y);
     ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
@@ -655,18 +1069,26 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
     observation = RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
     Require(observation.popup_open, "labeling task selector should open for the integration fixture");
 
-    ImVec2 temporary_action_position;
-    const float popup_content_x = observation.popup_content_start.x + 50.0f;
-    const float popup_search_start_y = observation.popup_content_start.y - 20.0f;
-    const float popup_search_end_y = observation.popup_content_start.y + 100.0f;
-    for (float y = popup_search_start_y;
-         y <= popup_search_end_y && !observation.temporary_action_hovered;
-         y += 2.0f) {
-        temporary_action_position = ImVec2(popup_content_x, y);
-        ImGui::GetIO().AddMousePosEvent(temporary_action_position.x, temporary_action_position.y);
-        observation = RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
-    }
-    Require(observation.temporary_action_hovered, "integration fixture should locate the temporary task action");
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false);
+    const auto temporary_action_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+    Require(
+        temporary_action_rect.has_value(),
+        "integration fixture should expose a deterministic temporary task action rectangle");
+    const ImVec2 temporary_action_position(
+        ((*temporary_action_rect)[0] + (*temporary_action_rect)[2]) * 0.5f,
+        ((*temporary_action_rect)[1] + (*temporary_action_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(temporary_action_position.x, temporary_action_position.y);
+    observation = RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
+    Require(
+        observation.temporary_action_hovered,
+        "integration fixture should locate the temporary task action");
     ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
     (void)RenderLabelingTaskSwitchFrame(panel, inactive_view, latest_view, activated_view, false);
     ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
@@ -679,6 +1101,1662 @@ void TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame()
         observation.shortcut.kind == specforge::SampleWorkflowShortcutKind::AssignLabel &&
             observation.shortcut.label_code == 8,
         "the first new shortcut after a task switch should be routed without a settling frame");
+}
+
+void TestLabelingPanelUsesIdentityForSingleDraftResume()
+{
+    const specforge::SourceCollectionSessionView stale_view =
+        MakeRecoveryPanelView();
+    specforge::SourceCollectionSessionView activated_view = stale_view;
+    activated_view.labeling.has_active_task = true;
+    activated_view.labeling.active_task_is_temporary = true;
+    activated_view.labeling.task_id =
+        stale_view.labeling.recovery_drafts.front().task_id;
+    activated_view.labeling.task_name =
+        stale_view.labeling.recovery_drafts.front().task_name;
+
+    const auto submit_single_draft_resume = [
+        &stale_view,
+        &activated_view](
+        const specforge::SourceCollectionSessionView& rejected_view,
+        specforge::SampleLabelingOperationResult::Issue issue) {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = stale_view;
+
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        LabelingTaskSwitchFrameObservation observation =
+            RenderLabelingTaskSwitchFrame(
+                panel,
+                stale_view,
+                latest_view,
+                activated_view,
+                true);
+        const auto selector_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+        Require(
+            selector_rect.has_value(),
+            "single-draft resume fixture should expose a deterministic selector rectangle");
+        const ImVec2 selector_position(
+            ((*selector_rect)[0] + (*selector_rect)[2]) * 0.5f,
+            ((*selector_rect)[1] + (*selector_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            selector_position.x,
+            selector_position.y);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        Require(
+            observation.selector_hovered,
+            "single-draft resume fixture should locate the task selector");
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        Require(
+            observation.popup_open,
+            "single-draft resume fixture should open the task selector");
+
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        const auto temporary_action_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+        Require(
+            temporary_action_rect.has_value(),
+            "single-draft resume fixture should expose a deterministic generic action rectangle");
+        const ImVec2 resume_position(
+            ((*temporary_action_rect)[0] + (*temporary_action_rect)[2]) * 0.5f,
+            ((*temporary_action_rect)[1] + (*temporary_action_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            resume_position.x,
+            resume_position.y);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        Require(
+            observation.temporary_action_hovered,
+            "single-draft resume fixture should locate its generic action");
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        observation = RenderLabelingTaskSwitchFrame(
+            panel,
+            stale_view,
+            latest_view,
+            activated_view,
+            false,
+            std::string{},
+            issue,
+            &rejected_view);
+        return observation;
+    };
+
+    specforge::SourceCollectionSessionView missing_view = stale_view;
+    missing_view.labeling.has_temporary_task = false;
+    missing_view.labeling.recovery_drafts.clear();
+    const LabelingTaskSwitchFrameObservation missing =
+        submit_single_draft_resume(
+            missing_view,
+            specforge::SampleLabelingOperationResult::Issue::
+                EditTargetChanged);
+    Require(
+        missing.submission_count == 1 &&
+            missing.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RecoverTemporaryLabelingTask &&
+            missing.submitted_source_identity ==
+                stale_view.labeling.source_identity &&
+            missing.submitted_task_id ==
+                stale_view.labeling.recovery_drafts.front().task_id,
+        "a missing single draft must submit identity-checked recovery");
+
+    specforge::SourceCollectionSessionView formalized_view =
+        MakeLabelingPanelView(8, 'g');
+    formalized_view.labeling.source_identity =
+        stale_view.labeling.source_identity;
+    formalized_view.labeling.task_id = "formalized-task";
+    formalized_view.labeling.task_name = "Formalized task";
+    const LabelingTaskSwitchFrameObservation formalized =
+        submit_single_draft_resume(
+            formalized_view,
+            specforge::SampleLabelingOperationResult::Issue::
+                EditTargetChanged);
+    Require(
+        formalized.submission_count == 1 &&
+            formalized.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    RecoverTemporaryLabelingTask &&
+            formalized.submitted_source_identity ==
+                stale_view.labeling.source_identity &&
+            formalized.submitted_task_id ==
+                stale_view.labeling.recovery_drafts.front().task_id,
+        "a formalized single draft must submit identity-checked recovery");
+}
+
+void TestLabelingPanelRoutesTemporaryDraftRecoveryActions()
+{
+    const specforge::SourceCollectionSessionView recovery_view =
+        MakeRecoveryPanelView();
+    const ImVec2 compact_window_size(650.0f, 700.0f);
+
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        const auto recover_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                recovery_view,
+                0,
+                "SpecForgeRecoverTemporaryDraft");
+        const auto keep_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                recovery_view,
+                0,
+                "SpecForgeKeepTemporaryDraft");
+        const auto delete_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                recovery_view,
+                0,
+                "SpecForgeDeleteTemporaryDraft");
+        Require(
+            recover_rect.has_value() && keep_rect.has_value() && delete_rect.has_value(),
+            "the recovery list should expose deterministic Recover, Keep, and Delete rectangles");
+        const ImVec2 recover_position(
+            ((*recover_rect)[0] + (*recover_rect)[2]) * 0.5f,
+            ((*recover_rect)[1] + (*recover_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            recover_position.x,
+            recover_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        const RecoveryFrameObservation observation =
+            RenderRecoveryFrame(
+                panel,
+                recovery_view,
+                latest_view,
+                false,
+                specforge::UiLanguage::English,
+                compact_window_size);
+        Require(
+            observation.submission_count == 1 &&
+                observation.submitted_workflow_kind ==
+                    specforge::ActiveSampleWorkflowIntentKind::
+                        RecoverTemporaryLabelingTask &&
+                observation.submitted_source_identity ==
+                    recovery_view.labeling.source_identity &&
+                observation.submitted_task_id ==
+                    recovery_view.labeling.recovery_drafts.front().task_id,
+            "Recover should submit the exact source and task identity");
+    }
+
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        const auto keep_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                recovery_view,
+                0,
+                "SpecForgeKeepTemporaryDraft");
+        Require(
+            keep_rect.has_value(),
+            "the recovery list should expose a deterministic Keep rectangle");
+        const ImVec2 keep_position(
+            ((*keep_rect)[0] + (*keep_rect)[2]) * 0.5f,
+            ((*keep_rect)[1] + (*keep_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            keep_position.x,
+            keep_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        const RecoveryFrameObservation observation =
+            RenderRecoveryFrame(
+                panel,
+                recovery_view,
+                latest_view,
+                false,
+                specforge::UiLanguage::English,
+                compact_window_size);
+        Require(
+            observation.submission_count == 0 &&
+                specforge::SampleWorkflowPanelUiTestAccess::
+                    IsRecoveryDraftRetained(
+                        panel,
+                        recovery_view.labeling.source_identity,
+                        recovery_view.labeling.recovery_drafts.front().task_id),
+            "Keep draft should acknowledge the recovery row locally without a workflow mutation");
+        specforge::SourceCollectionSessionView other_source_view =
+            recovery_view;
+        other_source_view.labeling.source_identity = "source/other";
+        (void)RenderRecoveryFrame(
+            panel,
+            other_source_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "switching sources must not clear a session-local Keep acknowledgement");
+        panel.ResetForSampleWorkflow();
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "resetting workflow presentation must not end the UI session acknowledgement");
+        specforge::SourceCollectionSessionView unrelated_view = recovery_view;
+        unrelated_view.labeling.recovery_revision =
+            recovery_view.labeling.recovery_revision + 1;
+        unrelated_view.labeling.recovery_drafts.push_back(
+            {
+                .task_id = "draft-2",
+                .task_name = "Unrelated draft",
+                .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+                .labeled_count = 0,
+                .sample_count = 5,
+            });
+        (void)RenderRecoveryFrame(
+            panel,
+            unrelated_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "an unrelated recovery revision should not clear this draft's Keep acknowledgement");
+        specforge::SourceCollectionSessionView changed_view = recovery_view;
+        changed_view.labeling.recovery_drafts.front().labeled_count = 3;
+        (void)RenderRecoveryFrame(
+            panel,
+            changed_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            !specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "a changed recovery row should clear its Keep acknowledgement");
+        specforge::SourceCollectionSessionView empty_view = recovery_view;
+        empty_view.labeling.recovery_drafts.clear();
+        (void)RenderRecoveryFrame(
+            panel,
+            empty_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            !specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "removing a recovery row should clear its local Keep acknowledgement");
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        Require(
+            !specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetained(
+                    panel,
+                    recovery_view.labeling.source_identity,
+                    recovery_view.labeling.recovery_drafts.front().task_id),
+            "a same-ID replacement draft should not inherit the old Keep acknowledgement");
+    }
+
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = recovery_view;
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        const auto delete_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                recovery_view,
+                0,
+                "SpecForgeDeleteTemporaryDraft");
+        Require(
+            delete_rect.has_value(),
+            "the recovery list should expose a deterministic Delete rectangle");
+        const ImVec2 delete_position(
+            ((*delete_rect)[0] + (*delete_rect)[2]) * 0.5f,
+            ((*delete_rect)[1] + (*delete_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            delete_position.x,
+            delete_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        RecoveryFrameObservation observation =
+            RenderRecoveryFrame(
+                panel,
+                recovery_view,
+                latest_view,
+                false,
+                specforge::UiLanguage::English,
+                compact_window_size);
+        Require(
+            observation.submission_count == 0 && observation.popup_open,
+            "Delete draft should open the existing confirmation modal");
+        Require(
+            observation.popup_confirm_id != 0,
+            "Delete draft confirmation should expose its stable button ID");
+
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        observation = RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size);
+        const auto confirm_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingDeleteConfirmationRect(panel);
+        Require(
+            confirm_rect.has_value(),
+            "Delete draft fixture should expose a deterministic confirmation rectangle");
+        const ImVec2 confirm_position(
+            ((*confirm_rect)[0] + (*confirm_rect)[2]) * 0.5f,
+            ((*confirm_rect)[1] + (*confirm_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            confirm_position.x,
+            confirm_position.y);
+        const RecoveryFrameObservation confirm_hovered =
+            RenderRecoveryFrame(
+                panel,
+                recovery_view,
+                latest_view,
+                false,
+                specforge::UiLanguage::English,
+                compact_window_size);
+        Require(
+            confirm_hovered.popup_open &&
+                confirm_hovered.hovered_id == confirm_hovered.popup_confirm_id &&
+                confirm_hovered.popup_confirm_id == observation.popup_confirm_id,
+            "Delete draft fixture should locate the confirmation button");
+        ImGui::GetIO().AddMousePosEvent(
+            confirm_position.x,
+            confirm_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size,
+            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        const RecoveryFrameObservation confirmed = RenderRecoveryFrame(
+            panel,
+            recovery_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            compact_window_size,
+            specforge::SampleLabelingOperationResult::Issue::EditTargetChanged);
+        Require(
+            confirmed.submission_count == 1 &&
+                confirmed.submitted_workflow_kind ==
+                    specforge::ActiveSampleWorkflowIntentKind::
+                        DeleteTemporaryLabelingTask &&
+                confirmed.submitted_source_identity ==
+                    recovery_view.labeling.source_identity &&
+                confirmed.submitted_task_id ==
+                    recovery_view.labeling.recovery_drafts.front().task_id,
+            "Delete draft confirmation should submit the exact source and task identity");
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingOperationMessage(panel) ==
+                specforge::UiText(
+                    specforge::UiLanguage::English,
+                    specforge::UiTextId::LabelingDeleteTargetChanged),
+            "Delete target changes should use delete-specific feedback");
+    }
+}
+
+void TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    const specforge::SourceCollectionSessionView duplicate_view =
+        MakeDuplicateRecoveryPanelView();
+    specforge::SourceCollectionSessionView latest_view = duplicate_view;
+    const ImVec2 compact_window_size(650.0f, 900.0f);
+
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    const auto second_keep_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+            panel,
+            duplicate_view,
+            1,
+            "SpecForgeKeepTemporaryDraft");
+    Require(
+        second_keep_rect.has_value(),
+        "duplicate recovery rows should expose a deterministic second Keep rectangle");
+    const ImVec2 second_keep_position(
+        ((*second_keep_rect)[0] + (*second_keep_rect)[2]) * 0.5f,
+        ((*second_keep_rect)[1] + (*second_keep_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        second_keep_position.x,
+        second_keep_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetainedAt(
+                    panel,
+                    duplicate_view,
+                    1) &&
+            !specforge::SampleWorkflowPanelUiTestAccess::
+                IsRecoveryDraftRetainedAt(
+                    panel,
+                    duplicate_view,
+                    0),
+        "Keep should acknowledge only the selected duplicate task row");
+
+    specforge::SourceCollectionSessionView changed_view = duplicate_view;
+    changed_view.labeling.recovery_drafts[1].labeled_count = 3;
+    latest_view = changed_view;
+    (void)RenderRecoveryFrame(
+        panel,
+        changed_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::
+            IsRecoveryDraftRetainedAt(panel, changed_view, 1),
+        "changing a kept duplicate row should clear only its row token");
+
+    latest_view = duplicate_view;
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    const auto first_keep_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+            panel,
+            duplicate_view,
+            0,
+            "SpecForgeKeepTemporaryDraft");
+    Require(
+        first_keep_rect.has_value(),
+        "the first duplicate recovery row should expose a deterministic Keep rectangle");
+    const ImVec2 first_keep_position(
+        ((*first_keep_rect)[0] + (*first_keep_rect)[2]) * 0.5f,
+        ((*first_keep_rect)[1] + (*first_keep_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        first_keep_position.x,
+        first_keep_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    (void)RenderRecoveryFrame(
+        panel,
+        duplicate_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+            IsRecoveryDraftRetainedAt(panel, duplicate_view, 0),
+        "the other duplicate row should remain independently retainable");
+
+    specforge::SourceCollectionSessionView removed_view = duplicate_view;
+    removed_view.labeling.recovery_drafts.erase(
+        removed_view.labeling.recovery_drafts.begin());
+    latest_view = removed_view;
+    (void)RenderRecoveryFrame(
+        panel,
+        removed_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::
+            IsRecoveryDraftRetainedAt(panel, duplicate_view, 0),
+        "a removed duplicate row should clear its own acknowledgement");
+}
+
+void TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair()
+{
+    const specforge::SourceCollectionSessionView duplicate_view =
+        MakeDuplicateRecoveryPanelView();
+    specforge::SourceCollectionSessionView repaired_view = duplicate_view;
+    repaired_view.labeling.recovery_drafts.erase(
+        repaired_view.labeling.recovery_drafts.begin() + 1);
+    const ImVec2 compact_window_size(650.0f, 900.0f);
+    const auto assert_ambiguous_action_is_blocked = [
+        &duplicate_view,
+        &repaired_view,
+        &compact_window_size](std::string_view stable_id) {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = duplicate_view;
+        (void)RenderRecoveryFrame(
+            panel,
+            duplicate_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::SimplifiedChinese,
+            compact_window_size);
+        latest_view = repaired_view;
+        const RecoveryFrameObservation initial = RenderRecoveryFrame(
+            panel,
+            duplicate_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::SimplifiedChinese,
+            compact_window_size,
+            specforge::SampleLabelingOperationResult::Issue::None,
+            true,
+            &repaired_view);
+        const std::string_view conflict_text = specforge::UiText(
+            specforge::UiLanguage::SimplifiedChinese,
+            specforge::UiTextId::TemporaryDraftDuplicateIdentity);
+        Require(
+            initial.logged_text.find(std::string(conflict_text)) !=
+                std::string::npos,
+            "ambiguous duplicate rows should show localized conflict feedback");
+        const auto action_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                duplicate_view,
+                1,
+                stable_id);
+        Require(
+            action_rect.has_value(),
+            "ambiguous duplicate actions should expose deterministic rectangles");
+        const ImVec2 action_position(
+            ((*action_rect)[0] + (*action_rect)[2]) * 0.5f,
+            ((*action_rect)[1] + (*action_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            action_position.x,
+            action_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderRecoveryFrame(
+            panel,
+            duplicate_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::SimplifiedChinese,
+            compact_window_size,
+            specforge::SampleLabelingOperationResult::Issue::None,
+            false,
+            &repaired_view);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        const RecoveryFrameObservation released = RenderRecoveryFrame(
+            panel,
+            duplicate_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::SimplifiedChinese,
+            compact_window_size,
+            specforge::SampleLabelingOperationResult::Issue::None,
+            false,
+            &repaired_view);
+        Require(
+            released.submission_count == 0 &&
+                !released.popup_open,
+            "a repaired same-ID cache must not submit ambiguous Recover/Delete");
+    };
+
+    assert_ambiguous_action_is_blocked(
+        "SpecForgeRecoverTemporaryDraft");
+    assert_ambiguous_action_is_blocked(
+        "SpecForgeDeleteTemporaryDraft");
+}
+
+void TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeLabelingPanelView(8, 'g');
+    view.labeling.source_identity = "source/multiple-drafts";
+    view.labeling.task_id = "formal-task";
+    view.labeling.task_name = "Formal task";
+    view.labeling.active_task_is_temporary = false;
+    view.labeling.has_temporary_task = true;
+    view.labeling.recovery_drafts = {
+        {
+            .task_id = "draft-1",
+            .task_name = "Draft one",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Recoverable,
+            .sample_count = 1,
+        },
+        {
+            .task_id = "draft-2",
+            .task_name = "Draft two",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Conflicting,
+            .sample_count = 1,
+        },
+    };
+    specforge::SourceCollectionSessionView latest_view = view;
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    LabelingTaskSwitchFrameObservation observation =
+        RenderLabelingTaskSwitchFrame(
+            panel,
+            view,
+            latest_view,
+            view,
+            true);
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "multiple-draft fixture should expose a deterministic selector rectangle");
+    const ImVec2 selector_position(
+        ((*selector_rect)[0] + (*selector_rect)[2]) * 0.5f,
+        ((*selector_rect)[1] + (*selector_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_position.x,
+        selector_position.y);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        view,
+        latest_view,
+        view,
+        false);
+    Require(
+        observation.selector_hovered,
+        "multiple-draft fixture should locate the task selector");
+    ImGui::GetIO().AddMousePosEvent(
+        selector_position.x,
+        selector_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingTaskSwitchFrame(
+        panel,
+        view,
+        latest_view,
+        view,
+        false);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        view,
+        latest_view,
+        view,
+        false);
+    Require(
+        observation.popup_open,
+        "multiple-draft fixture should open the task selector");
+
+    const auto temporary_action_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+    const bool generic_resume_hovered = temporary_action_rect.has_value();
+    Require(
+        !generic_resume_hovered && observation.submission_count == 0,
+        "multiple recovery drafts must not expose an identity-free Resume labeling draft action");
+}
+
+void TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity()
+{
+    const specforge::SourceCollectionSessionView ambiguous_view =
+        MakeFormalTaskWithAmbiguousRecoveryDraftView();
+
+    const auto assert_row_action_disabled = [
+        &ambiguous_view](std::string_view stable_id,
+                         std::string_view message) {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = ambiguous_view;
+        const ImVec2 window_size(650.0f, 700.0f);
+        (void)RenderRecoveryFrame(
+            panel,
+            ambiguous_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            window_size);
+        const auto action_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                ambiguous_view,
+                0,
+                stable_id);
+        Require(
+            action_rect.has_value(),
+            message);
+        const ImVec2 action_position(
+            ((*action_rect)[0] + (*action_rect)[2]) * 0.5f,
+            ((*action_rect)[1] + (*action_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            action_position.x,
+            action_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderRecoveryFrame(
+            panel,
+            ambiguous_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        const RecoveryFrameObservation released = RenderRecoveryFrame(
+            panel,
+            ambiguous_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size);
+        Require(
+            released.submission_count == 0 && !released.popup_open,
+            message);
+    };
+
+    assert_row_action_disabled(
+        "SpecForgeRecoverTemporaryDraft",
+        "a formal/temp duplicate ID should disable recovery");
+    assert_row_action_disabled(
+        "SpecForgeDeleteTemporaryDraft",
+        "a formal/temp duplicate ID should disable deletion");
+
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView latest_view = ambiguous_view;
+    const ImVec2 window_size(650.0f, 700.0f);
+    (void)RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        window_size);
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "a formal/temp duplicate ID should expose a selector rectangle");
+    const ImVec2 selector_position(
+        ((*selector_rect)[0] + (*selector_rect)[2]) * 0.5f,
+        ((*selector_rect)[1] + (*selector_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_position.x,
+        selector_position.y);
+    (void)RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    RecoveryFrameObservation selector_released = RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    Require(
+        selector_released.popup_open,
+        "a formal/temp duplicate ID should open the selector for the disabled Resume check");
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    selector_released = RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    const auto temporary_action_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+    Require(
+        temporary_action_rect.has_value(),
+        "a formal/temp duplicate ID should expose the disabled Resume rectangle");
+    const ImVec2 temporary_action_position(
+        ((*temporary_action_rect)[0] + (*temporary_action_rect)[2]) * 0.5f,
+        ((*temporary_action_rect)[1] + (*temporary_action_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        temporary_action_position.x,
+        temporary_action_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const RecoveryFrameObservation resume_released = RenderRecoveryFrame(
+        panel,
+        ambiguous_view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        window_size);
+    Require(
+        resume_released.submission_count == 0,
+        "a formal/temp duplicate ID should disable generic Resume");
+}
+
+void TestLabelingPanelDeleteModalShowsRecoveryIdentity()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    view.labeling.recovery_drafts.push_back(
+        {
+            .task_id = "draft-2",
+            .task_name = "Second draft",
+            .status = specforge::SampleLabelingRecoveryDraftStatus::Stale,
+            .sample_count = 5,
+    });
+    specforge::SourceCollectionSessionView latest_view = view;
+    const ImVec2 compact_window_size(650.0f, 700.0f);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    const auto delete_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+            panel,
+            view,
+            0,
+            "SpecForgeDeleteTemporaryDraft");
+    Require(
+        delete_rect.has_value(),
+        "multiple-draft fixture should expose a deterministic selected draft Delete rectangle");
+    const ImVec2 delete_position(
+        ((*delete_rect)[0] + (*delete_rect)[2]) * 0.5f,
+        ((*delete_rect)[1] + (*delete_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        delete_position.x,
+        delete_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const RecoveryFrameObservation opened = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        compact_window_size,
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+    Require(
+        opened.popup_open &&
+            opened.logged_text.find("Recovered draft") != std::string::npos &&
+            opened.logged_text.find("draft-1") != std::string::npos &&
+            opened.logged_text.find("source/recovery") != std::string::npos,
+        "recovery delete confirmation should show the selected draft name and identity");
+}
+
+void TestLabelingPanelPlacesSelectorBeforeRecoveryList()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    const specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    specforge::SourceCollectionSessionView latest_view = view;
+    const RecoveryFrameObservation observation = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        ImVec2(650.0f, 700.0f),
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+    const std::size_t selector_position = observation.logged_text.find(
+        "Select labeling task");
+    const std::size_t recovery_position = observation.logged_text.find(
+        std::string(
+            specforge::UiText(
+                specforge::UiLanguage::English,
+                specforge::UiTextId::TemporaryDraftRecovery)));
+    Require(
+        selector_position != std::string::npos &&
+            recovery_position != std::string::npos &&
+            selector_position < recovery_position,
+        "the labeling selector should be rendered before the recovery list");
+}
+
+void TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths()
+{
+    const std::array<ImVec2, 2> window_sizes = {
+        ImVec2(900.0f, 900.0f),
+        ImVec2(650.0f, 900.0f),
+    };
+    const auto assert_selector_row_layout = [
+        &window_sizes](
+        const specforge::SourceCollectionSessionView& view,
+        bool expect_recovery_action) {
+        for (const ImVec2 window_size : window_sizes) {
+            ScopedImGuiContext context;
+            specforge::SampleWorkflowPanelUi panel;
+            specforge::SourceCollectionSessionView latest_view = view;
+            const RecoveryFrameObservation rendered = RenderRecoveryFrame(
+                panel,
+                view,
+                latest_view,
+                true,
+                specforge::UiLanguage::English,
+                window_size);
+            const auto selector_rect =
+                specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingSelectorRect(panel);
+            const auto pause_rect =
+                specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingPauseRect(panel);
+            const auto delete_rect =
+                specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingDeleteRect(panel);
+            const auto recovery_rect =
+                specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingRecoveryRect(panel);
+            Require(
+                selector_rect && pause_rect && delete_rect && recovery_rect,
+                "labeling layout fixture should expose all first-row and recovery rectangles");
+            Require(
+                std::fabs((*selector_rect)[1] - (*pause_rect)[1]) <= 1.0f &&
+                    std::fabs((*pause_rect)[1] - (*delete_rect)[1]) <= 1.0f,
+                "selector, Pause, and Delete should share the first-row baseline");
+            Require(
+                (*recovery_rect)[1] >=
+                    std::max((*pause_rect)[3], (*delete_rect)[3]) &&
+                    (*recovery_rect)[3] > (*recovery_rect)[1],
+                "the recovery rectangle should begin below the complete selector row");
+            Require(
+                (*selector_rect)[0] >= 20.0f &&
+                    (*selector_rect)[2] <= 20.0f + window_size.x &&
+                    (*pause_rect)[0] >= 20.0f &&
+                    (*delete_rect)[2] <= 20.0f + window_size.x,
+                "selector row controls should remain inside the labeling window");
+            if (expect_recovery_action) {
+                Require(
+                    (*recovery_rect)[1] > (*delete_rect)[3],
+                    "formal-task recovery actions should begin below Pause and Delete");
+            }
+            (void)rendered;
+        }
+    };
+
+    assert_selector_row_layout(
+        MakeActiveTemporaryRecoveryPanelView(),
+        false);
+    assert_selector_row_layout(
+        MakeFormalTaskWithRecoveryDraftView(),
+        true);
+}
+
+void TestLabelingPanelRendersCurrentTaskDeleteModalOnce()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView active_view =
+        MakeLabelingPanelView(8, 'g');
+    active_view.labeling.source_identity = "source/active";
+    specforge::SourceCollectionSessionView latest_view = active_view;
+    const auto render_active_frame = [&](bool request_initial_focus) {
+        return RenderRecoveryFrame(
+            panel,
+            active_view,
+            latest_view,
+            request_initial_focus,
+            specforge::UiLanguage::English,
+            ImVec2(700.0f, 500.0f));
+    };
+
+    (void)render_active_frame(true);
+    const auto delete_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingDeleteRect(panel);
+    Require(
+        delete_rect.has_value(),
+        "active delete integration fixture should expose a deterministic delete rectangle");
+    const ImVec2 delete_task_position(
+        ((*delete_rect)[0] + (*delete_rect)[2]) * 0.5f,
+        ((*delete_rect)[1] + (*delete_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        delete_task_position.x,
+        delete_task_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    const RecoveryFrameObservation opened =
+        render_active_frame(false);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    Require(
+        !opened.popup_open,
+        "the current-task delete control should open its modal for the next frame");
+    const RecoveryFrameObservation rendered =
+        render_active_frame(false);
+    Require(
+        rendered.popup_open,
+        "the current-task delete path should render one confirmation modal");
+}
+
+void TestLabelingPanelRejectsCrossFrameCurrentTaskDelete()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView frame_view =
+        MakeLabelingPanelView(8, 'g');
+    frame_view.labeling.source_identity = "source/old";
+    frame_view.labeling.task_id = "task-old";
+    specforge::SourceCollectionSessionView latest_view = frame_view;
+    auto render_active_frame = [&]() {
+        return RenderRecoveryFrame(
+            panel,
+            frame_view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            ImVec2(700.0f, 500.0f));
+    };
+
+    (void)render_active_frame();
+    const auto delete_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingDeleteRect(panel);
+    Require(
+        delete_rect.has_value(),
+        "cross-frame delete fixture should expose a deterministic delete rectangle");
+    const ImVec2 delete_task_position(
+        ((*delete_rect)[0] + (*delete_rect)[2]) * 0.5f,
+        ((*delete_rect)[1] + (*delete_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        delete_task_position.x,
+        delete_task_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    (void)render_active_frame();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    const RecoveryFrameObservation opened = render_active_frame();
+    Require(opened.popup_open, "cross-frame delete fixture should open the confirmation modal");
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)render_active_frame();
+    latest_view = frame_view;
+    latest_view.labeling.source_identity = "source/new";
+    latest_view.labeling.task_id = "task-new";
+    const auto confirm_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingDeleteConfirmationRect(panel);
+    Require(
+        confirm_rect.has_value(),
+        "cross-frame delete fixture should expose a deterministic confirmation rectangle");
+    const ImVec2 confirm_position(
+        ((*confirm_rect)[0] + (*confirm_rect)[2]) * 0.5f,
+        ((*confirm_rect)[1] + (*confirm_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        confirm_position.x,
+        confirm_position.y);
+    const RecoveryFrameObservation confirm_hovered = render_active_frame();
+    Require(
+        confirm_hovered.popup_open &&
+            confirm_hovered.hovered_id == confirm_hovered.popup_confirm_id &&
+            confirm_hovered.popup_confirm_id != 0,
+        "cross-frame delete fixture should locate the confirmation button");
+    ImGui::GetIO().AddMousePosEvent(
+        confirm_position.x,
+        confirm_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    (void)render_active_frame();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    const RecoveryFrameObservation confirmed = render_active_frame();
+    Require(
+        confirmed.submission_count == 0 &&
+            specforge::SampleWorkflowPanelUiTestAccess::LabelingOperationMessage(panel) ==
+                specforge::UiText(
+                    specforge::UiLanguage::English,
+                    specforge::UiTextId::LabelingDeleteTargetChanged),
+        "a current-task delete confirmation must reject a changed source/task identity");
+}
+
+void TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft()
+{
+    const auto make_view = []() {
+        specforge::SourceCollectionSessionView view =
+            MakeLabelingPanelView(8, 'g');
+        view.labeling.source_identity = "source/shared";
+        view.labeling.task_id = "formal-task";
+        view.labeling.task_name = "Formal task";
+        view.labeling.active_task_is_temporary = false;
+        view.labeling.recovery_drafts =
+            MakeRecoveryPanelView().labeling.recovery_drafts;
+        return view;
+    };
+    const auto find_and_confirm_delete = [](
+                                           specforge::SampleWorkflowPanelUi& panel,
+                                           const specforge::SourceCollectionSessionView& view,
+                                           specforge::SourceCollectionSessionView& latest_view,
+                                           specforge::SampleLabelingOperationResult::Issue issue) {
+        const ImVec2 window_size(233.0f, 700.0f);
+        (void)RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            window_size);
+        specforge::SampleWorkflowPanelUiTestAccess::SetActiveTaskId(
+            panel,
+            view.labeling.task_id);
+        const auto delete_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                view,
+                0,
+                "SpecForgeDeleteTemporaryDraft");
+        Require(
+            delete_rect.has_value(),
+            "editing-state fixture should expose a deterministic recovery Delete rectangle");
+        const ImVec2 delete_position(
+            ((*delete_rect)[0] + (*delete_rect)[2]) * 0.5f,
+            ((*delete_rect)[1] + (*delete_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(delete_position.x, delete_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        RecoveryFrameObservation opened = RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size);
+        Require(opened.popup_open, "editing-state fixture should open recovery deletion confirmation");
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        opened = RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size);
+        specforge::SampleWorkflowPanelUiTestAccess::SetEditingLabelCode(
+            panel,
+            8);
+        specforge::SampleWorkflowPanelUiTestAccess::SetShortcutCaptureActive(
+            panel,
+            true);
+
+        const auto confirm_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingDeleteConfirmationRect(panel);
+        Require(
+            confirm_rect.has_value(),
+            "editing-state fixture should expose a deterministic recovery confirmation rectangle");
+        const ImVec2 confirm_position(
+            ((*confirm_rect)[0] + (*confirm_rect)[2]) * 0.5f,
+            ((*confirm_rect)[1] + (*confirm_rect)[3]) * 0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            confirm_position.x,
+            confirm_position.y);
+        const RecoveryFrameObservation confirm_hovered = RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size,
+            issue);
+        Require(
+            confirm_hovered.popup_open &&
+                confirm_hovered.popup_confirm_id != 0 &&
+                confirm_hovered.hovered_id == confirm_hovered.popup_confirm_id,
+            "editing-state fixture should locate recovery confirmation");
+        ImGui::GetIO().AddMousePosEvent(confirm_position.x, confirm_position.y);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        (void)RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size,
+            issue);
+        ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        RecoveryFrameObservation confirmed = RenderRecoveryFrame(
+            panel,
+            view,
+            latest_view,
+            false,
+            specforge::UiLanguage::English,
+            window_size,
+            issue);
+        Require(
+            confirmed.submission_count == 1 &&
+                confirmed.submitted_workflow_kind ==
+                    specforge::ActiveSampleWorkflowIntentKind::
+                        DeleteTemporaryLabelingTask &&
+                confirmed.submitted_source_identity ==
+                    view.labeling.source_identity &&
+                confirmed.submitted_task_id ==
+                    view.labeling.recovery_drafts.front().task_id,
+            "editing-state delete confirmation must submit the exact delete operation and draft identity");
+        return confirmed;
+    };
+
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        const specforge::SourceCollectionSessionView view = make_view();
+        specforge::SourceCollectionSessionView latest_view = view;
+        (void)find_and_confirm_delete(
+            panel,
+            view,
+            latest_view,
+            specforge::SampleLabelingOperationResult::Issue::None);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
+                specforge::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
+            "deleting an unrelated recovery draft must preserve active-task editing state after success");
+    }
+
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        const specforge::SourceCollectionSessionView view = make_view();
+        specforge::SourceCollectionSessionView latest_view = view;
+        (void)find_and_confirm_delete(
+            panel,
+            view,
+            latest_view,
+            specforge::SampleLabelingOperationResult::Issue::EditLeaseUnavailable);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::IsEditingLabelCode(panel) &&
+                specforge::SampleWorkflowPanelUiTestAccess::IsShortcutCaptureActive(panel),
+            "a rejected unrelated recovery deletion must preserve active-task editing state");
+    }
+}
+
+void TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    const specforge::SourceCollectionSessionView view = MakeRecoveryPanelView();
+    specforge::SourceCollectionSessionView latest_view = view;
+    const ImVec2 default_labeling_dock_size(233.0f, 700.0f);
+    const RecoveryFrameObservation rendered = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::SimplifiedChinese,
+        default_labeling_dock_size);
+    const std::array<std::string_view, 3> action_ids = {
+        "SpecForgeRecoverTemporaryDraft",
+        "SpecForgeKeepTemporaryDraft",
+        "SpecForgeDeleteTemporaryDraft",
+    };
+    Require(
+        rendered.cursor_max_y < default_labeling_dock_size.y,
+        "the default labeling dock should keep all recovery actions visible in a narrow layout");
+    for (const std::string_view action_id : action_ids) {
+        const auto action_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::RecoveryActionRect(
+                panel,
+                view,
+                0,
+                action_id);
+        Require(
+            action_rect.has_value(),
+            "narrow recovery actions should expose deterministic rectangles");
+        Require(
+            (*action_rect)[0] >= 0.0f &&
+                (*action_rect)[2] <= default_labeling_dock_size.x &&
+                (*action_rect)[1] >= 0.0f &&
+                (*action_rect)[3] <= default_labeling_dock_size.y,
+            "narrow recovery actions should remain inside the dock");
+    }
+}
+
+void TestLabelingPanelLocalizesBuiltInRecoveryPresentation()
+{
+    const std::string built_in_name(specforge::kTemporarySampleLabelingTaskName);
+    Require(
+        specforge::SampleWorkflowTemporaryDraftTaskName(
+            specforge::UiLanguage::SimplifiedChinese,
+            built_in_name) ==
+            specforge::UiText(
+                specforge::UiLanguage::SimplifiedChinese,
+                specforge::UiTextId::TemporaryLabelingTask),
+        "the built-in temporary task name should use the selected UI language in recovery rows");
+    Require(
+        specforge::SampleWorkflowTemporaryDraftTaskName(
+            specforge::UiLanguage::SimplifiedChinese,
+            "Historical review") == "Historical review",
+        "a historical custom recovery task name must remain unchanged");
+}
+
+void TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView view =
+        MakeRecoveryPanelView();
+    const std::string long_task_id =
+        "historical-draft-task-id-with-a-long-stable-identity-"
+        "0123456789abcdef0123456789abcdef0123456789abcdef";
+    view.labeling.recovery_drafts.front().task_id = long_task_id;
+    specforge::SourceCollectionSessionView latest_view = view;
+    const ImVec2 narrow_window_size(233.0f, 700.0f);
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        narrow_window_size);
+    const auto identity_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::RecoveryIdentityRect(
+            panel,
+            view,
+            0);
+    Require(
+        identity_rect.has_value(),
+        "a recovery row should expose a deterministic task identity rectangle");
+    const ImVec2 identity_position(
+        (*identity_rect)[0] + 4.0f,
+        ((*identity_rect)[1] + (*identity_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        identity_position.x,
+        identity_position.y);
+    const RecoveryFrameObservation hovered = RenderRecoveryFrame(
+        panel,
+        view,
+        latest_view,
+        false,
+        specforge::UiLanguage::English,
+        narrow_window_size,
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+    const std::size_t first_identity =
+        hovered.logged_text.find(long_task_id);
+    Require(
+        first_identity != std::string::npos &&
+            hovered.logged_text.find(
+                long_task_id,
+                first_identity + long_task_id.size()) != std::string::npos,
+        "hovering a narrow recovery identity should render the complete task ID tooltip");
+}
+
+void TestLabelingPanelShowsPausedDraftSaveFailure()
+{
+    const specforge::SourceCollectionSessionView failed_view =
+        MakeFailedRecoveryPanelView();
+    float healthy_height = 0.0f;
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        const specforge::SourceCollectionSessionView healthy_view =
+            MakeRecoveryPanelView();
+        specforge::SourceCollectionSessionView latest_view = healthy_view;
+        healthy_height = RenderRecoveryFrame(
+            panel,
+            healthy_view,
+            latest_view,
+            true)
+                             .cursor_max_y;
+    }
+
+    float failed_height = 0.0f;
+    RecoveryFrameObservation failed_observation;
+    {
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView latest_view = failed_view;
+        failed_observation = RenderRecoveryFrame(
+            panel,
+            failed_view,
+            latest_view,
+            true,
+            specforge::UiLanguage::English,
+            ImVec2(900.0f, 500.0f),
+            specforge::SampleLabelingOperationResult::Issue::None,
+            true);
+        failed_height = failed_observation.cursor_max_y;
+    }
+
+    const auto& failed_state =
+        failed_view.labeling.recovery_drafts.front().save_state;
+    const std::string english_status =
+        specforge::SampleWorkflowSaveStateText(
+            specforge::UiLanguage::English,
+            failed_state);
+    const std::string chinese_status =
+        specforge::SampleWorkflowSaveStateText(
+            specforge::UiLanguage::SimplifiedChinese,
+            failed_state);
+    Require(
+        failed_height > healthy_height &&
+            english_status.find("1") != std::string::npos &&
+            english_status.find(
+                specforge::UiText(
+                    specforge::UiLanguage::English,
+                    specforge::UiTextId::SaveFailedValue)) != std::string::npos &&
+            chinese_status.find(
+                specforge::UiText(
+                    specforge::UiLanguage::SimplifiedChinese,
+                    specforge::UiTextId::SaveFailedValue)) != std::string::npos &&
+            specforge::SampleWorkflowSaveMessageText(
+                specforge::UiLanguage::English,
+                failed_state) == failed_state.message &&
+            failed_observation.logged_text.find(english_status) !=
+                std::string::npos &&
+            failed_observation.logged_text.find(failed_state.message) !=
+                std::string::npos,
+        "a paused failed draft should render localized status, pending count, and its retained error detail");
+
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView warning_view =
+        MakeRecoveryPanelView();
+    warning_view.labeling.state_save_failed = true;
+    warning_view.labeling.state_save_error = "save warning detail";
+    warning_view.labeling.state_load_warning = "load warning detail";
+    specforge::SourceCollectionSessionView latest_view = warning_view;
+    const RecoveryFrameObservation warning = RenderRecoveryFrame(
+        panel,
+        warning_view,
+        latest_view,
+        true,
+        specforge::UiLanguage::English,
+        ImVec2(900.0f, 500.0f),
+        specforge::SampleLabelingOperationResult::Issue::None,
+        true);
+    Require(
+        warning.logged_text.find("save warning detail") != std::string::npos &&
+            warning.logged_text.find("load warning detail") != std::string::npos,
+        "a no-active-task recovery view should render state save/load diagnostics");
 }
 
 void TestLabelingPanelSurfacesRejectedWorkflowMessage()
@@ -706,25 +2784,24 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
             true,
             conflict_message);
 
-    ImVec2 selector_position;
-    for (float y = 25.0f;
-         y <= 150.0f && !observation.selector_hovered;
-         y += 2.0f) {
-        selector_position =
-            ImVec2(
-                observation.content_start.x + 50.0f,
-                y);
-        ImGui::GetIO().AddMousePosEvent(
-            selector_position.x,
-            selector_position.y);
-        observation = RenderLabelingTaskSwitchFrame(
-            panel,
-            inactive_view,
-            latest_view,
-            activated_view,
-            false,
-            conflict_message);
-    }
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::LabelingSelectorRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "message integration fixture should expose a deterministic selector rectangle");
+    const ImVec2 selector_position(
+        ((*selector_rect)[0] + (*selector_rect)[2]) * 0.5f,
+        ((*selector_rect)[1] + (*selector_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_position.x,
+        selector_position.y);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
     Require(
         observation.selector_hovered,
         "message integration fixture should locate the labeling task selector");
@@ -752,26 +2829,32 @@ void TestLabelingPanelSurfacesRejectedWorkflowMessage()
         observation.popup_open,
         "message integration fixture should open the task selector");
 
-    ImVec2 temporary_action_position;
-    const float popup_x =
-        observation.popup_content_start.x + 50.0f;
-    for (float y = observation.popup_content_start.y - 20.0f;
-         y <= observation.popup_content_start.y + 100.0f &&
-         !observation.temporary_action_hovered;
-         y += 2.0f) {
-        temporary_action_position =
-            ImVec2(popup_x, y);
-        ImGui::GetIO().AddMousePosEvent(
-            temporary_action_position.x,
-            temporary_action_position.y);
-        observation = RenderLabelingTaskSwitchFrame(
-            panel,
-            inactive_view,
-            latest_view,
-            activated_view,
-            false,
-            conflict_message);
-    }
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
+    const auto temporary_action_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::TemporaryLabelingActionRect(panel);
+    Require(
+        temporary_action_rect.has_value(),
+        "message integration fixture should expose a deterministic labeling action rectangle");
+    const ImVec2 temporary_action_position(
+        ((*temporary_action_rect)[0] + (*temporary_action_rect)[2]) * 0.5f,
+        ((*temporary_action_rect)[1] + (*temporary_action_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        temporary_action_position.x,
+        temporary_action_position.y);
+    observation = RenderLabelingTaskSwitchFrame(
+        panel,
+        inactive_view,
+        latest_view,
+        activated_view,
+        false,
+        conflict_message);
     Require(
         observation.temporary_action_hovered,
         "message integration fixture should locate the labeling action");
@@ -1160,6 +3243,22 @@ int main()
     TestNavigationAndLabelCommandsShareOneRouter();
     TestLabelingPanelRoutesTheLatestSessionProjection();
     TestLabelingPanelTaskSwitchRegistersTheNewShortcutInTheSelectionFrame();
+    TestLabelingPanelUsesIdentityForSingleDraftResume();
+    TestLabelingPanelRoutesTemporaryDraftRecoveryActions();
+    TestLabelingPanelKeepsDuplicateRecoveryRowsIndependently();
+    TestLabelingPanelDisablesAmbiguousRecoveryActionsAfterRepair();
+    TestLabelingPanelRequiresIdentityForMultipleRecoveryDrafts();
+    TestLabelingPanelDisablesFormalAndTemporaryIdentityAmbiguity();
+    TestLabelingPanelDeleteModalShowsRecoveryIdentity();
+    TestLabelingPanelPlacesSelectorBeforeRecoveryList();
+    TestLabelingPanelKeepsSelectorRowAboveRecoveryListAtAllWidths();
+    TestLabelingPanelRendersCurrentTaskDeleteModalOnce();
+    TestLabelingPanelRejectsCrossFrameCurrentTaskDelete();
+    TestLabelingPanelPreservesEditingStateWhenDeletingRecoveryDraft();
+    TestLabelingPanelKeepsRecoveryActionsUsableAtDefaultDockWidth();
+    TestLabelingPanelLocalizesBuiltInRecoveryPresentation();
+    TestLabelingPanelShowsFullRecoveryTaskIdentityTooltip();
+    TestLabelingPanelShowsPausedDraftSaveFailure();
     TestLabelingPanelSurfacesRejectedWorkflowMessage();
     TestLabelingPanelLocalizesLeaseNotices();
     TestLabelingPanelClearsNoticeAfterActionOnlySuccess();
