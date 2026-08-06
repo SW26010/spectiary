@@ -80,7 +80,7 @@ headroom.
 
 The CI helper maps `Headless` to `ci-headless` and `RealGui` to `real-gui`.
 The workflow and the helper use these exact labels; `required` is an additional
-CTest label on the four headless tests, not a different selector.
+CTest label on the five headless tests, not a different selector.
 
 The real-GUI job is opt-in because an ordinary hosted Windows runner does not
 provide a stable interactive desktop contract for this D3D11 path. The job

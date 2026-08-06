@@ -123,6 +123,20 @@ objects. There is no TCP listener, fixed discovery pipe, registry rendezvous,
 global input simulation, or foreground-window activation. The pipe DACL grants
 access only to the current Windows user and rejects remote clients.
 
+### Trust boundary
+
+The trusted principal is the interactive Windows user that launched the
+automation instance. The current-user DACL and `PIPE_REJECT_REMOTE_CLIENTS`
+exclude other ordinary users and remote pipe clients. The random instance ID,
+per-launch pipe name, nonce, and exact hello response bind the launcher to the
+GUI child it created and reject stale or cross-instance clients.
+
+This is not a sandbox or an authentication boundary against hostile code already
+running as the same Windows user, an administrator, or the operating system.
+Same-user code may be able to inspect process arguments and the launcher's state
+root. The nonce is instance correlation within the local test/debugging contract,
+not a secret credential against that stronger threat model.
+
 The server permits one connection for the instance. A second connection is
 rejected; there is no multi-client scheduling or reconnect contract. Each
 message is limited to 65,536 bytes, the accepted-command queue is limited to 32
@@ -173,6 +187,44 @@ unclaimed requests, and stops dispatching later commands from the same batch.
 Thus a canceled terminal cannot describe a mutation that was already applied,
 and a mutation that did occur reaches its matching terminal before the later
 quit terminal.
+
+### Timeout, retry, disconnect, and crash contract
+
+The protocol has no reconnect, replay, or automatic business-command retry.
+Before acceptance, a failed request has not entered an App/Shell/Session owner;
+a caller may submit a new request with a fresh ID while the connection still
+accepts requests. Every syntactically valid observed ID is connection-scoped and
+single-use, including IDs attached to semantic failures, `queue_full`, and
+`shutting_down`. The one exception is an ID rejected by
+`request_limit_reached`: it is not inserted because the bounded ID set is
+already full, but the connection stops accepting requests. A caller must never
+retry an accepted mutation or infer its outcome from a reused ID.
+
+There is currently no protocol-level or launcher-owned response deadline. The
+launcher bounds initial pipe connection to 10 seconds, its best-effort normal
+cleanup wait to 5 seconds, and the post-quit GUI process wait to 10 seconds, but
+hello and accepted-command receives wait until a response or disconnect. CTest
+and CI own the hard outer test/suite timeouts and kill-on-close process Job; see
+[Automation CI](automation_ci.md). The missing standalone response bound is
+tracked as [Issue #30](https://github.com/SW26010/SpecForge/issues/30).
+
+Disconnect cancels work that has not claimed execution. Claimed work remains
+owned by the production component and retires from the server only after its
+factual completion, even though its response can no longer reach the client.
+If the pipe or GUI process is lost before the client observes a terminal, the
+client cannot determine from the protocol alone whether a claimed mutation ran.
+There is no cross-process exactly-once recovery token. A new launcher uses a new
+root, instance ID, nonce, connection, and request-ID namespace; the previous
+isolated root is diagnostic evidence, not a replay log.
+
+Before GUI creation, launcher failure removes only the partial root that the
+launcher created and pinned. After GUI creation, the root is retained for
+diagnosis. Normal launcher cleanup requests `app.quit` when possible and then
+uses the exact child process handle. An unexpected launcher exit closes its
+kill-on-close Job Object (or leaves termination to the already-owning runner
+Job), so cleanup never searches by executable name or PID alone. Production
+owners retain their own atomic-write, retry, and startup-recovery behavior; the
+control plane does not add a second recovery model.
 
 ## Command contracts
 
@@ -537,6 +589,21 @@ mutation occurs from the existing UI-thread event loop. Control readiness wakes
 that loop with an application message, and idle checks use a bounded maintenance
 deadline, preserving event-driven rendering.
 
+## Source truth, derived observation, and persisted projection
+
+The control plane does not make `state.get` or its JSON files a second product
+model. These layers have different authority and timing:
+
+| Layer | Authority and examples | Automation meaning |
+| --- | --- | --- |
+| Production source truth | `ApplicationSettings`, Shell/Session controllers, the sample-labeling controller, `ProfileSink`, and the frame-capture pipeline | Commands validate, claim, and mutate only through these existing owners. Operation-specific terminals report facts produced by the owner. |
+| Derived observation | `SpecForgeApp::AutomationState()` plus the last successfully presented `ShellAutomationView` | `state.get` is a point-in-time projection. Live source-load state may lead the presented spectrum/label snapshot; capture and profile fields summarize current or last terminal observations. It is neither durable state nor mutation authority. |
+| Persisted projection | Production settings, panel, session, labeling, layout, profile, and capture files below the isolated root | Durability follows each production owner's contract. Settings writes are synchronous; panel/session/label state may be debounced or retryable; a label terminal carries persistence flags; `app.quit` drives the ordinary final-flush/shutdown path. |
+
+A successful command terminal therefore means exactly what that command section
+states. It does not generally mean that every future debounce deadline has
+elapsed or that a later `state.get` must describe an unpresented live change.
+
 ## State and focus isolation
 
 Automation redirects all SpecForge-owned mutable state paths beneath the
@@ -613,3 +680,32 @@ interactive failure-injection
 coverage also blocks the production UI-scale path and verifies
 `setting_persistence_failed`, retained model/live values, no applied-setting
 notification, and a usable idle barrier.
+
+## Security and reliability audit checklist
+
+Issue #22 audited the production implementation and its registered tests. The
+table records durable evidence locations rather than line numbers so it remains
+useful as the files evolve.
+
+| Boundary or lifecycle rule | Production source | Verification evidence | Documented contract and audit result |
+| --- | --- | --- | --- |
+| Local-only, single-user, single-client pipe; remote and second clients rejected | `automation_named_pipe.cpp`: `PrepareCurrentUserPipeSecurity`, `AutomationNamedPipeServer::Start` | `TestPipeAclIsCurrentUserOnly`, `TestSingleClientQueueAndLifecycle` in `automation_control_tests.cpp` | **Verified.** See **Trust boundary** and **Transport and protocol**. Same-user hostile code is explicitly outside the boundary. |
+| Random instance/nonce handshake and automation-only startup arguments | `automation_launcher_main.cpp`: `RandomHex`, `BuildGuiCommandLine`; `automation_startup.cpp`: `ParseSpecForgeCommandLine` | `TestStartupAndNoActivationContract`; real launcher hello/instance assertions in `automation_launcher_integration_tests.ps1` | **Verified.** Partial, repeated, mismatched, or inherited legacy startup input fails closed before App construction. |
+| New launcher-pinned state root, ordinary-root separation, and isolated production paths | `automation_startup.cpp`: `CreatePinnedAutomationStateRoot`, `AutomationStateRootIsIndependent`; `main.cpp`: `PrepareStartup` | `TestStartupAndNoActivationContract`, `automation_state_isolation_tests.cpp`, root-identity scenarios in `automation_launcher_integration_tests.ps1` | **Verified.** The launcher rejects an existing root and same/parent/child overlap; the GUI independently rechecks separation. |
+| Seed identity, read-only ownership, materialization, and persistent-output policy | `automation_launcher_main.cpp`: `ValidateLabelingStateSeed`, `MaterializeLabelingStateSeed`; `automation_startup.cpp`: `PinAutomationReadOnlyFile`, `MaterializePinnedAutomationSeed` | seed replacement/output/reparse scenarios in `automation_control_tests.cpp`, `automation_state_isolation_tests.cpp`, and `automation_launcher_integration_tests.ps1` | **Verified.** Normal launcher seeds permit internal drafts only; the direct two-process fixture requires an explicit startup opt-in. |
+| Capture path ownership, create-new/no-follow encoding, and publish/disconnect ordering | `automation_startup.cpp`: `ValidateAutomationCapturePath`; `d3d11_frame_capture.cpp`: handle-relative prepare/publish; `automation_named_pipe.cpp`: `TryFinalizeFrameCapture` | `TestFrameCaptureFinalizationLease`; real GUI outside-root, reparse, disconnect, and PNG checks in `automation_launcher_integration_tests.ps1` | **Verified.** No desktop screenshot or general external write seam exists. |
+| Profile output ownership, no-follow final handle, and finalized writer terminal | `automation_startup.cpp`: `AutomationProfileOutputFactory::Create`; `specforge_app.cpp`: `ServiceAutomationProfileStart`, `PollAutomationProfileStop` | `TestProfileOutputCreationIsHandleBoundToAutomationRoot`, `TestProfileWriteFailureUsesStopTerminalResponsePath`, real GUI profile scenarios | **Verified.** Final success requires the summary record and flush; start or write failures remain distinct. |
+| UTF-8 JSON, duplicate/nesting/malformed/oversized input, exact commands and bounded response | `local_user_state_json.cpp`: `JsonParser`; `automation_protocol.cpp`: `ParseAutomationClientMessage`; `automation_named_pipe.cpp`: `ReadMessage`, `EnqueueResponseLocked` | `TestProtocolAndStableState`, `TestSingleClientQueueAndLifecycle`, `TestPreHandshakeJsonNestingIsBounded`, `TestQueueCapacityVersionAndDisconnect`, `TestOversizedTerminalResponseIsBounded` | **Verified.** Invalid or unsupported input fails before acceptance; oversized correlated output becomes `response_too_large` without poisoning the connection. |
+| Queue, request-ID, acceptance, terminal, and shutdown rejection | `automation_named_pipe.cpp`: `HandleClientMessage`, `TryReserveRequestIdLocked`, `Complete`, `Fail` | `TestSingleClientQueueAndLifecycle`, `TestDistinctRequestIdLimit`, `TestQueueCapacityVersionAndDisconnect` | **Verified.** While connected, each accepted request has one terminal; valid observed IDs are consumed as documented. |
+| Execution claims, disconnect, quit sequence barrier, and publication races | `automation_named_pipe.cpp`: `TryClaimExecution`, `TryBeginAppQuit`, `HandleDisconnect`, `TryFinalizeFrameCapture` | `TestExecutionClaimsAndQuitBarrier`, `TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState`, `TestFrameCaptureFinalizationLease` | **Verified.** Unclaimed work cancels; claimed mutations keep factual ownership and terminal ordering. |
+| `wait.idle`, retry ownership, and persistence timing | `specforge_app.cpp`: `ServiceAutomation`, `AutomationBusinessIdle`; production persistence owners under `src/app` and `src/sessions` | `TestIdleWaitIsAnEarlierOnlySequenceBarrier`, `TestIdleWaitStopsLaterBusinessDispatch`, real GUI persistence assertions | **Verified.** The barrier is earlier-sequence-only and does not wait for future debounce/retry deadlines. |
+| Source truth versus live, presented, terminal, and persisted projections | `specforge_app.cpp`: command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
+| Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, blocking send/wait helpers; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | graceful/forced cleanup and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **P2 tracked.** Outer runners are bounded and cleanup is identity-owned, but standalone hello/command receives are not; follow-up is Issue #30. |
+| Orderly shutdown, panel rollback, state flush, and writer retirement | `specforge_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
+
+The 2026-08-06 audit at base commit `4472fad` found no P0 or P1 defect and one
+P2 defect, tracked by Issue #30. The repository wrapper rebuilt the control,
+panel-coordinator, state-isolation, launcher, and native targets successfully.
+`ctest -L ci-headless` passed all 5 tests, and the real-GUI
+`specforge_automation_launcher_integration_tests` passed its complete
+launcher-to-GUI workflow.
