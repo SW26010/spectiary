@@ -191,12 +191,13 @@ bool RenderTopBarStatus(
         operation_text =
             UiText(language, UiTextId::StateRecovered);
     }
-    const std::string frame_text =
-        std::string(UiText(language, UiTextId::Frame)) +
-        " " +
-        std::to_string(
-            static_cast<unsigned long long>(
-                status.frame_index));
+    const TopBarFrameRateSample frame_rate_sample{
+        .framerate = status.application_framerate,
+        .delta_time = status.application_delta_time};
+    const std::optional<std::string> frame_text =
+        FormatTopBarFrameRate(
+            frame_rate_sample,
+            UiText(language, UiTextId::ApplicationFrameRate));
     const std::string dimensions_text =
         std::to_string(status.client_width) + "x" + std::to_string(status.client_height);
     ProfileRecordingUiPresentation recording_presentation =
@@ -220,7 +221,9 @@ bool RenderTopBarStatus(
         : 0.0f;
     const TopBarStatusWidths widths{
         .operation = ImGui::CalcTextSize(operation_text.c_str()).x,
-        .frame = ImGui::CalcTextSize(frame_text.c_str()).x,
+        .frame = frame_text
+            ? ImGui::CalcTextSize(frame_text->c_str()).x
+            : 0.0f,
         .dimensions = ImGui::CalcTextSize(dimensions_text.c_str()).x,
         .profile = recording_indicator_width +
                    ImGui::CalcTextSize(
@@ -294,9 +297,9 @@ bool RenderTopBarStatus(
             ImVec2(operation_start_x, text_y),
             ImVec2(cursor_x, text_y + text_height));
     }
-    if (layout.show_frame) {
+    if (layout.show_frame && frame_text) {
         draw_separator();
-        draw_text(frame_text, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        draw_text(*frame_text, ImGui::GetColorU32(ImGuiCol_TextDisabled));
     }
     if (layout.show_dimensions) {
         draw_separator();

@@ -20,6 +20,7 @@
 #include "renderer/d3d11_imgui_viewport_renderer.h"
 #include "renderer/d3d11_renderer.h"
 #include "ui/shell_ui.h"
+#include "ui/top_bar_status_layout.h"
 
 #include <Windows.h>
 #include <imgui.h>
@@ -272,6 +273,9 @@ private:
     ProfileSink::StopReason displayed_profile_stop_reason_ = ProfileSink::StopReason::None;
     ProfileRecordingStatus profile_status_;
     std::uint64_t frame_index_ = 0;
+    // Keep the last valid sample while event-driven rendering is idle.
+    std::optional<TopBarFrameRateSample>
+        application_frame_rate_sample_;
     std::optional<RuntimeResourceWorkload>
         runtime_resource_workload_;
 };

@@ -146,7 +146,9 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"State save retrying", "正在重试保存状态"},
     UiTextEntry{"State warning", "状态警告"},
     UiTextEntry{"State recovered", "状态已恢复"},
-    UiTextEntry{"Frame", "帧"},
+    UiTextEntry{
+        "%.3f ms/frame · %.1f FPS",
+        "%.3f 毫秒/帧 · %.1f FPS"},
     UiTextEntry{"Load failed (click to dismiss):", "加载失败（单击可忽略）："},
     UiTextEntry{"Performance recording", "正在录制性能诊断"},
     UiTextEntry{"Finishing recording...", "正在完成录制…"},

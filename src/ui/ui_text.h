@@ -99,7 +99,7 @@ enum class UiTextId {
     StateSaveRetrying,
     StateWarning,
     StateRecovered,
-    Frame,
+    ApplicationFrameRate,
     LoadFailedDismissHint,
     PerformanceRecording,
     FinishingRecording,

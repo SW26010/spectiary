@@ -1,6 +1,8 @@
 #include "ui/top_bar_status_layout.h"
 
+#include <array>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,13 +24,99 @@ constexpr specforge::TopBarStatusWidths kWidths{
     .separator = 2.0f,
 };
 
+constexpr std::string_view kEnglishFrameRateFormat =
+    "%.3f ms/frame · %.1f FPS";
+constexpr std::string_view kChineseFrameRateFormat =
+    "%.3f 毫秒/帧 · %.1f FPS";
+
+void TestFrameRateSampleGatingAndFormatting()
+{
+    constexpr float kNormalDeltaTime = 1.0f / 60.0f;
+    const auto first_frame = specforge::TryMakeTopBarFrameRateSample(
+        60.0f,
+        kNormalDeltaTime,
+        true);
+    Require(!first_frame, "the first frame should not display a timing sample");
+
+    const auto valid_sample = specforge::TryMakeTopBarFrameRateSample(
+        60.0f,
+        kNormalDeltaTime,
+        false);
+    Require(
+        valid_sample.has_value(),
+        "a normal post-first-frame sample should be accepted");
+
+    const auto english = specforge::FormatTopBarFrameRate(
+        *valid_sample,
+        kEnglishFrameRateFormat);
+    Require(
+        english && *english == "16.667 ms/frame · 60.0 FPS",
+        "valid application frame rate should use the compact English format");
+
+    const auto chinese = specforge::FormatTopBarFrameRate(
+        *valid_sample,
+        kChineseFrameRateFormat);
+    Require(
+        chinese && *chinese == "16.667 毫秒/帧 · 60.0 FPS",
+        "valid application frame rate should use the compact Chinese format");
+}
+
+void TestInvalidAndGapTimingSamplesAreHidden()
+{
+    constexpr float kNormalDeltaTime = 1.0f / 60.0f;
+    const std::array<float, 4> invalid_delta_times{
+        0.0f,
+        -1.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+    };
+    for (const float delta_time : invalid_delta_times) {
+        Require(
+            !specforge::TryMakeTopBarFrameRateSample(
+                60.0f,
+                delta_time,
+                false),
+            "invalid DeltaTime must not produce a timing sample");
+    }
+
+    const auto gap = specforge::TryMakeTopBarFrameRateSample(
+        0.5f,
+        1.0f,
+        false);
+    Require(!gap, "an idle or minimized gap must not become a timing sample");
+
+    Require(
+        !specforge::FormatTopBarFrameRate(
+            specforge::TopBarFrameRateSample{
+                .framerate = 60.0f,
+                .delta_time = 1.0f},
+            kEnglishFrameRateFormat),
+        "a timing gap must not produce status text");
+
+    const auto valid_sample = specforge::TryMakeTopBarFrameRateSample(
+        60.0f,
+        kNormalDeltaTime,
+        false);
+    std::optional<specforge::TopBarFrameRateSample> last_valid_sample =
+        valid_sample;
+    if (gap) {
+        last_valid_sample = gap;
+    }
+    const auto retained = specforge::FormatTopBarFrameRate(
+        *last_valid_sample,
+        kEnglishFrameRateFormat);
+    Require(
+        retained && *retained == "16.667 ms/frame · 60.0 FPS",
+        "a timing gap should retain the last valid sample");
+}
+
 void TestWideBarOmitsInactiveProfileStatus()
 {
     const specforge::TopBarStatusLayout layout =
         specforge::ResolveTopBarStatusLayout(46.0f, kWidths, false, false);
 
     Require(layout.show_operation, "wide bar should show the operation state");
-    Require(layout.show_frame, "wide bar should show the frame counter");
+    Require(layout.show_frame, "wide bar should show the frame-rate indicator");
     Require(layout.show_dimensions, "wide bar should show the client dimensions");
     Require(!layout.show_profile, "wide bar should omit the inactive profile state");
     Require(layout.width == 34.0f, "inactive profile state should consume no status-bar width");
@@ -41,8 +129,21 @@ void TestRoutineStatusDropsLowPriorityDetailsFirst()
 
     Require(layout.show_operation, "routine operation state should remain visible");
     Require(layout.show_dimensions, "dimensions should survive before lower-priority diagnostics");
-    Require(!layout.show_frame, "frame counter should yield before dimensions");
+    Require(!layout.show_frame, "frame-rate indicator should yield before dimensions");
     Require(!layout.show_profile, "inactive profile state should remain omitted");
+}
+
+void TestUnavailableFrameRateDoesNotConsumeWidth()
+{
+    specforge::TopBarStatusWidths widths = kWidths;
+    widths.frame = 0.0f;
+    const specforge::TopBarStatusLayout layout =
+        specforge::ResolveTopBarStatusLayout(46.0f, widths, false, false);
+
+    Require(layout.show_operation, "operation state should remain visible");
+    Require(layout.show_dimensions, "dimensions should remain visible");
+    Require(!layout.show_frame, "unavailable frame rate should be hidden");
+    Require(layout.width == 22.0f, "hidden frame rate should consume no width");
 }
 
 void TestActiveRecordingOutranksRoutineReadyState()
@@ -80,8 +181,11 @@ void TestStatusDisappearsInsteadOfOverlappingMenus()
 int main()
 {
     try {
+        TestFrameRateSampleGatingAndFormatting();
+        TestInvalidAndGapTimingSamplesAreHidden();
         TestWideBarOmitsInactiveProfileStatus();
         TestRoutineStatusDropsLowPriorityDetailsFirst();
+        TestUnavailableFrameRateDoesNotConsumeWidth();
         TestActiveRecordingOutranksRoutineReadyState();
         TestLoadFailureOutranksActiveRecording();
         TestStatusDisappearsInsteadOfOverlappingMenus();

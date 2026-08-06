@@ -258,6 +258,14 @@ void TestShellAndSettingsMappingsAreExact()
             "正在加载源…",
         "top-bar loading status should be localized");
     Require(
+        UiText(UiLanguage::English, UiTextId::ApplicationFrameRate) ==
+                "%.3f ms/frame · %.1f FPS" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::ApplicationFrameRate) ==
+                "%.3f 毫秒/帧 · %.1f FPS",
+        "top-bar frame-rate format should be localized");
+    Require(
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::SpectralLines) == "谱线",

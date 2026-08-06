@@ -4,6 +4,7 @@
 
 仓库当前是 native shell + 多格式真实数据 loader。`specforge_native` 是 Win32 + DirectX 11 executable target，
 用于初始化 Dear ImGui docking、ImPlot、dock host、主图、文件区、信息/标签区、谱线区、状态栏和可选 JSONL profile sink。
+状态栏中的 `ms/frame` 与 `FPS` 使用 ImGui `io.DeltaTime` 的最近有效应用/UI 帧样本，并在首帧或 idle/minimized 间隔时保留最近有效样本；它不是显示器刷新率、合成器扫描输出率或各 viewport 的 `Present` FPS。空闲时不为刷新该数字强制出帧。
 默认启动仍有 small synthetic fixture 用于 smoke test；命令行源路径和 Files 面板 `Add file...` 支持通过 domain snapshot loader 打开 source。
 Files 面板 `Add folder...` 使用 Windows 原生目录选择器添加目录 source，目录本身仍交给 domain snapshot loader 处理。
 当前可绘制的真实数据包括 `.npy` 光谱矩阵、简单波长/流量 `.csv`、可识别的单条 LAMOST/SDSS FITS table 光谱，以及第一层包含 CSV/FITS 文件的 folder collection；受限 image FITS fallback 不作为主支持承诺，catalog/unsupported FITS 由 domain 产出不可绘制的 diagnostic snapshot。

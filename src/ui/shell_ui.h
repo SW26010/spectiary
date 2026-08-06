@@ -52,6 +52,9 @@ struct ShellStatus {
     std::string_view frame_capture_status_result;
     unsigned int client_width = 0;
     unsigned int client_height = 0;
+    // Last valid ImGui application-timing sample, not monitor refresh or Present FPS.
+    float application_framerate = 0.0f;
+    float application_delta_time = 0.0f;
     std::uint64_t frame_index = 0;
 };
 
