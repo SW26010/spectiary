@@ -215,6 +215,12 @@ private:
         std::string matched_name,
         const SpectrumSnapshotHandle& snapshot);
     [[nodiscard]] SampleWorkflowTransitionOutcome StartOrResumeTemporaryLabelingTask();
+    [[nodiscard]] SampleWorkflowTransitionOutcome RecoverTemporaryLabelingTask(
+        std::string source_identity,
+        std::string task_id);
+    [[nodiscard]] SampleWorkflowTransitionOutcome DeleteTemporaryLabelingTask(
+        std::string source_identity,
+        std::string task_id);
     [[nodiscard]] SampleWorkflowTransitionOutcome ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
     [[nodiscard]] SampleWorkflowTransitionOutcome DeleteActiveLabelingTask();

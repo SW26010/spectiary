@@ -96,11 +96,14 @@ to that source collection.
 
 ## Manual Labeling
 
-Manual labeling starts with the source collection's single temporary sample
-labeling task. It has a stable task id, the fixed user-facing name `Temporary
-labeling task`, one sample label set, and workflow choices such as auto-advance
-behavior. Labeling does not ask for a task name when this draft is created or
-resumed.
+Manual labeling normally starts with the source collection's single temporary
+sample labeling draft slot. It has a stable task id, the stable persisted/domain
+name `Temporary labeling task` (localized by the UI according to the selected
+language), one sample label set, and workflow choices such as auto-advance
+behavior. Historical, conflicting, or damaged cache state may still expose
+more than one recovery draft; those rows are handled through the identity-bearing
+recovery list. Labeling does not ask for a task name when this draft is created
+or resumed.
 
 Starting a new temporary sample labeling task should start with every sample
 unlabeled. The initial label result is therefore a one-dimensional array filled
@@ -181,12 +184,17 @@ terms for the task and workflow behind that window.
 The first row of `Labeling` should use one compact task selector rather than
 separate task-name, create/resume, and annotation-drop rows. Its permanent first
 item is `New labeling task` when no temporary draft exists, `Resume labeling
-draft` when a draft is paused, and the selected temporary draft while that draft
-is active. Remaining items are the source collection's formal local labeling
-annotations. The selector itself remains the drag target for compatible rows
+draft` when exactly one draft is paused, and the selected temporary draft while
+that draft is active. When multiple drafts exist, recovery rows carrying their
+source/task identities are the only activation route. Remaining items are the
+source collection's formal local labeling annotations. The selector itself
+remains the drag target for compatible rows
 from `Annotations`. Pause and delete controls belong immediately to the
 selector's right on the same row. Switching through the selector or drag target
 must honor the same pending/failed output-save guard as explicit close.
+The temporary-draft recovery list is rendered below this selector row so the
+primary task control remains the first row of `Labeling`, including when the
+list contains multiple drafts or the dock is narrow.
 
 Pausing or closing a sample labeling task should deactivate the active sample
 labeling task rather than hide the `Labeling` window or delete the task record.
@@ -809,10 +817,12 @@ read-only annotations. Manual classification output in the first editable
 implementation writes numeric label codes only. String task editing and
 compressed label result formats can be added later as explicit export options.
 
-The single temporary sample labeling draft for a source collection protects
+The normal temporary sample labeling draft slot for a source collection protects
 in-progress work before it has been written to a selected output location. It
 should be saved automatically as part of the local task record and kept separate
-from formal sample label results.
+from formal sample label results. Historical, conflicting, or damaged cache
+state may expose multiple recovery drafts; those drafts remain individually
+addressable in the recovery list.
 
 By default, manual labeling should autosave to the local draft. Once the user
 selects an explicit output location, label changes should autosave to that
@@ -830,8 +840,17 @@ position, and other UI recovery state, but should not maintain a competing
 second label result for the same task.
 
 The first implementation should not proactively delete old drafts. Drafts for
-the same labeling context may be overwritten by newer autosaves, but unrelated
-drafts should remain until a future explicit draft-management workflow exists.
+the same labeling context may be overwritten by newer autosaves, while unrelated
+drafts remain available in the temporary-draft recovery list until the user
+chooses `Recover`, `Keep`, or `Delete`. `Recover` and `Delete` use the lease-safe
+controller operations. `Keep` is only a local acknowledgement for the current
+UI session: it remains when the workflow presentation is reset or another
+source is selected, but is cleared if that observed recovery row disappears or
+changes identity/content, and it is not restored after the UI session ends. It
+does not acquire or release a lease, modify the draft, or persist the
+acknowledgement. Each recovery row exposes the source and task identity,
+recovery status, progress, and save state; recovery operations must not silently
+overwrite a formal labeling task.
 
 When the user starts or returns to an editable task, SpecForge should use the
 local task record to restore available internal autosave state. The restored

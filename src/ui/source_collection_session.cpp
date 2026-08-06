@@ -240,6 +240,28 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::StartOrResumeTemporaryLab
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::RecoverTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::RecoverTemporaryLabelingTask;
+    intent.source_identity = std::move(source_identity);
+    intent.task_id = std::move(task_id);
+    return intent;
+}
+
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::DeleteTemporaryLabelingTask(
+    std::string source_identity,
+    std::string task_id)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind = ActiveSampleWorkflowIntentKind::DeleteTemporaryLabelingTask;
+    intent.source_identity = std::move(source_identity);
+    intent.task_id = std::move(task_id);
+    return intent;
+}
+
 ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ActivateLabelingTaskFromAnnotation(
     std::filesystem::path annotation_path)
 {

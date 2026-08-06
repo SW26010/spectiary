@@ -69,6 +69,8 @@ enum class SampleNavigationIntentKind {
 
 enum class ActiveSampleWorkflowIntentKind {
     StartOrResumeTemporaryLabelingTask,
+    RecoverTemporaryLabelingTask,
+    DeleteTemporaryLabelingTask,
     ActivateLabelingTaskFromAnnotation,
     DeleteActiveLabelingTask,
     UpsertActiveLabel,
@@ -144,6 +146,12 @@ private:
 
 struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent StartOrResumeTemporaryLabelingTask();
+    [[nodiscard]] static ActiveSampleWorkflowIntent RecoverTemporaryLabelingTask(
+        std::string source_identity,
+        std::string task_id);
+    [[nodiscard]] static ActiveSampleWorkflowIntent DeleteTemporaryLabelingTask(
+        std::string source_identity,
+        std::string task_id);
     [[nodiscard]] static ActiveSampleWorkflowIntent ActivateLabelingTaskFromAnnotation(
         std::filesystem::path annotation_path);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeleteActiveLabelingTask();
@@ -165,11 +173,14 @@ private:
     friend class SourceCollectionSession;
     friend class SampleWorkflowCoordinator;
     friend struct SourceCollectionSessionIntent;
+    friend struct SourceCollectionPanelUiTestAccess;
 
     ActiveSampleWorkflowIntent() = default;
 
     ActiveSampleWorkflowIntentKind kind = ActiveSampleWorkflowIntentKind::StartOrResumeTemporaryLabelingTask;
     std::filesystem::path path;
+    std::string source_identity;
+    std::string task_id;
     SampleLabelDefinition label;
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;
