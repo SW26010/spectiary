@@ -750,7 +750,7 @@ SettingsPanelUi::ArtifactIdentityForAbout()
                     ArtifactIdentityStatus::Unavailable
                 ? std::chrono::steady_clock::now() +
                     kArtifactIdentityRetryDelay
-                : std::chrono::steady_clock::time_point::max();
+                : (std::chrono::steady_clock::time_point::max)();
     }
 
     if (!artifact_identity_) {

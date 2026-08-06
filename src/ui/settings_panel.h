@@ -195,7 +195,7 @@ private:
         artifact_identity_computation_;
     bool artifact_identity_retry_requested_ = false;
     std::chrono::steady_clock::time_point artifact_identity_retry_at_ =
-        std::chrono::steady_clock::time_point::max();
+        (std::chrono::steady_clock::time_point::max)();
 
     friend struct SettingsPanelUiTestAccess;
 };
