@@ -461,6 +461,17 @@ set_target_properties(
         VS_DEBUGGER_WORKING_DIRECTORY
             "${CMAKE_SOURCE_DIR}"
 )
+add_executable(specforge_automation_launcher_timeout_fixture
+    tests/automation_launcher_timeout_fixture.cpp
+)
+specforge_configure_production_target(
+    specforge_automation_launcher_timeout_fixture
+)
+target_link_libraries(
+    specforge_automation_launcher_timeout_fixture
+    PRIVATE
+        specforge_automation
+)
 add_custom_command(TARGET specforge_native POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf
         "$<TARGET_FILE_DIR:specforge_native>/Legal"
@@ -687,13 +698,17 @@ add_test(
         -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
         -Executable "$<TARGET_FILE:specforge_native>"
         -CleanupFixture "$<TARGET_FILE:specforge_automation_control_tests>"
+        -TimeoutFixture "$<TARGET_FILE:specforge_automation_launcher_timeout_fixture>"
         -StateFixture "$<TARGET_FILE:specforge_automation_state_isolation_tests>"
 )
 set_tests_properties(
     specforge_automation_launcher_integration_tests
     PROPERTIES
         RUN_SERIAL TRUE
-        TIMEOUT 120
+        # This test includes the deterministic fake-GUI deadline fixtures as
+        # well as the real-GUI launcher workflow; retain margin over the
+        # current ~94-second run on the managed desktop.
+        TIMEOUT 180
         LABELS "automation;real-gui"
 )
 add_test(

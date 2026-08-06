@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CleanupFixture,
     [Parameter(Mandatory = $true)]
+    [string]$TimeoutFixture,
+    [Parameter(Mandatory = $true)]
     [string]$StateFixture
 )
 
@@ -289,6 +291,117 @@ function Read-LauncherLine {
             }))
     }
     return [string]$read.Result
+}
+
+function Invoke-LauncherWithInput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LauncherPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AppPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines,
+        [Parameter(Mandatory = $true)]
+        [int]$TimeoutMilliseconds
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $LauncherPath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $utf8WithoutBom =
+        [System.Text.UTF8Encoding]::new($false)
+    $start.StandardOutputEncoding = $utf8WithoutBom
+    $start.StandardErrorEncoding = $utf8WithoutBom
+    $start.Arguments =
+        '--app "' + $AppPath +
+        '" --state-root "' + $Root + '"'
+
+    $process = [System.Diagnostics.Process]::Start($start)
+    $stdoutTask =
+        $process.StandardOutput.ReadToEndAsync()
+    $stderrTask =
+        $process.StandardError.ReadToEndAsync()
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $payload =
+            $utf8WithoutBom.GetBytes(
+                ($Lines -join "`n") + "`n")
+        $inputStream = $process.StandardInput.BaseStream
+        $inputStream.Write(
+            $payload,
+            0,
+            $payload.Length)
+        $inputStream.Flush()
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            $process.Kill()
+            [void]$process.WaitForExit(5000)
+            throw (
+                'Launcher did not exit within the timeout-fixture test budget of ' +
+                $TimeoutMilliseconds + ' ms.')
+        }
+        $stopwatch.Stop()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $output = @()
+        if (-not [string]::IsNullOrEmpty($stdout)) {
+            $output += $stdout -split "`r?`n"
+        }
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            $output += $stderr -split "`r?`n"
+        }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            ElapsedMilliseconds = $stopwatch.ElapsedMilliseconds
+            Output = $output
+        }
+    }
+    finally {
+        $stopwatch.Stop()
+        $process.Dispose()
+    }
+}
+
+function Get-TimeoutFixturePid {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $pidPath = Join-Path $Root 'timeout-fixture.pid'
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $pidPath -PathType Leaf) {
+            return [int](Get-Content -Raw -LiteralPath $pidPath)
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw "Timeout fixture did not publish its PID under $Root."
+}
+
+function Assert-ProcessGoneWithin {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if ($null -eq (
+                Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+            return
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    throw $Message
 }
 
 function Send-InteractiveLauncherRequest {
@@ -1209,6 +1322,8 @@ $resolvedLauncher = (Resolve-Path -LiteralPath $Launcher).Path
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable).Path
 $resolvedCleanupFixture =
     (Resolve-Path -LiteralPath $CleanupFixture).Path
+$resolvedTimeoutFixture =
+    (Resolve-Path -LiteralPath $TimeoutFixture).Path
 $resolvedStateFixture =
     (Resolve-Path -LiteralPath $StateFixture).Path
 
@@ -1244,7 +1359,14 @@ $originalCleanupFixtureEnvironment =
     [System.Environment]::GetEnvironmentVariable(
         $cleanupFixtureEnvironment,
         [System.EnvironmentVariableTarget]::Process)
+$timeoutFixtureEnvironment =
+    'SPECFORGE_AUTOMATION_TIMEOUT_FIXTURE'
+$originalTimeoutFixtureEnvironment =
+    [System.Environment]::GetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        [System.EnvironmentVariableTarget]::Process)
 $bystander = $null
+$timeoutFixtureBudgetMilliseconds = 25000
 
 try {
     [System.IO.Directory]::CreateDirectory(
@@ -4362,10 +4484,264 @@ try {
         -ArgumentList @(
             '-NoProfile',
             '-Command',
-            'Start-Sleep -Seconds 60'
+            'Start-Sleep -Seconds 300'
         ) `
         -WindowStyle Hidden `
         -PassThru
+
+    $helloTimeoutRoot =
+        Join-Path $fixtureParent 'hello-timeout-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'hello-no-response',
+        [System.EnvironmentVariableTarget]::Process)
+    $helloTimeout = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $helloTimeoutRoot `
+        -Lines @('state get') `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $helloFixturePid =
+        Get-TimeoutFixturePid -Root $helloTimeoutRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $helloFixturePid `
+        -Message 'A hello response timeout must terminate the owned fake GUI within the launcher cleanup budget.'
+    Assert-True `
+        -Condition (
+            $helloTimeout.ExitCode -ne 0 -and
+            $helloTimeout.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($helloTimeout.Output -join "`n") -match
+                'Automation hello response timed out after 5 seconds\.' -and
+            (Test-Path `
+                -LiteralPath $helloTimeoutRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $helloTimeoutRoot 'hello-request-observed.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'A missing hello response must fail quickly, retain the state root, and preserve fixture evidence. Output: ' +
+            ($helloTimeout.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Hello timeout cleanup must not affect a non-owned bystander process.'
+
+    $unobservedAcceptanceRoot =
+        Join-Path $fixtureParent 'unobserved-acceptance-timeout-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'no-accepted-no-terminal',
+        [System.EnvironmentVariableTarget]::Process)
+    $unobservedAcceptanceTimeout = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $unobservedAcceptanceRoot `
+        -Lines @('state get') `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $unobservedAcceptanceFixturePid =
+        Get-TimeoutFixturePid -Root $unobservedAcceptanceRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $unobservedAcceptanceFixturePid `
+        -Message 'A sent request without an observed accepted response must terminate the exact owned fake GUI.'
+    Assert-True `
+        -Condition (
+            $unobservedAcceptanceTimeout.ExitCode -ne 0 -and
+            $unobservedAcceptanceTimeout.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($unobservedAcceptanceTimeout.Output -join "`n") -match
+                'Automation command response timed out after 10 seconds; terminal outcome was not observed\.' -and
+            (Test-Path `
+                -LiteralPath $unobservedAcceptanceRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $unobservedAcceptanceRoot 'request-observed.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'A sent command without observed acceptance must still report an ambiguous terminal outcome and retain the state root. Output: ' +
+            ($unobservedAcceptanceTimeout.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Unobserved-acceptance cleanup must not affect a non-owned bystander process.'
+
+    $singleTimeoutRoot =
+        Join-Path $fixtureParent 'single-command-timeout-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'accepted-no-terminal',
+        [System.EnvironmentVariableTarget]::Process)
+    $singleTimeout = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $singleTimeoutRoot `
+        -Lines @('state get') `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $singleFixturePid =
+        Get-TimeoutFixturePid -Root $singleTimeoutRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $singleFixturePid `
+        -Message 'An accepted single-command timeout must terminate the owned fake GUI within the launcher cleanup budget.'
+    Assert-True `
+        -Condition (
+            $singleTimeout.ExitCode -ne 0 -and
+            $singleTimeout.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($singleTimeout.Output -join "`n") -match
+                'Automation command response timed out after 10 seconds; terminal outcome was not observed\.' -and
+            (Test-Path `
+                -LiteralPath $singleTimeoutRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $singleTimeoutRoot 'accepted-request-observed.txt') `
+                -PathType Leaf) -and
+            -not (Test-Path `
+                -LiteralPath (
+                    Join-Path $singleTimeoutRoot 'extra-request-after-accepted.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'An accepted command without a terminal must fail with an ambiguity diagnostic and retain the state root. Output: ' +
+            ($singleTimeout.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Single-command timeout cleanup must not affect a non-owned bystander process.'
+
+    $pipelineTimeoutRoot =
+        Join-Path $fixtureParent 'pipeline-timeout-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'accepted-no-terminal',
+        [System.EnvironmentVariableTarget]::Process)
+    $pipelineTimeout = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $pipelineTimeoutRoot `
+        -Lines @(
+            'pipeline begin'
+            'state get'
+            'pipeline end'
+        ) `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $pipelineFixturePid =
+        Get-TimeoutFixturePid -Root $pipelineTimeoutRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $pipelineFixturePid `
+        -Message 'An accepted pipeline timeout must terminate the owned fake GUI within the launcher cleanup budget.'
+    Assert-True `
+        -Condition (
+            $pipelineTimeout.ExitCode -ne 0 -and
+            $pipelineTimeout.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($pipelineTimeout.Output -join "`n") -match
+                'Automation pipeline response timed out after 10 seconds; terminal outcome was not observed\.' -and
+            (Test-Path `
+                -LiteralPath $pipelineTimeoutRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $pipelineTimeoutRoot 'accepted-request-observed.txt') `
+                -PathType Leaf) -and
+            -not (Test-Path `
+                -LiteralPath (
+                    Join-Path $pipelineTimeoutRoot 'extra-request-after-accepted.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'An accepted pipeline without terminals must fail with an ambiguity diagnostic and retain the state root. Output: ' +
+            ($pipelineTimeout.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Pipeline timeout cleanup must not affect a non-owned bystander process.'
+
+    $pipelineWriteStallRoot =
+        Join-Path $fixtureParent 'pipeline-write-stall-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'pipeline-write-stall',
+        [System.EnvironmentVariableTarget]::Process)
+    $largePipelineValue = 'x' * 5000
+    $pipelineWriteStallLines = @(
+        'pipeline begin'
+        'state get'
+    )
+    foreach ($index in 1..31) {
+        $pipelineWriteStallLines +=
+            'setting set ui.scale ' + $largePipelineValue
+    }
+    $pipelineWriteStallLines += 'pipeline end'
+    $pipelineWriteStall = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $pipelineWriteStallRoot `
+        -Lines $pipelineWriteStallLines `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $pipelineWriteStallFixturePid =
+        Get-TimeoutFixturePid -Root $pipelineWriteStallRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $pipelineWriteStallFixturePid `
+        -Message 'A pipeline write deadline must terminate the exact owned fake GUI after the first request is accepted.'
+    Assert-True `
+        -Condition (
+            $pipelineWriteStall.ExitCode -ne 0 -and
+            $pipelineWriteStall.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($pipelineWriteStall.Output -join "`n") -match
+                'Automation pipeline response timed out after 10 seconds; terminal outcome was not observed\.' -and
+            (Test-Path `
+                -LiteralPath $pipelineWriteStallRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $pipelineWriteStallRoot 'accepted-request-observed.txt') `
+                -PathType Leaf) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $pipelineWriteStallRoot 'pipeline-first-accepted.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'A pipeline write that stalls after the first accepted request must time out with an ambiguity diagnostic and retain the state root. Output: ' +
+            ($pipelineWriteStall.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Pipeline write deadline cleanup must not affect a non-owned bystander process.'
+
+    $eofQuitTimeoutRoot =
+        Join-Path $fixtureParent 'eof-quit-timeout-state'
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        'quit-no-terminal',
+        [System.EnvironmentVariableTarget]::Process)
+    $eofQuitTimeout = Invoke-LauncherWithInput `
+        -LauncherPath $resolvedLauncher `
+        -AppPath $resolvedTimeoutFixture `
+        -Root $eofQuitTimeoutRoot `
+        -Lines @('state get') `
+        -TimeoutMilliseconds $timeoutFixtureBudgetMilliseconds
+    $eofQuitFixturePid =
+        Get-TimeoutFixturePid -Root $eofQuitTimeoutRoot
+    Assert-ProcessGoneWithin `
+        -ProcessId $eofQuitFixturePid `
+        -Message 'A missing implicit app.quit terminal must still clean up the exact owned fake GUI.'
+    Assert-True `
+        -Condition (
+            $eofQuitTimeout.ExitCode -ne 0 -and
+            $eofQuitTimeout.ElapsedMilliseconds -lt $timeoutFixtureBudgetMilliseconds -and
+            [string]($eofQuitTimeout.Output -join "`n") -match
+                'Automation command response ended before terminal outcome was observed\.' -and
+            (Test-Path `
+                -LiteralPath $eofQuitTimeoutRoot `
+                -PathType Container) -and
+            (Test-Path `
+                -LiteralPath (
+                    Join-Path $eofQuitTimeoutRoot 'quit-request-observed.txt') `
+                -PathType Leaf)) `
+        -Message (
+            'A lost implicit app.quit terminal must remain a nonzero, ambiguous result even when the GUI exits 0. Output: ' +
+            ($eofQuitTimeout.Output -join [Environment]::NewLine))
+    $bystander.Refresh()
+    Assert-True `
+        -Condition (-not $bystander.HasExited) `
+        -Message 'Implicit app.quit response cleanup must not affect a non-owned bystander process.'
 
     $pipelineLimitRoot =
         Join-Path $fixtureParent 'pipeline-limit-state'
@@ -4525,6 +4901,10 @@ finally {
     [System.Environment]::SetEnvironmentVariable(
         $cleanupFixtureEnvironment,
         $originalCleanupFixtureEnvironment,
+        [System.EnvironmentVariableTarget]::Process)
+    [System.Environment]::SetEnvironmentVariable(
+        $timeoutFixtureEnvironment,
+        $originalTimeoutFixtureEnvironment,
         [System.EnvironmentVariableTarget]::Process)
     if ($null -ne $bystander) {
         $bystander.Refresh()

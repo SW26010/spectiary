@@ -200,13 +200,36 @@ single-use, including IDs attached to semantic failures, `queue_full`, and
 already full, but the connection stops accepting requests. A caller must never
 retry an accepted mutation or infer its outcome from a reused ID.
 
-There is currently no protocol-level or launcher-owned response deadline. The
-launcher bounds initial pipe connection to 10 seconds, its best-effort normal
-cleanup wait to 5 seconds, and the post-quit GUI process wait to 10 seconds, but
-hello and accepted-command receives wait until a response or disconnect. CTest
-and CI own the hard outer test/suite timeouts and kill-on-close process Job; see
-[Automation CI](automation_ci.md). The missing standalone response bound is
-tracked as [Issue #30](https://github.com/SW26010/SpecForge/issues/30).
+The protocol does not carry a timeout field. The launcher owns these finite
+budgets: initial pipe connection 10 seconds, hello response 5 seconds, and the
+response drain for one command or one pipeline 10 seconds. For a pipeline,
+that absolute deadline starts before its first request is written and covers
+every request write plus the accepted/terminal response drain; a blocked later
+write therefore cannot extend or bypass the budget. The command/pipeline
+budget is one overall deadline for the accepted and terminal responses; an
+`accepted` response does not reset it, and a pipeline's multiple terminal
+responses share the same budget. The `disconnect after accepted` harness
+control uses the same 10-second response budget while waiting for acceptance.
+Normal cleanup waits 5 seconds before forced child termination, and the final
+exact-child process wait is 10 seconds.
+
+When a launcher response deadline expires, the launcher closes the pipe,
+returns nonzero, and emits a stable diagnostic. It never reconnects or retries
+the request. The hello timeout is reported as `Automation hello response timed
+out after 5 seconds.`; command and pipeline timeout diagnostics use
+`Automation <exchange> response timed out after 10 seconds; terminal outcome
+was not observed.`, with `<exchange>` set to `command` or `pipeline`. This
+includes a pipeline write that exhausts the shared budget. After a request has
+been successfully sent, any response wait that
+ends without an authoritative terminal says `terminal outcome was not
+observed`, whether or not the independent `accepted` response reached the
+launcher. The server may already have queued or claimed the request before
+that response was observed, so this is an ambiguity boundary, not a
+cancellation or replay claim. If end-of-input's implicit `app.quit` loses its
+terminal response, that diagnostic is retained after exact-child cleanup and
+the launcher still returns nonzero, even if the GUI exits with code 0. CTest
+and CI still own their hard outer test/suite timeouts and kill-on-close process
+Job; see [Automation CI](automation_ci.md).
 
 Disconnect cancels work that has not claimed execution. Claimed work remains
 owned by the production component and retires from the server only after its
@@ -700,12 +723,14 @@ useful as the files evolve.
 | Execution claims, disconnect, quit sequence barrier, and publication races | `automation_named_pipe.cpp`: `TryClaimExecution`, `TryBeginAppQuit`, `HandleDisconnect`, `TryFinalizeFrameCapture` | `TestExecutionClaimsAndQuitBarrier`, `TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState`, `TestFrameCaptureFinalizationLease` | **Verified.** Unclaimed work cancels; claimed mutations keep factual ownership and terminal ordering. |
 | `wait.idle`, retry ownership, and persistence timing | `specforge_app.cpp`: `ServiceAutomation`, `AutomationBusinessIdle`; production persistence owners under `src/app` and `src/sessions` | `TestIdleWaitIsAnEarlierOnlySequenceBarrier`, `TestIdleWaitStopsLaterBusinessDispatch`, real GUI persistence assertions | **Verified.** The barrier is earlier-sequence-only and does not wait for future debounce/retry deadlines. |
 | Source truth versus live, presented, terminal, and persisted projections | `specforge_app.cpp`: command service/poll methods and `AutomationState`; `automation_state.cpp`: `SerializeAutomationStateBody` | protocol state assertions in `TestProtocolAndStableState`; real GUI source/goto/label/capture/profile/state workflows | **Verified.** See **Source truth, derived observation, and persisted projection**. |
-| Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, blocking send/wait helpers; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | graceful/forced cleanup and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **P2 tracked.** Outer runners are bounded and cleanup is identity-owned, but standalone hello/command receives are not; follow-up is Issue #30. |
+| Timeout, crash ambiguity, exact-child cleanup, and retained diagnostics | `automation_launcher_main.cpp`: `LauncherChildJobGuard`, `LauncherOwnedProcessGuard`, deadline-bound response helpers; `automation_named_pipe.cpp`: `AutomationNamedPipeClient::SendUntil` and `ReceiveUntil`; `run-automation-ci.ps1`: `Invoke-BoundedCTest` | hello-no-response, no-accepted/accepted-command, accepted pipeline, pipeline-write-stall, and EOF app.quit-no-terminal fake GUI/pipe fixture cases, with retained-root and bystander assertions in `automation_launcher_integration_tests.ps1`; CTest/CI timeout properties | **Verified.** Launcher-owned response/write deadlines close the pipe and preserve the existing exact-child handle/Job Object cleanup path; accepted requests remain explicitly outcome-ambiguous and are never retried. |
 | Orderly shutdown, panel rollback, state flush, and writer retirement | `specforge_app.cpp`: run-loop shutdown and `Shutdown`; `automation_panel_command_coordinator.cpp`: `SettleForShutdown` | panel coordinator tests, real HWND shutdown rollback, profile quit-during-stop/recording scenarios | **Verified.** Rollback precedes server stop and local-state flush; normal quit retains production shutdown ownership. |
 
 The 2026-08-06 audit at base commit `4472fad` found no P0 or P1 defect and one
-P2 defect, tracked by Issue #30. The repository wrapper rebuilt the control,
-panel-coordinator, state-isolation, launcher, and native targets successfully.
+P2 defect, tracked by Issue #30. This follow-up closes that audit gap with the
+launcher deadlines and fake-GUI regression described above. The repository
+wrapper rebuilt the control, panel-coordinator, state-isolation, launcher, and
+native targets successfully.
 `ctest -L ci-headless` passed all 5 tests, and the real-GUI
 `specforge_automation_launcher_integration_tests` passed its complete
 launcher-to-GUI workflow.

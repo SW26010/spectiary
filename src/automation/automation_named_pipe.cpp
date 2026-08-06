@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <sstream>
 #include <utility>
@@ -52,6 +53,36 @@ using UniqueHandle =
     std::unique_ptr<void, HandleCloser>;
 using UniqueLocalMemory =
     std::unique_ptr<void, LocalFreeDeleter>;
+
+constexpr auto kOverlappedCancellationDrainTimeout =
+    std::chrono::milliseconds(50);
+
+struct PendingOverlappedRead {
+    HANDLE completed = nullptr;
+    OVERLAPPED overlapped = {};
+    std::vector<char> buffer;
+    DWORD bytes_read = 0;
+
+    ~PendingOverlappedRead()
+    {
+        if (completed != nullptr) {
+            CloseHandle(completed);
+        }
+    }
+};
+
+struct PendingOverlappedWrite {
+    HANDLE completed = nullptr;
+    OVERLAPPED overlapped = {};
+    std::string buffer;
+
+    ~PendingOverlappedWrite()
+    {
+        if (completed != nullptr) {
+            CloseHandle(completed);
+        }
+    }
+};
 
 struct PipeSecurity {
     SECURITY_DESCRIPTOR descriptor = {};
@@ -1175,7 +1206,7 @@ bool AutomationNamedPipeClient::Connect(
         0,
         nullptr,
         OPEN_EXISTING,
-        0,
+        FILE_FLAG_OVERLAPPED,
         nullptr);
     if (pipe_ == INVALID_HANDLE_VALUE) {
         const DWORD error = GetLastError();
@@ -1206,6 +1237,17 @@ bool AutomationNamedPipeClient::Send(
     std::string_view message,
     std::string& error_message)
 {
+    return SendUntil(
+        message,
+        std::chrono::steady_clock::time_point::max(),
+        error_message);
+}
+
+bool AutomationNamedPipeClient::SendUntil(
+    std::string_view message,
+    std::chrono::steady_clock::time_point deadline,
+    std::string& error_message)
+{
     if (!connected()) {
         error_message =
             "Automation client is not connected.";
@@ -1218,17 +1260,134 @@ bool AutomationNamedPipeClient::Send(
             "Automation client message violates max_message_bytes.";
         return false;
     }
-    DWORD bytes_written = 0;
-    if (!WriteFile(
-            pipe_,
-            message.data(),
-            static_cast<DWORD>(message.size()),
-            &bytes_written,
-            nullptr) ||
-        bytes_written != message.size()) {
+
+    const bool bounded =
+        deadline !=
+        std::chrono::steady_clock::time_point::max();
+    if (bounded &&
+        std::chrono::steady_clock::now() >= deadline) {
+        error_message = std::string(
+            kAutomationNamedPipeSendDeadlineExpired);
+        Close();
+        return false;
+    }
+
+    auto write_state =
+        std::make_unique<PendingOverlappedWrite>();
+    write_state->buffer.assign(
+        message.data(),
+        message.size());
+    write_state->completed = CreateEventW(
+        nullptr,
+        TRUE,
+        FALSE,
+        nullptr);
+    if (write_state->completed == nullptr) {
         error_message = Win32ErrorMessage(
-            "WriteFile",
+            "CreateEventW",
             GetLastError());
+        Close();
+        return false;
+    }
+    write_state->overlapped.hEvent =
+        write_state->completed;
+    const BOOL result = WriteFile(
+        pipe_,
+        write_state->buffer.data(),
+        static_cast<DWORD>(write_state->buffer.size()),
+        nullptr,
+        &write_state->overlapped);
+    const DWORD write_error =
+        result ? ERROR_SUCCESS : GetLastError();
+    if (!result && write_error != ERROR_IO_PENDING) {
+        error_message = IsPipeDisconnectError(write_error)
+            ? "Automation server disconnected."
+            : Win32ErrorMessage(
+                  "WriteFile",
+                  write_error);
+        Close();
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining =
+        !bounded
+        ? std::chrono::milliseconds(0)
+        : deadline <= now
+        ? std::chrono::milliseconds(0)
+        : std::chrono::duration_cast<
+              std::chrono::milliseconds>(deadline - now);
+    const DWORD wait_timeout =
+        !bounded
+        ? INFINITE
+        : remaining.count() <= 0
+        ? 0
+        : static_cast<DWORD>(
+              (std::min<std::int64_t>)(
+                  remaining.count(),
+                  static_cast<std::int64_t>(MAXDWORD)));
+    DWORD wait_result = WAIT_OBJECT_0;
+    DWORD wait_error = ERROR_SUCCESS;
+    if (!result) {
+        wait_result = WaitForSingleObject(
+            write_state->completed,
+            wait_timeout);
+        wait_error =
+            wait_result == WAIT_FAILED
+            ? GetLastError()
+            : ERROR_SUCCESS;
+    }
+
+    if (wait_result == WAIT_TIMEOUT ||
+        wait_result == WAIT_FAILED) {
+        (void)CancelIoEx(
+            pipe_,
+            &write_state->overlapped);
+        Close();
+        const DWORD drain_result = WaitForSingleObject(
+            write_state->completed,
+            static_cast<DWORD>(
+                kOverlappedCancellationDrainTimeout.count()));
+        if (drain_result != WAIT_OBJECT_0) {
+            // The OVERLAPPED structure and its buffer must remain alive until
+            // Windows completes the canceled operation. This is an abnormal
+            // launcher-timeout path; retaining the single operation until
+            // process exit is preferable to an unbounded wait or use-after-
+            // free after the exact-child cleanup continues.
+            (void)write_state.release();
+        }
+    }
+
+    if (wait_result == WAIT_TIMEOUT) {
+        error_message = std::string(
+            kAutomationNamedPipeSendDeadlineExpired);
+        return false;
+    }
+    if (wait_result == WAIT_FAILED) {
+        error_message = Win32ErrorMessage(
+            "WaitForSingleObject",
+            wait_error);
+        return false;
+    }
+
+    DWORD bytes_written = 0;
+    if (!GetOverlappedResult(
+            pipe_,
+            &write_state->overlapped,
+            &bytes_written,
+            FALSE)) {
+        const DWORD io_error = GetLastError();
+        error_message = IsPipeDisconnectError(io_error)
+            ? "Automation server disconnected."
+            : Win32ErrorMessage(
+                  "GetOverlappedResult",
+                  io_error);
+        Close();
+        return false;
+    }
+    if (bytes_written != message.size()) {
+        error_message =
+            "Automation client write was incomplete.";
         Close();
         return false;
     }
@@ -1239,22 +1398,63 @@ bool AutomationNamedPipeClient::Receive(
     std::string& message,
     std::string& error_message)
 {
+    return ReceiveUntil(
+        message,
+        std::chrono::steady_clock::time_point::max(),
+        error_message);
+}
+
+bool AutomationNamedPipeClient::ReceiveUntil(
+    std::string& message,
+    std::chrono::steady_clock::time_point deadline,
+    std::string& error_message)
+{
     if (!connected()) {
         error_message =
             "Automation client is not connected.";
         return false;
     }
-    std::vector<char> buffer(
+
+    const bool bounded =
+        deadline !=
+        std::chrono::steady_clock::time_point::max();
+    if (bounded &&
+        std::chrono::steady_clock::now() >= deadline) {
+        error_message = std::string(
+            kAutomationNamedPipeReceiveDeadlineExpired);
+        Close();
+        return false;
+    }
+
+    auto read_state =
+        std::make_unique<PendingOverlappedRead>();
+    read_state->buffer.resize(
         kAutomationMaxMessageBytes + 1U);
-    DWORD bytes_read = 0;
+    read_state->completed = CreateEventW(
+        nullptr,
+        TRUE,
+        FALSE,
+        nullptr);
+    if (read_state->completed == nullptr) {
+        error_message = Win32ErrorMessage(
+            "CreateEventW",
+            GetLastError());
+        Close();
+        return false;
+    }
+    read_state->overlapped.hEvent =
+        read_state->completed;
+
     const BOOL result = ReadFile(
         pipe_,
-        buffer.data(),
-        static_cast<DWORD>(buffer.size()),
-        &bytes_read,
-        nullptr);
-    if (!result) {
-        const DWORD error = GetLastError();
+        read_state->buffer.data(),
+        static_cast<DWORD>(read_state->buffer.size()),
+        nullptr,
+        &read_state->overlapped);
+    const DWORD read_error =
+        result ? ERROR_SUCCESS : GetLastError();
+    if (!result && read_error != ERROR_IO_PENDING) {
+        const DWORD error = read_error;
         error_message = IsPipeDisconnectError(error)
             ? "Automation server disconnected."
             : Win32ErrorMessage(
@@ -1263,7 +1463,82 @@ bool AutomationNamedPipeClient::Receive(
         Close();
         return false;
     }
-    if (bytes_read >
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining =
+        !bounded
+        ? std::chrono::milliseconds(0)
+        : deadline <= now
+        ? std::chrono::milliseconds(0)
+        : std::chrono::duration_cast<
+              std::chrono::milliseconds>(deadline - now);
+    const DWORD wait_timeout =
+        !bounded
+        ? INFINITE
+        : remaining.count() <= 0
+        ? 0
+        : static_cast<DWORD>(
+              (std::min<std::int64_t>)(
+                  remaining.count(),
+                  static_cast<std::int64_t>(MAXDWORD)));
+    DWORD wait_result = WAIT_OBJECT_0;
+    DWORD wait_error = ERROR_SUCCESS;
+    if (!result) {
+        wait_result = WaitForSingleObject(
+            read_state->completed,
+            wait_timeout);
+        wait_error =
+            wait_result == WAIT_FAILED
+            ? GetLastError()
+            : ERROR_SUCCESS;
+    }
+
+    if (wait_result == WAIT_TIMEOUT ||
+        wait_result == WAIT_FAILED) {
+        (void)CancelIoEx(
+            pipe_,
+            &read_state->overlapped);
+        Close();
+        const DWORD drain_result = WaitForSingleObject(
+            read_state->completed,
+            static_cast<DWORD>(
+                kOverlappedCancellationDrainTimeout.count()));
+        if (drain_result != WAIT_OBJECT_0) {
+            // The OVERLAPPED structure and its buffer must remain alive until
+            // Windows completes the canceled operation. This is an abnormal
+            // launcher-timeout path; retaining the single operation until
+            // process exit is preferable to an unbounded wait or use-after-
+            // free after the exact-child cleanup continues.
+            (void)read_state.release();
+        }
+    }
+
+    if (wait_result == WAIT_TIMEOUT) {
+        error_message = std::string(
+            kAutomationNamedPipeReceiveDeadlineExpired);
+        return false;
+    }
+    if (wait_result == WAIT_FAILED) {
+        error_message = Win32ErrorMessage(
+            "WaitForSingleObject",
+            wait_error);
+        return false;
+    }
+    if (!GetOverlappedResult(
+            pipe_,
+            &read_state->overlapped,
+            &read_state->bytes_read,
+            FALSE)) {
+        const DWORD error = GetLastError();
+        error_message = IsPipeDisconnectError(error)
+            ? "Automation server disconnected."
+            : Win32ErrorMessage(
+                  "GetOverlappedResult",
+                  error);
+        Close();
+        return false;
+    }
+    if (read_state->bytes_read >
         kAutomationMaxMessageBytes) {
         error_message =
             "Automation server response exceeded max_message_bytes.";
@@ -1271,8 +1546,8 @@ bool AutomationNamedPipeClient::Receive(
         return false;
     }
     message.assign(
-        buffer.data(),
-        static_cast<std::size_t>(bytes_read));
+        read_state->buffer.data(),
+        static_cast<std::size_t>(read_state->bytes_read));
     return true;
 }
 

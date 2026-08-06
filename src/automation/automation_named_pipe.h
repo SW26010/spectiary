@@ -19,6 +19,13 @@
 
 namespace specforge {
 
+inline constexpr std::string_view
+    kAutomationNamedPipeReceiveDeadlineExpired =
+        "Automation response deadline expired.";
+inline constexpr std::string_view
+    kAutomationNamedPipeSendDeadlineExpired =
+        "Automation request send deadline expired.";
+
 struct AutomationNamedPipeServerTestAccess;
 
 struct AutomationQueuedCommand {
@@ -188,8 +195,16 @@ public:
     [[nodiscard]] bool Send(
         std::string_view message,
         std::string& error_message);
+    [[nodiscard]] bool SendUntil(
+        std::string_view message,
+        std::chrono::steady_clock::time_point deadline,
+        std::string& error_message);
     [[nodiscard]] bool Receive(
         std::string& message,
+        std::string& error_message);
+    [[nodiscard]] bool ReceiveUntil(
+        std::string& message,
+        std::chrono::steady_clock::time_point deadline,
         std::string& error_message);
     void Close();
 

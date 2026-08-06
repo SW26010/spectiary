@@ -68,6 +68,50 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+bool WriteOverlappedPipeMessage(
+    HANDLE pipe,
+    std::string_view message)
+{
+    HANDLE completed = CreateEventW(
+        nullptr,
+        TRUE,
+        FALSE,
+        nullptr);
+    if (completed == nullptr) {
+        return false;
+    }
+
+    OVERLAPPED overlapped = {};
+    overlapped.hEvent = completed;
+    const BOOL result = WriteFile(
+        pipe,
+        message.data(),
+        static_cast<DWORD>(message.size()),
+        nullptr,
+        &overlapped);
+    if (!result) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_IO_PENDING ||
+            WaitForSingleObject(
+                completed,
+                INFINITE) != WAIT_OBJECT_0) {
+            CloseHandle(completed);
+            return false;
+        }
+    }
+
+    DWORD bytes_written = 0;
+    const bool complete =
+        GetOverlappedResult(
+            pipe,
+            &overlapped,
+            &bytes_written,
+            FALSE) != FALSE;
+    CloseHandle(completed);
+    return complete &&
+        bytes_written == message.size();
+}
+
 std::string UniqueInstanceId()
 {
     static std::atomic_uint32_t counter = 0;
@@ -2134,16 +2178,12 @@ void TestQueueCapacityVersionAndDisconnect()
             specforge::kAutomationMaxMessageBytes +
                 1U,
             'x');
-        DWORD bytes_written = 0;
         Require(
-            WriteFile(
+            WriteOverlappedPipeMessage(
                 client.native_handle(),
-                oversized.data(),
-                static_cast<DWORD>(
-                    oversized.size()),
-                &bytes_written,
-                nullptr) != FALSE &&
-                bytes_written == oversized.size(),
+                std::string_view(
+                    oversized.data(),
+                    oversized.size())),
             "oversized raw pipe message should reach the server boundary");
         const auto too_large =
             ReceiveParsed(client);
@@ -2281,17 +2321,10 @@ void TestPreHandshakeJsonNestingIsBounded()
             specforge::kAutomationMaxMessageBytes,
         "deep JSON fixture must remain within max_message_bytes");
 
-    DWORD bytes_written = 0;
     Require(
-        WriteFile(
+        WriteOverlappedPipeMessage(
             client.native_handle(),
-            deeply_nested_json.data(),
-            static_cast<DWORD>(
-                deeply_nested_json.size()),
-            &bytes_written,
-            nullptr) != FALSE &&
-            bytes_written ==
-                deeply_nested_json.size(),
+            deeply_nested_json),
         "deep raw pipe message should reach the pre-handshake parser");
 
     const auto response = ReceiveParsed(client);

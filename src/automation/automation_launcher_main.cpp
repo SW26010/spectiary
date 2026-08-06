@@ -31,6 +31,33 @@ namespace {
 
 using namespace std::chrono_literals;
 
+constexpr auto kLauncherConnectTimeout = 10s;
+constexpr auto kLauncherHelloResponseTimeout = 5s;
+constexpr auto kLauncherCommandResponseTimeout = 10s;
+constexpr auto kLauncherNormalCleanupTimeout = 5s;
+constexpr auto kLauncherProcessExitTimeout = 10s;
+
+std::string ResponseWaitFailure(
+    std::string_view exchange,
+    std::string_view receive_error)
+{
+    if (receive_error ==
+            specforge::
+                kAutomationNamedPipeReceiveDeadlineExpired ||
+        receive_error ==
+            specforge::
+                kAutomationNamedPipeSendDeadlineExpired) {
+        std::ostringstream message;
+        message << "Automation " << exchange
+                << " response timed out after "
+                << kLauncherCommandResponseTimeout.count()
+                << " seconds; terminal outcome was not observed.";
+        return message.str();
+    }
+    return "Automation " + std::string(exchange) +
+        " response ended before terminal outcome was observed.";
+}
+
 struct LauncherOptions {
     std::filesystem::path app_path;
     std::optional<std::filesystem::path> state_root;
@@ -989,11 +1016,19 @@ bool SendCommandAndWait(
     }
 
     bool accepted = false;
+    const auto response_deadline =
+        std::chrono::steady_clock::now() +
+        kLauncherCommandResponseTimeout;
     for (;;) {
         std::string response;
-        if (!client.Receive(
+        if (!client.ReceiveUntil(
                 response,
+                response_deadline,
                 error_message)) {
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "command",
+                error_message);
             return false;
         }
         std::cout << response << '\n'
@@ -1007,6 +1042,10 @@ bool SendCommandAndWait(
                 parsed.error_message.empty()
                 ? "Received a response for the wrong request."
                 : parsed.error_message;
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "command",
+                error_message);
             return false;
         }
         if (parsed.message->status == "accepted") {
@@ -1054,19 +1093,32 @@ bool SendPipelineAndWait(
     };
     std::unordered_map<std::string, RequestState>
         requests;
+    std::size_t sent_count = 0;
+    const auto response_deadline =
+        std::chrono::steady_clock::now() +
+        kLauncherCommandResponseTimeout;
     for (const HumanCommand& command : commands) {
         const std::string request_id =
             "request-" +
             std::to_string(request_number++);
-        if (!client.Send(
-                specforge::
-                    SerializeAutomationCommandRequest(
-                        request_id,
-                        command.kind,
-                        command.parameters),
+        const std::string request =
+            specforge::SerializeAutomationCommandRequest(
+                request_id,
+                command.kind,
+                command.parameters);
+        if (!client.SendUntil(
+                request,
+                response_deadline,
                 error_message)) {
+            if (sent_count != 0) {
+                client.Close();
+                error_message = ResponseWaitFailure(
+                    "pipeline",
+                    error_message);
+            }
             return false;
         }
+        ++sent_count;
         requests.emplace(
             request_id,
             RequestState{});
@@ -1075,9 +1127,14 @@ bool SendPipelineAndWait(
     std::size_t terminal_count = 0;
     while (terminal_count < requests.size()) {
         std::string response;
-        if (!client.Receive(
+        if (!client.ReceiveUntil(
                 response,
+                response_deadline,
                 error_message)) {
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "pipeline",
+                error_message);
             return false;
         }
         std::cout << response << '\n'
@@ -1088,6 +1145,10 @@ bool SendPipelineAndWait(
         if (!parsed.message) {
             error_message =
                 parsed.error_message;
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "pipeline",
+                error_message);
             return false;
         }
         auto state = requests.find(
@@ -1095,6 +1156,10 @@ bool SendPipelineAndWait(
         if (state == requests.end()) {
             error_message =
                 "Received a pipeline response for an unknown request.";
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "pipeline",
+                error_message);
             return false;
         }
         if (parsed.message->status == "accepted") {
@@ -1102,6 +1167,10 @@ bool SendPipelineAndWait(
                 state->second.terminal) {
                 error_message =
                     "Received a duplicate or late accepted response.";
+                client.Close();
+                error_message = ResponseWaitFailure(
+                    "pipeline",
+                    error_message);
                 return false;
             }
             state->second.accepted = true;
@@ -1116,6 +1185,10 @@ bool SendPipelineAndWait(
                  "canceled")) {
             error_message =
                 "Received an invalid pipeline terminal response.";
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "pipeline",
+                error_message);
             return false;
         }
         state->second.terminal = true;
@@ -1142,11 +1215,19 @@ bool SendCommandAndDisconnectAfterAccepted(
             error_message)) {
         return false;
     }
+    const auto response_deadline =
+        std::chrono::steady_clock::now() +
+        kLauncherCommandResponseTimeout;
     for (;;) {
         std::string response;
-        if (!client.Receive(
+        if (!client.ReceiveUntil(
                 response,
+                response_deadline,
                 error_message)) {
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "disconnect-after-accepted",
+                error_message);
             return false;
         }
         std::cout << response << '\n'
@@ -1160,6 +1241,10 @@ bool SendCommandAndDisconnectAfterAccepted(
                 parsed.error_message.empty()
                 ? "Received a response for the wrong disconnect request."
                 : parsed.error_message;
+            client.Close();
+            error_message = ResponseWaitFailure(
+                "disconnect-after-accepted",
+                error_message);
             return false;
         }
         if (parsed.message->status == "accepted") {
@@ -1293,7 +1378,10 @@ public:
             graceful_wait_exhausted_ = true;
             error_message =
                 wait_result == WAIT_TIMEOUT
-                ? "SpecForge did not complete normal shutdown within 10 seconds."
+                ? "SpecForge did not complete normal shutdown within " +
+                    std::to_string(
+                        kLauncherProcessExitTimeout.count()) +
+                    " seconds."
                 : "Could not wait for the SpecForge automation process.";
             return false;
         }
@@ -1337,7 +1425,9 @@ private:
             exited =
                 WaitForSingleObject(
                     process_,
-                    5000) == WAIT_OBJECT_0;
+                    static_cast<DWORD>(
+                        kLauncherNormalCleanupTimeout.count() *
+                        1000)) == WAIT_OBJECT_0;
         }
 
         client_.Close();
@@ -1563,7 +1653,8 @@ int wmain(int argc, wchar_t** argv)
         process.hProcess,
         client);
     const auto connect_deadline =
-        std::chrono::steady_clock::now() + 10s;
+        std::chrono::steady_clock::now() +
+        kLauncherConnectTimeout;
     while (!client.connected() &&
            std::chrono::steady_clock::now() <
                connect_deadline) {
@@ -1601,9 +1692,23 @@ int wmain(int argc, wchar_t** argv)
         return 2;
     }
     std::string hello_response;
-    if (!client.Receive(
+    const auto hello_response_deadline =
+        std::chrono::steady_clock::now() +
+        kLauncherHelloResponseTimeout;
+    if (!client.ReceiveUntil(
             hello_response,
+            hello_response_deadline,
             error_message)) {
+        client.Close();
+        if (error_message ==
+            specforge::
+                kAutomationNamedPipeReceiveDeadlineExpired) {
+            error_message =
+                "Automation hello response timed out after " +
+                std::to_string(
+                    kLauncherHelloResponseTimeout.count()) +
+                " seconds.";
+        }
         std::cerr << error_message << '\n';
         return 2;
     }
@@ -1815,6 +1920,7 @@ int wmain(int argc, wchar_t** argv)
         return 0;
     }
 
+    std::optional<std::string> shutdown_error;
     if (!app_quit_sent && client.connected()) {
         if (SendCommandAndWait(
                 client,
@@ -1824,15 +1930,27 @@ int wmain(int argc, wchar_t** argv)
                 error_message)) {
             app_quit_sent = true;
             child_process.MarkNormalQuitRequested();
+        } else {
+            shutdown_error = error_message;
+            client.Close();
         }
     }
 
     DWORD exit_code = 0;
     if (!child_process.WaitForExit(
-            10000,
+            static_cast<DWORD>(
+                kLauncherProcessExitTimeout.count() *
+                1000),
             exit_code,
             error_message)) {
+        if (shutdown_error) {
+            std::cerr << *shutdown_error << '\n';
+        }
         std::cerr << error_message << '\n';
+        return 2;
+    }
+    if (shutdown_error) {
+        std::cerr << *shutdown_error << '\n';
         return 2;
     }
     return static_cast<int>(exit_code);
