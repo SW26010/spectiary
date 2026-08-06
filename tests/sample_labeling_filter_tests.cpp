@@ -6419,6 +6419,228 @@ void TestTemporarySlotLeaseSerializesDifferentTaskIds()
         "temporary-slot serialization should leave exactly one persisted draft");
 }
 
+void TestActiveTemporaryDraftCanRecoverAnotherDraftWithSharedSlot()
+{
+    const auto write_fixture = [](
+                                    const std::filesystem::path& cache_path) {
+        specforge::SampleLabelingStateCache cache;
+        specforge::SampleLabelingSourceState source;
+        source.sample_count = 3;
+        source.active_task_id = "draft-a";
+        specforge::SampleLabelingTask active =
+            specforge::CreateSampleLabelingTask(
+                "draft-a",
+                "Draft A",
+                3);
+        specforge::SampleLabelingTask paused =
+            specforge::CreateSampleLabelingTask(
+                "draft-b",
+                "Draft B",
+                3);
+        specforge::MarkSampleLabelTaskPersisted(
+            active,
+            specforge::SampleLabelSaveStateKind::InternalDraftOnly);
+        specforge::MarkSampleLabelTaskPersisted(
+            paused,
+            specforge::SampleLabelSaveStateKind::InternalDraftOnly);
+        source.tasks = {
+            std::move(active),
+            std::move(paused)};
+        cache.sources.emplace(
+            "shared-source",
+            std::move(source));
+        Require(
+            specforge::SaveSampleLabelingStateCache(
+                cache_path,
+                cache),
+            "shared temporary-slot fixture should save two drafts");
+    };
+
+    {
+        const std::filesystem::path directory =
+            FreshTestDirectory(
+                "specforge_labeling_active_temporary_recover_shared_slot");
+        const std::filesystem::path cache_path =
+            directory / "sample-labeling-tasks.json";
+        write_fixture(cache_path);
+        specforge::SampleLabelingController controller(cache_path);
+        controller.ActivateSource("shared-source", 3);
+        Require(
+            ActiveTask(controller) != nullptr &&
+                ActiveTask(controller)->task_id == "draft-a",
+            "shared temporary-slot recovery fixture should activate draft A");
+        const specforge::SampleLabelingOperationResult recovered =
+            controller.RecoverTemporaryTask(
+                "shared-source",
+                "draft-b");
+        Require(
+            recovered.accepted &&
+                ActiveTask(controller) != nullptr &&
+                ActiveTask(controller)->task_id == "draft-b",
+            "recovering paused draft B should reuse active draft A's temporary slot lease");
+    }
+
+    {
+        const std::filesystem::path directory =
+            FreshTestDirectory(
+                "specforge_labeling_active_temporary_delete_shared_slot");
+        const std::filesystem::path cache_path =
+            directory / "sample-labeling-tasks.json";
+        write_fixture(cache_path);
+        specforge::SampleLabelingController controller(cache_path);
+        controller.ActivateSource("shared-source", 3);
+        Require(
+            ActiveTask(controller) != nullptr &&
+                ActiveTask(controller)->task_id == "draft-a",
+            "shared temporary-slot deletion fixture should activate draft A");
+
+        const specforge::SampleLabelingOperationResult deleted =
+            controller.DeleteTemporaryTask(
+                "shared-source",
+                "draft-b");
+        const std::vector<specforge::SampleLabelingTask>* tasks =
+            ActiveSourceTasks(controller);
+        Require(
+            deleted.accepted &&
+                deleted.state_saved &&
+                ActiveTask(controller) != nullptr &&
+                ActiveTask(controller)->task_id == "draft-a" &&
+                tasks != nullptr &&
+                tasks->size() == 1 &&
+                tasks->front().task_id == "draft-a",
+            "deleting paused draft B should borrow A's slot and leave A active");
+    }
+
+    {
+        const std::filesystem::path directory =
+            FreshTestDirectory(
+                "specforge_labeling_active_temporary_recover_shared_slot_pending");
+        const std::filesystem::path cache_path =
+            directory / "sample-labeling-tasks.json";
+        write_fixture(cache_path);
+        specforge::SampleLabelingController recovering(cache_path);
+        specforge::SampleLabelingController observer(cache_path);
+        recovering.ActivateSource("shared-source", 3);
+        observer.ActivateSource("shared-source", 3);
+        Require(
+            ActiveTask(recovering) != nullptr &&
+                ActiveTask(recovering)->task_id == "draft-a",
+            "pending shared-slot recovery fixture should activate draft A");
+
+        specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+            specforge::TryAcquireExclusiveFileLease(
+                specforge::SampleLabelingStateCoordinationDirectory(
+                    cache_path) /
+                "cache-commit.lock");
+        Require(
+            blocked_commit.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+            "pending shared-slot recovery fixture should hold the cache commit lock");
+
+        const specforge::SampleLabelingOperationResult recovered =
+            recovering.RecoverTemporaryTask(
+                "shared-source",
+                "draft-b");
+        Require(
+            recovered.accepted &&
+                !recovered.state_saved &&
+                ActiveTask(recovering) != nullptr &&
+                ActiveTask(recovering)->task_id == "draft-b",
+            "recovering draft B should remain locally active when selection persistence is blocked");
+        Require(
+            !observer.ActivateTask("draft-a").accepted &&
+                observer.ActivateTask("draft-b").issue ==
+                    specforge::SampleLabelingOperationResult::Issue::
+                        EditLeaseUnavailable,
+            "a failed shared-slot recovery must retain both the deferred old identity and new active lease");
+
+        blocked_commit.lease.Reset();
+        Require(
+            recovering.FlushStateCache(),
+            "shared-slot recovery leases should be releasable after the selection patch can commit");
+        Require(
+            recovering.DeactivateActiveTask().state_saved,
+            "the recovered draft should release its transferred slot after persistence");
+        observer.ActivateSource("shared-source", 3);
+        Require(
+            observer.ActivateTask("draft-a").accepted,
+            "the old draft identity and shared slot should both be reusable after recovery completes");
+    }
+
+    {
+        const std::filesystem::path directory =
+            FreshTestDirectory(
+                "specforge_labeling_active_temporary_delete_shared_slot_pending");
+        const std::filesystem::path cache_path =
+            directory / "sample-labeling-tasks.json";
+        write_fixture(cache_path);
+        specforge::SampleLabelingController deleting(cache_path);
+        specforge::SampleLabelingController observer(cache_path);
+        deleting.ActivateSource("shared-source", 3);
+        observer.ActivateSource("shared-source", 3);
+        Require(
+            ActiveTask(deleting) != nullptr &&
+                ActiveTask(deleting)->task_id == "draft-a",
+            "pending shared-slot deletion fixture should activate draft A");
+
+        specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+            specforge::TryAcquireExclusiveFileLease(
+                specforge::SampleLabelingStateCoordinationDirectory(
+                    cache_path) /
+                "cache-commit.lock");
+        Require(
+            blocked_commit.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+            "pending shared-slot deletion fixture should hold the cache commit lock");
+
+        const specforge::SampleLabelingOperationResult deleted =
+            deleting.DeleteTemporaryTask(
+                "shared-source",
+                "draft-b");
+        const std::vector<specforge::SampleLabelingTask>* tasks =
+            ActiveSourceTasks(deleting);
+        Require(
+            deleted.accepted &&
+                !deleted.state_saved &&
+                ActiveTask(deleting) != nullptr &&
+                ActiveTask(deleting)->task_id == "draft-a" &&
+                tasks != nullptr &&
+                tasks->size() == 1 &&
+                tasks->front().task_id == "draft-a" &&
+                observer.ActivateTask("draft-b").issue ==
+                    specforge::SampleLabelingOperationResult::Issue::
+                        EditLeaseUnavailable,
+            "a failed deletion must retain the deleted draft identity while leaving A's slot active");
+
+        blocked_commit.lease.Reset();
+        Require(
+            deleting.FlushStateCache(),
+            "the pending draft tombstone should commit after the cache lock is released");
+        const specforge::SampleLabelingStateCacheLoadResult loaded =
+            specforge::LoadSampleLabelingStateCache(cache_path);
+        Require(
+            FindTask(
+                loaded.cache,
+                "shared-source",
+                "draft-b") == nullptr,
+            "the shared-slot deletion retry should persist B's tombstone");
+        observer.ActivateSource("shared-source", 3);
+        Require(
+            !observer.ActivateTask("draft-b").accepted &&
+                observer.ActivateTask("draft-a").issue ==
+                    specforge::SampleLabelingOperationResult::Issue::
+                        EditLeaseUnavailable,
+            "after deletion commits, B must stay absent while A retains the shared slot");
+        Require(
+            deleting.DeactivateActiveTask().state_saved,
+            "the active draft should release the shared slot after the deletion retry");
+        observer.ActivateSource("shared-source", 3);
+        Require(
+            observer.ActivateTask("draft-a").accepted,
+            "the remaining draft should become reusable after its owner releases the slot");
+    }
+}
+
 void TestTaskDeletionMergesWithAnotherInstanceUpsert()
 {
     const std::filesystem::path directory =
@@ -6825,6 +7047,7 @@ int main(int argc, char* argv[])
         TestMissingTaskRefreshRemovesGhostAndRestartsDraft();
         TestRecoveryViewExpiresLeaseConflictAfterTrustedRefresh();
         TestTemporarySlotLeaseSerializesDifferentTaskIds();
+        TestActiveTemporaryDraftCanRecoverAnotherDraftWithSharedSlot();
         TestTaskDeletionMergesWithAnotherInstanceUpsert();
         TestOrdinaryTaskSavePreservesLatestExplicitSelection();
         TestTargetLeaseIsReleasedAfterProcessTermination();

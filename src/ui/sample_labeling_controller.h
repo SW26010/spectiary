@@ -260,6 +260,7 @@ private:
         TaskEditLeaseSet leases;
         SampleLabelingStateCache latest_cache;
         std::optional<SampleLabelingTask> task;
+        bool reuses_active_temporary_slot = false;
         ExclusiveFileLeaseAcquireStatus lease_status =
             ExclusiveFileLeaseAcquireStatus::Failed;
         TaskRefreshStatus refresh_status =
@@ -351,7 +352,8 @@ private:
             std::string_view source_identity,
             const SampleLabelingTask& known_task,
             std::size_t sample_count,
-            bool reuse_deferred_lease);
+            bool reuse_deferred_lease,
+            bool reuse_active_temporary_slot);
     [[nodiscard]] SampleLabelingOperationResult
         ActivateTaskWithExpectation(
             std::string_view task_id,
@@ -387,6 +389,8 @@ private:
         std::string_view task_id) const;
     void AdoptActiveTaskLeases(
         TaskEditLeaseSet leases);
+    void TransferActiveTemporarySlotLease(
+        TaskEditLeaseSet& leases);
     void TransitionActiveTaskLeases(
         TaskEditLeaseSet leases,
         bool pending_patch_saved);

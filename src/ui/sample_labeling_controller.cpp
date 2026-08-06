@@ -1174,6 +1174,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
             *active_source_identity_,
             task,
             state->sample_count,
+            false,
             false);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
@@ -1438,6 +1439,7 @@ SampleLabelingController::DeleteTemporaryTask(
             source_identity,
             *match,
             state->sample_count,
+            true,
             true);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
@@ -1557,6 +1559,7 @@ SampleLabelingController::ActivateTaskWithExpectation(
             *active_source_identity_,
             *match,
             state->sample_count,
+            true,
             true);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
@@ -1630,6 +1633,10 @@ SampleLabelingController::ActivateTaskWithExpectation(
         task_projection_changed
             ? TaskProjectionEffect::Changed
             : TaskProjectionEffect::Unchanged);
+    if (preparation.reuses_active_temporary_slot) {
+        TransferActiveTemporarySlotLease(
+            preparation.leases);
+    }
     TransitionActiveTaskLeases(
         std::move(preparation.leases),
         result.state_saved);
@@ -2509,6 +2516,7 @@ bool SampleLabelingController::TryRetryOutputSaves()
                     identity,
                     task,
                     state.sample_count,
+                    false,
                     false);
                 if (preparation.lease_status !=
                     ExclusiveFileLeaseAcquireStatus::Acquired) {
@@ -2604,7 +2612,8 @@ SampleLabelingController::PrepareTaskActivation(
     std::string_view source_identity,
     const SampleLabelingTask& known_task,
     std::size_t sample_count,
-    bool reuse_deferred_lease)
+    bool reuse_deferred_lease,
+    bool reuse_active_temporary_slot)
 {
     TaskActivationPreparation preparation;
     const std::string task_identity_key =
@@ -2616,6 +2625,24 @@ SampleLabelingController::PrepareTaskActivation(
             "labeling task identity is empty";
         return preparation;
     }
+
+    const SampleLabelingTask* active_task =
+        ActiveTask();
+    const std::string temporary_slot_key =
+        TemporarySlotEditLeaseKey(source_identity);
+    const bool can_reuse_active_temporary_slot =
+        reuse_active_temporary_slot &&
+        !known_task.output_path &&
+        !state_cache_path_.empty() &&
+        active_source_identity_ &&
+        *active_source_identity_ == source_identity &&
+        active_task != nullptr &&
+        !active_task->output_path &&
+        active_task_leases_.temporary_slot_key ==
+            temporary_slot_key &&
+        active_task_leases_.temporary_slot.Held();
+    preparation.reuses_active_temporary_slot =
+        can_reuse_active_temporary_slot;
 
     auto deferred =
         deferred_task_leases_.end();
@@ -2667,19 +2694,21 @@ SampleLabelingController::PrepareTaskActivation(
             preparation.leases.task_identity =
                 std::move(identity_lease.component);
         }
-        ExclusiveFileLeaseAcquireResult temporary_slot_lease =
-            TryAttachTemporarySlotLease(
-                *working_leases,
-                source_identity,
-                known_task);
-        if (temporary_slot_lease.status !=
-            ExclusiveFileLeaseAcquireStatus::Acquired) {
-            preparation.lease_status =
-                temporary_slot_lease.status;
-            preparation.error =
-                std::move(
-                    temporary_slot_lease.error);
-            return preparation;
+        if (!preparation.reuses_active_temporary_slot) {
+            ExclusiveFileLeaseAcquireResult temporary_slot_lease =
+                TryAttachTemporarySlotLease(
+                    *working_leases,
+                    source_identity,
+                    known_task);
+            if (temporary_slot_lease.status !=
+                ExclusiveFileLeaseAcquireStatus::Acquired) {
+                preparation.lease_status =
+                    temporary_slot_lease.status;
+                preparation.error =
+                    std::move(
+                        temporary_slot_lease.error);
+                return preparation;
+            }
         }
     } else {
         preparation.lease_status =
@@ -2761,19 +2790,21 @@ SampleLabelingController::PrepareTaskActivation(
         return preparation;
     }
 
-    ExclusiveFileLeaseAcquireResult temporary_slot_lease =
-        TryAttachTemporarySlotLease(
-            *working_leases,
-            source_identity,
-            *structural_task);
-    if (temporary_slot_lease.status !=
-        ExclusiveFileLeaseAcquireStatus::Acquired) {
-        preparation.lease_status =
-            temporary_slot_lease.status;
-        preparation.error =
-            std::move(
-                temporary_slot_lease.error);
-        return preparation;
+    if (!preparation.reuses_active_temporary_slot) {
+        ExclusiveFileLeaseAcquireResult temporary_slot_lease =
+            TryAttachTemporarySlotLease(
+                *working_leases,
+                source_identity,
+                *structural_task);
+        if (temporary_slot_lease.status !=
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            preparation.lease_status =
+                temporary_slot_lease.status;
+            preparation.error =
+                std::move(
+                    temporary_slot_lease.error);
+            return preparation;
+        }
     }
 
     ExclusiveFileLeaseAcquireResult output_lease =
@@ -3389,6 +3420,15 @@ void SampleLabelingController::AdoptActiveTaskLeases(
     active_task_leases_ = std::move(leases);
 }
 
+void SampleLabelingController::TransferActiveTemporarySlotLease(
+    TaskEditLeaseSet& leases)
+{
+    leases.temporary_slot =
+        std::move(active_task_leases_.temporary_slot);
+    leases.temporary_slot_key =
+        std::move(active_task_leases_.temporary_slot_key);
+}
+
 void SampleLabelingController::TransitionActiveTaskLeases(
     TaskEditLeaseSet leases,
     bool pending_patch_saved)
@@ -3492,6 +3532,7 @@ bool SampleLabelingController::RestoreActiveTaskLease()
             *active_source_identity_,
             *active,
             state->sample_count,
+            true,
             true);
     if (preparation.lease_status !=
             ExclusiveFileLeaseAcquireStatus::Acquired ||
@@ -3561,6 +3602,10 @@ bool SampleLabelingController::RestoreActiveTaskLease()
     ClearRecoveryTaskTrust(
         *active_source_identity_,
         active->task_id);
+    if (preparation.reuses_active_temporary_slot) {
+        TransferActiveTemporarySlotLease(
+            preparation.leases);
+    }
     AdoptActiveTaskLeases(
         std::move(preparation.leases));
     if (active_source_identity_) {
