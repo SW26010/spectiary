@@ -12,9 +12,11 @@
 #include <shellapi.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cstdio>
 #include <cstdint>
 #include <optional>
@@ -93,8 +95,52 @@ void RenderEmbeddedLegalDocument(
         maximum_size);
     ImGui::SetNextWindowPos(
         popup_position,
-        ImGuiCond_Always,
+        ImGuiCond_Appearing,
         ImVec2(0.5f, 0.5f));
+
+    // Keep an already-open modal reachable when its host viewport shrinks.
+    // Only submit a position when clamping is required so normal dragging
+    // remains under Dear ImGui's control.
+    if (ImGuiWindow* existing_popup =
+            ImGui::FindWindowByName(popup_label.c_str());
+        existing_popup != nullptr && existing_popup->WasActive) {
+        const ImVec2 popup_size_current(
+            std::clamp(
+                existing_popup->SizeFull.x,
+                minimum_size.x,
+                maximum_size.x),
+            std::clamp(
+                existing_popup->SizeFull.y,
+                minimum_size.y,
+                maximum_size.y));
+        const ImVec2 popup_min_position(
+            viewport->WorkPos.x + viewport_margin.x,
+            viewport->WorkPos.y + viewport_margin.y);
+        const ImVec2 popup_max_position(
+            std::max(
+                popup_min_position.x,
+                viewport->WorkPos.x + viewport->WorkSize.x -
+                    viewport_margin.x - popup_size_current.x),
+            std::max(
+                popup_min_position.y,
+                viewport->WorkPos.y + viewport->WorkSize.y -
+                    viewport_margin.y - popup_size_current.y));
+        const ImVec2 popup_position_clamped(
+            std::clamp(
+                existing_popup->Pos.x,
+                popup_min_position.x,
+                popup_max_position.x),
+            std::clamp(
+                existing_popup->Pos.y,
+                popup_min_position.y,
+                popup_max_position.y));
+        if (popup_position_clamped.x != existing_popup->Pos.x ||
+            popup_position_clamped.y != existing_popup->Pos.y) {
+            ImGui::SetNextWindowPos(
+                popup_position_clamped,
+                ImGuiCond_Always);
+        }
+    }
     ImGui::SetNextWindowViewport(viewport->ID);
     bool popup_open = true;
     if (!ImGui::BeginPopupModal(
@@ -128,7 +174,7 @@ void RenderEmbeddedLegalDocument(
             "##EmbeddedLegalDocumentContent",
             selectable_content.data(),
             selectable_content.size() + 1,
-            ImVec2(0.0f, -footer_height),
+            ImVec2(-FLT_MIN, -footer_height),
             ImGuiInputTextFlags_ReadOnly |
                 ImGuiInputTextFlags_WordWrap);
     }

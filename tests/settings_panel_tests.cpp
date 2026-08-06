@@ -6,6 +6,7 @@
 #include <imgui_internal.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -319,9 +320,11 @@ struct LegalRenderObservation {
     bool popup_fits_viewport = false;
     ImVec2 popup_position;
     ImVec2 popup_size;
+    float popup_content_width = 0.0f;
     ImVec2 viewport_work_position;
     ImVec2 viewport_work_size;
     ImVec2 document_content_center;
+    float document_content_width = 0.0f;
     bool document_content_found = false;
     bool document_content_hovered = false;
     bool document_text_active = false;
@@ -339,12 +342,26 @@ struct LegalRenderObservation {
 LegalRenderObservation RenderLegalFrame(
     specforge::SettingsPanelUi& panel,
     const LegalDocumentUiFixture& fixture,
-    ImVec2 display_size = ImVec2(700.0f, 500.0f))
+    ImVec2 display_size = ImVec2(700.0f, 500.0f),
+    std::optional<ImVec2> popup_size_override = std::nullopt,
+    std::optional<ImVec2> popup_position_override = std::nullopt)
 {
     ImGuiIO& io = ImGui::GetIO();
     io.DeltaTime = 1.0f / 60.0f;
     io.DisplaySize = display_size;
     ImGui::NewFrame();
+    if (popup_size_override.has_value()) {
+        ImGui::SetWindowSize(
+            fixture.popup_label,
+            *popup_size_override,
+            ImGuiCond_Always);
+    }
+    if (popup_position_override.has_value()) {
+        ImGui::SetWindowPos(
+            fixture.popup_label,
+            *popup_position_override,
+            ImGuiCond_Always);
+    }
     specforge::ApplicationSettingsView settings =
         MakeSettingsView();
     settings.ui_scale_percentage = 150;
@@ -388,6 +405,8 @@ LegalRenderObservation RenderLegalFrame(
 
         observation.popup_position = popup_window->Pos;
         observation.popup_size = popup_window->Size;
+        observation.popup_content_width =
+            popup_window->WorkRect.GetWidth();
         observation.viewport_work_position =
             popup_window->Viewport->WorkPos;
         observation.viewport_work_size =
@@ -428,6 +447,7 @@ LegalRenderObservation RenderLegalFrame(
                     ImVec2(
                         window->Pos.x + window->Size.x * 0.5f,
                         window->Pos.y + window->Size.y * 0.5f);
+                observation.document_content_width = window->Size.x;
                 observation.document_content_found = true;
                 observation.document_content_hovered =
                     GImGui->HoveredWindow == window;
@@ -2130,6 +2150,86 @@ void TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale()
     }
 }
 
+void TestOpenLegalPopupTracksUserResize()
+{
+    ScopedImGuiContext imgui;
+    ImGui::GetStyle().FontScaleMain = 1.5f;
+
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    panel.Open();
+
+    constexpr ImVec2 viewport(1200.0f, 800.0f);
+    const LegalDocumentUiFixture& fixture =
+        kLegalDocumentUiFixtures[0];
+    LegalRenderObservation observation =
+        RenderLegalFrame(panel, fixture, viewport);
+    observation =
+        RenderLegalFrame(panel, fixture, viewport);
+    ImGui::ActivateItemByID(observation.entry_id);
+    observation =
+        RenderLegalFrame(panel, fixture, viewport);
+    observation =
+        RenderLegalFrame(panel, fixture, viewport);
+    Require(
+        observation.popup_open,
+        "the resize fixture should begin with an open Legal popup");
+    Require(
+        observation.popup_size.x <
+            observation.viewport_work_size.x * 0.95f,
+        "a new Legal popup should keep a moderate default width");
+
+    constexpr float resized_popup_width = 760.0f;
+    constexpr float resized_popup_height = 360.0f;
+    const ImVec2 resized_popup_size(
+        resized_popup_width,
+        resized_popup_height);
+    const ImVec2 resized_popup_position(140.0f, 90.0f);
+    observation = RenderLegalFrame(
+        panel,
+        fixture,
+        viewport,
+        resized_popup_size,
+        resized_popup_position);
+    observation = RenderLegalFrame(
+        panel,
+        fixture,
+        viewport,
+        resized_popup_size,
+        resized_popup_position);
+    constexpr float width_tolerance = 1.0f;
+    Require(
+        observation.popup_open &&
+            std::abs(
+                observation.popup_size.x - resized_popup_width) <=
+                width_tolerance &&
+            std::abs(
+                observation.popup_size.y - resized_popup_height) <=
+                width_tolerance,
+        "a Legal popup should preserve user-resized width and height");
+    Require(
+        std::abs(
+            observation.popup_position.x - resized_popup_position.x) <=
+                width_tolerance &&
+            std::abs(
+                observation.popup_position.y - resized_popup_position.y) <=
+                width_tolerance,
+        "a Legal popup should preserve a user-dragged position");
+    Require(
+        observation.document_content_found &&
+            std::abs(
+                observation.document_content_width -
+                observation.popup_content_width) <=
+                width_tolerance,
+        "a resized Legal document body should match the popup content width");
+
+    ImGui::ActivateItemByID(observation.bottom_close_id);
+    (void)RenderLegalFrame(panel, fixture, viewport);
+    (void)RenderLegalFrame(panel, fixture, viewport);
+}
+
 void TestOpenLegalPopupTracksViewportShrink()
 {
     ScopedImGuiContext imgui;
@@ -2142,6 +2242,7 @@ void TestOpenLegalPopupTracksViewportShrink()
     panel.Open();
 
     constexpr ImVec2 large_viewport(1200.0f, 800.0f);
+    constexpr ImVec2 small_viewport(700.0f, 500.0f);
     const LegalDocumentUiFixture& fixture =
         kLegalDocumentUiFixtures[0];
     LegalRenderObservation observation =
@@ -2155,12 +2256,12 @@ void TestOpenLegalPopupTracksViewportShrink()
         RenderLegalFrame(panel, fixture, large_viewport);
     Require(
         observation.popup_open &&
-            (observation.popup_size.x > 700.0f ||
-             observation.popup_size.y > 500.0f),
-        "the shrink fixture should begin with a Legal popup larger than 700x500");
+            (observation.popup_size.x > small_viewport.x ||
+             observation.popup_size.y > small_viewport.y),
+        "the shrink fixture should begin with a Legal popup larger than the target viewport");
 
-    observation = RenderLegalFrame(panel, fixture);
-    observation = RenderLegalFrame(panel, fixture);
+    observation = RenderLegalFrame(panel, fixture, small_viewport);
+    observation = RenderLegalFrame(panel, fixture, small_viewport);
     if (!observation.popup_open ||
         !observation.popup_fits_viewport) {
         std::cerr
@@ -2178,11 +2279,19 @@ void TestOpenLegalPopupTracksViewportShrink()
     Require(
         observation.popup_open &&
             observation.popup_fits_viewport,
-        "an open Legal popup should immediately follow a viewport shrink");
+        "an open Legal popup should remain visible after a viewport shrink");
+    constexpr float width_tolerance = 1.0f;
+    Require(
+        observation.document_content_found &&
+            std::abs(
+                observation.document_content_width -
+                observation.popup_content_width) <=
+                width_tolerance,
+        "a shrunk Legal document body should match the popup content width");
 
     ImGui::ActivateItemByID(observation.bottom_close_id);
-    (void)RenderLegalFrame(panel, fixture);
-    (void)RenderLegalFrame(panel, fixture);
+    (void)RenderLegalFrame(panel, fixture, small_viewport);
+    (void)RenderLegalFrame(panel, fixture, small_viewport);
 }
 
 }  // namespace
@@ -2212,6 +2321,7 @@ int main()
     TestSettingsWindowMinimumSizeTracksUiScale();
     TestSettingsWindowConstraintsFollowCurrentViewport();
     TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale();
+    TestOpenLegalPopupTracksUserResize();
     TestOpenLegalPopupTracksViewportShrink();
     std::cout << "settings panel tests passed\n";
     return 0;
