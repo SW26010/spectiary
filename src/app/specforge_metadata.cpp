@@ -330,8 +330,6 @@ bool IsSchemaAllowedForRequirement(
             schema_version == kSchema4Version ||
             schema_version == metadata_contract::kSchema5Version;
     case MetadataSchemaRequirement::CurrentFilename:
-        // Production builds still emit schema 4 until the finalizer work
-        // lands, while the canonical filename also carries schema 5.
         return schema_version == kSchema4Version ||
             schema_version == metadata_contract::kSchema5Version;
     case MetadataSchemaRequirement::LegacyFilename:

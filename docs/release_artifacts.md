@@ -89,15 +89,16 @@ Finalization occurs after `specforge_native` links and its post-build commands
 run. The `specforge_metadata` target declares the executable-adjacent sidecar
 as a byproduct, depends on the native executable and finalizer tool, and runs a
 freshness check. That check proves
-the sidecar is schema 5, has a completion timestamp, names `SpecForge.exe`,
-and records the current EXE hash;
-if the sidecar is missing, invalid, has a non-5 schema, lacks a non-empty
-completion timestamp, names a non-canonical artifact, or records a hash that
-does not match the current EXE, it invokes the finalizer again. A timestamp-only
-edit that leaves those identity checks valid is intentionally preserved by a
-CMake no-op; the CTest regression verifies that it does not rewrite the sidecar
-or alter the EXE. Release automation builds this target so an up-to-date EXE
-cannot cause an identity-invalid or stale sidecar to be silently accepted. The CTest
+performs exactly four identity checks: `schema_version` is 5,
+`build.completed_at_utc` is present and non-empty, `artifact.file` is exactly
+`SpecForge.exe`, and `artifact.sha256` matches the current EXE hash. A missing
+or invalid sidecar, or any failed identity check, invokes the finalizer again.
+A timestamp-only edit that leaves those checks valid is intentionally preserved
+by a CMake no-op; the CTest regression verifies that it does not rewrite the
+sidecar or alter the EXE. This freshness check is not the complete strict
+schema/package validation performed by packaging and runtime. Release
+automation builds this target so an up-to-date EXE cannot cause an
+identity-invalid or stale sidecar to be silently accepted. The CTest
 metadata build regression removes only the EXE to force one real
 relink/finalization, then runs a second real no-op build; it verifies the
 executable hash is unchanged by a metadata timestamp change and that the no-op
