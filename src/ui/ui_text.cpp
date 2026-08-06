@@ -443,6 +443,12 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Panel visibility", "面板可见性"},
     UiTextEntry{"Add file...", "添加文件…"},
     UiTextEntry{"Add folder...", "添加文件夹…"},
+    UiTextEntry{
+        "Open in New SpecForge Instance",
+        "在新 SpecForge 实例打开"},
+    UiTextEntry{
+        "Could not open the source in a new SpecForge instance.",
+        "无法在新的 SpecForge 实例中打开源。"},
     UiTextEntry{"source", "个源"},
     UiTextEntry{"sources", "个源"},
     UiTextEntry{

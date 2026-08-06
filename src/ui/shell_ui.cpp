@@ -1,6 +1,7 @@
 #include "ui/shell_ui.h"
 
 #include "app/runtime_paths.h"
+#include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
@@ -2449,6 +2450,15 @@ void ShellUi::RenderFilesPanel(
         },
         [this](const std::filesystem::path& path) {
             OpenSource(path);
+        },
+        [this](const std::filesystem::path& path)
+            -> std::optional<std::string> {
+            const CurrentExecutableLaunchResult result =
+                LaunchCurrentExecutableWithSource(path);
+            if (result.succeeded()) {
+                return std::nullopt;
+            }
+            return result.diagnostic;
         });
     HandleSessionAction(
         panel_session_interaction_.TakeAction());

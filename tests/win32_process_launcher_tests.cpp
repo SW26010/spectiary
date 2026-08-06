@@ -1,6 +1,9 @@
+#include "app/initial_source.h"
 #include "app/runtime_paths.h"
+#include "automation/automation_startup.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
+#include "ui/shell_ui.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -12,11 +15,23 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+
+namespace specforge {
+
+struct ShellUiTestAccess {
+    static void Drain(ShellUi& shell)
+    {
+        shell.DrainSourceLoads();
+    }
+};
+
+}  // namespace specforge
 
 namespace {
 
@@ -95,6 +110,32 @@ public:
 
 private:
     std::filesystem::path path_;
+};
+
+class ScopedCurrentDirectory {
+public:
+    explicit ScopedCurrentDirectory(
+        const std::filesystem::path& path)
+    {
+        std::error_code error;
+        previous_ = std::filesystem::current_path(error);
+        Require(!error, "launcher test current directory should be readable");
+        std::filesystem::current_path(path, error);
+        Require(!error, "launcher test current directory should be set");
+    }
+
+    ~ScopedCurrentDirectory()
+    {
+        std::error_code ignored;
+        std::filesystem::current_path(previous_, ignored);
+    }
+
+    ScopedCurrentDirectory(const ScopedCurrentDirectory&) = delete;
+    ScopedCurrentDirectory& operator=(
+        const ScopedCurrentDirectory&) = delete;
+
+private:
+    std::filesystem::path previous_;
 };
 
 class ScopedEnvironmentVariable {
@@ -224,7 +265,9 @@ void WriteFixture(const std::filesystem::path& path)
 {
     std::ofstream output(path, std::ios::binary);
     Require(output.good(), "launcher source fixture should be writable");
-    output << "fixture\n";
+    output << "wav,loglam,flux\n"
+           << "5001,3.1,2\n"
+           << "5000,3.0,1\n";
 }
 
 void TestLaunchCurrentExecutableWithSource(
@@ -252,23 +295,34 @@ void TestLaunchCurrentExecutableWithSource(
             "launch result should report the current executable path");
     }
 
-    const std::string expected = PathText(source_path);
+    std::error_code absolute_error;
+    const std::filesystem::path expected_source_path =
+        source_path.is_absolute()
+        ? source_path
+        : std::filesystem::absolute(
+              source_path,
+              absolute_error);
+    Require(
+        !absolute_error,
+        "launcher test source path should resolve absolutely");
+    const std::string expected = PathText(expected_source_path);
     Require(
         WaitForFileContents(marker_path, expected, 5s),
-        "launched child should receive the exact Unicode source path");
+        "the production startup loader should activate the exact Unicode source path");
 }
 
 void TestFileAndDirectorySources()
 {
     TemporaryDirectory temporary;
     const std::filesystem::path file_path =
-        temporary.path() / L"source file 文件.npy";
+        temporary.path() / L"source file 文件.csv";
     WriteFixture(file_path);
     const std::filesystem::path directory_path =
         temporary.path() / L"source folder 目录";
     std::error_code directory_error;
     std::filesystem::create_directories(directory_path, directory_error);
     Require(!directory_error, "directory source fixture should be created");
+    WriteFixture(directory_path / L"spectrum file.csv");
 
     TestLaunchCurrentExecutableWithSource(
         file_path,
@@ -276,6 +330,18 @@ void TestFileAndDirectorySources()
     TestLaunchCurrentExecutableWithSource(
         directory_path,
         temporary.path() / L"observed directory path 目录.txt");
+
+    const std::filesystem::path leading_dash_file =
+        temporary.path() / L"-source file 文件.csv";
+    WriteFixture(leading_dash_file);
+    {
+        ScopedCurrentDirectory current_directory(
+            temporary.path());
+        TestLaunchCurrentExecutableWithSource(
+            leading_dash_file.filename(),
+            temporary.path() /
+                L"observed leading dash path 文件.txt");
+    }
 }
 
 void TestInvalidSourceIsStructured()
@@ -297,7 +363,7 @@ void TestProcessCreationFailureIsStructured()
     const std::filesystem::path executable_path =
         temporary.path() / L"missing executable 不存在.exe";
     const std::filesystem::path source_path =
-        temporary.path() / L"source file 文件.npy";
+        temporary.path() / L"source file 文件.csv";
     const specforge::CurrentExecutableLaunchResult result =
         specforge::LaunchExecutableWithSource(
             executable_path,
@@ -328,17 +394,67 @@ int RunChildIfRequested(int argc, wchar_t** argv)
         return 2;
     }
 
-    std::ofstream output(*marker, std::ios::binary | std::ios::trunc);
-    if (!output) {
+    const specforge::SpecForgeCommandLine command_line =
+        specforge::ParseCurrentProcessSpecForgeCommandLine();
+    if (!command_line.error_message.empty() ||
+        !command_line.initial_source ||
+        command_line.initial_source->wstring() != argv[1]) {
         return 3;
     }
-    const std::string source_text =
-        specforge::WideToUtf8(argv[1]);
-    if (source_text.empty()) {
-        return 4;
+
+    try {
+        const std::filesystem::path production_executable =
+            specforge::CurrentExecutablePath().parent_path() /
+            L"SpecForge.exe";
+        if (!std::filesystem::is_regular_file(
+                production_executable)) {
+            return 4;
+        }
+
+        specforge::RuntimePathInputs inputs =
+            specforge::CurrentProcessRuntimePathInputs(
+                production_executable);
+        inputs.local_user_state_root_override =
+            marker->parent_path() / L"startup loader state";
+        const specforge::SpecForgeStartup startup =
+            specforge::PrepareSpecForgeStartup(std::move(inputs));
+        specforge::ShellUi shell(startup);
+        specforge::OpenInitialSource(
+            shell,
+            command_line.initial_source);
+
+        const auto deadline =
+            std::chrono::steady_clock::now() + 5s;
+        while (std::chrono::steady_clock::now() < deadline) {
+            specforge::ShellUiTestAccess::Drain(shell);
+            const specforge::ShellRuntimeResourceObservation observation =
+                shell.runtime_resource_observation();
+            if (observation.idle()) {
+                const specforge::SpectrumSnapshotHandle snapshot =
+                    shell.current_snapshot();
+                if (!snapshot ||
+                    snapshot->source.path !=
+                        *command_line.initial_source) {
+                    return 5;
+                }
+
+                std::ofstream output(
+                    *marker,
+                    std::ios::binary | std::ios::trunc);
+                if (!output) {
+                    return 6;
+                }
+                output << PathText(snapshot->source.path);
+                return output.good() ? 0 : 7;
+            }
+            std::this_thread::sleep_for(10ms);
+        }
+    } catch (const std::exception&) {
+        return 8;
+    } catch (...) {
+        return 9;
     }
-    output << source_text;
-    return output.good() ? 0 : 5;
+    return 10;
 }
 
 }  // namespace

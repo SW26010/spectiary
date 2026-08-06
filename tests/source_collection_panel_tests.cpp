@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,6 +37,25 @@ struct SourceCollectionPanelUiTestAccess {
     MoveRequest(const SourceCollectionSessionIntent& intent)
     {
         return intent.sample_navigation.request;
+    }
+
+    [[nodiscard]] static const std::optional<std::string>&
+    SourceLaunchError(const SourceCollectionPanelUi& panel)
+    {
+        return panel.source_launch_error_;
+    }
+
+    [[nodiscard]] static const std::optional<std::array<float, 4>>&
+    FirstSourceContextCellRect(
+        const SourceCollectionPanelUi& panel)
+    {
+        return panel.first_source_context_cell_rect_;
+    }
+
+    [[nodiscard]] static const std::optional<std::array<float, 4>>&
+    SourceContextActionRect(const SourceCollectionPanelUi& panel)
+    {
+        return panel.source_context_action_rect_;
     }
 };
 
@@ -123,6 +144,9 @@ void TestFilesPanelAddFileForwardsCsvToInAppOpener()
             },
             [&](const std::filesystem::path& path) {
                 opened_path = path;
+            },
+            [](const std::filesystem::path&) -> std::optional<std::string> {
+                return std::nullopt;
             });
         ImGui::EndFrame();
     };
@@ -164,6 +188,415 @@ void TestFilesPanelAddFileForwardsCsvToInAppOpener()
             choose_folder_count == 0 &&
             opened_path == selected_path,
         "Files panel Add file should forward the selected CSV to its source opener");
+}
+
+ImVec2 RectCenter(const std::array<float, 4>& rect)
+{
+    return ImVec2(
+        (rect[0] + rect[2]) * 0.5f,
+        (rect[1] + rect[3]) * 0.5f);
+}
+
+void TestReopenableSourcePathEligibility()
+{
+    Require(
+        !specforge::IsReopenableSourcePath({}),
+        "an empty source path must not be reopenable");
+    Require(
+        specforge::IsReopenableSourcePath(
+            std::filesystem::path{L"relative folder\\观测 file.npy"}),
+        "relative filesystem source paths should be reopenable");
+    Require(
+        specforge::IsReopenableSourcePath(
+            std::filesystem::path{L"C:\\观测 data\\source file.npy"}),
+        "Unicode and space-containing filesystem source paths should be reopenable");
+
+    const std::filesystem::path::string_type invalid_native{
+        L"source\0path",
+        11};
+    Require(
+        !specforge::IsReopenableSourcePath(
+            std::filesystem::path{invalid_native}),
+        "a source path containing an embedded NUL must not be reopenable");
+}
+
+void TestFilesPanelContextActionLaunchesWithoutMutatingSession()
+{
+    ScopedImGuiContext context;
+    const std::filesystem::path source_path =
+        std::filesystem::path{L"C:\\观测 data\\source file.npy"};
+    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    snapshot->source.path = source_path;
+    snapshot->source.display_name = "source file";
+    snapshot->collection.spectrum_count = 4;
+    snapshot->collection.current_index = 2;
+
+    specforge::SourceCollectionSessionView view;
+    view.snapshot = snapshot;
+    view.current_sample_snapshot = snapshot;
+    view.sources = {
+        {
+            source_path,
+            "source file",
+            std::string{"npy"},
+            specforge::SourceCollectionSourceState::Loaded,
+        },
+    };
+    view.current_source_index = 0;
+    view.navigation.has_active_source = true;
+    view.navigation.current_index = 2;
+    view.navigation.current_source_row = 2;
+    view.navigation.sample_count = 4;
+    view.labeling.has_active_source = true;
+    view.labeling.source_identity = "source identity";
+    view.sorting.has_active_source = true;
+    view.sorting.active_source_id = "source identity";
+    const specforge::SourceCollectionSessionView before = view;
+
+    int submit_count = 0;
+    int launch_count = 0;
+    std::optional<std::filesystem::path> launched_path;
+    specforge::PanelSessionInteraction interaction(
+        [&](specforge::SourceCollectionSessionIntent,
+            std::optional<specforge::NavigationLatencyInputKind>) {
+            ++submit_count;
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    specforge::SourceCollectionPanelUi panel;
+    bool open = true;
+    const specforge::SourceCollectionPathLauncher launch_source =
+        [&](const std::filesystem::path& path)
+        -> std::optional<std::string> {
+        ++launch_count;
+        launched_path = path;
+        return std::string{"test process creation failure"};
+    };
+
+    const auto render_frame = [&]() {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DeltaTime = 1.0f / 60.0f;
+        io.DisplaySize = ImVec2(900.0f, 700.0f);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(
+            ImVec2(20.0f, 20.0f),
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(700.0f, 500.0f),
+            ImGuiCond_Always);
+        panel.RenderFiles(
+            interaction,
+            specforge::UiLanguage::English,
+            &open,
+            []() -> std::optional<std::filesystem::path> {
+                return std::nullopt;
+            },
+            []() -> std::optional<std::filesystem::path> {
+                return std::nullopt;
+            },
+            [](const std::filesystem::path&) {},
+            launch_source);
+        ImGui::EndFrame();
+    };
+
+    render_frame();
+    ImGuiWindow* files_window = ImGui::FindWindowByName(
+        specforge::SourceCollectionPanelUi::FilesWindowName());
+    Require(
+        files_window != nullptr,
+        "Files panel should render its window for the context-menu test");
+
+    const auto source_context_cell =
+        specforge::SourceCollectionPanelUiTestAccess::
+            FirstSourceContextCellRect(panel);
+    Require(
+        source_context_cell.has_value(),
+        "Files panel should expose the rendered type-cell rectangle for its context menu");
+    const ImVec2 source_context_position =
+        RectCenter(*source_context_cell);
+    ImGui::GetIO().AddMousePosEvent(
+        source_context_position.x,
+        source_context_position.y);
+    render_frame();
+    Require(
+        GImGui->HoveredWindow == files_window,
+        "the rendered type-cell rectangle should target the Files panel");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        false);
+    render_frame();
+    render_frame();
+    Require(
+        ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
+        "right-clicking a source row should open its context menu");
+    ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
+    Require(
+        popup != nullptr,
+        "source context menu should expose a popup window");
+
+    const auto action_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            SourceContextActionRect(panel);
+    Require(
+        action_rect.has_value(),
+        "source context menu should expose the rendered action rectangle");
+    const ImVec2 action_position = RectCenter(*action_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        action_position.x,
+        action_position.y);
+    render_frame();
+    Require(
+        GImGui->HoveredWindow == popup &&
+            GImGui->HoveredId != 0 &&
+            !GImGui->HoveredIdIsDisabled,
+        "the eligible source context menu action should be enabled before activation");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    render_frame();
+    Require(
+        launch_count == 1 && launched_path == source_path,
+        "activating the source context menu should launch the selected filesystem path");
+    Require(
+        submit_count == 0,
+        "opening a source in a new instance must not submit a session action");
+    Require(
+        view.snapshot == before.snapshot &&
+            view.current_sample_snapshot == before.current_sample_snapshot &&
+            view.current_source_index == before.current_source_index &&
+            view.navigation.current_index == before.navigation.current_index &&
+            view.navigation.current_source_row == before.navigation.current_source_row &&
+            view.labeling.source_identity == before.labeling.source_identity &&
+            view.sorting.active_source_id == before.sorting.active_source_id,
+        "the original source, selection, and workflow state must remain unchanged");
+    const specforge::SourceCollectionSessionAction pending_action =
+        interaction.TakeAction();
+    Require(
+        !pending_action.source_roster_changed &&
+            !pending_action.snapshot_changed &&
+            !pending_action.workflow_changed &&
+            !pending_action.navigation_inputs_changed &&
+            !interaction.PendingAction().source_roster_changed &&
+            !interaction.PendingAction().snapshot_changed &&
+            !interaction.PendingAction().workflow_changed &&
+            !interaction.PendingAction().navigation_inputs_changed,
+        "opening a source in a new instance must not change pending session state");
+    Require(
+        specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) &&
+            *specforge::SourceCollectionPanelUiTestAccess::SourceLaunchError(panel) ==
+                "test process creation failure",
+        "a launcher failure should remain visible as a Files-panel diagnostic");
+}
+
+void TestFilesPanelContextActionIsDisabledForIneligiblePath()
+{
+    ScopedImGuiContext context;
+    const std::filesystem::path loaded_path =
+        std::filesystem::path{L"C:\\观测 data\\loaded source.npy"};
+    auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
+    snapshot->source.path = loaded_path;
+    snapshot->source.display_name = "loaded source";
+    snapshot->collection.spectrum_count = 1;
+
+    specforge::SourceCollectionSessionView view;
+    view.snapshot = snapshot;
+    view.current_sample_snapshot = snapshot;
+    view.sources = {
+        {
+            {},
+            "unavailable source",
+            std::string{"npy"},
+            specforge::SourceCollectionSourceState::Unavailable,
+        },
+    };
+    view.current_source_index = 0;
+
+    int launch_count = 0;
+    specforge::PanelSessionInteraction interaction(
+        [](specforge::SourceCollectionSessionIntent,
+           std::optional<specforge::NavigationLatencyInputKind>) {
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    specforge::SourceCollectionPanelUi panel;
+    bool open = true;
+    bool cover_source_context_cell = false;
+    const specforge::SourceCollectionPathLauncher launch_source =
+        [&launch_count](const std::filesystem::path&)
+        -> std::optional<std::string> {
+        ++launch_count;
+        return std::nullopt;
+    };
+
+    const auto render_frame = [&]() {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DeltaTime = 1.0f / 60.0f;
+        io.DisplaySize = ImVec2(900.0f, 700.0f);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(
+            ImVec2(20.0f, 20.0f),
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(700.0f, 500.0f),
+            ImGuiCond_Always);
+        panel.RenderFiles(
+            interaction,
+            specforge::UiLanguage::English,
+            &open,
+            []() -> std::optional<std::filesystem::path> {
+                return std::nullopt;
+            },
+            []() -> std::optional<std::filesystem::path> {
+                return std::nullopt;
+            },
+            [](const std::filesystem::path&) {},
+            launch_source);
+        if (cover_source_context_cell) {
+            const auto cell =
+                specforge::SourceCollectionPanelUiTestAccess::
+                    FirstSourceContextCellRect(panel);
+            if (cell) {
+                ImGui::SetNextWindowPos(
+                    ImVec2((*cell)[0] - 20.0f,
+                           (*cell)[1] - 20.0f),
+                    ImGuiCond_Always);
+                ImGui::SetNextWindowSize(
+                    ImVec2((*cell)[2] - (*cell)[0] + 40.0f,
+                           (*cell)[3] - (*cell)[1] + 40.0f),
+                    ImGuiCond_Always);
+                ImGui::Begin(
+                    "Source context occluder",
+                    nullptr,
+                    ImGuiWindowFlags_NoDecoration |
+                        ImGuiWindowFlags_NoMove |
+                        ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoSavedSettings);
+                ImGui::End();
+            }
+        }
+        ImGui::EndFrame();
+    };
+
+    render_frame();
+    ImGuiWindow* files_window = ImGui::FindWindowByName(
+        specforge::SourceCollectionPanelUi::FilesWindowName());
+    Require(
+        files_window != nullptr,
+        "Files panel should render its window for the disabled context-menu test");
+
+    const auto source_context_cell =
+        specforge::SourceCollectionPanelUiTestAccess::
+            FirstSourceContextCellRect(panel);
+    Require(
+        source_context_cell.has_value(),
+        "Files panel should expose the ineligible type-cell rectangle for the disabled context-menu test");
+    const ImVec2 source_context_position(
+        (*source_context_cell)[0] + 1.0f,
+        ((*source_context_cell)[1] +
+         (*source_context_cell)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        source_context_position.x,
+        source_context_position.y);
+    cover_source_context_cell = true;
+    render_frame();
+    render_frame();
+    ImGuiWindow* occluder = ImGui::FindWindowByName(
+        "Source context occluder");
+    Require(
+        occluder != nullptr &&
+            GImGui->HoveredWindow == occluder,
+        "the context-menu test should cover the source cell with a foreground window");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        false);
+    render_frame();
+    render_frame();
+    Require(
+        !ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId |
+                ImGuiPopupFlags_AnyPopupLevel),
+        "right-clicking an occluded source cell must not open the underlying context menu");
+
+    cover_source_context_cell = false;
+    render_frame();
+    render_frame();
+    Require(
+        GImGui->HoveredWindow == files_window,
+        "the uncovered type-cell padding should target the Files panel");
+
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Right,
+        false);
+    render_frame();
+    render_frame();
+    Require(
+        ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
+        "right-clicking an ineligible row should still open its context menu");
+    ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
+    Require(
+        popup != nullptr,
+        "the ineligible source context menu should expose a popup window");
+
+    const auto action_rect =
+        specforge::SourceCollectionPanelUiTestAccess::
+            SourceContextActionRect(panel);
+    Require(
+        action_rect.has_value(),
+        "the ineligible source context menu should expose the rendered action rectangle");
+    const ImVec2 action_position = RectCenter(*action_rect);
+    ImGui::GetIO().AddMousePosEvent(
+        action_position.x,
+        action_position.y);
+    render_frame();
+    Require(
+        GImGui->HoveredWindow == popup &&
+            GImGui->HoveredId != 0 &&
+            GImGui->HoveredIdIsDisabled,
+        "the ineligible source context menu action should be disabled");
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    render_frame();
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    render_frame();
+
+    Require(
+        launch_count == 0,
+        "activating the disabled source context menu item must not launch an ineligible path");
+    Require(
+        ImGui::IsPopupOpen(
+            nullptr,
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel),
+        "a disabled source context menu item should not close its popup when clicked");
 }
 
 class NavigationFixture {
@@ -1511,6 +1944,9 @@ void TestCoveredDockTabFinalizesSequenceDraft()
 int main()
 {
     TestFilesPanelAddFileForwardsCsvToInAppOpener();
+    TestReopenableSourcePathEligibility();
+    TestFilesPanelContextActionLaunchesWithoutMutatingSession();
+    TestFilesPanelContextActionIsDisabledForIneligiblePath();
     TestLiveSourceInputSubmitsEveryValidPrefixAndSurvivesCursorSync();
     TestLiveSequenceInputSubmitsEveryValidPrefixAndEscapeKeepsLatestIntent();
     TestLiveInputRejectsInvalidTargetsAndStopsAfterTopologyChange();

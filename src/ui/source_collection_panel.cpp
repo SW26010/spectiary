@@ -310,6 +310,26 @@ bool TableCellRightAlignedTextButton(const char* id, std::string_view text, ImU3
     return clicked;
 }
 
+void OpenSourceContextPopupForHoveredCell(const char* popup_id)
+{
+    bool hovered = ImGui::IsItemHovered();
+    if (!hovered && ImGui::IsWindowHovered()) {
+        if (ImGuiTable* table = ImGui::GetCurrentTable()) {
+            const ImRect cell = ImGui::TableGetCellBgRect(
+                table,
+                ImGui::TableGetColumnIndex());
+            hovered = ImGui::IsMouseHoveringRect(
+                cell.Min,
+                cell.Max,
+                true);
+        }
+    }
+    if (hovered &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+        ImGui::OpenPopup(popup_id);
+    }
+}
+
 float TrashIconButtonWidth()
 {
     return ImGui::GetFrameHeight() * 0.5f;
@@ -401,6 +421,15 @@ bool TrashIconButton(
 
 }  // namespace
 
+bool IsReopenableSourcePath(
+    const std::filesystem::path& path) noexcept
+{
+    const auto& native = path.native();
+    return !native.empty() &&
+           native.find(std::filesystem::path::value_type{}) ==
+               std::filesystem::path::string_type::npos;
+}
+
 const char* SourceCollectionPanelUi::FilesWindowName()
 {
     return kFilesWindow;
@@ -414,6 +443,17 @@ const char* SourceCollectionPanelUi::NavigationWindowName()
 const char* SourceCollectionPanelUi::AnnotationsWindowName()
 {
     return kAnnotationsWindow;
+}
+
+void SourceCollectionPanelUi::LaunchSourceInNewInstance(
+    const std::filesystem::path& path,
+    const SourceCollectionPathLauncher& launch_source_in_new_instance)
+{
+    source_launch_error_.reset();
+    if (launch_source_in_new_instance) {
+        source_launch_error_ =
+            launch_source_in_new_instance(path);
+    }
 }
 
 void SourceCollectionPanelUi::SyncNavigationInputs(
@@ -797,8 +837,11 @@ void SourceCollectionPanelUi::RenderFiles(
     bool* open,
     const SourceCollectionPathPicker& choose_source_file,
     const SourceCollectionPathPicker& choose_source_folder,
-    const SourceCollectionPathOpener& open_source)
+    const SourceCollectionPathOpener& open_source,
+    const SourceCollectionPathLauncher& launch_source_in_new_instance)
 {
+    first_source_context_cell_rect_.reset();
+    source_context_action_rect_.reset();
     const std::string window_label = StableUiLabel(
         language,
         UiTextId::Files,
@@ -811,6 +854,20 @@ void SourceCollectionPanelUi::RenderFiles(
     const SourceCollectionSessionView& view = interaction.View();
     RenderText(UiText(language, UiTextId::Files));
     ImGui::Separator();
+
+    if (source_launch_error_) {
+        RenderText(
+            UiText(
+                language,
+                UiTextId::OpenSourceInNewInstanceFailed));
+        ImGui::PushTextWrapPos(
+            ImGui::GetFontSize() * 42.0f);
+        ImGui::TextWrapped(
+            "%s",
+            source_launch_error_->c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+    }
 
     const std::string add_file_label = StableUiLabel(
         language,
@@ -888,14 +945,16 @@ void SourceCollectionPanelUi::RenderFiles(
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_Header));
             }
 
-            ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(index));
+            ImGui::TableSetColumnIndex(0);
             if (TableCellTextButton("source", entry.display_name, ImGui::GetColorU32(ImGuiCol_Text))) {
                 (void)interaction.Submit(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
             }
-            if (ImGui::IsItemHovered()) {
+            const bool source_hovered = ImGui::IsItemHovered();
+            OpenSourceContextPopupForHoveredCell("source_context");
+            if (source_hovered) {
                 const std::string path = NarrowPath(entry.path);
                 ImGui::SetTooltip("%s", path.c_str());
             }
@@ -911,6 +970,18 @@ void SourceCollectionPanelUi::RenderFiles(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
             }
+            const ImRect source_context_cell =
+                ImGui::TableGetCellBgRect(
+                    ImGui::GetCurrentTable(),
+                    ImGui::TableGetColumnIndex());
+            if (index == 0) {
+                first_source_context_cell_rect_ = {
+                    source_context_cell.Min.x,
+                    source_context_cell.Min.y,
+                    source_context_cell.Max.x,
+                    source_context_cell.Max.y};
+            }
+            OpenSourceContextPopupForHoveredCell("source_context");
 
             ImGui::TableSetColumnIndex(2);
             ImU32 state_color = ImGui::GetColorU32(is_current ? ImGuiCol_Text : ImGuiCol_TextDisabled);
@@ -921,6 +992,40 @@ void SourceCollectionPanelUi::RenderFiles(
                 (void)interaction.Submit(
                     EditSourceCollection(
                         SourceCollectionIntent::SwitchActive(index)));
+            }
+            OpenSourceContextPopupForHoveredCell("source_context");
+
+            if (ImGui::BeginPopup("source_context")) {
+                const bool can_reopen =
+                    IsReopenableSourcePath(entry.path) &&
+                    static_cast<bool>(launch_source_in_new_instance);
+                if (!can_reopen) {
+                    ImGui::BeginDisabled();
+                }
+                const std::string reopen_label = StableUiLabel(
+                    language,
+                    UiTextId::OpenSourceInNewInstance,
+                    "SpecForgeOpenSourceInNewInstance");
+                const bool reopen_requested =
+                    ImGui::MenuItem(reopen_label.c_str());
+                const ImVec2 action_min =
+                    ImGui::GetItemRectMin();
+                const ImVec2 action_max =
+                    ImGui::GetItemRectMax();
+                source_context_action_rect_ = {
+                    action_min.x,
+                    action_min.y,
+                    action_max.x,
+                    action_max.y};
+                if (reopen_requested) {
+                    LaunchSourceInNewInstance(
+                        entry.path,
+                        launch_source_in_new_instance);
+                }
+                if (!can_reopen) {
+                    ImGui::EndDisabled();
+                }
+                ImGui::EndPopup();
             }
 
             ImGui::TableSetColumnIndex(3);

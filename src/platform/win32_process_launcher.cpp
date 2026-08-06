@@ -148,6 +148,27 @@ std::string ProcessCreationFailureDiagnostic(
            ".";
 }
 
+CurrentExecutableLaunchResult SourcePathResolutionFailureResult(
+    const std::filesystem::path& source_path,
+    const std::error_code& error)
+{
+    const std::uint32_t native_error =
+        static_cast<std::uint32_t>(error.value());
+    return {
+        .failure =
+            CurrentExecutableLaunchFailure::InvalidSourcePath,
+        .win32_error = native_error,
+        .diagnostic =
+            "Could not resolve source path '" +
+            PathText(source_path) +
+            "' before launching SpecForge (Win32 error " +
+            std::to_string(native_error) +
+            ")" +
+            ErrorSuffix(native_error) +
+            ".",
+    };
+}
+
 }  // namespace
 
 CurrentExecutablePathResult ResolveCurrentExecutablePath()
@@ -192,10 +213,26 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
     const std::filesystem::path& executable_path,
     const std::filesystem::path& source_path)
 {
-    const std::wstring source_text = source_path.wstring();
-    if (HasInvalidPathText(source_text)) {
+    const std::wstring requested_source_text =
+        source_path.wstring();
+    if (HasInvalidPathText(requested_source_text)) {
         return InvalidSourcePathResult();
     }
+
+    std::filesystem::path launch_source_path = source_path;
+    if (!launch_source_path.is_absolute()) {
+        std::error_code source_path_error;
+        launch_source_path = std::filesystem::absolute(
+            launch_source_path,
+            source_path_error);
+        if (source_path_error || launch_source_path.empty()) {
+            return SourcePathResolutionFailureResult(
+                source_path,
+                source_path_error);
+        }
+    }
+    const std::wstring source_text =
+        launch_source_path.wstring();
 
     const std::wstring executable_text = executable_path.wstring();
     if (HasInvalidPathText(executable_text)) {
@@ -240,7 +277,7 @@ CurrentExecutableLaunchResult LaunchExecutableWithSource(
             .executable_path = executable_path,
             .diagnostic = ProcessCreationFailureDiagnostic(
                 executable_path,
-                source_path,
+                launch_source_path,
                 error),
         };
     }
