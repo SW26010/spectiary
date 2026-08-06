@@ -15,9 +15,16 @@
 namespace specforge {
 
 struct ShellUiTestAccess;
+struct SourceCollectionPanelUiTestAccess;
 
 using SourceCollectionPathPicker = std::function<std::optional<std::filesystem::path>()>;
 using SourceCollectionPathOpener = std::function<void(const std::filesystem::path&)>;
+using SourceCollectionPathLauncher = std::function<std::optional<std::string>(
+    const std::filesystem::path&)>;
+
+[[nodiscard]] bool IsReopenableSourcePath(
+    const std::filesystem::path& path) noexcept;
+
 class SourceCollectionPanelUi {
 public:
     [[nodiscard]] static const char* FilesWindowName();
@@ -34,7 +41,8 @@ public:
         bool* open,
         const SourceCollectionPathPicker& choose_source_file,
         const SourceCollectionPathPicker& choose_source_folder,
-        const SourceCollectionPathOpener& open_source);
+        const SourceCollectionPathOpener& open_source,
+        const SourceCollectionPathLauncher& launch_source_in_new_instance);
 
     void RenderNavigation(
         PanelSessionInteraction& interaction,
@@ -56,6 +64,11 @@ public:
 
 private:
     friend struct ShellUiTestAccess;
+    friend struct SourceCollectionPanelUiTestAccess;
+
+    void LaunchSourceInNewInstance(
+        const std::filesystem::path& path,
+        const SourceCollectionPathLauncher& launch_source_in_new_instance);
 
     struct NavigationNumberInputCommit {
         std::string draft;
@@ -136,6 +149,11 @@ private:
     std::string displayed_sample_name_;
     std::string sample_name_search_restore_name_;
     std::string annotation_display_name_edit_key_;
+    std::optional<std::string> source_launch_error_;
+    std::optional<std::array<float, 4>>
+        first_source_context_cell_rect_;
+    std::optional<std::array<float, 4>>
+        source_context_action_rect_;
 };
 
 }  // namespace specforge

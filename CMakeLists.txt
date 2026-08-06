@@ -250,6 +250,7 @@ add_library(specforge_core STATIC
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp
     src/platform/win32_message_wait.cpp
+    src/platform/win32_process_launcher.cpp
     src/profile/load_latency_trace_lifecycle.cpp
     src/profile/navigation_latency_trace.cpp
     src/profile/navigation_prefetch_trace.cpp
@@ -320,6 +321,7 @@ target_link_libraries(specforge_sessions PUBLIC specforge_core)
 
 add_library(specforge_desktop_ui STATIC
     src/app/application_settings.cpp
+    src/app/initial_source.cpp
     src/app/native_window_title.cpp
     src/plot/plot_touchpad_gesture.cpp
     src/plot/scientific_label.cpp
@@ -999,6 +1001,23 @@ specforge_add_test(
     specforge_win32_message_wait_tests
     tests/win32_message_wait_tests.cpp
     specforge_core
+)
+specforge_add_test(
+    specforge_win32_process_launcher_tests
+    tests/win32_process_launcher_tests.cpp
+    specforge_core
+)
+target_link_libraries(
+    specforge_win32_process_launcher_tests
+    PRIVATE
+        specforge_automation
+        specforge_desktop_ui
+        dwmapi
+        shell32
+)
+add_dependencies(
+    specforge_win32_process_launcher_tests
+    specforge_native
 )
 specforge_add_test(
     specforge_loader_tests
