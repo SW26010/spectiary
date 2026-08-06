@@ -151,8 +151,9 @@ that the build-directory EXE hash, metadata
 without metadata or without `deployment` is
 Standalone and uses `%LOCALAPPDATA%\SpecForge`. A structurally invalid
 deployment declaration fails during startup before application state objects
-are constructed. Build-provenance mismatch is still reported in About but does
-not override a valid storage declaration. Legacy schema 3
+are constructed. A build-provenance or artifact-identity mismatch only hides
+metadata-derived fields in About; it does not alter valid deployment or storage
+semantics. Legacy schema 3
 `specforge_build_metadata.json` files remain readable so an old Portable folder
 can receive only a new EXE without losing sight of its `Data/` state.
 

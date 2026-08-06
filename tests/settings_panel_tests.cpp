@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -759,8 +760,8 @@ void TestHeadBuildSourcePresentation()
     Require(
         specforge::FormatBuildSourceForAbout(
             environment.build_source) ==
-            "Source: HEAD 0123456789ab",
-        "HEAD About text should use the 12-character revision");
+            "Source: HEAD",
+        "HEAD About text should omit the Git revision");
 
     const std::string diagnostics =
         specforge::FormatDiagnosticInformation(
@@ -800,13 +801,6 @@ void TestChineseBuildAndDiagnosticsPresentation()
                 SimplifiedChinese) ==
             "源码：工作树",
         "Chinese About source text should be exact");
-    Require(
-        specforge::FormatBuildMetadataStatusForAbout(
-            specforge::BuildMetadataStatus::Mismatch,
-            specforge::UiLanguage::
-                SimplifiedChinese) ==
-            "构建元数据不匹配",
-        "Chinese build metadata status should be exact");
     Require(
         specforge::FormatProfileOutputDirectoryStatus(
             specforge::ApplicationSettingsStatusKind::
@@ -849,24 +843,6 @@ void TestChineseBuildAndDiagnosticsPresentation()
         "copied diagnostics should use localized labels");
 }
 
-void TestBuildMetadataStatusPresentation()
-{
-    Require(
-        specforge::FormatBuildMetadataStatusForAbout(
-            specforge::BuildMetadataStatus::Available).empty(),
-        "available metadata should not render a fallback status");
-    Require(
-        specforge::FormatBuildMetadataStatusForAbout(
-            specforge::BuildMetadataStatus::Unavailable) ==
-            "Build metadata unavailable",
-        "unavailable metadata should render its fallback status");
-    Require(
-        specforge::FormatBuildMetadataStatusForAbout(
-            specforge::BuildMetadataStatus::Mismatch) ==
-            "Build metadata mismatch",
-        "mismatched metadata should render its fallback status");
-}
-
 void TestArtifactIdentityVerification()
 {
     constexpr std::string_view kAbcSha256 =
@@ -894,7 +870,6 @@ void TestArtifactIdentityVerification()
                 specforge::ArtifactIdentityStatus::Available &&
             available.completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
-            available.metadata_sha256 == kAbcSha256 &&
             available.executable_sha256 == kAbcSha256,
         "matching executable and metadata digests should be available");
 
@@ -907,10 +882,9 @@ void TestArtifactIdentityVerification()
         mismatch.status ==
                 specforge::ArtifactIdentityStatus::Mismatch &&
             mismatch.completed_at_utc.empty() &&
-            mismatch.metadata_sha256 == mismatched_sha256 &&
             mismatch.executable_sha256 == kAbcSha256,
-        "different executable and metadata digests should preserve digest "
-        "diagnostics without exposing an unverified completion time");
+        "different executable and metadata digests should reject metadata "
+        "without exposing an unverified completion time");
 
     const specforge::ArtifactIdentityResult unavailable =
         specforge::VerifyExecutableArtifactIdentity(
@@ -920,7 +894,6 @@ void TestArtifactIdentityVerification()
         unavailable.status ==
                 specforge::ArtifactIdentityStatus::Unavailable &&
             unavailable.completed_at_utc.empty() &&
-            unavailable.metadata_sha256 == kAbcSha256 &&
             unavailable.executable_sha256.empty(),
         "an unreadable executable should make identity unavailable without "
         "exposing an unverified completion time");
@@ -932,24 +905,233 @@ void TestArtifactIdentityVerification()
     Require(
         missing_metadata.status ==
                 specforge::ArtifactIdentityStatus::Unavailable &&
-            missing_metadata.metadata_sha256.empty(),
-        "missing metadata should make identity unavailable");
+            missing_metadata.completed_at_utc.empty() &&
+            missing_metadata.executable_sha256 == kAbcSha256,
+        "missing metadata should hide metadata fields while retaining the "
+        "running executable digest");
+
+    specforge::BuildMetadataReadResult malformed_metadata =
+        MakeArtifactMetadata(std::string(kAbcSha256));
+    malformed_metadata.metadata->finalized_artifact->artifact.sha256 =
+        "not-a-sha256";
+    const specforge::ArtifactIdentityResult malformed =
+        specforge::VerifyExecutableArtifactIdentity(
+            executable_path,
+            malformed_metadata);
+    Require(
+        malformed.status ==
+                specforge::ArtifactIdentityStatus::Unavailable &&
+            malformed.completed_at_utc.empty() &&
+            malformed.executable_sha256 == kAbcSha256,
+        "malformed metadata should hide metadata fields while retaining the "
+        "running executable digest");
+
+    std::filesystem::remove_all(root, cleanup_error);
+}
+
+void TestAboutArtifactPresentationMatrix()
+{
+    constexpr std::string_view kAbcSha256 =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    const specforge::ArtifactIdentityResult matching_identity = {
+        .status = specforge::ArtifactIdentityStatus::Available,
+        .completed_at_utc = "2026-08-05T09:21:32Z",
+        .executable_sha256 = std::string(kAbcSha256),
+    };
+    const specforge::AboutArtifactPresentation matching =
+        specforge::AboutArtifactPresentationFor(
+            matching_identity,
+            MakeArtifactMetadata(std::string(kAbcSha256)));
+    Require(
+        matching.show_executable_sha256 &&
+            matching.show_metadata_derived_fields &&
+            matching.show_completed_at_utc &&
+            matching.show_third_party_versions &&
+            !matching.show_third_party_fallback,
+        "matching metadata should expose the executable hash and trusted metadata fields");
+
+    const specforge::ArtifactIdentityResult missing_identity = {
+        .status = specforge::ArtifactIdentityStatus::Unavailable,
+        .executable_sha256 = std::string(kAbcSha256),
+    };
+    const specforge::AboutArtifactPresentation missing =
+        specforge::AboutArtifactPresentationFor(
+            missing_identity,
+            {});
+    Require(
+        missing.show_executable_sha256 &&
+            !missing.show_metadata_derived_fields &&
+            !missing.show_completed_at_utc &&
+            !missing.show_third_party_versions &&
+            missing.show_third_party_fallback,
+        "missing metadata should retain the executable hash and static component fallback without status text");
+
+    specforge::BuildMetadataReadResult malformed_metadata =
+        MakeArtifactMetadata(std::string(kAbcSha256));
+    malformed_metadata.metadata->finalized_artifact->artifact.sha256 =
+        "not-a-sha256";
+    const specforge::ArtifactIdentityResult malformed_identity = {
+        .status = specforge::ArtifactIdentityStatus::Unavailable,
+        .executable_sha256 = std::string(kAbcSha256),
+    };
+    const specforge::AboutArtifactPresentation malformed =
+        specforge::AboutArtifactPresentationFor(
+            malformed_identity,
+            malformed_metadata);
+    Require(
+        malformed.show_executable_sha256 &&
+            !malformed.show_metadata_derived_fields &&
+            !malformed.show_completed_at_utc &&
+            !malformed.show_third_party_versions &&
+            malformed.show_third_party_fallback,
+        "malformed metadata should omit metadata-derived and verification UI while retaining static component information");
+
+    const specforge::ArtifactIdentityResult mismatch_identity = {
+        .status = specforge::ArtifactIdentityStatus::Mismatch,
+        .executable_sha256 = std::string(kAbcSha256),
+    };
+    const specforge::AboutArtifactPresentation mismatch =
+        specforge::AboutArtifactPresentationFor(
+            mismatch_identity,
+            MakeArtifactMetadata(std::string(64, '0')));
+    Require(
+        mismatch.show_executable_sha256 &&
+            !mismatch.show_metadata_derived_fields &&
+            !mismatch.show_completed_at_utc &&
+            !mismatch.show_third_party_versions &&
+            mismatch.show_third_party_fallback,
+        "mismatched metadata should present like unavailable metadata without a mismatch or recorded-hash row");
 
     Require(
-        specforge::FormatArtifactIdentityStatusForAbout(
-            specforge::ArtifactIdentityStatus::Pending) ==
-            "Verifying executable identity" &&
-            specforge::FormatArtifactIdentityStatusForAbout(
-            specforge::ArtifactIdentityStatus::Available) ==
-                "Executable matches metadata" &&
-            specforge::FormatArtifactIdentityStatusForAbout(
-                specforge::ArtifactIdentityStatus::Unavailable) ==
-                "Executable identity unavailable" &&
-            specforge::FormatArtifactIdentityStatusForAbout(
-                specforge::ArtifactIdentityStatus::Mismatch,
-                specforge::UiLanguage::SimplifiedChinese) ==
-                "可执行文件身份不匹配",
-        "About should distinguish verified, unavailable, and mismatched identity");
+        specforge::UiText(
+            specforge::UiLanguage::English,
+            specforge::UiTextId::DearImGuiComponentFallback) ==
+            "Dear ImGui (docking / Win32 / DirectX 11) - MIT License" &&
+            specforge::UiText(
+                specforge::UiLanguage::English,
+                specforge::UiTextId::ImPlotComponentFallback) ==
+            "ImPlot - MIT License" &&
+            specforge::UiText(
+                specforge::UiLanguage::English,
+                specforge::UiTextId::ZlibComponentFallback) ==
+            "zlib - zlib License",
+        "untrusted metadata should retain static component and license information");
+
+    constexpr std::array<std::string_view, 14> kForbiddenAboutText = {
+        "Build metadata unavailable",
+        "Build metadata mismatch",
+        "Verifying executable identity",
+        "Executable matches metadata",
+        "Executable identity unavailable",
+        "Executable identity mismatch",
+        "Recorded executable SHA-256",
+        "构建元数据不可用",
+        "构建元数据不匹配",
+        "正在验证可执行文件身份",
+        "可执行文件与元数据匹配",
+        "可执行文件身份不可用",
+        "可执行文件身份不匹配",
+        "元数据记录的可执行文件 SHA-256",
+    };
+    for (std::size_t text_index = 0;
+         text_index < static_cast<std::size_t>(
+             specforge::UiTextId::Count);
+         ++text_index) {
+        const auto text_id = static_cast<specforge::UiTextId>(text_index);
+        const std::string_view english = specforge::UiText(
+            specforge::UiLanguage::English,
+            text_id);
+        const std::string_view simplified_chinese = specforge::UiText(
+            specforge::UiLanguage::SimplifiedChinese,
+            text_id);
+        for (const std::string_view forbidden : kForbiddenAboutText) {
+            Require(
+                english != forbidden && simplified_chinese != forbidden,
+                "About catalog should not contain verification or metadata-hash status text");
+        }
+    }
+}
+
+void TestArtifactIdentityRetainsHashWhenMetadataUnavailable()
+{
+    ScopedImGuiContext imgui;
+    constexpr std::string_view kAbcSha256 =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() /
+        "specforge-settings-artifact-identity-metadata-gate";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path executable_path =
+        root / "SpecForge.exe";
+    {
+        std::ofstream stream(executable_path, std::ios::binary);
+        Require(stream.good(), "metadata gate fixture should open");
+        stream << "abc";
+    }
+
+    specforge::SettingsPanelUi panel({
+        .version = "test",
+        .distribution = "Portable",
+        .configuration = "Debug",
+        .target_architecture = "amd64",
+        .executable_path = executable_path,
+        .build_source = {
+            .mode = "working_tree",
+            .revision = "",
+        },
+        .build_metadata = {},
+        .data_directory = "Data",
+    });
+    panel.Open();
+    specforge::SettingsPanelUiTestAccess::SelectSection(
+        panel,
+        specforge::SettingsSection::About);
+    RenderSettingsFrame(panel);
+    const specforge::ArtifactIdentityResult first_frame =
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+            panel);
+    Require(
+        first_frame.executable_sha256 == kAbcSha256,
+        "the first About frame should already show the running executable hash");
+
+    bool metadata_unavailable = false;
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        RenderSettingsFrame(panel);
+        const specforge::ArtifactIdentityResult identity =
+            specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+                panel);
+        if (identity.status ==
+            specforge::ArtifactIdentityStatus::Unavailable) {
+            metadata_unavailable = true;
+            Require(
+                identity.executable_sha256 == kAbcSha256,
+                "metadata rejection should retain the successful executable hash");
+            break;
+        }
+    }
+    Require(
+        metadata_unavailable,
+        "missing metadata should complete as unavailable without hiding the executable hash");
+
+    {
+        std::ofstream stream(executable_path, std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "metadata gate rewrite fixture should open");
+        stream << "def";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{350});
+    RenderSettingsFrame(panel);
+    const specforge::ArtifactIdentityResult after_metadata_retry_window =
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+            panel);
+    Require(
+        after_metadata_retry_window.status ==
+                specforge::ArtifactIdentityStatus::Unavailable &&
+            after_metadata_retry_window.executable_sha256 == kAbcSha256,
+        "metadata-only rejection should not trigger periodic executable rehashing");
 
     std::filesystem::remove_all(root, cleanup_error);
 }
@@ -1007,6 +1189,11 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         specforge::SettingsPanelUiTestAccess::ArtifactIdentityStatusForTest(
             panel) == specforge::ArtifactIdentityStatus::Pending,
         "the first About frame should publish pending identity verification");
+    Require(
+        specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
+            panel)
+                .executable_sha256 == kAbcSha256,
+        "the first About frame should expose the running executable hash");
 
     bool identity_available = false;
     for (int attempt = 0; attempt < 100; ++attempt) {
@@ -1027,6 +1214,7 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
         specforge::SettingsPanelUiTestAccess::ArtifactIdentityResultForTest(
             panel);
     Require(
+        identity.executable_sha256 == kAbcSha256 &&
         identity.completed_at_utc == "2026-08-05T09:21:32Z",
         "background identity verification should publish the verified completion time");
 
@@ -1039,8 +1227,6 @@ void TestArtifactIdentityIsComputedOnAboutDemand()
                 specforge::ArtifactIdentityStatus::Available &&
             identity_after_next_frame.completed_at_utc ==
                 identity.completed_at_utc &&
-            identity_after_next_frame.metadata_sha256 ==
-                identity.metadata_sha256 &&
             identity_after_next_frame.executable_sha256 ==
                 identity.executable_sha256,
         "verified identity should persist across subsequent About frames");
@@ -2367,11 +2553,12 @@ void TestOpenLegalPopupTracksViewportShrink()
 int main()
 {
     TestDefaultEnvironmentDescribesThisBuild();
-        TestWorkingTreeBuildSourcePresentation();
-        TestHeadBuildSourcePresentation();
-        TestChineseBuildAndDiagnosticsPresentation();
-    TestBuildMetadataStatusPresentation();
+    TestWorkingTreeBuildSourcePresentation();
+    TestHeadBuildSourcePresentation();
+    TestChineseBuildAndDiagnosticsPresentation();
     TestArtifactIdentityVerification();
+    TestAboutArtifactPresentationMatrix();
+    TestArtifactIdentityRetainsHashWhenMetadataUnavailable();
     TestArtifactIdentityIsComputedOnAboutDemand();
     TestArtifactIdentityRetriesAfterHashFailure();
     TestOpenIsIdempotent();

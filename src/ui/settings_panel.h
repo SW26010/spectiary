@@ -39,8 +39,15 @@ struct ArtifactIdentityResult {
     ArtifactIdentityStatus status =
         ArtifactIdentityStatus::Unavailable;
     std::string completed_at_utc;
-    std::string metadata_sha256;
     std::string executable_sha256;
+};
+
+struct AboutArtifactPresentation {
+    bool show_executable_sha256 = false;
+    bool show_metadata_derived_fields = false;
+    bool show_completed_at_utc = false;
+    bool show_third_party_versions = false;
+    bool show_third_party_fallback = false;
 };
 
 struct SettingsPanelEnvironment {
@@ -79,17 +86,14 @@ SettingsPanelEnvironmentForStartup(
 [[nodiscard]] std::string FormatBuildSourceForAbout(
     const BuildSourceIdentity& build_source,
     UiLanguage language = UiLanguage::English);
-[[nodiscard]] std::string_view FormatBuildMetadataStatusForAbout(
-    BuildMetadataStatus status,
-    UiLanguage language = UiLanguage::English);
 [[nodiscard]] ArtifactIdentityResult
 VerifyExecutableArtifactIdentity(
     const std::filesystem::path& executable_path,
     const BuildMetadataReadResult& build_metadata);
-[[nodiscard]] std::string_view
-FormatArtifactIdentityStatusForAbout(
-    ArtifactIdentityStatus status,
-    UiLanguage language = UiLanguage::English);
+[[nodiscard]] AboutArtifactPresentation
+AboutArtifactPresentationFor(
+    const ArtifactIdentityResult& artifact_identity,
+    const BuildMetadataReadResult& build_metadata);
 [[nodiscard]] std::string_view
 FormatProfileOutputDirectoryStatus(
     ApplicationSettingsStatusKind kind,
@@ -149,7 +153,8 @@ private:
     struct ArtifactIdentityComputation;
     [[nodiscard]] const ArtifactIdentityResult&
     ArtifactIdentityForAbout();
-    void StartArtifactIdentityComputation();
+    void StartArtifactIdentityComputation(
+        std::optional<std::string> executable_sha256 = std::nullopt);
     void ResetProfileOutputDirectory();
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);

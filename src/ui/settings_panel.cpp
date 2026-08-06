@@ -465,45 +465,18 @@ std::string FormatBuildSourceForAbout(
         : build_source.mode == "head"
             ? UiText(language, UiTextId::Head)
             : std::string_view{build_source.mode});
-    if (build_source.mode == "working_tree") {
-        return formatted;
-    }
-    if (build_source.mode == "head") {
-        constexpr std::size_t kDisplayedRevisionLength = 12;
-        formatted += " ";
-        formatted += build_source.revision.substr(
-            0,
-            kDisplayedRevisionLength);
-    }
     return formatted;
 }
 
-std::string_view FormatBuildMetadataStatusForAbout(
-    BuildMetadataStatus status,
-    UiLanguage language)
-{
-    switch (status) {
-    case BuildMetadataStatus::Available:
-        return {};
-    case BuildMetadataStatus::Unavailable:
-        return UiText(
-            language,
-            UiTextId::BuildMetadataUnavailable);
-    case BuildMetadataStatus::Mismatch:
-        return UiText(
-            language,
-            UiTextId::BuildMetadataMismatch);
-    }
-    return UiText(
-        language,
-        UiTextId::BuildMetadataUnavailable);
-}
+namespace {
 
-ArtifactIdentityResult VerifyExecutableArtifactIdentity(
-    const std::filesystem::path& executable_path,
+ArtifactIdentityResult VerifyArtifactMetadataAgainstExecutableSha256(
+    std::string_view executable_sha256,
     const BuildMetadataReadResult& build_metadata)
 {
     ArtifactIdentityResult result;
+    result.executable_sha256 = std::string(executable_sha256);
+
     if (build_metadata.status != BuildMetadataStatus::Available ||
         !build_metadata.metadata) {
         return result;
@@ -520,16 +493,8 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
         return result;
     }
 
-    result.metadata_sha256 =
-        metadata.finalized_artifact->artifact.sha256;
-    const std::optional<std::string> executable_sha256 =
-        ComputeFileSha256(executable_path);
-    if (!executable_sha256) {
-        return result;
-    }
-
-    result.executable_sha256 = *executable_sha256;
-    if (result.metadata_sha256 != result.executable_sha256) {
+    if (metadata.finalized_artifact->artifact.sha256 !=
+        executable_sha256) {
         result.status = ArtifactIdentityStatus::Mismatch;
         return result;
     }
@@ -540,31 +505,40 @@ ArtifactIdentityResult VerifyExecutableArtifactIdentity(
     return result;
 }
 
-std::string_view FormatArtifactIdentityStatusForAbout(
-    ArtifactIdentityStatus status,
-    UiLanguage language)
+}  // namespace
+
+ArtifactIdentityResult VerifyExecutableArtifactIdentity(
+    const std::filesystem::path& executable_path,
+    const BuildMetadataReadResult& build_metadata)
 {
-    switch (status) {
-    case ArtifactIdentityStatus::Pending:
-        return UiText(
-            language,
-            UiTextId::ArtifactIdentityPending);
-    case ArtifactIdentityStatus::Available:
-        return UiText(
-            language,
-            UiTextId::ArtifactIdentityVerified);
-    case ArtifactIdentityStatus::Unavailable:
-        return UiText(
-            language,
-            UiTextId::ArtifactIdentityUnavailable);
-    case ArtifactIdentityStatus::Mismatch:
-        return UiText(
-            language,
-            UiTextId::ArtifactIdentityMismatch);
+    const std::optional<std::string> executable_sha256 =
+        ComputeFileSha256(executable_path);
+    if (!executable_sha256) {
+        return {};
     }
-    return UiText(
-        language,
-        UiTextId::ArtifactIdentityUnavailable);
+    return VerifyArtifactMetadataAgainstExecutableSha256(
+        *executable_sha256,
+        build_metadata);
+}
+
+AboutArtifactPresentation AboutArtifactPresentationFor(
+    const ArtifactIdentityResult& artifact_identity,
+    const BuildMetadataReadResult& build_metadata)
+{
+    const bool show_metadata_derived_fields =
+        !artifact_identity.executable_sha256.empty() &&
+        artifact_identity.status == ArtifactIdentityStatus::Available &&
+        !artifact_identity.completed_at_utc.empty() &&
+        build_metadata.status == BuildMetadataStatus::Available &&
+        build_metadata.metadata.has_value();
+    return {
+        .show_executable_sha256 =
+            !artifact_identity.executable_sha256.empty(),
+        .show_metadata_derived_fields = show_metadata_derived_fields,
+        .show_completed_at_utc = show_metadata_derived_fields,
+        .show_third_party_versions = show_metadata_derived_fields,
+        .show_third_party_fallback = !show_metadata_derived_fields,
+    };
 }
 
 std::string_view FormatProfileOutputDirectoryStatus(
@@ -761,7 +735,8 @@ SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
 
 SettingsPanelUi::~SettingsPanelUi() = default;
 
-void SettingsPanelUi::StartArtifactIdentityComputation()
+void SettingsPanelUi::StartArtifactIdentityComputation(
+    std::optional<std::string> executable_sha256)
 {
     if (!artifact_identity_computation_) {
         artifact_identity_computation_ =
@@ -782,19 +757,30 @@ void SettingsPanelUi::StartArtifactIdentityComputation()
         environment_.executable_path;
     const BuildMetadataReadResult build_metadata =
         environment_.build_metadata;
+    const std::string cached_executable_sha256 =
+        executable_sha256.value_or(std::string{});
     try {
         computation->worker = std::jthread(
             [computation,
              executable_path = std::move(executable_path),
-             build_metadata = std::move(build_metadata)](
+             build_metadata = std::move(build_metadata),
+             executable_sha256 = std::move(executable_sha256),
+             cached_executable_sha256](
                 std::stop_token) {
                 ArtifactIdentityResult result;
+                result.executable_sha256 = cached_executable_sha256;
                 try {
-                    result = VerifyExecutableArtifactIdentity(
-                        executable_path,
-                        build_metadata);
+                    result = executable_sha256
+                        ? VerifyArtifactMetadataAgainstExecutableSha256(
+                              *executable_sha256,
+                              build_metadata)
+                        : VerifyExecutableArtifactIdentity(
+                              executable_path,
+                              build_metadata);
                 } catch (...) {
                     result = ArtifactIdentityResult{};
+                    result.executable_sha256 =
+                        cached_executable_sha256;
                 }
 
                 std::lock_guard lock(computation->mutex);
@@ -803,7 +789,9 @@ void SettingsPanelUi::StartArtifactIdentityComputation()
             });
     } catch (...) {
         std::lock_guard lock(computation->mutex);
-        computation->completed = ArtifactIdentityResult{};
+        ArtifactIdentityResult result;
+        result.executable_sha256 = cached_executable_sha256;
+        computation->completed = std::move(result);
         computation->running = false;
     }
 }
@@ -826,8 +814,7 @@ SettingsPanelUi::ArtifactIdentityForAbout()
     if (completed) {
         artifact_identity_ = std::move(completed);
         artifact_identity_retry_at_ =
-            artifact_identity_->status ==
-                    ArtifactIdentityStatus::Unavailable
+            artifact_identity_->executable_sha256.empty()
                 ? std::chrono::steady_clock::now() +
                     kArtifactIdentityRetryDelay
                 : (std::chrono::steady_clock::time_point::max)();
@@ -837,10 +824,22 @@ SettingsPanelUi::ArtifactIdentityForAbout()
         artifact_identity_ = ArtifactIdentityResult{
             .status = ArtifactIdentityStatus::Pending,
         };
-        StartArtifactIdentityComputation();
+        std::optional<std::string> executable_sha256;
+        try {
+            executable_sha256 = ComputeFileSha256(
+                environment_.executable_path);
+        } catch (...) {
+            executable_sha256 = std::nullopt;
+        }
+        if (executable_sha256) {
+            artifact_identity_->executable_sha256 =
+                *executable_sha256;
+        }
+        StartArtifactIdentityComputation(
+            std::move(executable_sha256));
     }
     else if (
-        artifact_identity_->status == ArtifactIdentityStatus::Unavailable &&
+        artifact_identity_->executable_sha256.empty() &&
         (artifact_identity_retry_requested_ ||
          std::chrono::steady_clock::now() >= artifact_identity_retry_at_)) {
         artifact_identity_ = ArtifactIdentityResult{
@@ -859,8 +858,7 @@ void SettingsPanelUi::Open()
         action_status_.clear();
         ui_scale_draft_percentage_.reset();
         if (artifact_identity_ &&
-            artifact_identity_->status ==
-                ArtifactIdentityStatus::Unavailable) {
+            artifact_identity_->executable_sha256.empty()) {
             artifact_identity_retry_requested_ = true;
             artifact_identity_retry_at_ =
                 std::chrono::steady_clock::now();
@@ -2025,25 +2023,20 @@ void SettingsPanelUi::RenderAbout(
         UiText(language, UiTextId::Graphics).data(),
         "Direct3D 11 / SDR");
 
-    ImGui::Spacing();
-    const std::string build_details = StableUiLabel(
-        language,
-        UiTextId::BuildDetails,
-        "SpecForgeBuildDetails");
-    ImGui::SeparatorText(build_details.c_str());
-    const std::string_view metadata_status_text =
-        FormatBuildMetadataStatusForAbout(
-            environment_.build_metadata.status,
-            language);
-    if (!metadata_status_text.empty()) {
-        ImGui::TextDisabled(
-            "%.*s",
-            static_cast<int>(metadata_status_text.size()),
-            metadata_status_text.data());
-    } else if (
-        environment_.build_metadata.status ==
-            BuildMetadataStatus::Available &&
-        environment_.build_metadata.metadata) {
+    const ArtifactIdentityResult& artifact_identity =
+        ArtifactIdentityForAbout();
+    const AboutArtifactPresentation presentation =
+        AboutArtifactPresentationFor(
+            artifact_identity,
+            environment_.build_metadata);
+
+    if (presentation.show_metadata_derived_fields) {
+        ImGui::Spacing();
+        const std::string build_details = StableUiLabel(
+            language,
+            UiTextId::BuildDetails,
+            "SpecForgeBuildDetails");
+        ImGui::SeparatorText(build_details.c_str());
         const BuildMetadata& metadata =
             *environment_.build_metadata.metadata;
         const std::string compiler =
@@ -2073,32 +2066,17 @@ void SettingsPanelUi::RenderAbout(
         UiTextId::ArtifactIdentity,
         "SpecForgeArtifactIdentity");
     ImGui::SeparatorText(artifact_identity_heading.c_str());
-    const ArtifactIdentityResult& artifact_identity =
-        ArtifactIdentityForAbout();
-    if (artifact_identity.status == ArtifactIdentityStatus::Available &&
+    if (presentation.show_completed_at_utc &&
         !artifact_identity.completed_at_utc.empty()) {
         RenderReadOnlyValue(
             UiText(language, UiTextId::MetadataCompletedAt).data(),
             artifact_identity.completed_at_utc.c_str());
     }
-    if (!artifact_identity.metadata_sha256.empty()) {
-        RenderReadOnlyValue(
-            UiText(language, UiTextId::MetadataSha256).data(),
-            artifact_identity.metadata_sha256.c_str());
-    }
-    if (!artifact_identity.executable_sha256.empty()) {
+    if (presentation.show_executable_sha256) {
         RenderReadOnlyValue(
             UiText(language, UiTextId::ExecutableSha256).data(),
             artifact_identity.executable_sha256.c_str());
     }
-    const std::string_view artifact_identity_status =
-        FormatArtifactIdentityStatusForAbout(
-            artifact_identity.status,
-            language);
-    ImGui::TextDisabled(
-        "%.*s",
-        static_cast<int>(artifact_identity_status.size()),
-        artifact_identity_status.data());
 
     ImGui::Spacing();
     const std::string third_party_heading =
@@ -2108,9 +2086,7 @@ void SettingsPanelUi::RenderAbout(
             "SpecForgeThirdPartyComponents");
     ImGui::SeparatorText(
         third_party_heading.c_str());
-    if (environment_.build_metadata.status ==
-            BuildMetadataStatus::Available &&
-        environment_.build_metadata.metadata) {
+    if (presentation.show_third_party_versions) {
         const BuildMetadata& metadata =
             *environment_.build_metadata.metadata;
         ImGui::BulletText(
@@ -2131,19 +2107,17 @@ void SettingsPanelUi::RenderAbout(
                 UiTextId::ZlibComponent)
                 .data(),
             metadata.zlib_version.c_str());
-    } else {
+    } else if (presentation.show_third_party_fallback) {
         ImGui::BulletText(
             "%.*s",
             static_cast<int>(
                 UiText(
                     language,
-                    UiTextId::
-                        DearImGuiComponentFallback)
+                    UiTextId::DearImGuiComponentFallback)
                     .size()),
             UiText(
                 language,
-                UiTextId::
-                    DearImGuiComponentFallback)
+                UiTextId::DearImGuiComponentFallback)
                 .data());
         ImGui::BulletText(
             "%.*s",

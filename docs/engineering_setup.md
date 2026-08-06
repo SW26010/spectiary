@@ -263,18 +263,22 @@ metadata，并据此校验 `THIRD_PARTY_NOTICES.txt`。不可变构建 metadata 
 按实际配置生成的
 `build\<preset>\generated\<configuration>\specforge\specforge_build_identity.h`
 并编译进 EXE。该身份包含产品版本、configuration、目标架构和构建来源，不包含 distribution 或
-storage profile。About 以这些 EXE 内字段为 build provenance 权威；它只读取一次 EXE 同目录 schema 5 metadata，
+storage profile。About 以这些 EXE 内字段为 build provenance 权威；它消费现有启动预检从 EXE 同目录
+metadata 读取并验证后形成的快照，覆盖受支持的 schema 3/4/5，而不是在 About 中重新读取文件；
 且仅在版本、configuration、架构、source mode/revision 全部匹配时显示
-compiler、CMake、generator、Windows SDK 和依赖版本。文件缺失或无效显示
-`Build metadata unavailable`，核心字段不同显示 `Build metadata mismatch`，两者都不
-混合展示 sidecar 详情。所有必填字符串必须非空且没有首尾空白，working-tree 的
+compiler、CMake、generator、Windows SDK 和依赖版本。About 始终显示当前运行中
+EXE 的 SHA-256；metadata 缺失，或 metadata 成功解析为受支持 envelope 但其中
+build-provenance/artifact 部分无效、不完整、核心字段不匹配或 artifact hash 不匹配时，
+仅省略这些 metadata-derived 字段，不显示 sidecar digest、mismatch 或 verification 状态。
+无 metadata 时仍保留静态组件和许可证信息。非法 JSON、不支持的 schema 或非法
+deployment 仍遵循既有启动失败契约，应用不会进入 About。
+所有必填字符串必须非空且没有首尾空白，working-tree 的
 `source_revision` 必须严格为 JSON `null`。About 对 working-tree 构建显示
-`Source: Working tree`，对 HEAD 构建显示完整
-revision 的前 12 位；复制诊断信息始终包含 source mode，且只有 HEAD 构建包含完整
-40 位 revision。About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
+`Source: Working tree`，对 HEAD 构建仅显示 `Source: HEAD`；复制诊断信息始终包含
+source mode，且只有 HEAD 构建包含完整 40 位 revision。About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
 无 metadata 或 schema 4/5 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
 仅兼容映射到 `portable|local_app_data` 存储。About 另外按需校验当前 EXE 的 SHA-256，并显示 schema 5
-的完成时间与 digest；无法读取或缺少 identity 时与 digest mismatch 分开显示。合法 storage selection 不受
+的完成时间；无法读取 EXE 时不显示该 hash。合法 storage selection 不受
 build provenance 或 artifact identity mismatch 影响；deployment 存在但字段缺失、类型错误或值未知时，
 `wWinMain` 在构造任何应用状态对象前明确失败。
 

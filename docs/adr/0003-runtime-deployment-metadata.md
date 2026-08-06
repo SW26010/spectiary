@@ -100,8 +100,16 @@ file.
 
 Build provenance validation is independent of deployment parsing. A valid
 deployment controls storage even when the sidecar's product/build tuple is
-unavailable or does not match the executable. About continues to report build
-metadata unavailable or mismatch without changing the selected state root.
+unavailable or does not match the executable. About always displays the
+SHA-256 of the executable that is running and exposes metadata-derived fields
+only after the existing metadata validation and artifact comparison succeed.
+Missing metadata, or a successfully parsed supported envelope whose
+build-provenance or artifact portion is invalid, incomplete, core-mismatched,
+or artifact-mismatched, simply omits those fields; About does not display the
+sidecar digest or verification/mismatch status. Invalid JSON, an unsupported
+schema, or an invalid deployment continues to fail startup under the existing
+preflight contract, so About is not reached. None of this changes the selected
+state root.
 
 The production build removes the executable-adjacent
 `specforge_metadata.json` before linking the final EXE and running any

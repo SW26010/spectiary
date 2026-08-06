@@ -335,22 +335,12 @@ void TestShellAndSettingsMappingsAreExact()
     Require(
         UiText(
             UiLanguage::SimplifiedChinese,
-            UiTextId::BuildMetadataMismatch) ==
-            "构建元数据不匹配",
-        "About page should be localized");
-    Require(
-        UiText(
-            UiLanguage::SimplifiedChinese,
             UiTextId::ArtifactIdentity) ==
                 "可执行文件身份" &&
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::MetadataCompletedAt) ==
                 "可执行文件最终化时间" &&
-            UiText(
-                UiLanguage::SimplifiedChinese,
-                UiTextId::MetadataSha256) ==
-                "元数据记录的可执行文件 SHA-256" &&
             UiText(
                 UiLanguage::SimplifiedChinese,
                 UiTextId::ExecutableSha256) ==
