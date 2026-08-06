@@ -46,6 +46,40 @@ constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::About,
 };
 
+const ImGuiPlatformMonitor* FindClosestPlatformMonitor(
+    const ImGuiViewport& viewport)
+{
+    const ImVector<ImGuiPlatformMonitor>& monitors =
+        ImGui::GetPlatformIO().Monitors;
+    const ImVec2 center = viewport.GetCenter();
+    const ImGuiPlatformMonitor* closest = nullptr;
+    float closest_distance_squared = FLT_MAX;
+    for (const ImGuiPlatformMonitor& monitor : monitors) {
+        const float monitor_max_x =
+            monitor.MainPos.x + monitor.MainSize.x;
+        const float monitor_max_y =
+            monitor.MainPos.y + monitor.MainSize.y;
+        const float distance_x = center.x < monitor.MainPos.x
+            ? monitor.MainPos.x - center.x
+            : (center.x > monitor_max_x
+                ? center.x - monitor_max_x
+                : 0.0f);
+        const float distance_y = center.y < monitor.MainPos.y
+            ? monitor.MainPos.y - center.y
+            : (center.y > monitor_max_y
+                ? center.y - monitor_max_y
+                : 0.0f);
+        const float distance_squared =
+            distance_x * distance_x +
+            distance_y * distance_y;
+        if (distance_squared < closest_distance_squared) {
+            closest = &monitor;
+            closest_distance_squared = distance_squared;
+        }
+    }
+    return closest;
+}
+
 void RenderEmbeddedLegalDocument(
     LegalDocument document,
     UiTextId title_text_id,
@@ -851,6 +885,17 @@ void SettingsPanelUi::Render(
     if (viewport == nullptr) {
         viewport = ImGui::GetMainViewport();
     }
+    const ImGuiPlatformMonitor* monitor =
+        FindClosestPlatformMonitor(*viewport);
+    // A secondary viewport's work area is the Settings platform window
+    // itself. Use its monitor for constraints so shrinking the window does
+    // not also lower the maximum size on the next frame.
+    const ImVec2 work_position = monitor != nullptr
+        ? monitor->WorkPos
+        : viewport->WorkPos;
+    const ImVec2 work_size = monitor != nullptr
+        ? monitor->WorkSize
+        : viewport->WorkSize;
     const float user_scale =
         static_cast<float>(settings.ui_scale_percentage) /
         static_cast<float>(kDefaultUiScalePercentage);
@@ -858,14 +903,16 @@ void SettingsPanelUi::Render(
         kInitialSettingsWidth * user_scale,
         kInitialSettingsHeight * user_scale);
     const ImVec2 maximum_size(
-        std::max(1.0f, viewport->WorkSize.x),
-        std::max(1.0f, viewport->WorkSize.y));
+        std::max(1.0f, work_size.x),
+        std::max(1.0f, work_size.y));
     const ImVec2 initial_size(
         std::min(preferred_size.x, maximum_size.x),
         std::min(preferred_size.y, maximum_size.y));
     const ImVec2 initial_position(
-        viewport->WorkPos.x + std::max(0.0f, viewport->WorkSize.x - initial_size.x) * 0.5f,
-        viewport->WorkPos.y + std::max(0.0f, viewport->WorkSize.y - initial_size.y) * 0.5f);
+        work_position.x +
+            std::max(0.0f, work_size.x - initial_size.x) * 0.5f,
+        work_position.y +
+            std::max(0.0f, work_size.y - initial_size.y) * 0.5f);
     ImGui::SetNextWindowSize(initial_size, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(
         initial_size,

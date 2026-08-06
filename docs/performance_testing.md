@@ -30,7 +30,10 @@
 - `present`: DX11 swap chain Present 调用完成时间；clock pacing 活跃时可作为提交帧节奏代理，
   但不是光子到达屏幕的直接测量。
 - `display_environment`: 当前窗口所在 monitor、Windows display mode 频率、DWM timing、swapchain refresh desc 和 `Present` sync interval。
-- `compositor_clock`: 初始化与 boost 状态变化。`available` 表示 Windows API 可用，`requested` 表示交互策略提出请求，`active` 表示请求成功且 compositor tick pacing 正在运行。
+- `compositor_clock`: 初始化与 boost 状态变化。`available` 表示 Windows API 可用，
+  `requested` 表示交互策略提出请求，`active` 表示请求成功且 compositor tick pacing 正在运行；
+  `imgui_drag_active` 表示 ImGui 捕获的左键拖动正在请求低延迟 UI 呈现
+  （uncapped ImPlot pan 除外）。
 - `runtime_config` / `pan_pacing`: 分别记录会话请求和实际生效的 pan pacing，以及 pan 活跃时的
   backend、Present mode、sync interval、flags、tearing 支持和连续渲染状态。
 

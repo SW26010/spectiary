@@ -39,7 +39,8 @@
 - 所有产品面板都可 dock、undock、re-dock。
 - 不实现自研 docking。
 - 布局持久化优先交给 ImGui ini。
-- 多 viewport 可以在 shell 稳定后启用，但必须验证 DPI、窗口恢复、focus 和 monitor 切换。
+- 多 viewport 已启用，并关闭 viewport 自动 merge；必须持续验证 DPI、窗口恢复、focus 和
+  monitor 切换。
 
 DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在小函数里，并在文档中说明它依赖 docking branch 的实验 API。
 

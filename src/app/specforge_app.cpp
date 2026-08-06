@@ -640,6 +640,7 @@ void SpecForgeApp::InitializeUiBackends()
     io.ConfigDpiScaleFonts = true;
     io.ConfigDpiScaleViewports = true;
     io.ConfigViewportsNoDecoration = true;
+    io.ConfigViewportsNoAutoMerge = true;
     const UiFontSelection ui_fonts = AddUiFonts(io);
     ui_.SetSpectralLineLabelFont(ui_fonts.spectral_label_font);
     const std::optional<std::filesystem::path>& ui_font_path =
@@ -980,6 +981,11 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
 {
     const bool plot_interaction_active = ui_.latency_sensitive_plot_interaction_active();
     const bool uncapped_pan_active = UncappedPanActive(window_renderable);
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool imgui_drag_active = ShouldBoostForImGuiDrag(
+        io.WantCaptureMouse,
+        ImGui::IsMouseDragging(ImGuiMouseButton_Left),
+        uncapped_pan_active);
     render_wake_scheduler_.SetContinuousRendering(uncapped_pan_active);
     if (uncapped_pan_active != uncapped_pan_active_) {
         uncapped_pan_active_ = uncapped_pan_active;
@@ -990,7 +996,8 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
         window_renderable &&
         ((plot_interaction_active &&
           pan_pacing_.effective == PanPacingMode::Display) ||
-         (touchpad_active && !uncapped_pan_active));
+         (touchpad_active && !uncapped_pan_active) ||
+         imgui_drag_active);
     if (requested == compositor_clock_.boost_requested()) {
         render_wake_scheduler_.SetCompositorClockPaced(
             compositor_clock_.boost_active());
@@ -1016,6 +1023,9 @@ void SpecForgeApp::UpdateCompositorClockBoost(bool window_renderable, bool touch
                                                   ProfileSink::Field::Bool(
                                                       "touchpad_active",
                                                       touchpad_active),
+                                                  ProfileSink::Field::Bool(
+                                                      "imgui_drag_active",
+                                                      imgui_drag_active),
                                                   ProfileSink::Field::String(
                                                       "presentation_backend",
                                                       D3D11PresentationBackendName(

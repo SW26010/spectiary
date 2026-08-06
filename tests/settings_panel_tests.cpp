@@ -1977,6 +1977,74 @@ void TestSettingsWindowConstraintsFollowCurrentViewport()
     GImGui->Viewports.pop_back();
 }
 
+void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
+{
+    ScopedImGuiContext imgui;
+    specforge::SettingsPanelUi panel = MakePanel();
+    panel.Open();
+
+    ImGuiPlatformMonitor monitor;
+    monitor.MainPos = ImVec2(0.0f, 0.0f);
+    monitor.MainSize = ImVec2(1600.0f, 1000.0f);
+    monitor.WorkPos = monitor.MainPos;
+    monitor.WorkSize = monitor.MainSize;
+    monitor.DpiScale = 1.0f;
+    ImGui::GetPlatformIO().Monitors.push_back(monitor);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.DeltaTime = 1.0f / 60.0f;
+    io.DisplaySize = monitor.MainSize;
+    ImGui::NewFrame();
+    panel.Render(MakeSettingsView());
+    ImGuiWindow* window = ImGui::FindWindowByName(
+        "Settings###SpecForgeSettingsV1");
+    Require(
+        window != nullptr,
+        "detached resize fixture should create the Settings window");
+    ImGui::EndFrame();
+
+    ImGuiViewportP detached_viewport;
+    detached_viewport.ID =
+        ImHashStr("SpecForgeSettingsDetachedViewport");
+    detached_viewport.Pos = ImVec2(200.0f, 100.0f);
+    detached_viewport.Size = ImVec2(1000.0f, 700.0f);
+    detached_viewport.WorkPos = detached_viewport.Pos;
+    detached_viewport.WorkSize = detached_viewport.Size;
+    detached_viewport.DpiScale = 1.0f;
+    detached_viewport.Idx = GImGui->Viewports.Size;
+
+    ImGui::NewFrame();
+    GImGui->Viewports.push_back(&detached_viewport);
+    specforge::SettingsPanelUiTestAccess::SetViewportId(
+        panel,
+        detached_viewport.ID);
+    ImGui::SetWindowSize(
+        "Settings###SpecForgeSettingsV1",
+        detached_viewport.Size,
+        ImGuiCond_Always);
+    panel.Render(MakeSettingsView());
+    ImGui::EndFrame();
+    GImGui->Viewports.pop_back();
+
+    constexpr ImVec2 enlarged_size(1200.0f, 800.0f);
+    ImGui::NewFrame();
+    GImGui->Viewports.push_back(&detached_viewport);
+    specforge::SettingsPanelUiTestAccess::SetViewportId(
+        panel,
+        detached_viewport.ID);
+    ImGui::SetWindowSize(
+        "Settings###SpecForgeSettingsV1",
+        enlarged_size,
+        ImGuiCond_Always);
+    panel.Render(MakeSettingsView());
+    Require(
+        window->Size.x >= enlarged_size.x &&
+            window->Size.y >= enlarged_size.y,
+        "a detached Settings window should remain growable after it shrinks");
+    ImGui::EndFrame();
+    GImGui->Viewports.pop_back();
+}
+
 void TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale()
 {
     ScopedImGuiContext imgui;
@@ -2320,6 +2388,7 @@ int main()
     TestRenderSmoke();
     TestSettingsWindowMinimumSizeTracksUiScale();
     TestSettingsWindowConstraintsFollowCurrentViewport();
+    TestSettingsWindowCanGrowAfterDetachedViewportShrink();
     TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale();
     TestOpenLegalPopupTracksUserResize();
     TestOpenLegalPopupTracksViewportShrink();

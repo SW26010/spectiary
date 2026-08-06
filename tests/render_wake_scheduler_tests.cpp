@@ -532,6 +532,24 @@ void TestPanPacingConfigurationIsExactAndDefaultsToDisplay()
         "unknown or differently-cased values must not silently enable uncapped pacing");
 }
 
+void TestImGuiDragBoostRespectsCaptureAndUncappedPan()
+{
+    Require(
+        !specforge::ShouldBoostForImGuiDrag(false, true, false),
+        "an uncaptured drag should not request compositor-clock pacing");
+    Require(
+        !specforge::ShouldBoostForImGuiDrag(true, false, false),
+        "captured mouse input without a left drag should not request "
+        "compositor-clock pacing");
+    Require(
+        specforge::ShouldBoostForImGuiDrag(true, true, false),
+        "a captured left drag should request compositor-clock pacing");
+    Require(
+        !specforge::ShouldBoostForImGuiDrag(true, true, true),
+        "uncapped ImPlot pan must take precedence over the general ImGui "
+        "drag boost");
+}
+
 void TestContinuousRenderingStopsWithoutAResidualBusyLoop()
 {
     const Scheduler::TimePoint start{};
@@ -616,6 +634,7 @@ int main()
     TestTextInputAndTouchpadExposeTimeDrivenDemand();
     TestHiddenWindowIgnoresRenderDeadlinesButKeepsMaintenance();
     TestPanPacingConfigurationIsExactAndDefaultsToDisplay();
+    TestImGuiDragBoostRespectsCaptureAndUncappedPan();
     TestContinuousRenderingStopsWithoutAResidualBusyLoop();
     TestContinuousRenderingPreservesRetrySemantics();
     return 0;

@@ -50,4 +50,12 @@ const char* PanPacingModeName(PanPacingMode mode) noexcept
     return mode == PanPacingMode::Uncapped ? "uncapped" : "display";
 }
 
+bool ShouldBoostForImGuiDrag(
+    bool want_capture_mouse,
+    bool left_mouse_dragging,
+    bool uncapped_pan_active) noexcept
+{
+    return want_capture_mouse && left_mouse_dragging && !uncapped_pan_active;
+}
+
 }  // namespace specforge
