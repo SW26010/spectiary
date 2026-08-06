@@ -2,6 +2,8 @@
 #include "automation/automation_protocol.h"
 #include "automation/automation_startup.h"
 #include "app/local_user_state_paths.h"
+#include "app/runtime_paths.h"
+#include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
 #include "ui/sample_labeling_state_cache_io.h"
 
@@ -66,60 +68,6 @@ struct LauncherOptions {
     std::string error_message;
 };
 
-std::filesystem::path CurrentExecutablePath()
-{
-    std::wstring buffer(MAX_PATH, L'\0');
-    for (;;) {
-        const DWORD length = GetModuleFileNameW(
-            nullptr,
-            buffer.data(),
-            static_cast<DWORD>(buffer.size()));
-        if (length == 0) {
-            return {};
-        }
-        if (length < buffer.size()) {
-            buffer.resize(length);
-            return std::filesystem::path(buffer);
-        }
-        buffer.resize(buffer.size() * 2U);
-    }
-}
-
-std::wstring QuoteArgument(std::wstring_view value)
-{
-    if (value.empty()) {
-        return L"\"\"";
-    }
-    const bool requires_quotes =
-        value.find_first_of(L" \t\n\v\"") !=
-        std::wstring_view::npos;
-    if (!requires_quotes) {
-        return std::wstring(value);
-    }
-
-    std::wstring quoted;
-    quoted.push_back(L'"');
-    std::size_t backslashes = 0;
-    for (const wchar_t character : value) {
-        if (character == L'\\') {
-            ++backslashes;
-            continue;
-        }
-        if (character == L'"') {
-            quoted.append(backslashes * 2U + 1U, L'\\');
-            quoted.push_back(L'"');
-            backslashes = 0;
-            continue;
-        }
-        quoted.append(backslashes, L'\\');
-        backslashes = 0;
-        quoted.push_back(character);
-    }
-    quoted.append(backslashes * 2U, L'\\');
-    quoted.push_back(L'"');
-    return quoted;
-}
-
 std::wstring BuildGuiCommandLine(
     const std::filesystem::path& app_path,
     const std::wstring& pipe_name,
@@ -145,7 +93,8 @@ std::wstring BuildGuiCommandLine(
         if (!command_line.empty()) {
             command_line.push_back(L' ');
         }
-        command_line += QuoteArgument(argument);
+        command_line +=
+            specforge::QuoteWindowsCommandLineArgument(argument);
     }
     return command_line;
 }
@@ -218,7 +167,7 @@ LauncherOptions ParseOptions(int argc, wchar_t** argv)
 {
     LauncherOptions options;
     const std::filesystem::path launcher_path =
-        CurrentExecutablePath();
+        specforge::CurrentExecutablePath();
     options.app_path =
         launcher_path.parent_path() /
         "SpecForge.exe";

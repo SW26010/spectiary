@@ -1,6 +1,7 @@
 #include "app/runtime_paths.h"
 
 #include "app/local_user_state_paths.h"
+#include "platform/win32_process_launcher.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -143,17 +144,10 @@ void SetLocalUserStatePaths(
 std::filesystem::path CurrentExecutablePath()
 {
 #ifdef _WIN32
-    std::wstring buffer(MAX_PATH, L'\0');
-    for (;;) {
-        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (length == 0) {
-            break;
-        }
-        if (length < buffer.size()) {
-            buffer.resize(length);
-            return std::filesystem::path(buffer);
-        }
-        buffer.resize(buffer.size() * 2);
+    const CurrentExecutablePathResult resolved =
+        ResolveCurrentExecutablePath();
+    if (resolved.resolved()) {
+        return resolved.path;
     }
 #endif
 
