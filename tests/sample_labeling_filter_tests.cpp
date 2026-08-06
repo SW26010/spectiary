@@ -2900,6 +2900,138 @@ void TestTemporaryDraftRecoveryCancelsPendingCreateBeforeFlush()
         "deleting a failed create must not resurrect its expected-absent upsert");
 }
 
+void TestTemporaryDraftRecoveryUsesPendingCreateBeforeFlush()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_temporary_recovery_pending_create");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource("shared-source", 3);
+
+    specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        blocked_commit.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "pending-create recovery fixture should hold the cache commit lock");
+
+    const specforge::SampleLabelingOperationResult created =
+        controller.CreateTask(
+            "pending-draft",
+            "Pending draft");
+    Require(
+        created.accepted &&
+            created.state_save_attempted &&
+            !created.state_saved &&
+            ActiveTask(controller) != nullptr,
+        "pending-create recovery fixture should retain a locally created draft after a failed save");
+    Require(
+        controller.state_save_failed() &&
+            controller.state_save_pending(),
+        "pending-create recovery fixture should report the failed initial save as pending");
+    Require(
+        controller.DeactivateActiveTask().accepted &&
+            controller.state_save_failed() &&
+            controller.state_save_pending() &&
+            ActiveTask(controller) == nullptr,
+        "pending-create recovery fixture should pause the draft locally");
+
+    const specforge::ExclusiveFileLeaseAcquireResult task_lease_before_recover =
+        specforge::TryAcquireExclusiveFileLease(
+            LabelingTargetLeasePath(
+                cache_path,
+                "task\nshared-source\npending-draft"));
+    Require(
+        task_lease_before_recover.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Unavailable,
+        "pause should retain the pending task identity lease before recovery");
+    const specforge::ExclusiveFileLeaseAcquireResult temporary_slot_lease_before_recover =
+        specforge::TryAcquireExclusiveFileLease(
+            LabelingTargetLeasePath(
+                cache_path,
+                "temporary-slot\nshared-source"));
+    Require(
+        temporary_slot_lease_before_recover.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Unavailable,
+        "pause should retain the pending temporary-slot lease before recovery");
+
+    const specforge::SampleLabelingOperationResult recovered =
+        controller.RecoverTemporaryTask(
+            "shared-source",
+            "pending-draft");
+    Require(
+        recovered.accepted &&
+            !recovered.state_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == "pending-draft" &&
+            ActiveTask(controller)->values.size() == 3,
+        "Recover should restore a pending-create draft before its first cache flush");
+
+    specforge::ExclusiveFileLeaseAcquireResult task_lease =
+        specforge::TryAcquireExclusiveFileLease(
+            LabelingTargetLeasePath(
+                cache_path,
+                "task\nshared-source\npending-draft"));
+    Require(
+        task_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Unavailable,
+        "Recover should preserve the pending task identity lease");
+    specforge::ExclusiveFileLeaseAcquireResult temporary_slot_lease =
+        specforge::TryAcquireExclusiveFileLease(
+            LabelingTargetLeasePath(
+                cache_path,
+                "temporary-slot\nshared-source"));
+    Require(
+        temporary_slot_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Unavailable,
+        "Recover should preserve the pending temporary-slot lease");
+
+    blocked_commit.lease.Reset();
+    Require(
+        controller.FlushStateCache(),
+        "pending-create recovery should flush after the cache lock is released");
+    const specforge::SampleLabelingStateCacheLoadResult loaded =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const specforge::SampleLabelingTask* task =
+        FindTask(
+            loaded.cache,
+            "shared-source",
+            "pending-draft");
+    Require(
+        task != nullptr &&
+            task->task_name == "Pending draft" &&
+            task->values == std::vector<int>({-1, -1, -1}) &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->task_id == "pending-draft",
+        "Recover should persist the pending-create draft without a restart");
+
+    Require(
+        controller.DeactivateActiveTask().state_saved,
+        "a recovered pending-create draft should release leases after selection persistence");
+    task_lease = specforge::TryAcquireExclusiveFileLease(
+        LabelingTargetLeasePath(
+            cache_path,
+            "task\nshared-source\npending-draft"));
+    Require(
+        task_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "the task identity lease should release after the recovered draft is paused");
+    task_lease.lease.Reset();
+    temporary_slot_lease = specforge::TryAcquireExclusiveFileLease(
+        LabelingTargetLeasePath(
+            cache_path,
+            "temporary-slot\nshared-source"));
+    Require(
+        temporary_slot_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "the temporary-slot lease should release after the recovered draft is paused");
+}
+
 void TestTemporaryDraftRecoveryMissingTargetDoesNotTombstoneRecreatedTask()
 {
     const std::filesystem::path directory =
@@ -6995,6 +7127,7 @@ int main(int argc, char* argv[])
         TestTemporaryDraftRecoveryRevalidatesSourceAndTask();
         TestTemporaryDraftRecoveryDeletionKeepsLeaseUntilTombstoneCommits();
         TestTemporaryDraftRecoveryCancelsPendingCreateBeforeFlush();
+        TestTemporaryDraftRecoveryUsesPendingCreateBeforeFlush();
         TestTemporaryDraftRecoveryMissingTargetDoesNotTombstoneRecreatedTask();
         TestTemporaryDraftRecoveryRetainsDeferredPendingEdit();
         TestTemporaryDraftRecoveryDeleteConvergesFormalizedProjection();

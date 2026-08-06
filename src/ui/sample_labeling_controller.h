@@ -353,11 +353,13 @@ private:
             const SampleLabelingTask& known_task,
             std::size_t sample_count,
             bool reuse_deferred_lease,
-            bool reuse_active_temporary_slot);
+            bool reuse_active_temporary_slot,
+            bool allow_pending_task_recovery = false);
     [[nodiscard]] SampleLabelingOperationResult
         ActivateTaskWithExpectation(
             std::string_view task_id,
-            TaskActivationExpectation expectation);
+            TaskActivationExpectation expectation,
+            bool allow_pending_task_recovery = false);
     [[nodiscard]] TaskCreationPreparation
         PrepareTaskCreation(
             std::string_view source_identity,

@@ -1395,7 +1395,8 @@ SampleLabelingController::RecoverTemporaryTask(
     }
     return ActivateTaskWithExpectation(
         owned_task_id,
-        TaskActivationExpectation::TemporaryTask);
+        TaskActivationExpectation::TemporaryTask,
+        true);
 }
 
 SampleLabelingOperationResult
@@ -1525,7 +1526,8 @@ SampleLabelingController::DeleteTemporaryTask(
 SampleLabelingOperationResult
 SampleLabelingController::ActivateTaskWithExpectation(
     std::string_view task_id,
-    TaskActivationExpectation expectation)
+    TaskActivationExpectation expectation,
+    bool allow_pending_task_recovery)
 {
     SourceState* state = ActiveSource();
     if (state == nullptr || task_id.empty()) {
@@ -1560,7 +1562,8 @@ SampleLabelingController::ActivateTaskWithExpectation(
             *match,
             state->sample_count,
             true,
-            true);
+            true,
+            allow_pending_task_recovery);
     if (preparation.lease_status !=
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         if (active_source_identity_ &&
@@ -2613,7 +2616,8 @@ SampleLabelingController::PrepareTaskActivation(
     const SampleLabelingTask& known_task,
     std::size_t sample_count,
     bool reuse_deferred_lease,
-    bool reuse_active_temporary_slot)
+    bool reuse_active_temporary_slot,
+    bool allow_pending_task_recovery)
 {
     TaskActivationPreparation preparation;
     const std::string task_identity_key =
@@ -2675,6 +2679,28 @@ SampleLabelingController::PrepareTaskActivation(
         preparation.leases = std::move(*deferred);
         deferred_task_leases_.erase(deferred);
         working_leases = &preparation.leases;
+    };
+    const auto restore_pending_temporary_task = [&]() {
+        // A failed first save can leave a locally owned draft only in the
+        // pending patch. Recovery may adopt that patch after the identity and
+        // temporary-slot leases above have been revalidated.
+        if (!allow_pending_task_recovery) {
+            return false;
+        }
+        const SampleLabelingTask* pending =
+            PendingTaskUpsert(
+                source_identity,
+                known_task.task_id);
+        if (pending == nullptr ||
+            pending->output_path ||
+            pending->values.size() != sample_count) {
+            return false;
+        }
+        preparation.task = *pending;
+        preparation.refresh_status =
+            TaskRefreshStatus::Ready;
+        adopt_deferred_leases();
+        return true;
     };
 
     if (!state_cache_path_.empty()) {
@@ -2767,8 +2793,10 @@ SampleLabelingController::PrepareTaskActivation(
         structural.cache.sources.find(
             std::string(source_identity));
     if (source == structural.cache.sources.end()) {
-        preparation.refresh_status =
-            TaskRefreshStatus::Missing;
+        if (!restore_pending_temporary_task()) {
+            preparation.refresh_status =
+                TaskRefreshStatus::Missing;
+        }
         return preparation;
     }
     if (source->second.sample_count != sample_count) {
@@ -2785,8 +2813,10 @@ SampleLabelingController::PrepareTaskActivation(
                     known_task.task_id;
             });
     if (structural_task == source->second.tasks.end()) {
-        preparation.refresh_status =
-            TaskRefreshStatus::Missing;
+        if (!restore_pending_temporary_task()) {
+            preparation.refresh_status =
+                TaskRefreshStatus::Missing;
+        }
         return preparation;
     }
 
