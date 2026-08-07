@@ -1,8 +1,6 @@
 SPECFORGE DATA SOURCES
 
-This file covers third-party data incorporated into the built-in public
-spectral-line catalog. The catalog is provided for visual reference and is not
-intended for wavelength calibration or authoritative quantitative analysis.
+This file covers third-party data incorporated into the built-in public spectral-line catalog. The catalog is provided for visual reference and is not intended for wavelength calibration or authoritative quantitative analysis.
 
 ==============================================================================
 Atomic Line List v3.00b5
@@ -16,23 +14,11 @@ Version date: 2023-10-02
 Downloaded archive SHA-256:
 5707fb5304021392540c66bbf4a76535373d48cf008164f9f22a1f5343d49097
 
-The Atomic Line List website states that all data distributed through its
-webpages are licensed under CC BY 4.0. SpecForge uses a selected subset of its
-vacuum wavelengths for H I, Li I, Na I, Mg I, K I, Ca I, and Ca II.
-SpecForge selected the rows, assigned application-specific identifiers and
-labels, and rounded wavelengths to 0.001 Angstrom.
+The Atomic Line List website states that all data distributed through its webpages are licensed under CC BY 4.0. SpecForge uses a selected subset of its vacuum wavelengths for H I, Li I, Na I, Mg I, K I, Ca I, and Ca II. SpecForge selected the rows, assigned application-specific identifiers and labels, and rounded wavelengths to 0.001 Angstrom.
 
-The Li I 6708 catalog marker combines the AtLL transitions at 6709.613 and
-6709.764 Angstrom into one unresolved band marker. The K I catalog markers use
-the AtLL transitions at 7667.021 and 7701.093 Angstrom as separate lines. The
-Mg I 8809 catalog marker uses the AtLL transition at 8809.175 Angstrom.
+The Li I 6708 catalog marker combines the AtLL transitions at 6709.613 and 6709.764 Angstrom into one unresolved band marker. The K I catalog markers use the AtLL transitions at 7667.021 and 7701.093 Angstrom as separate lines. The Mg I 8809 catalog marker uses the AtLL transition at 8809.175 Angstrom.
 
-AtLL v3.00b5 is a beta release offered for testing and may change without
-notice. AtLL states that its wavelengths are calculated from differences
-between transition energy levels, except for weighted hydrogenic lines, and
-that observed wavelengths have only limited coverage. SpecForge therefore
-uses these values for visual line identification, not as wavelength-calibration
-truth.
+AtLL v3.00b5 is a beta release offered for testing and may change without notice. AtLL states that its wavelengths are calculated from differences between transition energy levels, except for weighted hydrogenic lines, and that observed wavelengths have only limited coverage. SpecForge therefore uses these values for visual line identification, not as wavelength-calibration truth.
 
 Requested scientific citation:
 P. A. M. van Hoof (2018), "A New Atomic Line List",
@@ -53,10 +39,7 @@ Copyright: The Author(s), 2023
 License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 License: https://creativecommons.org/licenses/by/4.0/
 
-SpecForge uses the observed Ba II wavelengths reported as 4554.024 Angstrom
-and 6496.891 Angstrom. SpecForge converted the reported visible air
-wavelengths to vacuum using the refractive-index relation documented by
-Morton (2000), equation 3, then rounded the results to 0.001 Angstrom.
+SpecForge uses the observed Ba II wavelengths reported as 4554.024 Angstrom and 6496.891 Angstrom. SpecForge converted the reported visible air wavelengths to vacuum using the refractive-index relation documented by Morton (2000), equation 3, then rounded the results to 0.001 Angstrom.
 
 D. C. Morton (2000), "Atomic Data for Resonance Absorption Lines. II.
 Wavelengths Longward of the Lyman Limit for Heavy Elements",
@@ -67,11 +50,6 @@ https://doi.org/10.1086/317349
 SpecForge-curated approximate markers
 ==============================================================================
 
-Rows carrying the source handle "specforge_curated_approximate" are rounded
-visual annotations curated by SpecForge rather than redistributed precision
-measurements. Sr II 4078 is stored as an approximate 4078.9 Angstrom vacuum
-marker. It is not intended for wavelength calibration.
+Rows carrying the source handle "specforge_curated_approximate" are rounded visual annotations curated by SpecForge rather than redistributed precision measurements. Sr II 4078 is stored as an approximate 4078.9 Angstrom vacuum marker. It is not intended for wavelength calibration.
 
-Other rows carrying the historical handle "carbon_star_requirements" are
-approximate molecular or feature markers originating in the public SpecForge
-requirements catalog. They are likewise intended only for visual annotation.
+Other rows carrying the historical handle "carbon_star_requirements" are approximate molecular or feature markers originating in the public SpecForge requirements catalog. They are likewise intended only for visual annotation.
