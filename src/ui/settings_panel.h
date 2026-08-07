@@ -146,6 +146,8 @@ private:
     AppearanceAccentColorLabel(UiLanguage language);
     [[nodiscard]] static float VisibleLabelWidth(
         std::string_view label);
+    static void RequestPlatformWindowFocus(
+        ImGuiViewport& viewport);
     void RenderNavigation(UiLanguage language);
     void RenderSelectedSection(
         const ApplicationSettingsView& settings,

@@ -641,6 +641,7 @@ void SpecForgeApp::InitializeUiBackends()
     io.ConfigDpiScaleViewports = true;
     io.ConfigViewportsNoDecoration = true;
     io.ConfigViewportsNoAutoMerge = true;
+    io.ConfigViewportsNoDefaultParent = true;
     const UiFontSelection ui_fonts = AddUiFonts(io);
     ui_.SetSpectralLineLabelFont(ui_fonts.spectral_label_font);
     const std::optional<std::filesystem::path>& ui_font_path =
@@ -718,6 +719,45 @@ void SpecForgeApp::SaveImGuiLayoutForShutdown()
                     imgui_layout_error),
             });
     }
+}
+
+void SpecForgeApp::HideSecondaryPlatformWindowsForMainMinimize()
+{
+    hidden_secondary_windows_.clear();
+    if (!imgui_initialized_) {
+        return;
+    }
+
+    const ImGuiPlatformIO& platform_io =
+        ImGui::GetPlatformIO();
+    for (ImGuiViewport* viewport : platform_io.Viewports) {
+        HWND viewport_window = static_cast<HWND>(
+            viewport->PlatformHandleRaw != nullptr
+                ? viewport->PlatformHandleRaw
+                : viewport->PlatformHandle);
+        if (viewport_window == nullptr ||
+            viewport_window == window_.hwnd() ||
+            !IsWindow(viewport_window) ||
+            !IsWindowVisible(viewport_window)) {
+            continue;
+        }
+        ShowWindow(viewport_window, SW_HIDE);
+        hidden_secondary_windows_.push_back(
+            viewport_window);
+    }
+}
+
+void SpecForgeApp::RestoreSecondaryPlatformWindowsAfterMainRestore()
+{
+    for (HWND viewport_window :
+         hidden_secondary_windows_) {
+        if (IsWindow(viewport_window)) {
+            ShowWindow(
+                viewport_window,
+                SW_SHOWNOACTIVATE);
+        }
+    }
+    hidden_secondary_windows_.clear();
 }
 
 void SpecForgeApp::Shutdown()
@@ -4261,6 +4301,7 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         if (wparam == SIZE_MINIMIZED) {
             if (!minimized_) {
                 profile_.WriteEvent("render_idle", {ProfileSink::Field::String("reason", "minimized")});
+                HideSecondaryPlatformWindowsForMainMinimize();
             }
             minimized_ = true;
             pending_resize_.reset();
@@ -4269,6 +4310,7 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
 
         if (minimized_) {
             profile_.WriteEvent("render_resume", {ProfileSink::Field::String("reason", "restored")});
+            RestoreSecondaryPlatformWindowsAfterMainRestore();
         }
         minimized_ = false;
 

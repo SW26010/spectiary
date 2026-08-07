@@ -108,6 +108,8 @@ private:
         const std::optional<std::filesystem::path>& initial_source);
     void InitializeUiBackends();
     void SaveImGuiLayoutForShutdown();
+    void HideSecondaryPlatformWindowsForMainMinimize();
+    void RestoreSecondaryPlatformWindowsAfterMainRestore();
     void Shutdown();
     [[nodiscard]] RenderFrameOutcome RenderFrame();
     void UpdateCompositorClockBoost(bool window_renderable, bool touchpad_active);
@@ -260,6 +262,7 @@ private:
     bool running_ = true;
     bool minimized_ = false;
     bool window_visible_ = true;
+    std::vector<HWND> hidden_secondary_windows_;
     bool uncapped_pan_active_ = false;
     ImGuiStyle base_imgui_style_;
     float system_dpi_scale_ = 1.0f;

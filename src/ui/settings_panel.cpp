@@ -739,6 +739,18 @@ float SettingsPanelUi::VisibleLabelWidth(std::string_view label)
         true).x;
 }
 
+void SettingsPanelUi::RequestPlatformWindowFocus(
+    ImGuiViewport& viewport)
+{
+    ImGuiPlatformIO& platform_io =
+        ImGui::GetPlatformIO();
+    if (&viewport != ImGui::GetMainViewport() &&
+        viewport.PlatformWindowCreated &&
+        platform_io.Platform_SetWindowFocus != nullptr) {
+        platform_io.Platform_SetWindowFocus(&viewport);
+    }
+}
+
 SettingsPanelUi::SettingsPanelUi(SettingsPanelEnvironment environment)
     : environment_(std::move(environment))
 {
@@ -933,9 +945,10 @@ void SettingsPanelUi::Render(
     ImGui::SetNextWindowPos(
         initial_position,
         ImGuiCond_FirstUseEver);
-    if (focus_requested_) {
+    const bool focus_requested =
+        std::exchange(focus_requested_, false);
+    if (focus_requested) {
         ImGui::SetNextWindowFocus();
-        focus_requested_ = false;
     }
 
     const std::string settings_window =
@@ -944,8 +957,13 @@ void SettingsPanelUi::Render(
             settings_window.c_str(),
             &open_,
             ImGuiWindowFlags_NoCollapse);
-    settings_viewport_id_ =
-        ImGui::GetWindowViewport()->ID;
+    ImGuiViewport* settings_viewport =
+        ImGui::GetWindowViewport();
+    settings_viewport_id_ = settings_viewport->ID;
+    if (focus_requested) {
+        RequestPlatformWindowFocus(
+            *settings_viewport);
+    }
     if (!contents_visible) {
         ImGui::End();
         return;

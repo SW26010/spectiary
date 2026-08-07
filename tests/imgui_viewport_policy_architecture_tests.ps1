@@ -26,4 +26,17 @@ if ($assignments.Count -ne 1) {
     throw 'ConfigViewportsNoAutoMerge should have exactly one policy assignment.'
 }
 
+if ($appSource -notmatch
+    'io\.ConfigViewportsNoDefaultParent\s*=\s*true') {
+    throw 'Detached platform windows must remain independent top-level HWNDs; main-window lifecycle is synchronized explicitly.'
+}
+
+$parentAssignments = [regex]::Matches(
+    $appSource,
+    'ConfigViewportsNoDefaultParent\s*=')
+
+if ($parentAssignments.Count -ne 1) {
+    throw 'ConfigViewportsNoDefaultParent should have exactly one policy assignment.'
+}
+
 Write-Host 'ImGui viewport policy architecture checks passed.'

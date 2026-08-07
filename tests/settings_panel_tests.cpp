@@ -112,6 +112,12 @@ struct SettingsPanelUiTestAccess {
     {
         return SettingsPanelUi::VisibleLabelWidth(label);
     }
+    static void RequestPlatformWindowFocus(
+        ImGuiViewport& viewport)
+    {
+        SettingsPanelUi::RequestPlatformWindowFocus(
+            viewport);
+    }
     static bool ShouldSubmitLanguageSelection(
         const ApplicationSettingsView& settings,
         UiLanguage candidate)
@@ -1330,6 +1336,33 @@ void TestOpenIsIdempotent()
     Require(
         panel.open(),
         "opening settings repeatedly should retain one open panel");
+}
+
+ImGuiViewport* focused_settings_platform_viewport = nullptr;
+
+void RecordSettingsPlatformFocus(ImGuiViewport* viewport)
+{
+    focused_settings_platform_viewport = viewport;
+}
+
+void TestDetachedPlatformWindowFocusUsesBackendCallback()
+{
+    ScopedImGuiContext imgui;
+
+    ImGuiViewport detached_viewport;
+    detached_viewport.ID =
+        ImHashStr("SpecForgeSettingsFocusViewport");
+    detached_viewport.PlatformWindowCreated = true;
+
+    focused_settings_platform_viewport = nullptr;
+    ImGui::GetPlatformIO().Platform_SetWindowFocus =
+        RecordSettingsPlatformFocus;
+    specforge::SettingsPanelUiTestAccess::
+        RequestPlatformWindowFocus(detached_viewport);
+    Require(
+        focused_settings_platform_viewport ==
+            &detached_viewport,
+        "detached Settings focus should use the native platform callback");
 }
 
 void TestClosedToOpenClearsTransientFeedback()
@@ -2604,6 +2637,7 @@ int main()
     TestArtifactIdentityIsComputedOnAboutDemand();
     TestArtifactIdentityRetriesAfterHashFailure();
     TestOpenIsIdempotent();
+    TestDetachedPlatformWindowFocusUsesBackendCallback();
     TestClosedToOpenClearsTransientFeedback();
     TestProfileResetEmitsOneShotSettingsIntent();
     TestWarnedFallbacksRemainDirectlyRepairable();
