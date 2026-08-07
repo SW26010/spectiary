@@ -24,52 +24,41 @@ struct TopBarStatusLayout {
     float width = 0.0f;
 };
 
-struct TopBarFrameRateSample {
-    float framerate = 0.0f;
-    float delta_time = 0.0f;
+struct TopBarFrameTimingSample {
+    float delta_time_seconds = 0.0f;
 };
 
 inline constexpr float kMaximumTopBarFrameDeltaTime = 0.25f;
 
-[[nodiscard]] inline std::optional<TopBarFrameRateSample>
-TryMakeTopBarFrameRateSample(
-    float imgui_framerate,
-    float delta_time,
+[[nodiscard]] inline std::optional<TopBarFrameTimingSample>
+TryMakeTopBarFrameTimingSample(
+    float delta_time_seconds,
     bool first_frame) noexcept
 {
     if (first_frame ||
-        !std::isfinite(imgui_framerate) ||
-        imgui_framerate <= 0.0f ||
-        !std::isfinite(delta_time) ||
-        delta_time <= 0.0f ||
-        delta_time > kMaximumTopBarFrameDeltaTime) {
+        !std::isfinite(delta_time_seconds) ||
+        delta_time_seconds <= 0.0f ||
+        delta_time_seconds > kMaximumTopBarFrameDeltaTime) {
         return std::nullopt;
     }
-
-    const float framerate = 1.0f / delta_time;
-    if (!std::isfinite(framerate) || framerate <= 0.0f) {
-        return std::nullopt;
-    }
-    return TopBarFrameRateSample{
-        .framerate = framerate,
-        .delta_time = delta_time};
+    return TopBarFrameTimingSample{.delta_time_seconds = delta_time_seconds};
 }
 
 [[nodiscard]] inline std::optional<std::string> FormatTopBarFrameRate(
-    const TopBarFrameRateSample& sample,
+    const TopBarFrameTimingSample& sample,
     std::string_view format)
 {
     if (format.empty() ||
-        !std::isfinite(sample.framerate) ||
-        sample.framerate <= 0.0f ||
-        !std::isfinite(sample.delta_time) ||
-        sample.delta_time <= 0.0f ||
-        sample.delta_time > kMaximumTopBarFrameDeltaTime) {
+        !std::isfinite(sample.delta_time_seconds) ||
+        sample.delta_time_seconds <= 0.0f ||
+        sample.delta_time_seconds > kMaximumTopBarFrameDeltaTime) {
         return std::nullopt;
     }
 
-    const float frame_time_ms = sample.delta_time * 1000.0f;
-    if (!std::isfinite(frame_time_ms) || frame_time_ms <= 0.0f) {
+    const float frame_time_ms = sample.delta_time_seconds * 1000.0f;
+    const float framerate = 1.0f / sample.delta_time_seconds;
+    if (!std::isfinite(frame_time_ms) || frame_time_ms <= 0.0f ||
+        !std::isfinite(framerate) || framerate <= 0.0f) {
         return std::nullopt;
     }
 
@@ -79,7 +68,7 @@ TryMakeTopBarFrameRateSample(
         0,
         format_string.c_str(),
         frame_time_ms,
-        sample.framerate);
+        framerate);
     if (required <= 0) {
         return std::nullopt;
     }
@@ -90,7 +79,7 @@ TryMakeTopBarFrameRateSample(
         result.size() + 1,
         format_string.c_str(),
         frame_time_ms,
-        sample.framerate);
+        framerate);
     if (written != required) {
         return std::nullopt;
     }

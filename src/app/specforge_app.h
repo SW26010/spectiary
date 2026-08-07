@@ -274,8 +274,8 @@ private:
     ProfileRecordingStatus profile_status_;
     std::uint64_t frame_index_ = 0;
     // Keep the last valid sample while event-driven rendering is idle.
-    std::optional<TopBarFrameRateSample>
-        application_frame_rate_sample_;
+    std::optional<TopBarFrameTimingSample>
+        application_frame_timing_sample_;
     std::optional<RuntimeResourceWorkload>
         runtime_resource_workload_;
 };

@@ -13,6 +13,7 @@
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session.h"
 #include "ui/spectrum_view_session.h"
+#include "ui/top_bar_status_layout.h"
 
 #include <imgui.h>
 
@@ -53,8 +54,7 @@ struct ShellStatus {
     unsigned int client_width = 0;
     unsigned int client_height = 0;
     // Last valid ImGui application-timing sample, not monitor refresh or Present FPS.
-    float application_framerate = 0.0f;
-    float application_delta_time = 0.0f;
+    std::optional<TopBarFrameTimingSample> application_frame_timing_sample;
     std::uint64_t frame_index = 0;
 };
 

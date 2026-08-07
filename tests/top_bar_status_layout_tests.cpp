@@ -29,17 +29,15 @@ constexpr std::string_view kEnglishFrameRateFormat =
 constexpr std::string_view kChineseFrameRateFormat =
     "%.3f 毫秒/帧 · %.1f FPS";
 
-void TestFrameRateSampleGatingAndFormatting()
+void TestFrameTimingSampleGatingAndFormatting()
 {
     constexpr float kNormalDeltaTime = 1.0f / 60.0f;
-    const auto first_frame = specforge::TryMakeTopBarFrameRateSample(
-        60.0f,
+    const auto first_frame = specforge::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         true);
     Require(!first_frame, "the first frame should not display a timing sample");
 
-    const auto valid_sample = specforge::TryMakeTopBarFrameRateSample(
-        60.0f,
+    const auto valid_sample = specforge::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         false);
     Require(
@@ -72,32 +70,25 @@ void TestInvalidAndGapTimingSamplesAreHidden()
     };
     for (const float delta_time : invalid_delta_times) {
         Require(
-            !specforge::TryMakeTopBarFrameRateSample(
-                60.0f,
+            !specforge::TryMakeTopBarFrameTimingSample(
                 delta_time,
                 false),
             "invalid DeltaTime must not produce a timing sample");
     }
 
-    const auto gap = specforge::TryMakeTopBarFrameRateSample(
-        0.5f,
-        1.0f,
-        false);
+    const auto gap = specforge::TryMakeTopBarFrameTimingSample(1.0f, false);
     Require(!gap, "an idle or minimized gap must not become a timing sample");
 
     Require(
         !specforge::FormatTopBarFrameRate(
-            specforge::TopBarFrameRateSample{
-                .framerate = 60.0f,
-                .delta_time = 1.0f},
+            specforge::TopBarFrameTimingSample{.delta_time_seconds = 1.0f},
             kEnglishFrameRateFormat),
         "a timing gap must not produce status text");
 
-    const auto valid_sample = specforge::TryMakeTopBarFrameRateSample(
-        60.0f,
+    const auto valid_sample = specforge::TryMakeTopBarFrameTimingSample(
         kNormalDeltaTime,
         false);
-    std::optional<specforge::TopBarFrameRateSample> last_valid_sample =
+    std::optional<specforge::TopBarFrameTimingSample> last_valid_sample =
         valid_sample;
     if (gap) {
         last_valid_sample = gap;
@@ -181,7 +172,7 @@ void TestStatusDisappearsInsteadOfOverlappingMenus()
 int main()
 {
     try {
-        TestFrameRateSampleGatingAndFormatting();
+        TestFrameTimingSampleGatingAndFormatting();
         TestInvalidAndGapTimingSamplesAreHidden();
         TestWideBarOmitsInactiveProfileStatus();
         TestRoutineStatusDropsLowPriorityDetailsFirst();

@@ -191,13 +191,12 @@ bool RenderTopBarStatus(
         operation_text =
             UiText(language, UiTextId::StateRecovered);
     }
-    const TopBarFrameRateSample frame_rate_sample{
-        .framerate = status.application_framerate,
-        .delta_time = status.application_delta_time};
-    const std::optional<std::string> frame_text =
-        FormatTopBarFrameRate(
-            frame_rate_sample,
+    std::optional<std::string> frame_text;
+    if (status.application_frame_timing_sample) {
+        frame_text = FormatTopBarFrameRate(
+            *status.application_frame_timing_sample,
             UiText(language, UiTextId::ApplicationFrameRate));
+    }
     const std::string dimensions_text =
         std::to_string(status.client_width) + "x" + std::to_string(status.client_height);
     ProfileRecordingUiPresentation recording_presentation =

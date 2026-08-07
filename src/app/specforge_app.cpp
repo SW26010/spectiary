@@ -856,20 +856,13 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         status.client_width = window_.client_width();
         status.client_height = window_.client_height();
         const ImGuiIO& io = ImGui::GetIO();
-        const std::optional<TopBarFrameRateSample> current_frame_rate_sample =
-            TryMakeTopBarFrameRateSample(
-                io.Framerate,
-                io.DeltaTime,
-                frame_index_ == 1);
-        if (current_frame_rate_sample) {
-            application_frame_rate_sample_ = current_frame_rate_sample;
+        const std::optional<TopBarFrameTimingSample> current_frame_timing_sample =
+            TryMakeTopBarFrameTimingSample(io.DeltaTime, frame_index_ == 1);
+        if (current_frame_timing_sample) {
+            application_frame_timing_sample_ = current_frame_timing_sample;
         }
-        if (application_frame_rate_sample_) {
-            status.application_framerate =
-                application_frame_rate_sample_->framerate;
-            status.application_delta_time =
-                application_frame_rate_sample_->delta_time;
-        }
+        status.application_frame_timing_sample =
+            application_frame_timing_sample_;
         status.frame_index = frame_index_;
         ui_.Render(status);
         (void)ui_.TakeAppliedUiLanguage();
