@@ -453,6 +453,7 @@ target_link_libraries(
     specforge_automation_launcher
     PRIVATE
         specforge_automation
+        specforge_imgui_layout
         specforge_sessions
         bcrypt
 )
@@ -602,6 +603,11 @@ specforge_add_test(
     tests/imgui_layout_persistence_tests.cpp
     specforge_imgui_layout
 )
+target_compile_definitions(
+    specforge_imgui_layout_persistence_tests
+    PRIVATE
+        SPECFORGE_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
+)
 specforge_add_test(
     specforge_automation_control_tests
     tests/automation_control_tests.cpp
@@ -712,6 +718,22 @@ set_tests_properties(
         # current ~94-second run on the managed desktop.
         TIMEOUT 180
         LABELS "automation;real-gui"
+)
+add_test(
+    NAME specforge_imgui_viewport_ownership_integration_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/imgui_viewport_ownership_integration_tests.ps1"
+        -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
+        -Executable "$<TARGET_FILE:specforge_native>"
+        -LayoutSeed
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
+)
+set_tests_properties(
+    specforge_imgui_viewport_ownership_integration_tests
+    PROPERTIES
+        RUN_SERIAL TRUE
+        TIMEOUT 90
+        LABELS "automation;gui-integration"
 )
 add_test(
     NAME specforge_automation_samples_tests
@@ -990,6 +1012,12 @@ add_test(
     NAME specforge_production_target_dependency_architecture_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/production_target_dependency_architecture_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
+add_test(
+    NAME specforge_imgui_viewport_policy_architecture_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/imgui_viewport_policy_architecture_tests.ps1"
         -RepoRoot "${CMAKE_SOURCE_DIR}"
 )
 specforge_add_test(

@@ -1,6 +1,7 @@
 #include "automation/automation_named_pipe.h"
 #include "automation/automation_protocol.h"
 #include "automation/automation_startup.h"
+#include "app/imgui_layout_persistence.h"
 #include "app/local_user_state_paths.h"
 #include "app/runtime_paths.h"
 #include "platform/win32_process_launcher.h"
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -38,6 +40,8 @@ constexpr auto kLauncherHelloResponseTimeout = 5s;
 constexpr auto kLauncherCommandResponseTimeout = 10s;
 constexpr auto kLauncherNormalCleanupTimeout = 5s;
 constexpr auto kLauncherProcessExitTimeout = 10s;
+constexpr std::uintmax_t kMaximumImGuiLayoutSeedBytes =
+    16U * 1024U * 1024U;
 
 std::string ResponseWaitFailure(
     std::string_view exchange,
@@ -65,6 +69,8 @@ struct LauncherOptions {
     std::optional<std::filesystem::path> state_root;
     std::optional<std::filesystem::path>
         labeling_state_seed;
+    std::optional<std::filesystem::path>
+        imgui_layout_seed;
     std::string error_message;
 };
 
@@ -218,6 +224,22 @@ LauncherOptions ParseOptions(int argc, wchar_t** argv)
             }
             options.labeling_state_seed =
                 std::filesystem::path(*value);
+        } else if (
+            argument ==
+            L"--imgui-layout-seed") {
+            const auto value =
+                require_value(
+                    "--imgui-layout-seed");
+            if (!value) {
+                return options;
+            }
+            if (options.imgui_layout_seed) {
+                options.error_message =
+                    "Option --imgui-layout-seed was provided more than once.";
+                return options;
+            }
+            options.imgui_layout_seed =
+                std::filesystem::path(*value);
         } else if (argument == L"--help" ||
                    argument == L"-h") {
             options.error_message = "help";
@@ -314,6 +336,67 @@ bool ValidateLabelingStateSeed(
         error_message);
 }
 
+bool ReadValidImGuiLayoutSeed(
+    const std::filesystem::path& path,
+    std::string_view description,
+    std::string& error_message)
+{
+    std::error_code size_error;
+    const std::uintmax_t size =
+        std::filesystem::file_size(
+            path,
+            size_error);
+    if (size_error ||
+        size == 0 ||
+        size > kMaximumImGuiLayoutSeedBytes) {
+        error_message =
+            std::string(description) +
+            " must be a non-empty ImGui layout no larger than 16 MiB.";
+        return false;
+    }
+
+    std::ifstream input(
+        path,
+        std::ios::binary);
+    const std::string snapshot{
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>()};
+    if (!input.is_open() ||
+        input.bad() ||
+        snapshot.size() != size ||
+        !specforge::ImGuiLayoutPersistence::
+            IsWellFormedSnapshot(snapshot)) {
+        error_message =
+            std::string(description) +
+            " is not a well-formed ImGui layout snapshot.";
+        return false;
+    }
+    return true;
+}
+
+bool ValidateImGuiLayoutSeed(
+    const specforge::
+        AutomationReadOnlyFileLease& seed,
+    const std::filesystem::path& state_root,
+    const std::filesystem::path& ordinary_root,
+    std::string& error_message)
+{
+    if (!specforge::AutomationStateRootIsIndependent(
+            seed.path(),
+            ordinary_root) ||
+        !specforge::AutomationStateRootIsIndependent(
+            seed.path(),
+            state_root)) {
+        error_message =
+            "ImGui layout seed must be independent from ordinary and automation state roots.";
+        return false;
+    }
+    return ReadValidImGuiLayoutSeed(
+        seed.path(),
+        "ImGui layout seed",
+        error_message);
+}
+
 bool MaterializeLabelingStateSeed(
     specforge::AutomationStateRootLease&
         state_root,
@@ -356,6 +439,35 @@ bool MaterializeLabelingStateSeed(
     return RejectLabelingStateOutputPaths(
         loaded.cache,
         "Materialized labeling state contains a forbidden persistent output_path reference.",
+        error_message);
+}
+
+bool MaterializeImGuiLayoutSeed(
+    specforge::AutomationStateRootLease&
+        state_root,
+    const specforge::
+        AutomationReadOnlyFileLease& seed,
+    std::string& error_message)
+{
+    const std::wstring destination_name =
+        std::filesystem::path(
+            specforge::local_user_state_paths::
+                kImGuiIni)
+            .wstring();
+    const std::filesystem::path destination =
+        state_root.path() /
+        destination_name;
+    if (!specforge::
+            MaterializePinnedAutomationSeed(
+                state_root,
+                seed,
+                destination_name,
+                error_message)) {
+        return false;
+    }
+    return ReadValidImGuiLayoutSeed(
+        destination,
+        "Materialized ImGui layout seed",
         error_message);
 }
 
@@ -1411,7 +1523,7 @@ private:
 void PrintUsage()
 {
     std::cout
-        << "Usage: SpecForgeAutomation [--app <SpecForge.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>]\n"
+        << "Usage: SpecForgeAutomation [--app <SpecForge.exe>] [--state-root <new-absolute-directory>] [--labeling-state-seed <production-cache.json>] [--imgui-layout-seed <specforge-imgui-v2.ini>]\n"
         << "Commands: setting get <ui.language|ui.scale>, setting set <ui.language|ui.scale> <value>, panel get <name>, panel set <name> <true|false>, source open <absolute-path>, spectrum goto <zero-based-index>, spectrum goto name <exact-name>, label assign <code> [spectrum <index>|spectrum name <exact-name>], frame capture <absolute-png-under-state-root>, profile start, profile stop, state get, wait idle, app quit, help\n"
         << "Harness controls: pipeline begin ... pipeline end; disconnect after accepted <next command>\n";
 }
@@ -1517,6 +1629,25 @@ int wmain(int argc, wchar_t** argv)
             return 2;
         }
     }
+    specforge::AutomationReadOnlyFileLease
+        imgui_layout_seed;
+    if (options.imgui_layout_seed) {
+        imgui_layout_seed =
+            specforge::
+                PinAutomationReadOnlyFile(
+                    *options
+                         .imgui_layout_seed,
+                    error_message);
+        if (!imgui_layout_seed.valid() ||
+            !ValidateImGuiLayoutSeed(
+                imgui_layout_seed,
+                state_root,
+                ordinary_state_root,
+                error_message)) {
+            std::cerr << error_message << '\n';
+            return 2;
+        }
+    }
     std::vector<wchar_t> child_environment;
     if (!BuildAutomationChildEnvironment(
             child_environment,
@@ -1545,7 +1676,18 @@ int wmain(int argc, wchar_t** argv)
         std::cerr << error_message << '\n';
         return 2;
     }
+    if (options.imgui_layout_seed &&
+        !MaterializeImGuiLayoutSeed(
+            state_root_lease,
+            imgui_layout_seed,
+            error_message)) {
+        std::cerr << error_message << '\n';
+        return 2;
+    }
     labeling_state_seed =
+        specforge::
+            AutomationReadOnlyFileLease{};
+    imgui_layout_seed =
         specforge::
             AutomationReadOnlyFileLease{};
 

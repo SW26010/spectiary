@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -13,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
@@ -2045,6 +2047,39 @@ void TestSettingsWindowCanGrowAfterDetachedViewportShrink()
     GImGui->Viewports.pop_back();
 }
 
+void TestSettingsDetachedConstraintsFollowClosestMonitor()
+{
+    ImGuiViewport detached_viewport;
+    detached_viewport.Pos = ImVec2(2200.0f, 100.0f);
+    detached_viewport.Size = ImVec2(700.0f, 500.0f);
+    detached_viewport.WorkPos = detached_viewport.Pos;
+    detached_viewport.WorkSize = detached_viewport.Size;
+
+    std::array<ImGuiPlatformMonitor, 2> monitors;
+    monitors[0].MainPos = ImVec2(0.0f, 0.0f);
+    monitors[0].MainSize = ImVec2(1920.0f, 1080.0f);
+    monitors[0].WorkPos = ImVec2(0.0f, 0.0f);
+    monitors[0].WorkSize = ImVec2(1920.0f, 1040.0f);
+    monitors[1].MainPos = ImVec2(1920.0f, 0.0f);
+    monitors[1].MainSize = ImVec2(1280.0f, 720.0f);
+    monitors[1].WorkPos = ImVec2(1920.0f, 0.0f);
+    monitors[1].WorkSize = ImVec2(1280.0f, 680.0f);
+
+    const specforge::PlatformWorkArea area =
+        specforge::ResolvePlatformWorkArea(
+            detached_viewport,
+            std::span<const ImGuiPlatformMonitor>(monitors));
+
+    Require(
+        area.position.x == 1920.0f &&
+            area.position.y == 0.0f,
+        "detached Settings should resolve the closest monitor work position");
+    Require(
+        area.size.x == 1280.0f &&
+            area.size.y == 680.0f,
+        "detached Settings constraints should follow the closest monitor work size");
+}
+
 void TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale()
 {
     ScopedImGuiContext imgui;
@@ -2389,6 +2424,7 @@ int main()
     TestSettingsWindowMinimumSizeTracksUiScale();
     TestSettingsWindowConstraintsFollowCurrentViewport();
     TestSettingsWindowCanGrowAfterDetachedViewportShrink();
+    TestSettingsDetachedConstraintsFollowClosestMonitor();
     TestEmbeddedLegalDocumentsRemainInteractiveAtMaximumScale();
     TestOpenLegalPopupTracksUserResize();
     TestOpenLegalPopupTracksViewportShrink();

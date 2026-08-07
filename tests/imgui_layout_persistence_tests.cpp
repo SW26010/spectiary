@@ -597,6 +597,51 @@ void TestSectionNamesMayContainClosingBrackets(
     ImGui::DestroyContext();
 }
 
+void TestViewportOwnershipLayoutFixtureContract()
+{
+    const std::filesystem::path fixture(
+        SPECFORGE_VIEWPORT_OWNERSHIP_LAYOUT_FIXTURE);
+    const std::string snapshot = ReadText(fixture);
+    Require(
+        specforge::ImGuiLayoutPersistence::
+            IsWellFormedSnapshot(snapshot),
+        "viewport ownership layout fixture should remain a well-formed ImGui snapshot");
+
+    constexpr std::string_view window_section =
+        "[Window][SpecForgeSpectralLinesV2]";
+    const std::size_t section_start =
+        snapshot.find(window_section);
+    Require(
+        section_start != std::string::npos,
+        "viewport ownership fixture should retain the stable Spectral Lines window section");
+    const std::size_t section_end =
+        snapshot.find(
+            "\n[",
+            section_start +
+                window_section.size());
+    const std::string_view spectral_lines_section(
+        snapshot.data() + section_start,
+        (section_end == std::string::npos
+             ? snapshot.size()
+             : section_end) -
+            section_start);
+    Require(
+        spectral_lines_section.find("DockId=") ==
+            std::string_view::npos,
+        "Spectral Lines must remain undocked in the viewport ownership fixture");
+    Require(
+        spectral_lines_section.find("Size=420,320") !=
+            std::string_view::npos,
+        "detached Spectral Lines fixture should retain a bounded platform-window size");
+    Require(
+        snapshot.find("[Docking][Data]") !=
+                std::string::npos &&
+            snapshot.find(
+                "DockSpace             ID=0xFBB4891A") !=
+                std::string::npos,
+        "viewport ownership fixture should retain a loaded dockspace so startup does not reseed the default layout");
+}
+
 void TestMalformedLayoutRecoversOnNextSave(
     const std::filesystem::path& target)
 {
@@ -744,6 +789,7 @@ int wmain(int argc, wchar_t** argv)
         TestInterruptedWriteByProcessTerminationRecoversOnRestart(target);
         TestMalformedLayoutRecoversOnNextSave(target);
         TestSectionNamesMayContainClosingBrackets(target);
+        TestViewportOwnershipLayoutFixtureContract();
         TestRestartLoadsTheSharedSnapshot(target);
 
         std::filesystem::remove_all(root, cleanup_error);

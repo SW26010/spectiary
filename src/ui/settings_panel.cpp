@@ -28,29 +28,11 @@
 #include <vector>
 
 namespace specforge {
-namespace {
 
-constexpr float kMinimumNavigationWidth = 190.0f;
-constexpr float kInitialSettingsWidth = 860.0f;
-constexpr float kInitialSettingsHeight = 560.0f;
-constexpr auto kArtifactIdentityRetryDelay =
-    std::chrono::milliseconds{250};
-
-constexpr std::array<SettingsSection, 7> kSettingsSections = {
-    SettingsSection::General,
-    SettingsSection::Appearance,
-    SettingsSection::Language,
-    SettingsSection::Input,
-    SettingsSection::DataAndRecovery,
-    SettingsSection::Diagnostics,
-    SettingsSection::About,
-};
-
-const ImGuiPlatformMonitor* FindClosestPlatformMonitor(
-    const ImGuiViewport& viewport)
+PlatformWorkArea ResolvePlatformWorkArea(
+    const ImGuiViewport& viewport,
+    std::span<const ImGuiPlatformMonitor> monitors)
 {
-    const ImVector<ImGuiPlatformMonitor>& monitors =
-        ImGui::GetPlatformIO().Monitors;
     const ImVec2 center = viewport.GetCenter();
     const ImGuiPlatformMonitor* closest = nullptr;
     float closest_distance_squared = FLT_MAX;
@@ -77,8 +59,35 @@ const ImGuiPlatformMonitor* FindClosestPlatformMonitor(
             closest_distance_squared = distance_squared;
         }
     }
-    return closest;
+
+    return closest != nullptr
+        ? PlatformWorkArea{
+            .position = closest->WorkPos,
+            .size = closest->WorkSize,
+        }
+        : PlatformWorkArea{
+            .position = viewport.WorkPos,
+            .size = viewport.WorkSize,
+        };
 }
+
+namespace {
+
+constexpr float kMinimumNavigationWidth = 190.0f;
+constexpr float kInitialSettingsWidth = 860.0f;
+constexpr float kInitialSettingsHeight = 560.0f;
+constexpr auto kArtifactIdentityRetryDelay =
+    std::chrono::milliseconds{250};
+
+constexpr std::array<SettingsSection, 7> kSettingsSections = {
+    SettingsSection::General,
+    SettingsSection::Appearance,
+    SettingsSection::Language,
+    SettingsSection::Input,
+    SettingsSection::DataAndRecovery,
+    SettingsSection::Diagnostics,
+    SettingsSection::About,
+};
 
 void RenderEmbeddedLegalDocument(
     LegalDocument document,
@@ -885,17 +894,21 @@ void SettingsPanelUi::Render(
     if (viewport == nullptr) {
         viewport = ImGui::GetMainViewport();
     }
-    const ImGuiPlatformMonitor* monitor =
-        FindClosestPlatformMonitor(*viewport);
+    const ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    const std::span<const ImGuiPlatformMonitor> monitors =
+        platform_io.Monitors.Size > 0
+        ? std::span<const ImGuiPlatformMonitor>(
+            platform_io.Monitors.Data,
+            static_cast<std::size_t>(platform_io.Monitors.Size))
+        : std::span<const ImGuiPlatformMonitor>{};
+    const PlatformWorkArea work_area = ResolvePlatformWorkArea(
+        *viewport,
+        monitors);
     // A secondary viewport's work area is the Settings platform window
     // itself. Use its monitor for constraints so shrinking the window does
     // not also lower the maximum size on the next frame.
-    const ImVec2 work_position = monitor != nullptr
-        ? monitor->WorkPos
-        : viewport->WorkPos;
-    const ImVec2 work_size = monitor != nullptr
-        ? monitor->WorkSize
-        : viewport->WorkSize;
+    const ImVec2 work_position = work_area.position;
+    const ImVec2 work_size = work_area.size;
     const float user_scale =
         static_cast<float>(settings.ui_scale_percentage) /
         static_cast<float>(kDefaultUiScalePercentage);

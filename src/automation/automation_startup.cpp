@@ -1076,7 +1076,7 @@ PinAutomationReadOnlyFile(
             CloseHandle(handle);
         }
         error_message =
-            "Labeling state seed must be a pinned regular file without reparse points.";
+            "Automation seed must be a pinned regular file without reparse points.";
         return lease;
     }
     lease.path_ = normalized;
@@ -1127,7 +1127,7 @@ bool MaterializePinnedAutomationSeed(
             CloseHandle(output);
         }
         error_message =
-            "Could not create the labeling state seed inside the pinned automation root.";
+            "Could not create the pinned automation seed inside the automation root.";
         return false;
     }
 
@@ -1182,7 +1182,7 @@ bool MaterializePinnedAutomationSeed(
             output);
         CloseHandle(output);
         error_message =
-            "Could not copy the pinned labeling state seed into the automation root.";
+            "Could not copy the pinned automation seed into the automation root.";
         return false;
     }
     CloseHandle(output);
