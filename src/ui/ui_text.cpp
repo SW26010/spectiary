@@ -283,10 +283,9 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "Local astronomical spectrum inspection and labeling.",
         "本地天文光谱检视与标注。"},
-    UiTextEntry{"Copyright (c) 2026 SpecForge.", "版权所有 (c) 2026 SpecForge。"},
     UiTextEntry{
-        "Proprietary software. Use is subject to the SpecForge EULA.",
-        "专有软件。使用须遵守 SpecForge 最终用户许可协议。"},
+        "Copyright (c) 2026 SpecForge. All rights reserved.",
+        "版权所有 (c) 2026 SpecForge。保留所有权利。"},
     UiTextEntry{"Version", "版本"},
     UiTextEntry{"Distribution", "分发方式"},
     UiTextEntry{"Configuration", "构建配置"},
@@ -325,9 +324,8 @@ constexpr std::array kTextCatalog = {
         "Dear ImGui 随附的修改版 stb 头文件 — MIT 许可证"},
     UiTextEntry{"Legal documents", "法律文档"},
     UiTextEntry{
-        "The complete license, notices, and data attributions are embedded in this executable and can be read here.",
-        "完整许可条款、第三方声明与数据来源已内嵌于此可执行文件，可在此处阅读。"},
-    UiTextEntry{"End User License Agreement", "最终用户许可协议"},
+        "Third-party notices and data-source attributions are embedded in this executable and can be read here.",
+        "第三方声明与数据来源已内嵌于此可执行文件，可在此处阅读。"},
     UiTextEntry{"Third-Party Notices", "第三方声明"},
     UiTextEntry{"Data Sources", "数据来源"},
     UiTextEntry{"Copy Document", "复制文档"},

@@ -135,9 +135,9 @@ deployment section, adds the Portable deployment declaration only to the
 package metadata, creates `Data`, and copies the unchanged EXE. Formal Portable
 packaging requires a non-null valid Windows SDK version even though development
 metadata may use `windows_sdk_version: null`. It verifies that the build EXE,
-metadata artifact digest, packaged EXE, and ZIP entries agree. The EULA,
-third-party notices, and data-source attributions are embedded in that shared
-executable and remain available through About without adjacent documents. The
+metadata artifact digest, packaged EXE, and ZIP entries agree. Third-party
+notices and data-source attributions are embedded in that shared executable and
+remain available through About without adjacent documents. The
 ZIP root is exactly:
 
 - `SpecForge.exe`

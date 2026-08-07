@@ -684,7 +684,6 @@ if ($buildMetadata.product.name -cne 'SpecForge' -or
 }
 
 $legalRoot = Join-Path $RepoRoot 'legal'
-$eulaPath = Join-Path $legalRoot 'EULA.txt'
 $noticesPath = Join-Path $legalRoot 'THIRD_PARTY_NOTICES.txt'
 $dataSourcesPath = Join-Path $legalRoot 'DATA_SOURCES.txt'
 $catalogPath = Join-Path $RepoRoot 'config\spectral_lines.public.tsv'
@@ -709,7 +708,6 @@ $metadataBuildRegressionTestPath = Join-Path `
     'tests\specforge_metadata_build_regression_tests.ps1'
 
 foreach ($requiredPath in @(
-    $eulaPath,
     $noticesPath,
     $dataSourcesPath,
     $catalogPath,
@@ -755,9 +753,8 @@ foreach ($documentName in @(
 }
 
 $embeddedDocuments = @(
-    [pscustomobject]@{ Name = 'EULA.txt'; Id = 101; Symbol = 'SPECFORGE_RESOURCE_EULA' },
-    [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = 102; Symbol = 'SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES' },
-    [pscustomobject]@{ Name = 'DATA_SOURCES.txt'; Id = 103; Symbol = 'SPECFORGE_RESOURCE_DATA_SOURCES' }
+    [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = 101; Symbol = 'SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES' },
+    [pscustomobject]@{ Name = 'DATA_SOURCES.txt'; Id = 102; Symbol = 'SPECFORGE_RESOURCE_DATA_SOURCES' }
 )
 foreach ($document in $embeddedDocuments) {
     $expectedBytes = [Convert]::ToBase64String(
@@ -770,12 +767,6 @@ foreach ($document in $embeddedDocuments) {
         throw "Embedded $($document.Name) does not byte-match its source file."
     }
 }
-
-$eula = Get-Content -Raw -LiteralPath $eulaPath
-Assert-Contains $eula 'Copyright (c) 2026 SpecForge.' 'EULA'
-Assert-Contains $eula 'in-application' 'EULA embedded-document access'
-Assert-Contains $eula 'Third-Party Notices and Data Sources' 'EULA third-party boundary'
-Assert-NotContains $eula '.txt' 'EULA external document filename'
 
 $notices = Get-Content -Raw -LiteralPath $noticesPath
 foreach ($expected in @(
@@ -1130,7 +1121,6 @@ foreach ($document in $embeddedDocuments) {
     Assert-Contains $resourceTemplate $document.Name 'Legal resource template'
 }
 Assert-Contains $packageScript 'THIRD_PARTY_NOTICES.txt' 'Portable notice-version check'
-Assert-NotContains $packageScript 'EULA.txt' 'Portable external document packaging'
 Assert-NotContains $packageScript 'DATA_SOURCES.txt' 'Portable external document packaging'
 Assert-Contains $embeddedLegalSource 'FindResourceW' 'Embedded legal runtime loader'
 Assert-Contains $embeddedLegalSource 'RT_RCDATA' 'Embedded legal resource type'

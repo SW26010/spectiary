@@ -301,11 +301,6 @@ struct LegalDocumentUiFixture {
 
 constexpr LegalDocumentUiFixture kLegalDocumentUiFixtures[] = {
     {
-        specforge::LegalDocument::Eula,
-        "End User License Agreement###SpecForgeOpenEula",
-        "End User License Agreement###SpecForgeEulaDocument",
-    },
-    {
         specforge::LegalDocument::ThirdPartyNotices,
         "Third-Party Notices###SpecForgeOpenThirdPartyNotices",
         "Third-Party Notices###SpecForgeThirdPartyNoticesDocument",
@@ -493,16 +488,19 @@ ImVec2 FindLegalEntryPosition(
         observation.settings_content_window->Scroll.y = scroll_y;
         observation = RenderLegalFrame(panel, fixture);
 
-        const float x =
-            observation.settings_content_clip_rect.Min.x + 10.0f;
         for (float y =
                  observation.settings_content_clip_rect.Min.y + 1.0f;
              y < observation.settings_content_clip_rect.Max.y;
              y += 3.0f) {
-            ImGui::GetIO().AddMousePosEvent(x, y);
-            observation = RenderLegalFrame(panel, fixture);
-            if (observation.entry_hovered) {
-                return ImVec2(x, y);
+            for (float x =
+                     observation.settings_content_clip_rect.Min.x + 1.0f;
+                 x < observation.settings_content_clip_rect.Max.x;
+                 x += 24.0f) {
+                ImGui::GetIO().AddMousePosEvent(x, y);
+                observation = RenderLegalFrame(panel, fixture);
+                if (observation.entry_hovered) {
+                    return ImVec2(x, y);
+                }
             }
         }
 
@@ -2070,12 +2068,6 @@ void TestLanguageRenderKeepsStableImGuiIds()
             ImHashStr(
                 "英语###SpecForgeUiLanguageEnglish"),
         "localized language options should retain one ImGui ID");
-    Require(
-        ImHashStr(
-            "End User License Agreement###SpecForgeOpenEula") ==
-            ImHashStr(
-                "最终用户许可协议###SpecForgeOpenEula"),
-        "localized EULA actions should retain one ImGui ID");
     Require(
         ImHashStr(
             "Third-Party Notices###SpecForgeOpenThirdPartyNotices") ==

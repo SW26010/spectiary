@@ -2026,13 +2026,6 @@ void SettingsPanelUi::RenderAbout(
         copyright_notice.data(),
         copyright_notice.data() +
             copyright_notice.size());
-    const std::string_view proprietary_notice = UiText(
-        language,
-        UiTextId::ProprietarySoftwareNotice);
-    ImGui::TextDisabled(
-        "%.*s",
-        static_cast<int>(proprietary_notice.size()),
-        proprietary_notice.data());
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     RenderReadOnlyValue(
@@ -2205,11 +2198,7 @@ void SettingsPanelUi::RenderAbout(
         legal_documents_description.data());
     ImGui::PopTextWrapPos();
 
-    const std::array<std::string, 3> legal_document_buttons = {
-        StableUiLabel(
-            language,
-            UiTextId::EndUserLicenseAgreement,
-            "SpecForgeOpenEula"),
+    const std::array<std::string, 2> legal_document_buttons = {
         StableUiLabel(
             language,
             UiTextId::ThirdPartyNotices,
@@ -2234,15 +2223,6 @@ void SettingsPanelUi::RenderAbout(
         legal_document_row_width <=
         ImGui::GetContentRegionAvail().x;
 
-    RenderEmbeddedLegalDocument(
-        LegalDocument::Eula,
-        UiTextId::EndUserLicenseAgreement,
-        "SpecForgeOpenEula",
-        "SpecForgeEulaDocument",
-        language);
-    if (render_legal_documents_inline) {
-        ImGui::SameLine();
-    }
     RenderEmbeddedLegalDocument(
         LegalDocument::ThirdPartyNotices,
         UiTextId::ThirdPartyNotices,

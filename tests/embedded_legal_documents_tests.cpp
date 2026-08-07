@@ -35,9 +35,6 @@ void TestEmbeddedDocumentsMatchSourceFiles()
     };
     constexpr std::array expected_documents = {
         ExpectedDocument{
-            specforge::LegalDocument::Eula,
-            "EULA.txt"},
-        ExpectedDocument{
             specforge::LegalDocument::ThirdPartyNotices,
             "THIRD_PARTY_NOTICES.txt"},
         ExpectedDocument{

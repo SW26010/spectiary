@@ -12,8 +12,6 @@ namespace {
 int ResourceId(LegalDocument document) noexcept
 {
     switch (document) {
-    case LegalDocument::Eula:
-        return SPECFORGE_RESOURCE_EULA;
     case LegalDocument::ThirdPartyNotices:
         return SPECFORGE_RESOURCE_THIRD_PARTY_NOTICES;
     case LegalDocument::DataSources:

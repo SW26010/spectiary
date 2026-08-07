@@ -1,6 +1,6 @@
 SPECFORGE THIRD-PARTY NOTICES
 
-This file covers third-party software incorporated into the SpecForge binary. It does not change the proprietary license of SpecForge-owned code.
+This file covers third-party software incorporated into the SpecForge binary.
 
 ==============================================================================
 Dear ImGui 1.92.8, including docking, Win32, and DirectX 11 backends

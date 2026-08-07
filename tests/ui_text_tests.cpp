@@ -356,12 +356,18 @@ void TestShellAndSettingsMappingsAreExact()
         "artifact identity labels should be localized");
     Require(
         UiText(
-            UiLanguage::SimplifiedChinese,
-            UiTextId::EndUserLicenseAgreement) ==
-            "最终用户许可协议" &&
+            UiLanguage::English,
+            UiTextId::CopyrightNotice) ==
+                "Copyright (c) 2026 SpecForge. All rights reserved." &&
             UiText(
                 UiLanguage::SimplifiedChinese,
-                UiTextId::ThirdPartyNotices) ==
+                UiTextId::CopyrightNotice) ==
+                "版权所有 (c) 2026 SpecForge。保留所有权利。",
+        "pre-open-source ownership notice should be localized");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::ThirdPartyNotices) ==
                 "第三方声明" &&
             UiText(
                 UiLanguage::SimplifiedChinese,

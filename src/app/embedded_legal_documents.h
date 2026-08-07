@@ -5,7 +5,6 @@
 namespace specforge {
 
 enum class LegalDocument {
-    Eula,
     ThirdPartyNotices,
     DataSources,
 };

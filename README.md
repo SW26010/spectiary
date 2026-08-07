@@ -137,9 +137,9 @@ and [docs/automation_ci.md](docs/automation_ci.md).
 ## Portable Package
 
 The first portable package is a no-launcher zip with `SpecForge.exe`,
-`specforge_metadata.json`, and `Data/` at the zip root. The complete EULA,
-third-party notices, and data-source attributions are embedded in the shared
-executable and are available from About. Schema 5 keeps product, build
+`specforge_metadata.json`, and `Data/` at the zip root. Third-party notices and
+data-source attributions are embedded in the shared executable and are
+available from About. Schema 5 keeps product, build
 provenance, executable artifact identity, and deployment separate. After the
 final EXE link, the build finalizer computes the EXE SHA-256 and UTC completion
 timestamp and atomically publishes the adjacent metadata. The Portable packager
