@@ -20,14 +20,24 @@ Start an isolated automation instance:
 ```
 
 The launcher accepts `--app <SpecForge.exe>`,
-`--state-root <new-absolute-directory>`, and the optional
-`--labeling-state-seed <absolute-production-cache.json>`. The state-root path
+`--state-root <new-absolute-directory>`, the optional
+`--labeling-state-seed <absolute-production-cache.json>`, and the optional
+`--imgui-layout-seed <absolute-specforge-imgui-v2.ini>`. The state-root path
 must not already exist. When omitted, the launcher creates a unique directory
 below the system temporary directory. The launcher also generates a
 cryptographically random instance ID and nonce, constructs the per-instance
 named-pipe name, and passes all four values to the GUI through explicit
 automation-only startup arguments. Those GUI arguments are an internal launcher
 contract.
+
+The ImGui layout seed is a launcher preparation input, not a protocol command.
+The launcher pins a non-reparse regular file that is independent from the
+ordinary and automation state roots, rejects empty, malformed, or larger than
+16 MiB snapshots with the production layout validator, and copies it through
+the pinned state-root handle as `specforge-imgui-v2.ini` before `CreateProcessW`.
+The materialized copy is validated again. This keeps deterministic layout and
+viewport lifecycle fixtures out of ordinary user state without adding an ImGui
+mutation command to the automation protocol.
 
 The labeling seed is automation-launch preparation, not a label mutation
 command or a profile importer. The launcher requires an existing regular file
@@ -53,7 +63,7 @@ and bounds pipe I/O and owned-process cleanup so a stalled GUI cannot leave its
 fixture behind.
 
 The launcher creates the new root relative to a verified directory handle,
-copies the seed handle-to-handle with create-new/no-follow semantics, and
+copies each seed handle-to-handle with create-new/no-follow semantics, and
 validates the materialized `sample-labeling-tasks.json` with the same reader.
 A launcher-owned identity lock prevents the root from being renamed or replaced
 through the complete GUI child lifetime while permitting normal sibling cache
@@ -703,6 +713,20 @@ interactive failure-injection
 coverage also blocks the production UI-scale path and verifies
 `setting_persistence_failed`, retained model/live values, no applied-setting
 notification, and a usable idle barrier.
+
+The manually selected `gui-integration` CTest group also includes
+`specforge_imgui_viewport_ownership_integration_tests`. It starts from a seeded
+layout with a detached Spectral Lines panel, moves the secondary HWND fully
+inside and then moves its center outside the main client rectangle without
+synthesizing mouse input,
+and uses unchanged `panel.set spectral_lines true` requests as detached-
+viewport Present barriers. The viewport HWND must remain identical throughout.
+This test is intentionally excluded from both the required headless gate and
+the protected `real-gui` CI label; run it on an interactive desktop with:
+
+```powershell
+ctest --test-dir build\ninja-msvc-debug -C Debug -L gui-integration --output-on-failure
+```
 
 ## Security and reliability audit checklist
 

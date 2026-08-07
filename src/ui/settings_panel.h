@@ -4,10 +4,13 @@
 #include "app/on_demand_frame_capture.h"
 #include "app/runtime_paths.h"
 
+#include <imgui.h>
+
 #include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -79,6 +82,15 @@ struct SettingsPanelStatus {
     std::string_view frame_capture_status_operation;
     std::string_view frame_capture_status_result;
 };
+
+struct PlatformWorkArea {
+    ImVec2 position;
+    ImVec2 size;
+};
+
+[[nodiscard]] PlatformWorkArea ResolvePlatformWorkArea(
+    const ImGuiViewport& viewport,
+    std::span<const ImGuiPlatformMonitor> monitors);
 
 [[nodiscard]] SettingsPanelEnvironment
 SettingsPanelEnvironmentForStartup(

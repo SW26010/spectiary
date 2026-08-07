@@ -490,6 +490,14 @@ void TestSourceInspectionMappingsAreExact()
     constexpr std::array kExpectedTexts = {
         ExpectedText{UiTextId::AddFile, "Add file...", "添加文件…"},
         ExpectedText{UiTextId::AddFolder, "Add folder...", "添加文件夹…"},
+        ExpectedText{
+            UiTextId::OpenSourceInNewInstance,
+            "Open in New SpecForge Instance",
+            "在新 SpecForge 实例打开"},
+        ExpectedText{
+            UiTextId::OpenSourceInNewInstanceFailed,
+            "Could not open the source in a new SpecForge instance.",
+            "无法在新的 SpecForge 实例中打开源。"},
         ExpectedText{UiTextId::SourceSingular, "source", "个源"},
         ExpectedText{UiTextId::SourcesPlural, "sources", "个源"},
         ExpectedText{
