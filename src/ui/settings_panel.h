@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/application_settings.h"
+#include "app/embedded_legal_documents.h"
 #include "app/on_demand_frame_capture.h"
 #include "app/runtime_paths.h"
 
@@ -209,6 +210,7 @@ private:
     std::optional<ApplicationSettingsIntent>
         application_settings_intent_;
     std::optional<int> ui_scale_draft_percentage_;
+    std::optional<LegalDocument> expanded_legal_document_;
     std::optional<ArtifactIdentityResult> artifact_identity_;
     std::unique_ptr<ArtifactIdentityComputation>
         artifact_identity_computation_;

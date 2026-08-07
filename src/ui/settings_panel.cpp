@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cfloat>
 #include <cstdio>
 #include <cstdint>
 #include <optional>
@@ -89,119 +88,54 @@ constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::About,
 };
 
-void RenderEmbeddedLegalDocument(
+struct LegalDisclosureRenderResult {
+    ImRect bounds;
+};
+
+LegalDisclosureRenderResult RenderEmbeddedLegalDisclosure(
     LegalDocument document,
     UiTextId title_text_id,
-    const char* button_id,
-    const char* popup_id,
-    UiLanguage language)
+    const char* disclosure_id,
+    const char* content_child_id,
+    UiLanguage language,
+    std::optional<LegalDocument>& expanded_document)
 {
-    const std::string button_label = StableUiLabel(
+    const std::string disclosure_label = StableUiLabel(
         language,
         title_text_id,
-        button_id);
-    const std::string popup_label = StableUiLabel(
-        language,
-        title_text_id,
-        popup_id);
-    if (ImGui::Button(button_label.c_str())) {
-        ImGui::OpenPopup(popup_label.c_str());
-    }
-
-    const ImGuiViewport* viewport = ImGui::GetWindowViewport();
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float font_size = ImGui::GetFontSize();
-    const ImVec2 viewport_margin(
-        std::max(font_size, style.WindowPadding.x),
-        std::max(font_size, style.WindowPadding.y));
-    const ImVec2 maximum_size(
-        std::max(
-            1.0f,
-            viewport->WorkSize.x - viewport_margin.x * 2.0f),
-        std::max(
-            1.0f,
-            viewport->WorkSize.y - viewport_margin.y * 2.0f));
-    const ImVec2 minimum_size(
-        std::min(font_size * 24.0f, maximum_size.x),
-        std::min(font_size * 16.0f, maximum_size.y));
-    const ImVec2 popup_size(
-        std::min(font_size * 52.0f, maximum_size.x),
-        std::min(font_size * 34.0f, maximum_size.y));
-    const ImVec2 popup_position(
-        viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-        viewport->WorkPos.y + viewport->WorkSize.y * 0.5f);
-    ImGui::SetNextWindowSize(
-        popup_size,
-        ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(
-        minimum_size,
-        maximum_size);
-    ImGui::SetNextWindowPos(
-        popup_position,
-        ImGuiCond_Appearing,
-        ImVec2(0.5f, 0.5f));
-
-    // Keep an already-open modal reachable when its host viewport shrinks.
-    // Only submit a position when clamping is required so normal dragging
-    // remains under Dear ImGui's control.
-    if (ImGuiWindow* existing_popup =
-            ImGui::FindWindowByName(popup_label.c_str());
-        existing_popup != nullptr && existing_popup->WasActive) {
-        const ImVec2 popup_size_current(
-            std::clamp(
-                existing_popup->SizeFull.x,
-                minimum_size.x,
-                maximum_size.x),
-            std::clamp(
-                existing_popup->SizeFull.y,
-                minimum_size.y,
-                maximum_size.y));
-        const ImVec2 popup_min_position(
-            viewport->WorkPos.x + viewport_margin.x,
-            viewport->WorkPos.y + viewport_margin.y);
-        const ImVec2 popup_max_position(
-            std::max(
-                popup_min_position.x,
-                viewport->WorkPos.x + viewport->WorkSize.x -
-                    viewport_margin.x - popup_size_current.x),
-            std::max(
-                popup_min_position.y,
-                viewport->WorkPos.y + viewport->WorkSize.y -
-                    viewport_margin.y - popup_size_current.y));
-        const ImVec2 popup_position_clamped(
-            std::clamp(
-                existing_popup->Pos.x,
-                popup_min_position.x,
-                popup_max_position.x),
-            std::clamp(
-                existing_popup->Pos.y,
-                popup_min_position.y,
-                popup_max_position.y));
-        if (popup_position_clamped.x != existing_popup->Pos.x ||
-            popup_position_clamped.y != existing_popup->Pos.y) {
-            ImGui::SetNextWindowPos(
-                popup_position_clamped,
-                ImGuiCond_Always);
+        disclosure_id);
+    const bool was_expanded =
+        expanded_document == document;
+    ImGui::SetNextItemOpen(was_expanded, ImGuiCond_Always);
+    const bool disclosure_open =
+        ImGui::CollapsingHeader(disclosure_label.c_str());
+    LegalDisclosureRenderResult result{
+        .bounds = ImRect(
+            ImGui::GetItemRectMin(),
+            ImGui::GetItemRectMax()),
+    };
+    if (disclosure_open != was_expanded) {
+        if (disclosure_open) {
+            expanded_document = document;
+        } else {
+            expanded_document.reset();
         }
     }
-    ImGui::SetNextWindowViewport(viewport->ID);
-    bool popup_open = true;
-    if (!ImGui::BeginPopupModal(
-            popup_label.c_str(),
-            &popup_open,
-            ImGuiWindowFlags_NoSavedSettings)) {
-        return;
+    if (expanded_document != document) {
+        return result;
     }
 
     const std::string_view content =
         EmbeddedLegalDocumentContent(document);
-    const float footer_height =
-        ImGui::GetFrameHeightWithSpacing();
-    if (content.empty()) {
-        if (ImGui::BeginChild(
-                "##EmbeddedLegalDocumentContent",
-                ImVec2(0.0f, -footer_height),
-                true)) {
+    const float content_height =
+        ImGui::GetTextLineHeightWithSpacing() * 16.0f;
+    if (ImGui::BeginChild(
+            content_child_id,
+            ImVec2(0.0f, content_height),
+            ImGuiChildFlags_None,
+            ImGuiWindowFlags_None)) {
+        ImGui::PushTextWrapPos(0.0f);
+        if (content.empty()) {
             const std::string_view unavailable = UiText(
                 language,
                 UiTextId::LegalDocumentUnavailable);
@@ -209,18 +143,16 @@ void RenderEmbeddedLegalDocument(
                 "%.*s",
                 static_cast<int>(unavailable.size()),
                 unavailable.data());
+        } else {
+            ImGui::TextUnformatted(
+                content.data(),
+                content.data() + content.size());
         }
-        ImGui::EndChild();
-    } else {
-        std::string selectable_content(content);
-        (void)ImGui::InputTextMultiline(
-            "##EmbeddedLegalDocumentContent",
-            selectable_content.data(),
-            selectable_content.size() + 1,
-            ImVec2(-FLT_MIN, -footer_height),
-            ImGuiInputTextFlags_ReadOnly |
-                ImGuiInputTextFlags_WordWrap);
+        ImGui::PopTextWrapPos();
     }
+    ImGui::EndChild();
+    result.bounds.Add(ImGui::GetItemRectMin());
+    result.bounds.Add(ImGui::GetItemRectMax());
 
     const std::string copy_label = StableUiLabel(
         language,
@@ -231,16 +163,9 @@ void RenderEmbeddedLegalDocument(
         ImGui::SetClipboardText(std::string(content).c_str());
     }
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    const std::string close_label = StableUiLabel(
-        language,
-        UiTextId::Close,
-        "SpecForgeCloseLegalDocument");
-    if (ImGui::Button(close_label.c_str())) {
-        ImGui::CloseCurrentPopup();
-    }
-
-    ImGui::EndPopup();
+    result.bounds.Add(ImGui::GetItemRectMin());
+    result.bounds.Add(ImGui::GetItemRectMax());
+    return result;
 }
 
 std::string SettingsWindowLabel(UiLanguage language)
@@ -880,6 +805,7 @@ void SettingsPanelUi::Open()
         action_failed_ = false;
         action_status_.clear();
         ui_scale_draft_percentage_.reset();
+        expanded_legal_document_.reset();
         if (artifact_identity_ &&
             artifact_identity_->executable_sha256.empty()) {
             artifact_identity_retry_requested_ = true;
@@ -1051,6 +977,9 @@ void SettingsPanelUi::RenderSelectedSection(
     const ApplicationSettingsView& settings,
     const SettingsPanelStatus& status)
 {
+    if (selected_section_ != SettingsSection::About) {
+        expanded_legal_document_.reset();
+    }
     switch (selected_section_) {
     case SettingsSection::General:
         RenderGeneral(settings);
@@ -2198,46 +2127,43 @@ void SettingsPanelUi::RenderAbout(
         legal_documents_description.data());
     ImGui::PopTextWrapPos();
 
-    const std::array<std::string, 2> legal_document_buttons = {
-        StableUiLabel(
-            language,
+    const LegalDisclosureRenderResult third_party_notices =
+        RenderEmbeddedLegalDisclosure(
+            LegalDocument::ThirdPartyNotices,
             UiTextId::ThirdPartyNotices,
-            "SpecForgeOpenThirdPartyNotices"),
-        StableUiLabel(
+            "SpecForgeOpenThirdPartyNotices",
+            "##SpecForgeThirdPartyNoticesContent",
             language,
+            expanded_legal_document_);
+    const LegalDisclosureRenderResult data_sources =
+        RenderEmbeddedLegalDisclosure(
+            LegalDocument::DataSources,
             UiTextId::DataSources,
-            "SpecForgeOpenDataSources"),
-    };
-    float legal_document_row_width =
-        ImGui::GetStyle().ItemSpacing.x *
-        static_cast<float>(legal_document_buttons.size() - 1);
-    for (const std::string& label : legal_document_buttons) {
-        legal_document_row_width +=
-            ImGui::CalcTextSize(
-                label.c_str(),
-                nullptr,
-                true).x +
-            ImGui::GetStyle().FramePadding.x * 2.0f;
-    }
-    const bool render_legal_documents_inline =
-        legal_document_row_width <=
-        ImGui::GetContentRegionAvail().x;
+            "SpecForgeOpenDataSources",
+            "##SpecForgeDataSourcesContent",
+            language,
+            expanded_legal_document_);
 
-    RenderEmbeddedLegalDocument(
-        LegalDocument::ThirdPartyNotices,
-        UiTextId::ThirdPartyNotices,
-        "SpecForgeOpenThirdPartyNotices",
-        "SpecForgeThirdPartyNoticesDocument",
-        language);
-    if (render_legal_documents_inline) {
-        ImGui::SameLine();
+    if (expanded_legal_document_ &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        const ImVec2 mouse_position = ImGui::GetIO().MousePos;
+        const ImGuiWindow* current_window = ImGui::GetCurrentWindow();
+        const ImGuiWindow* hovered_window = GImGui->HoveredWindow;
+        const bool settings_window_hovered =
+            hovered_window != nullptr &&
+            (hovered_window == current_window ||
+             hovered_window->RootWindow == current_window->RootWindow);
+        // Include both headers so clicking the other disclosure switches it
+        // directly; the expanded disclosure bounds also include its child
+        // and Copy Document control.
+        const bool disclosure_target =
+            settings_window_hovered &&
+            (third_party_notices.bounds.Contains(mouse_position) ||
+             data_sources.bounds.Contains(mouse_position));
+        if (!disclosure_target) {
+            expanded_legal_document_.reset();
+        }
     }
-    RenderEmbeddedLegalDocument(
-        LegalDocument::DataSources,
-        UiTextId::DataSources,
-        "SpecForgeOpenDataSources",
-        "SpecForgeDataSourcesDocument",
-        language);
 
     ImGui::Spacing();
     const std::string diagnostics_heading =
