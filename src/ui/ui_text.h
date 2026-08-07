@@ -186,7 +186,6 @@ enum class UiTextId {
     Architecture,
     Source,
     WorkingTree,
-    Head,
     Graphics,
     BuildDetails,
     ArtifactIdentity,

@@ -293,7 +293,6 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Architecture", "体系结构"},
     UiTextEntry{"Source", "源码"},
     UiTextEntry{"Working tree", "工作树"},
-    UiTextEntry{"HEAD", "HEAD"},
     UiTextEntry{"Graphics", "图形"},
     UiTextEntry{"Build details", "构建详情"},
     UiTextEntry{

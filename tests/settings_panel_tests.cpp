@@ -761,8 +761,16 @@ void TestHeadBuildSourcePresentation()
     Require(
         specforge::FormatBuildSourceForAbout(
             environment.build_source) ==
-            "Source: HEAD",
-        "HEAD About text should omit the Git revision");
+            "Source: 0123456789abcdef0123456789abcdef01234567",
+        "HEAD About text should show the full Git revision without a "
+        "relative HEAD label");
+    Require(
+        specforge::FormatBuildSourceForAbout(
+            environment.build_source,
+            specforge::UiLanguage::SimplifiedChinese) ==
+            "源码：0123456789abcdef0123456789abcdef01234567",
+        "Chinese HEAD About text should show the full Git revision without "
+        "a relative HEAD label");
 
     const std::string diagnostics =
         specforge::FormatDiagnosticInformation(

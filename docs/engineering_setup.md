@@ -275,8 +275,9 @@ build-provenance/artifact 部分无效、不完整、核心字段不匹配或 ar
 deployment 仍遵循既有启动失败契约，应用不会进入 About。
 所有必填字符串必须非空且没有首尾空白，working-tree 的
 `source_revision` 必须严格为 JSON `null`。About 对 working-tree 构建显示
-`Source: Working tree`，对 HEAD 构建仅显示 `Source: HEAD`；复制诊断信息始终包含
-source mode，且只有 HEAD 构建包含完整 40 位 revision。About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
+`Source: Working tree`；对隔离提交构建直接显示完整 40 位 `source_revision`，不显示相对的
+`HEAD` 标签。复制诊断信息始终包含 source mode，且只有隔离提交构建包含完整 40 位 revision。
+About 的 Distribution 则只来自合法的 deployment：Installer、WinGet、Portable、Scoop；
 无 metadata 或 schema 4/5 无 deployment 时显示 Standalone。schema 3 的 `release_profile=Portable|Installed`
 仅兼容映射到 `portable|local_app_data` 存储。About 另外按需校验当前 EXE 的 SHA-256，并显示 schema 5
 的完成时间；无法读取 EXE 时不显示该 hash。合法 storage selection 不受

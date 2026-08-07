@@ -465,15 +465,17 @@ std::string FormatBuildSourceForAbout(
     UiLanguage language)
 {
     std::string formatted;
+    std::string_view source = build_source.mode;
+    if (build_source.mode == "working_tree") {
+        source = UiText(language, UiTextId::WorkingTree);
+    } else if (build_source.mode == "head") {
+        source = build_source.revision;
+    }
     AppendLabeledValue(
         formatted,
         language,
         UiTextId::Source,
-        build_source.mode == "working_tree"
-            ? UiText(language, UiTextId::WorkingTree)
-        : build_source.mode == "head"
-            ? UiText(language, UiTextId::Head)
-            : std::string_view{build_source.mode});
+        source);
     return formatted;
 }
 
