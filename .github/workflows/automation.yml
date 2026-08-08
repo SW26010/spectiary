@@ -1,10 +1,6 @@
 name: SpecForge automation
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
   workflow_dispatch:
     inputs:
       run_real_gui:
