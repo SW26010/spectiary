@@ -142,26 +142,44 @@ Win32FinalPathByHandle(HANDLE handle)
     const std::filesystem::path& left,
     const std::filesystem::path& right)
 {
-    const std::wstring left_text =
-        left.wstring();
-    const std::wstring right_text =
-        right.wstring();
-    if (left_text.size() >
-            static_cast<std::size_t>(
-                (std::numeric_limits<int>::max)()) ||
-        right_text.size() >
-            static_cast<std::size_t>(
-                (std::numeric_limits<int>::max)())) {
-        return false;
+    const auto equal_ordinal =
+        [](const std::filesystem::path& lhs,
+           const std::filesystem::path& rhs) {
+            const std::wstring left_text =
+                lhs.wstring();
+            const std::wstring right_text =
+                rhs.wstring();
+            if (left_text.size() >
+                    static_cast<std::size_t>(
+                        (std::numeric_limits<int>::max)()) ||
+                right_text.size() >
+                    static_cast<std::size_t>(
+                        (std::numeric_limits<int>::max)())) {
+                return false;
+            }
+            return CompareStringOrdinal(
+                       left_text.data(),
+                       static_cast<int>(
+                           left_text.size()),
+                       right_text.data(),
+                       static_cast<int>(
+                           right_text.size()),
+                       TRUE) == CSTR_EQUAL;
+        };
+
+    if (equal_ordinal(left, right)) {
+        return true;
     }
-    return CompareStringOrdinal(
-               left_text.data(),
-               static_cast<int>(
-                   left_text.size()),
-               right_text.data(),
-               static_cast<int>(
-                   right_text.size()),
-               TRUE) == CSTR_EQUAL;
+
+    const std::filesystem::path normalized_left =
+        Win32FullPath(left);
+    const std::filesystem::path normalized_right =
+        Win32FullPath(right);
+    return !normalized_left.empty() &&
+           !normalized_right.empty() &&
+           equal_ordinal(
+               normalized_left,
+               normalized_right);
 }
 
 [[nodiscard]] inline HRESULT
