@@ -1,5 +1,6 @@
 #include "domain/spectrum_loader.h"
 #include "domain/fits_file_reader.h"
+#include "domain/npy_array_io.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_collection_identity_digest.h"
@@ -449,6 +450,114 @@ void WriteNpy(
         stream.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
     }
     Require(stream.good(), "could not write test NPY fixture");
+}
+
+std::string NpyHeaderBytes(
+    unsigned char major_version,
+    std::uint32_t declared_header_length,
+    std::string_view header_text)
+{
+    Require(major_version >= 1 && major_version <= 3, "test NPY version must be v1, v2, or v3");
+
+    constexpr std::array<unsigned char, 6> kMagic = {0x93, 'N', 'U', 'M', 'P', 'Y'};
+    std::string bytes(reinterpret_cast<const char*>(kMagic.data()), kMagic.size());
+    bytes.push_back(static_cast<char>(major_version));
+    bytes.push_back(0);
+
+    const std::size_t length_byte_count = major_version == 1 ? 2 : 4;
+    if (major_version == 1) {
+        Require(
+            declared_header_length <= std::numeric_limits<std::uint16_t>::max(),
+            "test NPY v1 header length must fit in uint16");
+    }
+    for (std::size_t index = 0; index < length_byte_count; ++index) {
+        bytes.push_back(static_cast<char>((declared_header_length >> (index * 8U)) & 0xffU));
+    }
+    bytes.append(header_text);
+    return bytes;
+}
+
+std::string NpyHeaderBytes(unsigned char major_version, std::string header_text)
+{
+    const std::size_t preamble_size = major_version == 1 ? 10U : 12U;
+    constexpr std::size_t kHeaderAlignment = 64;
+    const std::size_t header_with_newline_size = header_text.size() + 1U;
+    const std::size_t padding =
+        (kHeaderAlignment - ((preamble_size + header_with_newline_size) % kHeaderAlignment)) %
+        kHeaderAlignment;
+    header_text.append(padding, ' ');
+    header_text.push_back('\n');
+
+    return NpyHeaderBytes(
+        major_version,
+        static_cast<std::uint32_t>(header_text.size()),
+        header_text);
+}
+
+void TestReadsNpyV1V2V3Headers()
+{
+    const std::string header_text =
+        "{'descr': '<f8', 'fortran_order': False, 'shape': (2, 3), }";
+
+    for (const unsigned char major_version : std::array<unsigned char, 3>{1, 2, 3}) {
+        const std::string bytes = NpyHeaderBytes(major_version, header_text);
+        std::istringstream stream(bytes, std::ios::in | std::ios::binary);
+        const specforge::NpyHeader header = specforge::ReadNpyHeader(stream);
+
+        Require(header.descr == "<f8", "NPY header dtype should be preserved");
+        Require(header.shape == std::vector<std::size_t>({2, 3}), "NPY header shape should be preserved");
+        Require(
+            header.data_offset == bytes.size(),
+            "NPY data offset should account for the padded header");
+        Require(header.data_offset % 64U == 0, "NPY header fixture should end on a 64-byte boundary");
+        Require(bytes.back() == '\n', "NPY header fixture should retain its trailing newline");
+    }
+}
+
+void TestRejectsOversizedNpyV2V3Headers()
+{
+    for (const unsigned char major_version : std::array<unsigned char, 2>{2, 3}) {
+        const std::string bytes =
+            NpyHeaderBytes(major_version, std::numeric_limits<std::uint32_t>::max(), {});
+        std::istringstream stream(bytes, std::ios::in | std::ios::binary);
+
+        bool rejected = false;
+        try {
+            static_cast<void>(specforge::ReadNpyHeader(stream));
+        } catch (const specforge::NpyArrayError& error) {
+            rejected = true;
+            Require(
+                error.kind() == specforge::NpyArrayErrorKind::InvalidShape,
+                "oversized NPY header should use the invalid-shape error path");
+            Require(
+                std::string_view(error.what()).find("1 MiB limit") != std::string_view::npos,
+                "oversized NPY header should explain the resource limit");
+        }
+        Require(rejected, "oversized NPY header must be rejected");
+    }
+}
+
+void TestRejectsNpyHeaderLongerThanRemainingInput()
+{
+    constexpr std::uint32_t kDeclaredHeaderLength = 1024;
+    for (const unsigned char major_version : std::array<unsigned char, 3>{1, 2, 3}) {
+        const std::string bytes = NpyHeaderBytes(major_version, kDeclaredHeaderLength, "{'descr': '<f8'");
+        std::istringstream stream(bytes, std::ios::in | std::ios::binary);
+
+        bool rejected = false;
+        try {
+            static_cast<void>(specforge::ReadNpyHeader(stream));
+        } catch (const specforge::NpyArrayError& error) {
+            rejected = true;
+            Require(
+                error.kind() == specforge::NpyArrayErrorKind::InvalidShape,
+                "truncated NPY header should use the invalid-shape error path");
+            Require(
+                std::string_view(error.what()) == "NPY header is truncated",
+                "truncated NPY header should preserve the diagnostic message");
+        }
+        Require(rejected, "NPY header longer than the remaining input must be rejected");
+    }
 }
 
 SpectrumDiagnosticCode FirstDiagnosticCode(const SpectrumSnapshotHandle& snapshot)
@@ -1724,6 +1833,9 @@ void TestOptionalSampleDirectory()
 
 int main()
 {
+    TestReadsNpyV1V2V3Headers();
+    TestRejectsOversizedNpyV2V3Headers();
+    TestRejectsNpyHeaderLongerThanRemainingInput();
     TestNpyTypedValueConversionPollsCancellation();
     TestFolderSortingPollsCancellation();
     TestLoadsSelectedNpyRow();

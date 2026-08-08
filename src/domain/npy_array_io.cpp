@@ -41,6 +41,37 @@ std::uint32_t ReadLittleEndianU32(const std::array<unsigned char, 4>& bytes)
            (static_cast<std::uint32_t>(bytes[2]) << 16U) | (static_cast<std::uint32_t>(bytes[3]) << 24U);
 }
 
+std::optional<std::uint64_t> RemainingStreamBytes(std::istream& stream)
+{
+    std::streambuf* buffer = stream.rdbuf();
+    if (buffer == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto invalid_position = std::streampos(std::streamoff(-1));
+    const auto current_position = buffer->pubseekoff(0, std::ios::cur, std::ios::in);
+    if (current_position == invalid_position) {
+        return std::nullopt;
+    }
+
+    const auto end_position = buffer->pubseekoff(0, std::ios::end, std::ios::in);
+    if (end_position == invalid_position) {
+        if (buffer->pubseekpos(current_position, std::ios::in) == invalid_position) {
+            throw NpyArrayError(NpyArrayErrorKind::OpenFailed, "could not restore NPY stream position");
+        }
+        return std::nullopt;
+    }
+    if (buffer->pubseekpos(current_position, std::ios::in) == invalid_position) {
+        throw NpyArrayError(NpyArrayErrorKind::OpenFailed, "could not restore NPY stream position");
+    }
+
+    const std::streamoff remaining_bytes = end_position - current_position;
+    if (remaining_bytes < 0) {
+        return std::uint64_t{0};
+    }
+    return static_cast<std::uint64_t>(remaining_bytes);
+}
+
 std::uint32_t ReadLittleEndianU32(const unsigned char* bytes)
 {
     return static_cast<std::uint32_t>(bytes[0]) | (static_cast<std::uint32_t>(bytes[1]) << 8U) |
@@ -190,6 +221,15 @@ NpyHeader ReadNpyHeader(std::istream& stream)
         data_offset += length_bytes.size();
     } else {
         throw NpyArrayError(NpyArrayErrorKind::UnsupportedFormat, "unsupported NPY major version");
+    }
+
+    constexpr std::uint32_t kMaxHeaderLength = 1U << 20U;
+    if (header_length > kMaxHeaderLength) {
+        throw NpyArrayError(NpyArrayErrorKind::InvalidShape, "NPY header exceeds the 1 MiB limit");
+    }
+    if (const std::optional<std::uint64_t> remaining_bytes = RemainingStreamBytes(stream);
+        remaining_bytes && header_length > *remaining_bytes) {
+        throw NpyArrayError(NpyArrayErrorKind::InvalidShape, "NPY header is truncated");
     }
 
     std::string header_text(header_length, '\0');
