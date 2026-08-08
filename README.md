@@ -1,250 +1,135 @@
-# SpecForge
+<p align="center">
+  <img src="resources/branding/specforge.svg" width="128" alt="SpecForge logo">
+</p>
 
-SpecForge is being prepared as a native Windows spectrum viewer built on Win32,
-DirectX 11, Dear ImGui docking, ImPlot, CMake, and vcpkg.
+<h1 align="center">SpecForge</h1>
 
-This repository now contains the first native shell slice for the product
-direction: a Win32 + DirectX 11 executable with Dear ImGui docking, ImPlot, a
-synthetic spectrum fixture, and optional JSONL profile output.
+<p align="center">
+  <strong>Lightweight. Fast. Fluid.</strong><br>
+  A native Windows spectrum viewer for focused, high-refresh exploration of astronomical spectra.
+</p>
 
-## Current State
+SpecForge is built for the part of spectral analysis that happens with your eyes and hands: opening local datasets, moving rapidly through spectra, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
 
-- `specforge_native` builds the Windows executable target.
-- The app shell initializes Win32, DirectX 11, Dear ImGui docking, and ImPlot.
-- The main plot consumes `SpectrumSnapshotHandle` snapshots from the domain
-  layer; the synthetic fixture and `.npy` loader use the same UI/plot path.
-- A versioned public spectral-line catalog is loaded from
-  `config/spectral_lines.public.tsv`; the Spectral Lines panel searches and
-  organizes it, and the main plot renders line and band reference overlays.
-- The real-data loader supports `.npy` spectrum matrices, simple
-  wavelength/flux `.csv` files, and recognized single-spectrum FITS files
-  focused on LAMOST/SDSS table spectra. Limited COEFF0/COEFF1 FITS image
-  handling is a narrow fallback, not a generic FITS support promise.
-- No real-data performance conclusion is claimed from this shell yet.
-- Generated build trees, local data, layout files, profile logs, and scratch
-  experiments are ignored.
+It is designed as a focused desktop tool rather than a general scientific platform. The main plot stays at the center of the experience, interaction latency is treated as a product requirement, and features are expected to preserve the responsiveness of pan, zoom, navigation, and spectrum switching.
 
-## Product Direction
+> [!NOTE]
+> SpecForge is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while format coverage and higher-level analysis workflows are still evolving.
 
-The product target is an elegant, responsive, dockable desktop spectrum viewer:
+## Why SpecForge
 
-- primary view: wavelength on X, flux on Y
-- interaction: mouse pan and cursor-centered wheel zoom, Precision Touchpad
-  two-finger pan and pinch zoom, range navigation, spectrum switching, and
-  spectral-line overlays
-- overlay data: public rest-frame vacuum Angstrom reference markers in tracked
-  config; subtype presets, zoom windows, and private criteria stay out of the
-  public catalog
-- windowing: freely dockable ImGui panels using the docking branch
-- performance: measured on real data before making refresh-rate claims
-- refresh policy: event-driven at idle; on supported Windows 11 DRR systems,
-  main-plot mouse pan and Precision Touchpad manipulation request the compositor
-  high-refresh clock, pace rendering from its ticks, and return to the base rate
-  when interaction ends
+### Lightweight
 
-See [docs/product_requirements.md](docs/product_requirements.md),
-[docs/technical_direction.md](docs/technical_direction.md), and
-[docs/spectral_line_catalog_contract.md](docs/spectral_line_catalog_contract.md).
-For the build and release artifact contract, see
-[docs/release_artifacts.md](docs/release_artifacts.md).
+SpecForge is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to view spectra, and it avoids a large cross-platform UI framework in the hot path.
 
-## Environment
+The application also uses an event-driven render policy: when nothing is changing, it does not keep redrawing just to look alive.
 
-The built application requires Windows 10 or Windows 11 at runtime. Its
-presentation path depends on `DXGI_SWAP_EFFECT_FLIP_DISCARD` and
-`IDXGISwapChain3`; older Windows versions are not supported.
-Windows 11 build 22000 or newer additionally enables compositor-clock DRR
-boosting. When DXGI reports variable-refresh presentation support, boosted
-frames use the standard tearing-capable flip-model path; ordinary and fallback
-frames retain the existing display-vsync path. Windows 10 and systems without
-the compositor-clock API safely keep the fallback behavior.
+### Fast
 
-Required tools:
+The architecture keeps data loading, diagnostics, and other potentially expensive work away from the plot interaction path. Source collections can load in the background, while the UI consumes stable spectrum snapshots rather than parsing files inside the renderer.
 
-- Visual Studio 2022 Build Tools with the C++ desktop workload
-- Windows 10/11 SDK with DirectX 11 headers and libraries
-- CMake 3.24 or newer
-- Ninja, if using the `ninja-msvc-debug` preset
-- vcpkg
+Performance work is validated with **real spectral data and recorded interaction timing**, not synthetic-only benchmark claims.
 
-Set `VCPKG_ROOT` to your vcpkg checkout:
+### Fluid
 
-```powershell
-[Environment]::SetEnvironmentVariable('VCPKG_ROOT', (Join-Path $env:USERPROFILE 'vcpkg'), 'User')
-```
+The main plot is designed around direct manipulation:
 
-Open a new terminal after setting it.
+- drag to pan
+- cursor-centered wheel zoom
+- Windows Precision Touchpad two-finger pan and pinch zoom
+- axis-constrained touchpad gestures when starting over an axis
+- wavelength and flux range navigation
+- fast previous/next spectrum switching for multi-spectrum sources
 
-## Configure Check
+On supported Windows 11 systems, SpecForge can integrate with **Dynamic Refresh Rate (DRR)** through the Windows compositor clock so active plot interaction can request a higher-refresh presentation path and return to the base rate afterwards.
 
-> [!IMPORTANT]
-> For Ninja/MSVC configure and build operations, use
-> `scripts/build-ninja-msvc-debug.ps1`. Do not run `ninja` or
-> `cmake --build --preset ninja-msvc-debug` directly from an ordinary
-> PowerShell or a restricted agent shell. Restricted agents must run the wrapper
-> with tool escalation. See
-> [Ninja/MSVC troubleshooting](docs/engineering_setup.md#ninjamsvc-卡住排查).
+## What You Can Do
 
-Use the Ninja preset from a terminal with the MSVC environment loaded:
+- **Open real spectrum data** from `.npy`, simple wavelength/flux `.csv`, and supported FITS sources.
+- **Browse collections quickly**, including rows in spectrum matrices and supported multi-spectrum FITS data.
+- **Open folders of spectra** for lightweight local review workflows.
+- **Pan, zoom, and inspect features** with mouse or Precision Touchpad input.
+- **Navigate wavelength and flux ranges** without losing the main plot as the primary workspace.
+- **Search spectral references** and display line and band overlays directly on the plot.
+- **Arrange the workspace freely** with dockable and detachable panels.
+- **Enter an immersive plot view** with `F11` when the spectrum itself needs the full screen.
+- **Record bounded performance diagnostics** when investigating interaction or presentation behavior.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 -Configure
-```
+## Designed For
 
-Or use the Visual Studio generator preset:
+SpecForge is especially suited to workflows such as:
 
-```powershell
-cmake --preset vs2022-x64-debug
-```
+- visually inspecting **LAMOST, SDSS, and similar astronomical spectra**
+- rapidly reviewing many spectra for quality control or candidate triage
+- zooming into local wavelength regions and comparing features with reference lines or bands
+- long desktop inspection sessions where low interaction latency and high information density matter
+- high-refresh Windows desktops and laptops where the plotting surface should feel as direct as the rest of the system
 
-Configure success verifies the dependency stack and generated build files.
+## Spectrum Sources
 
-## Build
+Current source support is intentionally focused rather than pretending to be a universal astronomy file reader.
 
-Use the Ninja preset from a terminal with the MSVC environment loaded:
+| Source | Current support |
+| --- | --- |
+| `.npy` | 1D spectra and row-oriented 2D float32/float64 spectrum matrices |
+| `.csv` | Simple wavelength/flux spectra |
+| FITS | Recognized LAMOST/SDSS-style table spectra, including supported multi-spectrum vector-table cases |
+| Folder | Non-recursive collections of supported CSV/FITS files |
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1
-```
+A 3909-column `.npy` matrix uses SpecForge's fixed log-wavelength grid; other widths fall back to pixel index with diagnostics. FITS image handling remains a narrow compatibility fallback and should **not** be read as generic FITS support.
 
-The wrapper performs a process-kill preflight and refuses to start CMake if the current
-shell cannot clean up the job-assigned `cmd/cmake/ninja` process tree.
+For the exact data contract, see [Spectrum Snapshot Contract](docs/spectrum_snapshot_contract.md).
 
-The executable is written under
-`build/ninja-msvc-debug/SpecForge.exe`. A build output has no deployment
-declaration and therefore runs as Standalone, with SpecForge-owned state under
-`%LOCALAPPDATA%\SpecForge`. The ImGui layout is
-`%LOCALAPPDATA%\SpecForge\specforge-imgui-v2.ini`. Release builds can start or
-stop a performance
-diagnostic recording from `Settings > Diagnostics`, where users can also choose
-the output directory. That choice is saved under the selected data root.
-JSONL output defaults to its `logs/` child; resolution order is
-`SPECFORGE_PROFILE_DIR` environment override, saved user setting, then the
-storage-profile default. `SPECFORGE_PROFILE=1` remains available for scripted
-startup capture.
-Recording uses a bounded asynchronous writer and stops automatically after five
-minutes or 100 MiB. Stopping from Settings drains in the background; completed
-recordings are accepted by the analyzer only when their final summary reports
-zero dropped events.
+## A Native, Performance-First Stack
 
-For the explicit test/debug-only console launcher, named-pipe protocol,
-state-isolation contract, and supported automation commands, see
-[docs/automation_control.md](docs/automation_control.md).
-For the checked-in sample command sequences and the native/headless versus
-real-GUI CI split, see [docs/automation_samples.md](docs/automation_samples.md)
-and [docs/automation_ci.md](docs/automation_ci.md).
+SpecForge deliberately uses a small native stack:
 
-## Portable Package
+- **C++20** for the application and domain layer
+- **Win32** for native Windows integration
+- **DirectX 11 / DXGI flip model** for presentation
+- **Dear ImGui docking branch** for a flexible desktop workspace
+- **ImPlot** for interactive spectrum plotting
+- **Windows Direct Manipulation** for native Precision Touchpad gestures
+- **Windows 11 compositor clock / DRR integration** for high-refresh interaction where supported
+- **CMake + vcpkg** for reproducible project configuration and dependency management
 
-The first portable package is a no-launcher zip with `SpecForge.exe`,
-`specforge_metadata.json`, and `Data/` at the zip root. Third-party notices and
-data-source attributions are embedded in the shared executable and are
-available from About. Schema 5 keeps product, build
-provenance, executable artifact identity, and deployment separate. After the
-final EXE link, the build finalizer computes the EXE SHA-256 and UTC completion
-timestamp and atomically publishes the adjacent metadata. The Portable packager
-adds to its metadata copy
-`deployment.distribution: "portable"` and
-`deployment.storage_profile: "portable"` without modifying the EXE; it verifies
-that the build-directory EXE hash, metadata
-`artifact.sha256`, packaged EXE hash, and ZIP entries agree. The same EXE
-without metadata or without `deployment` is
-Standalone and uses `%LOCALAPPDATA%\SpecForge`. A structurally invalid
-deployment declaration fails during startup before application state objects
-are constructed. A build-provenance or artifact-identity mismatch only hides
-metadata-derived fields in About; it does not alter valid deployment or storage
-semantics. Legacy schema 3
-`specforge_build_metadata.json` files remain readable so an old Portable folder
-can receive only a new EXE without losing sight of its `Data/` state.
+This stack is not an abstraction exercise. It is chosen to keep the path from input to plot update to presentation short, observable, and maintainable.
 
-Build provenance identifies whether a package came from current workspace
-files or an isolated committed `HEAD` snapshot and records compiler, CMake,
-generator, target architecture, Windows SDK, and dependency versions. Ninja and
-other configurations without an authoritative CMake SDK value record
-`windows_sdk_version: null`; formal Portable packaging requires a non-null SDK
-version. Schema 5's `completed_at_utc` is the finalization time, not a compile
-timestamp. Its `artifact.file` is exactly `SpecForge.exe`, and
-`artifact.sha256` is the lowercase digest of that final executable. The
-executable architecture is recorded as `amd64`; Visual Studio,
-vcpkg, and preset inputs retain their native `x64` spelling. This tuple is
-diagnostic rather than a reproducibility guarantee; the schema 5 artifact
-digest binds the sidecar to the EXE, while the packaged ZIP SHA-256 identifies
-the complete release package. See
-[the release artifact finalization contract](docs/release_artifacts.md) for the
-field and verification rules.
+## Workspace and Interaction
 
-Build current workspace files without claiming a Git revision:
+The main spectrum plot is the first visual layer. Supporting tools live in ordinary dockable panels, so the workspace can be rearranged without replacing the plotting surface with a custom window-management system.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable.ps1
-```
+Panels can be docked, undocked, and restored through the Dear ImGui docking layout. Detached panels use native Windows viewports, while `F11` provides a dedicated immersive plot presentation for focused inspection.
 
-Build the exact local `HEAD` commit from a temporary `git archive` snapshot:
+Spectral references come from the tracked public catalog in [`config/spectral_lines.public.tsv`](config/spectral_lines.public.tsv). The Spectral Lines panel can search and organize those references and render line or band overlays on the main plot.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-portable-from-head.ps1
-```
+## Platform
 
-The working-tree builder invokes CMake directly with the current unified Visual
-Studio release preset. The HEAD wrapper delegates preset selection,
-configuration defaults, and package validation to the builder stored in the
-snapshot, so it remains compatible across build-script generations. Run either
-entrypoint from a normal developer shell or an approved unsandboxed agent run.
-The snapshot builder's source-mode parameters are an internal contract between
-these entrypoints: `head` mode is rejected when the builder is running from a
-Git checkout instead of an exported snapshot.
+- **Windows 10 or Windows 11**
+- x64 is the primary target
+- Windows 11 adds optional compositor-clock DRR boosting on supported systems
+- Windows Precision Touchpad gestures use the native Windows Direct Manipulation path
 
-Working-tree output uses `dist\SpecForge-portable`; isolated HEAD output uses
-`dist\head\SpecForge-portable`. Each package has a matching ZIP and `.sha256`
-file in its own output directory.
+The presentation path uses modern DXGI flip-model behavior and does not target Windows versions older than Windows 10.
 
-Launch with a spectrum source path to smoke-test the real-data loader:
+## Development
 
-```powershell
-.\build\ninja-msvc-debug\SpecForge.exe C:\path\to\spectrum_source.fits
-```
+README is intentionally kept user-facing. Build configuration, implementation contracts, profiling details, automation interfaces, and packaging rules live in the documentation instead.
 
-The external spectrum-file folder-source preference is off by default. When
-enabled in Settings, it applies only to a supported single-file spectrum source
-passed at application startup from outside SpecForge: the containing folder
-becomes the first-level folder source, while the file passed by Windows remains
-the active member after the scan. This behavior is non-recursive and keeps the
-existing folder-source contract. File > Open and the Files panel `Add file...`
-action retain their existing behavior, and `source.open` automation remains
-unchanged: it still opens a file as a single-file source. Disabling the
-preference also keeps external startup opens as single files. Eligibility comes
-from the domain loader/source-member capability; NPY spectrum matrices are not
-included in this preference.
+Start here if you want to build or work on SpecForge:
 
-Inside the app, the Files panel `Add file...` button opens source files through
-the same domain snapshot loader, and `Add folder...` opens the native Windows
-folder picker to add a directory source to the session list. Folder loading is
-non-recursive. The current folder-source member contract includes first-level
-`.csv` and FITS files; subfolders, unrelated file types, and mixed CSV/FITS
-folders are reported as diagnostics. The file picker exposes common candidate
-source suffixes such as `.npy`, `.csv`, and FITS variants. Unsupported files
-and catalog FITS files stay visible in the Files panel as domain-produced error
-snapshots with diagnostics.
+- [Engineering setup](docs/engineering_setup.md) — toolchain, vcpkg, CMake presets, build and test guidance
+- [Technical direction](docs/technical_direction.md) — architecture and performance constraints
+- [Product requirements](docs/product_requirements.md) — product goals, workflows, milestones, and non-goals
+- [Performance testing](docs/performance_testing.md) — real-data interaction profiling
+- [Release artifacts](docs/release_artifacts.md) — portable packaging, metadata, hashes, and release contracts
+- [Automation control](docs/automation_control.md) — test/debug automation interface
+- [Spectral line catalog contract](docs/spectral_line_catalog_contract.md) — public reference data rules
 
-A 3909-column `.npy` matrix uses the fixed loglam wavelength grid; other column
-counts fall back to pixel index and report that in snapshot diagnostics. Known
-auxiliary arrays such as `*_label.npy`, `*_index.npy`, `*_ormask.npy`, and
-`*_known_mask.npy` are rejected instead of being plotted as spectra.
+The current native stack requires Visual Studio 2022 Build Tools, a Windows 10/11 SDK, CMake 3.24 or newer, and vcpkg. Ninja is optional. See [Engineering setup](docs/engineering_setup.md) for the supported commands rather than invoking the Ninja/MSVC build path ad hoc.
 
-On a Windows Precision Touchpad, move the pointer over the spectrum and use two
-fingers to pan or pinch to zoom. Starting over the plot body controls both axes;
-starting over an axis region constrains the gesture to that axis. The docked
-plot, immersive plot, and detached viewport share the same behavior. Devices
-without native Precision Touchpad input retain the existing mouse and wheel
-controls.
+---
 
-## Interaction Profiling
-
-For the standard ImPlot pan/drag responsiveness flow, see
-[docs/performance_testing.md](docs/performance_testing.md). For implementation
-constraints and regression case studies, see
-[docs/ui_responsiveness.md](docs/ui_responsiveness.md). The short path is:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\profile-implot-pan.ps1 -InitialSource "C:\path\to\source.npy"
-```
+<p align="center">
+  <strong>SpecForge is about one thing first: making spectrum inspection feel light, fast, and fluid.</strong>
+</p>
