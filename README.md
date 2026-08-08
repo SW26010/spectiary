@@ -4,6 +4,13 @@
 
 <h1 align="center">SpecForge</h1>
 
+[![Build](https://github.com/SW26010/SpecForge/actions/workflows/automation.yml/badge.svg)](https://github.com/SW26010/SpecForge/actions/workflows/automation.yml)
+[![Release](https://img.shields.io/github/v/release/SW26010/SpecForge?label=Release)](https://github.com/SW26010/SpecForge/releases)
+![C++](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus)
+![Dear ImGui](https://img.shields.io/badge/Dear%20ImGui-Docking-4B8BBE)
+![ImPlot](https://img.shields.io/badge/ImPlot-Plotting-8A2BE2)
+![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D4?logo=windows11)
+
 <p align="center">
   <strong>Lightweight. Fast. Fluid.</strong><br>
   A native Windows spectrum viewer for fast, focused inspection of LAMOST and SDSS spectra.
@@ -108,7 +115,8 @@ Spectral references come from the tracked public catalog in [`config/spectral_li
 ## Platform
 
 - **Windows 10 or Windows 11**
-- x64 is the primary target
+- **64-bit Windows on x64 hardware**
+- Official releases are provided for x64 only
 - Windows 11 adds optional compositor-clock DRR boosting on supported systems
 - Windows Precision Touchpad gestures use the native Windows Direct Manipulation path
 
