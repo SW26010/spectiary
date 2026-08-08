@@ -41,9 +41,11 @@
 - 布局持久化优先交给 ImGui ini。
 - 多 viewport 已启用，并关闭 viewport 自动 merge；detached panel 继续拥有独立的 ImGui
   viewport、原生 HWND、交换链和 presentation identity，但 Win32 platform window 默认由
-  主窗口 owning。这里的 viewport 独立性不等于 unowned top-level window；不要用 TOPMOST
-  或恢复时手工重排 z-order 替代原生 owner/owned window 关系。必须持续验证 DPI、窗口恢复、
-  focus 和 monitor 切换。
+  主窗口 owning。这里的 viewport 独立性不等于 unowned top-level window；
+  `FLIP_DISCARD + NoAutoMerge + Win32 owner/owned window` 的组合、历史原因和“detached panel
+  始终位于主窗口之上”的已接受 UX 取舍由
+  [ADR 0005](adr/0005-detached-panel-win32-ownership.md) 约束。不要用 TOPMOST、恢复时手工重排
+  z-order 或动态切换 owner 替代该关系。必须持续验证 DPI、窗口恢复、focus 和 monitor 切换。
 
 DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在小函数里，并在文档中说明它依赖 docking branch 的实验 API。
 
