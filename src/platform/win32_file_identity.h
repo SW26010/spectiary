@@ -40,6 +40,39 @@ Win32FullPath(const std::filesystem::path& path)
 }
 
 [[nodiscard]] inline std::filesystem::path
+Win32LongPathIfAvailable(
+    const std::filesystem::path& path)
+{
+    const std::filesystem::path full_path =
+        Win32FullPath(path);
+    if (full_path.empty()) {
+        return {};
+    }
+
+    const DWORD required =
+        GetLongPathNameW(
+            full_path.c_str(),
+            nullptr,
+            0);
+    if (required == 0) {
+        return full_path;
+    }
+    std::wstring buffer(required, L'\0');
+    const DWORD written =
+        GetLongPathNameW(
+            full_path.c_str(),
+            buffer.data(),
+            required);
+    if (written == 0 || written >= required) {
+        return full_path;
+    }
+    buffer.resize(written);
+    return std::filesystem::path(
+        std::move(buffer))
+        .lexically_normal();
+}
+
+[[nodiscard]] inline std::filesystem::path
 Win32ExtendedLengthPath(const std::filesystem::path& path)
 {
     std::filesystem::path full_path =
@@ -116,26 +149,42 @@ Win32FinalPathByHandle(HANDLE handle)
     const std::filesystem::path& left,
     const std::filesystem::path& right)
 {
-    const std::wstring left_text =
-        left.wstring();
-    const std::wstring right_text =
-        right.wstring();
-    if (left_text.size() >
-            static_cast<std::size_t>(
-                (std::numeric_limits<int>::max)()) ||
-        right_text.size() >
-            static_cast<std::size_t>(
-                (std::numeric_limits<int>::max)())) {
-        return false;
+    const auto equal_ordinal =
+        [](const std::filesystem::path& lhs,
+           const std::filesystem::path& rhs) {
+            const std::wstring left_text =
+                lhs.wstring();
+            const std::wstring right_text =
+                rhs.wstring();
+            if (left_text.size() >
+                    static_cast<std::size_t>(
+                        (std::numeric_limits<int>::max)()) ||
+                right_text.size() >
+                    static_cast<std::size_t>(
+                        (std::numeric_limits<int>::max)())) {
+                return false;
+            }
+            return CompareStringOrdinal(
+                       left_text.data(),
+                       static_cast<int>(
+                           left_text.size()),
+                       right_text.data(),
+                       static_cast<int>(
+                           right_text.size()),
+                       TRUE) == CSTR_EQUAL;
+        };
+
+    if (equal_ordinal(left, right)) {
+        return true;
     }
-    return CompareStringOrdinal(
-               left_text.data(),
-               static_cast<int>(
-                   left_text.size()),
-               right_text.data(),
-               static_cast<int>(
-                   right_text.size()),
-               TRUE) == CSTR_EQUAL;
+
+    const std::filesystem::path long_left =
+        Win32LongPathIfAvailable(left);
+    const std::filesystem::path long_right =
+        Win32LongPathIfAvailable(right);
+    return !long_left.empty() &&
+           !long_right.empty() &&
+           equal_ordinal(long_left, long_right);
 }
 
 [[nodiscard]] inline HRESULT
