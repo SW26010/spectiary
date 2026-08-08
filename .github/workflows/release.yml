@@ -1,0 +1,185 @@
+name: SpecForge release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: specforge-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build portable release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      package_name: ${{ steps.release.outputs.package_name }}
+      commit_sha: ${{ steps.release.outputs.commit_sha }}
+    steps:
+      - name: Check out tagged revision
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release identity
+        id: release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Release tags must use stable SemVer form vMAJOR.MINOR.PATCH; got '$tag'."
+          }
+          $version = $tag.Substring(1)
+
+          $cmakeLists = Get-Content -Raw -LiteralPath 'CMakeLists.txt'
+          $versionMatch = [regex]::Match(
+            $cmakeLists,
+            '(?m)^\s*project\s*\(\s*SpecForge\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\b'
+          )
+          if (-not $versionMatch.Success) {
+            throw 'Could not resolve SpecForge VERSION from CMakeLists.txt.'
+          }
+          $projectVersion = $versionMatch.Groups[1].Value
+          if ($projectVersion -cne $version) {
+            throw "Tag version '$version' does not match CMake project version '$projectVersion'."
+          }
+
+          $commitSha = (& git rev-parse --verify 'HEAD^{commit}').Trim()
+          if ($LASTEXITCODE -ne 0 -or $commitSha -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'Could not resolve the checked-out release commit.'
+          }
+
+          & git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not refresh origin/master for release ancestry validation.'
+          }
+          & git merge-base --is-ancestor $commitSha 'origin/master'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release commit $commitSha is not contained in origin/master."
+          }
+
+          $packageName = "SpecForge-$version-windows-x64-portable"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "package_name=$packageName" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "commit_sha=$commitSha" -Encoding utf8
+
+      - name: Select runner vcpkg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
+            $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+            if ($null -ne $vcpkgCommand) {
+              $vcpkgRoot = Split-Path -Parent $vcpkgCommand.Source
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($vcpkgRoot) -or
+              -not (Test-Path -LiteralPath (Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))) {
+            throw 'Runner vcpkg checkout is unavailable.'
+          }
+
+          $binaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          New-Item -ItemType Directory -Path $binaryCache -Force | Out-Null
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VCPKG_DEFAULT_BINARY_CACHE=$binaryCache" -Encoding utf8
+
+      - name: Build and verify portable package
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File scripts\build-portable-from-head.ps1 `
+            -PackageName $env:PACKAGE_NAME
+          if ($LASTEXITCODE -ne 0) {
+            throw "Portable release build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.ref_name }}
+          path: |
+            dist/head/${{ steps.release.outputs.package_name }}.zip
+            dist/head/${{ steps.release.outputs.package_name }}.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-${{ github.ref_name }}
+          path: release
+
+      - name: Verify release handoff
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zipPath = Join-Path 'release' "$env:PACKAGE_NAME.zip"
+          $hashPath = "$zipPath.sha256"
+          foreach ($path in @($zipPath, $hashPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Release artifact is missing after workflow handoff: $path"
+            }
+          }
+
+          $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
+          $hashMatch = [regex]::Match($hashLine, '^([0-9a-f]{64})  (.+)$')
+          $expectedName = Split-Path -Leaf $zipPath
+          if (-not $hashMatch.Success -or $hashMatch.Groups[2].Value -cne $expectedName) {
+            throw "Invalid SHA-256 sidecar: $hashPath"
+          }
+          $expectedHash = $hashMatch.Groups[1].Value
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
+          if ($expectedHash -cne $actualHash) {
+            throw "Release ZIP SHA-256 does not match its sidecar."
+          }
+
+          $remoteCommit = (& gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_REF_NAME" --jq '.sha').Trim()
+          if ($LASTEXITCODE -ne 0 -or $remoteCommit -cnotmatch '^[0-9a-f]{40}$') {
+            throw "Could not resolve remote tag '$env:GITHUB_REF_NAME' to a commit."
+          }
+          if ($remoteCommit -cne $env:RELEASE_COMMIT) {
+            throw "Remote tag moved during the workflow: expected $env:RELEASE_COMMIT, found $remoteCommit."
+          }
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zipPath = Join-Path 'release' "$env:PACKAGE_NAME.zip"
+          $hashPath = "$zipPath.sha256"
+          & gh release create $env:GITHUB_REF_NAME `
+            $zipPath `
+            $hashPath `
+            --repo $env:GITHUB_REPOSITORY `
+            --verify-tag `
+            --generate-notes `
+            --fail-on-no-commits `
+            --title "SpecForge $env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release publication failed with exit code $LASTEXITCODE."
+          }
