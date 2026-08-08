@@ -920,6 +920,12 @@ add_test(
         -File "${CMAKE_SOURCE_DIR}/tests/analyze_source_load_profile_tests.ps1"
         -Analyzer "${CMAKE_SOURCE_DIR}/scripts/analyze-source-load-profile.ps1"
 )
+add_test(
+    NAME specforge_build_ninja_msvc_debug_watchdog_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/build_ninja_msvc_debug_watchdog_tests.ps1"
+        -Wrapper "${CMAKE_SOURCE_DIR}/scripts/build-ninja-msvc-debug.ps1"
+)
 add_executable(
     specforge_runtime_resource_workload_tests
     tests/runtime_resource_workload_tests.cpp
