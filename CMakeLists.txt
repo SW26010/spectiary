@@ -1036,6 +1036,18 @@ set_tests_properties(
         RUN_SERIAL TRUE
 )
 add_test(
+    NAME specforge_release_workflow_contract_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/release_workflow_contract_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(
+    specforge_release_workflow_contract_tests
+    PROPERTIES
+        LABELS "release;required"
+        TIMEOUT 30
+)
+add_test(
     NAME specforge_application_icon_tests
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File "${CMAKE_SOURCE_DIR}/tests/application_icon_tests.ps1"

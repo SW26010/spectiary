@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     name: Build portable release
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
     outputs:
       package_name: ${{ steps.release.outputs.package_name }}
