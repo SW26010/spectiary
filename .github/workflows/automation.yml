@@ -90,6 +90,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 10
         run: |
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-debug `
@@ -253,6 +257,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 20
         run: |
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-real-gui-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode RealGui `
             -BuildDirectory build\ninja-msvc-debug `
