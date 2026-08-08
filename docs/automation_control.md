@@ -326,7 +326,7 @@ outside signed 64-bit range remains a string and fails integer-valued
 | `labeling` | Labeling |
 | `filters` | Filters |
 | `sorting` | Sorting |
-| `smoothing` | Smoothing |
+| `smoothing` | Curve Display |
 | `information` | Information |
 | `spectral_lines` | Spectral Lines |
 

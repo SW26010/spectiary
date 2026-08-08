@@ -11,17 +11,23 @@
 
 namespace specforge {
 
+struct SpectrumSmoothingCache {
+    SpectrumValueVector source;
+    SpectrumSmoothingSettings settings;
+    SpectrumValueVector values;
+};
+
 struct SpectrumPlotState {
     bool fit_next_frame = true;
     SpectrumViewportRangeMode viewport_range_mode =
         SpectrumViewportRangeMode::Automatic;
+    bool show_raw_curve = true;
     bool show_points = false;
-    bool show_smoothed = false;
-    bool show_raw_when_smoothed = true;
-    SpectrumSmoothingSettings smoothing;
-    SpectrumValueVector smoothing_cache_source;
-    SpectrumSmoothingSettings smoothing_cache_settings;
-    SpectrumValueVector smoothed_y_values;
+    bool show_gaussian_smoothed = false;
+    bool show_median_smoothed = false;
+    SpectrumSmoothingParameters smoothing_parameters;
+    SpectrumSmoothingCache gaussian_smoothing_cache;
+    SpectrumSmoothingCache median_smoothing_cache;
     bool pan_drag_active = false;
     bool has_profile_limits = false;
     double profiled_x_min = 0.0;
@@ -40,6 +46,7 @@ struct SpectrumPlotState {
 };
 
 struct SpectrumPlotRenderResult {
+    // True when a valid plot frame was presented, even if every data series is hidden.
     bool plot_submitted = false;
     bool fit_applied = false;
     bool stored_limits_reused = false;

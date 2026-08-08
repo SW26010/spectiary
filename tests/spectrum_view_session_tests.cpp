@@ -242,11 +242,8 @@ public:
 void ConfigureGaussianSmoothing(specforge::SpectrumViewSession& session)
 {
     session.Submit(specforge::SpectrumViewSessionCommand::SetShowPoints(true));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowSmoothed(true));
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowRawWhenSmoothed(false));
-    session.Submit(
-        specforge::SpectrumViewSessionCommand::SetSmoothingMethod(
-            specforge::SpectrumSmoothingMethod::Gaussian));
+    session.Submit(specforge::SpectrumViewSessionCommand::SetShowRawCurve(false));
+    session.Submit(specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
     session.Submit(specforge::SpectrumViewSessionCommand::SetGaussianSigma(3.25));
 }
 
@@ -516,12 +513,14 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
 
     const specforge::SpectrumViewSessionView view = session.View();
     Require(view.show_points, "snapshot reset should preserve show-points state");
-    Require(view.show_smoothed, "snapshot reset should preserve smoothing visibility");
-    Require(!view.show_raw_when_smoothed, "snapshot reset should preserve raw-overlay visibility");
+    Require(!view.show_raw_curve, "snapshot reset should preserve raw-curve visibility");
     Require(
-        view.smoothing.method == specforge::SpectrumSmoothingMethod::Gaussian,
-        "snapshot reset should preserve smoothing method");
-    RequireNear(view.smoothing.gaussian_sigma, 3.25, "snapshot reset should preserve gaussian sigma");
+        view.show_gaussian_smoothed && !view.show_median_smoothed,
+        "snapshot reset should preserve independent smoothing visibility");
+    RequireNear(
+        view.smoothing_parameters.gaussian_sigma,
+        3.25,
+        "snapshot reset should preserve gaussian sigma");
     Require(!session.PlotPanActive(), "snapshot reset should clear plot interaction feedback");
     Require(
         session.RetainHeavySnapshotResources().empty(),
@@ -536,6 +535,32 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
     Require(
         second.visible_limits->x_min > first.visible_limits->x_max,
         "snapshot reset should discard old plot limits");
+}
+
+void TestHiddenCurvesStillReportPresentedPlotFrame()
+{
+    ScopedPlotUi ui;
+    specforge::SpectrumViewSession session;
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot({1.0, 2.0, 3.0}, {2.0, 4.0, 3.0});
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetShowRawCurve(false));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetShowPoints(false));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(false));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetShowMedianSmoothed(false));
+
+    const specforge::SpectrumViewRenderFeedback feedback =
+        ui.RenderFrame(session, snapshot);
+    Require(
+        feedback.plot_submitted,
+        "a valid plot frame should count as presented when every curve is hidden");
+    Require(
+        feedback.fit_applied && feedback.visible_limits,
+        "a curve-free plot frame should still complete its initial fit");
 }
 
 void TestFitAndStoredLimitReuseAreObservable()
@@ -823,14 +848,11 @@ void TestSmoothingCommandsOwnCacheInvalidation()
     specforge::SpectrumViewSession session;
     const specforge::SpectrumSnapshotHandle snapshot =
         MakeSnapshot({1.0, 2.0, 3.0, 4.0, 5.0}, {2.0, 4.0, 3.0, 5.0, 1.0});
-    session.Submit(specforge::SpectrumViewSessionCommand::SetShowSmoothed(true));
-    session.Submit(
-        specforge::SpectrumViewSessionCommand::SetSmoothingMethod(
-            specforge::SpectrumSmoothingMethod::Median));
+    session.Submit(specforge::SpectrumViewSessionCommand::SetShowMedianSmoothed(true));
     session.Submit(specforge::SpectrumViewSessionCommand::SetMedianKernelSize(4));
 
     Require(
-        session.View().smoothing.median_kernel_size == 5,
+        session.View().smoothing_parameters.median_kernel_size == 5,
         "median kernel command should normalize to an odd size");
     Require(
         session.EffectiveMedianKernelSize(4) == 3,
@@ -845,18 +867,48 @@ void TestSmoothingCommandsOwnCacheInvalidation()
         session.RetainHeavySnapshotResources().empty(),
         "changing the median kernel should clear smoothing resources");
     Require(
-        session.View().smoothing.median_kernel_size == 9,
+        session.View().smoothing_parameters.median_kernel_size == 9,
         "normalized median kernel should be observable");
     Require(ui.RenderFrame(session, snapshot).plot_submitted, "smoothing should rebuild");
     Require(
         session.RetainHeavySnapshotResources().size() == 2,
         "render should rebuild smoothing resources");
 
+    session.Submit(specforge::SpectrumViewSessionCommand::SetShowGaussianSmoothed(true));
+    Require(
+        ui.RenderFrame(session, snapshot).plot_submitted,
+        "gaussian and median smoothing should render together");
+    const std::vector<specforge::SpectrumValueVector> both_smoothing_resources =
+        session.RetainHeavySnapshotResources();
+    Require(
+        both_smoothing_resources.size() == 3,
+        "simultaneous smoothing should retain one source and both smoothed curves");
+
+    session.Submit(specforge::SpectrumViewSessionCommand::SetGaussianSigma(4.0));
+    Require(ui.RenderFrame(session, snapshot).plot_submitted, "gaussian smoothing should rebuild");
+    const std::vector<specforge::SpectrumValueVector> gaussian_changed_resources =
+        session.RetainHeavySnapshotResources();
+    Require(
+        gaussian_changed_resources.size() == 3 &&
+            gaussian_changed_resources[1] != both_smoothing_resources[1] &&
+            gaussian_changed_resources[2] == both_smoothing_resources[2],
+        "changing sigma should rebuild only the gaussian smoothing cache");
+
+    session.Submit(specforge::SpectrumViewSessionCommand::SetMedianKernelSize(11));
+    Require(ui.RenderFrame(session, snapshot).plot_submitted, "median smoothing should rebuild");
+    const std::vector<specforge::SpectrumValueVector> median_changed_resources =
+        session.RetainHeavySnapshotResources();
+    Require(
+        median_changed_resources.size() == 3 &&
+            median_changed_resources[1] == gaussian_changed_resources[1] &&
+            median_changed_resources[2] != gaussian_changed_resources[2],
+        "changing kernel size should rebuild only the median smoothing cache");
+
     session.Submit(specforge::SpectrumViewSessionCommand::ResetSmoothing());
     const specforge::SpectrumViewSessionView reset = session.View();
     Require(
-        !reset.show_smoothed && reset.show_raw_when_smoothed &&
-            reset.smoothing.method == specforge::SpectrumSmoothingMethod::None,
+        reset.show_raw_curve && !reset.show_gaussian_smoothed &&
+            !reset.show_median_smoothed,
         "reset smoothing should restore display defaults");
     Require(
         session.RetainHeavySnapshotResources().empty(),
@@ -1032,6 +1084,7 @@ int main()
     TestIndependentSpectrumViewsDoNotShareViewportLock();
     TestSourceRosterClassifiesSnapshotChanges();
     TestSnapshotResetPreservesControlsAndFitsNewData();
+    TestHiddenCurvesStillReportPresentedPlotFrame();
     TestFitAndStoredLimitReuseAreObservable();
     TestViewportLockOverlayTogglesInAxisCorner();
     TestViewportLockConsumesImmersiveAxisAndTouchpadInput();

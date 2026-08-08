@@ -73,6 +73,14 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::RequestFitView()
     return command;
 }
 
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowRawCurve(bool enabled)
+{
+    SpectrumViewSessionCommand command;
+    command.kind = SpectrumViewSessionCommandKind::SetShowRawCurve;
+    command.enabled = enabled;
+    return command;
+}
+
 SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowPoints(bool enabled)
 {
     SpectrumViewSessionCommand command;
@@ -81,18 +89,18 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowPoints(bool enable
     return command;
 }
 
-SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowSmoothed(bool enabled)
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowGaussianSmoothed(bool enabled)
 {
     SpectrumViewSessionCommand command;
-    command.kind = SpectrumViewSessionCommandKind::SetShowSmoothed;
+    command.kind = SpectrumViewSessionCommandKind::SetShowGaussianSmoothed;
     command.enabled = enabled;
     return command;
 }
 
-SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowRawWhenSmoothed(bool enabled)
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetShowMedianSmoothed(bool enabled)
 {
     SpectrumViewSessionCommand command;
-    command.kind = SpectrumViewSessionCommandKind::SetShowRawWhenSmoothed;
+    command.kind = SpectrumViewSessionCommandKind::SetShowMedianSmoothed;
     command.enabled = enabled;
     return command;
 }
@@ -101,14 +109,6 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::ResetSmoothing()
 {
     SpectrumViewSessionCommand command;
     command.kind = SpectrumViewSessionCommandKind::ResetSmoothing;
-    return command;
-}
-
-SpectrumViewSessionCommand SpectrumViewSessionCommand::SetSmoothingMethod(SpectrumSmoothingMethod method)
-{
-    SpectrumViewSessionCommand command;
-    command.kind = SpectrumViewSessionCommandKind::SetSmoothingMethod;
-    command.smoothing_method = method;
     return command;
 }
 
@@ -173,37 +173,34 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
         state_->plot.fit_next_frame = true;
         ++state_->viewport_mutation_revision;
         break;
+    case SpectrumViewSessionCommandKind::SetShowRawCurve:
+        state_->plot.show_raw_curve = command.enabled;
+        break;
     case SpectrumViewSessionCommandKind::SetShowPoints:
         state_->plot.show_points = command.enabled;
         break;
-    case SpectrumViewSessionCommandKind::SetShowSmoothed:
-        state_->plot.show_smoothed = command.enabled;
+    case SpectrumViewSessionCommandKind::SetShowGaussianSmoothed:
+        state_->plot.show_gaussian_smoothed = command.enabled;
         break;
-    case SpectrumViewSessionCommandKind::SetShowRawWhenSmoothed:
-        state_->plot.show_raw_when_smoothed = command.enabled;
+    case SpectrumViewSessionCommandKind::SetShowMedianSmoothed:
+        state_->plot.show_median_smoothed = command.enabled;
         break;
     case SpectrumViewSessionCommandKind::ResetSmoothing:
         ResetSmoothing();
         break;
-    case SpectrumViewSessionCommandKind::SetSmoothingMethod:
-        if (state_->plot.smoothing.method != command.smoothing_method) {
-            state_->plot.smoothing.method = command.smoothing_method;
-            ClearSmoothingCache();
-        }
-        break;
     case SpectrumViewSessionCommandKind::SetGaussianSigma: {
         const double sigma = std::max(0.01, command.gaussian_sigma);
-        if (state_->plot.smoothing.gaussian_sigma != sigma) {
-            state_->plot.smoothing.gaussian_sigma = sigma;
-            ClearSmoothingCache();
+        if (state_->plot.smoothing_parameters.gaussian_sigma != sigma) {
+            state_->plot.smoothing_parameters.gaussian_sigma = sigma;
+            ClearGaussianSmoothingCache();
         }
         break;
     }
     case SpectrumViewSessionCommandKind::SetMedianKernelSize: {
         const int kernel_size = NormalizeMedianKernelSize(command.median_kernel_size);
-        if (state_->plot.smoothing.median_kernel_size != kernel_size) {
-            state_->plot.smoothing.median_kernel_size = kernel_size;
-            ClearSmoothingCache();
+        if (state_->plot.smoothing_parameters.median_kernel_size != kernel_size) {
+            state_->plot.smoothing_parameters.median_kernel_size = kernel_size;
+            ClearMedianSmoothingCache();
         }
         break;
     }
@@ -229,11 +226,11 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
 SpectrumViewSessionView SpectrumViewSession::View() const
 {
     SpectrumViewSessionView view;
+    view.show_raw_curve = state_->plot.show_raw_curve;
     view.show_points = state_->plot.show_points;
-    view.show_smoothed = state_->plot.show_smoothed;
-    view.show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
-    view.smoothing_active = SmoothingActive();
-    view.smoothing = state_->plot.smoothing;
+    view.show_gaussian_smoothed = state_->plot.show_gaussian_smoothed;
+    view.show_median_smoothed = state_->plot.show_median_smoothed;
+    view.smoothing_parameters = state_->plot.smoothing_parameters;
     view.viewport_range_mode = state_->plot.viewport_range_mode;
     return view;
 }
@@ -241,7 +238,7 @@ SpectrumViewSessionView SpectrumViewSession::View() const
 int SpectrumViewSession::EffectiveMedianKernelSize(std::size_t point_count) const
 {
     return specforge::EffectiveMedianKernelSize(
-        state_->plot.smoothing.median_kernel_size,
+        state_->plot.smoothing_parameters.median_kernel_size,
         point_count);
 }
 
@@ -313,13 +310,16 @@ SpectrumViewSession::ViewportMutationRevision() const noexcept
 std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResources() const
 {
     std::vector<SpectrumValueVector> resources;
-    resources.reserve(2);
-    if (state_->plot.smoothing_cache_source) {
-        resources.push_back(state_->plot.smoothing_cache_source);
-    }
-    if (state_->plot.smoothed_y_values) {
-        resources.push_back(state_->plot.smoothed_y_values);
-    }
+    resources.reserve(3);
+    const auto retain_unique = [&resources](const SpectrumValueVector& resource) {
+        if (resource && std::find(resources.begin(), resources.end(), resource) == resources.end()) {
+            resources.push_back(resource);
+        }
+    };
+    retain_unique(state_->plot.gaussian_smoothing_cache.source);
+    retain_unique(state_->plot.gaussian_smoothing_cache.values);
+    retain_unique(state_->plot.median_smoothing_cache.source);
+    retain_unique(state_->plot.median_smoothing_cache.values);
     return resources;
 }
 
@@ -377,18 +377,21 @@ void SpectrumViewSession::ApplySnapshotChange(
         state_->plot.last_x_max,
         state_->plot.last_y_min,
         state_->plot.last_y_max};
+    const bool show_raw_curve = state_->plot.show_raw_curve;
     const bool show_points = state_->plot.show_points;
-    const bool show_smoothed = state_->plot.show_smoothed;
-    const bool show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
-    const SpectrumSmoothingSettings smoothing = state_->plot.smoothing;
+    const bool show_gaussian_smoothed = state_->plot.show_gaussian_smoothed;
+    const bool show_median_smoothed = state_->plot.show_median_smoothed;
+    const SpectrumSmoothingParameters smoothing_parameters =
+        state_->plot.smoothing_parameters;
 
     state_->plot = SpectrumPlotState{};
     state_->plot.viewport_range_mode =
         viewport_transition.range_mode;
+    state_->plot.show_raw_curve = show_raw_curve;
     state_->plot.show_points = show_points;
-    state_->plot.show_smoothed = show_smoothed;
-    state_->plot.show_raw_when_smoothed = show_raw_when_smoothed;
-    state_->plot.smoothing = smoothing;
+    state_->plot.show_gaussian_smoothed = show_gaussian_smoothed;
+    state_->plot.show_median_smoothed = show_median_smoothed;
+    state_->plot.smoothing_parameters = smoothing_parameters;
     if (preserve_last_limits) {
         state_->plot.fit_next_frame = false;
         state_->plot.has_last_limits = true;
@@ -403,22 +406,27 @@ void SpectrumViewSession::ApplySnapshotChange(
 
 void SpectrumViewSession::ResetSmoothing()
 {
-    state_->plot.show_smoothed = false;
-    state_->plot.show_raw_when_smoothed = true;
-    state_->plot.smoothing = SpectrumSmoothingSettings{};
-    ClearSmoothingCache();
+    state_->plot.show_raw_curve = true;
+    state_->plot.show_gaussian_smoothed = false;
+    state_->plot.show_median_smoothed = false;
+    state_->plot.smoothing_parameters = SpectrumSmoothingParameters{};
+    ClearSmoothingCaches();
 }
 
-void SpectrumViewSession::ClearSmoothingCache()
+void SpectrumViewSession::ClearGaussianSmoothingCache()
 {
-    state_->plot.smoothing_cache_source.reset();
-    state_->plot.smoothed_y_values.reset();
+    state_->plot.gaussian_smoothing_cache = {};
 }
 
-bool SpectrumViewSession::SmoothingActive() const
+void SpectrumViewSession::ClearMedianSmoothingCache()
 {
-    return state_->plot.show_smoothed &&
-           state_->plot.smoothing.method != SpectrumSmoothingMethod::None;
+    state_->plot.median_smoothing_cache = {};
+}
+
+void SpectrumViewSession::ClearSmoothingCaches()
+{
+    ClearGaussianSmoothingCache();
+    ClearMedianSmoothingCache();
 }
 
 void BindSourceCollectionActivationPresentationLifecycle(

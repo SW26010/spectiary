@@ -112,8 +112,9 @@ std::vector<double> SmoothMedian(const std::vector<double>& values, int kernel_s
 
 bool operator==(const SpectrumSmoothingSettings& left, const SpectrumSmoothingSettings& right)
 {
-    return left.method == right.method && left.gaussian_sigma == right.gaussian_sigma &&
-           left.median_kernel_size == right.median_kernel_size;
+    return left.method == right.method &&
+           left.parameters.gaussian_sigma == right.parameters.gaussian_sigma &&
+           left.parameters.median_kernel_size == right.parameters.median_kernel_size;
 }
 
 bool operator!=(const SpectrumSmoothingSettings& left, const SpectrumSmoothingSettings& right)
@@ -153,9 +154,9 @@ std::vector<double> SmoothSpectrumValues(const std::vector<double>& values, cons
 {
     switch (settings.method) {
     case SpectrumSmoothingMethod::Gaussian:
-        return SmoothGaussian(values, settings.gaussian_sigma);
+        return SmoothGaussian(values, settings.parameters.gaussian_sigma);
     case SpectrumSmoothingMethod::Median:
-        return SmoothMedian(values, settings.median_kernel_size);
+        return SmoothMedian(values, settings.parameters.median_kernel_size);
     case SpectrumSmoothingMethod::None:
     default:
         return values;

@@ -33,7 +33,7 @@ using Microsoft::WRL::ComPtr;
 constexpr const char* kDockHostWindow = "SpecForge Dock Host###SpecForgeDockHostV2";
 constexpr const char* kMainPlotWindow = "Spectrum###SpecForgeSpectrumV2";
 constexpr const char* kInfoTagsWindow = "Info###SpecForgeInfoTagsV2";
-constexpr const char* kSmoothingWindow = "Smoothing###SpecForgeSmoothingV1";
+constexpr const char* kCurveDisplayWindow = "Curve Display###SpecForgeSmoothingV1";
 constexpr std::array<const char*, kApplicationPanelCount>
     kApplicationPanelWindowIds{
         "###SpecForgeFilesV2",
@@ -512,32 +512,6 @@ ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
     case SpectrumDiagnosticSeverity::Info:
     default:
         return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
-    }
-}
-
-int SmoothingMethodIndex(SpectrumSmoothingMethod method)
-{
-    switch (method) {
-    case SpectrumSmoothingMethod::Gaussian:
-        return 1;
-    case SpectrumSmoothingMethod::Median:
-        return 2;
-    case SpectrumSmoothingMethod::None:
-    default:
-        return 0;
-    }
-}
-
-SpectrumSmoothingMethod SmoothingMethodFromIndex(int index)
-{
-    switch (index) {
-    case 1:
-        return SpectrumSmoothingMethod::Gaussian;
-    case 2:
-        return SpectrumSmoothingMethod::Median;
-    case 0:
-    default:
-        return SpectrumSmoothingMethod::None;
     }
 }
 
@@ -2491,7 +2465,7 @@ void ShellUi::RenderMainMenuBar(
             panel_visibility.sorting);
         render_panel_toggle(
             language,
-            UiTextId::Smoothing,
+            UiTextId::CurveDisplay,
             "SpecForgeViewSmoothing",
             ApplicationPanel::Smoothing,
             panel_visibility.smoothing);
@@ -2655,7 +2629,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         application_settings_.View().language;
     const std::string smoothing_window = StableUiLabel(
         language,
-        UiTextId::Smoothing,
+        UiTextId::CurveDisplay,
         "SpecForgeSmoothingV1");
     if (!ImGui::Begin(
             smoothing_window.c_str(),
@@ -2669,7 +2643,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
 
     RenderUiText(
         language,
-        UiTextId::Smoothing);
+        UiTextId::CurveDisplay);
     ImGui::Separator();
 
     const SpectrumSnapshotHandle snapshot = session_.CurrentSampleSnapshot();
@@ -2684,118 +2658,147 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         return;
     }
 
-    SpectrumViewSessionView view = spectrum_view_session_.View();
-    bool show_smoothed = view.show_smoothed;
-    const std::string show_smoothed_label = StableUiLabel(
-        language,
-        UiTextId::ShowSmoothedCurve,
-        "SpecForgeShowSmoothedCurve");
-    if (ImGui::Checkbox(
-            show_smoothed_label.c_str(),
-            &show_smoothed)) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowSmoothed(show_smoothed));
-        view = spectrum_view_session_.View();
-    }
-    ImGui::SameLine();
-    const std::string reset_label = StableUiLabel(
-        language,
-        UiTextId::Reset,
-        "SpecForgeResetSmoothing");
-    if (ImGui::Button(reset_label.c_str())) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::ResetSmoothing());
-        view = spectrum_view_session_.View();
-    }
+    const SpectrumViewSessionView view = spectrum_view_session_.View();
+    const float numeric_control_width =
+        ImGui::CalcTextSize("000000").x +
+        ImGui::GetStyle().FramePadding.x * 2.0f;
 
-    std::string method_labels;
-    for (const UiTextId text_id : {
-             UiTextId::SmoothingNone,
-             UiTextId::SmoothingGaussian,
-             UiTextId::SmoothingMedian}) {
-        method_labels += UiText(language, text_id);
-        method_labels.push_back('\0');
-    }
-    method_labels.push_back('\0');
-    const std::string method_label = StableUiLabel(
-        language,
-        UiTextId::SmoothingMethod,
-        "SpecForgeSmoothingMethod");
-    int method_index = SmoothingMethodIndex(view.smoothing.method);
-    if (ImGui::Combo(
-            method_label.c_str(),
-            &method_index,
-            method_labels.c_str())) {
-        spectrum_view_session_.Submit(
-            SpectrumViewSessionCommand::SetSmoothingMethod(SmoothingMethodFromIndex(method_index)));
-        view = spectrum_view_session_.View();
-    }
-
-    if (view.smoothing.method == SpectrumSmoothingMethod::Gaussian) {
-        float sigma = static_cast<float>(view.smoothing.gaussian_sigma);
-        ImGui::SetNextItemWidth(120.0f);
-        const std::string sigma_label = StableUiLabel(
-            language,
-            UiTextId::GaussianSigma,
-            "SpecForgeGaussianSigma");
-        if (ImGui::DragFloat(
-                sigma_label.c_str(),
-                &sigma,
-                0.05f,
-                0.01f,
-                100.0f,
-                "%.2f")) {
-            spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetGaussianSigma(static_cast<double>(sigma)));
-            view = spectrum_view_session_.View();
-        }
-    } else if (view.smoothing.method == SpectrumSmoothingMethod::Median) {
-        int kernel_size = view.smoothing.median_kernel_size;
-        ImGui::SetNextItemWidth(120.0f);
-        const std::string kernel_size_label = StableUiLabel(
-            language,
-            UiTextId::MedianKernelSize,
-            "SpecForgeMedianKernelSize");
-        if (ImGui::InputInt(
-                kernel_size_label.c_str(),
-                &kernel_size,
-                2,
-                10)) {
-            spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetMedianKernelSize(kernel_size));
-            view = spectrum_view_session_.View();
-        }
-        const int effective_kernel_size =
-            spectrum_view_session_.EffectiveMedianKernelSize(snapshot->current_spectrum.point_count);
-        if (effective_kernel_size != view.smoothing.median_kernel_size) {
-            const std::string_view effective_kernel = UiText(
-                language,
-                UiTextId::EffectiveKernel);
-            ImGui::TextDisabled(
-                "%.*s %d",
-                static_cast<int>(effective_kernel.size()),
-                effective_kernel.data(),
-                effective_kernel_size);
-        }
-    }
-
-    if (view.smoothing.method == SpectrumSmoothingMethod::None && view.show_smoothed) {
-        RenderDisabledUiText(
-            language,
-            UiTextId::NoSmoothingMethodSelected);
-    }
-
-    if (!view.smoothing_active) {
-        ImGui::BeginDisabled();
-    }
-    bool show_raw_when_smoothed = view.show_raw_when_smoothed;
+    bool show_raw_curve = view.show_raw_curve;
     const std::string show_raw_label = StableUiLabel(
         language,
-        UiTextId::ShowRawOverlay,
-        "SpecForgeShowRawOverlay");
-    if (ImGui::Checkbox(
-            show_raw_label.c_str(),
-            &show_raw_when_smoothed)) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowRawWhenSmoothed(show_raw_when_smoothed));
+        UiTextId::RawSpectrum,
+        "SpecForgeShowRawCurve");
+    if (ImGui::Checkbox(show_raw_label.c_str(), &show_raw_curve)) {
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetShowRawCurve(show_raw_curve));
     }
-    if (!view.smoothing_active) {
-        ImGui::EndDisabled();
+    ImGui::SameLine();
+    bool show_points = view.show_points;
+    const std::string show_points_label = StableUiLabel(
+        language,
+        UiTextId::DataPoints,
+        "SpecForgeShowSpectrumPoints");
+    if (ImGui::Checkbox(show_points_label.c_str(), &show_points)) {
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetShowPoints(show_points));
+    }
+
+    bool show_gaussian_smoothed = view.show_gaussian_smoothed;
+    const std::string show_gaussian_label = StableUiLabel(
+        language,
+        UiTextId::GaussianSmoothing,
+        "SpecForgeShowGaussianSmoothedCurve");
+    if (ImGui::Checkbox(
+            show_gaussian_label.c_str(),
+            &show_gaussian_smoothed)) {
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetShowGaussianSmoothed(
+                show_gaussian_smoothed));
+    }
+    ImGui::SameLine();
+    float sigma = static_cast<float>(
+        view.smoothing_parameters.gaussian_sigma);
+    ImGui::SetNextItemWidth(numeric_control_width);
+    const std::string sigma_label = StableUiLabel(
+        language,
+        UiTextId::GaussianSigma,
+        "SpecForgeGaussianSigma");
+    if (ImGui::DragFloat(
+            sigma_label.c_str(),
+            &sigma,
+            0.01f,
+            0.01f,
+            100.0f,
+            "%.2f",
+            ImGuiSliderFlags_AlwaysClamp)) {
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetGaussianSigma(
+                static_cast<double>(sigma)));
+    }
+    if (ImGui::IsItemHovered()) {
+        const std::string_view hint = UiText(
+            language,
+            UiTextId::DragOrEnterValue);
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(hint.size()),
+            hint.data());
+    }
+
+    bool show_median_smoothed = view.show_median_smoothed;
+    const std::string show_median_label = StableUiLabel(
+        language,
+        UiTextId::MedianSmoothing,
+        "SpecForgeShowMedianSmoothedCurve");
+    if (ImGui::Checkbox(
+            show_median_label.c_str(),
+            &show_median_smoothed)) {
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetShowMedianSmoothed(
+                show_median_smoothed));
+    }
+    ImGui::SameLine();
+    int kernel_size =
+        view.smoothing_parameters.median_kernel_size;
+    const int previous_kernel_size = kernel_size;
+    ImGui::SetNextItemWidth(numeric_control_width);
+    const std::string kernel_size_label = StableUiLabel(
+        language,
+        UiTextId::MedianKernelSize,
+        "SpecForgeMedianKernelSize");
+    const ImGuiID kernel_size_id =
+        ImGui::GetCurrentWindow()->GetID(kernel_size_label.c_str());
+    const bool kernel_text_input_active_before =
+        ImGui::TempInputIsActive(kernel_size_id);
+    if (ImGui::DragInt(
+            kernel_size_label.c_str(),
+            &kernel_size,
+            0.1f,
+            3,
+            501,
+            "%d",
+            ImGuiSliderFlags_AlwaysClamp |
+                ImGuiSliderFlags_NoSpeedTweaks)) {
+        const bool kernel_text_input_active =
+            kernel_text_input_active_before ||
+            ImGui::TempInputIsActive(kernel_size_id);
+        const int requested_kernel_size = kernel_text_input_active
+            ? kernel_size
+            : std::clamp(
+                  previous_kernel_size +
+                      (kernel_size - previous_kernel_size) * 2,
+                  3,
+                  501);
+        spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::SetMedianKernelSize(
+                requested_kernel_size));
+    }
+    const bool kernel_size_hovered = ImGui::IsItemHovered();
+    const SpectrumViewSessionView current_view =
+        spectrum_view_session_.View();
+    const int effective_kernel_size =
+        spectrum_view_session_.EffectiveMedianKernelSize(
+            snapshot->current_spectrum.point_count);
+    if (effective_kernel_size !=
+        current_view.smoothing_parameters.median_kernel_size) {
+        ImGui::SameLine();
+        const std::string_view effective_label = UiText(
+            language,
+            UiTextId::EffectiveKernelCompact);
+        ImGui::TextDisabled(
+            "%.*s%d",
+            static_cast<int>(effective_label.size()),
+            effective_label.data(),
+            effective_kernel_size);
+    }
+    if (kernel_size_hovered) {
+        const std::string_view hint = UiText(
+            language,
+            UiTextId::OddKernelInputHint);
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(hint.size()),
+            hint.data());
     }
 
     ImGui::End();
@@ -2958,25 +2961,6 @@ void ShellUi::RenderInfoTagsPanel(bool panel_open)
         RenderDisabledUiText(
             language,
             UiTextId::NoSnapshot);
-    }
-
-    ImGui::Spacing();
-    const std::string fit_view_label = StableUiLabel(
-        language,
-        UiTextId::FitView,
-        "SpecForgeFitSpectrumView");
-    if (ImGui::Button(fit_view_label.c_str())) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::RequestFitView());
-    }
-    bool show_points = spectrum_view_session_.View().show_points;
-    const std::string show_points_label = StableUiLabel(
-        language,
-        UiTextId::ShowPoints,
-        "SpecForgeShowSpectrumPoints");
-    if (ImGui::Checkbox(
-            show_points_label.c_str(),
-            &show_points)) {
-        spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetShowPoints(show_points));
     }
 
     ImGui::Spacing();
@@ -3231,7 +3215,7 @@ void ShellUi::SeedInitialDockLayout(ImGuiID dockspace_id, const ImVec2& size)
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::FiltersWindowName(), filters_id);
     ImGui::DockBuilderDockWindow(SampleWorkflowPanelUi::SortingWindowName(), sorting_id);
     ImGui::DockBuilderDockWindow(kInfoTagsWindow, info_tags_id);
-    ImGui::DockBuilderDockWindow(kSmoothingWindow, smoothing_id);
+    ImGui::DockBuilderDockWindow(kCurveDisplayWindow, smoothing_id);
     ImGui::DockBuilderDockWindow(kMainPlotWindow, center_id);
     ImGui::DockBuilderDockWindow(SpectralLinesPanelUi::WindowName(), spectral_lines_id);
     ImGui::DockBuilderFinish(dockspace_id);

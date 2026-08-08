@@ -271,6 +271,13 @@ void TestShellAndSettingsMappingsAreExact()
             UiTextId::SpectralLines) == "谱线",
         "shell window titles should be localized");
     Require(
+        UiText(UiLanguage::English, UiTextId::CurveDisplay) ==
+                "Curve Display" &&
+            UiText(
+                UiLanguage::SimplifiedChinese,
+                UiTextId::CurveDisplay) == "曲线显示",
+        "curve-display panel title should match its expanded controls");
+    Require(
         UiText(
             UiLanguage::SimplifiedChinese,
             UiTextId::GeneralPageDescription) ==
@@ -549,28 +556,33 @@ void TestSourceInspectionMappingsAreExact()
             UiTextId::NoPlottableSpectrum,
             "No plottable spectrum",
             "无可绘制光谱"},
-        ExpectedText{
-            UiTextId::ShowSmoothedCurve,
-            "Show smoothed curve",
-            "显示平滑曲线"},
-        ExpectedText{UiTextId::SmoothingMethod, "Method", "方法"},
-        ExpectedText{UiTextId::SmoothingNone, "None", "无"},
-        ExpectedText{UiTextId::SmoothingGaussian, "Gaussian", "高斯"},
-        ExpectedText{UiTextId::SmoothingMedian, "Median", "中值"},
         ExpectedText{UiTextId::GaussianSigma, "Sigma", "标准差 σ"},
         ExpectedText{UiTextId::MedianKernelSize, "Kernel size", "核大小"},
-        ExpectedText{UiTextId::EffectiveKernel, "Effective kernel:", "有效核大小："},
+        ExpectedText{UiTextId::RawSpectrum, "Original curve", "原始曲线"},
         ExpectedText{
-            UiTextId::NoSmoothingMethodSelected,
-            "No smoothing method selected",
-            "未选择平滑方法"},
-        ExpectedText{UiTextId::ShowRawOverlay, "Show raw overlay", "显示原始曲线叠加"},
-        ExpectedText{UiTextId::RawSpectrum, "raw spectrum", "原始光谱"},
-        ExpectedText{UiTextId::GaussianSmoothing, "Gaussian smoothing", "高斯平滑"},
-        ExpectedText{UiTextId::MedianSmoothing, "Median smoothing", "中值平滑"},
+            UiTextId::GaussianSmoothing,
+            "Gaussian-smoothed curve",
+            "高斯平滑曲线"},
+        ExpectedText{
+            UiTextId::MedianSmoothing,
+            "Median-smoothed curve",
+            "中值平滑曲线"},
         ExpectedText{UiTextId::CurrentSpectrum, "current spectrum", "当前光谱"},
         ExpectedText{UiTextId::Name, "Name", "名称"},
         ExpectedText{UiTextId::Points, "Points", "数据点"},
+        ExpectedText{UiTextId::DataPoints, "Data points", "数据点"},
+        ExpectedText{
+            UiTextId::DragOrEnterValue,
+            "Drag to adjust; Ctrl+click or press Enter to type a value.",
+            "拖动调节；Ctrl+单击或按 Enter 可手动输入数值。"},
+        ExpectedText{
+            UiTextId::OddKernelInputHint,
+            "Drag through odd values; Ctrl+click or press Enter to type. Typed values round up to the next odd number.",
+            "拖动时仅选择奇数；Ctrl+单击或按 Enter 可手动输入，输入值会向上取整为奇数。"},
+        ExpectedText{
+            UiTextId::EffectiveKernelCompact,
+            "Effective: ",
+            "有效："},
         ExpectedText{UiTextId::NoneValue, "none", "无"},
         ExpectedText{UiTextId::UnknownValue, "unknown", "未知"},
         ExpectedText{UiTextId::WavelengthMedium, "Wavelength medium", "波长介质"},
@@ -606,8 +618,6 @@ void TestSourceInspectionMappingsAreExact()
             "invalid pipeline redshift",
             "无效的流水线红移"},
         ExpectedText{UiTextId::NoSnapshot, "No snapshot", "无快照"},
-        ExpectedText{UiTextId::FitView, "Fit view", "适配视图"},
-        ExpectedText{UiTextId::ShowPoints, "Show points", "显示数据点"},
         ExpectedText{UiTextId::DiagnosticsHeading, "Diagnostics", "诊断"},
         ExpectedText{UiTextId::NoDiagnostics, "No diagnostics", "无诊断信息"},
         ExpectedText{UiTextId::DiagnosticSeverityInfo, "info", "信息"},
@@ -663,16 +673,16 @@ void TestSourceInspectionMappingsAreExact()
     Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
-            UiTextId::ShowRawOverlay,
-            "SpecForgeShowRawOverlay") ==
-            "显示原始曲线叠加###SpecForgeShowRawOverlay",
+            UiTextId::RawSpectrum,
+            "SpecForgeShowRawCurve") ==
+            "原始曲线###SpecForgeShowRawCurve",
         "localized smoothing controls should retain stable IDs");
     Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
             UiTextId::RawSpectrum,
             "SpecForgeRawSpectrum") ==
-            "原始光谱###SpecForgeRawSpectrum",
+            "原始曲线###SpecForgeRawSpectrum",
         "localized plot series should retain stable IDs");
 }
 

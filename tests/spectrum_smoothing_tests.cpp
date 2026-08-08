@@ -46,7 +46,7 @@ void TestGaussianKeepsConstantSignal()
 {
     specforge::SpectrumSmoothingSettings settings;
     settings.method = specforge::SpectrumSmoothingMethod::Gaussian;
-    settings.gaussian_sigma = 1.0;
+    settings.parameters.gaussian_sigma = 1.0;
 
     const std::vector<double> values = {5.0, 5.0, 5.0, 5.0};
     const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);
@@ -57,7 +57,7 @@ void TestMedianUsesReflectedEdges()
 {
     specforge::SpectrumSmoothingSettings settings;
     settings.method = specforge::SpectrumSmoothingMethod::Median;
-    settings.median_kernel_size = 3;
+    settings.parameters.median_kernel_size = 3;
 
     const std::vector<double> values = {9.0, 1.0, 8.0, 2.0, 7.0};
     const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);
@@ -69,7 +69,7 @@ void TestMedianKernelLargerThanSignalDoesNotIntroduceZeroes()
 {
     specforge::SpectrumSmoothingSettings settings;
     settings.method = specforge::SpectrumSmoothingMethod::Median;
-    settings.median_kernel_size = 99;
+    settings.parameters.median_kernel_size = 99;
 
     const std::vector<double> values = {2.0, 10.0, 20.0};
     const std::vector<double> smoothed = specforge::SmoothSpectrumValues(values, settings);

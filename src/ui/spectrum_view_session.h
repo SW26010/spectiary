@@ -37,11 +37,11 @@ struct SpectrumViewportTransition {
 enum class SpectrumViewSessionCommandKind {
     ApplySnapshotChange,
     RequestFitView,
+    SetShowRawCurve,
     SetShowPoints,
-    SetShowSmoothed,
-    SetShowRawWhenSmoothed,
+    SetShowGaussianSmoothed,
+    SetShowMedianSmoothed,
     ResetSmoothing,
-    SetSmoothingMethod,
     SetGaussianSigma,
     SetMedianKernelSize,
     SetPlotStyle,
@@ -53,11 +53,11 @@ struct SpectrumViewSessionCommand {
     [[nodiscard]] static SpectrumViewSessionCommand ApplySnapshotChange(
         SourceCollectionSnapshotChangeReason reason);
     [[nodiscard]] static SpectrumViewSessionCommand RequestFitView();
+    [[nodiscard]] static SpectrumViewSessionCommand SetShowRawCurve(bool enabled);
     [[nodiscard]] static SpectrumViewSessionCommand SetShowPoints(bool enabled);
-    [[nodiscard]] static SpectrumViewSessionCommand SetShowSmoothed(bool enabled);
-    [[nodiscard]] static SpectrumViewSessionCommand SetShowRawWhenSmoothed(bool enabled);
+    [[nodiscard]] static SpectrumViewSessionCommand SetShowGaussianSmoothed(bool enabled);
+    [[nodiscard]] static SpectrumViewSessionCommand SetShowMedianSmoothed(bool enabled);
     [[nodiscard]] static SpectrumViewSessionCommand ResetSmoothing();
-    [[nodiscard]] static SpectrumViewSessionCommand SetSmoothingMethod(SpectrumSmoothingMethod method);
     [[nodiscard]] static SpectrumViewSessionCommand SetGaussianSigma(double sigma);
     [[nodiscard]] static SpectrumViewSessionCommand SetMedianKernelSize(int kernel_size);
     [[nodiscard]] static SpectrumViewSessionCommand SetPlotStyle(SpectrumPlotStyle style);
@@ -72,7 +72,6 @@ private:
 
     SpectrumViewSessionCommandKind kind = SpectrumViewSessionCommandKind::RequestFitView;
     bool enabled = false;
-    SpectrumSmoothingMethod smoothing_method = SpectrumSmoothingMethod::None;
     double gaussian_sigma = 0.0;
     int median_kernel_size = 0;
     SpectrumPlotStyle plot_style;
@@ -82,16 +81,17 @@ private:
 };
 
 struct SpectrumViewSessionView {
+    bool show_raw_curve = true;
     bool show_points = false;
-    bool show_smoothed = false;
-    bool show_raw_when_smoothed = true;
-    bool smoothing_active = false;
-    SpectrumSmoothingSettings smoothing;
+    bool show_gaussian_smoothed = false;
+    bool show_median_smoothed = false;
+    SpectrumSmoothingParameters smoothing_parameters;
     SpectrumViewportRangeMode viewport_range_mode =
         SpectrumViewportRangeMode::Automatic;
 };
 
 struct SpectrumViewRenderFeedback {
+    // True when a valid plot frame was presented, even if every data series is hidden.
     bool plot_submitted = false;
     bool fit_applied = false;
     bool stored_limits_reused = false;
@@ -133,8 +133,9 @@ private:
 
     void ApplySnapshotChange(SourceCollectionSnapshotChangeReason reason);
     void ResetSmoothing();
-    void ClearSmoothingCache();
-    [[nodiscard]] bool SmoothingActive() const;
+    void ClearGaussianSmoothingCache();
+    void ClearMedianSmoothingCache();
+    void ClearSmoothingCaches();
 
     std::unique_ptr<State> state_;
 };

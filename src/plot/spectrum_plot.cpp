@@ -104,15 +104,24 @@ bool CanPlotSnapshot(const SpectrumSnapshotHandle& snapshot)
            x_values->size() <= static_cast<std::size_t>(std::numeric_limits<int>::max());
 }
 
-bool SmoothingActive(const SpectrumPlotState& state)
+bool GaussianSmoothingActive(const SpectrumPlotState& state)
 {
-    return state.show_smoothed && state.smoothing.method != SpectrumSmoothingMethod::None;
+    return state.show_gaussian_smoothed;
 }
 
-UiTextId SmoothingTextId(
-    const SpectrumSmoothingSettings& settings)
+bool MedianSmoothingActive(const SpectrumPlotState& state)
 {
-    switch (settings.method) {
+    return state.show_median_smoothed;
+}
+
+bool AnySmoothingActive(const SpectrumPlotState& state)
+{
+    return GaussianSmoothingActive(state) || MedianSmoothingActive(state);
+}
+
+UiTextId SmoothingTextId(SpectrumSmoothingMethod method)
+{
+    switch (method) {
     case SpectrumSmoothingMethod::Gaussian:
         return UiTextId::GaussianSmoothing;
     case SpectrumSmoothingMethod::Median:
@@ -123,26 +132,43 @@ UiTextId SmoothingTextId(
     }
 }
 
-SpectrumValueVector SmoothedValuesFor(const SpectrumValueVector& y_values, SpectrumPlotState& state)
+SpectrumValueVector SmoothedValuesFor(
+    const SpectrumValueVector& y_values,
+    SpectrumPlotState& state,
+    SpectrumSmoothingMethod method)
 {
+    SpectrumSmoothingCache& cache =
+        method == SpectrumSmoothingMethod::Gaussian
+            ? state.gaussian_smoothing_cache
+            : state.median_smoothing_cache;
     if (!y_values) {
-        state.smoothing_cache_source.reset();
-        state.smoothed_y_values.reset();
+        cache = {};
         return {};
     }
 
-    const bool cache_valid = state.smoothing_cache_source == y_values &&
-                             state.smoothing_cache_settings == state.smoothing && state.smoothed_y_values &&
-                             state.smoothed_y_values->size() == y_values->size();
+    const SpectrumSmoothingSettings settings{
+        .method = method,
+        .parameters = state.smoothing_parameters,
+    };
+    const bool smoothing_parameter_matches =
+        method == SpectrumSmoothingMethod::Gaussian
+            ? cache.settings.parameters.gaussian_sigma ==
+                  settings.parameters.gaussian_sigma
+            : cache.settings.parameters.median_kernel_size ==
+                  settings.parameters.median_kernel_size;
+    const bool cache_valid =
+        cache.source == y_values && smoothing_parameter_matches && cache.values &&
+        cache.values->size() == y_values->size();
     if (cache_valid) {
-        return state.smoothed_y_values;
+        return cache.values;
     }
 
-    auto smoothed = std::make_shared<std::vector<double>>(SmoothSpectrumValues(*y_values, state.smoothing));
-    state.smoothing_cache_source = y_values;
-    state.smoothing_cache_settings = state.smoothing;
-    state.smoothed_y_values = std::move(smoothed);
-    return state.smoothed_y_values;
+    auto smoothed = std::make_shared<std::vector<double>>(
+        SmoothSpectrumValues(*y_values, settings));
+    cache.source = y_values;
+    cache.settings = settings;
+    cache.values = std::move(smoothed);
+    return cache.values;
 }
 
 void ExpandYBounds(Bounds& bounds, const std::vector<double>& y_values, bool& has_y_bounds)
@@ -177,13 +203,21 @@ Bounds ComputeBounds(const SpectrumSnapshot& snapshot, SpectrumPlotState& state)
     bounds.x_max = *x_max;
 
     bool has_y_bounds = false;
-    if (SmoothingActive(state)) {
-        const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
-        if (smoothed_values && smoothed_values->size() == y_values->size()) {
-            ExpandYBounds(bounds, *smoothed_values, has_y_bounds);
-            if (state.show_raw_when_smoothed) {
-                ExpandYBounds(bounds, *y_values, has_y_bounds);
-            }
+    if (state.show_raw_curve || state.show_points) {
+        ExpandYBounds(bounds, *y_values, has_y_bounds);
+    }
+    if (GaussianSmoothingActive(state)) {
+        const SpectrumValueVector gaussian_values =
+            SmoothedValuesFor(y_values, state, SpectrumSmoothingMethod::Gaussian);
+        if (gaussian_values && gaussian_values->size() == y_values->size()) {
+            ExpandYBounds(bounds, *gaussian_values, has_y_bounds);
+        }
+    }
+    if (MedianSmoothingActive(state)) {
+        const SpectrumValueVector median_values =
+            SmoothedValuesFor(y_values, state, SpectrumSmoothingMethod::Median);
+        if (median_values && median_values->size() == y_values->size()) {
+            ExpandYBounds(bounds, *median_values, has_y_bounds);
         }
     }
     if (!has_y_bounds) {
@@ -1075,7 +1109,7 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         plot_flags |= ImPlotFlags_NoInputs;
     }
 
-    bool plot_submitted = false;
+    bool plot_frame_presented = false;
     const std::string plot_label = StableUiLabel(
         language,
         UiTextId::Spectrum,
@@ -1087,10 +1121,15 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             plot_label.c_str(),
             plot_size,
             plot_flags)) {
+        plot_frame_presented = true;
         const char* x_label = snapshot->axis.x_label.empty() ? "x" : snapshot->axis.x_label.c_str();
         const char* y_label = snapshot->axis.y_label.empty() ? "y" : snapshot->axis.y_label.c_str();
         ImPlot::SetupAxis(ImAxis_X1, x_label, x_axis_flags);
         ImPlot::SetupAxis(ImAxis_Y1, y_label, y_axis_flags);
+        ImPlot::SetupLegend(
+            ImPlotLocation_NorthWest,
+            ImPlotLegendFlags_NoButtons |
+                ImPlotLegendFlags_NoMenus);
         if (transparent_native_axes) {
             ImPlot::SetupAxisFormat(ImAxis_Y1, FormatNativeCompactYTick);
         }
@@ -1105,73 +1144,83 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         base_spec.MarkerLineColor = base_spec.LineColor;
         base_spec.MarkerFillColor = base_spec.LineColor;
 
-        if (SmoothingActive(state)) {
-            if (state.show_raw_when_smoothed) {
-                const std::string raw_spectrum_label =
-                    StableUiLabel(
-                        language,
-                        UiTextId::RawSpectrum,
-                        "SpecForgeRawSpectrum");
-                ImPlotSpec raw_spec = base_spec;
-                raw_spec.LineColor.w = 0.30f;
-                raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
-                raw_spec.MarkerLineColor = raw_spec.LineColor;
-                raw_spec.MarkerFillColor = raw_spec.LineColor;
-                ImPlot::PlotLine(
-                    raw_spectrum_label.c_str(),
-                    x_values->data(),
-                    y_values->data(),
-                    static_cast<int>(x_values->size()),
-                    raw_spec);
-                plot_submitted = true;
+        const bool smoothing_active = AnySmoothingActive(state);
+        if (state.show_raw_curve || state.show_points) {
+            std::string raw_spectrum_label;
+            const char* raw_series_label = name.c_str();
+            if (smoothing_active) {
+                raw_spectrum_label = StableUiLabel(
+                    language,
+                    UiTextId::RawSpectrum,
+                    "SpecForgeRawSpectrum");
+                raw_series_label = raw_spectrum_label.c_str();
+            } else if (name.empty()) {
+                raw_spectrum_label = StableUiLabel(
+                    language,
+                    UiTextId::CurrentSpectrum,
+                    "SpecForgeCurrentSpectrum");
+                raw_series_label = raw_spectrum_label.c_str();
             }
 
-            const SpectrumValueVector smoothed_values = SmoothedValuesFor(y_values, state);
-            if (smoothed_values && smoothed_values->size() == x_values->size()) {
+            ImPlotSpec raw_spec = base_spec;
+            if (smoothing_active) {
+                raw_spec.LineColor.w = 0.30f;
+                raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
+            }
+            if (!state.show_raw_curve) {
+                raw_spec.LineWeight = 0.0f;
+            }
+            if (state.show_points) {
+                raw_spec.Marker = ImPlotMarker_Circle;
+                raw_spec.MarkerSize = 2.0f;
+            }
+            ImPlot::PlotLine(
+                raw_series_label,
+                x_values->data(),
+                y_values->data(),
+                static_cast<int>(x_values->size()),
+                raw_spec);
+        }
+
+        const auto plot_smoothed_curve =
+            [&](SpectrumSmoothingMethod method,
+                const char* stable_id,
+                const ImVec4& color) {
+                const SpectrumValueVector smoothed_values =
+                    SmoothedValuesFor(y_values, state, method);
+                if (!smoothed_values || smoothed_values->size() != x_values->size()) {
+                    return;
+                }
+
                 const std::string smoothed_spectrum_label =
                     StableUiLabel(
                         language,
-                        SmoothingTextId(state.smoothing),
-                        "SpecForgeSmoothedSpectrum");
+                        SmoothingTextId(method),
+                        stable_id);
                 ImPlotSpec smoothed_spec = base_spec;
-                smoothed_spec.LineColor = ImVec4(0.94f, 0.36f, 0.22f, 1.0f);
+                smoothed_spec.LineColor = color;
                 smoothed_spec.LineWeight = std::max(1.0f, style.line_weight * 1.08f);
                 smoothed_spec.MarkerLineColor = smoothed_spec.LineColor;
                 smoothed_spec.MarkerFillColor = smoothed_spec.LineColor;
-                if (state.show_points) {
-                    smoothed_spec.Marker = ImPlotMarker_Circle;
-                    smoothed_spec.MarkerSize = 2.0f;
-                }
                 ImPlot::PlotLine(
                     smoothed_spectrum_label.c_str(),
                     x_values->data(),
                     smoothed_values->data(),
                     static_cast<int>(x_values->size()),
                     smoothed_spec);
-                plot_submitted = true;
-            }
-        } else {
-            if (state.show_points) {
-                base_spec.Marker = ImPlotMarker_Circle;
-                base_spec.MarkerSize = 2.0f;
-            }
-            std::string current_spectrum_label;
-            const char* series_label = name.c_str();
-            if (name.empty()) {
-                current_spectrum_label = StableUiLabel(
-                    language,
-                    UiTextId::CurrentSpectrum,
-                    "SpecForgeCurrentSpectrum");
-                series_label =
-                    current_spectrum_label.c_str();
-            }
-            ImPlot::PlotLine(
-                series_label,
-                x_values->data(),
-                y_values->data(),
-                static_cast<int>(x_values->size()),
-                base_spec);
-            plot_submitted = true;
+            };
+
+        if (GaussianSmoothingActive(state)) {
+            plot_smoothed_curve(
+                SpectrumSmoothingMethod::Gaussian,
+                "SpecForgeGaussianSmoothedSpectrum",
+                ImVec4(0.94f, 0.36f, 0.22f, 1.0f));
+        }
+        if (MedianSmoothingActive(state)) {
+            plot_smoothed_curve(
+                SpectrumSmoothingMethod::Median,
+                "SpecForgeMedianSmoothedSpectrum",
+                ImVec4(0.20f, 0.72f, 0.58f, 1.0f));
         }
 
         const bool hovered = ImPlot::IsPlotHovered();
@@ -1312,7 +1361,7 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             touchpad_gestures->ClearTarget();
         }
     }
-    result.plot_submitted = plot_submitted;
+    result.plot_submitted = plot_frame_presented;
     return result;
 }
 

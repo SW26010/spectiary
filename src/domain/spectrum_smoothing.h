@@ -11,10 +11,14 @@ enum class SpectrumSmoothingMethod {
     Median,
 };
 
-struct SpectrumSmoothingSettings {
-    SpectrumSmoothingMethod method = SpectrumSmoothingMethod::None;
+struct SpectrumSmoothingParameters {
     double gaussian_sigma = 0.25;
     int median_kernel_size = 7;
+};
+
+struct SpectrumSmoothingSettings {
+    SpectrumSmoothingMethod method = SpectrumSmoothingMethod::None;
+    SpectrumSmoothingParameters parameters;
 };
 
 [[nodiscard]] bool operator==(const SpectrumSmoothingSettings& left, const SpectrumSmoothingSettings& right);
