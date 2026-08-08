@@ -54,7 +54,9 @@ jobs:
             throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
           }
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\specforge-vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $vcvars = @(
             & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
@@ -88,6 +90,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 10
         run: |
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode Headless `
             -BuildDirectory build\ninja-msvc-debug `
@@ -215,7 +221,9 @@ jobs:
             throw 'Runner vcpkg checkout is unavailable; set VCPKG_INSTALLATION_ROOT on the runner.'
           }
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\specforge-vcpkg-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $vcpkgBinaryCache = Join-Path $env:RUNNER_TEMP 'specforge-vcpkg-cache'
+          New-Item -ItemType Directory -Path $vcpkgBinaryCache -Force | Out-Null
+          "VCPKG_DEFAULT_BINARY_CACHE=$vcpkgBinaryCache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $vcvars = @(
             & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat'
@@ -249,6 +257,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 20
         run: |
+          $ctestTemp = Join-Path $env:RUNNER_TEMP 'specforge-real-gui-ctest-temp'
+          New-Item -ItemType Directory -Path $ctestTemp -Force | Out-Null
+          $env:TEMP = $ctestTemp
+          $env:TMP = $ctestTemp
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-automation-ci.ps1 `
             -Mode RealGui `
             -BuildDirectory build\ninja-msvc-debug `
