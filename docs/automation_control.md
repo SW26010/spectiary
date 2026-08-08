@@ -716,11 +716,17 @@ notification, and a usable idle barrier.
 
 The manually selected `gui-integration` CTest group also includes
 `specforge_imgui_viewport_ownership_integration_tests`. It starts from a seeded
-layout with a detached Spectral Lines panel, moves the secondary HWND fully
-inside and then moves its center outside the main client rectangle without
-synthesizing mouse input,
-and uses unchanged `panel.set spectral_lines true` requests as detached-
-viewport Present barriers. The viewport HWND must remain identical throughout.
+layout with detached Spectral Lines and Information panels, verifies both
+secondary HWNDs are non-topmost windows owned by the main HWND, and moves one
+secondary HWND fully inside and then moves its center outside the main client
+rectangle without synthesizing mouse input. Unchanged `panel.set` requests act
+as detached-viewport Present barriers, and both viewport HWNDs must retain their
+identity. The test then minimizes the main window, confirms Windows hides the
+owned HWNDs without destroying them, activates an independent cross-process
+Win32 peer window, and restores SpecForge through that foreground peer. After
+restore, the owned HWNDs must be visible with unchanged identity and ownership,
+and the SpecForge ownership group must remain contiguous above the peer in the
+non-topmost z-order.
 This test is intentionally excluded from both the required headless gate and
 the protected `real-gui` CI label; run it on an interactive desktop with:
 

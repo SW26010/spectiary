@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Executable,
     [Parameter(Mandatory = $true)]
+    [string]$WindowPeer,
+    [Parameter(Mandatory = $true)]
     [string]$LayoutSeed
 )
 
@@ -187,6 +189,83 @@ function Send-LauncherRequest {
     return $messages[1]
 }
 
+function Start-WindowPeer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExecutablePath
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $ExecutablePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $utf8WithoutBom =
+        [System.Text.UTF8Encoding]::new($false)
+    $start.StandardOutputEncoding = $utf8WithoutBom
+    $start.StandardErrorEncoding = $utf8WithoutBom
+
+    $process = $null
+    try {
+        $process = [System.Diagnostics.Process]::Start($start)
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $ready = Read-LauncherLine -Process $process
+        Assert-True `
+            -Condition (
+                $ready -match
+                    '^ready (0x[0-9a-fA-F]+)$') `
+            -Message (
+                "Win32 test peer returned an invalid ready line: $ready")
+        $handle = [IntPtr][Convert]::ToInt64(
+            $Matches[1].Substring(2),
+            16)
+        return [pscustomobject]@{
+            Process = $process
+            StderrTask = $stderrTask
+            Handle = $handle
+        }
+    }
+    catch {
+        if ($null -ne $process) {
+            try {
+                $process.StandardInput.Close()
+            }
+            catch {
+            }
+            try {
+                if (-not $process.HasExited -and
+                    -not $process.WaitForExit(3000)) {
+                    $process.Kill()
+                    [void]$process.WaitForExit(5000)
+                }
+            }
+            catch {
+            }
+            $process.Dispose()
+        }
+        throw
+    }
+}
+
+function Send-WindowPeerCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [string]$Command
+    )
+
+    $payload =
+        [System.Text.UTF8Encoding]::new($false).GetBytes(
+            $Command + "`n")
+    $input = $Process.StandardInput.BaseStream
+    $input.Write($payload, 0, $payload.Length)
+    $input.Flush()
+    return Read-LauncherLine -Process $Process
+}
+
 if ($null -eq ('SpecForgeViewportOwnershipNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -244,7 +323,30 @@ public static class SpecForgeViewportOwnershipNative
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(IntPtr window);
+    public static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindowAsync(
+        IntPtr window,
+        int command);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(
+        IntPtr window,
+        uint command);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtrW(
+        IntPtr window,
+        int index);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassNameW(
@@ -332,6 +434,39 @@ public static class SpecForgeViewportOwnershipNative
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
         return windows.ToArray();
+    }
+
+    public static IntPtr[] VisibleWindowsInZOrder()
+    {
+        List<IntPtr> windows = new List<IntPtr>();
+        EnumWindowsCallback callback = delegate(IntPtr window, IntPtr parameter)
+        {
+            if (IsWindowVisible(window))
+            {
+                windows.Add(window);
+            }
+            return true;
+        };
+        if (!EnumWindows(callback, IntPtr.Zero))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        return windows.ToArray();
+    }
+
+    public static IntPtr WindowOwner(IntPtr window)
+    {
+        const uint GW_OWNER = 4;
+        return GetWindow(window, GW_OWNER);
+    }
+
+    public static bool WindowIsTopMost(IntPtr window)
+    {
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_TOPMOST = 0x00000008L;
+        return (
+            GetWindowLongPtrW(window, GWL_EXSTYLE).ToInt64() &
+            WS_EX_TOPMOST) != 0;
     }
 
     public static uint WindowProcessId(IntPtr window)
@@ -422,7 +557,8 @@ function Format-Handle {
 function Wait-ForOwnershipWindows {
     param(
         [Parameter(Mandatory = $true)]
-        [int]$GuiProcessId
+        [int]$GuiProcessId,
+        [int]$ExpectedSecondaryCount = 2
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -444,10 +580,11 @@ function Wait-ForOwnershipWindows {
                         'SpecForgeMainWindow'
                 })
         if ($main.Count -eq 1 -and
-            $secondary.Count -eq 1) {
+            $secondary.Count -eq
+                $ExpectedSecondaryCount) {
             return [pscustomobject]@{
                 Main = $main[0]
-                Secondary = $secondary[0]
+                Secondary = @($secondary)
             }
         }
         Start-Sleep -Milliseconds 25
@@ -461,49 +598,180 @@ function Wait-ForOwnershipWindows {
             }
     ) -join '; '
     throw (
-        'Expected exactly one SpecForge main HWND and one detached ImGui ' +
-        "viewport HWND. Observed: $diagnostic")
+        'Expected exactly one SpecForge main HWND and ' +
+        "$ExpectedSecondaryCount detached ImGui viewport HWNDs. " +
+        "Observed: $diagnostic")
 }
 
-function Assert-SameOwnership {
+function Assert-SameViewportWindows {
     param(
         [Parameter(Mandatory = $true)]
         [int]$GuiProcessId,
         [Parameter(Mandatory = $true)]
         [IntPtr]$MainHandle,
         [Parameter(Mandatory = $true)]
-        [IntPtr]$SecondaryHandle,
+        [IntPtr[]]$SecondaryHandles,
         [Parameter(Mandatory = $true)]
         [string]$Phase
     )
 
-    Assert-True `
-        -Condition (
+    foreach ($secondaryHandle in $SecondaryHandles) {
+        Assert-True `
+            -Condition (
             [SpecForgeViewportOwnershipNative]::
-                IsWindow($SecondaryHandle) -and
+                    IsWindow($secondaryHandle) -and
             [SpecForgeViewportOwnershipNative]::
-                WindowProcessId($SecondaryHandle) -eq
-                    [uint32]$GuiProcessId) `
-        -Message (
-            "$Phase destroyed or reassigned detached HWND " +
-            (Format-Handle -Handle $SecondaryHandle) + '.')
+                    WindowProcessId($secondaryHandle) -eq
+                        [uint32]$GuiProcessId) `
+            -Message (
+                "$Phase destroyed or reassigned detached HWND " +
+                (Format-Handle -Handle $secondaryHandle) + '.')
+    }
     $windows =
         Wait-ForOwnershipWindows `
-            -GuiProcessId $GuiProcessId
+            -GuiProcessId $GuiProcessId `
+            -ExpectedSecondaryCount $SecondaryHandles.Count
+    $observedSecondaryHandles = @(
+        $windows.Secondary |
+            ForEach-Object { [IntPtr]$_.Handle }
+    )
+    $missingHandles = @(
+        $SecondaryHandles |
+            Where-Object {
+                $observedSecondaryHandles -notcontains $_
+            }
+    )
+    $unexpectedHandles = @(
+        $observedSecondaryHandles |
+            Where-Object {
+                $SecondaryHandles -notcontains $_
+            }
+    )
     Assert-True `
         -Condition (
             $windows.Main.Handle -eq $MainHandle -and
-            $windows.Secondary.Handle -eq
-                $SecondaryHandle) `
+            $missingHandles.Count -eq 0 -and
+            $unexpectedHandles.Count -eq 0) `
         -Message (
-            "$Phase changed viewport ownership. Expected main " +
+            "$Phase changed viewport HWND identity. Expected main " +
             (Format-Handle -Handle $MainHandle) +
-            ' and detached ' +
-            (Format-Handle -Handle $SecondaryHandle) +
+            ' and detached HWNDs ' +
+            (($SecondaryHandles | ForEach-Object {
+                Format-Handle -Handle $_
+            }) -join ', ') +
             '; observed main ' +
             (Format-Handle -Handle $windows.Main.Handle) +
-            ' and detached ' +
-            (Format-Handle -Handle $windows.Secondary.Handle) + '.')
+            ' and detached HWNDs ' +
+            (($observedSecondaryHandles | ForEach-Object {
+                Format-Handle -Handle $_
+            }) -join ', ') + '.')
+}
+
+function Assert-Win32Ownership {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$MainHandle,
+        [Parameter(Mandatory = $true)]
+        [IntPtr[]]$SecondaryHandles,
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    foreach ($secondaryHandle in $SecondaryHandles) {
+        $owner =
+            [SpecForgeViewportOwnershipNative]::
+                WindowOwner($secondaryHandle)
+        Assert-True `
+            -Condition (
+                $owner -eq $MainHandle -and
+                -not [SpecForgeViewportOwnershipNative]::
+                    WindowIsTopMost($secondaryHandle)) `
+            -Message (
+                "$Phase expected detached HWND " +
+                (Format-Handle -Handle $secondaryHandle) +
+                ' to be a non-topmost window owned by main HWND ' +
+                (Format-Handle -Handle $MainHandle) +
+                '; actual owner is ' +
+                (Format-Handle -Handle $owner) + '.')
+    }
+}
+
+function Assert-OwnershipGroupZOrder {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$MainHandle,
+        [Parameter(Mandatory = $true)]
+        [IntPtr[]]$SecondaryHandles,
+        [Parameter(Mandatory = $true)]
+        [IntPtr]$PeerHandle
+    )
+
+    $visibleWindows = @(
+        [SpecForgeViewportOwnershipNative]::
+            VisibleWindowsInZOrder()
+    )
+    $indices = @{}
+    for ($index = 0;
+         $index -lt $visibleWindows.Count;
+         ++$index) {
+        $indices[
+            (Format-Handle -Handle (
+                [IntPtr]$visibleWindows[$index]))] =
+                    $index
+    }
+    $groupHandles = @($SecondaryHandles) +
+        @($MainHandle)
+    $groupKeys = @(
+        $groupHandles |
+            ForEach-Object {
+                Format-Handle -Handle $_
+            }
+    )
+    $missingKeys = @(
+        $groupKeys |
+            Where-Object { -not $indices.ContainsKey($_) }
+    )
+    $peerKey = Format-Handle -Handle $PeerHandle
+    Assert-True `
+        -Condition (
+            $missingKeys.Count -eq 0 -and
+            $indices.ContainsKey($peerKey)) `
+        -Message (
+            'Restored z-order did not contain every SpecForge HWND and the ' +
+            'peer HWND. Missing: ' + ($missingKeys -join ', ') + '.')
+
+    $groupIndices = @(
+        $groupKeys |
+            ForEach-Object { [int]$indices[$_] }
+    )
+    $mainIndex =
+        [int]$indices[
+            (Format-Handle -Handle $MainHandle)]
+    $minimumGroupIndex =
+        ($groupIndices | Measure-Object -Minimum).Minimum
+    $maximumGroupIndex =
+        ($groupIndices | Measure-Object -Maximum).Maximum
+    $secondaryAboveOwner =
+        @(
+            $SecondaryHandles |
+                Where-Object {
+                    [int]$indices[
+                        (Format-Handle -Handle $_)] -ge
+                            $mainIndex
+                }
+        ).Count -eq 0
+    Assert-True `
+        -Condition (
+            $secondaryAboveOwner -and
+            $maximumGroupIndex - $minimumGroupIndex + 1 -eq
+                $groupHandles.Count -and
+            [int]$indices[$peerKey] -gt
+                $maximumGroupIndex) `
+        -Message (
+            'Restored SpecForge HWNDs must form one contiguous non-topmost ' +
+            'ownership group above the peer window. Group indexes: ' +
+            ($groupIndices -join ', ') +
+            "; peer index: $($indices[$peerKey]).")
 }
 
 function Test-RectangleContained {
@@ -665,6 +933,8 @@ $resolvedLauncher =
     (Resolve-Path -LiteralPath $Launcher).Path
 $resolvedExecutable =
     (Resolve-Path -LiteralPath $Executable).Path
+$resolvedWindowPeer =
+    (Resolve-Path -LiteralPath $WindowPeer).Path
 $resolvedLayoutSeed =
     (Resolve-Path -LiteralPath $LayoutSeed).Path
 $fixtureParent = Join-Path `
@@ -677,6 +947,8 @@ $stateRoot = Join-Path $fixtureParent 'state'
 $invalidStateRoot = Join-Path $fixtureParent 'invalid-state'
 $invalidSeed = Join-Path $fixtureParent 'malformed-layout.ini'
 $launcherProcess = $null
+$peerProcess = $null
+$peerStderrTask = $null
 $guiProcessId = 0
 $testCompleted = $false
 
@@ -737,8 +1009,15 @@ try {
         Wait-ForOwnershipWindows `
             -GuiProcessId $guiProcessId
     $mainHandle = [IntPtr]$windows.Main.Handle
-    $secondaryHandle =
-        [IntPtr]$windows.Secondary.Handle
+    $secondaryHandles = @(
+        $windows.Secondary |
+            ForEach-Object { [IntPtr]$_.Handle }
+    )
+    $secondaryHandle = $secondaryHandles[0]
+    Assert-Win32Ownership `
+        -MainHandle $mainHandle `
+        -SecondaryHandles $secondaryHandles `
+        -Phase 'Initial detached viewport creation'
     $mainClient =
         [SpecForgeViewportOwnershipNative]::
             ClientRectangleOnScreen($mainHandle)
@@ -788,10 +1067,10 @@ try {
             [uint64]$insideSecond.result.frame_index -gt
                 [uint64]$insideFirst.result.frame_index) `
         -Message 'Moving inside must be followed by two later successful detached-viewport Present barriers.'
-    Assert-SameOwnership `
+    Assert-SameViewportWindows `
         -GuiProcessId $guiProcessId `
         -MainHandle $mainHandle `
-        -SecondaryHandle $secondaryHandle `
+        -SecondaryHandles $secondaryHandles `
         -Phase 'Moving the detached viewport inside the main client area'
     $insideRect =
         [SpecForgeViewportOwnershipNative]::
@@ -834,10 +1113,10 @@ try {
             [uint64]$outsideSecond.result.frame_index -gt
                 [uint64]$outsideFirst.result.frame_index) `
         -Message 'Moving outside must be followed by two later successful detached-viewport Present barriers.'
-    Assert-SameOwnership `
+    Assert-SameViewportWindows `
         -GuiProcessId $guiProcessId `
         -MainHandle $mainHandle `
-        -SecondaryHandle $secondaryHandle `
+        -SecondaryHandles $secondaryHandles `
         -Phase 'Moving the detached viewport outside the main client area'
     $outsideRect =
         [SpecForgeViewportOwnershipNative]::
@@ -849,11 +1128,172 @@ try {
                 -Outer $mainClient) `
         -Message 'Detached viewport center did not remain outside the main client rectangle after Present barriers.'
 
+    $peer = Start-WindowPeer `
+        -ExecutablePath $resolvedWindowPeer
+    $peerProcess = $peer.Process
+    $peerStderrTask = $peer.StderrTask
+    $peerHandle = [IntPtr]$peer.Handle
+    Assert-True `
+        -Condition (
+            [SpecForgeViewportOwnershipNative]::
+                WindowOwner($peerHandle) -eq
+                    [IntPtr]::Zero -and
+            -not [SpecForgeViewportOwnershipNative]::
+                WindowIsTopMost($peerHandle)) `
+        -Message 'The Win32 test peer must be an ordinary unowned non-topmost window.'
+
+    [void][SpecForgeViewportOwnershipNative]::
+        ShowWindowAsync($mainHandle, 7)
+    $minimizeDeadline =
+        [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $visibleSecondaryHandles = @(
+            $secondaryHandles |
+                Where-Object {
+                    [SpecForgeViewportOwnershipNative]::
+                        IsWindowVisible($_)
+                }
+        )
+        if ([SpecForgeViewportOwnershipNative]::
+                IsIconic($mainHandle) -and
+            $visibleSecondaryHandles.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $minimizeDeadline)
+    $destroyedWhileMinimized = @(
+        $secondaryHandles |
+            Where-Object {
+                -not [SpecForgeViewportOwnershipNative]::
+                    IsWindow($_)
+            }
+    )
+    Assert-True `
+        -Condition (
+            [SpecForgeViewportOwnershipNative]::
+                IsIconic($mainHandle) -and
+            $visibleSecondaryHandles.Count -eq 0 -and
+            $destroyedWhileMinimized.Count -eq 0) `
+        -Message (
+            'Minimizing the owner must hide every detached viewport without ' +
+            'destroying its HWND identity.')
+    Assert-Win32Ownership `
+        -MainHandle $mainHandle `
+        -SecondaryHandles $secondaryHandles `
+        -Phase 'Main-window minimize'
+
+    $peerActivation =
+        Send-WindowPeerCommand `
+            -Process $peerProcess `
+            -Command 'activate'
+    Assert-True `
+        -Condition (
+            $peerActivation -eq (
+                'activated ' +
+                (Format-Handle -Handle $peerHandle) +
+                ' true') -and
+            [SpecForgeViewportOwnershipNative]::
+                GetForegroundWindow() -eq
+                    $peerHandle) `
+        -Message (
+            'The independent Win32 peer must become the foreground window ' +
+            "while SpecForge is minimized. Peer response: $peerActivation")
+
+    $mainActivation =
+        Send-WindowPeerCommand `
+            -Process $peerProcess `
+            -Command (
+                'activate-window ' +
+                (Format-Handle -Handle $mainHandle))
+    $restoreDeadline =
+        [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $hiddenSecondaryHandles = @(
+            $secondaryHandles |
+                Where-Object {
+                    -not [SpecForgeViewportOwnershipNative]::
+                        IsWindowVisible($_)
+                }
+        )
+        if (-not [SpecForgeViewportOwnershipNative]::
+                IsIconic($mainHandle) -and
+            $hiddenSecondaryHandles.Count -eq 0 -and
+            [SpecForgeViewportOwnershipNative]::
+                GetForegroundWindow() -eq
+                    $mainHandle) {
+            break
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $restoreDeadline)
+    Assert-True `
+        -Condition (
+            $mainActivation -eq (
+                'activated ' +
+                (Format-Handle -Handle $mainHandle) +
+                ' true') -and
+            -not [SpecForgeViewportOwnershipNative]::
+                IsIconic($mainHandle) -and
+            $hiddenSecondaryHandles.Count -eq 0 -and
+            [SpecForgeViewportOwnershipNative]::
+                GetForegroundWindow() -eq
+                    $mainHandle) `
+        -Message (
+            'The foreground peer must restore and activate the SpecForge ' +
+            'ownership group without leaving a detached viewport hidden. ' +
+            "Peer response: $mainActivation")
+
+    $restoredSpectralLines =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'panel set spectral_lines true' `
+            -RequestId 'request-6'
+    $restoredInformation =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'panel set information true' `
+            -RequestId 'request-7'
+    Assert-True `
+        -Condition (
+            [string]$restoredSpectralLines.status -eq
+                'completed' -and
+            [string]$restoredInformation.status -eq
+                'completed' -and
+            [uint64]$restoredInformation.result.frame_index -gt
+                [uint64]$restoredSpectralLines.result.frame_index) `
+        -Message 'Both restored detached viewports must complete later successful Present barriers.'
+    Assert-SameViewportWindows `
+        -GuiProcessId $guiProcessId `
+        -MainHandle $mainHandle `
+        -SecondaryHandles $secondaryHandles `
+        -Phase 'Main-window restore after peer activation'
+    Assert-Win32Ownership `
+        -MainHandle $mainHandle `
+        -SecondaryHandles $secondaryHandles `
+        -Phase 'Main-window restore after peer activation'
+    Assert-OwnershipGroupZOrder `
+        -MainHandle $mainHandle `
+        -SecondaryHandles $secondaryHandles `
+        -PeerHandle $peerHandle
+
+    $peerProcess.StandardInput.WriteLine('quit')
+    $peerProcess.StandardInput.Flush()
+    Assert-True `
+        -Condition ($peerProcess.WaitForExit(10000)) `
+        -Message 'Win32 test peer did not exit after quit.'
+    Assert-True `
+        -Condition ($peerProcess.ExitCode -eq 0) `
+        -Message (
+            'Win32 test peer exited with code ' +
+            $peerProcess.ExitCode + '. ' +
+            $peerStderrTask.GetAwaiter().GetResult())
+    $peerProcess.Dispose()
+    $peerProcess = $null
+
     $quit =
         Send-LauncherRequest `
             -Process $launcherProcess `
             -Line 'app quit' `
-            -RequestId 'request-6'
+            -RequestId 'request-8'
     Assert-True `
         -Condition (
             [string]$quit.status -eq 'completed' -and
@@ -869,11 +1309,28 @@ try {
             $launcherProcess.ExitCode + '. ' +
             $launch.StderrTask.GetAwaiter().GetResult())
     Write-Host (
-        'ImGui viewport ownership integration passed with stable detached HWND ' +
-        (Format-Handle -Handle $secondaryHandle) + '.')
+        'ImGui viewport ownership integration passed with stable owned detached HWNDs ' +
+        (($secondaryHandles | ForEach-Object {
+            Format-Handle -Handle $_
+        }) -join ', ') + '.')
     $testCompleted = $true
 }
 finally {
+    if ($null -ne $peerProcess) {
+        if (-not $peerProcess.HasExited) {
+            try {
+                $peerProcess.StandardInput.WriteLine('quit')
+                $peerProcess.StandardInput.Flush()
+            }
+            catch {
+            }
+            if (-not $peerProcess.WaitForExit(3000)) {
+                $peerProcess.Kill()
+                [void]$peerProcess.WaitForExit(5000)
+            }
+        }
+        $peerProcess.Dispose()
+    }
     if ($null -ne $launcherProcess) {
         if (-not $launcherProcess.HasExited) {
             try {

@@ -27,8 +27,8 @@ if ($assignments.Count -ne 1) {
 }
 
 if ($appSource -notmatch
-    'io\.ConfigViewportsNoDefaultParent\s*=\s*true') {
-    throw 'Detached platform windows must remain independent top-level HWNDs; main-window lifecycle is synchronized explicitly.'
+    'io\.ConfigViewportsNoDefaultParent\s*=\s*false') {
+    throw 'Detached panels must keep independent ImGui viewports while their Win32 platform windows remain owned by the main window.'
 }
 
 $parentAssignments = [regex]::Matches(

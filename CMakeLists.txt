@@ -474,6 +474,17 @@ target_link_libraries(
     PRIVATE
         specforge_automation
 )
+add_executable(specforge_win32_window_peer
+    tests/win32_window_peer_main.cpp
+)
+specforge_configure_production_target(
+    specforge_win32_window_peer
+)
+target_link_libraries(
+    specforge_win32_window_peer
+    PRIVATE
+        user32
+)
 add_custom_command(TARGET specforge_native POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E rm -rf
         "$<TARGET_FILE_DIR:specforge_native>/Legal"
@@ -724,6 +735,7 @@ add_test(
         -File "${CMAKE_SOURCE_DIR}/tests/imgui_viewport_ownership_integration_tests.ps1"
         -Launcher "$<TARGET_FILE:specforge_automation_launcher>"
         -Executable "$<TARGET_FILE:specforge_native>"
+        -WindowPeer "$<TARGET_FILE:specforge_win32_window_peer>"
         -LayoutSeed
             "${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
 )

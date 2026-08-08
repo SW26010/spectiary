@@ -39,8 +39,11 @@
 - 所有产品面板都可 dock、undock、re-dock。
 - 不实现自研 docking。
 - 布局持久化优先交给 ImGui ini。
-- 多 viewport 已启用，并关闭 viewport 自动 merge；必须持续验证 DPI、窗口恢复、focus 和
-  monitor 切换。
+- 多 viewport 已启用，并关闭 viewport 自动 merge；detached panel 继续拥有独立的 ImGui
+  viewport、原生 HWND、交换链和 presentation identity，但 Win32 platform window 默认由
+  主窗口 owning。这里的 viewport 独立性不等于 unowned top-level window；不要用 TOPMOST
+  或恢复时手工重排 z-order 替代原生 owner/owned window 关系。必须持续验证 DPI、窗口恢复、
+  focus 和 monitor 切换。
 
 DockBuilder 只允许用于初始布局种子。如果使用，必须隔离在小函数里，并在文档中说明它依赖 docking branch 的实验 API。
 
