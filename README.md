@@ -6,27 +6,27 @@
 
 <p align="center">
   <strong>Lightweight. Fast. Fluid.</strong><br>
-  A native Windows spectrum viewer for focused, high-refresh exploration of astronomical spectra.
+  A native Windows spectrum viewer for fast, focused inspection of LAMOST and SDSS spectra.
 </p>
 
-SpecForge is built for the part of spectral analysis that happens with your eyes and hands: opening local datasets, moving rapidly through spectra, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
+SpecForge is built for the part of spectral analysis that happens with your eyes and hands: opening local astronomical spectra, moving rapidly through observations, zooming into features, and comparing them with spectral references without carrying a heavy application stack along for the ride.
 
 It is designed as a focused desktop tool rather than a general scientific platform. The main plot stays at the center of the experience, interaction latency is treated as a product requirement, and features are expected to preserve the responsiveness of pan, zoom, navigation, and spectrum switching.
 
 > [!NOTE]
-> SpecForge is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while format coverage and higher-level analysis workflows are still evolving.
+> SpecForge is currently **pre-1.0 and under active development**. The core viewing workflow is usable today, while FITS coverage and higher-level analysis workflows are still evolving.
 
 ## Why SpecForge
 
 ### Lightweight
 
-SpecForge is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to view spectra, and it avoids a large cross-platform UI framework in the hot path.
+SpecForge is a native **C++20** Windows application built directly on Win32 and DirectX 11. It does not require a browser runtime or a Python runtime to inspect spectra, and it avoids a large cross-platform UI framework in the hot path.
 
 The application also uses an event-driven render policy: when nothing is changing, it does not keep redrawing just to look alive.
 
 ### Fast
 
-The architecture keeps data loading, diagnostics, and other potentially expensive work away from the plot interaction path. Source collections can load in the background, while the UI consumes stable spectrum snapshots rather than parsing files inside the renderer.
+The architecture keeps data loading, diagnostics, and other potentially expensive work away from the plot interaction path. Spectrum sources can load in the background, while the UI consumes stable spectrum snapshots rather than parsing files inside the renderer.
 
 Performance work is validated with **real spectral data and recorded interaction timing**, not synthetic-only benchmark claims.
 
@@ -39,14 +39,14 @@ The main plot is designed around direct manipulation:
 - Windows Precision Touchpad two-finger pan and pinch zoom
 - axis-constrained touchpad gestures when starting over an axis
 - wavelength and flux range navigation
-- fast previous/next spectrum switching for multi-spectrum sources
+- fast previous/next spectrum switching for supported multi-spectrum sources
 
 On supported Windows 11 systems, SpecForge can integrate with **Dynamic Refresh Rate (DRR)** through the Windows compositor clock so active plot interaction can request a higher-refresh presentation path and return to the base rate afterwards.
 
 ## What You Can Do
 
-- **Open real spectrum data** from `.npy`, simple wavelength/flux `.csv`, and supported FITS sources.
-- **Browse collections quickly**, including rows in spectrum matrices and supported multi-spectrum FITS data.
+- **Open LAMOST and SDSS FITS spectra** directly in a native desktop viewer.
+- **Move rapidly through supported spectrum collections** and multi-spectrum FITS sources.
 - **Open folders of spectra** for lightweight local review workflows.
 - **Pan, zoom, and inspect features** with mouse or Precision Touchpad input.
 - **Navigate wavelength and flux ranges** without losing the main plot as the primary workspace.
@@ -59,26 +59,28 @@ On supported Windows 11 systems, SpecForge can integrate with **Dynamic Refresh 
 
 SpecForge is especially suited to workflows such as:
 
-- visually inspecting **LAMOST, SDSS, and similar astronomical spectra**
-- rapidly reviewing many spectra for quality control or candidate triage
+- visually inspecting **LAMOST and SDSS FITS spectra** on a local Windows workstation
+- rapidly reviewing many observations for quality control, candidate triage, or manual inspection
 - zooming into local wavelength regions and comparing features with reference lines or bands
+- moving repeatedly between neighboring spectra without breaking visual focus
 - long desktop inspection sessions where low interaction latency and high information density matter
 - high-refresh Windows desktops and laptops where the plotting surface should feel as direct as the rest of the system
 
-## Spectrum Sources
+## FITS First
 
-Current source support is intentionally focused rather than pretending to be a universal astronomy file reader.
+SpecForge's user-facing data path is centered on astronomical FITS spectra, with **LAMOST and SDSS as the primary compatibility targets**.
 
 | Source | Current support |
 | --- | --- |
-| `.npy` | 1D spectra and row-oriented 2D float32/float64 spectrum matrices |
-| `.csv` | Simple wavelength/flux spectra |
-| FITS | Recognized LAMOST/SDSS-style table spectra, including supported multi-spectrum vector-table cases |
-| Folder | Non-recursive collections of supported CSV/FITS files |
+| LAMOST FITS | Recognized single-spectrum table files and supported vector-table cases |
+| SDSS FITS | Recognized SDSS-style table spectra and supported vector-table cases |
+| Folder of spectra | Non-recursive browsing of supported first-level FITS sources |
 
-A 3909-column `.npy` matrix uses SpecForge's fixed log-wavelength grid; other widths fall back to pixel index with diagnostics. FITS image handling remains a narrow compatibility fallback and should **not** be read as generic FITS support.
+FITS is a broad ecosystem, so support is intentionally explicit rather than claiming that every FITS layout will work. Image-based FITS handling remains a narrow compatibility fallback and should **not** be read as generic FITS support.
 
-For the exact data contract, see [Spectrum Snapshot Contract](docs/spectrum_snapshot_contract.md).
+SpecForge also has `.npy` and simple wavelength/flux `.csv` input paths for project-specific datasets, development, testing, and conversion workflows. They are useful implementation contracts, but they are **not the formats that define the public-facing product**.
+
+For the exact loader and data-boundary behavior, see [Spectrum Snapshot Contract](docs/spectrum_snapshot_contract.md).
 
 ## A Native, Performance-First Stack
 
