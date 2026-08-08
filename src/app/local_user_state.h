@@ -31,6 +31,7 @@ enum class LocalUserStateHealthKind {
 
 enum class LocalUserStateArea {
     SourceSession,
+    SpectrumViewport,
     SampleNavigation,
     SampleLabeling,
     SampleWorkflow,

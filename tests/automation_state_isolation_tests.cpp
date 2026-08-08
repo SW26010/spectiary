@@ -711,7 +711,11 @@ int wmain(int argc, wchar_t** argv)
             startup.runtime_paths()
                     .source_session_state_path ==
                 automation_root /
-                    "source-session.json",
+                    "source-session.json" &&
+            startup.runtime_paths()
+                    .spectrum_view_state_path ==
+                automation_root /
+                    "spectrum-view-state.json",
         "automation override should remap the complete local-state path family");
 
     {

@@ -42,9 +42,37 @@ struct SourceCollectionLoadFailure {
     SourceCollectionLoadError error;
 };
 
+enum class SourceCollectionSnapshotChangeReason {
+    None,
+    SampleChangedWithinCollection,
+    SnapshotReloadedWithinCollection,
+    SourceCollectionChanged,
+    SourceCollectionCleared,
+};
+
+[[nodiscard]] constexpr int SnapshotChangeReasonPriority(
+    SourceCollectionSnapshotChangeReason reason) noexcept
+{
+    switch (reason) {
+    case SourceCollectionSnapshotChangeReason::None:
+        return 0;
+    case SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection:
+        return 1;
+    case SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection:
+        return 2;
+    case SourceCollectionSnapshotChangeReason::SourceCollectionChanged:
+        return 3;
+    case SourceCollectionSnapshotChangeReason::SourceCollectionCleared:
+        return 4;
+    }
+    return 0;
+}
+
 struct SourceCollectionSessionAction {
     bool source_roster_changed = false;
     bool snapshot_changed = false;
+    SourceCollectionSnapshotChangeReason snapshot_change_reason =
+        SourceCollectionSnapshotChangeReason::None;
     bool workflow_changed = false;
     bool navigation_inputs_changed = false;
 };
@@ -57,6 +85,10 @@ inline void MergeSourceCollectionSessionAction(
         target.source_roster_changed ||
         source.source_roster_changed;
     target.snapshot_changed = target.snapshot_changed || source.snapshot_changed;
+    if (SnapshotChangeReasonPriority(source.snapshot_change_reason) >
+        SnapshotChangeReasonPriority(target.snapshot_change_reason)) {
+        target.snapshot_change_reason = source.snapshot_change_reason;
+    }
     target.workflow_changed = target.workflow_changed || source.workflow_changed;
     target.navigation_inputs_changed = target.navigation_inputs_changed || source.navigation_inputs_changed;
 }

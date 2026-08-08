@@ -264,7 +264,10 @@ private:
         std::function<
             std::vector<BackgroundRetirementHandle>()>
             retain_resources,
-        std::function<void()> reset_for_snapshot_change);
+        std::function<void(SourceCollectionSnapshotChangeReason)>
+            apply_snapshot_change,
+        std::function<void(std::optional<std::string>)>
+            deferred_restore_finished = {});
     void RetirePendingSessionViews();
     void RetireResources(
         std::vector<BackgroundRetirementHandle> resources);
@@ -388,8 +391,10 @@ private:
     std::function<
         std::vector<BackgroundRetirementHandle>()>
         retain_presentation_resources_;
-    std::function<void()>
-        reset_presentation_for_snapshot_change_;
+    std::function<void(SourceCollectionSnapshotChangeReason)>
+        apply_presentation_snapshot_change_;
+    std::function<void(std::optional<std::string>)>
+        presentation_deferred_restore_finished_;
     std::unordered_map<std::uint64_t, Ticket> pending_loads_;
     std::unordered_map<std::string, std::uint64_t> generations_;
     std::unordered_set<std::uint64_t>
@@ -450,7 +455,9 @@ private:
     friend class ShellUi;
     friend void BindSourceCollectionActivationPresentationLifecycle(
         SourceCollectionActivationTransaction& activation,
-        SpectrumViewSession& presentation);
+        SpectrumViewSession& presentation,
+        std::function<void(std::optional<std::string>)>
+            deferred_restore_finished);
 };
 
 }  // namespace specforge

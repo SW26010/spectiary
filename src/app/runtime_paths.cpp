@@ -122,6 +122,9 @@ void SetLocalUserStatePaths(
     paths.panel_visibility_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kPanelVisibilityState;
+    paths.spectrum_view_state_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kSpectrumViewState;
     paths.source_session_state_path =
         paths.local_user_state_root /
         local_user_state_paths::kSourceSessionState;

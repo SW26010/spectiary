@@ -134,6 +134,55 @@ struct ShellUiTestAccess {
         shell.BeginDeferredSourceRestore();
     }
 
+    static void SeedStartupSpectrumViewState(
+        ShellUi& shell,
+        SpectrumViewStateCache state)
+    {
+        shell.startup_spectrum_view_state_ =
+            std::move(state);
+        shell.startup_spectrum_view_mutation_revision_ =
+            shell.spectrum_view_session_.
+                ViewportMutationRevision();
+    }
+
+    static void RequestSpectrumViewportFit(
+        ShellUi& shell)
+    {
+        shell.spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::RequestFitView());
+    }
+
+    static SpectrumViewSessionView SpectrumView(
+        const ShellUi& shell)
+    {
+        return shell.spectrum_view_session_.View();
+    }
+
+    static std::optional<PlotViewLimits>
+    LockedViewportLimits(const ShellUi& shell)
+    {
+        return shell.spectrum_view_session_.
+            LockedViewportLimits();
+    }
+
+    static void ConfigureSpectrumViewPersistence(
+        ShellUi& shell,
+        std::filesystem::path path)
+    {
+        shell.spectrum_view_state_path_ =
+            std::move(path);
+        shell.persist_local_state_ = true;
+        shell.local_state_flush_result_.reset();
+    }
+
+    static bool RestoreLockedViewport(
+        ShellUi& shell,
+        const PlotViewLimits& limits)
+    {
+        return shell.spectrum_view_session_.
+            RestoreLockedViewport(limits);
+    }
+
     static void SyncNavigationInputs(ShellUi& shell)
     {
         shell.HandleSessionAction(
@@ -670,6 +719,279 @@ bool HasHealthMessage(
         }
     }
     return false;
+}
+
+void TestDeferredRestoreReusesOnlyMatchingLockedViewport()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path source_path =
+        UniqueTempPath("_viewport_restore.csv");
+    const SourceSessionCachePaths cache_paths{
+        UniqueTempPath("_viewport_source_session.json"),
+        UniqueTempPath("_viewport_navigation.json"),
+        UniqueTempPath("_viewport_labeling.json"),
+        UniqueTempPath("_viewport_workflow.json"),
+    };
+    {
+        std::ofstream stream(
+            source_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            stream.good(),
+            "viewport restore source fixture should be created");
+        stream << "fixture";
+    }
+
+    std::string source_collection_identity;
+    {
+        specforge::SourceCollectionSession saved =
+            MakeCachedSession(cache_paths);
+        const specforge::SpectrumSnapshotHandle snapshot =
+            MakeSnapshot(source_path, 0);
+        const specforge::SourceCollectionSingleFileState
+            file_state =
+                specforge::CaptureSourceCollectionSingleFileState(
+                    source_path);
+        specforge::SourceCollectionContext context;
+        context.identity =
+            specforge::BuildSourceCollectionIdentity(
+                *snapshot,
+                file_state);
+        context.manifest.sample_names = {
+            "alpha", "beta", "gamma"};
+        source_collection_identity = context.identity.id;
+        specforge::PreparedSampleWorkflowState workflow =
+            specforge::PrepareSampleWorkflowState(
+                *snapshot,
+                context,
+                0,
+                {{}, {}});
+        Require(
+            saved.OpenPreparedSource(
+                     source_path,
+                     0,
+                     snapshot,
+                     specforge::PreparedSourceCollectionPlan{
+                         std::move(context),
+                         std::move(workflow)},
+                     {},
+                     specforge::SourceCollectionContextReuseProof{
+                         .identity =
+                             specforge::BuildSourceCollectionIdentity(
+                                 *snapshot,
+                                 file_state),
+                         .dependency_state = file_state,
+                     })
+                .loaded,
+            "viewport restore source should seed the saved session");
+        Require(
+            saved.FlushStateCaches(),
+            "viewport restore source session should be saved");
+    }
+
+    const specforge::PlotViewLimits expected{
+        .x_min = 4100.25,
+        .x_max = 4900.75,
+        .y_min = -0.5,
+        .y_max = 2.25,
+    };
+    std::unique_ptr<specforge::ShellUi> matching =
+        Access::Create(
+            MakeCachedSession(cache_paths),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                MakeFixtureLoadDependencies(cache_paths)));
+    Access::SeedStartupSpectrumViewState(
+        *matching,
+        specforge::SpectrumViewStateCache{
+            .locked = true,
+            .source_collection_identity =
+                source_collection_identity,
+            .limits = expected,
+        });
+    Access::BeginDeferredRestore(*matching);
+    Require(
+        DrainAllSourceLoads(*matching),
+        "matching viewport restore should finish its deferred source load");
+    const std::optional<specforge::PlotViewLimits>
+        matching_limits =
+            Access::LockedViewportLimits(*matching);
+    Require(
+        Access::SpectrumView(*matching).viewport_range_mode ==
+                specforge::SpectrumViewportRangeMode::Locked &&
+            matching_limits &&
+            matching_limits->x_min == expected.x_min &&
+            matching_limits->x_max == expected.x_max &&
+            matching_limits->y_min == expected.y_min &&
+            matching_limits->y_max == expected.y_max,
+        "a deferred restore of the same collection identity should reuse the locked viewport");
+    matching.reset();
+
+    std::unique_ptr<specforge::ShellUi> mutated =
+        Access::Create(
+            MakeCachedSession(cache_paths),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                MakeFixtureLoadDependencies(cache_paths)));
+    Access::SeedStartupSpectrumViewState(
+        *mutated,
+        specforge::SpectrumViewStateCache{
+            .locked = true,
+            .source_collection_identity =
+                source_collection_identity,
+            .limits = expected,
+        });
+    Access::BeginDeferredRestore(*mutated);
+    Access::RequestSpectrumViewportFit(*mutated);
+    Require(
+        DrainAllSourceLoads(*mutated),
+        "mutated viewport restore should finish its deferred source load");
+    Require(
+        Access::SpectrumView(*mutated).viewport_range_mode ==
+                specforge::SpectrumViewportRangeMode::Automatic &&
+            !Access::LockedViewportLimits(*mutated),
+        "a deferred viewport restore must not overwrite a newer user viewport mutation");
+    mutated.reset();
+
+    std::unique_ptr<specforge::ShellUi> mismatched =
+        Access::Create(
+            MakeCachedSession(cache_paths),
+            specforge::MakeSourceCollectionLoadQueueForTesting(
+                MakeFixtureLoadDependencies(cache_paths)));
+    Access::SeedStartupSpectrumViewState(
+        *mismatched,
+        specforge::SpectrumViewStateCache{
+            .locked = true,
+            .source_collection_identity =
+                "different-collection",
+            .limits = expected,
+        });
+    Access::BeginDeferredRestore(*mismatched);
+    Require(
+        DrainAllSourceLoads(*mismatched),
+        "mismatched viewport restore should finish its deferred source load");
+    Require(
+        Access::SpectrumView(*mismatched).viewport_range_mode ==
+                specforge::SpectrumViewportRangeMode::Automatic &&
+            !Access::LockedViewportLimits(*mismatched),
+        "a different collection identity must not reuse the saved viewport");
+    mismatched.reset();
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(source_path, cleanup_error);
+    std::filesystem::remove(cache_paths.source_session, cleanup_error);
+    std::filesystem::remove(cache_paths.navigation, cleanup_error);
+    std::filesystem::remove(cache_paths.labeling, cleanup_error);
+    std::filesystem::remove(cache_paths.workflow, cleanup_error);
+}
+
+void TestShellShutdownFlushPersistsLockedViewport()
+{
+    using Access = specforge::ShellUiTestAccess;
+    const std::filesystem::path source_path =
+        UniqueTempPath("_viewport_flush.csv");
+    const std::filesystem::path state_path =
+        UniqueTempPath("_viewport_state.json");
+    {
+        std::ofstream stream(
+            source_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            stream.good(),
+            "viewport flush source fixture should be created");
+        stream << "fixture";
+    }
+
+    specforge::SourceCollectionSession session(
+        {}, {}, {}, {});
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 0);
+    const specforge::SourceCollectionSingleFileState file_state =
+        specforge::CaptureSourceCollectionSingleFileState(
+            source_path);
+    specforge::SourceCollectionContext context;
+    context.identity =
+        specforge::BuildSourceCollectionIdentity(
+            *snapshot,
+            file_state);
+    context.manifest.sample_names = {
+        "alpha", "beta", "gamma"};
+    const std::string source_collection_identity =
+        context.identity.id;
+    specforge::PreparedSampleWorkflowState workflow =
+        specforge::PrepareSampleWorkflowState(
+            *snapshot,
+            context,
+            0,
+            {{}, {}});
+    Require(
+        session.OpenPreparedSource(
+                   source_path,
+                   0,
+                   snapshot,
+                   specforge::PreparedSourceCollectionPlan{
+                       std::move(context),
+                       std::move(workflow)},
+                   {},
+                   specforge::SourceCollectionContextReuseProof{
+                       .identity =
+                           specforge::BuildSourceCollectionIdentity(
+                               *snapshot,
+                               file_state),
+                       .dependency_state = file_state,
+                   })
+            .loaded,
+        "viewport flush fixture should activate its source");
+
+    const specforge::PlotViewLimits expected{
+        .x_min = 100.125,
+        .x_max = 200.875,
+        .y_min = -3.5,
+        .y_max = 8.25,
+    };
+    std::unique_ptr<specforge::ShellUi> shell =
+        Access::Create(
+            std::move(session),
+            specforge::MakeSourceCollectionLoadQueueForTesting());
+    Access::ConfigureSpectrumViewPersistence(
+        *shell,
+        state_path);
+    Require(
+        Access::RestoreLockedViewport(*shell, expected),
+        "viewport flush fixture should lock valid limits");
+    const specforge::ShellLocalStateFlushResult flushed =
+        shell->FlushLocalState();
+    const specforge::SpectrumViewStateCacheLoadResult loaded =
+        specforge::LoadSpectrumViewStateCache(state_path);
+    Require(
+        flushed.spectrum_view_saved &&
+            loaded.warning.empty() && loaded.state.locked &&
+            loaded.state.source_collection_identity ==
+                source_collection_identity &&
+            loaded.state.limits.x_min == expected.x_min &&
+            loaded.state.limits.x_max == expected.x_max &&
+            loaded.state.limits.y_min == expected.y_min &&
+            loaded.state.limits.y_max == expected.y_max,
+        "shutdown flush should persist the locked viewport for its active collection identity");
+    shell.reset();
+
+    std::unique_ptr<specforge::ShellUi> unlocked =
+        Access::Create(
+            specforge::SourceCollectionSession(
+                {}, {}, {}, {}),
+            specforge::MakeSourceCollectionLoadQueueForTesting());
+    Access::ConfigureSpectrumViewPersistence(
+        *unlocked,
+        state_path);
+    Require(
+        unlocked->FlushLocalState().spectrum_view_saved &&
+            !specforge::LoadSpectrumViewStateCache(
+                 state_path)
+                 .state.locked,
+        "an unlocked shutdown should clear an older persisted lock");
+    unlocked.reset();
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(source_path, cleanup_error);
+    std::filesystem::remove(state_path, cleanup_error);
 }
 
 void TestAutomationGotoAndTargetedLabelNavigationRespectActiveSequence()
@@ -3437,6 +3759,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
     result.application_settings.panel_visibility_saved = false;
     result.source_collection.navigation_saved = false;
     result.source_collection.workflow_saved = false;
+    result.spectrum_view_saved = false;
     result.spectral_lines_saved = false;
     const std::string message = result.FailureMessage();
     Require(
@@ -3450,6 +3773,8 @@ void TestShellFlushResultNamesEveryFailedOwner()
             message.find("Sample navigation") !=
                 std::string::npos &&
             message.find("Sample workflow") !=
+                std::string::npos &&
+            message.find("Spectrum viewport") !=
                 std::string::npos &&
             message.find("Spectral-line state") !=
                 std::string::npos,
@@ -6116,6 +6441,8 @@ int main()
         TestPublishedStaleCompletionIsRejectedWithoutMutatingNewNavigation();
         TestRealDrainPreservesWorkflowChangesMadeWhileFullPlanWaits();
         TestRealDrainRequeuesReconciledTargetAndRetiresIntermediateSnapshotOffThread();
+        TestShellShutdownFlushPersistsLockedViewport();
+        TestDeferredRestoreReusesOnlyMatchingLockedViewport();
         TestDeferredRestoreCompletionPreservesUnrelatedNavigationTicket();
         TestDeferredRestoreFollowUpFailureClearsPendingAndAllowsRetry();
         TestDeferredRestorePreservesSavedActiveSourceAfterLaterCompletion();

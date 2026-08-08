@@ -684,6 +684,94 @@ bool ContainsPoint(const ImVec2& min, const ImVec2& max, const ImVec2& point)
     return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y;
 }
 
+void RenderViewportLockOverlay(
+    UiLanguage language,
+    SpectrumPlotState& state,
+    const ImVec2& button_min,
+    float side,
+    const ImVec2& return_cursor)
+{
+    const bool locked =
+        state.viewport_range_mode ==
+        SpectrumViewportRangeMode::Locked;
+    ImGui::SetCursorScreenPos(button_min);
+    const bool clicked = ImGui::InvisibleButton(
+        "##SpecForgeViewportRangeLock",
+        ImVec2(side, side));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImVec2 button_max(button_min.x + side, button_min.y + side);
+    if (active || hovered) {
+        const ImU32 background = ImGui::GetColorU32(
+            active
+                ? ImGuiCol_ButtonActive
+                : ImGuiCol_ButtonHovered);
+        draw_list->AddRectFilled(
+            button_min,
+            button_max,
+            background,
+            style.FrameRounding);
+    }
+
+    const ImU32 icon_color = locked
+        ? IM_COL32_WHITE
+        : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const float center_x = (button_min.x + button_max.x) * 0.5f;
+    const float body_top = button_min.y + side * 0.49f;
+    const float body_half_width = side * 0.19f;
+    const float stroke = std::max(1.4f, side * 0.075f);
+    draw_list->AddRectFilled(
+        ImVec2(center_x - body_half_width, body_top),
+        ImVec2(center_x + body_half_width, button_min.y + side * 0.77f),
+        icon_color,
+        side * 0.055f);
+
+    if (locked) {
+        const float shackle_top = button_min.y + side * 0.25f;
+        draw_list->PathLineTo(ImVec2(center_x - body_half_width * 0.72f, body_top));
+        draw_list->PathLineTo(ImVec2(center_x - body_half_width * 0.72f, shackle_top + side * 0.08f));
+        draw_list->PathBezierCubicCurveTo(
+            ImVec2(center_x - body_half_width * 0.72f, shackle_top),
+            ImVec2(center_x + body_half_width * 0.72f, shackle_top),
+            ImVec2(center_x + body_half_width * 0.72f, shackle_top + side * 0.08f));
+        draw_list->PathLineTo(ImVec2(center_x + body_half_width * 0.72f, body_top));
+    } else {
+        const float shackle_center_x = center_x + side * 0.08f;
+        const float shackle_top = button_min.y + side * 0.18f;
+        draw_list->PathLineTo(ImVec2(shackle_center_x - body_half_width * 0.72f, body_top));
+        draw_list->PathLineTo(ImVec2(shackle_center_x - body_half_width * 0.72f, shackle_top + side * 0.08f));
+        draw_list->PathBezierCubicCurveTo(
+            ImVec2(shackle_center_x - body_half_width * 0.72f, shackle_top),
+            ImVec2(shackle_center_x + body_half_width * 0.72f, shackle_top),
+            ImVec2(shackle_center_x + body_half_width * 0.72f, shackle_top + side * 0.08f));
+    }
+    draw_list->PathStroke(icon_color, ImDrawFlags_None, stroke);
+
+    if (hovered) {
+        const std::string_view tooltip = UiText(
+            language,
+            locked
+                ? UiTextId::ViewportLockedTooltip
+                : UiTextId::ViewportUnlockedTooltip);
+        ImGui::SetTooltip(
+            "%.*s",
+            static_cast<int>(tooltip.size()),
+            tooltip.data());
+    }
+    if (clicked) {
+        state.viewport_range_mode = locked
+            ? SpectrumViewportRangeMode::Automatic
+            : SpectrumViewportRangeMode::Locked;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(
+        return_cursor.x,
+        return_cursor.y - style.ItemSpacing.y));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+}
+
 void ZoomRangeAround(double& min, double& max, double anchor, float wheel_delta)
 {
     const double span = max - min;
@@ -791,7 +879,8 @@ PlotTouchpadTarget MakeTouchpadTarget(
     const ImVec2& widget_pos,
     const ImVec2& widget_size,
     bool edge_axis_overlay,
-    float edge_axis_band)
+    float edge_axis_band,
+    const PlotPixelRect& input_exclusion_rect)
 {
     const PlotPixelRect widget_rect{
         widget_pos.x,
@@ -801,6 +890,7 @@ PlotTouchpadTarget MakeTouchpadTarget(
 
     PlotTouchpadTarget target;
     target.native_window = native_window;
+    target.input_exclusion_rect = input_exclusion_rect;
     if (edge_axis_overlay) {
         target.plot_rect = widget_rect;
         target.x_axis_rect = {
@@ -877,9 +967,50 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
     const SpectrumPlotMetrics plot_metrics = MakeSpectrumPlotMetrics(
         ImGui::GetFontSize(),
         ImGui::GetTextLineHeight());
+    const float edge_axis_band = plot_metrics.edge_axis.interaction_band;
+    const ImVec2 plot_widget_pos = ImGui::GetCursorScreenPos();
+    const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
+    const ImVec2 plot_size = PlotSizeForDisplay(display, plot_widget_size);
+    const float viewport_lock_side = std::max(ImGui::GetFrameHeight(), 22.0f);
+    const float viewport_lock_padding = 3.0f;
+    const bool viewport_lock_fits =
+        plot_widget_size.x >= viewport_lock_side + viewport_lock_padding * 2.0f &&
+        plot_widget_size.y >= viewport_lock_side + viewport_lock_padding * 2.0f;
+    const ImVec2 viewport_lock_min(
+        plot_widget_pos.x + viewport_lock_padding,
+        plot_widget_pos.y + plot_widget_size.y - viewport_lock_side - viewport_lock_padding);
+    const ImVec2 viewport_lock_max(
+        viewport_lock_min.x + viewport_lock_side,
+        viewport_lock_min.y + viewport_lock_side);
+    const PlotPixelRect viewport_lock_rect = viewport_lock_fits
+        ? PlotPixelRect{
+              viewport_lock_min.x,
+              viewport_lock_min.y,
+              viewport_lock_max.x,
+              viewport_lock_max.y}
+        : PlotPixelRect{};
+    const bool viewport_lock_hovered =
+        viewport_lock_fits &&
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+        ContainsPoint(viewport_lock_min, viewport_lock_max, ImGui::GetIO().MousePos);
+
     PlotTouchpadGestureBatch touchpad_batch;
     if (touchpad_gestures != nullptr && native_window != 0) {
         touchpad_batch = touchpad_gestures->Poll(native_window);
+    }
+    const auto first_excluded_touchpad_delta = std::remove_if(
+        touchpad_batch.deltas.begin(),
+        touchpad_batch.deltas.end(),
+        [&viewport_lock_rect](const PlotTouchpadGestureDelta& gesture) {
+            return viewport_lock_rect.Contains(gesture.anchor_x, gesture.anchor_y);
+        });
+    const bool touchpad_input_excluded =
+        first_excluded_touchpad_delta != touchpad_batch.deltas.end();
+    touchpad_batch.deltas.erase(
+        first_excluded_touchpad_delta,
+        touchpad_batch.deltas.end());
+    if (touchpad_input_excluded && touchpad_batch.deltas.empty()) {
+        touchpad_batch.active = false;
     }
 
     const bool fit_requested = state.fit_next_frame;
@@ -911,12 +1042,9 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         SetNextViewLimits(requested_limits);
     }
 
-    const float edge_axis_band = plot_metrics.edge_axis.interaction_band;
-    const ImVec2 plot_widget_pos = ImGui::GetCursorScreenPos();
-    const ImVec2 plot_widget_size = ImGui::GetContentRegionAvail();
-    const ImVec2 plot_size = PlotSizeForDisplay(display, plot_widget_size);
     const bool edge_axis_wheel_zoomed =
-        display.edge_axis_overlay && !fit_requested && !touchpad_batch.active &&
+        display.edge_axis_overlay && !viewport_lock_hovered &&
+        !fit_requested && !touchpad_batch.active &&
         touchpad_batch.deltas.empty() &&
         ApplyEdgeAxisWheelZoom(state, plot_widget_pos, plot_widget_size, edge_axis_band);
 
@@ -943,12 +1071,18 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
     if (edge_axis_wheel_zoomed || touchpad_batch.active || !touchpad_batch.deltas.empty()) {
         plot_flags |= ImPlotFlags_NoInputs;
     }
+    if (viewport_lock_hovered) {
+        plot_flags |= ImPlotFlags_NoInputs;
+    }
 
     bool plot_submitted = false;
     const std::string plot_label = StableUiLabel(
         language,
         UiTextId::Spectrum,
         "main_spectrum");
+    if (viewport_lock_fits) {
+        ImGui::SetNextItemAllowOverlap();
+    }
     if (ImPlot::BeginPlot(
             plot_label.c_str(),
             plot_size,
@@ -1074,7 +1208,8 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
                 plot_widget_pos,
                 plot_widget_size,
                 display.edge_axis_overlay,
-                edge_axis_band));
+                edge_axis_band,
+                viewport_lock_rect));
         }
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();
@@ -1162,6 +1297,15 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         result.pan_active = pan_drag_active;
 
         ImPlot::EndPlot();
+        if (viewport_lock_fits) {
+            const ImVec2 return_cursor = ImGui::GetCursorScreenPos();
+            RenderViewportLockOverlay(
+                language,
+                state,
+                viewport_lock_min,
+                viewport_lock_side,
+                return_cursor);
+        }
     } else {
         state.pan_drag_active = false;
         if (touchpad_gestures != nullptr) {

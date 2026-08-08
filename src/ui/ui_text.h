@@ -236,6 +236,7 @@ enum class UiTextId {
     UnsavedAreas,
     ApplicationSettingsArea,
     SourceSessionArea,
+    SpectrumViewportArea,
     SampleNavigationArea,
     SampleLabelingArea,
     SampleWorkflowArea,
@@ -501,6 +502,8 @@ enum class UiTextId {
     RenameGroup,
     UnassignedGroup,
     DefaultGroupPrefix,
+    ViewportUnlockedTooltip,
+    ViewportLockedTooltip,
     Count,  // Non-display sentinel.
 };
 

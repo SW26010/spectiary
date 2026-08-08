@@ -777,6 +777,12 @@ SpectrumSnapshotHandle SourceCollectionSession::CurrentSourceSnapshot() const
     return roster_->snapshot();
 }
 
+std::optional<std::string>
+SourceCollectionSession::CurrentSourceCollectionIdentity() const
+{
+    return roster_->current_source_collection_identity();
+}
+
 std::vector<std::filesystem::path> SourceCollectionSession::AnnotationPathsForSource(
     const std::filesystem::path& path) const
 {

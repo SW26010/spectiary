@@ -12,6 +12,7 @@
 #include "ui/spectral_lines_panel_controller.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_session.h"
+#include "ui/spectrum_view_state_cache_io.h"
 #include "ui/spectrum_view_session.h"
 #include "ui/top_bar_status_layout.h"
 
@@ -97,12 +98,14 @@ struct ShellRuntimeResourceObservation {
 struct ShellLocalStateFlushResult {
     ApplicationSettingsFlushResult application_settings;
     SourceCollectionStateFlushResult source_collection;
+    bool spectrum_view_saved = true;
     bool spectral_lines_saved = true;
 
     [[nodiscard]] bool all_saved() const noexcept
     {
         return application_settings.all_saved() &&
                source_collection.all_saved() &&
+               spectrum_view_saved &&
                spectral_lines_saved;
     }
 
@@ -394,6 +397,8 @@ private:
     void DrainSourceLoads(
         bool allow_snapshot_prefetch = true);
     void BeginDeferredSourceRestore();
+    void RestoreDeferredSpectrumViewport(
+        std::optional<std::string> source_collection_identity);
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,
@@ -438,6 +443,13 @@ private:
     SourceCollectionPanelUi source_collection_panel_ui_;
     SettingsPanelUi settings_panel_ui_;
     ApplicationSettings application_settings_;
+    std::filesystem::path spectrum_view_state_path_;
+    std::optional<SpectrumViewStateCache>
+        startup_spectrum_view_state_;
+    std::optional<std::uint64_t>
+        startup_spectrum_view_mutation_revision_;
+    LocalUserStatePersistenceLifecycle
+        spectrum_view_state_persistence_;
     PlotTouchpadGestureSource* touchpad_gestures_ = nullptr;
     ImFont* spectral_line_label_font_ = nullptr;
     bool immersive_plot_mode_ = false;

@@ -59,6 +59,14 @@ PlotGestureAxes HitTestPlotTouchpadTarget(
     float screen_y,
     bool* hit)
 {
+    if (target.input_exclusion_rect.Contains(
+            screen_x,
+            screen_y)) {
+        if (hit != nullptr) {
+            *hit = false;
+        }
+        return PlotGestureAxes::Both;
+    }
     if (target.x_axis_rect.Contains(screen_x, screen_y)) {
         if (hit != nullptr) {
             *hit = true;

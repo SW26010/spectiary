@@ -44,6 +44,8 @@ public:
     [[nodiscard]] std::optional<std::size_t> current_source_index() const;
     [[nodiscard]] bool has_source(std::size_t source_index) const;
     [[nodiscard]] std::optional<std::string> current_source_key() const;
+    [[nodiscard]] std::optional<std::string>
+    current_source_collection_identity() const;
     [[nodiscard]] bool has_active_source() const;
     [[nodiscard]] std::vector<SourceCollectionSourceView> SourceViews() const;
     [[nodiscard]] std::vector<SourceCollectionSavedSource> SavedSources() const;
@@ -142,7 +144,10 @@ private:
         SourceListEntry& source,
         std::vector<SpectrumSnapshotHandle>& retired_snapshots);
     void EvictResidentSnapshots(std::vector<SpectrumSnapshotHandle>& retired_snapshots);
-    void SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action);
+    void SetSnapshot(
+        SpectrumSnapshotHandle snapshot,
+        SourceCollectionSnapshotChangeReason reason,
+        SourceCollectionSessionAction& action);
 
     SpectrumSnapshotHandle snapshot_;
     std::vector<SourceListEntry> sources_;

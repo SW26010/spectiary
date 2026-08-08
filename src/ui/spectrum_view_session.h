@@ -6,16 +6,36 @@
 #include "ui/ui_text.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace specforge {
 
 class SourceCollectionActivationTransaction;
+enum class SourceCollectionSnapshotChangeReason;
+
+enum class SpectrumViewportRangeAction {
+    Fit,
+    Preserve,
+};
+
+struct SpectrumViewportTransition {
+    SpectrumViewportRangeMode range_mode =
+        SpectrumViewportRangeMode::Automatic;
+    SpectrumViewportRangeAction range_action =
+        SpectrumViewportRangeAction::Fit;
+};
+
+[[nodiscard]] SpectrumViewportTransition ResolveViewportTransition(
+    SpectrumViewportRangeMode range_mode,
+    SourceCollectionSnapshotChangeReason change_reason) noexcept;
 
 enum class SpectrumViewSessionCommandKind {
-    ResetForSnapshotChange,
+    ApplySnapshotChange,
     RequestFitView,
     SetShowPoints,
     SetShowSmoothed,
@@ -25,11 +45,13 @@ enum class SpectrumViewSessionCommandKind {
     SetGaussianSigma,
     SetMedianKernelSize,
     SetPlotStyle,
+    SetViewportRangeMode,
     SyncPlotLimitsOnNextRender,
 };
 
 struct SpectrumViewSessionCommand {
-    [[nodiscard]] static SpectrumViewSessionCommand ResetForSnapshotChange();
+    [[nodiscard]] static SpectrumViewSessionCommand ApplySnapshotChange(
+        SourceCollectionSnapshotChangeReason reason);
     [[nodiscard]] static SpectrumViewSessionCommand RequestFitView();
     [[nodiscard]] static SpectrumViewSessionCommand SetShowPoints(bool enabled);
     [[nodiscard]] static SpectrumViewSessionCommand SetShowSmoothed(bool enabled);
@@ -39,6 +61,8 @@ struct SpectrumViewSessionCommand {
     [[nodiscard]] static SpectrumViewSessionCommand SetGaussianSigma(double sigma);
     [[nodiscard]] static SpectrumViewSessionCommand SetMedianKernelSize(int kernel_size);
     [[nodiscard]] static SpectrumViewSessionCommand SetPlotStyle(SpectrumPlotStyle style);
+    [[nodiscard]] static SpectrumViewSessionCommand SetViewportRangeMode(
+        SpectrumViewportRangeMode mode);
     [[nodiscard]] static SpectrumViewSessionCommand SyncPlotLimitsOnNextRender();
 
 private:
@@ -52,6 +76,9 @@ private:
     double gaussian_sigma = 0.0;
     int median_kernel_size = 0;
     SpectrumPlotStyle plot_style;
+    SpectrumViewportRangeMode viewport_range_mode =
+        SpectrumViewportRangeMode::Automatic;
+    SourceCollectionSnapshotChangeReason snapshot_change_reason{};
 };
 
 struct SpectrumViewSessionView {
@@ -60,6 +87,8 @@ struct SpectrumViewSessionView {
     bool show_raw_when_smoothed = true;
     bool smoothing_active = false;
     SpectrumSmoothingSettings smoothing;
+    SpectrumViewportRangeMode viewport_range_mode =
+        SpectrumViewportRangeMode::Automatic;
 };
 
 struct SpectrumViewRenderFeedback {
@@ -92,12 +121,17 @@ public:
         const SpectrumPlotDisplayOptions& display = {},
         PlotTouchpadGestureSource* touchpad_gestures = nullptr);
     [[nodiscard]] bool PlotPanActive() const;
+    [[nodiscard]] std::uint64_t ViewportMutationRevision() const noexcept;
     [[nodiscard]] std::vector<SpectrumValueVector> RetainHeavySnapshotResources() const;
+    [[nodiscard]] std::optional<PlotViewLimits>
+    LockedViewportLimits() const;
+    [[nodiscard]] bool RestoreLockedViewport(
+        const PlotViewLimits& limits);
 
 private:
     struct State;
 
-    void ResetForSnapshotChange();
+    void ApplySnapshotChange(SourceCollectionSnapshotChangeReason reason);
     void ResetSmoothing();
     void ClearSmoothingCache();
     [[nodiscard]] bool SmoothingActive() const;
@@ -109,6 +143,8 @@ private:
 // UI-thread snapshot replacement and to the view reset caused by that change.
 void BindSourceCollectionActivationPresentationLifecycle(
     SourceCollectionActivationTransaction& activation,
-    SpectrumViewSession& presentation);
+    SpectrumViewSession& presentation,
+    std::function<void(std::optional<std::string>)>
+        deferred_restore_finished = {});
 
 }  // namespace specforge

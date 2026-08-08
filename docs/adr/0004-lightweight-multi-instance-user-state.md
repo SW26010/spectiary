@@ -152,3 +152,13 @@ runner is a deliberate exception: it launches direct GUI copies with an
 explicit persistent-output fixture opt-in and a runner-owned shared temporary
 root to exercise the production target leases; it is not a user-facing
 automation or state-sharing mode.
+
+The spectrum viewport cache is also an ordinary complete-snapshot setting. An
+orderly shutdown records axis limits only when the logical spectrum view is
+locked and associates them with the active source-collection identity; an
+unlocked shutdown records that no locked viewport should be restored. Startup
+may reuse the limits only after deferred source restoration resolves to the same
+source-collection identity. A missing, malformed, changed, or unavailable
+identity leaves the view in automatic-fit mode. Concurrent GUI instances do not
+merge or live-synchronize viewport state; the last completed atomic replacement
+wins.

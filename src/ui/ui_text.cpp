@@ -367,6 +367,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Unsaved areas:", "未保存的区域："},
     UiTextEntry{"Application settings", "应用设置"},
     UiTextEntry{"Source session", "源会话"},
+    UiTextEntry{"Spectrum viewport", "光谱视口"},
     UiTextEntry{"Sample navigation", "样本导航"},
     UiTextEntry{"Sample labeling", "样本标注"},
     UiTextEntry{"Sample workflow", "样本工作流"},
@@ -886,6 +887,12 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Rename group", "重命名分组"},
     UiTextEntry{"Unassigned", "未分组"},
     UiTextEntry{"Group ", "分组 "},
+    UiTextEntry{
+        "Keep View is off. Click to keep the current X/Y range when switching samples; pan and zoom remain available.",
+        "保持视野未开启：点击后，切换样本时将保留当前 X/Y 范围；开启后仍可平移和缩放。"},
+    UiTextEntry{
+        "Keep View is on: switching samples keeps the current X/Y range, and pan and zoom remain available. Click to turn it off.",
+        "保持视野已开启：切换样本时保留当前 X/Y 范围，仍可平移和缩放。点击可关闭。"},
 };
 
 static_assert(kTextCatalog.size() == kUiTextCount);
@@ -1094,6 +1101,10 @@ std::string_view UiText(
         return UiText(
             language,
             UiTextId::SourceSessionArea);
+    case LocalUserStateArea::SpectrumViewport:
+        return UiText(
+            language,
+            UiTextId::SpectrumViewportArea);
     case LocalUserStateArea::SampleNavigation:
         return UiText(
             language,

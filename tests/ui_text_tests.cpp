@@ -1160,8 +1160,20 @@ void TestSpectralLineMappingsAreExact()
         static_cast<std::size_t>(
             UiTextId::Count) ==
         static_cast<std::size_t>(
-            UiTextId::DefaultGroupPrefix) +
+            UiTextId::ViewportLockedTooltip) +
             1);
+    Require(
+        UiText(
+            UiLanguage::English,
+            UiTextId::ViewportUnlockedTooltip) ==
+            "Keep View is off. Click to keep the current X/Y range when switching samples; pan and zoom remain available.",
+        "English unlocked viewport tooltip should be exact");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::ViewportLockedTooltip) ==
+            "保持视野已开启：切换样本时保留当前 X/Y 范围，仍可平移和缩放。点击可关闭。",
+        "Chinese locked viewport tooltip should be exact");
     Require(
         StableUiLabel(
             UiLanguage::SimplifiedChinese,
@@ -1390,6 +1402,19 @@ void TestSessionSemanticsAreLocalizedAtTheUiBoundary()
 
 void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
 {
+    Require(
+        specforge::UiText(
+            specforge::UiLanguage::English,
+            specforge::LocalUserStateArea::
+                SpectrumViewport) ==
+            "Spectrum viewport" &&
+        specforge::UiText(
+            specforge::UiLanguage::
+                SimplifiedChinese,
+            specforge::LocalUserStateArea::
+                SpectrumViewport) ==
+            "光谱视口",
+        "spectrum viewport persistence area should be localized");
     specforge::LocalUserStateHealthMessage retrying{
         .area =
             specforge::LocalUserStateArea::

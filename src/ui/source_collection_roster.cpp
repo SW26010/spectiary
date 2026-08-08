@@ -161,6 +161,17 @@ std::optional<std::string> SourceCollectionRoster::current_source_key() const
     return source->key;
 }
 
+std::optional<std::string>
+SourceCollectionRoster::current_source_collection_identity() const
+{
+    const SourceListEntry* source = current_source();
+    if (source == nullptr || !source->context_reuse_proof ||
+        source->context_reuse_proof->identity.id.empty()) {
+        return std::nullopt;
+    }
+    return source->context_reuse_proof->identity.id;
+}
+
 bool SourceCollectionRoster::has_active_source() const
 {
     return current_source() != nullptr && snapshot_ && !snapshot_->source.path.empty();
@@ -360,6 +371,22 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     std::optional<SourceCollectionContextReuseProof> context_reuse_proof)
 {
     SourceCollectionRosterOpenResult result;
+    const SourceListEntry* previous_source = current_source();
+    const std::optional<std::size_t>
+        previous_displayed_spectrum_index =
+        snapshot_
+        ? std::optional<std::size_t>{
+              snapshot_->collection.current_index}
+        : std::nullopt;
+    const std::optional<std::string> previous_identity =
+        previous_source && previous_source->context_reuse_proof
+        ? std::optional<std::string>{previous_source->context_reuse_proof->identity.id}
+        : std::nullopt;
+    const std::optional<std::string> next_identity =
+        context_reuse_proof
+        ? std::optional<std::string>{context_reuse_proof->identity.id}
+        : std::nullopt;
+    const bool same_snapshot_handle = snapshot_ == snapshot;
     AddOrUpdateSourceResult update = AddOrUpdateSource(
         path,
         snapshot,
@@ -370,7 +397,26 @@ SourceCollectionRosterOpenResult SourceCollectionRoster::OpenPreparedSource(
     result.retired_snapshots = std::move(update.retired_snapshots);
     result.replaced_folder_listing_generation =
         std::move(update.replaced_folder_listing_generation);
-    SetSnapshot(std::move(snapshot), result.action);
+    const bool same_source_collection =
+        previous_identity && next_identity &&
+        !previous_identity->empty() &&
+        *previous_identity == *next_identity;
+    if (same_source_collection &&
+        previous_displayed_spectrum_index &&
+        *previous_displayed_spectrum_index == spectrum_index &&
+        same_snapshot_handle) {
+        return result;
+    }
+    SetSnapshot(
+        std::move(snapshot),
+        same_source_collection &&
+                previous_displayed_spectrum_index &&
+                *previous_displayed_spectrum_index != spectrum_index
+            ? SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection
+            : same_source_collection
+                ? SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection
+                : SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+        result.action);
     return result;
 }
 
@@ -381,9 +427,16 @@ SourceCollectionSessionAction SourceCollectionRoster::ActivateSource(std::size_t
         return action;
     }
 
+    if (current_source_index_ &&
+        *current_source_index_ == source_index) {
+        return action;
+    }
     SourceListEntry& entry = sources_[source_index];
     current_source_index_ = source_index;
-    SetSnapshot(entry.cached_snapshot, action);
+    SetSnapshot(
+        entry.cached_snapshot,
+        SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+        action);
     return action;
 }
 
@@ -421,7 +474,10 @@ SourceCollectionRosterRemoveResult SourceCollectionRoster::RemoveSource(std::siz
         if (next_current_index) {
             MergeSourceCollectionSessionAction(result.action, ActivateSource(*next_current_index));
         } else {
-            SetSnapshot(MakeSmallSyntheticSpectrumSnapshot(), result.action);
+            SetSnapshot(
+                MakeSmallSyntheticSpectrumSnapshot(),
+                SourceCollectionSnapshotChangeReason::SourceCollectionCleared,
+                result.action);
             result.action.navigation_inputs_changed = true;
         }
         return result;
@@ -651,10 +707,14 @@ void SourceCollectionRoster::EvictResidentSnapshots(
     }
 }
 
-void SourceCollectionRoster::SetSnapshot(SpectrumSnapshotHandle snapshot, SourceCollectionSessionAction& action)
+void SourceCollectionRoster::SetSnapshot(
+    SpectrumSnapshotHandle snapshot,
+    SourceCollectionSnapshotChangeReason reason,
+    SourceCollectionSessionAction& action)
 {
     snapshot_ = std::move(snapshot);
     action.snapshot_changed = true;
+    action.snapshot_change_reason = reason;
 }
 
 }  // namespace specforge

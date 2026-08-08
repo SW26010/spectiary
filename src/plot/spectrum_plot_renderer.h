@@ -13,6 +13,8 @@ namespace specforge {
 
 struct SpectrumPlotState {
     bool fit_next_frame = true;
+    SpectrumViewportRangeMode viewport_range_mode =
+        SpectrumViewportRangeMode::Automatic;
     bool show_points = false;
     bool show_smoothed = false;
     bool show_raw_when_smoothed = true;

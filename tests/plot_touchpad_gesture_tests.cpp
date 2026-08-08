@@ -55,6 +55,7 @@ void TestTargetHitTestingUsesAxisZonesBeforePlotBody()
     target.plot_rect = {0.0f, 0.0f, 500.0f, 400.0f};
     target.x_axis_rect = {0.0f, 356.0f, 500.0f, 400.0f};
     target.y_axis_rect = {0.0f, 0.0f, 44.0f, 400.0f};
+    target.input_exclusion_rect = {3.0f, 375.0f, 25.0f, 397.0f};
 
     bool hit = false;
     Require(
@@ -67,6 +68,14 @@ void TestTargetHitTestingUsesAxisZonesBeforePlotBody()
                 specforge::PlotGestureAxes::YOnly &&
             hit,
         "left edge should select only the y axis");
+    (void)specforge::HitTestPlotTouchpadTarget(
+        target,
+        14.0f,
+        386.0f,
+        &hit);
+    Require(
+        !hit,
+        "the Keep View exclusion should reject touchpad contact before axis hit testing");
     Require(
         specforge::HitTestPlotTouchpadTarget(target, 200.0f, 200.0f, &hit) ==
                 specforge::PlotGestureAxes::Both &&

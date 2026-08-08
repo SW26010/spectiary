@@ -28,6 +28,7 @@ struct PlotTouchpadTarget {
     PlotPixelRect plot_rect;
     PlotPixelRect x_axis_rect;
     PlotPixelRect y_axis_rect;
+    PlotPixelRect input_exclusion_rect;
 };
 
 enum class PlotTouchpadGestureKind {

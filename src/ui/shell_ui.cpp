@@ -976,6 +976,9 @@ std::string ShellLocalStateFlushResult::FailureMessage(
     if (!source_collection.workflow_saved) {
         append_area(LocalUserStateArea::SampleWorkflow);
     }
+    if (!spectrum_view_saved) {
+        append_area(LocalUserStateArea::SpectrumViewport);
+    }
     if (!spectral_lines_saved) {
         append_area(LocalUserStateArea::SpectralLines);
     }
@@ -1012,11 +1015,36 @@ ShellUi::ShellUi(
       application_settings_(
           ApplicationSettingsStorageForRuntimePaths(
               startup.runtime_paths())),
+      spectrum_view_state_path_(
+          startup.runtime_paths().spectrum_view_state_path),
       touchpad_gestures_(touchpad_gestures)
 {
+    SpectrumViewStateCacheLoadResult spectrum_view_state =
+        LoadSpectrumViewStateCache(
+            spectrum_view_state_path_);
+    if (!spectrum_view_state.warning.empty()) {
+        spectrum_view_state_persistence_.SetLoadWarning(
+            std::move(spectrum_view_state.warning),
+            std::move(
+                spectrum_view_state.diagnostic_detail));
+    }
+    if (spectrum_view_state.state.locked) {
+        startup_spectrum_view_state_ =
+            std::move(spectrum_view_state.state);
+        startup_spectrum_view_mutation_revision_ =
+            spectrum_view_session_.
+                ViewportMutationRevision();
+    }
     BindSourceCollectionActivationPresentationLifecycle(
         source_activation_,
-        spectrum_view_session_);
+        spectrum_view_session_,
+        [this](
+            std::optional<std::string>
+                source_collection_identity) {
+            RestoreDeferredSpectrumViewport(
+                std::move(
+                    source_collection_identity));
+        });
     RefreshSystemColors();
     BeginDeferredSourceRestore();
 }
@@ -1042,7 +1070,14 @@ ShellUi::ShellUi(
 {
     BindSourceCollectionActivationPresentationLifecycle(
         source_activation_,
-        spectrum_view_session_);
+        spectrum_view_session_,
+        [this](
+            std::optional<std::string>
+                source_collection_identity) {
+            RestoreDeferredSpectrumViewport(
+                std::move(
+                    source_collection_identity));
+        });
 }
 
 ShellUi::~ShellUi()
@@ -1071,6 +1106,36 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
             application_settings_.Flush();
         result.source_collection =
             session_.FlushStateCachesWithStatus();
+        SpectrumViewStateCache spectrum_view_state;
+        const std::optional<PlotViewLimits> locked_limits =
+            spectrum_view_session_.LockedViewportLimits();
+        const std::optional<std::string>
+            source_collection_identity =
+                session_.CurrentSourceCollectionIdentity();
+        if (locked_limits && source_collection_identity) {
+            spectrum_view_state.locked = true;
+            spectrum_view_state.source_collection_identity =
+                *source_collection_identity;
+            spectrum_view_state.limits = *locked_limits;
+        }
+        spectrum_view_state_persistence_.MarkDirty();
+        result.spectrum_view_saved =
+            spectrum_view_state_persistence_.Flush(
+                [this, &spectrum_view_state]() {
+                    std::string error;
+                    const bool saved =
+                        SaveSpectrumViewStateCache(
+                            spectrum_view_state_path_,
+                            spectrum_view_state,
+                            &error);
+                    return LocalUserStatePersistenceLifecycle::
+                        SaveResult{
+                            .saved = saved,
+                            .error = std::move(error),
+                        };
+                }) !=
+            LocalUserStatePersistenceLifecycle::
+                FlushOutcome::Failed;
         result.spectral_lines_saved =
             spectral_lines_panel_.Flush();
     }
@@ -1695,6 +1760,34 @@ void ShellUi::BeginDeferredSourceRestore()
     source_activation_.BeginDeferredRestore();
 }
 
+void ShellUi::RestoreDeferredSpectrumViewport(
+    std::optional<std::string>
+        source_collection_identity)
+{
+    std::optional<SpectrumViewStateCache> restored =
+        std::exchange(
+            startup_spectrum_view_state_,
+            std::nullopt);
+    const std::optional<std::uint64_t>
+        expected_mutation_revision =
+            std::exchange(
+                startup_spectrum_view_mutation_revision_,
+                std::nullopt);
+    const std::uint64_t current_mutation_revision =
+        spectrum_view_session_.ViewportMutationRevision();
+    if (!restored || !restored->locked ||
+        !expected_mutation_revision ||
+        current_mutation_revision !=
+            *expected_mutation_revision ||
+        !source_collection_identity ||
+        *source_collection_identity !=
+            restored->source_collection_identity) {
+        return;
+    }
+    (void)spectrum_view_session_.RestoreLockedViewport(
+        restored->limits);
+}
+
 SpectrumSnapshotHandle ShellUi::current_snapshot() const
 {
     return session_.CurrentSampleSnapshot();
@@ -2063,6 +2156,11 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
     append_setting(
         LocalUserStateArea::PanelVisibility,
         ApplicationSetting::PanelVisibility);
+    AppendLocalUserStateHealth(
+        health,
+        LocalUserStateArea::SpectrumViewport,
+        spectrum_view_state_persistence_.
+            PersistenceStatus());
     AppendLocalUserStateHealth(
         health,
         LocalUserStateArea::SpectralLines,

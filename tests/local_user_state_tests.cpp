@@ -73,6 +73,10 @@ void RequireCompleteLocalUserStatePathMapping(
             root / kPanelVisibilityState,
         "panel visibility should use the canonical name");
     Require(
+        paths.spectrum_view_state_path ==
+            root / kSpectrumViewState,
+        "spectrum view state should use the canonical name");
+    Require(
         paths.source_session_state_path ==
             root / kSourceSessionState,
         "source session state should use the canonical name");

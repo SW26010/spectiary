@@ -301,6 +301,8 @@ public:
     [[nodiscard]] std::optional<std::size_t> EffectiveSampleNavigationIndex() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSampleSnapshot() const;
     [[nodiscard]] SpectrumSnapshotHandle CurrentSourceSnapshot() const;
+    [[nodiscard]] std::optional<std::string>
+    CurrentSourceCollectionIdentity() const;
     [[nodiscard]] std::vector<std::filesystem::path> AnnotationPathsForSource(
         const std::filesystem::path& path) const;
     [[nodiscard]] std::optional<SourceCollectionLoadHint> LoadHintForSource(

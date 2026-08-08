@@ -3,6 +3,8 @@
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_load_queue_internal.h"
+#include "ui/source_collection_roster.h"
+#include "ui/spectrum_view_state_cache_io.h"
 
 #include <imgui.h>
 #include <implot.h>
@@ -96,6 +98,79 @@ specforge::SpectrumSnapshotHandle MakeActivationSnapshot(
     return snapshot;
 }
 
+class QueuedTouchpadGestureSource final : public specforge::PlotTouchpadGestureSource {
+public:
+    [[nodiscard]] specforge::PlotTouchpadGestureBatch Poll(std::uintptr_t) override
+    {
+        specforge::PlotTouchpadGestureBatch result = std::move(next_batch_);
+        next_batch_ = {};
+        return result;
+    }
+
+    void SetTarget(const specforge::PlotTouchpadTarget& target) override
+    {
+        target_ = target;
+    }
+
+    void ClearTarget() override
+    {
+        target_ = {};
+    }
+
+    void QueueZoom(double factor)
+    {
+        Require(target_.plot_rect.IsValid(), "touchpad target should be available after rendering");
+        QueueZoomAt(
+            ImVec2(
+                (target_.plot_rect.left + target_.plot_rect.right) * 0.5f,
+                (target_.plot_rect.top + target_.plot_rect.bottom) * 0.5f),
+            factor);
+    }
+
+    void QueuePanAt(const ImVec2& anchor, float pan_x, float pan_y)
+    {
+        Require(target_.plot_rect.IsValid(), "touchpad target should be available after rendering");
+        specforge::PlotTouchpadGestureDelta pan;
+        pan.kind = specforge::PlotTouchpadGestureKind::Pan;
+        pan.axes = specforge::PlotGestureAxes::Both;
+        pan.plot_rect = target_.plot_rect;
+        pan.anchor_x = anchor.x;
+        pan.anchor_y = anchor.y;
+        pan.pan_x = pan_x;
+        pan.pan_y = pan_y;
+        next_batch_.deltas.push_back(pan);
+        next_batch_.active = true;
+    }
+
+    void QueueZoomAt(const ImVec2& anchor, double factor)
+    {
+        Require(target_.plot_rect.IsValid(), "touchpad target should be available after rendering");
+        specforge::PlotTouchpadGestureDelta zoom;
+        zoom.kind = specforge::PlotTouchpadGestureKind::Zoom;
+        zoom.axes = specforge::PlotGestureAxes::Both;
+        zoom.plot_rect = target_.plot_rect;
+        zoom.anchor_x = anchor.x;
+        zoom.anchor_y = anchor.y;
+        zoom.zoom_factor = factor;
+        next_batch_.deltas.push_back(zoom);
+        next_batch_.active = true;
+    }
+
+    [[nodiscard]] ImVec2 ViewportLockCenter() const
+    {
+        Require(
+            target_.input_exclusion_rect.IsValid(),
+            "touchpad target should expose the viewport lock exclusion");
+        return ImVec2(
+            (target_.input_exclusion_rect.left + target_.input_exclusion_rect.right) * 0.5f,
+            (target_.input_exclusion_rect.top + target_.input_exclusion_rect.bottom) * 0.5f);
+    }
+
+private:
+    specforge::PlotTouchpadTarget target_;
+    specforge::PlotTouchpadGestureBatch next_batch_;
+};
+
 class ScopedPlotUi {
 public:
     ScopedPlotUi()
@@ -112,6 +187,7 @@ public:
         Require(
             font_pixels != nullptr && font_width > 0 && font_height > 0,
             "ImGui font atlas should build");
+        ImGui::GetMainViewport()->PlatformHandleRaw = reinterpret_cast<void*>(1);
     }
 
     ~ScopedPlotUi()
@@ -127,13 +203,19 @@ public:
         specforge::SpectrumViewSession& session,
         const specforge::SpectrumSnapshotHandle& snapshot,
         ImVec2 mouse_position = ImVec2(400.0f, 300.0f),
-        bool left_button_down = false)
+        bool left_button_down = false,
+        specforge::PlotTouchpadGestureSource* touchpad_gestures = nullptr,
+        specforge::SpectrumPlotDisplayOptions display = {},
+        float mouse_wheel = 0.0f)
     {
         ImGuiIO& io = ImGui::GetIO();
         io.DeltaTime = 1.0f / 60.0f;
         io.DisplaySize = ImVec2(800.0f, 600.0f);
         io.AddMousePosEvent(mouse_position.x, mouse_position.y);
         io.AddMouseButtonEvent(ImGuiMouseButton_Left, left_button_down);
+        if (mouse_wheel != 0.0f) {
+            io.AddMouseWheelEvent(0.0f, mouse_wheel);
+        }
         ImGui::NewFrame();
 
         constexpr ImGuiWindowFlags kWindowFlags =
@@ -146,7 +228,11 @@ public:
             "test plot window should be visible");
         const specforge::SpectrumViewRenderFeedback feedback = session.Render(
             snapshot,
-            specforge::UiLanguage::English);
+            specforge::UiLanguage::English,
+            {},
+            {},
+            display,
+            touchpad_gestures);
         ImGui::End();
         ImGui::EndFrame();
         return feedback;
@@ -162,6 +248,249 @@ void ConfigureGaussianSmoothing(specforge::SpectrumViewSession& session)
         specforge::SpectrumViewSessionCommand::SetSmoothingMethod(
             specforge::SpectrumSmoothingMethod::Gaussian));
     session.Submit(specforge::SpectrumViewSessionCommand::SetGaussianSigma(3.25));
+}
+
+void TestViewportTransitionPolicyUsesChangeReason()
+{
+    const specforge::SpectrumViewportTransition same_collection =
+        specforge::ResolveViewportTransition(
+            specforge::SpectrumViewportRangeMode::Locked,
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection);
+    Require(
+        same_collection.range_mode == specforge::SpectrumViewportRangeMode::Locked &&
+            same_collection.range_action == specforge::SpectrumViewportRangeAction::Preserve,
+        "a locked view should preserve its range for samples in the same collection");
+
+    const specforge::SpectrumViewportTransition same_sample_reload =
+        specforge::ResolveViewportTransition(
+            specforge::SpectrumViewportRangeMode::Locked,
+            specforge::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection);
+    Require(
+        same_sample_reload.range_mode == specforge::SpectrumViewportRangeMode::Locked &&
+            same_sample_reload.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        "reloading the current sample should fit without leaving Keep View mode");
+
+    const specforge::SpectrumViewportTransition different_collection =
+        specforge::ResolveViewportTransition(
+            specforge::SpectrumViewportRangeMode::Locked,
+            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged);
+    Require(
+        different_collection.range_mode == specforge::SpectrumViewportRangeMode::Automatic &&
+            different_collection.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        "switching collections should unlock and fit the viewport");
+
+    const specforge::SpectrumViewportTransition cleared =
+        specforge::ResolveViewportTransition(
+            specforge::SpectrumViewportRangeMode::Locked,
+            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionCleared);
+    Require(
+        cleared.range_mode == specforge::SpectrumViewportRangeMode::Automatic &&
+            cleared.range_action == specforge::SpectrumViewportRangeAction::Fit,
+        "clearing the active collection should unlock and fit the viewport");
+}
+
+void TestLockedViewportStateCacheRoundTripsAndClears()
+{
+    const std::filesystem::path path = UniqueTempPath();
+    const specforge::SpectrumViewStateCache locked{
+        .locked = true,
+        .source_collection_identity =
+            "viewport-cache-collection",
+        .limits = {
+            .x_min = 4100.125,
+            .x_max = 4900.875,
+            .y_min = -0.03125,
+            .y_max = 2.0625,
+        },
+    };
+    std::string error;
+    Require(
+        specforge::SaveSpectrumViewStateCache(
+            path,
+            locked,
+            &error),
+        error.empty()
+            ? "locked viewport cache should save"
+            : error);
+    const specforge::SpectrumViewStateCacheLoadResult loaded =
+        specforge::LoadSpectrumViewStateCache(path);
+    Require(
+        loaded.warning.empty() && loaded.state.locked &&
+            loaded.state.source_collection_identity ==
+                locked.source_collection_identity &&
+            loaded.state.limits.x_min ==
+                locked.limits.x_min &&
+            loaded.state.limits.x_max ==
+                locked.limits.x_max &&
+            loaded.state.limits.y_min ==
+                locked.limits.y_min &&
+            loaded.state.limits.y_max ==
+                locked.limits.y_max,
+        "locked viewport cache should round-trip its collection identity and exact limits");
+
+    Require(
+        specforge::SaveSpectrumViewStateCache(
+            path,
+            {},
+            &error),
+        "an unlocked shutdown should clear the persisted locked viewport");
+    Require(
+        !specforge::LoadSpectrumViewStateCache(path)
+             .state.locked,
+        "the cleared viewport cache should reload in automatic mode");
+    std::filesystem::remove(path);
+}
+
+void TestSpectrumViewSessionCapturesAndRestoresLockedLimits()
+{
+    specforge::SpectrumViewSession session;
+    const specforge::PlotViewLimits expected{
+        .x_min = 12.5,
+        .x_max = 18.75,
+        .y_min = -4.0,
+        .y_max = 9.5,
+    };
+    Require(
+        session.RestoreLockedViewport(expected),
+        "valid persisted limits should restore");
+    const std::optional<specforge::PlotViewLimits> restored =
+        session.LockedViewportLimits();
+    Require(
+        session.View().viewport_range_mode ==
+                specforge::SpectrumViewportRangeMode::Locked &&
+            restored && restored->x_min == expected.x_min &&
+            restored->x_max == expected.x_max &&
+            restored->y_min == expected.y_min &&
+            restored->y_max == expected.y_max,
+        "restored limits should become the logical view's locked viewport");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::
+                SourceCollectionChanged));
+    Require(
+        session.View().viewport_range_mode ==
+                specforge::SpectrumViewportRangeMode::Automatic &&
+            !session.LockedViewportLimits(),
+        "a later collection change should still unlock a restored viewport");
+}
+
+void TestIndependentSpectrumViewsDoNotShareViewportLock()
+{
+    specforge::SpectrumViewSession first;
+    specforge::SpectrumViewSession second;
+    first.Submit(
+        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
+            specforge::SpectrumViewportRangeMode::Locked));
+
+    Require(
+        first.View().viewport_range_mode == specforge::SpectrumViewportRangeMode::Locked,
+        "the owning spectrum view should observe its viewport lock");
+    Require(
+        second.View().viewport_range_mode == specforge::SpectrumViewportRangeMode::Automatic,
+        "independent spectrum views must not share viewport lock state");
+}
+
+void TestSourceRosterClassifiesSnapshotChanges()
+{
+    specforge::SourceCollectionRoster roster;
+    const std::filesystem::path first_path = "viewport-source-a.csv";
+    const std::filesystem::path second_path = "viewport-source-b.csv";
+    specforge::SourceCollectionContextReuseProof first_proof;
+    first_proof.identity.id = "viewport-collection-a";
+    specforge::SourceCollectionContextReuseProof second_proof;
+    second_proof.identity.id = "viewport-collection-b";
+
+    const specforge::SourceCollectionRosterOpenResult first =
+        roster.OpenPreparedSource(
+            first_path,
+            0,
+            MakeActivationSnapshot(first_path, 0),
+            {},
+            first_proof);
+    Require(
+        first.action.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+        "opening the first source should be classified as a collection change");
+
+    const specforge::SourceCollectionRosterOpenResult next_sample =
+        roster.OpenPreparedSource(
+            first_path,
+            1,
+            MakeActivationSnapshot(first_path, 1),
+            {},
+            first_proof);
+    Require(
+        next_sample.action.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
+        "loading another sample with the same collection identity should preserve its scope");
+
+    const specforge::SpectrumSnapshotHandle current_snapshot =
+        roster.snapshot();
+    const specforge::SourceCollectionRosterOpenResult unchanged =
+        roster.OpenPreparedSource(
+            first_path,
+            1,
+            current_snapshot,
+            {},
+            first_proof);
+    Require(
+        !unchanged.action.snapshot_changed &&
+            unchanged.action.snapshot_change_reason ==
+                specforge::SourceCollectionSnapshotChangeReason::None,
+        "re-presenting the same snapshot handle and index should be a no-op");
+
+    const specforge::SourceCollectionRosterOpenResult reloaded =
+        roster.OpenPreparedSource(
+            first_path,
+            1,
+            MakeActivationSnapshot(first_path, 1),
+            {},
+            first_proof);
+    Require(
+        reloaded.action.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection,
+        "replacing the current sample should retain an explicit reload reason");
+
+    roster.RememberActiveSourceIndex(2);
+    const specforge::SourceCollectionRosterOpenResult corrective_follow_up =
+        roster.OpenPreparedSource(
+            first_path,
+            2,
+            MakeActivationSnapshot(first_path, 2),
+            {},
+            first_proof);
+    Require(
+        corrective_follow_up.action.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection,
+        "a corrective follow-up should compare against the displayed snapshot index, not the roster target");
+
+    const specforge::SourceCollectionRosterOpenResult second =
+        roster.OpenPreparedSource(
+            second_path,
+            0,
+            MakeActivationSnapshot(second_path, 0),
+            {},
+            second_proof);
+    Require(
+        second.action.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+        "opening a different collection identity should be classified as a collection change");
+
+    const specforge::SourceCollectionSessionAction reactivated =
+        roster.ActivateSource(0);
+    Require(
+        reactivated.snapshot_change_reason ==
+            specforge::SourceCollectionSnapshotChangeReason::SourceCollectionChanged,
+        "reactivating another roster source should be classified as a collection change");
+
+    const specforge::SourceCollectionSessionAction unchanged_activation =
+        roster.ActivateSource(0);
+    Require(
+        !unchanged_activation.snapshot_changed &&
+            unchanged_activation.snapshot_change_reason ==
+                specforge::SourceCollectionSnapshotChangeReason::None,
+        "activating the current roster source should be a no-op");
 }
 
 void TestSnapshotResetPreservesControlsAndFitsNewData()
@@ -181,7 +510,9 @@ void TestSnapshotResetPreservesControlsAndFitsNewData()
         retained.size() == 2,
         "smoothed render should expose both heavy cache resources for retention");
 
-    session.Submit(specforge::SpectrumViewSessionCommand::ResetForSnapshotChange());
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
 
     const specforge::SpectrumViewSessionView view = session.View();
     Require(view.show_points, "snapshot reset should preserve show-points state");
@@ -247,6 +578,243 @@ void TestFitAndStoredLimitReuseAreObservable()
     Require(
         fitted.fit_applied && !fitted.stored_limits_reused,
         "fit command should supersede stored-limit reuse");
+}
+
+void TestViewportLockOverlayTogglesInAxisCorner()
+{
+    ScopedPlotUi ui;
+    specforge::SpectrumViewSession session;
+    QueuedTouchpadGestureSource touchpad_gestures;
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot({4100.0, 4500.0, 4900.0}, {-0.25, 1.75, 0.5});
+
+    Require(
+        ui.RenderFrame(
+              session,
+              snapshot,
+              ImVec2(400.0f, 300.0f),
+              false,
+              &touchpad_gestures)
+            .plot_submitted,
+        "viewport lock overlay test should render a plot");
+    const ImVec2 lock_center = touchpad_gestures.ViewportLockCenter();
+    (void)ui.RenderFrame(session, snapshot, lock_center, false);
+    (void)ui.RenderFrame(session, snapshot, lock_center, true);
+    (void)ui.RenderFrame(session, snapshot, lock_center, false);
+    Require(
+        session.View().viewport_range_mode ==
+            specforge::SpectrumViewportRangeMode::Locked,
+        "clicking the axis-corner overlay should lock the viewport");
+
+    (void)ui.RenderFrame(session, snapshot, lock_center, true);
+    (void)ui.RenderFrame(session, snapshot, lock_center, false);
+    Require(
+        session.View().viewport_range_mode ==
+            specforge::SpectrumViewportRangeMode::Automatic,
+        "clicking the axis-corner overlay again should unlock the viewport");
+}
+
+void TestViewportLockConsumesImmersiveAxisAndTouchpadInput()
+{
+    ScopedPlotUi ui;
+    specforge::SpectrumViewSession session;
+    QueuedTouchpadGestureSource touchpad_gestures;
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot({0.0, 50.0, 100.0}, {-10.0, 0.0, 10.0});
+    const specforge::SpectrumPlotDisplayOptions immersive{
+        .edge_axis_overlay = true,
+        .include_edge_pixels = true,
+    };
+
+    const specforge::SpectrumViewRenderFeedback initial =
+        ui.RenderFrame(
+            session,
+            snapshot,
+            ImVec2(400.0f, 300.0f),
+            false,
+            &touchpad_gestures,
+            immersive);
+    Require(
+        initial.visible_limits.has_value(),
+        "immersive wheel regression should establish initial plot limits");
+    const ImVec2 lock_center =
+        touchpad_gestures.ViewportLockCenter();
+    const specforge::SpectrumViewRenderFeedback wheel_over_lock =
+        ui.RenderFrame(
+            session,
+            snapshot,
+            lock_center,
+            false,
+            &touchpad_gestures,
+            immersive,
+            1.0f);
+    Require(
+        wheel_over_lock.visible_limits.has_value(),
+        "immersive wheel regression should retain visible limits");
+    RequireNear(
+        wheel_over_lock.visible_limits->x_min,
+        initial.visible_limits->x_min,
+        "Keep View hit rect should consume immersive x-axis wheel min");
+    RequireNear(
+        wheel_over_lock.visible_limits->x_max,
+        initial.visible_limits->x_max,
+        "Keep View hit rect should consume immersive x-axis wheel max");
+
+    touchpad_gestures.QueuePanAt(lock_center, 40.0f, 30.0f);
+    const specforge::SpectrumViewRenderFeedback pan_over_lock =
+        ui.RenderFrame(
+            session,
+            snapshot,
+            lock_center,
+            false,
+            &touchpad_gestures,
+            immersive);
+    Require(
+        pan_over_lock.visible_limits.has_value(),
+        "immersive touchpad pan regression should retain visible limits");
+    RequireNear(
+        pan_over_lock.visible_limits->x_min,
+        initial.visible_limits->x_min,
+        "Keep View hit rect should consume immersive touchpad pan x min");
+    RequireNear(
+        pan_over_lock.visible_limits->x_max,
+        initial.visible_limits->x_max,
+        "Keep View hit rect should consume immersive touchpad pan x max");
+    RequireNear(
+        pan_over_lock.visible_limits->y_min,
+        initial.visible_limits->y_min,
+        "Keep View hit rect should consume immersive touchpad pan y min");
+    RequireNear(
+        pan_over_lock.visible_limits->y_max,
+        initial.visible_limits->y_max,
+        "Keep View hit rect should consume immersive touchpad pan y max");
+
+    touchpad_gestures.QueueZoomAt(lock_center, 2.0);
+    const specforge::SpectrumViewRenderFeedback pinch_over_lock =
+        ui.RenderFrame(
+            session,
+            snapshot,
+            lock_center,
+            false,
+            &touchpad_gestures,
+            immersive);
+    Require(
+        pinch_over_lock.visible_limits.has_value(),
+        "immersive touchpad pinch regression should retain visible limits");
+    RequireNear(
+        pinch_over_lock.visible_limits->x_min,
+        initial.visible_limits->x_min,
+        "Keep View hit rect should consume immersive touchpad pinch x min");
+    RequireNear(
+        pinch_over_lock.visible_limits->x_max,
+        initial.visible_limits->x_max,
+        "Keep View hit rect should consume immersive touchpad pinch x max");
+    RequireNear(
+        pinch_over_lock.visible_limits->y_min,
+        initial.visible_limits->y_min,
+        "Keep View hit rect should consume immersive touchpad pinch y min");
+    RequireNear(
+        pinch_over_lock.visible_limits->y_max,
+        initial.visible_limits->y_max,
+        "Keep View hit rect should consume immersive touchpad pinch y max");
+}
+
+void TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit()
+{
+    ScopedPlotUi ui;
+    specforge::SpectrumViewSession session;
+    QueuedTouchpadGestureSource touchpad_gestures;
+    const specforge::SpectrumSnapshotHandle first_snapshot =
+        MakeSnapshot({0.0, 50.0, 100.0}, {-10.0, 0.0, 10.0});
+
+    const specforge::SpectrumViewRenderFeedback initial =
+        ui.RenderFrame(
+            session,
+            first_snapshot,
+            ImVec2(400.0f, 300.0f),
+            false,
+            &touchpad_gestures);
+    Require(
+        initial.fit_applied && initial.visible_limits,
+        "initial unlocked render should fit the first sample");
+    Require(
+        session.ViewportMutationRevision() == 0,
+        "automatic initial fit should not count as a user viewport mutation");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
+            specforge::SpectrumViewportRangeMode::Locked));
+    Require(
+        session.View().viewport_range_mode ==
+            specforge::SpectrumViewportRangeMode::Locked,
+        "viewport lock mode should be observable");
+    const std::uint64_t locked_revision =
+        session.ViewportMutationRevision();
+
+    touchpad_gestures.QueueZoom(2.0);
+    const specforge::SpectrumViewRenderFeedback adjusted =
+        ui.RenderFrame(
+            session,
+            first_snapshot,
+            ImVec2(400.0f, 300.0f),
+            false,
+            &touchpad_gestures);
+    Require(
+        adjusted.visible_limits &&
+            adjusted.visible_limits->x_max - adjusted.visible_limits->x_min <
+                initial.visible_limits->x_max - initial.visible_limits->x_min,
+        "viewport lock should not prevent plot navigation from adjusting the visible range");
+    Require(
+        session.ViewportMutationRevision() >
+            locked_revision,
+        "user viewport navigation should advance the mutation revision");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const specforge::SpectrumViewRenderFeedback second =
+        ui.RenderFrame(
+            session,
+            MakeSnapshot({1000.0, 1500.0, 2000.0}, {50.0, 75.0, 100.0}));
+    Require(
+        second.stored_limits_reused && !second.fit_applied && second.visible_limits,
+        "locked sample change should reuse the adjusted viewport");
+    RequireNear(second.visible_limits->x_min, adjusted.visible_limits->x_min, "locked x min");
+    RequireNear(second.visible_limits->x_max, adjusted.visible_limits->x_max, "locked x max");
+    RequireNear(second.visible_limits->y_min, adjusted.visible_limits->y_min, "locked y min");
+    RequireNear(second.visible_limits->y_max, adjusted.visible_limits->y_max, "locked y max");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const specforge::SpectrumViewRenderFeedback third =
+        ui.RenderFrame(
+            session,
+            MakeSnapshot({3000.0, 3500.0, 4000.0}, {-200.0, 0.0, 200.0}));
+    Require(
+        third.stored_limits_reused && !third.fit_applied && third.visible_limits,
+        "consecutive locked sample changes should keep reusing the viewport");
+    RequireNear(third.visible_limits->x_min, adjusted.visible_limits->x_min, "stable locked x min");
+    RequireNear(third.visible_limits->x_max, adjusted.visible_limits->x_max, "stable locked x max");
+    RequireNear(third.visible_limits->y_min, adjusted.visible_limits->y_min, "stable locked y min");
+    RequireNear(third.visible_limits->y_max, adjusted.visible_limits->y_max, "stable locked y max");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
+            specforge::SpectrumViewportRangeMode::Automatic));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection));
+    const specforge::SpectrumViewRenderFeedback unlocked =
+        ui.RenderFrame(
+            session,
+            MakeSnapshot({5000.0, 5500.0, 6000.0}, {500.0, 600.0, 700.0}));
+    Require(
+        unlocked.fit_applied && !unlocked.stored_limits_reused && unlocked.visible_limits,
+        "unlocked sample change should restore automatic fitting");
+    Require(
+        unlocked.visible_limits->x_min > adjusted.visible_limits->x_max,
+        "unlocked fit should use the new sample bounds");
 }
 
 void TestSmoothingCommandsOwnCacheInvalidation()
@@ -373,6 +941,9 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
                 RetainHeavySnapshotResources()
             .size() == 2,
         "binding regression requires both heavy smoothing resources");
+    presentation.Submit(
+        specforge::SpectrumViewSessionCommand::SetViewportRangeMode(
+            specforge::SpectrumViewportRangeMode::Locked));
     old_snapshot.reset();
     old_y_values.reset();
 
@@ -440,6 +1011,10 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
             .empty(),
         "snapshot activation should reset the bound presentation view");
     Require(
+        presentation.View().viewport_range_mode ==
+            specforge::SpectrumViewportRangeMode::Automatic,
+        "activating a different source collection should unlock the viewport");
+    Require(
         retired,
         "old presentation resources should reach the background reclaimer");
     Require(
@@ -451,8 +1026,16 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
 
 int main()
 {
+    TestViewportTransitionPolicyUsesChangeReason();
+    TestLockedViewportStateCacheRoundTripsAndClears();
+    TestSpectrumViewSessionCapturesAndRestoresLockedLimits();
+    TestIndependentSpectrumViewsDoNotShareViewportLock();
+    TestSourceRosterClassifiesSnapshotChanges();
     TestSnapshotResetPreservesControlsAndFitsNewData();
     TestFitAndStoredLimitReuseAreObservable();
+    TestViewportLockOverlayTogglesInAxisCorner();
+    TestViewportLockConsumesImmersiveAxisAndTouchpadInput();
+    TestViewportLockPreservesAdjustedLimitsAndUnlockRestoresFit();
     TestSmoothingCommandsOwnCacheInvalidation();
     TestRenderFeedbackTracksPanLifecycle();
     TestActivationPresentationBindingResetsAndRetiresHeavyViewResources();

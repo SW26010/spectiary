@@ -1221,8 +1221,9 @@ void SourceCollectionActivationTransaction::
         const SourceCollectionSessionAction& action)
 {
     if (action.snapshot_changed &&
-        reset_presentation_for_snapshot_change_) {
-        reset_presentation_for_snapshot_change_();
+        apply_presentation_snapshot_change_) {
+        apply_presentation_snapshot_change_(
+            action.snapshot_change_reason);
     }
 }
 
@@ -1231,12 +1232,17 @@ void SourceCollectionActivationTransaction::
         std::function<
             std::vector<BackgroundRetirementHandle>()>
             retain_resources,
-        std::function<void()> reset_for_snapshot_change)
+        std::function<void(SourceCollectionSnapshotChangeReason)>
+            apply_snapshot_change,
+        std::function<void(std::optional<std::string>)>
+            deferred_restore_finished)
 {
     retain_presentation_resources_ =
         std::move(retain_resources);
-    reset_presentation_for_snapshot_change_ =
-        std::move(reset_for_snapshot_change);
+    apply_presentation_snapshot_change_ =
+        std::move(apply_snapshot_change);
+    presentation_deferred_restore_finished_ =
+        std::move(deferred_restore_finished);
 }
 
 void SourceCollectionActivationTransaction::
@@ -1528,9 +1534,15 @@ void SourceCollectionActivationTransaction::
         return;
     }
     RestoreDeferredActiveSourceIfAvailable(action);
+    std::optional<std::string> active_source_identity =
+        session_.CurrentSourceCollectionIdentity();
     session_.FinishDeferredRestore();
     deferred_restore_active_ = false;
     deferred_restore_active_path_.reset();
+    if (presentation_deferred_restore_finished_) {
+        presentation_deferred_restore_finished_(
+            std::move(active_source_identity));
+    }
 }
 
 NavigationLatencyTraceHandle

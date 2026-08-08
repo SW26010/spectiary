@@ -2,23 +2,67 @@
 
 #include "plot/spectrum_plot_renderer.h"
 #include "ui/source_collection_activation_transaction.h"
+#include "ui/source_collection_session_types.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <utility>
 
 namespace specforge {
+namespace {
+
+bool LimitsAreUsable(const PlotViewLimits& limits)
+{
+    return std::isfinite(limits.x_min) &&
+           std::isfinite(limits.x_max) &&
+           std::isfinite(limits.y_min) &&
+           std::isfinite(limits.y_max) &&
+           limits.x_min < limits.x_max &&
+           limits.y_min < limits.y_max;
+}
+
+}  // namespace
+
+SpectrumViewportTransition ResolveViewportTransition(
+    SpectrumViewportRangeMode range_mode,
+    SourceCollectionSnapshotChangeReason change_reason) noexcept
+{
+    if (range_mode == SpectrumViewportRangeMode::Locked &&
+        change_reason ==
+            SourceCollectionSnapshotChangeReason::SampleChangedWithinCollection) {
+        return {
+            .range_mode = SpectrumViewportRangeMode::Locked,
+            .range_action = SpectrumViewportRangeAction::Preserve,
+        };
+    }
+    if (range_mode == SpectrumViewportRangeMode::Locked &&
+        change_reason ==
+            SourceCollectionSnapshotChangeReason::SnapshotReloadedWithinCollection) {
+        return {
+            .range_mode = SpectrumViewportRangeMode::Locked,
+            .range_action = SpectrumViewportRangeAction::Fit,
+        };
+    }
+    return {
+        .range_mode = SpectrumViewportRangeMode::Automatic,
+        .range_action = SpectrumViewportRangeAction::Fit,
+    };
+}
 
 struct SpectrumViewSession::State {
     SpectrumPlotState plot;
     SpectrumPlotStyle style;
     SpectrumViewRenderFeedback last_render;
+    std::uint64_t viewport_mutation_revision = 0;
 };
 
-SpectrumViewSessionCommand SpectrumViewSessionCommand::ResetForSnapshotChange()
+SpectrumViewSessionCommand SpectrumViewSessionCommand::ApplySnapshotChange(
+    SourceCollectionSnapshotChangeReason reason)
 {
     SpectrumViewSessionCommand command;
-    command.kind = SpectrumViewSessionCommandKind::ResetForSnapshotChange;
+    command.kind = SpectrumViewSessionCommandKind::ApplySnapshotChange;
+    command.snapshot_change_reason = reason;
     return command;
 }
 
@@ -92,6 +136,15 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::SetPlotStyle(SpectrumPlot
     return command;
 }
 
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetViewportRangeMode(
+    SpectrumViewportRangeMode mode)
+{
+    SpectrumViewSessionCommand command;
+    command.kind = SpectrumViewSessionCommandKind::SetViewportRangeMode;
+    command.viewport_range_mode = mode;
+    return command;
+}
+
 SpectrumViewSessionCommand SpectrumViewSessionCommand::SyncPlotLimitsOnNextRender()
 {
     SpectrumViewSessionCommand command;
@@ -113,11 +166,12 @@ SpectrumViewSession& SpectrumViewSession::operator=(SpectrumViewSession&&) noexc
 void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
 {
     switch (command.kind) {
-    case SpectrumViewSessionCommandKind::ResetForSnapshotChange:
-        ResetForSnapshotChange();
+    case SpectrumViewSessionCommandKind::ApplySnapshotChange:
+        ApplySnapshotChange(command.snapshot_change_reason);
         break;
     case SpectrumViewSessionCommandKind::RequestFitView:
         state_->plot.fit_next_frame = true;
+        ++state_->viewport_mutation_revision;
         break;
     case SpectrumViewSessionCommandKind::SetShowPoints:
         state_->plot.show_points = command.enabled;
@@ -156,6 +210,14 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
     case SpectrumViewSessionCommandKind::SetPlotStyle:
         state_->style = command.plot_style;
         break;
+    case SpectrumViewSessionCommandKind::SetViewportRangeMode:
+        if (state_->plot.viewport_range_mode !=
+            command.viewport_range_mode) {
+            state_->plot.viewport_range_mode =
+                command.viewport_range_mode;
+            ++state_->viewport_mutation_revision;
+        }
+        break;
     case SpectrumViewSessionCommandKind::SyncPlotLimitsOnNextRender:
         if (state_->plot.has_last_limits) {
             state_->plot.sync_last_limits_next_frame = true;
@@ -172,6 +234,7 @@ SpectrumViewSessionView SpectrumViewSession::View() const
     view.show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
     view.smoothing_active = SmoothingActive();
     view.smoothing = state_->plot.smoothing;
+    view.viewport_range_mode = state_->plot.viewport_range_mode;
     return view;
 }
 
@@ -190,6 +253,16 @@ SpectrumViewRenderFeedback SpectrumViewSession::Render(
     const SpectrumPlotDisplayOptions& display,
     PlotTouchpadGestureSource* touchpad_gestures)
 {
+    const SpectrumViewportRangeMode previous_range_mode =
+        state_->plot.viewport_range_mode;
+    const bool previously_had_limits =
+        state_->plot.has_last_limits;
+    const PlotViewLimits previous_limits{
+        state_->plot.last_x_min,
+        state_->plot.last_x_max,
+        state_->plot.last_y_min,
+        state_->plot.last_y_max,
+    };
     const SpectrumPlotRenderResult result = RenderSpectrumPlot(
         snapshot,
         state_->plot,
@@ -199,6 +272,23 @@ SpectrumViewRenderFeedback SpectrumViewSession::Render(
         overlays,
         display,
         touchpad_gestures);
+    const bool range_mode_changed =
+        state_->plot.viewport_range_mode !=
+        previous_range_mode;
+    const bool limits_changed =
+        state_->plot.has_last_limits !=
+            previously_had_limits ||
+        (state_->plot.has_last_limits &&
+         previously_had_limits &&
+         (state_->plot.last_x_min != previous_limits.x_min ||
+          state_->plot.last_x_max != previous_limits.x_max ||
+          state_->plot.last_y_min != previous_limits.y_min ||
+          state_->plot.last_y_max != previous_limits.y_max));
+    if (range_mode_changed ||
+        (limits_changed && !result.fit_applied &&
+         !result.stored_limits_reused)) {
+        ++state_->viewport_mutation_revision;
+    }
     state_->last_render = {
         .plot_submitted = result.plot_submitted,
         .fit_applied = result.fit_applied,
@@ -214,6 +304,12 @@ bool SpectrumViewSession::PlotPanActive() const
     return state_->last_render.pan_active;
 }
 
+std::uint64_t
+SpectrumViewSession::ViewportMutationRevision() const noexcept
+{
+    return state_->viewport_mutation_revision;
+}
+
 std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResources() const
 {
     std::vector<SpectrumValueVector> resources;
@@ -227,18 +323,81 @@ std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResourc
     return resources;
 }
 
-void SpectrumViewSession::ResetForSnapshotChange()
+std::optional<PlotViewLimits>
+SpectrumViewSession::LockedViewportLimits() const
 {
+    if (state_->plot.viewport_range_mode !=
+            SpectrumViewportRangeMode::Locked ||
+        !state_->plot.has_last_limits) {
+        return std::nullopt;
+    }
+    const PlotViewLimits limits{
+        .x_min = state_->plot.last_x_min,
+        .x_max = state_->plot.last_x_max,
+        .y_min = state_->plot.last_y_min,
+        .y_max = state_->plot.last_y_max,
+    };
+    return LimitsAreUsable(limits)
+        ? std::optional<PlotViewLimits>{limits}
+        : std::nullopt;
+}
+
+bool SpectrumViewSession::RestoreLockedViewport(
+    const PlotViewLimits& limits)
+{
+    if (!LimitsAreUsable(limits)) {
+        return false;
+    }
+    state_->plot.viewport_range_mode =
+        SpectrumViewportRangeMode::Locked;
+    state_->plot.fit_next_frame = false;
+    state_->plot.has_last_limits = true;
+    state_->plot.last_x_min = limits.x_min;
+    state_->plot.last_x_max = limits.x_max;
+    state_->plot.last_y_min = limits.y_min;
+    state_->plot.last_y_max = limits.y_max;
+    state_->plot.sync_last_limits_next_frame = true;
+    state_->last_render = {};
+    return true;
+}
+
+void SpectrumViewSession::ApplySnapshotChange(
+    SourceCollectionSnapshotChangeReason reason)
+{
+    const SpectrumViewportTransition viewport_transition =
+        ResolveViewportTransition(
+            state_->plot.viewport_range_mode,
+            reason);
+    const bool preserve_last_limits =
+        viewport_transition.range_action ==
+            SpectrumViewportRangeAction::Preserve &&
+        state_->plot.has_last_limits;
+    const PlotViewLimits last_limits{
+        state_->plot.last_x_min,
+        state_->plot.last_x_max,
+        state_->plot.last_y_min,
+        state_->plot.last_y_max};
     const bool show_points = state_->plot.show_points;
     const bool show_smoothed = state_->plot.show_smoothed;
     const bool show_raw_when_smoothed = state_->plot.show_raw_when_smoothed;
     const SpectrumSmoothingSettings smoothing = state_->plot.smoothing;
 
     state_->plot = SpectrumPlotState{};
+    state_->plot.viewport_range_mode =
+        viewport_transition.range_mode;
     state_->plot.show_points = show_points;
     state_->plot.show_smoothed = show_smoothed;
     state_->plot.show_raw_when_smoothed = show_raw_when_smoothed;
     state_->plot.smoothing = smoothing;
+    if (preserve_last_limits) {
+        state_->plot.fit_next_frame = false;
+        state_->plot.has_last_limits = true;
+        state_->plot.last_x_min = last_limits.x_min;
+        state_->plot.last_x_max = last_limits.x_max;
+        state_->plot.last_y_min = last_limits.y_min;
+        state_->plot.last_y_max = last_limits.y_max;
+        state_->plot.sync_last_limits_next_frame = true;
+    }
     state_->last_render = {};
 }
 
@@ -264,7 +423,9 @@ bool SpectrumViewSession::SmoothingActive() const
 
 void BindSourceCollectionActivationPresentationLifecycle(
     SourceCollectionActivationTransaction& activation,
-    SpectrumViewSession& presentation)
+    SpectrumViewSession& presentation,
+    std::function<void(std::optional<std::string>)>
+        deferred_restore_finished)
 {
     activation.BindPresentationLifecycle(
         [&presentation]() {
@@ -278,11 +439,13 @@ void BindSourceCollectionActivationPresentationLifecycle(
             }
             return resources;
         },
-        [&presentation]() {
+        [&presentation](
+            SourceCollectionSnapshotChangeReason reason) {
             presentation.Submit(
                 SpectrumViewSessionCommand::
-                    ResetForSnapshotChange());
-        });
+                    ApplySnapshotChange(reason));
+        },
+        std::move(deferred_restore_finished));
 }
 
 }  // namespace specforge

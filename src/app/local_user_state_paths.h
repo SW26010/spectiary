@@ -12,6 +12,7 @@ inline constexpr char kExternalSourceSettings[] =
     "external-source-settings.json";
 inline constexpr char kProfileSettings[] = "profile-settings.json";
 inline constexpr char kPanelVisibilityState[] = "panel-visibility.json";
+inline constexpr char kSpectrumViewState[] = "spectrum-view-state.json";
 inline constexpr char kSourceSessionState[] = "source-session.json";
 inline constexpr char kSampleNavigationState[] =
     "sample-navigation-state.json";

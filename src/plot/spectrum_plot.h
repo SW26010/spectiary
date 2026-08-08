@@ -37,6 +37,11 @@ struct SpectrumPlotDisplayOptions {
     bool native_transparent_axes = false;
 };
 
+enum class SpectrumViewportRangeMode {
+    Automatic,
+    Locked,
+};
+
 [[nodiscard]] bool IsPlotPanDragActive(
     bool was_active,
     bool plot_hovered,
