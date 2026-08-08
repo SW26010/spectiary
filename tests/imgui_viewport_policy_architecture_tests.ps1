@@ -27,6 +27,19 @@ if ($assignments.Count -ne 1) {
 }
 
 if ($appSource -notmatch
+    'io\.ConfigViewportsNoTaskBarIcon\s*=\s*true') {
+    throw 'Detached panels must remain auxiliary windows without independent taskbar or Alt+Tab entries.'
+}
+
+$taskbarAssignments = [regex]::Matches(
+    $appSource,
+    'ConfigViewportsNoTaskBarIcon\s*=')
+
+if ($taskbarAssignments.Count -ne 1) {
+    throw 'ConfigViewportsNoTaskBarIcon should have exactly one policy assignment.'
+}
+
+if ($appSource -notmatch
     'io\.ConfigViewportsNoDefaultParent\s*=\s*false') {
     throw 'Detached panels must keep independent ImGui viewports while their Win32 platform windows remain owned by the main window.'
 }

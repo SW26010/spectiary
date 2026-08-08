@@ -460,13 +460,28 @@ public static class SpecForgeViewportOwnershipNative
         return GetWindow(window, GW_OWNER);
     }
 
-    public static bool WindowIsTopMost(IntPtr window)
+    public static long WindowExtendedStyle(IntPtr window)
     {
         const int GWL_EXSTYLE = -20;
+        return GetWindowLongPtrW(window, GWL_EXSTYLE).ToInt64();
+    }
+
+    public static bool WindowIsToolWindow(IntPtr window)
+    {
+        const long WS_EX_TOOLWINDOW = 0x00000080L;
+        return (WindowExtendedStyle(window) & WS_EX_TOOLWINDOW) != 0;
+    }
+
+    public static bool WindowIsAppWindow(IntPtr window)
+    {
+        const long WS_EX_APPWINDOW = 0x00040000L;
+        return (WindowExtendedStyle(window) & WS_EX_APPWINDOW) != 0;
+    }
+
+    public static bool WindowIsTopMost(IntPtr window)
+    {
         const long WS_EX_TOPMOST = 0x00000008L;
-        return (
-            GetWindowLongPtrW(window, GWL_EXSTYLE).ToInt64() &
-            WS_EX_TOPMOST) != 0;
+        return (WindowExtendedStyle(window) & WS_EX_TOPMOST) != 0;
     }
 
     public static uint WindowProcessId(IntPtr window)
@@ -667,7 +682,7 @@ function Assert-SameViewportWindows {
             }) -join ', ') + '.')
 }
 
-function Assert-Win32Ownership {
+function Assert-Win32WindowPolicy {
     param(
         [Parameter(Mandatory = $true)]
         [IntPtr]$MainHandle,
@@ -677,22 +692,51 @@ function Assert-Win32Ownership {
         [string]$Phase
     )
 
+    $mainOwner =
+        [SpecForgeViewportOwnershipNative]::
+            WindowOwner($MainHandle)
+    $mainExtendedStyle =
+        [SpecForgeViewportOwnershipNative]::
+            WindowExtendedStyle($MainHandle)
+    Assert-True `
+        -Condition (
+            $mainOwner -eq [IntPtr]::Zero -and
+            -not [SpecForgeViewportOwnershipNative]::
+                WindowIsToolWindow($MainHandle) -and
+            -not [SpecForgeViewportOwnershipNative]::
+                WindowIsTopMost($MainHandle)) `
+        -Message (
+            "$Phase expected main HWND " +
+            (Format-Handle -Handle $MainHandle) +
+            ' to remain the unowned, non-tool, non-topmost shell identity; ' +
+            'actual owner is ' +
+            (Format-Handle -Handle $mainOwner) +
+            (', extended style is 0x{0:x}.' -f $mainExtendedStyle))
+
     foreach ($secondaryHandle in $SecondaryHandles) {
         $owner =
             [SpecForgeViewportOwnershipNative]::
                 WindowOwner($secondaryHandle)
+        $extendedStyle =
+            [SpecForgeViewportOwnershipNative]::
+                WindowExtendedStyle($secondaryHandle)
         Assert-True `
             -Condition (
                 $owner -eq $MainHandle -and
+                [SpecForgeViewportOwnershipNative]::
+                    WindowIsToolWindow($secondaryHandle) -and
+                -not [SpecForgeViewportOwnershipNative]::
+                    WindowIsAppWindow($secondaryHandle) -and
                 -not [SpecForgeViewportOwnershipNative]::
                     WindowIsTopMost($secondaryHandle)) `
             -Message (
                 "$Phase expected detached HWND " +
                 (Format-Handle -Handle $secondaryHandle) +
-                ' to be a non-topmost window owned by main HWND ' +
+                ' to be an auxiliary WS_EX_TOOLWINDOW owned by main HWND ' +
                 (Format-Handle -Handle $MainHandle) +
-                '; actual owner is ' +
-                (Format-Handle -Handle $owner) + '.')
+                ' without WS_EX_APPWINDOW or WS_EX_TOPMOST; actual owner is ' +
+                (Format-Handle -Handle $owner) +
+                (', extended style is 0x{0:x}.' -f $extendedStyle))
     }
 }
 
@@ -1014,7 +1058,7 @@ try {
             ForEach-Object { [IntPtr]$_.Handle }
     )
     $secondaryHandle = $secondaryHandles[0]
-    Assert-Win32Ownership `
+    Assert-Win32WindowPolicy `
         -MainHandle $mainHandle `
         -SecondaryHandles $secondaryHandles `
         -Phase 'Initial detached viewport creation'
@@ -1177,7 +1221,7 @@ try {
         -Message (
             'Minimizing the owner must hide every detached viewport without ' +
             'destroying its HWND identity.')
-    Assert-Win32Ownership `
+    Assert-Win32WindowPolicy `
         -MainHandle $mainHandle `
         -SecondaryHandles $secondaryHandles `
         -Phase 'Main-window minimize'
@@ -1266,7 +1310,7 @@ try {
         -MainHandle $mainHandle `
         -SecondaryHandles $secondaryHandles `
         -Phase 'Main-window restore after peer activation'
-    Assert-Win32Ownership `
+    Assert-Win32WindowPolicy `
         -MainHandle $mainHandle `
         -SecondaryHandles $secondaryHandles `
         -Phase 'Main-window restore after peer activation'
@@ -1309,7 +1353,7 @@ try {
             $launcherProcess.ExitCode + '. ' +
             $launch.StderrTask.GetAwaiter().GetResult())
     Write-Host (
-        'ImGui viewport ownership integration passed with stable owned detached HWNDs ' +
+        'ImGui viewport ownership integration passed with stable owned auxiliary detached HWNDs ' +
         (($secondaryHandles | ForEach-Object {
             Format-Handle -Handle $_
         }) -join ', ') + '.')

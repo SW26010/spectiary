@@ -641,6 +641,7 @@ void SpecForgeApp::InitializeUiBackends()
     io.ConfigDpiScaleViewports = true;
     io.ConfigViewportsNoDecoration = true;
     io.ConfigViewportsNoAutoMerge = true;
+    io.ConfigViewportsNoTaskBarIcon = true;
     io.ConfigViewportsNoDefaultParent = false;
     const UiFontSelection ui_fonts = AddUiFonts(io);
     ui_.SetSpectralLineLabelFont(ui_fonts.spectral_label_font);

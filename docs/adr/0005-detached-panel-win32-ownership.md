@@ -9,7 +9,7 @@ modern `FLIP_DISCARD` presentation path. Floating product panels need to remain
 responsive, independently renderable, and stable while they are moved across
 the main-window boundary, minimized, restored, focused, docked, or undocked.
 
-The window model converged through three related regressions:
+The window model converged through four related regressions:
 
 - [#35](https://github.com/SW26010/SpecForge/issues/35) showed that
   `FLIP_DISCARD` combined with Dear ImGui viewport AutoMerge can expose a
@@ -25,12 +25,17 @@ The window model converged through three related regressions:
   architectural gap: explicit hide/show does not create a persistent Win32
   window group, so another application's window can interleave between the main
   HWND and detached panels after restore.
+- [#57](https://github.com/SW26010/SpecForge/issues/57) showed that owned
+  secondary viewports still exposed independent shell identities when the
+  backend created them with `WS_EX_APPWINDOW`. The resulting multiple taskbar
+  targets interrupted the normal one-click minimize/restore interaction even
+  though Win32 already treated the windows as one owner group.
 
-The required distinction is therefore between *viewport independence* and
-*operating-system window ownership*. A detached panel should keep its own ImGui
-viewport, native HWND, swap chain, and presentation identity, while still being
-recognized by Windows as an auxiliary window belonging to the SpecForge main
-window.
+The required distinctions are among *viewport independence*, *operating-system
+window ownership*, and *shell identity*. A detached panel should keep its own
+ImGui viewport, native HWND, swap chain, and presentation identity, while still
+being recognized by Windows as an auxiliary window belonging to the SpecForge
+main window and represented by that main window in the taskbar and Alt+Tab.
 
 ## Decision
 
@@ -38,10 +43,11 @@ SpecForge standardizes the detached-panel window stack as:
 
 - keep the current `FLIP_DISCARD` presentation architecture;
 - keep `io.ConfigViewportsNoAutoMerge = true`;
+- set `io.ConfigViewportsNoTaskBarIcon = true`;
 - set `io.ConfigViewportsNoDefaultParent = false`;
 - let the Dear ImGui Win32 backend translate the main viewport relationship into
   the native Win32 owner/owned-window relationship for secondary platform
-  windows.
+  windows and translate the no-taskbar policy into `WS_EX_TOOLWINDOW`.
 
 A detached panel is consequently independent for rendering and presentation but
 owned for native window management:
@@ -55,6 +61,12 @@ Win32:   detached panel -> top-level window owned by the main HWND
 This is an owner relationship, not a `WS_CHILD` child-window relationship.
 SpecForge must not replace it with `SetParent()` or otherwise introduce child
 coordinates/clipping semantics.
+
+Detached panels are auxiliary application windows. They must not carry
+`WS_EX_APPWINDOW` or expose independent taskbar or Alt+Tab entries; the main
+HWND is the single shell identity for the complete owner group. This shell
+presentation policy does not change each detached panel's independent viewport,
+HWND, swap chain, focus, movement, or resize behavior.
 
 Windows owns the normal minimize/restore and z-order grouping behavior of these
 owned windows. SpecForge must not reintroduce a general secondary-window
@@ -75,6 +87,9 @@ The following behavior is intentional and accepted:
 - Minimizing the main window hides its owned detached panels without requiring
   application-maintained visibility bookkeeping; restoring the owner restores
   the group while preserving the secondary HWND identities.
+- The taskbar and Alt+Tab expose only the main HWND. Clicking the SpecForge
+  taskbar entry therefore minimizes or restores the complete owner group
+  without first presenting a detached-window chooser.
 - `NoAutoMerge` means an undocked panel remains a distinct platform viewport
   even when positioned wholly inside the main-window client area. Explicit
   docking is what returns the panel to a dock host.
@@ -105,6 +120,15 @@ Rejected because #48 and #53 demonstrated the resulting lifecycle and global
 z-order gaps. Independent viewports do not require unrelated Win32 top-level
 windows.
 
+### Independent shell identities for detached panels
+
+Rejected because a detached panel is an auxiliary window within one SpecForge
+application workflow, not an independently task-switchable document window.
+`WS_EX_APPWINDOW` creates redundant taskbar targets and blocks the standard
+one-click owner-group minimize/restore interaction. A future document window
+that genuinely needs its own shell identity requires an explicit per-window
+policy and architecture review.
+
 ### Global topmost detached panels
 
 Rejected because `WS_EX_TOPMOST`/`HWND_TOPMOST` changes cross-application
@@ -128,10 +152,11 @@ current floating-tool-window product model.
 
 ## Validation Contract
 
-The architecture check must continue to protect both policy assignments:
+The architecture check must continue to protect all policy assignments:
 
 ```cpp
 io.ConfigViewportsNoAutoMerge = true;
+io.ConfigViewportsNoTaskBarIcon = true;
 io.ConfigViewportsNoDefaultParent = false;
 ```
 
@@ -141,7 +166,9 @@ least:
 - multiple detached viewport HWNDs retain their identities while moved inside
   and outside the main client area;
 - each secondary HWND reports the main HWND as its Win32 owner;
-- detached HWNDs do not carry `WS_EX_TOPMOST`;
+- the main HWND remains an unowned, non-tool shell identity;
+- detached HWNDs carry `WS_EX_TOOLWINDOW` and do not carry `WS_EX_APPWINDOW` or
+  `WS_EX_TOPMOST`;
 - minimizing the main HWND hides owned secondary HWNDs without destroying them;
 - after an independent cross-process peer window becomes foreground, restoring
   and activating SpecForge restores the same owned HWNDs;
@@ -164,6 +191,7 @@ absence of a cross-HWND DWM composition flicker.
 - #36 — floating viewport interaction/presentation cadence.
 - #48 — detached-panel minimize/restore and reactivation gaps.
 - #53 — restore-time application-window-group z-order gap.
+- #57 — redundant detached-panel taskbar and Alt+Tab targets.
 - `170a2fef14f70bb5969ec4d4e904ebebf1bc5e5a` — keeps floating panels in
   independent viewports.
 - `3f2a24f2252a7504e6490bb30d3a065096eaaf39` — temporary explicit detached
