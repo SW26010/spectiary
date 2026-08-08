@@ -156,6 +156,13 @@ Spectral Lines panel. Failed saves must use a retry backoff instead of writing
 again every frame. A corrupt or unsupported cache must not prevent the catalog
 from loading.
 
+This local cache remains a startup snapshot and is not live-synchronized across
+ordinary GUI instances. Its task-level commit behavior follows the
+[catalog concurrent user-state write contract](spectral_line_catalog_contract.md#concurrent-user-state-write-contract)
+and the bounded exception in
+[ADR 0004](adr/0004-lightweight-multi-instance-user-state.md#catalog-user-state-reconciliation-is-a-bounded-exception);
+the JSON format itself does not provide generic merge semantics.
+
 The cache should be normalized and versioned:
 
 ```json

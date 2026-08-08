@@ -109,6 +109,11 @@ switch.
 
 ## Concurrent user-state write contract
 
+This is the operational contract for the catalog-only reconciliation exception
+recorded in
+[ADR 0004: Lightweight Multi-Instance Runs Share User State](adr/0004-lightweight-multi-instance-user-state.md#catalog-user-state-reconciliation-is-a-bounded-exception).
+It does not change the policy of unrelated settings or caches.
+
 Catalog user state is a startup snapshot. Ordinary GUI instances do not live-
 synchronize their panel state, but a task-level write must reconcile that
 snapshot with the durable cache immediately before replacement. Startup

@@ -5,20 +5,58 @@ in-memory viewing contexts over the same resolved local user state root. It does
 not introduce persisted per-instance sessions, a primary process, an IPC
 configuration owner, or live state propagation. Each instance loads shared
 settings, recovery state, and catalog user state as a startup snapshot; later
-explicit writes update the shared defaults, and the last completed write wins.
-This keeps the common temporary multi-spectrum viewing case lightweight while
-retaining the existing Portable and LocalAppData storage contracts.
+explicit writes update the shared defaults according to the contract of the
+state being written. Ordinary complete-snapshot settings remain
+last-completed-writer-wins. The bounded catalog and labeling exceptions below
+do not add live propagation between instances. This keeps the common temporary
+multi-spectrum viewing case lightweight while retaining the existing Portable
+and LocalAppData storage contracts.
 
-Labeling is the exception because its task cache and external result/metadata
-pair represent user-authored work. Different labeling targets may be edited by
-different instances concurrently, but one logical target may have only one
-SpecForge editor. A target-scoped operating-system lease protects the editing
-lifetime. Shared labeling-task-cache commits take a separate short-lived
-cross-process lock, reload the latest JSON, apply only task-level upserts or
-explicit deletion tombstones, validate the task and output identities, and
-atomically replace the document. Ordinary task saves do not overwrite the
-persisted active-task selection; only explicit activation or deactivation may
-update that best-effort next-launch choice.
+## Catalog User-State Reconciliation Is a Bounded Exception
+
+Catalog user state retains the startup-snapshot model: ordinary GUI instances
+do not observe another instance's panel edits as they happen, and no watcher,
+IPC owner, or background synchronization refreshes an already loaded panel.
+A task-level write is nevertheless not a blind complete-snapshot write. The
+task records its explicit changes against a canonicalized reconciliation base,
+then reconciles only that task-owned delta with the latest durable catalog user
+state at commit time. Startup normalization such as trimming names, repairing
+references, or selecting a valid fallback is part of the base and is not
+treated as explicit task intent.
+
+The catalog controller acquires the short-lived `<cache-path>.commit.lock`
+lease before reloading the latest durable document and holds it through trust
+validation, catalog-specific reconciliation, canonicalization and validation
+of the result, and completion or failure of the atomic replacement. The live
+operating-system file handle owns the lease. The lease does not span the GUI
+instance lifetime or ordinary in-memory panel editing. Stable catalog view and
+group identities, field ownership, marker-reference membership, explicit
+ordering and selection intent, and remapped panel expansion keys define the
+merge boundary. The catalog controller and its reconciliation module own those
+semantics; the generic atomic-file and local-user-state facilities do not.
+
+If the latest durable document cannot be trusted because parsing, schema,
+shape, semantic-identity, or allocator-history validation fails, the commit
+fails closed with the diagnostic and leaves that document untouched. A stale
+startup snapshot must not replace or repair it. A missing cache remains the
+normal empty first-write state, and supported legacy migration is allowed only
+under the catalog contract's validation rules. The complete operational merge,
+canonicalization, migration, and failure rules are specified in the
+[spectral-line catalog concurrent user-state write contract](../spectral_line_catalog_contract.md#concurrent-user-state-write-contract).
+This is an intentional catalog-only exception, not a reusable multi-writer
+cache framework. This amendment records existing behavior and ownership; it
+does not change runtime ownership or introduce a new persistence facility.
+
+Labeling is a separate exception because its task cache and external
+result/metadata pair represent user-authored work. Different labeling targets
+may be edited by different instances concurrently, but one logical target may
+have only one SpecForge editor. A target-scoped operating-system lease protects
+the editing lifetime. Shared labeling-task-cache commits take a separate
+short-lived cross-process lock, reload the latest JSON, apply only task-level
+upserts or explicit deletion tombstones, validate the task and output
+identities, and atomically replace the document. Ordinary task saves do not
+overwrite the persisted active-task selection; only explicit activation or
+deactivation may update that best-effort next-launch choice.
 
 Cache coordination always acquires the adjacent normalized-path lock as its
 mandatory baseline, even while the cache file or its parent directory is being
@@ -95,20 +133,22 @@ If those capabilities become product requirements, they should be designed as
 a separate follow-up and do not by themselves require a primary process or IPC
 configuration service.
 
-Other shared settings and caches do not gain multi-writer merge semantics.
-The shared ImGui layout is the bounded exception required for ordinary GUI
-instances: it uses a complete-snapshot, shared last-completed-writer-wins
-protocol. ImGui automatic disk I/O is disabled; startup reads the existing
-snapshot only when it passes a conservative structural check, and each save
-writes a unique sibling temporary file, closes it successfully, then atomically
-replaces the shared target. A writer crash therefore leaves the previous complete
-snapshot or the new complete snapshot, while an incomplete temporary sibling is
-ignored. A malformed existing snapshot is treated as defaults and is repaired
-by the next successful explicit or orderly-shutdown save. There is no merge or
-live synchronization between instances. Automation instances retain their
-existing isolated state roots and are outside this ordinary multi-instance
-contract. The test-only two-process labeling smoke runner is a
-deliberate exception: it launches direct GUI copies with an explicit
-persistent-output fixture opt-in and a runner-owned shared temporary root to
-exercise the production target leases; it is not a user-facing automation or
-state-sharing mode.
+The catalog and labeling exceptions do not grant multi-writer merge semantics
+to unrelated shared settings or caches; those retain their existing policies.
+In particular, the shared ImGui layout uses a complete-snapshot, shared
+last-completed-writer-wins protocol. ImGui automatic disk I/O is disabled;
+startup reads the existing snapshot only when it passes a conservative
+structural check, and each save writes a unique sibling temporary file, closes
+it successfully, then atomically replaces the shared target. A writer crash
+therefore leaves the previous complete snapshot or the new complete snapshot,
+while an incomplete temporary sibling is ignored. A malformed existing
+snapshot is treated as defaults and is repaired by the next successful explicit
+or orderly-shutdown save. There is no merge or live synchronization between
+instances. Any future cache that needs reconciliation requires its own bounded
+domain decision rather than inheriting catalog merge behavior. Automation
+instances retain their existing isolated state roots and are outside this
+ordinary multi-instance contract. The test-only two-process labeling smoke
+runner is a deliberate exception: it launches direct GUI copies with an
+explicit persistent-output fixture opt-in and a runner-owned shared temporary
+root to exercise the production target leases; it is not a user-facing
+automation or state-sharing mode.
