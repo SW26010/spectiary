@@ -97,6 +97,9 @@ set(SPECFORGE_WINDOWS_RESOURCES
 set(SPECFORGE_RESOURCE_HEADER
     "${CMAKE_SOURCE_DIR}/src/platform/specforge_resource.h"
 )
+set(SPECFORGE_APPLICATION_ICON
+    "${CMAKE_SOURCE_DIR}/resources/branding/specforge.ico"
+)
 
 include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
 specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
@@ -139,7 +142,7 @@ set_source_files_properties(
     "${SPECFORGE_WINDOWS_RESOURCES}"
     PROPERTIES
         OBJECT_DEPENDS
-            "${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER}"
+            "${SPECFORGE_LEGAL_DOCUMENTS};${SPECFORGE_RESOURCE_HEADER};${SPECFORGE_APPLICATION_ICON}"
 )
 configure_file(
     "${CMAKE_SOURCE_DIR}/cmake/specforge_build_identity.h.in"
@@ -382,6 +385,7 @@ add_executable(specforge_native WIN32
     src/app/runtime_resource_workload.cpp
     src/app/specforge_app.cpp
     src/main.cpp
+    src/platform/win32_application_icon.cpp
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
     ${SPECFORGE_MANIFEST}
@@ -591,6 +595,26 @@ specforge_add_test(
     specforge_renderer
 )
 target_link_libraries(specforge_sdr_swap_chain_tests PRIVATE imgui::imgui)
+
+add_executable(specforge_win32_application_icon_tests
+    tests/win32_application_icon_tests.cpp
+    src/platform/win32_application_icon.cpp
+    src/platform/win32_window.cpp
+    ${SPECFORGE_WINDOWS_RESOURCES}
+)
+specforge_configure_production_target(
+    specforge_win32_application_icon_tests
+)
+target_link_libraries(
+    specforge_win32_application_icon_tests
+    PRIVATE
+        imgui::imgui
+        imm32
+)
+add_test(
+    NAME specforge_win32_application_icon_tests
+    COMMAND specforge_win32_application_icon_tests
+)
 
 specforge_add_test(
     specforge_local_user_state_tests
@@ -1003,6 +1027,18 @@ set_tests_properties(
     specforge_release_artifacts_tests
     PROPERTIES
         RUN_SERIAL TRUE
+)
+add_test(
+    NAME specforge_application_icon_tests
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/tests/application_icon_tests.ps1"
+        -RepoRoot "${CMAKE_SOURCE_DIR}"
+        -BuiltExecutable "$<TARGET_FILE:specforge_native>"
+)
+set_tests_properties(
+    specforge_application_icon_tests
+    PROPERTIES
+        LABELS "release;required"
 )
 add_test(
     NAME specforge_head_snapshot_build_tests

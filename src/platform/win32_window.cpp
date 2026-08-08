@@ -1,5 +1,7 @@
 #include "platform/win32_window.h"
 
+#include "platform/win32_application_icon.h"
+
 #include <stdexcept>
 #include <utility>
 
@@ -64,14 +66,21 @@ bool Win32Window::Create(HINSTANCE instance, const wchar_t* title, int width, in
     instance_ = instance;
     message_handler_ = std::move(handler);
     class_name_ = L"SpecForgeMainWindow";
+    const Win32ApplicationIcons icons =
+        LoadWin32ApplicationIcons(instance_);
+    if (!icons) {
+        return false;
+    }
 
     WNDCLASSEXW window_class = {};
     window_class.cbSize = sizeof(window_class);
     window_class.style = CS_CLASSDC;
     window_class.lpfnWndProc = &Win32Window::WindowProc;
     window_class.hInstance = instance_;
+    window_class.hIcon = icons.large_icon;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.lpszClassName = class_name_.c_str();
+    window_class.hIconSm = icons.small_icon;
 
     if (!RegisterClassExW(&window_class)) {
         return false;
@@ -107,6 +116,7 @@ bool Win32Window::Create(HINSTANCE instance, const wchar_t* title, int width, in
         UnregisterClassW(class_name_.c_str(), instance_);
         return false;
     }
+    ApplyWin32ApplicationIcons(hwnd_, icons);
 
     RECT client_rect = {};
     if (GetClientRect(hwnd_, &client_rect)) {

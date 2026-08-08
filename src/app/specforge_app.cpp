@@ -5,6 +5,7 @@
 #include "app/native_window_title.h"
 #include "app/runtime_paths.h"
 #include "platform/win32_message_wait.h"
+#include "platform/win32_application_icon.h"
 #include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
@@ -678,6 +679,13 @@ void SpecForgeApp::InitializeUiBackends()
         ImPlot::DestroyContext();
         ImGui::DestroyContext();
         throw std::runtime_error("Failed to initialize the Dear ImGui Win32 backend.");
+    }
+    if (!InstallImGuiPlatformWindowIconHook()) {
+        ImGui_ImplWin32_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        throw std::runtime_error(
+            "Failed to install the Dear ImGui platform-window icon hook.");
     }
 
     if (!ImGui_ImplDX11_Init(renderer_.device(), renderer_.context())) {
