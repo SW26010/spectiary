@@ -10,6 +10,8 @@
 #include <wincodec.h>
 
 #include <array>
+#include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -406,15 +408,6 @@ ComPtr<IDXGIFactory2> GetTestFactory(ID3D11Device* device)
     return factory;
 }
 
-bool PresentationApiSupported(ID3D11Device* device)
-{
-    ComPtr<IPresentationFactory> factory;
-    return SUCCEEDED(CreatePresentationFactory(
-               device,
-               IID_PPV_ARGS(factory.GetAddressOf()))) &&
-           factory->IsPresentationSupported();
-}
-
 struct ViewportCleanupObservation {
     bool viewport_destroyed = false;
     bool callbacks_cleared = false;
@@ -490,6 +483,11 @@ public:
     [[nodiscard]] bool renderer_initialized() const noexcept { return renderer_initialized_; }
     [[nodiscard]] bool has_viewport_swap_chain() const noexcept { return viewport_.RendererUserData != nullptr; }
     [[nodiscard]] specforge::D3D11RendererError TakeLastError() noexcept { return renderer_.TakeLastError(); }
+    [[nodiscard]] std::vector<specforge::D3D11ViewportPresentationUpdate>
+    TakePresentationUpdates() noexcept
+    {
+        return renderer_.TakePresentationUpdates();
+    }
     [[nodiscard]] std::vector<specforge::D3D11ViewportPresentCompletion>
     TakePresentCompletions() noexcept
     {
@@ -636,17 +634,27 @@ void TestWindowPresentationLifecycleAndDeterministicFallback()
     Require(
         presentation.backend() != specforge::D3D11PresentationBackend::None,
         "successful initialization should select a concrete presentation backend");
-    if (PresentationApiSupported(device.Get())) {
-        Require(
-            presentation.backend() ==
-                specforge::D3D11PresentationBackend::Composition,
-            "a supported Presentation API device should select the composition backend");
-    }
     const specforge::D3D11PresentationTransition initial_transition =
         presentation.TakeTransition();
     Require(
-        initial_transition.current_backend == presentation.backend(),
+        initial_transition.previous_backend ==
+                specforge::D3D11PresentationBackend::None &&
+            initial_transition.current_backend ==
+                presentation.backend(),
         "initialization should expose the selected backend as a transition");
+    if (presentation.backend() ==
+        specforge::D3D11PresentationBackend::Dxgi) {
+        Require(
+            FAILED(initial_transition.reason) &&
+                !initial_transition.operation.empty(),
+            "automatic DXGI fallback should retain the Composition failure reason");
+    } else {
+        Require(
+            presentation.backend() ==
+                    specforge::D3D11PresentationBackend::Composition &&
+                SUCCEEDED(initial_transition.reason),
+            "successful Composition initialization should be observable");
+    }
 
     constexpr float clear_color[4] = {0.08f, 0.09f, 0.10f, 1.0f};
     Require(
@@ -1021,26 +1029,42 @@ void TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng()
         "capture after Present should reject stale frame contents without producing an image");
 }
 
-void TestRendererCapturesDefaultCompositionFrameWhenAvailable()
+void TestRendererCapturesDefaultCompositionFrameWhenSelected()
 {
     SwapChainTestWindow window;
     TemporaryDirectory temporary;
     specforge::D3D11Renderer renderer;
     Require(
         SUCCEEDED(renderer.Initialize(window.hwnd())),
-        "the Composition frame-capture test should initialize the default renderer");
-    if (!PresentationApiSupported(renderer.device())) {
+        "the default renderer should initialize");
+    const specforge::D3D11PresentationTransition transition =
+        renderer.TakePresentationTransition();
+    Require(
+        transition.previous_backend ==
+                specforge::D3D11PresentationBackend::None &&
+            transition.current_backend ==
+                renderer.presentation_backend(),
+        "default renderer initialization should expose the selected backend as a transition");
+    if (renderer.presentation_backend() ==
+        specforge::D3D11PresentationBackend::Dxgi) {
         Require(
-            renderer.presentation_backend() ==
-                specforge::D3D11PresentationBackend::Dxgi,
-            "the default renderer should fall back to DXGI when Composition is unavailable");
+            FAILED(transition.reason) &&
+                !transition.operation.empty(),
+            "Composition fallback should retain its diagnostic");
+        std::fprintf(
+            stderr,
+            "[SKIP] TestRendererCapturesDefaultCompositionFrameWhenSelected: Composition capture unavailable; reason=0x%08lx operation=%.*s\n",
+            static_cast<unsigned long>(transition.reason),
+            static_cast<int>(transition.operation.size()),
+            transition.operation.data());
         return;
     }
     Require(
         renderer.presentation_backend() ==
             specforge::D3D11PresentationBackend::
-                Composition,
-        "the default renderer should select Composition when it is available");
+                Composition &&
+            SUCCEEDED(transition.reason),
+        "successful Composition initialization should be observable");
 
     constexpr std::array<float, 4> clear_color = {
         0.75f,
@@ -1084,6 +1108,19 @@ void TestImGuiViewportSwapChainLifecycle()
     fixture.CreateViewport();
     Require(fixture.has_viewport_swap_chain(), "detaching should create a viewport swap chain");
     Require(SUCCEEDED(fixture.TakeLastError().result), "viewport creation should not record a DXGI error");
+    const std::vector<specforge::D3D11ViewportPresentationUpdate>
+        initial_updates = fixture.TakePresentationUpdates();
+    Require(
+        initial_updates.size() == 1 &&
+            initial_updates[0].viewport_id == 73 &&
+            initial_updates[0].backend !=
+                specforge::D3D11PresentationBackend::None &&
+            initial_updates[0].transition.current_backend ==
+                initial_updates[0].backend,
+        "viewport creation should report its selected presentation backend");
+    const bool composition_selected =
+        initial_updates[0].backend ==
+        specforge::D3D11PresentationBackend::Composition;
 
     fixture.ResizeViewport(ImVec2(640.0f, 360.0f));
     Require(SUCCEEDED(fixture.TakeLastError().result), "detached viewport resize should succeed");
@@ -1093,18 +1130,33 @@ void TestImGuiViewportSwapChainLifecycle()
     const std::vector<specforge::D3D11ViewportPresentCompletion> ordinary_presentations =
         fixture.TakePresentCompletions();
     Require(
-        ordinary_presentations.size() == 1 && ordinary_presentations[0].viewport_id == 73 &&
-            ordinary_presentations[0].completed_at.time_since_epoch().count() > 0,
-        "a real detached viewport Present should publish its viewport identity and completion time");
+        (composition_selected
+             ? ordinary_presentations.size() == 1
+             : ordinary_presentations.size() <= 1) &&
+            (ordinary_presentations.empty() ||
+             (ordinary_presentations[0].viewport_id == 73 &&
+              ordinary_presentations[0]
+                      .completed_at.time_since_epoch()
+                      .count() > 0)),
+        "a completed detached viewport Present should publish exactly one valid completion while hidden DXGI occlusion may publish none");
 
     fixture.SetCompositorClockPaced(true);
     fixture.PresentViewport();
     Require(
         SUCCEEDED(fixture.TakeLastError().result),
         "detached viewport compositor-clock present should use supported DXGI flags");
+    const std::vector<specforge::D3D11ViewportPresentCompletion>
+        paced_presentations = fixture.TakePresentCompletions();
     Require(
-        fixture.TakePresentCompletions().size() == 1,
-        "each successful detached viewport Present should publish exactly one completion");
+        (composition_selected
+             ? paced_presentations.size() == 1
+             : paced_presentations.size() <= 1) &&
+            (paced_presentations.empty() ||
+             (paced_presentations[0].viewport_id == 73 &&
+              paced_presentations[0]
+                      .completed_at.time_since_epoch()
+                      .count() > 0)),
+        "each completed compositor-clock Present should publish exactly one valid completion while hidden DXGI occlusion may publish none");
 
     fixture.DestroyViewport();
     Require(!fixture.has_viewport_swap_chain(), "redocking should destroy the viewport swap chain");
@@ -1145,19 +1197,75 @@ void TestImGuiViewportFixtureCleansUpDuringExceptionUnwind()
         "exception cleanup should release global renderer state for a subsequent fixture");
 }
 
+struct TestCase {
+    const char* name;
+    void (*run)();
+};
+
 }  // namespace
 
 int main()
 {
-    TestSdrSwapChainUsesModernSrgbPresentationContract();
-    TestDisplayRefreshDurationPolicy();
-    TestInvalidArgumentsPreserveDiagnosticStage();
-    TestRealSwapChainInitializationColorSpaceAndResize();
-    TestRendererDebugLayerRequestFallsBackAndReportsAvailability();
-    TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng();
-    TestRendererCapturesDefaultCompositionFrameWhenAvailable();
-    TestWindowPresentationLifecycleAndDeterministicFallback();
-    TestImGuiViewportSwapChainLifecycle();
-    TestImGuiViewportFixtureCleansUpDuringExceptionUnwind();
+    constexpr TestCase tests[] = {
+        {
+            "TestSdrSwapChainUsesModernSrgbPresentationContract",
+            TestSdrSwapChainUsesModernSrgbPresentationContract,
+        },
+        {
+            "TestDisplayRefreshDurationPolicy",
+            TestDisplayRefreshDurationPolicy,
+        },
+        {
+            "TestInvalidArgumentsPreserveDiagnosticStage",
+            TestInvalidArgumentsPreserveDiagnosticStage,
+        },
+        {
+            "TestRealSwapChainInitializationColorSpaceAndResize",
+            TestRealSwapChainInitializationColorSpaceAndResize,
+        },
+        {
+            "TestRendererDebugLayerRequestFallsBackAndReportsAvailability",
+            TestRendererDebugLayerRequestFallsBackAndReportsAvailability,
+        },
+        {
+            "TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng",
+            TestRendererCapturesOnlyTheActiveDxgiFrameToValidPng,
+        },
+        {
+            "TestRendererCapturesDefaultCompositionFrameWhenSelected",
+            TestRendererCapturesDefaultCompositionFrameWhenSelected,
+        },
+        {
+            "TestWindowPresentationLifecycleAndDeterministicFallback",
+            TestWindowPresentationLifecycleAndDeterministicFallback,
+        },
+        {
+            "TestImGuiViewportSwapChainLifecycle",
+            TestImGuiViewportSwapChainLifecycle,
+        },
+        {
+            "TestImGuiViewportFixtureCleansUpDuringExceptionUnwind",
+            TestImGuiViewportFixtureCleansUpDuringExceptionUnwind,
+        },
+    };
+
+    for (const TestCase& test : tests) {
+        try {
+            test.run();
+        } catch (const std::exception& error) {
+            std::fprintf(
+                stderr,
+                "[FAIL] %s: %s\n",
+                test.name,
+                error.what());
+            return 1;
+        } catch (...) {
+            std::fprintf(
+                stderr,
+                "[FAIL] %s: unknown exception\n",
+                test.name);
+            return 1;
+        }
+    }
     return 0;
 }

@@ -66,6 +66,25 @@ HRESULT D3D11CompositionSwapChain::Initialize(
             "IPresentationFactory::IsPresentationSupported",
             DXGI_ERROR_UNSUPPORTED);
     }
+
+    D3D11_FEATURE_DATA_DISPLAYABLE displayable = {};
+    result = device->CheckFeatureSupport(
+        D3D11_FEATURE_DISPLAYABLE,
+        &displayable,
+        sizeof(displayable));
+    if (FAILED(result)) {
+        Shutdown();
+        return RecordFailure(
+            "ID3D11Device::CheckFeatureSupport(D3D11_FEATURE_DISPLAYABLE)",
+            result);
+    }
+    if (!displayable.DisplayableTexture) {
+        Shutdown();
+        return RecordFailure(
+            "D3D11_FEATURE_DATA_DISPLAYABLE::DisplayableTexture",
+            DXGI_ERROR_UNSUPPORTED);
+    }
+
     independent_flip_supported_ =
         factory_->IsPresentationSupportedWithIndependentFlip();
 
