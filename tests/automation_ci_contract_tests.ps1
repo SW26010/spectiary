@@ -78,7 +78,6 @@ $cmakeText = Get-Content -Raw -LiteralPath $resolvedCMakeLists
 $runnerText = Get-Content -Raw -LiteralPath $resolvedRunnerScript
 
 foreach ($requiredText in @(
-        'pull_request:',
         'workflow_dispatch:',
         'run_real_gui:',
         'type: boolean',
@@ -88,6 +87,10 @@ foreach ($requiredText in @(
         'name: Real-GUI status diagnostic',
         'status.json')) {
     Assert-True -Condition $workflowText.Contains($requiredText) -Message "Workflow must contain '$requiredText'."
+}
+
+foreach ($automaticTrigger in @('push:', 'pull_request:')) {
+    Assert-True -Condition (-not $workflowText.Contains($automaticTrigger)) -Message "Workflow must not contain automatic trigger '$automaticTrigger'."
 }
 
 $nativeBody = Get-JobBody -Text $workflowText -JobId 'native-headless'
