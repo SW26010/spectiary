@@ -814,6 +814,9 @@ foreach ($expected in @(
     '5707fb5304021392540c66bbf4a76535373d48cf008164f9f22a1f5343d49097',
     '6709.613 and',
     '6709.764 Angstrom into one unresolved band marker',
+    'H I, C I, C II, Li I',
+    '4075.631, 4075.694, and 4075.991 Angstrom for C II 4076',
+    '6463.736 and 6463.915 Angstrom for C II 6464',
     'beta release offered for testing',
     'uses these values for visual line identification',
     'wavelength-calibration',
@@ -840,7 +843,17 @@ if ($sr.Count -ne 1 -or $sr[0].vacuum_angstrom -ne '4078.9' -or
     throw 'Sr II must remain the curated approximate 4078.9 Angstrom marker.'
 }
 
-foreach ($markerId in @('li_i_6708', 'k_i_7667', 'k_i_7701', 'mg_i_8809')) {
+foreach ($markerId in @(
+    'c_i_5382',
+    'c_ii_3920',
+    'c_ii_4268_multiplet',
+    'c_ii_6580',
+    'c_ii_6585',
+    'li_i_6708',
+    'k_i_7667',
+    'k_i_7701',
+    'mg_i_8809'
+)) {
     $markerRows = @($catalog | Where-Object { $_.id -eq $markerId })
     if ($markerRows.Count -ne 1) {
         throw "Expected exactly one release-catalog row for '$markerId', found $($markerRows.Count)."
@@ -851,8 +864,8 @@ foreach ($markerId in @('li_i_6708', 'k_i_7667', 'k_i_7701', 'mg_i_8809')) {
 }
 
 $atllRows = @($catalog | Where-Object { $_.source_ref -eq 'atll_v3_00b5' })
-if ($atllRows.Count -ne 19) {
-    throw "Expected 19 Atomic Line List rows, found $($atllRows.Count)."
+if ($atllRows.Count -ne 43) {
+    throw "Expected 43 Atomic Line List rows, found $($atllRows.Count)."
 }
 
 $baRows = @($catalog | Where-Object { $_.source_ref -eq 'ferrara_et_al_2024_air_to_vacuum' })

@@ -2,6 +2,7 @@
 #include "overlays/spectral_line_catalog.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace {
 
@@ -145,6 +147,101 @@ void TestUsesVacuumWavelengthsForAtomicMarkers()
     Require(
         !NearlyEqual(*FindMarker(catalog, "h_alpha").vacuum_angstrom, 6562.801, 1.0e-3),
         "H alpha must not regress to air wavelength");
+}
+
+void TestPublicCatalogProvidesDqCarbonAtomicMarkers()
+{
+    const std::filesystem::path path =
+        std::filesystem::path(SPECFORGE_SOURCE_DIR) / "config" / "spectral_lines.public.tsv";
+    const specforge::SpectralLineCatalog catalog = specforge::LoadPublicSpectralLineCatalogFromPath(path);
+    Require(catalog.load_error.empty(), catalog.load_error);
+
+    const auto group_count = [&](std::string_view group) {
+        return static_cast<std::size_t>(std::count_if(
+            catalog.markers.begin(),
+            catalog.markers.end(),
+            [group](const specforge::SpectralLineMarker& marker) {
+                return marker.group == group;
+            }));
+    };
+    Require(group_count("C I") == 9, "public catalog should expose nine selected C I markers");
+    Require(group_count("C II") == 15, "public catalog should expose fifteen selected C II markers");
+
+    const auto require_line = [&](std::string_view id, std::string_view group, double wavelength) {
+        const specforge::SpectralLineMarker& marker = FindMarker(catalog, id);
+        Require(marker.kind == specforge::SpectralLineMarkerKind::Line, "selected carbon line should remain a line marker");
+        Require(marker.group == group, "selected carbon line should use its ionization-stage group");
+        Require(marker.source_ref == "atll_v3_00b5", "selected carbon line should retain Atomic Line List provenance");
+        Require(
+            marker.vacuum_angstrom && NearlyEqual(*marker.vacuum_angstrom, wavelength, 1.0e-6),
+            "selected carbon line should use the expected vacuum wavelength");
+    };
+    const auto require_multiplet = [&catalog](
+                                       std::string_view id,
+                                       std::string_view group,
+                                       double start,
+                                       double end) {
+        const specforge::SpectralLineMarker& marker = FindMarker(catalog, id);
+        Require(marker.kind == specforge::SpectralLineMarkerKind::Band, "unresolved carbon multiplet should use one band marker");
+        Require(marker.group == group, "carbon multiplet should use its ionization-stage group");
+        Require(marker.source_ref == "atll_v3_00b5", "carbon multiplet should retain Atomic Line List provenance");
+        Require(
+            marker.start_vacuum_angstrom && marker.end_vacuum_angstrom &&
+                NearlyEqual(*marker.start_vacuum_angstrom, start, 1.0e-6) &&
+                NearlyEqual(*marker.end_vacuum_angstrom, end, 1.0e-6),
+            "carbon multiplet should preserve its vacuum component bounds");
+        Require(Contains(marker.notes, "low-resolution multiplet"), "carbon multiplet notes should explain the combined marker");
+        Require(Contains(marker.notes, "not for wavelength calibration"), "carbon multiplet should reject calibration use");
+    };
+
+    const std::array c_i_lines = {
+        std::pair{"c_i_4270", 4270.221},
+        std::pair{"c_i_4373", 4372.596},
+        std::pair{"c_i_4771", 4771.361},
+        std::pair{"c_i_4933", 4933.426},
+        std::pair{"c_i_5054", 5053.575},
+        std::pair{"c_i_5382", 5381.833},
+        std::pair{"c_i_8337", 8337.440},
+    };
+    for (const auto& [id, wavelength] : c_i_lines) {
+        require_line(id, "C I", wavelength);
+    }
+    require_multiplet("c_i_6015_multiplet", "C I", 6014.831, 6014.878);
+    require_multiplet("c_i_7117_multiplet", "C I", 7117.134, 7117.144);
+
+    const std::array c_ii_lines = {
+        std::pair{"c_ii_3920", 3920.077},
+        std::pair{"c_ii_3922", 3921.792},
+        std::pair{"c_ii_4411", 4411.229},
+        std::pair{"c_ii_5147", 5146.598},
+        std::pair{"c_ii_5153", 5152.520},
+        std::pair{"c_ii_5891", 5891.408},
+        std::pair{"c_ii_5893", 5893.231},
+        std::pair{"c_ii_6580", 6579.869},
+        std::pair{"c_ii_6585", 6584.700},
+    };
+    for (const auto& [id, wavelength] : c_ii_lines) {
+        require_line(id, "C II", wavelength);
+    }
+    Require(
+        Contains(FindMarker(catalog, "c_ii_5891").notes, "Na I D2"),
+        "C II 5891 should warn about its low-resolution Na I blend");
+    require_multiplet("c_ii_4076_multiplet", "C II", 4075.631, 4075.991);
+    require_multiplet("c_ii_4268_multiplet", "C II", 4268.202, 4268.462);
+    require_multiplet("c_ii_4374_multiplet", "C II", 4373.604, 4373.743);
+    require_multiplet("c_ii_4620_multiplet", "C II", 4619.853, 4620.543);
+    require_multiplet("c_ii_6153_multiplet", "C II", 6152.968, 6153.237);
+    require_multiplet("c_ii_6464_multiplet", "C II", 6463.736, 6463.915);
+
+    Require(
+        !NearlyEqual(*FindMarker(catalog, "c_i_7117_multiplet").start_vacuum_angstrom, 7117.2, 1.0e-3),
+        "C I 7117 must not retain the approximate candidate wavelength");
+    Require(
+        !NearlyEqual(*FindMarker(catalog, "c_ii_4620_multiplet").start_vacuum_angstrom, 4619.7, 1.0e-3),
+        "C II 4620 must not retain the unsupported candidate wavelength");
+    Require(
+        !NearlyEqual(*FindMarker(catalog, "c_ii_5891").vacuum_angstrom, 5891.6, 1.0e-3),
+        "C II 5891 must not retain the Na I-like candidate wavelength");
 }
 
 void TestPublicCatalogDoesNotContainPrivateOverlayConcepts()
@@ -324,6 +421,7 @@ int main()
         TestLoadsPublicCatalog();
         TestPublicCatalogUsesScientificLabelTypography();
         TestUsesVacuumWavelengthsForAtomicMarkers();
+        TestPublicCatalogProvidesDqCarbonAtomicMarkers();
         TestPublicCatalogDoesNotContainPrivateOverlayConcepts();
         TestLoadsCatalogWithoutOptionalNotesColumn();
         TestGenericCatalogMayOmitGrouping();
