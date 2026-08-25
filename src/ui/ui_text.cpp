@@ -476,6 +476,9 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Sigma", "标准差 σ"},
     UiTextEntry{"Kernel size", "核大小"},
     UiTextEntry{"Color", "颜色"},
+    UiTextEntry{
+        "Right-click for color options.",
+        "右键打开颜色选项。"},
     UiTextEntry{"Reset to Auto", "恢复为自动配色"},
     UiTextEntry{"Original curve", "原始曲线"},
     UiTextEntry{"Gaussian-smoothed curve", "高斯平滑曲线"},

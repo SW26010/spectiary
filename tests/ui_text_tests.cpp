@@ -560,6 +560,10 @@ void TestSourceInspectionMappingsAreExact()
         ExpectedText{UiTextId::MedianKernelSize, "Kernel size", "核大小"},
         ExpectedText{UiTextId::CurveColor, "Color", "颜色"},
         ExpectedText{
+            UiTextId::ColorOptionsHint,
+            "Right-click for color options.",
+            "右键打开颜色选项。"},
+        ExpectedText{
             UiTextId::ResetColorToAuto,
             "Reset to Auto",
             "恢复为自动配色"},

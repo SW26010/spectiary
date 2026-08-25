@@ -301,6 +301,7 @@ enum class UiTextId {
     GaussianSigma,
     MedianKernelSize,
     CurveColor,
+    ColorOptionsHint,
     ResetColorToAuto,
     RawSpectrum,
     GaussianSmoothing,

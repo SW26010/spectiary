@@ -2694,7 +2694,7 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         ImGui::CalcTextSize("000000").x +
         ImGui::GetStyle().FramePadding.x * 2.0f;
     const auto render_color_editor =
-        [this, language, &view, numeric_control_width](
+        [this, language, &view](
             SpectrumPlotSeries series,
             const char* color_control_id,
             const char* reset_control_id) {
@@ -2713,14 +2713,11 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                 resolved.w,
             };
 
-            ImGui::Indent();
+            ImGui::SameLine();
             ImGui::SetNextItemWidth(
-                numeric_control_width);
+                ImGui::GetFrameHeight());
             const std::string color_label =
-                StableUiLabel(
-                    language,
-                    UiTextId::CurveColor,
-                    color_control_id);
+                "###" + std::string(color_control_id);
             if (ImGui::ColorEdit4(
                     color_label.c_str(),
                     rgba,
@@ -2742,35 +2739,84 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
                 spectrum_view_state_persistence_.
                     MarkDirty();
             }
-            ImGui::SameLine();
-            const bool automatic =
-                selection.mode() ==
-                PlotSeriesColorMode::Auto;
-            ImGui::BeginDisabled(automatic);
-            const std::string reset_label =
-                StableUiLabel(
-                    language,
-                    UiTextId::ResetColorToAuto,
-                    reset_control_id);
-            if (ImGui::Button(reset_label.c_str())) {
-                spectrum_view_session_.Submit(
-                    SpectrumViewSessionCommand::
-                        SetPlotSeriesColor(
-                            series,
-                            PlotSeriesColor::Auto()));
-                spectrum_view_state_persistence_.
-                    MarkDirty();
+            if (ImGui::IsItemHovered()) {
+                const std::string_view color_tooltip =
+                    UiText(language, UiTextId::CurveColor);
+                const std::string_view options_tooltip =
+                    UiText(language, UiTextId::ColorOptionsHint);
+                ImGui::SetTooltip(
+                    "%.*s\n%.*s",
+                    static_cast<int>(color_tooltip.size()),
+                    color_tooltip.data(),
+                    static_cast<int>(options_tooltip.size()),
+                    options_tooltip.data());
             }
-            ImGui::EndDisabled();
-            ImGui::Unindent();
+            if (ImGui::BeginPopupContextItem(reset_control_id)) {
+                const bool automatic =
+                    selection.mode() ==
+                    PlotSeriesColorMode::Auto;
+                const std::string reset_label =
+                    StableUiLabel(
+                        language,
+                        UiTextId::ResetColorToAuto,
+                        reset_control_id);
+                if (ImGui::MenuItem(
+                        reset_label.c_str(),
+                        nullptr,
+                        false,
+                        !automatic)) {
+                    spectrum_view_session_.Submit(
+                        SpectrumViewSessionCommand::
+                            SetPlotSeriesColor(
+                                series,
+                                PlotSeriesColor::Auto()));
+                    spectrum_view_state_persistence_.
+                        MarkDirty();
+                }
+                ImGui::EndPopup();
+            }
+        };
+    const auto render_curve_leading_controls =
+        [&render_color_editor, language](
+            bool& visible,
+            UiTextId name_text_id,
+            const char* checkbox_control_id,
+            SpectrumPlotSeries series,
+            const char* color_control_id,
+            const char* reset_control_id) {
+            const std::string checkbox_label =
+                "###" + std::string(checkbox_control_id);
+            bool changed =
+                ImGui::Checkbox(
+                    checkbox_label.c_str(),
+                    &visible);
+            render_color_editor(
+                series,
+                color_control_id,
+                reset_control_id);
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            const std::string_view name =
+                UiText(language, name_text_id);
+            ImGui::TextUnformatted(
+                name.data(),
+                name.data() + name.size());
+            if (ImGui::IsItemClicked(
+                    ImGuiMouseButton_Left)) {
+                visible = !visible;
+                changed = true;
+            }
+            return changed;
         };
 
     bool show_raw_curve = view.show_raw_curve;
-    const std::string show_raw_label = StableUiLabel(
-        language,
-        UiTextId::RawSpectrum,
-        "SpecForgeShowRawCurve");
-    if (ImGui::Checkbox(show_raw_label.c_str(), &show_raw_curve)) {
+    if (render_curve_leading_controls(
+            show_raw_curve,
+            UiTextId::RawSpectrum,
+            "SpecForgeShowRawCurve",
+            SpectrumPlotSeries::RawSpectrum,
+            "SpecForgeRawSpectrumColor",
+            "SpecForgeRawSpectrumColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowRawCurve(show_raw_curve));
     }
@@ -2784,19 +2830,15 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowPoints(show_points));
     }
-    render_color_editor(
-        SpectrumPlotSeries::RawSpectrum,
-        "SpecForgeRawSpectrumColor",
-        "SpecForgeRawSpectrumColorReset");
 
     bool show_gaussian_smoothed = view.show_gaussian_smoothed;
-    const std::string show_gaussian_label = StableUiLabel(
-        language,
-        UiTextId::GaussianSmoothing,
-        "SpecForgeShowGaussianSmoothedCurve");
-    if (ImGui::Checkbox(
-            show_gaussian_label.c_str(),
-            &show_gaussian_smoothed)) {
+    if (render_curve_leading_controls(
+            show_gaussian_smoothed,
+            UiTextId::GaussianSmoothing,
+            "SpecForgeShowGaussianSmoothedCurve",
+            SpectrumPlotSeries::GaussianSmoothing,
+            "SpecForgeGaussianSmoothingColor",
+            "SpecForgeGaussianSmoothingColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowGaussianSmoothed(
                 show_gaussian_smoothed));
@@ -2830,19 +2872,14 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
             static_cast<int>(hint.size()),
             hint.data());
     }
-    render_color_editor(
-        SpectrumPlotSeries::GaussianSmoothing,
-        "SpecForgeGaussianSmoothingColor",
-        "SpecForgeGaussianSmoothingColorReset");
-
     bool show_median_smoothed = view.show_median_smoothed;
-    const std::string show_median_label = StableUiLabel(
-        language,
-        UiTextId::MedianSmoothing,
-        "SpecForgeShowMedianSmoothedCurve");
-    if (ImGui::Checkbox(
-            show_median_label.c_str(),
-            &show_median_smoothed)) {
+    if (render_curve_leading_controls(
+            show_median_smoothed,
+            UiTextId::MedianSmoothing,
+            "SpecForgeShowMedianSmoothedCurve",
+            SpectrumPlotSeries::MedianSmoothing,
+            "SpecForgeMedianSmoothingColor",
+            "SpecForgeMedianSmoothingColorReset")) {
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowMedianSmoothed(
                 show_median_smoothed));
@@ -2910,11 +2947,6 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
             static_cast<int>(hint.size()),
             hint.data());
     }
-    render_color_editor(
-        SpectrumPlotSeries::MedianSmoothing,
-        "SpecForgeMedianSmoothingColor",
-        "SpecForgeMedianSmoothingColorReset");
-
     ImGui::End();
     SetPanelVisibility(
         ApplicationPanel::Smoothing,

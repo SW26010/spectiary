@@ -826,11 +826,11 @@ void SpectralLinesGroupingViewUi::Render(
                 }
 
                 ImGui::SameLine();
-                ImGuiTreeNodeFlags marker_flags =
-                    ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet |
-                    ImGuiTreeNodeFlags_SpanFullWidth;
+                ImGuiSelectableFlags marker_flags =
+                    ImGuiSelectableFlags_None;
                 if (editable && ordinary_group) {
-                    marker_flags |= ImGuiTreeNodeFlags_AllowOverlap;
+                    marker_flags |=
+                        ImGuiSelectableFlags_AllowOverlap;
                 }
                 const std::string marker_suffix =
                     resolved
@@ -842,7 +842,16 @@ void SpectralLinesGroupingViewUi::Render(
                 if (!resolved || !marker_visible) {
                     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 }
-                ImGui::TreeNodeEx("marker", marker_flags, "%s  %s", label.c_str(), marker_suffix.c_str());
+                const std::string marker_row_label =
+                    label + "  " + marker_suffix +
+                    "###marker";
+                (void)ImGui::Selectable(
+                    marker_row_label.c_str(),
+                    false,
+                    marker_flags,
+                    ImVec2(
+                        ImGui::GetContentRegionAvail().x,
+                        ImGui::GetFrameHeight()));
                 const ImVec2 marker_item_min = ImGui::GetItemRectMin();
                 const ImVec2 marker_item_max = ImGui::GetItemRectMax();
                 const bool marker_row_hovered = ImGui::IsItemHovered();
