@@ -2677,6 +2677,8 @@ void TestPanelDisconnectBeforeAndAfterClaimSettlesProductionState()
             return specforge::ApplicationSettingsStorage{
                 .language_settings_path =
                     root / "ui-language.json",
+                .appearance_settings_path =
+                    root / "appearance-settings.json",
                 .ui_scale_settings_path =
                     root / "ui-scale.json",
                 .input_settings_path =

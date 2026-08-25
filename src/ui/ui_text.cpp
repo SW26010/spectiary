@@ -49,10 +49,19 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Follow system", "跟随系统"},
     UiTextEntry{"Light", "浅色"},
     UiTextEntry{"Dark", "深色"},
+    UiTextEntry{
+        "The saved theme preference could not be loaded. Follow system is being used.",
+        "无法加载已保存的主题偏好，当前使用跟随系统。"},
+    UiTextEntry{
+        "The theme preference was rejected. The previous preference is still in use.",
+        "主题偏好被拒绝，仍继续使用此前的偏好。"},
+    UiTextEntry{
+        "The theme preference could not be saved. The previous preference is still in use.",
+        "无法保存主题偏好，仍继续使用此前的偏好。"},
     UiTextEntry{"Accent color", "强调色"},
     UiTextEntry{
-        "Not available yet. The current UI uses the built-in dark style.",
-        "暂不可用。当前界面使用内置深色样式。"},
+        "Accent color customization is not available yet.",
+        "暂不支持自定义强调色。"},
     UiTextEntry{"UI scale", "界面缩放"},
     UiTextEntry{"Reset", "重置"},
     UiTextEntry{
@@ -76,6 +85,9 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{
         "The requested application language is not supported.",
         "请求的应用语言不受支持。"},
+    UiTextEntry{
+        "The requested application theme is not supported.",
+        "请求的应用主题不受支持。"},
     UiTextEntry{
         "The UI scale must be from 80% through 150%.",
         "界面缩放比例必须在 80% 到 150% 之间。"},
@@ -1143,6 +1155,8 @@ std::string_view UiText(
             UiTextId::SampleWorkflowArea);
     case LocalUserStateArea::Language:
         return UiText(language, UiTextId::Language);
+    case LocalUserStateArea::Appearance:
+        return UiText(language, UiTextId::Appearance);
     case LocalUserStateArea::UiScale:
         return UiText(language, UiTextId::UiScale);
     case LocalUserStateArea::Input:

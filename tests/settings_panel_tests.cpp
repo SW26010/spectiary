@@ -93,6 +93,12 @@ struct SettingsPanelUiTestAccess {
     {
         panel.SetUiScalePercentage(percentage);
     }
+    static void SetThemeSelection(
+        SettingsPanelUi& panel,
+        ThemeSelection selection)
+    {
+        panel.SetThemeSelection(std::move(selection));
+    }
     static std::string SectionLabel(
         SettingsSection section,
         UiLanguage language)
@@ -1527,6 +1533,79 @@ void TestUiScaleControlEmitsOneShotSettingsIntent()
         "UI scale reset should emit 100%");
 }
 
+void TestThemeControlEmitsStableSelectionIntent()
+{
+    specforge::SettingsPanelUi panel = MakePanel();
+    specforge::SettingsPanelUiTestAccess::SetThemeSelection(
+        panel,
+        specforge::ThemeSelection::Explicit(
+            specforge::BuiltInLightThemeId()));
+
+    const std::optional<specforge::ApplicationSettingsIntent> intent =
+        panel.TakeApplicationSettingsIntent();
+    Require(
+        intent &&
+            intent->kind ==
+                specforge::ApplicationSettingsIntentKind::
+                    SetThemeSelection &&
+            intent->theme_selection ==
+                specforge::ThemeSelection::Explicit(
+                    specforge::BuiltInLightThemeId()),
+        "theme control should emit an explicit stable theme identity");
+    Require(
+        !panel.TakeApplicationSettingsIntent(),
+        "theme selection intent should be consumed once");
+}
+
+void TestAppearanceThemeOptionsKeepStableOrderAndMapping()
+{
+    const std::span<const specforge::AppearanceThemeOption> options =
+        specforge::AppearanceThemeOptions();
+    const std::array expected_text_ids = {
+        specforge::UiTextId::FollowSystemTheme,
+        specforge::UiTextId::DarkTheme,
+        specforge::UiTextId::LightTheme,
+    };
+    const std::array expected_selections = {
+        specforge::ThemeSelection::FollowSystem(),
+        specforge::ThemeSelection::Explicit(
+            specforge::BuiltInDarkThemeId()),
+        specforge::ThemeSelection::Explicit(
+            specforge::BuiltInLightThemeId()),
+    };
+    Require(
+        options.size() == expected_selections.size(),
+        "appearance should expose follow-system, dark, and light options");
+
+    for (std::size_t index = 0;
+         index < expected_selections.size();
+         ++index) {
+        const std::optional<int> mapped_index =
+            specforge::AppearanceThemeOptionIndex(
+                expected_selections[index]);
+        const std::optional<specforge::ThemeSelection> mapped_selection =
+            specforge::AppearanceThemeSelectionAt(
+                static_cast<int>(index));
+        Require(
+            options[index].text_id == expected_text_ids[index] &&
+                options[index].selection ==
+                    expected_selections[index] &&
+                mapped_index == static_cast<int>(index) &&
+                mapped_selection == expected_selections[index],
+            "appearance theme labels and bidirectional index mapping should share one stable order");
+    }
+
+    Require(
+        !specforge::AppearanceThemeSelectionAt(-1) &&
+            !specforge::AppearanceThemeSelectionAt(
+                static_cast<int>(options.size())) &&
+            !specforge::AppearanceThemeOptionIndex(
+                specforge::ThemeSelection::Explicit(
+                    specforge::ThemeId(
+                        "specforge.theme.synthetic"))),
+        "appearance theme mapping should reject indexes and identities outside the option table");
+}
+
 void TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent()
 {
     ScopedImGuiContext imgui;
@@ -2536,6 +2615,8 @@ int main()
     TestProfileResetEmitsOneShotSettingsIntent();
     TestWarnedFallbacksRemainDirectlyRepairable();
     TestUiScaleControlEmitsOneShotSettingsIntent();
+    TestThemeControlEmitsStableSelectionIntent();
+    TestAppearanceThemeOptionsKeepStableOrderAndMapping();
     TestLiveNumericNavigationCheckboxEmitsOneShotSettingsIntent();
     TestExternalSourceFolderCheckboxAndDeferredSubfolderPlaceholder();
     TestUiScaleSliderCommitsOnlyAfterEditDeactivation();

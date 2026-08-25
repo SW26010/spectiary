@@ -678,6 +678,8 @@ int wmain(int argc, wchar_t** argv)
         ordinary_root / "ui-language.json";
     specforge::ApplicationSettings ordinary_settings({
         .language_settings_path = ordinary_language,
+        .appearance_settings_path =
+            ordinary_root / "appearance-settings.json",
         .ui_scale_settings_path = ordinary_root / "ui-scale.json",
         .input_settings_path = ordinary_root / "input-settings.json",
         .external_source_settings_path =
@@ -718,6 +720,10 @@ int wmain(int argc, wchar_t** argv)
                     .ui_language_settings_path ==
                 automation_root /
                     "ui-language.json" &&
+            startup.runtime_paths()
+                    .appearance_settings_path ==
+                automation_root /
+                    "appearance-settings.json" &&
             startup.runtime_paths()
                     .source_session_state_path ==
                 automation_root /

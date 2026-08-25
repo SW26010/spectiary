@@ -36,6 +36,7 @@ enum class LocalUserStateArea {
     SampleLabeling,
     SampleWorkflow,
     Language,
+    Appearance,
     UiScale,
     Input,
     ExternalSource,

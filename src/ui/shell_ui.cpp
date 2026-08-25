@@ -923,6 +923,9 @@ std::string ShellLocalStateFlushResult::FailureMessage(
     if (!application_settings.language_saved) {
         append_area(LocalUserStateArea::Language);
     }
+    if (!application_settings.appearance_saved) {
+        append_area(LocalUserStateArea::Appearance);
+    }
     if (!application_settings.ui_scale_saved) {
         append_area(LocalUserStateArea::UiScale);
     }
@@ -2114,6 +2117,9 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
     append_setting(
         LocalUserStateArea::Language,
         ApplicationSetting::Language);
+    append_setting(
+        LocalUserStateArea::Appearance,
+        ApplicationSetting::Appearance);
     append_setting(
         LocalUserStateArea::UiScale,
         ApplicationSetting::UiScale);

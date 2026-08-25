@@ -3,6 +3,7 @@
 #include "app/local_user_state.h"
 #include "profile/profile_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
+#include "ui/theme.h"
 #include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
 
@@ -22,6 +23,7 @@ inline constexpr bool kDefaultOpenExternalSourceAsFolder = false;
 enum class ApplicationSetting {
     None,
     Language,
+    Appearance,
     ProfileOutputDirectory,
     UiScale,
     Input,
@@ -46,6 +48,7 @@ enum class ApplicationSettingsStatusReason {
     SavedValueUnreadable,
     SettingsWriteFailed,
     UnsupportedLanguage,
+    UnsupportedTheme,
     UiScaleOutOfRange,
     EnvironmentOverrideActive,
     RecordingInProgress,
@@ -62,6 +65,8 @@ struct ApplicationSettingsStatus {
 
 struct ApplicationSettingsView {
     UiLanguage language = UiLanguage::English;
+    ThemeSelection theme_selection =
+        ThemeSelection::FollowSystem();
     int ui_scale_percentage = kDefaultUiScalePercentage;
     bool live_numeric_navigation =
         kDefaultLiveNumericNavigation;
@@ -111,6 +116,7 @@ void SetApplicationPanelVisible(
 
 enum class ApplicationSettingsIntentKind {
     SetLanguage,
+    SetThemeSelection,
     SetUiScale,
     SetLiveNumericNavigation,
     SetOpenExternalSourceAsFolder,
@@ -125,6 +131,8 @@ struct ApplicationSettingsIntent {
     ApplicationSettingsIntentKind kind =
         ApplicationSettingsIntentKind::SetLanguage;
     UiLanguage language = UiLanguage::English;
+    ThemeSelection theme_selection =
+        ThemeSelection::FollowSystem();
     int ui_scale_percentage = kDefaultUiScalePercentage;
     bool live_numeric_navigation =
         kDefaultLiveNumericNavigation;
@@ -136,6 +144,8 @@ struct ApplicationSettingsIntent {
 
     [[nodiscard]] static ApplicationSettingsIntent SetLanguage(
         UiLanguage language);
+    [[nodiscard]] static ApplicationSettingsIntent SetThemeSelection(
+        ThemeSelection selection);
     [[nodiscard]] static ApplicationSettingsIntent SetUiScale(
         int percentage);
     [[nodiscard]] static ApplicationSettingsIntent
@@ -179,6 +189,7 @@ struct ApplicationSettingsRuntimeState {
 
 struct ApplicationSettingsStorage {
     std::filesystem::path language_settings_path;
+    std::filesystem::path appearance_settings_path;
     std::filesystem::path ui_scale_settings_path;
     std::filesystem::path input_settings_path;
     std::filesystem::path external_source_settings_path;
@@ -191,6 +202,7 @@ struct ApplicationSettingsStorage {
 
 struct ApplicationSettingsFlushResult {
     bool language_saved = true;
+    bool appearance_saved = true;
     bool ui_scale_saved = true;
     bool input_saved = true;
     bool external_source_saved = true;
@@ -200,6 +212,7 @@ struct ApplicationSettingsFlushResult {
     [[nodiscard]] bool all_saved() const noexcept
     {
         return language_saved &&
+               appearance_saved &&
                ui_scale_saved &&
                input_saved &&
                external_source_saved &&
@@ -231,6 +244,8 @@ public:
 private:
     [[nodiscard]] ApplicationSettingsResult ApplyLanguage(
         UiLanguage language);
+    [[nodiscard]] ApplicationSettingsResult ApplyThemeSelection(
+        ThemeSelection selection);
     [[nodiscard]] ApplicationSettingsResult ApplyUiScale(
         int percentage);
     [[nodiscard]] ApplicationSettingsResult
@@ -272,6 +287,8 @@ private:
 
     ApplicationSettingsStorage storage_;
     UiLanguage language_ = UiLanguage::English;
+    ThemeSelection theme_selection_ =
+        ThemeSelection::FollowSystem();
     int ui_scale_percentage_ = kDefaultUiScalePercentage;
     bool live_numeric_navigation_ =
         kDefaultLiveNumericNavigation;
@@ -288,6 +305,7 @@ private:
         kApplicationSettingCount>
         persistence_;
     std::optional<UiLanguage> pending_language_;
+    std::optional<ThemeSelection> pending_theme_selection_;
     std::optional<int> pending_ui_scale_percentage_;
     std::optional<bool> pending_live_numeric_navigation_;
     std::optional<bool> pending_open_external_source_as_folder_;

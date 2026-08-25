@@ -19,6 +19,8 @@ constexpr auto kPanelVisibilitySaveDebounce = 500ms;
 
 constexpr const char* kUiLanguageSettingsFormatKind =
     "specforge.ui_language.settings";
+constexpr const char* kAppearanceSettingsFormatKind =
+    "specforge.appearance.settings";
 constexpr const char* kUiScaleSettingsFormatKind =
     "specforge.ui_scale.settings";
 constexpr const char* kInputSettingsFormatKind =
@@ -26,6 +28,12 @@ constexpr const char* kInputSettingsFormatKind =
 constexpr const char* kExternalSourceSettingsFormatKind =
     "specforge.external_source.settings";
 constexpr int kSettingsSchemaVersion = 1;
+constexpr const char* kThemeSelectionPolicyMember =
+    "selection_policy";
+constexpr const char* kExplicitThemeIdMember = "theme_id";
+constexpr const char* kFollowSystemThemePolicyValue =
+    "follow_system";
+constexpr const char* kExplicitThemePolicyValue = "explicit";
 constexpr const char* kLiveNumericNavigationMember =
     "live_numeric_navigation";
 constexpr const char* kOpenExternalSourceAsFolderMember =
@@ -40,6 +48,11 @@ struct StoredUiLanguageLoadResult {
 
 struct StoredUiScaleLoadResult {
     int percentage = kDefaultUiScalePercentage;
+    std::string warning;
+};
+
+struct StoredThemeSelectionLoadResult {
+    ThemeSelection selection = ThemeSelection::FollowSystem();
     std::string warning;
 };
 
@@ -101,6 +114,103 @@ bool SaveStoredUiLanguage(
         "UI language settings",
         JsonObjectValue({
             {"language", JsonStringValue(stable_value)},
+        }),
+        error_message);
+}
+
+StoredThemeSelectionLoadResult LoadStoredThemeSelection(
+    const std::filesystem::path& path)
+{
+    StoredThemeSelectionLoadResult loaded;
+    VersionedJsonCacheLoadResult cache =
+        LoadVersionedJsonCacheFile(
+            path,
+            kAppearanceSettingsFormatKind,
+            {kSettingsSchemaVersion},
+            "appearance settings");
+    if (!cache.document) {
+        loaded.warning = std::move(cache.warning);
+        return loaded;
+    }
+
+    const std::optional<std::string> policy =
+        ReadJsonStringMember(
+            cache.document->root,
+            kThemeSelectionPolicyMember);
+    if (!policy) {
+        loaded.warning =
+            "Ignored appearance settings: selection_policy is missing or invalid.";
+        return loaded;
+    }
+    if (*policy == kFollowSystemThemePolicyValue) {
+        return loaded;
+    }
+    if (*policy != kExplicitThemePolicyValue) {
+        loaded.warning =
+            "Ignored appearance settings: selection_policy is not supported.";
+        return loaded;
+    }
+
+    const std::optional<std::string> stable_theme_id =
+        ReadJsonStringMember(
+            cache.document->root,
+            kExplicitThemeIdMember);
+    if (!stable_theme_id) {
+        loaded.warning =
+            "Ignored appearance settings: explicit selection requires a valid theme_id.";
+        return loaded;
+    }
+
+    ThemeSelection selection = ThemeSelection::Explicit(
+        ThemeId(*stable_theme_id));
+    if (!IsSupportedThemeSelection(selection)) {
+        loaded.warning =
+            "Ignored appearance settings: theme_id is not supported.";
+        return loaded;
+    }
+    loaded.selection = std::move(selection);
+    return loaded;
+}
+
+bool SaveStoredThemeSelection(
+    const std::filesystem::path& path,
+    const ThemeSelection& selection,
+    std::string* error_message)
+{
+    if (!IsSupportedThemeSelection(selection)) {
+        if (error_message != nullptr) {
+            *error_message =
+                "The selected application theme is not supported.";
+        }
+        return false;
+    }
+
+    if (selection.policy ==
+        ThemeSelectionPolicy::FollowSystem) {
+        return WriteVersionedJsonCacheDocument(
+            path,
+            kAppearanceSettingsFormatKind,
+            kSettingsSchemaVersion,
+            "appearance settings",
+            JsonObjectValue({
+                {kThemeSelectionPolicyMember,
+                 JsonStringValue(
+                     kFollowSystemThemePolicyValue)},
+            }),
+            error_message);
+    }
+
+    return WriteVersionedJsonCacheDocument(
+        path,
+        kAppearanceSettingsFormatKind,
+        kSettingsSchemaVersion,
+        "appearance settings",
+        JsonObjectValue({
+            {kThemeSelectionPolicyMember,
+             JsonStringValue(kExplicitThemePolicyValue)},
+            {kExplicitThemeIdMember,
+             JsonStringValue(
+                 selection.explicit_theme_id.value())},
         }),
         error_message);
 }
@@ -322,6 +432,17 @@ ApplicationSettingsIntent ApplicationSettingsIntent::SetLanguage(
     };
 }
 
+ApplicationSettingsIntent
+ApplicationSettingsIntent::SetThemeSelection(
+    ThemeSelection selection)
+{
+    return {
+        .kind =
+            ApplicationSettingsIntentKind::SetThemeSelection,
+        .theme_selection = std::move(selection),
+    };
+}
+
 ApplicationSettingsIntent ApplicationSettingsIntent::SetUiScale(
     int percentage)
 {
@@ -407,6 +528,8 @@ ApplicationSettingsStorageForRuntimePaths(
     return {
         .language_settings_path =
             paths.ui_language_settings_path,
+        .appearance_settings_path =
+            paths.appearance_settings_path,
         .ui_scale_settings_path =
             paths.ui_scale_settings_path,
         .input_settings_path =
@@ -455,6 +578,15 @@ ApplicationSettings::ApplicationSettings(
         ApplicationSetting::Language,
         std::move(language_settings.warning));
 
+    StoredThemeSelectionLoadResult appearance_settings =
+        LoadStoredThemeSelection(
+            storage_.appearance_settings_path);
+    theme_selection_ =
+        std::move(appearance_settings.selection);
+    AdoptLoadWarning(
+        ApplicationSetting::Appearance,
+        std::move(appearance_settings.warning));
+
     StoredUiScaleLoadResult ui_scale_settings =
         LoadStoredUiScale(storage_.ui_scale_settings_path);
     ui_scale_percentage_ = ui_scale_settings.percentage;
@@ -502,6 +634,7 @@ ApplicationSettingsView ApplicationSettings::View() const
 {
     return {
         .language = language_,
+        .theme_selection = theme_selection_,
         .ui_scale_percentage = ui_scale_percentage_,
         .live_numeric_navigation =
             live_numeric_navigation_,
@@ -525,6 +658,9 @@ ApplicationSettingsResult ApplicationSettings::Apply(
     switch (intent.kind) {
     case ApplicationSettingsIntentKind::SetLanguage:
         return ApplyLanguage(intent.language);
+    case ApplicationSettingsIntentKind::SetThemeSelection:
+        return ApplyThemeSelection(
+            std::move(intent.theme_selection));
     case ApplicationSettingsIntentKind::SetUiScale:
         return ApplyUiScale(intent.ui_scale_percentage);
     case ApplicationSettingsIntentKind::
@@ -563,6 +699,9 @@ void ApplicationSettings::RunMaintenance(
         return;
     }
     RunSettingMaintenance(ApplicationSetting::Language, now);
+    RunSettingMaintenance(
+        ApplicationSetting::Appearance,
+        now);
     RunSettingMaintenance(ApplicationSetting::UiScale, now);
     RunSettingMaintenance(ApplicationSetting::Input, now);
     RunSettingMaintenance(
@@ -600,6 +739,9 @@ ApplicationSettingsFlushResult ApplicationSettings::Flush()
     }
     result.language_saved =
         FlushSetting(ApplicationSetting::Language) !=
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
+    result.appearance_saved =
+        FlushSetting(ApplicationSetting::Appearance) !=
         LocalUserStatePersistenceLifecycle::FlushOutcome::Failed;
     result.ui_scale_saved =
         FlushSetting(ApplicationSetting::UiScale) !=
@@ -722,6 +864,66 @@ ApplicationSettingsResult ApplicationSettings::ApplyLanguage(
     if (!storage_.persistent) {
         language_ = language;
         pending_language_.reset();
+        ClearStatus(kSetting);
+        return {
+            .outcome = ApplicationSettingsOutcome::Applied,
+            .setting = kSetting,
+        };
+    }
+
+    PersistenceFor(kSetting).MarkDirty();
+    if (FlushSetting(kSetting) ==
+        LocalUserStatePersistenceLifecycle::FlushOutcome::Failed) {
+        const std::string error =
+            PersistenceStatus(kSetting).save_message;
+        CancelPendingSetting(kSetting);
+        return {
+            .outcome =
+                ApplicationSettingsOutcome::PersistenceFailed,
+            .setting = kSetting,
+            .detail = std::move(error),
+        };
+    }
+
+    return {
+        .outcome = ApplicationSettingsOutcome::Applied,
+        .setting = kSetting,
+    };
+}
+
+ApplicationSettingsResult
+ApplicationSettings::ApplyThemeSelection(
+    ThemeSelection selection)
+{
+    constexpr ApplicationSetting kSetting =
+        ApplicationSetting::Appearance;
+    if (selection == theme_selection_ &&
+        statuses_[static_cast<std::size_t>(kSetting)].kind ==
+            ApplicationSettingsStatusKind::Ready) {
+        return {
+            .outcome = ApplicationSettingsOutcome::Unchanged,
+            .setting = kSetting,
+        };
+    }
+    if (!IsSupportedThemeSelection(selection)) {
+        const std::string detail =
+            "The selected application theme is not supported.";
+        SetStatus(
+            ApplicationSettingsStatusKind::Rejected,
+            kSetting,
+            ApplicationSettingsStatusReason::UnsupportedTheme,
+            detail);
+        return {
+            .outcome = ApplicationSettingsOutcome::Rejected,
+            .setting = kSetting,
+            .detail = detail,
+        };
+    }
+
+    pending_theme_selection_ = std::move(selection);
+    if (!storage_.persistent) {
+        theme_selection_ = *pending_theme_selection_;
+        pending_theme_selection_.reset();
         ClearStatus(kSetting);
         return {
             .outcome = ApplicationSettingsOutcome::Applied,
@@ -1064,6 +1266,25 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
                 : std::move(error),
         };
     }
+    case ApplicationSetting::Appearance: {
+        if (!pending_theme_selection_) {
+            return {
+                .error =
+                    "No pending appearance setting save."};
+        }
+        std::string error;
+        if (SaveStoredThemeSelection(
+                storage_.appearance_settings_path,
+                *pending_theme_selection_,
+                &error)) {
+            return {.saved = true};
+        }
+        return {
+            .error = error.empty()
+                ? "Could not save appearance settings."
+                : std::move(error),
+        };
+    }
     case ApplicationSetting::UiScale: {
         if (!pending_ui_scale_percentage_) {
             return {.error = "No pending UI scale setting save."};
@@ -1201,6 +1422,8 @@ bool ApplicationSettings::HasPendingSetting(
     switch (setting) {
     case ApplicationSetting::Language:
         return pending_language_.has_value();
+    case ApplicationSetting::Appearance:
+        return pending_theme_selection_.has_value();
     case ApplicationSetting::UiScale:
         return pending_ui_scale_percentage_.has_value();
     case ApplicationSetting::Input:
@@ -1225,6 +1448,13 @@ void ApplicationSettings::CommitPendingSetting(ApplicationSetting setting)
         if (pending_language_) {
             language_ = *pending_language_;
             pending_language_.reset();
+        }
+        return;
+    case ApplicationSetting::Appearance:
+        if (pending_theme_selection_) {
+            theme_selection_ =
+                *pending_theme_selection_;
+            pending_theme_selection_.reset();
         }
         return;
     case ApplicationSetting::UiScale:
@@ -1267,6 +1497,9 @@ void ApplicationSettings::CancelPendingSetting(
     switch (setting) {
     case ApplicationSetting::Language:
         pending_language_.reset();
+        break;
+    case ApplicationSetting::Appearance:
+        pending_theme_selection_.reset();
         break;
     case ApplicationSetting::UiScale:
         pending_ui_scale_percentage_.reset();

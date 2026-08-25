@@ -63,6 +63,8 @@ specforge::ApplicationSettingsStorage MakeStorage(
 {
     return {
         .language_settings_path = root / "ui-language.json",
+        .appearance_settings_path =
+            root / "appearance-settings.json",
         .ui_scale_settings_path = root / "ui-scale.json",
         .input_settings_path = root / "input-settings.json",
         .external_source_settings_path =
@@ -87,6 +89,15 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         initial.language == specforge::UiLanguage::English,
         "missing language settings should default to English");
     Require(
+        initial.theme_selection ==
+                specforge::ThemeSelection::FollowSystem() &&
+            initial
+                    .StatusFor(
+                        specforge::ApplicationSetting::Appearance)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+        "missing appearance settings should follow the system theme");
+    Require(
         initial.ui_scale_percentage == 100,
         "missing UI scale settings should default to 100%");
     Require(
@@ -107,6 +118,15 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
     Require(
         language_result.applied(),
         "language intent should apply");
+
+    const auto appearance_result = settings.Apply(
+        specforge::ApplicationSettingsIntent::SetThemeSelection(
+            specforge::ThemeSelection::Explicit(
+                specforge::BuiltInDarkThemeId())),
+        {});
+    Require(
+        appearance_result.applied(),
+        "explicit theme intent should apply");
 
     const auto ui_scale_result = settings.Apply(
         specforge::ApplicationSettingsIntent::SetUiScale(125),
@@ -145,6 +165,16 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         ReadFile(storage.language_settings_path).find(
             R"("language": "zh-Hans")") != std::string::npos,
         "language should retain its stable persisted value");
+    const std::string appearance_document =
+        ReadFile(storage.appearance_settings_path);
+    Require(
+        appearance_document.find(
+            R"("selection_policy": "explicit")") !=
+                std::string::npos &&
+            appearance_document.find(
+                R"("theme_id": "specforge.theme.dark")") !=
+                std::string::npos,
+        "appearance should persist selection policy and stable theme ID separately");
     Require(
         ReadFile(storage.ui_scale_settings_path).find(
             R"("percentage": 125)") != std::string::npos,
@@ -172,6 +202,11 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         reloaded_view.language ==
             specforge::UiLanguage::SimplifiedChinese,
         "language should reload through the application settings owner");
+    Require(
+        reloaded_view.theme_selection ==
+            specforge::ThemeSelection::Explicit(
+                specforge::BuiltInDarkThemeId()),
+        "explicit theme identity should reload through the application settings owner");
     Require(
         reloaded_view.ui_scale_percentage == 125,
         "UI scale should reload through the application settings owner");
@@ -1181,6 +1216,7 @@ void TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure()
         settings.Flush();
     Require(
         flushed.language_saved &&
+            flushed.appearance_saved &&
             flushed.ui_scale_saved &&
             flushed.input_saved &&
             flushed.profile_output_directory_saved &&
@@ -1322,6 +1358,7 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
         settings.Flush();
     Require(
         failed.language_saved &&
+            failed.appearance_saved &&
             failed.ui_scale_saved &&
             failed.input_saved &&
             failed.profile_output_directory_saved &&
@@ -1372,6 +1409,129 @@ void TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner()
         "reloaded ApplicationSettings should retain the recovered panel visibility");
 }
 
+void TestAppearanceFallbackWarningsAndRepair()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.appearance_settings_path);
+        stream << "{invalid-json";
+    }
+
+    {
+        specforge::ApplicationSettings damaged(storage);
+        const specforge::ApplicationSettingsView fallback =
+            damaged.View();
+        Require(
+            fallback.theme_selection ==
+                    specforge::ThemeSelection::FollowSystem() &&
+                fallback
+                        .StatusFor(
+                            specforge::ApplicationSetting::Appearance)
+                        .kind ==
+                    specforge::ApplicationSettingsStatusKind::LoadWarning &&
+                !damaged
+                     .PersistenceStatus(
+                         specforge::ApplicationSetting::Appearance)
+                     .load_warning.empty(),
+            "corrupt appearance settings should warn and fall back to following the system");
+
+        const specforge::ApplicationSettingsResult repaired =
+            damaged.Apply(
+                specforge::ApplicationSettingsIntent::
+                    SetThemeSelection(
+                        specforge::ThemeSelection::FollowSystem()),
+                {});
+        Require(
+            repaired.applied() &&
+                damaged.View()
+                        .StatusFor(
+                            specforge::ApplicationSetting::Appearance)
+                        .kind ==
+                    specforge::ApplicationSettingsStatusKind::Ready,
+            "re-selecting a warned follow-system fallback should repair its settings file");
+        const std::string repaired_document =
+            ReadFile(storage.appearance_settings_path);
+        Require(
+            repaired_document.find(
+                R"("selection_policy": "follow_system")") !=
+                    std::string::npos &&
+                repaired_document.find("theme_id") ==
+                    std::string::npos,
+            "follow-system persistence should remain a policy rather than a concrete theme identity");
+    }
+
+    {
+        std::ofstream stream(storage.appearance_settings_path);
+        stream
+            << R"({"format_kind":"specforge.appearance.settings","schema_version":1,"selection_policy":"explicit","theme_id":"specforge.theme.future"})";
+    }
+    specforge::ApplicationSettings unknown(storage);
+    Require(
+        unknown.View().theme_selection ==
+                specforge::ThemeSelection::FollowSystem() &&
+            unknown.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::Appearance)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::LoadWarning,
+        "an unknown persisted theme ID should warn and fall back to following the system");
+
+    const specforge::ApplicationSettingsResult rejected =
+        unknown.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetThemeSelection(
+                    specforge::ThemeSelection::Explicit(
+                        specforge::ThemeId(
+                            std::string_view(
+                                "specforge.theme.future")))),
+            {});
+    Require(
+        rejected.outcome ==
+                specforge::ApplicationSettingsOutcome::Rejected &&
+            rejected.setting ==
+                specforge::ApplicationSetting::Appearance &&
+            unknown.View().theme_selection ==
+                specforge::ThemeSelection::FollowSystem(),
+        "unsupported explicit theme intents should be rejected without changing the fallback");
+}
+
+void TestAppearancePersistenceFailureRetainsPreviousSelection()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path blocker =
+        temporary.path() / "blocked";
+    {
+        std::ofstream stream(blocker);
+        stream << "not a directory";
+    }
+    auto storage = MakeStorage(temporary.path());
+    storage.appearance_settings_path =
+        blocker / "appearance-settings.json";
+    specforge::ApplicationSettings settings(storage);
+
+    const specforge::ApplicationSettingsResult result =
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetThemeSelection(
+                    specforge::ThemeSelection::Explicit(
+                        specforge::BuiltInLightThemeId())),
+            {});
+    Require(
+        result.outcome ==
+                specforge::ApplicationSettingsOutcome::
+                    PersistenceFailed &&
+            settings.View().theme_selection ==
+                specforge::ThemeSelection::FollowSystem() &&
+            settings.View()
+                    .StatusFor(
+                        specforge::ApplicationSetting::Appearance)
+                    .kind ==
+                specforge::ApplicationSettingsStatusKind::
+                    PersistenceError,
+        "a failed appearance write should retain the previous selection and expose the shared persistence error");
+}
+
 }  // namespace
 
 int main()
@@ -1396,5 +1556,7 @@ int main()
     TestSuccessfulSettingDoesNotClearAnotherSettingsStatus();
     TestSettingsFlushKeepsIndependentOwnersAndCancelsTransactionalFailure();
     TestPanelVisibilityFailureRetriesThroughApplicationSettingsOwner();
+    TestAppearanceFallbackWarningsAndRepair();
+    TestAppearancePersistenceFailureRetainsPreviousSelection();
     return 0;
 }

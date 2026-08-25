@@ -28,6 +28,55 @@
 
 namespace specforge {
 
+std::span<const AppearanceThemeOption>
+AppearanceThemeOptions() noexcept
+{
+    static const std::array options = {
+        AppearanceThemeOption{
+            .text_id = UiTextId::FollowSystemTheme,
+            .selection = ThemeSelection::FollowSystem(),
+        },
+        AppearanceThemeOption{
+            .text_id = UiTextId::DarkTheme,
+            .selection = ThemeSelection::Explicit(
+                BuiltInDarkThemeId()),
+        },
+        AppearanceThemeOption{
+            .text_id = UiTextId::LightTheme,
+            .selection = ThemeSelection::Explicit(
+                BuiltInLightThemeId()),
+        },
+    };
+    return options;
+}
+
+std::optional<int> AppearanceThemeOptionIndex(
+    const ThemeSelection& selection)
+{
+    const std::span<const AppearanceThemeOption> options =
+        AppearanceThemeOptions();
+    for (std::size_t index = 0;
+         index < options.size();
+         ++index) {
+        if (options[index].selection == selection) {
+            return static_cast<int>(index);
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<ThemeSelection>
+AppearanceThemeSelectionAt(int index)
+{
+    const std::span<const AppearanceThemeOption> options =
+        AppearanceThemeOptions();
+    if (index < 0 ||
+        static_cast<std::size_t>(index) >= options.size()) {
+        return std::nullopt;
+    }
+    return options[static_cast<std::size_t>(index)].selection;
+}
+
 PlatformWorkArea ResolvePlatformWorkArea(
     const ImGuiViewport& viewport,
     std::span<const ImGuiPlatformMonitor> monitors)
@@ -178,15 +227,10 @@ std::string SettingsWindowLabel(UiLanguage language)
 
 std::string AppearanceThemeItems(UiLanguage language)
 {
-    constexpr std::array kThemeTextIds = {
-        UiTextId::FollowSystemTheme,
-        UiTextId::LightTheme,
-        UiTextId::DarkTheme,
-    };
-
     std::string items;
-    for (const UiTextId text_id : kThemeTextIds) {
-        items += UiText(language, text_id);
+    for (const AppearanceThemeOption& option :
+         AppearanceThemeOptions()) {
+        items += UiText(language, option.text_id);
         items.push_back('\0');
     }
     items.push_back('\0');
@@ -519,6 +563,10 @@ std::string_view FormatApplicationSettingsStatusReason(
         return UiText(
             language,
             UiTextId::UnsupportedApplicationLanguage);
+    case ApplicationSettingsStatusReason::UnsupportedTheme:
+        return UiText(
+            language,
+            UiTextId::UnsupportedApplicationTheme);
     case ApplicationSettingsStatusReason::UiScaleOutOfRange:
         return UiText(
             language,
@@ -1113,7 +1161,8 @@ void SettingsPanelUi::RenderAppearance(
         UiText(language, UiTextId::Appearance),
         UiText(language, UiTextId::AppearancePageDescription));
 
-    int theme = 2;
+    int theme = AppearanceThemeOptionIndex(
+        settings.theme_selection).value_or(0);
     float accent_color[3] = {0.24f, 0.55f, 0.86f};
     const std::string theme_label =
         AppearanceThemeLabel(language);
@@ -1121,26 +1170,63 @@ void SettingsPanelUi::RenderAppearance(
         AppearanceThemeItems(language);
     const std::string accent_color_label =
         AppearanceAccentColorLabel(language);
-    ImGui::BeginDisabled();
-    ImGui::Combo(
+    if (ImGui::Combo(
         theme_label.c_str(),
         &theme,
-        theme_items.c_str());
+        theme_items.c_str())) {
+        if (std::optional<ThemeSelection> selection =
+                AppearanceThemeSelectionAt(theme)) {
+            SetThemeSelection(std::move(*selection));
+        }
+    }
+    ImGui::BeginDisabled();
     ImGui::ColorEdit3(
         accent_color_label.c_str(),
         accent_color,
         ImGuiColorEditFlags_NoInputs);
     ImGui::EndDisabled();
-    const std::string_view theme_unavailable = UiText(
+    const std::string_view accent_color_unavailable = UiText(
         language,
-        UiTextId::AppearanceThemeUnavailable);
+        UiTextId::AppearanceAccentColorUnavailable);
     ImGui::Spacing();
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled(
         "%.*s",
-        static_cast<int>(theme_unavailable.size()),
-        theme_unavailable.data());
+        static_cast<int>(accent_color_unavailable.size()),
+        accent_color_unavailable.data());
     ImGui::PopTextWrapPos();
+
+    const ApplicationSettingsStatus& appearance_status =
+        settings.StatusFor(ApplicationSetting::Appearance);
+    if (appearance_status.kind !=
+        ApplicationSettingsStatusKind::Ready) {
+        ImGui::Spacing();
+        const bool warning =
+            appearance_status.kind ==
+            ApplicationSettingsStatusKind::LoadWarning;
+        const ImVec4 feedback_color = warning
+            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
+            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const UiTextId feedback_text_id = warning
+            ? UiTextId::ThemeLoadWarning
+            : (appearance_status.kind ==
+                    ApplicationSettingsStatusKind::Rejected
+                ? UiTextId::ThemeRejected
+                : UiTextId::ThemeSaveError);
+        const std::string_view feedback = UiText(
+            language,
+            feedback_text_id);
+        ImGui::PushTextWrapPos();
+        ImGui::TextColored(
+            feedback_color,
+            "%.*s",
+            static_cast<int>(feedback.size()),
+            feedback.data());
+        RenderApplicationSettingsStatusReason(
+            appearance_status,
+            language);
+        ImGui::PopTextWrapPos();
+    }
 
     ImGui::Spacing();
     int ui_scale = ui_scale_draft_percentage_.value_or(
@@ -1226,6 +1312,14 @@ void SettingsPanelUi::SetUiScalePercentage(int percentage)
 {
     application_settings_intent_ =
         ApplicationSettingsIntent::SetUiScale(percentage);
+}
+
+void SettingsPanelUi::SetThemeSelection(
+    ThemeSelection selection)
+{
+    application_settings_intent_ =
+        ApplicationSettingsIntent::SetThemeSelection(
+            std::move(selection));
 }
 
 void SettingsPanelUi::RenderLanguage(

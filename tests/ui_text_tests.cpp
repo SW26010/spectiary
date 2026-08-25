@@ -445,9 +445,9 @@ void TestAppearanceMappingsAreExact()
             "Accent color",
             "强调色"},
         ExpectedText{
-            UiTextId::AppearanceThemeUnavailable,
-            "Not available yet. The current UI uses the built-in dark style.",
-            "暂不可用。当前界面使用内置深色样式。"},
+            UiTextId::AppearanceAccentColorUnavailable,
+            "Accent color customization is not available yet.",
+            "暂不支持自定义强调色。"},
         ExpectedText{
             UiTextId::UiScale,
             "UI scale",

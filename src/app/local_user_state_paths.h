@@ -6,6 +6,8 @@ inline constexpr char kProfileLogDirectory[] = "logs";
 inline constexpr char kFrameCaptureDirectory[] = "captures";
 inline constexpr char kImGuiIni[] = "specforge-imgui-v2.ini";
 inline constexpr char kUiLanguageSettings[] = "ui-language.json";
+inline constexpr char kAppearanceSettings[] =
+    "appearance-settings.json";
 inline constexpr char kUiScaleSettings[] = "ui-scale.json";
 inline constexpr char kInputSettings[] = "input-settings.json";
 inline constexpr char kExternalSourceSettings[] =

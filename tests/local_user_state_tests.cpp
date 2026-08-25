@@ -53,6 +53,10 @@ void RequireCompleteLocalUserStatePathMapping(
             root / kUiLanguageSettings,
         "language settings should use the canonical name");
     Require(
+        paths.appearance_settings_path ==
+            root / kAppearanceSettings,
+        "appearance settings should use the canonical name");
+    Require(
         paths.ui_scale_settings_path ==
             root / kUiScaleSettings,
         "UI scale settings should use the canonical name");

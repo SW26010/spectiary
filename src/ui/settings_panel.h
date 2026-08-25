@@ -27,6 +27,19 @@ enum class SettingsSection {
     About,
 };
 
+struct AppearanceThemeOption {
+    UiTextId text_id = UiTextId::FollowSystemTheme;
+    ThemeSelection selection =
+        ThemeSelection::FollowSystem();
+};
+
+[[nodiscard]] std::span<const AppearanceThemeOption>
+AppearanceThemeOptions() noexcept;
+[[nodiscard]] std::optional<int> AppearanceThemeOptionIndex(
+    const ThemeSelection& selection);
+[[nodiscard]] std::optional<ThemeSelection>
+AppearanceThemeSelectionAt(int index);
+
 struct BuildSourceIdentity {
     std::string mode;
     std::string revision;
@@ -171,6 +184,7 @@ private:
     void StartArtifactIdentityComputation(
         std::optional<std::string> executable_sha256 = std::nullopt);
     void ResetProfileOutputDirectory();
+    void SetThemeSelection(ThemeSelection selection);
     void SetUiScalePercentage(int percentage);
     void SetLiveNumericNavigation(bool enabled);
     void SetOpenExternalSourceAsFolder(bool enabled);

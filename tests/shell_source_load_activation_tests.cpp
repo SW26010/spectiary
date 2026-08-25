@@ -3756,6 +3756,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
         "a complete shell flush should not produce a warning");
 
     result.application_settings.language_saved = false;
+    result.application_settings.appearance_saved = false;
     result.application_settings.panel_visibility_saved = false;
     result.source_collection.navigation_saved = false;
     result.source_collection.workflow_saved = false;
@@ -3767,6 +3768,8 @@ void TestShellFlushResultNamesEveryFailedOwner()
         "any failed owner should make the shell flush incomplete");
     Require(
         message.find("Language") !=
+                std::string::npos &&
+            message.find("Appearance") !=
                 std::string::npos &&
             message.find("Panel visibility") !=
                 std::string::npos &&

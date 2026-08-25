@@ -107,6 +107,9 @@ void SetLocalUserStatePaths(
     paths.ui_language_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kUiLanguageSettings;
+    paths.appearance_settings_path =
+        paths.local_user_state_root /
+        local_user_state_paths::kAppearanceSettings;
     paths.ui_scale_settings_path =
         paths.local_user_state_root /
         local_user_state_paths::kUiScaleSettings;

@@ -340,6 +340,7 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectral_lines_panel.cpp
     src/ui/spectrum_view_state_cache_io.cpp
     src/ui/spectrum_view_session.cpp
+    src/ui/theme.cpp
     src/ui/ui_font.cpp
     src/ui/ui_scale_settings.cpp
     src/ui/ui_text.cpp
@@ -384,6 +385,7 @@ add_executable(specforge_native WIN32
     src/app/specforge_app.cpp
     src/main.cpp
     src/platform/win32_application_icon.cpp
+    src/platform/win32_system_theme.cpp
     src/platform/win32_touchpad_gesture_source.cpp
     src/platform/win32_window.cpp
     ${SPECFORGE_MANIFEST}
@@ -395,6 +397,7 @@ target_link_libraries(specforge_native PRIVATE
     specforge_desktop_ui
     specforge_imgui_layout
     specforge_renderer
+    advapi32
     dwmapi
     comctl32
     imm32
@@ -1235,6 +1238,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_ui_scale_settings_tests
     tests/ui_scale_settings_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_theme_tests
+    tests/theme_tests.cpp
     specforge_desktop_ui
 )
 add_test(

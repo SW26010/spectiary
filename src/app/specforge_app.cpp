@@ -7,6 +7,7 @@
 #include "platform/win32_message_wait.h"
 #include "platform/win32_application_icon.h"
 #include "platform/win32_text.h"
+#include "platform/win32_system_theme.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
 #include "ui/ui_scale_settings.h"
@@ -55,8 +56,6 @@ constexpr float kDefaultWindowsDpi = 96.0f;
 constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
 constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
-constexpr const wchar_t* kPersonalizeRegistryKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
-constexpr const wchar_t* kAppsUseLightThemeRegistryValue = L"AppsUseLightTheme";
 
 std::string HResultMessage(std::string_view action, HRESULT result)
 {
@@ -233,22 +232,6 @@ bool IsRenderableSize(UINT width, UINT height)
     return width > 0 && height > 0;
 }
 
-bool ShouldUseDarkTitleBar()
-{
-    DWORD apps_use_light_theme = 1;
-    DWORD value_size = sizeof(apps_use_light_theme);
-    const LSTATUS result = RegGetValueW(
-        HKEY_CURRENT_USER,
-        kPersonalizeRegistryKey,
-        kAppsUseLightThemeRegistryValue,
-        RRF_RT_REG_DWORD,
-        nullptr,
-        &apps_use_light_theme,
-        &value_size);
-
-    return result == ERROR_SUCCESS && apps_use_light_theme == 0;
-}
-
 std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadata, std::string_view key)
 {
     for (std::size_t index = 0; index < metadata.size(); ++index) {
@@ -261,7 +244,17 @@ std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadat
 
 void ApplyTitleBarTheme(HWND hwnd)
 {
-    const BOOL use_dark_title_bar = ShouldUseDarkTitleBar() ? TRUE : FALSE;
+    const ThemeId resolved_theme = ResolveThemeId(
+        ThemeSelection::FollowSystem(),
+        ReadWindowsSystemTheme());
+    const ThemeDescriptor* descriptor =
+        FindBuiltInThemeDescriptor(resolved_theme);
+    const BOOL use_dark_title_bar =
+        descriptor == nullptr ||
+                descriptor->color_scheme ==
+                    ThemeColorScheme::Dark
+            ? TRUE
+            : FALSE;
     HRESULT result = DwmSetWindowAttribute(
         hwnd,
         kDwmUseImmersiveDarkModeAttribute,

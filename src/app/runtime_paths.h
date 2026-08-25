@@ -25,6 +25,7 @@ struct RuntimePaths {
     std::filesystem::path frame_capture_directory;
     std::filesystem::path imgui_ini_path;
     std::filesystem::path ui_language_settings_path;
+    std::filesystem::path appearance_settings_path;
     std::filesystem::path ui_scale_settings_path;
     std::filesystem::path input_settings_path;
     std::filesystem::path external_source_settings_path;
