@@ -1,3 +1,4 @@
+#include "app/application_settings.h"
 #include "app/runtime_paths.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/source_collection_manifest.h"
@@ -5,7 +6,6 @@
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_labeling_state_cache_io.h"
 #include "ui/shell_ui.h"
-#include "ui/ui_language_settings.h"
 
 #include <Windows.h>
 
@@ -676,14 +676,24 @@ int wmain(int argc, wchar_t** argv)
 
     const std::filesystem::path ordinary_language =
         ordinary_root / "ui-language.json";
-    std::string save_error;
+    specforge::ApplicationSettings ordinary_settings({
+        .language_settings_path = ordinary_language,
+        .ui_scale_settings_path = ordinary_root / "ui-scale.json",
+        .input_settings_path = ordinary_root / "input-settings.json",
+        .external_source_settings_path =
+            ordinary_root / "external-source-settings.json",
+        .profile_settings_path = ordinary_root / "profile-settings.json",
+        .panel_visibility_path = ordinary_root / "panel-visibility.json",
+        .default_profile_output_directory = ordinary_root / "profiles",
+    });
+    const specforge::ApplicationSettingsResult language_result =
+        ordinary_settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::SimplifiedChinese),
+            {});
     Require(
-        specforge::SaveUiLanguageSettings(
-            ordinary_language,
-            specforge::UiLanguage::
-                SimplifiedChinese,
-            &save_error),
-        save_error);
+        language_result.applied(),
+        language_result.detail);
     const std::string ordinary_before =
         ReadFile(ordinary_language);
     const auto ordinary_write_time =

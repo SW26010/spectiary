@@ -15,6 +15,8 @@ namespace {
 
 constexpr std::size_t kUiLanguageCount = static_cast<std::size_t>(UiLanguage::Count);
 constexpr std::size_t kUiTextCount = static_cast<std::size_t>(UiTextId::Count);
+constexpr std::string_view kEnglishStableValue = "en";
+constexpr std::string_view kSimplifiedChineseStableValue = "zh-Hans";
 
 struct UiTextEntry {
     std::string_view english;
@@ -895,6 +897,32 @@ static_assert(kTextCatalog.size() == kUiTextCount);
 static_assert(kUiLanguageCount == 2);
 
 }  // namespace
+
+std::string_view UiLanguageSettingValue(
+    UiLanguage language) noexcept
+{
+    switch (language) {
+    case UiLanguage::English:
+        return kEnglishStableValue;
+    case UiLanguage::SimplifiedChinese:
+        return kSimplifiedChineseStableValue;
+    case UiLanguage::Count:
+        return {};
+    }
+    return {};
+}
+
+std::optional<UiLanguage> ParseUiLanguageSettingValue(
+    std::string_view value) noexcept
+{
+    if (value == kEnglishStableValue) {
+        return UiLanguage::English;
+    }
+    if (value == kSimplifiedChineseStableValue) {
+        return UiLanguage::SimplifiedChinese;
+    }
+    return std::nullopt;
+}
 
 std::string_view UiText(UiLanguage language, UiTextId text_id) noexcept
 {

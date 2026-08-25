@@ -1,12 +1,12 @@
 #include "app/application_settings.h"
 #include "automation/automation_panel_mutation_chain.h"
-#include "ui/ui_language_settings.h"
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 
@@ -47,6 +47,14 @@ public:
 private:
     std::filesystem::path path_;
 };
+
+std::string ReadFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    return std::string(
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>());
+}
 
 specforge::ApplicationSettingsStorage MakeStorage(
     const std::filesystem::path& root,
@@ -133,6 +141,30 @@ void TestSettingsIntentsPersistAndReloadThroughOneOwner()
         directory_result.applied(),
         "profile output directory intent should apply");
 
+    Require(
+        ReadFile(storage.language_settings_path).find(
+            R"("language": "zh-Hans")") != std::string::npos,
+        "language should retain its stable persisted value");
+    Require(
+        ReadFile(storage.ui_scale_settings_path).find(
+            R"("percentage": 125)") != std::string::npos,
+        "UI scale should retain its integer persisted value");
+    Require(
+        ReadFile(storage.input_settings_path).find(
+            R"("live_numeric_navigation": false)") !=
+            std::string::npos,
+        "live numeric navigation should retain its boolean persisted value");
+    const std::string external_source_document =
+        ReadFile(storage.external_source_settings_path);
+    Require(
+        external_source_document.find(
+            R"("open_external_source_as_folder": true)") !=
+                std::string::npos &&
+            external_source_document.find(
+                "open_external_fits_as_folder") ==
+                std::string::npos,
+        "external source settings should retain the generic persisted key");
+
     specforge::ApplicationSettings reloaded(storage);
     const specforge::ApplicationSettingsView reloaded_view =
         reloaded.View();
@@ -186,6 +218,137 @@ void TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings()
                     .StatusFor(specforge::ApplicationSetting::ExternalSource)
                     .kind == specforge::ApplicationSettingsStatusKind::Ready,
         "the application settings owner should retain an enabled legacy external source preference");
+
+    specforge::ApplicationSettings mutable_settings(storage);
+    Require(
+        mutable_settings.Apply(
+            specforge::ApplicationSettingsIntent::
+                SetOpenExternalSourceAsFolder(false),
+            {})
+            .applied(),
+        "changing a legacy external source preference should persist through the owner");
+    const std::string migrated =
+        ReadFile(storage.external_source_settings_path);
+    Require(
+        migrated.find(
+            R"("open_external_source_as_folder": false)") !=
+                std::string::npos &&
+            migrated.find("open_external_fits_as_folder") ==
+                std::string::npos,
+        "the next owner write should migrate the legacy external source member");
+}
+
+void TestCompactSingleValueFilesRemainReadableThroughApplicationSettings()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.language_settings_path);
+        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"zh-Hans"})";
+    }
+    {
+        std::ofstream stream(storage.ui_scale_settings_path);
+        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":1,"percentage":150})";
+    }
+    {
+        std::ofstream stream(storage.input_settings_path);
+        stream << R"({"format_kind":"specforge.input.settings","schema_version":1,"live_numeric_navigation":false})";
+    }
+    {
+        std::ofstream stream(storage.external_source_settings_path);
+        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_source_as_folder":true})";
+    }
+
+    const specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsView view = settings.View();
+    Require(
+        view.language == specforge::UiLanguage::SimplifiedChinese &&
+            view.ui_scale_percentage == 150 &&
+            !view.live_numeric_navigation &&
+            view.open_external_source_as_folder,
+        "compact version-1 setting files should remain readable through ApplicationSettings");
+    for (const specforge::ApplicationSetting setting : {
+             specforge::ApplicationSetting::Language,
+             specforge::ApplicationSetting::UiScale,
+             specforge::ApplicationSetting::Input,
+             specforge::ApplicationSetting::ExternalSource}) {
+        Require(
+            view.StatusFor(setting).kind ==
+                specforge::ApplicationSettingsStatusKind::Ready,
+            "valid compact setting files should load without warnings");
+    }
+}
+
+void TestInvalidSingleValuesFallBackThroughApplicationSettings()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.language_settings_path);
+        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":1,"language":"fr"})";
+    }
+    {
+        std::ofstream stream(storage.ui_scale_settings_path);
+        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":1,"percentage":151})";
+    }
+    {
+        std::ofstream stream(storage.input_settings_path);
+        stream << R"({"format_kind":"specforge.input.settings","schema_version":1,"live_numeric_navigation":"false"})";
+    }
+    {
+        std::ofstream stream(storage.external_source_settings_path);
+        stream << R"({"format_kind":"specforge.external_source.settings","schema_version":1,"open_external_source_as_folder":"true"})";
+    }
+
+    const specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsView view = settings.View();
+    Require(
+        view.language == specforge::UiLanguage::English &&
+            view.ui_scale_percentage == 100 &&
+            view.live_numeric_navigation &&
+            !view.open_external_source_as_folder,
+        "invalid stored values should retain the established defaults");
+    for (const specforge::ApplicationSetting setting : {
+             specforge::ApplicationSetting::Language,
+             specforge::ApplicationSetting::UiScale,
+             specforge::ApplicationSetting::Input,
+             specforge::ApplicationSetting::ExternalSource}) {
+        Require(
+            view.StatusFor(setting).kind ==
+                specforge::ApplicationSettingsStatusKind::LoadWarning,
+            "invalid stored values should surface through owner load warnings");
+    }
+}
+
+void TestUnsupportedSingleValueSchemasFallBackThroughApplicationSettings()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    {
+        std::ofstream stream(storage.language_settings_path);
+        stream << R"({"format_kind":"specforge.ui_language.settings","schema_version":2,"language":"zh-Hans"})";
+    }
+    {
+        std::ofstream stream(storage.ui_scale_settings_path);
+        stream << R"({"format_kind":"specforge.ui_scale.settings","schema_version":2,"percentage":125})";
+    }
+
+    const specforge::ApplicationSettings settings(storage);
+    const specforge::ApplicationSettingsView view = settings.View();
+    Require(
+        view.language == specforge::UiLanguage::English &&
+            view.ui_scale_percentage == 100,
+        "unsupported setting schemas should retain the established defaults");
+    for (const specforge::ApplicationSetting setting : {
+             specforge::ApplicationSetting::Language,
+             specforge::ApplicationSetting::UiScale}) {
+        Require(
+            view.StatusFor(setting).kind ==
+                    specforge::ApplicationSettingsStatusKind::LoadWarning &&
+                !settings.PersistenceStatus(setting)
+                     .load_warning.empty(),
+            "unsupported setting schemas should surface through owner load warnings");
+    }
 }
 
 void TestPersistenceFailureRetainsThePreviousValueAndStatus()
@@ -267,6 +430,31 @@ void TestPersistenceFailureRetainsThePreviousValueAndStatus()
                 specforge::ApplicationSetting::Language)
             .recovered,
         "a successful setting retry should expose recovery");
+}
+
+void TestLanguageValidationUsesApplicationSettingsInterface()
+{
+    TemporaryDirectory temporary;
+    const auto storage = MakeStorage(temporary.path());
+    specforge::ApplicationSettings settings(storage);
+
+    const specforge::ApplicationSettingsResult result =
+        settings.Apply(
+            specforge::ApplicationSettingsIntent::SetLanguage(
+                specforge::UiLanguage::Count),
+            {});
+    const specforge::ApplicationSettingsView view = settings.View();
+    Require(
+        result.outcome ==
+                specforge::ApplicationSettingsOutcome::Rejected &&
+            result.setting == specforge::ApplicationSetting::Language &&
+            view.language == specforge::UiLanguage::English &&
+            view.StatusFor(specforge::ApplicationSetting::Language)
+                    .reason ==
+                specforge::ApplicationSettingsStatusReason::
+                    UnsupportedLanguage &&
+            !std::filesystem::exists(storage.language_settings_path),
+        "unsupported languages should be rejected by ApplicationSettings before persistence");
 }
 
 void TestUiScaleValidationAndPersistenceFirstBehavior()
@@ -1190,7 +1378,11 @@ int main()
 {
     TestSettingsIntentsPersistAndReloadThroughOneOwner();
     TestLegacyExternalSourcePreferenceLoadsThroughApplicationSettings();
+    TestCompactSingleValueFilesRemainReadableThroughApplicationSettings();
+    TestInvalidSingleValuesFallBackThroughApplicationSettings();
+    TestUnsupportedSingleValueSchemasFallBackThroughApplicationSettings();
     TestPersistenceFailureRetainsThePreviousValueAndStatus();
+    TestLanguageValidationUsesApplicationSettingsInterface();
     TestUiScaleValidationAndPersistenceFirstBehavior();
     TestLiveNumericNavigationPersistenceFailureRetainsEnabledValue();
     TestExternalSourceFolderPersistenceFailureRetainsDisabledValue();

@@ -2,8 +2,6 @@
 
 #include "app/local_user_state.h"
 #include "profile/profile_settings.h"
-#include "ui/external_source_settings.h"
-#include "ui/input_settings.h"
 #include "ui/panel_visibility_state_cache_io.h"
 #include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
@@ -17,6 +15,9 @@
 namespace specforge {
 
 struct RuntimePaths;
+
+inline constexpr bool kDefaultLiveNumericNavigation = true;
+inline constexpr bool kDefaultOpenExternalSourceAsFolder = false;
 
 enum class ApplicationSetting {
     None,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,6 +20,11 @@ enum class UiLanguage {
     SimplifiedChinese,
     Count,  // Non-language sentinel.
 };
+
+[[nodiscard]] std::string_view UiLanguageSettingValue(
+    UiLanguage language) noexcept;
+[[nodiscard]] std::optional<UiLanguage> ParseUiLanguageSettingValue(
+    std::string_view value) noexcept;
 
 enum class UiTextId {
     Settings,

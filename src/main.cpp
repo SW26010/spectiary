@@ -1,8 +1,8 @@
+#include "app/application_settings.h"
 #include "app/specforge_app.h"
 #include "app/runtime_paths.h"
 #include "automation/automation_startup.h"
 #include "platform/win32_text.h"
-#include "ui/ui_language_settings.h"
 #include "ui/ui_text.h"
 
 #include <Windows.h>
@@ -217,9 +217,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
                 command_line.automation->state_root;
         }
         startup_error_language =
-            specforge::LoadUiLanguageSettings(
-                startup.runtime_paths()
-                    .ui_language_settings_path)
+            specforge::ApplicationSettings(
+                specforge::ApplicationSettingsStorageForRuntimePaths(
+                    startup.runtime_paths()))
+                .View()
                 .language;
         specforge::SpecForgeApp app(
             startup,

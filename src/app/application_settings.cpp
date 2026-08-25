@@ -1,10 +1,12 @@
 #include "app/application_settings.h"
 
+#include "app/local_user_state_json.h"
 #include "app/runtime_paths.h"
-#include "ui/ui_language_settings.h"
 
 #include <chrono>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace specforge {
@@ -14,6 +16,257 @@ using namespace std::chrono_literals;
 
 constexpr auto kApplicationSettingsSaveRetry = 2s;
 constexpr auto kPanelVisibilitySaveDebounce = 500ms;
+
+constexpr const char* kUiLanguageSettingsFormatKind =
+    "specforge.ui_language.settings";
+constexpr const char* kUiScaleSettingsFormatKind =
+    "specforge.ui_scale.settings";
+constexpr const char* kInputSettingsFormatKind =
+    "specforge.input.settings";
+constexpr const char* kExternalSourceSettingsFormatKind =
+    "specforge.external_source.settings";
+constexpr int kSettingsSchemaVersion = 1;
+constexpr const char* kLiveNumericNavigationMember =
+    "live_numeric_navigation";
+constexpr const char* kOpenExternalSourceAsFolderMember =
+    "open_external_source_as_folder";
+constexpr const char* kLegacyOpenExternalFitsAsFolderMember =
+    "open_external_fits_as_folder";
+
+struct StoredUiLanguageLoadResult {
+    UiLanguage language = UiLanguage::English;
+    std::string warning;
+};
+
+struct StoredUiScaleLoadResult {
+    int percentage = kDefaultUiScalePercentage;
+    std::string warning;
+};
+
+struct StoredBooleanLoadResult {
+    bool value = false;
+    std::string warning;
+};
+
+StoredUiLanguageLoadResult LoadStoredUiLanguage(
+    const std::filesystem::path& path)
+{
+    StoredUiLanguageLoadResult loaded;
+    VersionedJsonCacheLoadResult cache = LoadVersionedJsonCacheFile(
+        path,
+        kUiLanguageSettingsFormatKind,
+        {kSettingsSchemaVersion},
+        "UI language settings");
+    if (!cache.document) {
+        loaded.warning = std::move(cache.warning);
+        return loaded;
+    }
+
+    const std::optional<std::string> language =
+        ReadJsonStringMember(cache.document->root, "language");
+    if (!language) {
+        loaded.warning =
+            "Ignored UI language settings: the language value is missing or invalid.";
+        return loaded;
+    }
+    if (const std::optional<UiLanguage> parsed =
+            ParseUiLanguageSettingValue(*language)) {
+        loaded.language = *parsed;
+        return loaded;
+    }
+
+    loaded.warning =
+        "Ignored UI language settings: the language value is not supported.";
+    return loaded;
+}
+
+bool SaveStoredUiLanguage(
+    const std::filesystem::path& path,
+    UiLanguage language,
+    std::string* error_message)
+{
+    const std::string_view stable_value =
+        UiLanguageSettingValue(language);
+    if (stable_value.empty()) {
+        if (error_message != nullptr) {
+            *error_message = "The application language is not supported.";
+        }
+        return false;
+    }
+
+    return WriteVersionedJsonCacheDocument(
+        path,
+        kUiLanguageSettingsFormatKind,
+        kSettingsSchemaVersion,
+        "UI language settings",
+        JsonObjectValue({
+            {"language", JsonStringValue(stable_value)},
+        }),
+        error_message);
+}
+
+StoredUiScaleLoadResult LoadStoredUiScale(
+    const std::filesystem::path& path)
+{
+    StoredUiScaleLoadResult loaded;
+    VersionedJsonCacheLoadResult cache =
+        LoadVersionedJsonCacheFile(
+            path,
+            kUiScaleSettingsFormatKind,
+            {kSettingsSchemaVersion},
+            "UI scale settings");
+    if (!cache.document) {
+        loaded.warning = std::move(cache.warning);
+        return loaded;
+    }
+
+    const std::optional<int> percentage =
+        ReadJsonIntMember(cache.document->root, "percentage");
+    if (!percentage ||
+        !IsValidUiScalePercentage(*percentage)) {
+        loaded.warning =
+            "Ignored UI scale settings: the percentage "
+            "must be an integer from 80 through 150.";
+        return loaded;
+    }
+
+    loaded.percentage = *percentage;
+    return loaded;
+}
+
+bool SaveStoredUiScale(
+    const std::filesystem::path& path,
+    int percentage,
+    std::string* error_message)
+{
+    if (!IsValidUiScalePercentage(percentage)) {
+        if (error_message != nullptr) {
+            *error_message =
+                "The UI scale must be from 80% through 150%.";
+        }
+        return false;
+    }
+
+    return WriteVersionedJsonCacheDocument(
+        path,
+        kUiScaleSettingsFormatKind,
+        kSettingsSchemaVersion,
+        "UI scale settings",
+        JsonObjectValue({
+            {"percentage", JsonIntegerValue(percentage)},
+        }),
+        error_message);
+}
+
+StoredBooleanLoadResult LoadStoredLiveNumericNavigation(
+    const std::filesystem::path& path)
+{
+    StoredBooleanLoadResult loaded{
+        .value = kDefaultLiveNumericNavigation,
+    };
+    VersionedJsonCacheLoadResult cache =
+        LoadVersionedJsonCacheFile(
+            path,
+            kInputSettingsFormatKind,
+            {kSettingsSchemaVersion},
+            "input settings");
+    if (!cache.document) {
+        loaded.warning = std::move(cache.warning);
+        return loaded;
+    }
+
+    const JsonValue* live_numeric_navigation =
+        JsonObjectMember(
+            cache.document->root,
+            kLiveNumericNavigationMember);
+    if (live_numeric_navigation == nullptr ||
+        live_numeric_navigation->kind != JsonValue::Kind::Bool) {
+        loaded.warning =
+            "Ignored input settings: "
+            "live_numeric_navigation must be boolean.";
+        return loaded;
+    }
+
+    loaded.value = live_numeric_navigation->bool_value;
+    return loaded;
+}
+
+bool SaveStoredLiveNumericNavigation(
+    const std::filesystem::path& path,
+    bool enabled,
+    std::string* error_message)
+{
+    return WriteVersionedJsonCacheDocument(
+        path,
+        kInputSettingsFormatKind,
+        kSettingsSchemaVersion,
+        "input settings",
+        JsonObjectValue({
+            {kLiveNumericNavigationMember,
+             JsonBoolValue(enabled)},
+        }),
+        error_message);
+}
+
+StoredBooleanLoadResult LoadStoredOpenExternalSourceAsFolder(
+    const std::filesystem::path& path)
+{
+    StoredBooleanLoadResult loaded{
+        .value = kDefaultOpenExternalSourceAsFolder,
+    };
+    VersionedJsonCacheLoadResult cache =
+        LoadVersionedJsonCacheFile(
+            path,
+            kExternalSourceSettingsFormatKind,
+            {kSettingsSchemaVersion},
+            "external source settings");
+    if (!cache.document) {
+        loaded.warning = std::move(cache.warning);
+        return loaded;
+    }
+
+    const JsonValue* open_external_source_as_folder =
+        JsonObjectMember(
+            cache.document->root,
+            kOpenExternalSourceAsFolderMember);
+    const char* setting_member =
+        kOpenExternalSourceAsFolderMember;
+    if (open_external_source_as_folder == nullptr) {
+        open_external_source_as_folder = JsonObjectMember(
+            cache.document->root,
+            kLegacyOpenExternalFitsAsFolderMember);
+        setting_member = kLegacyOpenExternalFitsAsFolderMember;
+    }
+    if (open_external_source_as_folder == nullptr ||
+        open_external_source_as_folder->kind !=
+            JsonValue::Kind::Bool) {
+        loaded.warning =
+            "Ignored external source settings: "
+            + std::string(setting_member) +
+            " must be boolean.";
+        return loaded;
+    }
+
+    loaded.value = open_external_source_as_folder->bool_value;
+    return loaded;
+}
+
+bool SaveStoredOpenExternalSourceAsFolder(
+    const std::filesystem::path& path,
+    bool enabled,
+    std::string* error_message)
+{
+    return WriteVersionedJsonCacheDocument(
+        path,
+        kExternalSourceSettingsFormatKind,
+        kSettingsSchemaVersion,
+        "external source settings",
+        JsonObjectValue({
+            {kOpenExternalSourceAsFolderMember,
+             JsonBoolValue(enabled)},
+        }),
+        error_message);
+}
 
 template <typename Visibility>
 decltype(auto) PanelVisibilityValue(
@@ -195,33 +448,34 @@ ApplicationSettings::ApplicationSettings(
         return;
     }
 
-    UiLanguageSettingsLoadResult language_settings =
-        LoadUiLanguageSettings(storage_.language_settings_path);
+    StoredUiLanguageLoadResult language_settings =
+        LoadStoredUiLanguage(storage_.language_settings_path);
     language_ = language_settings.language;
     AdoptLoadWarning(
         ApplicationSetting::Language,
         std::move(language_settings.warning));
 
-    UiScaleSettingsLoadResult ui_scale_settings =
-        LoadUiScaleSettings(storage_.ui_scale_settings_path);
+    StoredUiScaleLoadResult ui_scale_settings =
+        LoadStoredUiScale(storage_.ui_scale_settings_path);
     ui_scale_percentage_ = ui_scale_settings.percentage;
     AdoptLoadWarning(
         ApplicationSetting::UiScale,
         std::move(ui_scale_settings.warning));
 
-    InputSettingsLoadResult input_settings =
-        LoadInputSettings(storage_.input_settings_path);
+    StoredBooleanLoadResult input_settings =
+        LoadStoredLiveNumericNavigation(
+            storage_.input_settings_path);
     live_numeric_navigation_ =
-        input_settings.settings.live_numeric_navigation;
+        input_settings.value;
     AdoptLoadWarning(
         ApplicationSetting::Input,
         std::move(input_settings.warning));
 
-    ExternalSourceSettingsLoadResult external_source_settings =
-        LoadExternalSourceSettings(
+    StoredBooleanLoadResult external_source_settings =
+        LoadStoredOpenExternalSourceAsFolder(
             storage_.external_source_settings_path);
     open_external_source_as_folder_ =
-        external_source_settings.settings.open_external_source_as_folder;
+        external_source_settings.value;
     AdoptLoadWarning(
         ApplicationSetting::ExternalSource,
         std::move(external_source_settings.warning));
@@ -798,7 +1052,7 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
             return {.error = "No pending language setting save."};
         }
         std::string error;
-        if (SaveUiLanguageSettings(
+        if (SaveStoredUiLanguage(
                 storage_.language_settings_path,
                 *pending_language_,
                 &error)) {
@@ -815,7 +1069,7 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
             return {.error = "No pending UI scale setting save."};
         }
         std::string error;
-        if (SaveUiScaleSettings(
+        if (SaveStoredUiScale(
                 storage_.ui_scale_settings_path,
                 *pending_ui_scale_percentage_,
                 &error)) {
@@ -832,10 +1086,9 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
             return {.error = "No pending input setting save."};
         }
         std::string error;
-        if (SaveInputSettings(
+        if (SaveStoredLiveNumericNavigation(
                 storage_.input_settings_path,
-                {.live_numeric_navigation =
-                     *pending_live_numeric_navigation_},
+                *pending_live_numeric_navigation_,
                 &error)) {
             return {.saved = true};
         }
@@ -852,10 +1105,9 @@ ApplicationSettings::SavePendingSetting(ApplicationSetting setting)
                     "No pending external source setting save."};
         }
         std::string error;
-        if (SaveExternalSourceSettings(
+        if (SaveStoredOpenExternalSourceAsFolder(
                 storage_.external_source_settings_path,
-                {.open_external_source_as_folder =
-                     *pending_open_external_source_as_folder_},
+                *pending_open_external_source_as_folder_,
                 &error)) {
             return {.saved = true};
         }

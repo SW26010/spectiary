@@ -329,8 +329,6 @@ add_library(specforge_desktop_ui STATIC
     src/plot/scientific_label.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
-    src/ui/input_settings.cpp
-    src/ui/external_source_settings.cpp
     src/ui/panel_session_interaction.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
@@ -343,7 +341,6 @@ add_library(specforge_desktop_ui STATIC
     src/ui/spectrum_view_state_cache_io.cpp
     src/ui/spectrum_view_session.cpp
     src/ui/ui_font.cpp
-    src/ui/ui_language_settings.cpp
     src/ui/ui_scale_settings.cpp
     src/ui/ui_text.cpp
 )
@@ -1236,23 +1233,8 @@ specforge_add_test(
     specforge_desktop_ui
 )
 specforge_add_test(
-    specforge_ui_language_settings_tests
-    tests/ui_language_settings_tests.cpp
-    specforge_desktop_ui
-)
-specforge_add_test(
     specforge_ui_scale_settings_tests
     tests/ui_scale_settings_tests.cpp
-    specforge_desktop_ui
-)
-specforge_add_test(
-    specforge_input_settings_tests
-    tests/input_settings_tests.cpp
-    specforge_desktop_ui
-)
-specforge_add_test(
-    specforge_external_source_settings_tests
-    tests/external_source_settings_tests.cpp
     specforge_desktop_ui
 )
 add_test(

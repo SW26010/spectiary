@@ -9,7 +9,6 @@
 #include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/ui_font.h"
-#include "ui/ui_language_settings.h"
 #include "ui/ui_scale_settings.h"
 #include "ui/ui_text.h"
 

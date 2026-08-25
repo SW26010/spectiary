@@ -1556,6 +1556,27 @@ void TestCountSentinelIsNotDisplayable()
         "count sentinel should not be displayable in Chinese");
 }
 
+void TestLanguageSettingValuesAreStable()
+{
+    Require(
+        specforge::UiLanguageSettingValue(
+            specforge::UiLanguage::English) == "en" &&
+            specforge::UiLanguageSettingValue(
+                specforge::UiLanguage::SimplifiedChinese) ==
+                "zh-Hans" &&
+            specforge::UiLanguageSettingValue(
+                specforge::UiLanguage::Count)
+                .empty(),
+        "language identities should retain their stable setting values");
+    Require(
+        specforge::ParseUiLanguageSettingValue("en") ==
+                specforge::UiLanguage::English &&
+            specforge::ParseUiLanguageSettingValue("zh-Hans") ==
+                specforge::UiLanguage::SimplifiedChinese &&
+            !specforge::ParseUiLanguageSettingValue("fr"),
+        "stable language setting values should parse without aliases");
+}
+
 void TestLabelingIssueDescriptorIsTheSingleMapping()
 {
     using Issue = specforge::SampleLabelingOperationResult::Issue;
@@ -1606,6 +1627,7 @@ int main()
         TestSourceLoadFailuresAreLocalizedAtTheUiBoundary();
         TestInvalidLanguageFallsBackToEnglish();
         TestCountSentinelIsNotDisplayable();
+        TestLanguageSettingValuesAreStable();
         TestLabelingIssueDescriptorIsTheSingleMapping();
         return 0;
     } catch (const std::exception& error) {
