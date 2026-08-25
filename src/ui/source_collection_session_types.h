@@ -116,6 +116,17 @@ struct SourceCollectionAnnotationValueView {
     bool can_remove_annotation = false;
 };
 
+// Read-only position of the current sample in the final navigation sequence.
+// The position is zero-based for workflow consumers; presentation code owns
+// any one-based formatting. An empty position explicitly means that the
+// current sample cannot be mapped into the resolved sequence. The sequence
+// length remains available in that state; the position never falls back to the
+// current source-row index.
+struct SourceCollectionResolvedSequencePositionView {
+    std::optional<std::size_t> zero_based_position;
+    std::size_t sequence_length = 0;
+};
+
 struct SourceCollectionNavigationView {
     bool has_active_source = false;
     std::optional<std::size_t> current_index;
@@ -128,6 +139,7 @@ struct SourceCollectionNavigationView {
     bool sequence_active = false;
     bool sequence_empty = false;
     std::size_t sequence_count = 0;
+    SourceCollectionResolvedSequencePositionView resolved_sequence_position;
     // Changes only when source context, membership, or ordering changes.
     std::uint64_t sequence_topology_revision = 0;
     std::optional<std::size_t> current_sequence_position;

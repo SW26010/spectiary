@@ -1714,6 +1714,12 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
     view.sequence_active = sequence.active;
     view.sequence_empty = sequence.empty;
     view.sequence_count = sequence.active ? sequence.ordered_rows.size() : view.sample_count;
+    view.resolved_sequence_position.sequence_length = view.sequence_count;
+    if (view.current_sequence_position &&
+        *view.current_sequence_position < view.sequence_count) {
+        view.resolved_sequence_position.zero_based_position =
+            view.current_sequence_position;
+    }
     view.sequence_topology_revision =
         navigation_.sequence_topology_revision();
     view.filtered_sample_count = view.sequence_count;

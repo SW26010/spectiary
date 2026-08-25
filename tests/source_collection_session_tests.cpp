@@ -42,6 +42,20 @@ void Require(bool condition, std::string_view message)
     }
 }
 
+void RequireResolvedSequencePosition(
+    const specforge::SourceCollectionNavigationView& view,
+    std::optional<std::size_t> expected_zero_based_position,
+    std::size_t expected_sequence_length,
+    std::string_view message)
+{
+    Require(
+        view.resolved_sequence_position.zero_based_position ==
+                expected_zero_based_position &&
+            view.resolved_sequence_position.sequence_length ==
+                expected_sequence_length,
+        message);
+}
+
 std::string Utf8(std::u8string_view value)
 {
     return std::string(reinterpret_cast<const char*>(value.data()), value.size());
@@ -1362,6 +1376,104 @@ void TestAnnotationFilterSelectionAppliesToNavigation()
         "clearing the active filter should publish a new sequence topology revision");
     Require(session.View().filter.sources.empty(), "removed source should leave no selected sample filters");
     Require(session.View().filter.available_sources.size() == 1, "removed source should return to the add-source list");
+}
+
+void TestResolvedSequencePositionTracksFinalNavigationSequence()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_resolved_sequence_position.npy");
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(
+        CompanionNamePath(source_path),
+        {"delta", "alpha", "charlie", "bravo"},
+        7);
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(loaded_indices, source_path, 4);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        0,
+        4,
+        "source-order navigation should expose row 0 as position 0 of 4");
+
+    const std::filesystem::path annotation_path =
+        AddPlainIntegerFilterAnnotation(
+            session,
+            {1, 0, 1, 1},
+            "_resolved_sequence_position_filter.npy");
+    const std::string filter_source_id =
+        AnnotationSourceId(annotation_path);
+    (void)Submit(
+        session,
+        AddSampleFilterSource(filter_source_id));
+    (void)Submit(
+        session,
+        SetFilterValueSelected(
+            filter_source_id,
+            "1",
+            true));
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        0,
+        3,
+        "sample filtering should expose row 0 as position 0 of the three-row filtered sequence");
+
+    (void)Submit(
+        session,
+        SetSampleSortSource("sample-name"));
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        2,
+        3,
+        "filtering plus sorting should expose row 0 in the final resolved order [3, 2, 0]");
+
+    (void)Submit(
+        session,
+        SetFilterValueSelected(
+            filter_source_id,
+            "1",
+            false));
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        3,
+        4,
+        "sample sorting alone should expose row 0 in the final order [1, 3, 2, 0]");
+
+    (void)Submit(session, ClearSampleSorting());
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        0,
+        4,
+        "clearing derived navigation inputs should restore source-order position");
+
+    specforge::SourceCollectionSession& deferred_session =
+        session;
+    const specforge::SourceCollectionSessionResult reconciled =
+        deferred_session.Submit(
+            SetFilterValueSelected(
+                filter_source_id,
+                "0",
+                true));
+    Require(
+        reconciled.follow_up_spectrum_index == 1 &&
+            session.View().navigation.current_index == 0 &&
+            !session.View().navigation.current_sample_in_filter,
+        "filter reconciliation should keep presenting excluded row 0 while row 1 is pending");
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        std::nullopt,
+        1,
+        "a presented current sample outside the resolved sequence must be unavailable without a roster-index fallback");
+
+    Require(
+        session.Open(source_path, 1).loaded,
+        "the reconciled row 1 snapshot should commit");
+    RequireResolvedSequencePosition(
+        session.View().navigation,
+        0,
+        1,
+        "committing reconciliation should expose row 1 as position 0 of the one-row sequence");
 }
 
 void TestLocalLabelingAnnotationCanBeSampleFilterSource()
@@ -8162,6 +8274,7 @@ void RunAllTests()
     TestNoOpLabelUpsertKeepsLabelUndoHistory();
     TestSavingToCompanionAnnotationKeepsLabelUndoHistory();
     TestAnnotationFilterSelectionAppliesToNavigation();
+    TestResolvedSequencePositionTracksFinalNavigationSequence();
     TestLocalLabelingAnnotationCanBeSampleFilterSource();
     TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot();
     TestRemovingLabelPrunesItsSampleFilterValue();
