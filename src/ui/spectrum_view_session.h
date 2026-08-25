@@ -44,7 +44,8 @@ enum class SpectrumViewSessionCommandKind {
     ResetSmoothing,
     SetGaussianSigma,
     SetMedianKernelSize,
-    SetPlotStyle,
+    SetPlotColors,
+    SetPlotSeriesColor,
     SetViewportRangeMode,
     SyncPlotLimitsOnNextRender,
 };
@@ -60,7 +61,11 @@ struct SpectrumViewSessionCommand {
     [[nodiscard]] static SpectrumViewSessionCommand ResetSmoothing();
     [[nodiscard]] static SpectrumViewSessionCommand SetGaussianSigma(double sigma);
     [[nodiscard]] static SpectrumViewSessionCommand SetMedianKernelSize(int kernel_size);
-    [[nodiscard]] static SpectrumViewSessionCommand SetPlotStyle(SpectrumPlotStyle style);
+    [[nodiscard]] static SpectrumViewSessionCommand SetPlotColors(
+        SpectrumPlotColors colors);
+    [[nodiscard]] static SpectrumViewSessionCommand SetPlotSeriesColor(
+        SpectrumPlotSeries series,
+        PlotSeriesColor color);
     [[nodiscard]] static SpectrumViewSessionCommand SetViewportRangeMode(
         SpectrumViewportRangeMode mode);
     [[nodiscard]] static SpectrumViewSessionCommand SyncPlotLimitsOnNextRender();
@@ -74,7 +79,10 @@ private:
     bool enabled = false;
     double gaussian_sigma = 0.0;
     int median_kernel_size = 0;
-    SpectrumPlotStyle plot_style;
+    SpectrumPlotColors plot_colors;
+    SpectrumPlotSeries plot_series =
+        SpectrumPlotSeries::RawSpectrum;
+    PlotSeriesColor plot_series_color;
     SpectrumViewportRangeMode viewport_range_mode =
         SpectrumViewportRangeMode::Automatic;
     SourceCollectionSnapshotChangeReason snapshot_change_reason{};
@@ -86,6 +94,7 @@ struct SpectrumViewSessionView {
     bool show_gaussian_smoothed = false;
     bool show_median_smoothed = false;
     SpectrumSmoothingParameters smoothing_parameters;
+    SpectrumPlotColors plot_colors;
     SpectrumViewportRangeMode viewport_range_mode =
         SpectrumViewportRangeMode::Automatic;
 };
@@ -113,6 +122,9 @@ public:
 
     [[nodiscard]] SpectrumViewSessionView View() const;
     [[nodiscard]] int EffectiveMedianKernelSize(std::size_t point_count) const;
+    [[nodiscard]] ImVec4 ResolveSeriesColor(
+        SpectrumPlotSeries series,
+        const SemanticPalette& theme_palette);
     [[nodiscard]] SpectrumViewRenderFeedback Render(
         const SpectrumSnapshotHandle& snapshot,
         UiLanguage language,

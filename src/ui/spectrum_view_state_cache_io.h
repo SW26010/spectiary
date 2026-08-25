@@ -1,6 +1,6 @@
 #pragma once
 
-#include "plot/plot_touchpad_gesture.h"
+#include "plot/spectrum_plot.h"
 
 #include <filesystem>
 #include <string>
@@ -11,6 +11,7 @@ struct SpectrumViewStateCache {
     bool locked = false;
     std::string source_collection_identity;
     PlotViewLimits limits;
+    SpectrumPlotColors plot_colors;
 };
 
 struct SpectrumViewStateCacheLoadResult {

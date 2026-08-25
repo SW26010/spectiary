@@ -558,6 +558,11 @@ void TestSourceInspectionMappingsAreExact()
             "无可绘制光谱"},
         ExpectedText{UiTextId::GaussianSigma, "Sigma", "标准差 σ"},
         ExpectedText{UiTextId::MedianKernelSize, "Kernel size", "核大小"},
+        ExpectedText{UiTextId::CurveColor, "Color", "颜色"},
+        ExpectedText{
+            UiTextId::ResetColorToAuto,
+            "Reset to Auto",
+            "恢复为自动配色"},
         ExpectedText{UiTextId::RawSpectrum, "Original curve", "原始曲线"},
         ExpectedText{
             UiTextId::GaussianSmoothing,
@@ -1416,15 +1421,15 @@ void TestPersistenceHealthMessagesAreLocalizedAtTheUiBoundary()
         specforge::UiText(
             specforge::UiLanguage::English,
             specforge::LocalUserStateArea::
-                SpectrumViewport) ==
-            "Spectrum viewport" &&
+                SpectrumView) ==
+            "Spectrum view" &&
         specforge::UiText(
             specforge::UiLanguage::
                 SimplifiedChinese,
             specforge::LocalUserStateArea::
-                SpectrumViewport) ==
-            "光谱视口",
-        "spectrum viewport persistence area should be localized");
+                SpectrumView) ==
+            "光谱视图",
+        "spectrum view persistence area should be localized");
     specforge::LocalUserStateHealthMessage retrying{
         .area =
             specforge::LocalUserStateArea::

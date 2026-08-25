@@ -128,11 +128,24 @@ SpectrumViewSessionCommand SpectrumViewSessionCommand::SetMedianKernelSize(int k
     return command;
 }
 
-SpectrumViewSessionCommand SpectrumViewSessionCommand::SetPlotStyle(SpectrumPlotStyle style)
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetPlotColors(
+    SpectrumPlotColors colors)
 {
     SpectrumViewSessionCommand command;
-    command.kind = SpectrumViewSessionCommandKind::SetPlotStyle;
-    command.plot_style = style;
+    command.kind = SpectrumViewSessionCommandKind::SetPlotColors;
+    command.plot_colors = std::move(colors);
+    return command;
+}
+
+SpectrumViewSessionCommand SpectrumViewSessionCommand::SetPlotSeriesColor(
+    SpectrumPlotSeries series,
+    PlotSeriesColor color)
+{
+    SpectrumViewSessionCommand command;
+    command.kind =
+        SpectrumViewSessionCommandKind::SetPlotSeriesColor;
+    command.plot_series = series;
+    command.plot_series_color = std::move(color);
     return command;
 }
 
@@ -204,8 +217,15 @@ void SpectrumViewSession::Submit(SpectrumViewSessionCommand command)
         }
         break;
     }
-    case SpectrumViewSessionCommandKind::SetPlotStyle:
-        state_->style = command.plot_style;
+    case SpectrumViewSessionCommandKind::SetPlotColors:
+        state_->style.colors =
+            std::move(command.plot_colors);
+        break;
+    case SpectrumViewSessionCommandKind::SetPlotSeriesColor:
+        SpectrumSeriesColor(
+            state_->style.colors,
+            command.plot_series) =
+            std::move(command.plot_series_color);
         break;
     case SpectrumViewSessionCommandKind::SetViewportRangeMode:
         if (state_->plot.viewport_range_mode !=
@@ -231,6 +251,7 @@ SpectrumViewSessionView SpectrumViewSession::View() const
     view.show_gaussian_smoothed = state_->plot.show_gaussian_smoothed;
     view.show_median_smoothed = state_->plot.show_median_smoothed;
     view.smoothing_parameters = state_->plot.smoothing_parameters;
+    view.plot_colors = state_->style.colors;
     view.viewport_range_mode = state_->plot.viewport_range_mode;
     return view;
 }
@@ -321,6 +342,17 @@ std::vector<SpectrumValueVector> SpectrumViewSession::RetainHeavySnapshotResourc
     retain_unique(state_->plot.median_smoothing_cache.source);
     retain_unique(state_->plot.median_smoothing_cache.values);
     return resources;
+}
+
+ImVec4 SpectrumViewSession::ResolveSeriesColor(
+    SpectrumPlotSeries series,
+    const SemanticPalette& theme_palette)
+{
+    return ResolveSpectrumSeriesColor(
+        state_->style.colors,
+        series,
+        theme_palette,
+        state_->plot.series_color_assignments);
 }
 
 std::optional<PlotViewLimits>

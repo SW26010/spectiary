@@ -299,6 +299,22 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
             .y_min = -0.03125,
             .y_max = 2.0625,
         },
+        .plot_colors = {
+            .raw_spectrum =
+                specforge::PlotSeriesColor::ExplicitColor({
+                    .red = 0.125f,
+                    .green = 0.25f,
+                    .blue = 0.5f,
+                    .alpha = 0.75f,
+                }),
+            .median_smoothing =
+                specforge::PlotSeriesColor::ExplicitColor({
+                    .red = 0.9f,
+                    .green = 0.7f,
+                    .blue = 0.3f,
+                    .alpha = 0.6f,
+                }),
+        },
     };
     std::string error;
     Require(
@@ -322,8 +338,29 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
             loaded.state.limits.y_min ==
                 locked.limits.y_min &&
             loaded.state.limits.y_max ==
-                locked.limits.y_max,
-        "locked viewport cache should round-trip its collection identity and exact limits");
+                locked.limits.y_max &&
+            loaded.state.plot_colors ==
+                locked.plot_colors,
+        "spectrum view state should round-trip its viewport and complete Auto/explicit curve colors");
+
+    specforge::SpectrumViewStateCache unlocked_colors;
+    unlocked_colors.plot_colors =
+        locked.plot_colors;
+    Require(
+        specforge::SaveSpectrumViewStateCache(
+            path,
+            unlocked_colors,
+            &error),
+        "unlocked spectrum colors should save independently of viewport state");
+    const specforge::SpectrumViewStateCacheLoadResult
+        loaded_unlocked_colors =
+            specforge::LoadSpectrumViewStateCache(path);
+    Require(
+        loaded_unlocked_colors.warning.empty() &&
+            !loaded_unlocked_colors.state.locked &&
+            loaded_unlocked_colors.state.plot_colors ==
+                unlocked_colors.plot_colors,
+        "curve colors are global view preferences and must not require a locked or source-scoped viewport");
 
     Require(
         specforge::SaveSpectrumViewStateCache(
@@ -336,6 +373,129 @@ void TestLockedViewportStateCacheRoundTripsAndClears()
              .state.locked,
         "the cleared viewport cache should reload in automatic mode");
     std::filesystem::remove(path);
+}
+
+void TestSpectrumColorCacheSupportsLegacyAndDamagedEntries()
+{
+    const std::filesystem::path path = UniqueTempPath();
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        stream <<
+            "{\"format_kind\":\"specforge.spectrum_view.state\","
+            "\"schema_version\":1,\"locked\":false}\n";
+    }
+    const specforge::SpectrumViewStateCacheLoadResult legacy =
+        specforge::LoadSpectrumViewStateCache(path);
+    Require(
+        legacy.warning.empty() &&
+            legacy.state.plot_colors ==
+                specforge::SpectrumPlotColors{},
+        "schema 1 viewport state should migrate to canonical Auto colors without a warning");
+
+    {
+        std::ofstream stream(
+            path,
+            std::ios::binary | std::ios::trunc);
+        stream <<
+            "{\"format_kind\":\"specforge.spectrum_view.state\","
+            "\"schema_version\":2,\"locked\":false,"
+            "\"series_colors\":{"
+            "\"spectrum.raw\":{\"mode\":\"explicit-color\","
+            "\"red\":\"0.1\",\"green\":\"0.2\","
+            "\"blue\":\"0.3\",\"alpha\":\"damaged\"},"
+            "\"spectrum.smoothing.gaussian\":{\"mode\":\"auto\"},"
+            "\"spectrum.smoothing.median\":{\"mode\":\"explicit-color\","
+            "\"red\":\"0.4\",\"green\":\"0.5\","
+            "\"blue\":\"0.6\",\"alpha\":\"0.7\"}}}\n";
+    }
+    const specforge::SpectrumViewStateCacheLoadResult damaged =
+        specforge::LoadSpectrumViewStateCache(path);
+    const std::optional<specforge::RgbaColor>& median =
+        damaged.state.plot_colors.median_smoothing.
+            explicit_color();
+    Require(
+        !damaged.warning.empty() &&
+            damaged.state.plot_colors.raw_spectrum.mode() ==
+                specforge::PlotSeriesColorMode::Auto &&
+            damaged.state.plot_colors.gaussian_smoothing.mode() ==
+                specforge::PlotSeriesColorMode::Auto &&
+            median && median->red == 0.4f &&
+            median->green == 0.5f &&
+            median->blue == 0.6f &&
+            median->alpha == 0.7f,
+        "one damaged color should warn and fall back independently without discarding valid curve colors");
+    std::filesystem::remove(path);
+}
+
+void TestSpectrumViewSessionOwnsCustomCurveColors()
+{
+    specforge::SpectrumViewSession automatic;
+    const specforge::SemanticPalette& palette =
+        specforge::FindBuiltInThemeDescriptor(
+            specforge::BuiltInDarkThemeId())
+            ->palette;
+    const ImVec4 raw = automatic.ResolveSeriesColor(
+        specforge::SpectrumPlotSeries::RawSpectrum,
+        palette);
+    const ImVec4 gaussian = automatic.ResolveSeriesColor(
+        specforge::SpectrumPlotSeries::GaussianSmoothing,
+        palette);
+    const ImVec4 median = automatic.ResolveSeriesColor(
+        specforge::SpectrumPlotSeries::MedianSmoothing,
+        palette);
+    Require(
+        raw.x == palette.plot_auto_series[0].x &&
+            gaussian.x == palette.plot_auto_series[1].x &&
+            median.x == palette.plot_auto_series[2].x,
+        "built-in curves should reserve distinct Auto slots in their stable rendering order");
+
+    specforge::SpectrumViewSession session;
+    specforge::SpectrumPlotColors colors;
+    colors.raw_spectrum =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.11f,
+            .green = 0.22f,
+            .blue = 0.33f,
+            .alpha = 0.44f,
+        });
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetPlotColors(
+            colors));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetPlotSeriesColor(
+            specforge::SpectrumPlotSeries::GaussianSmoothing,
+            specforge::PlotSeriesColor::ExplicitColor({
+                .red = 0.55f,
+                .green = 0.66f,
+                .blue = 0.77f,
+                .alpha = 0.88f,
+            })));
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::SetPlotSeriesColor(
+            specforge::SpectrumPlotSeries::MedianSmoothing,
+            specforge::PlotSeriesColor::Auto()));
+
+    const specforge::SpectrumPlotColors expected =
+        session.View().plot_colors;
+    Require(
+        expected.raw_spectrum == colors.raw_spectrum &&
+            expected.gaussian_smoothing.mode() ==
+                specforge::PlotSeriesColorMode::ExplicitColor &&
+            expected.median_smoothing.mode() ==
+                specforge::PlotSeriesColorMode::Auto,
+        "series color commands should target the requested raw or smoothing curve without index mapping");
+
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ResetSmoothing());
+    session.Submit(
+        specforge::SpectrumViewSessionCommand::ApplySnapshotChange(
+            specforge::SourceCollectionSnapshotChangeReason::
+                SourceCollectionChanged));
+    Require(
+        session.View().plot_colors == expected,
+        "smoothing resets and source changes should preserve global curve color preferences");
 }
 
 void TestSpectrumViewSessionCapturesAndRestoresLockedLimits()
@@ -1080,6 +1240,8 @@ int main()
 {
     TestViewportTransitionPolicyUsesChangeReason();
     TestLockedViewportStateCacheRoundTripsAndClears();
+    TestSpectrumColorCacheSupportsLegacyAndDamagedEntries();
+    TestSpectrumViewSessionOwnsCustomCurveColors();
     TestSpectrumViewSessionCapturesAndRestoresLockedLimits();
     TestIndependentSpectrumViewsDoNotShareViewportLock();
     TestSourceRosterClassifiesSnapshotChanges();

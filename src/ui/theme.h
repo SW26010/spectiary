@@ -72,8 +72,6 @@ struct SemanticPalette {
     ImVec4 spectral_molecule{};
     ImVec4 spectral_heavy_element{};
     ImVec4 spectral_default{};
-    ImVec4 smoothing_gaussian{};
-    ImVec4 smoothing_median{};
 };
 
 struct ThemeDescriptor {

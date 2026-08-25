@@ -916,7 +916,7 @@ std::string ShellLocalStateFlushResult::FailureMessage(
         append_area(LocalUserStateArea::SampleWorkflow);
     }
     if (!spectrum_view_saved) {
-        append_area(LocalUserStateArea::SpectrumViewport);
+        append_area(LocalUserStateArea::SpectrumView);
     }
     if (!spectral_lines_saved) {
         append_area(LocalUserStateArea::SpectralLines);
@@ -956,6 +956,9 @@ ShellUi::ShellUi(
               startup.runtime_paths())),
       spectrum_view_state_path_(
           startup.runtime_paths().spectrum_view_state_path),
+      spectrum_view_state_persistence_(
+          std::chrono::milliseconds(250),
+          std::chrono::seconds(1)),
       touchpad_gestures_(touchpad_gestures)
 {
     SpectrumViewStateCacheLoadResult spectrum_view_state =
@@ -967,6 +970,9 @@ ShellUi::ShellUi(
             std::move(
                 spectrum_view_state.diagnostic_detail));
     }
+    spectrum_view_session_.Submit(
+        SpectrumViewSessionCommand::SetPlotColors(
+            spectrum_view_state.state.plot_colors));
     if (spectrum_view_state.state.locked) {
         startup_spectrum_view_state_ =
             std::move(spectrum_view_state.state);
@@ -1004,6 +1010,9 @@ ShellUi::ShellUi(
           SettingsPanelEnvironment{}),
       application_settings_(
           ApplicationSettingsStorage{.persistent = false}),
+      spectrum_view_state_persistence_(
+          std::chrono::milliseconds(250),
+          std::chrono::seconds(1)),
       persist_local_state_(false)
 {
     BindSourceCollectionActivationPresentationLifecycle(
@@ -1032,6 +1041,40 @@ ShellUi::~ShellUi()
     }
 }
 
+SpectrumViewStateCache
+ShellUi::CurrentSpectrumViewStateCache() const
+{
+    SpectrumViewStateCache state;
+    state.plot_colors =
+        spectrum_view_session_.View().plot_colors;
+    const std::optional<PlotViewLimits> locked_limits =
+        spectrum_view_session_.LockedViewportLimits();
+    const std::optional<std::string>
+        source_collection_identity =
+            session_.CurrentSourceCollectionIdentity();
+    if (locked_limits && source_collection_identity) {
+        state.locked = true;
+        state.source_collection_identity =
+            *source_collection_identity;
+        state.limits = *locked_limits;
+    }
+    return state;
+}
+
+LocalUserStatePersistenceLifecycle::SaveResult
+ShellUi::SaveSpectrumViewState()
+{
+    std::string error;
+    const bool saved = SaveSpectrumViewStateCache(
+        spectrum_view_state_path_,
+        CurrentSpectrumViewStateCache(),
+        &error);
+    return {
+        .saved = saved,
+        .error = std::move(error),
+    };
+}
+
 ShellLocalStateFlushResult ShellUi::FlushLocalState()
 {
     if (local_state_flush_result_) {
@@ -1044,33 +1087,11 @@ ShellLocalStateFlushResult ShellUi::FlushLocalState()
             application_settings_.Flush();
         result.source_collection =
             session_.FlushStateCachesWithStatus();
-        SpectrumViewStateCache spectrum_view_state;
-        const std::optional<PlotViewLimits> locked_limits =
-            spectrum_view_session_.LockedViewportLimits();
-        const std::optional<std::string>
-            source_collection_identity =
-                session_.CurrentSourceCollectionIdentity();
-        if (locked_limits && source_collection_identity) {
-            spectrum_view_state.locked = true;
-            spectrum_view_state.source_collection_identity =
-                *source_collection_identity;
-            spectrum_view_state.limits = *locked_limits;
-        }
         spectrum_view_state_persistence_.MarkDirty();
         result.spectrum_view_saved =
             spectrum_view_state_persistence_.Flush(
-                [this, &spectrum_view_state]() {
-                    std::string error;
-                    const bool saved =
-                        SaveSpectrumViewStateCache(
-                            spectrum_view_state_path_,
-                            spectrum_view_state,
-                            &error);
-                    return LocalUserStatePersistenceLifecycle::
-                        SaveResult{
-                            .saved = saved,
-                            .error = std::move(error),
-                        };
+                [this]() {
+                    return SaveSpectrumViewState();
                 }) !=
             LocalUserStatePersistenceLifecycle::
                 FlushOutcome::Failed;
@@ -1207,6 +1228,14 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
     HandleSessionAction(
         source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);
+    if (persist_local_state_) {
+        (void)spectrum_view_state_persistence_.
+            RunMaintenance(
+                now,
+                [this]() {
+                    return SaveSpectrumViewState();
+                });
+    }
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDeadline() const
@@ -1222,6 +1251,11 @@ std::optional<LocalUserStateSaveScheduler::TimePoint> ShellUi::NextMaintenanceDe
         source_activation_.
             NextMaintenanceDeadline());
     consider(spectral_lines_panel_.NextMaintenanceDeadline());
+    if (persist_local_state_) {
+        consider(
+            spectrum_view_state_persistence_.
+                NextMaintenanceDeadline());
+    }
     return deadline;
 }
 
@@ -2122,7 +2156,7 @@ LocalUserStateHealthView ShellUi::PersistenceHealth()
         ApplicationSetting::PanelVisibility);
     AppendLocalUserStateHealth(
         health,
-        LocalUserStateArea::SpectrumViewport,
+        LocalUserStateArea::SpectrumView,
         spectrum_view_state_persistence_.
             PersistenceStatus());
     AppendLocalUserStateHealth(
@@ -2659,6 +2693,77 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
     const float numeric_control_width =
         ImGui::CalcTextSize("000000").x +
         ImGui::GetStyle().FramePadding.x * 2.0f;
+    const auto render_color_editor =
+        [this, language, &view, numeric_control_width](
+            SpectrumPlotSeries series,
+            const char* color_control_id,
+            const char* reset_control_id) {
+            PlotSeriesColor selection =
+                SpectrumSeriesColor(
+                    view.plot_colors,
+                    series);
+            const ImVec4 resolved =
+                spectrum_view_session_.ResolveSeriesColor(
+                    series,
+                    ActiveSemanticPalette());
+            float rgba[4]{
+                resolved.x,
+                resolved.y,
+                resolved.z,
+                resolved.w,
+            };
+
+            ImGui::Indent();
+            ImGui::SetNextItemWidth(
+                numeric_control_width);
+            const std::string color_label =
+                StableUiLabel(
+                    language,
+                    UiTextId::CurveColor,
+                    color_control_id);
+            if (ImGui::ColorEdit4(
+                    color_label.c_str(),
+                    rgba,
+                    ImGuiColorEditFlags_NoInputs |
+                        ImGuiColorEditFlags_AlphaBar |
+                        ImGuiColorEditFlags_AlphaPreviewHalf)) {
+                selection =
+                    PlotSeriesColor::ExplicitColor({
+                        .red = rgba[0],
+                        .green = rgba[1],
+                        .blue = rgba[2],
+                        .alpha = rgba[3],
+                    });
+                spectrum_view_session_.Submit(
+                    SpectrumViewSessionCommand::
+                        SetPlotSeriesColor(
+                            series,
+                            selection));
+                spectrum_view_state_persistence_.
+                    MarkDirty();
+            }
+            ImGui::SameLine();
+            const bool automatic =
+                selection.mode() ==
+                PlotSeriesColorMode::Auto;
+            ImGui::BeginDisabled(automatic);
+            const std::string reset_label =
+                StableUiLabel(
+                    language,
+                    UiTextId::ResetColorToAuto,
+                    reset_control_id);
+            if (ImGui::Button(reset_label.c_str())) {
+                spectrum_view_session_.Submit(
+                    SpectrumViewSessionCommand::
+                        SetPlotSeriesColor(
+                            series,
+                            PlotSeriesColor::Auto()));
+                spectrum_view_state_persistence_.
+                    MarkDirty();
+            }
+            ImGui::EndDisabled();
+            ImGui::Unindent();
+        };
 
     bool show_raw_curve = view.show_raw_curve;
     const std::string show_raw_label = StableUiLabel(
@@ -2679,6 +2784,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
         spectrum_view_session_.Submit(
             SpectrumViewSessionCommand::SetShowPoints(show_points));
     }
+    render_color_editor(
+        SpectrumPlotSeries::RawSpectrum,
+        "SpecForgeRawSpectrumColor",
+        "SpecForgeRawSpectrumColorReset");
 
     bool show_gaussian_smoothed = view.show_gaussian_smoothed;
     const std::string show_gaussian_label = StableUiLabel(
@@ -2721,6 +2830,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
             static_cast<int>(hint.size()),
             hint.data());
     }
+    render_color_editor(
+        SpectrumPlotSeries::GaussianSmoothing,
+        "SpecForgeGaussianSmoothingColor",
+        "SpecForgeGaussianSmoothingColorReset");
 
     bool show_median_smoothed = view.show_median_smoothed;
     const std::string show_median_label = StableUiLabel(
@@ -2797,6 +2910,10 @@ void ShellUi::RenderSmoothingPanel(bool panel_open)
             static_cast<int>(hint.size()),
             hint.data());
     }
+    render_color_editor(
+        SpectrumPlotSeries::MedianSmoothing,
+        "SpecForgeMedianSmoothingColor",
+        "SpecForgeMedianSmoothingColorReset");
 
     ImGui::End();
     SetPanelVisibility(

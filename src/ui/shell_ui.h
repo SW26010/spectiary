@@ -404,6 +404,10 @@ private:
     void BeginDeferredSourceRestore();
     void RestoreDeferredSpectrumViewport(
         std::optional<std::string> source_collection_identity);
+    [[nodiscard]] SpectrumViewStateCache
+    CurrentSpectrumViewStateCache() const;
+    [[nodiscard]] LocalUserStatePersistenceLifecycle::
+        SaveResult SaveSpectrumViewState();
     void RecordSpectrumDrawSubmission(
         std::uint64_t frame_index,
         unsigned int viewport_id,

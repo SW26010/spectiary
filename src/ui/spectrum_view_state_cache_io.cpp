@@ -19,7 +19,22 @@ namespace {
 
 constexpr const char* kStateFormatKind =
     "specforge.spectrum_view.state";
-constexpr int kStateSchemaVersion = 1;
+constexpr int kStateSchemaVersion = 2;
+constexpr std::string_view kSeriesColorsMember =
+    "series_colors";
+constexpr std::string_view kAutoColorMode = "auto";
+constexpr std::string_view kExplicitColorMode =
+    "explicit-color";
+
+void AppendWarning(
+    std::string& warning,
+    std::string_view message)
+{
+    if (!warning.empty()) {
+        warning += ' ';
+    }
+    warning += message;
+}
 
 bool LimitsAreUsable(const PlotViewLimits& limits)
 {
@@ -72,6 +87,129 @@ std::optional<std::string> EncodeFiniteDouble(double value)
     return std::string(buffer.data(), encoded.ptr);
 }
 
+bool ColorChannelIsUsable(double value)
+{
+    return std::isfinite(value) && value >= 0.0 &&
+           value <= 1.0;
+}
+
+std::optional<JsonValue> EncodePlotSeriesColor(
+    const PlotSeriesColor& selection)
+{
+    if (selection.mode() ==
+        PlotSeriesColorMode::Auto) {
+        return JsonObjectValue({
+            {"mode", JsonStringValue(kAutoColorMode)},
+        });
+    }
+
+    const RgbaColor& color =
+        *selection.explicit_color();
+    if (!ColorChannelIsUsable(color.red) ||
+        !ColorChannelIsUsable(color.green) ||
+        !ColorChannelIsUsable(color.blue) ||
+        !ColorChannelIsUsable(color.alpha)) {
+        return std::nullopt;
+    }
+    const std::optional<std::string> red =
+        EncodeFiniteDouble(color.red);
+    const std::optional<std::string> green =
+        EncodeFiniteDouble(color.green);
+    const std::optional<std::string> blue =
+        EncodeFiniteDouble(color.blue);
+    const std::optional<std::string> alpha =
+        EncodeFiniteDouble(color.alpha);
+    if (!red || !green || !blue || !alpha) {
+        return std::nullopt;
+    }
+    return JsonObjectValue({
+        {"mode", JsonStringValue(kExplicitColorMode)},
+        {"red", JsonStringValue(*red)},
+        {"green", JsonStringValue(*green)},
+        {"blue", JsonStringValue(*blue)},
+        {"alpha", JsonStringValue(*alpha)},
+    });
+}
+
+PlotSeriesColor ParsePlotSeriesColor(
+    const JsonValue& colors,
+    std::string_view stable_series_id,
+    std::string& warning)
+{
+    const JsonValue* encoded =
+        JsonObjectMember(colors, stable_series_id);
+    const std::optional<std::string> mode = encoded
+        ? ReadJsonStringMember(*encoded, "mode")
+        : std::nullopt;
+    if (!encoded || encoded->kind != JsonValue::Kind::Object ||
+        !mode) {
+        AppendWarning(
+            warning,
+            "A saved spectrum series color was invalid; Auto was used for that curve.");
+        return PlotSeriesColor::Auto();
+    }
+    if (*mode == kAutoColorMode) {
+        return PlotSeriesColor::Auto();
+    }
+    if (*mode != kExplicitColorMode) {
+        AppendWarning(
+            warning,
+            "A saved spectrum series color mode was invalid; Auto was used for that curve.");
+        return PlotSeriesColor::Auto();
+    }
+
+    const std::optional<double> red =
+        ParseFiniteDouble(*encoded, "red");
+    const std::optional<double> green =
+        ParseFiniteDouble(*encoded, "green");
+    const std::optional<double> blue =
+        ParseFiniteDouble(*encoded, "blue");
+    const std::optional<double> alpha =
+        ParseFiniteDouble(*encoded, "alpha");
+    if (!red || !green || !blue || !alpha ||
+        !ColorChannelIsUsable(*red) ||
+        !ColorChannelIsUsable(*green) ||
+        !ColorChannelIsUsable(*blue) ||
+        !ColorChannelIsUsable(*alpha)) {
+        AppendWarning(
+            warning,
+            "A saved explicit spectrum color had invalid RGBA channels; Auto was used for that curve.");
+        return PlotSeriesColor::Auto();
+    }
+    return PlotSeriesColor::ExplicitColor({
+        .red = static_cast<float>(*red),
+        .green = static_cast<float>(*green),
+        .blue = static_cast<float>(*blue),
+        .alpha = static_cast<float>(*alpha),
+    });
+}
+
+std::optional<JsonValue> EncodeSpectrumPlotColors(
+    const SpectrumPlotColors& colors)
+{
+    std::optional<JsonValue> raw =
+        EncodePlotSeriesColor(colors.raw_spectrum);
+    std::optional<JsonValue> gaussian =
+        EncodePlotSeriesColor(colors.gaussian_smoothing);
+    std::optional<JsonValue> median =
+        EncodePlotSeriesColor(colors.median_smoothing);
+    if (!raw || !gaussian || !median) {
+        return std::nullopt;
+    }
+
+    JsonValue encoded = JsonObjectValue();
+    encoded.object.emplace(
+        std::string(kRawSpectrumPlotSeriesId),
+        std::move(*raw));
+    encoded.object.emplace(
+        std::string(kGaussianSmoothingPlotSeriesId),
+        std::move(*gaussian));
+    encoded.object.emplace(
+        std::string(kMedianSmoothingPlotSeriesId),
+        std::move(*median));
+    return encoded;
+}
+
 }  // namespace
 
 std::filesystem::path DefaultSpectrumViewStateCachePath()
@@ -88,7 +226,7 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
         LoadVersionedJsonCacheFile(
             path,
             kStateFormatKind,
-            {kStateSchemaVersion},
+            {1, kStateSchemaVersion},
             "spectrum view state cache");
     loaded.warning = std::move(result.warning);
     loaded.diagnostic_detail =
@@ -98,12 +236,38 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
     }
 
     const JsonValue& root = result.document->root;
+    const JsonValue* series_colors =
+        JsonObjectMember(root, kSeriesColorsMember);
+    if (series_colors != nullptr &&
+        series_colors->kind == JsonValue::Kind::Object) {
+        loaded.state.plot_colors.raw_spectrum =
+            ParsePlotSeriesColor(
+                *series_colors,
+                kRawSpectrumPlotSeriesId,
+                loaded.warning);
+        loaded.state.plot_colors.gaussian_smoothing =
+            ParsePlotSeriesColor(
+                *series_colors,
+                kGaussianSmoothingPlotSeriesId,
+                loaded.warning);
+        loaded.state.plot_colors.median_smoothing =
+            ParsePlotSeriesColor(
+                *series_colors,
+                kMedianSmoothingPlotSeriesId,
+                loaded.warning);
+    } else if (result.document->schema_version >= 2) {
+        AppendWarning(
+            loaded.warning,
+            "Saved spectrum series colors were invalid; Auto colors were used.");
+    }
+
     const JsonValue* locked =
         JsonObjectMember(root, "locked");
     if (locked == nullptr ||
         locked->kind != JsonValue::Kind::Bool) {
-        loaded.warning =
-            "Spectrum view state cache member 'locked' must be boolean; automatic range was used.";
+        AppendWarning(
+            loaded.warning,
+            "Spectrum view state cache member 'locked' must be boolean; automatic range was used.");
         return loaded;
     }
     if (!locked->bool_value) {
@@ -124,27 +288,28 @@ SpectrumViewStateCacheLoadResult LoadSpectrumViewStateCache(
         ParseFiniteDouble(root, "y_max");
     if (!identity || identity->empty() || !x_min ||
         !x_max || !y_min || !y_max) {
-        loaded.warning =
-            "Locked spectrum view state is incomplete; automatic range was used.";
+        AppendWarning(
+            loaded.warning,
+            "Locked spectrum view state is incomplete; automatic range was used.");
         return loaded;
     }
 
-    SpectrumViewStateCache restored{
-        .locked = true,
-        .source_collection_identity = *identity,
-        .limits = {
-            .x_min = *x_min,
-            .x_max = *x_max,
-            .y_min = *y_min,
-            .y_max = *y_max,
-        },
+    const PlotViewLimits restored_limits{
+        .x_min = *x_min,
+        .x_max = *x_max,
+        .y_min = *y_min,
+        .y_max = *y_max,
     };
-    if (!LimitsAreUsable(restored.limits)) {
-        loaded.warning =
-            "Locked spectrum view state has invalid axis ranges; automatic range was used.";
+    if (!LimitsAreUsable(restored_limits)) {
+        AppendWarning(
+            loaded.warning,
+            "Locked spectrum view state has invalid axis ranges; automatic range was used.");
         return loaded;
     }
-    loaded.state = std::move(restored);
+    loaded.state.locked = true;
+    loaded.state.source_collection_identity =
+        *identity;
+    loaded.state.limits = restored_limits;
     return loaded;
 }
 
@@ -161,19 +326,19 @@ bool SaveSpectrumViewStateCache(
         return false;
     }
 
-    if (!state.locked) {
-        return WriteVersionedJsonCacheDocument(
-            path,
-            kStateFormatKind,
-            kStateSchemaVersion,
-            "spectrum view state cache",
-            JsonObjectValue({
-                {"locked", JsonBoolValue(false)},
-            }),
-            error_message);
+    const std::optional<JsonValue> series_colors =
+        EncodeSpectrumPlotColors(state.plot_colors);
+    if (!series_colors) {
+        if (error_message != nullptr) {
+            *error_message =
+                "Spectrum series colors contain invalid RGBA channels.";
+        }
+        return false;
     }
-    if (state.source_collection_identity.empty() ||
-        !LimitsAreUsable(state.limits)) {
+
+    if (state.locked &&
+        (state.source_collection_identity.empty() ||
+         !LimitsAreUsable(state.limits))) {
         if (error_message != nullptr) {
             *error_message =
                 "Locked spectrum view state is incomplete or invalid.";
@@ -181,20 +346,34 @@ bool SaveSpectrumViewStateCache(
         return false;
     }
 
-    const std::optional<std::string> x_min =
-        EncodeFiniteDouble(state.limits.x_min);
-    const std::optional<std::string> x_max =
-        EncodeFiniteDouble(state.limits.x_max);
-    const std::optional<std::string> y_min =
-        EncodeFiniteDouble(state.limits.y_min);
-    const std::optional<std::string> y_max =
-        EncodeFiniteDouble(state.limits.y_max);
-    if (!x_min || !x_max || !y_min || !y_max) {
-        if (error_message != nullptr) {
-            *error_message =
-                "Spectrum view axis ranges could not be encoded.";
+    JsonValue body = JsonObjectValue({
+        {"locked", JsonBoolValue(state.locked)},
+        {std::string(kSeriesColorsMember), *series_colors},
+    });
+    if (state.locked) {
+        const std::optional<std::string> x_min =
+            EncodeFiniteDouble(state.limits.x_min);
+        const std::optional<std::string> x_max =
+            EncodeFiniteDouble(state.limits.x_max);
+        const std::optional<std::string> y_min =
+            EncodeFiniteDouble(state.limits.y_min);
+        const std::optional<std::string> y_max =
+            EncodeFiniteDouble(state.limits.y_max);
+        if (!x_min || !x_max || !y_min || !y_max) {
+            if (error_message != nullptr) {
+                *error_message =
+                    "Spectrum view axis ranges could not be encoded.";
+            }
+            return false;
         }
-        return false;
+        body.object.emplace(
+            "source_collection_identity",
+            JsonStringValue(
+                state.source_collection_identity));
+        body.object.emplace("x_min", JsonStringValue(*x_min));
+        body.object.emplace("x_max", JsonStringValue(*x_max));
+        body.object.emplace("y_min", JsonStringValue(*y_min));
+        body.object.emplace("y_max", JsonStringValue(*y_max));
     }
 
     return WriteVersionedJsonCacheDocument(
@@ -202,16 +381,7 @@ bool SaveSpectrumViewStateCache(
         kStateFormatKind,
         kStateSchemaVersion,
         "spectrum view state cache",
-        JsonObjectValue({
-            {"locked", JsonBoolValue(true)},
-            {"source_collection_identity",
-             JsonStringValue(
-                 state.source_collection_identity)},
-            {"x_min", JsonStringValue(*x_min)},
-            {"x_max", JsonStringValue(*x_max)},
-            {"y_min", JsonStringValue(*y_min)},
-            {"y_max", JsonStringValue(*y_max)},
-        }),
+        body,
         error_message);
 }
 

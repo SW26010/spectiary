@@ -99,9 +99,24 @@ void TestSpectrumPlotStyleDefaultsToAuto()
 {
     const specforge::SpectrumPlotStyle style;
     Require(
-        style.line_color ==
-            specforge::PlotSeriesColor::Auto(),
-        "the main spectrum curve should enter the shared series-color path in Auto mode by default");
+        style.colors.raw_spectrum ==
+                specforge::PlotSeriesColor::Auto() &&
+            style.colors.gaussian_smoothing ==
+                specforge::PlotSeriesColor::Auto() &&
+            style.colors.median_smoothing ==
+                specforge::PlotSeriesColor::Auto(),
+        "every built-in spectrum curve should enter the shared series-color path in Auto mode by default");
+    Require(
+        specforge::SpectrumSeriesStableId(
+            specforge::SpectrumPlotSeries::RawSpectrum) ==
+                specforge::kRawSpectrumPlotSeriesId &&
+            specforge::SpectrumSeriesStableId(
+                specforge::SpectrumPlotSeries::GaussianSmoothing) ==
+                specforge::kGaussianSmoothingPlotSeriesId &&
+            specforge::SpectrumSeriesStableId(
+                specforge::SpectrumPlotSeries::MedianSmoothing) ==
+                specforge::kMedianSmoothingPlotSeriesId,
+        "the spectrum series mapping should preserve stable identities across UI, persistence, and rendering");
 }
 
 void TestAssignmentsRemainStableAcrossFrames()

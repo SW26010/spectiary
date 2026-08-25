@@ -158,6 +158,26 @@ struct ShellUiTestAccess {
         return shell.spectrum_view_session_.View();
     }
 
+    static void SetSpectrumSeriesColor(
+        ShellUi& shell,
+        SpectrumPlotSeries series,
+        PlotSeriesColor color)
+    {
+        shell.spectrum_view_session_.Submit(
+            SpectrumViewSessionCommand::
+                SetPlotSeriesColor(
+                    series,
+                    std::move(color)));
+    }
+
+    static void MarkSpectrumViewStateDirtyAt(
+        ShellUi& shell,
+        LocalUserStateSaveScheduler::TimePoint now)
+    {
+        shell.spectrum_view_state_persistence_.
+            MarkDirtyAt(now);
+    }
+
     static std::optional<PlotViewLimits>
     LockedViewportLimits(const ShellUi& shell)
     {
@@ -957,6 +977,34 @@ void TestShellShutdownFlushPersistsLockedViewport()
     Require(
         Access::RestoreLockedViewport(*shell, expected),
         "viewport flush fixture should lock valid limits");
+    const specforge::PlotSeriesColor custom_raw_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.12f,
+            .green = 0.34f,
+            .blue = 0.56f,
+            .alpha = 0.78f,
+        });
+    Access::SetSpectrumSeriesColor(
+        *shell,
+        specforge::SpectrumPlotSeries::RawSpectrum,
+        custom_raw_color);
+    const auto color_changed_at =
+        specforge::LocalUserStateSaveScheduler::
+            Clock::now();
+    Access::MarkSpectrumViewStateDirtyAt(
+        *shell,
+        color_changed_at);
+    shell->RunMaintenance(
+        color_changed_at + 250ms);
+    const specforge::SpectrumViewStateCacheLoadResult
+        maintained =
+            specforge::LoadSpectrumViewStateCache(
+                state_path);
+    Require(
+        maintained.warning.empty() &&
+            maintained.state.plot_colors.raw_spectrum ==
+                custom_raw_color,
+        "curve color edits should debounce into the global spectrum view cache before shutdown");
     const specforge::ShellLocalStateFlushResult flushed =
         shell->FlushLocalState();
     const specforge::SpectrumViewStateCacheLoadResult loaded =
@@ -969,8 +1017,10 @@ void TestShellShutdownFlushPersistsLockedViewport()
             loaded.state.limits.x_min == expected.x_min &&
             loaded.state.limits.x_max == expected.x_max &&
             loaded.state.limits.y_min == expected.y_min &&
-            loaded.state.limits.y_max == expected.y_max,
-        "shutdown flush should persist the locked viewport for its active collection identity");
+            loaded.state.limits.y_max == expected.y_max &&
+            loaded.state.plot_colors.raw_spectrum ==
+                custom_raw_color,
+        "shutdown flush should persist the locked viewport and global curve colors through the same view-state owner");
     shell.reset();
 
     std::unique_ptr<specforge::ShellUi> unlocked =
@@ -3777,7 +3827,7 @@ void TestShellFlushResultNamesEveryFailedOwner()
                 std::string::npos &&
             message.find("Sample workflow") !=
                 std::string::npos &&
-            message.find("Spectrum viewport") !=
+            message.find("Spectrum view") !=
                 std::string::npos &&
             message.find("Spectral-line state") !=
                 std::string::npos,

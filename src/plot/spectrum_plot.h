@@ -19,11 +19,42 @@ struct SpectrumPlotProfileContext {
     std::uint64_t frame_index = 0;
 };
 
-struct SpectrumPlotStyle {
-    PlotSeriesColor line_color =
+enum class SpectrumPlotSeries {
+    RawSpectrum,
+    GaussianSmoothing,
+    MedianSmoothing,
+};
+
+struct SpectrumPlotColors {
+    PlotSeriesColor raw_spectrum =
         PlotSeriesColor::Auto();
+    PlotSeriesColor gaussian_smoothing =
+        PlotSeriesColor::Auto();
+    PlotSeriesColor median_smoothing =
+        PlotSeriesColor::Auto();
+
+    [[nodiscard]] bool operator==(
+        const SpectrumPlotColors&) const = default;
+};
+
+struct SpectrumPlotStyle {
+    SpectrumPlotColors colors;
     float line_weight = 1.4f;
 };
+
+[[nodiscard]] PlotSeriesColor& SpectrumSeriesColor(
+    SpectrumPlotColors& colors,
+    SpectrumPlotSeries series) noexcept;
+[[nodiscard]] const PlotSeriesColor& SpectrumSeriesColor(
+    const SpectrumPlotColors& colors,
+    SpectrumPlotSeries series) noexcept;
+[[nodiscard]] std::string_view SpectrumSeriesStableId(
+    SpectrumPlotSeries series) noexcept;
+[[nodiscard]] ImVec4 ResolveSpectrumSeriesColor(
+    const SpectrumPlotColors& colors,
+    SpectrumPlotSeries series,
+    const SemanticPalette& theme_palette,
+    StablePlotSeriesColorAssignments& assignments);
 
 struct SpectrumPlotOverlays {
     const SpectralLineMarker* const* spectral_lines = nullptr;

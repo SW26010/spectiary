@@ -16,6 +16,63 @@
 
 namespace specforge {
 
+PlotSeriesColor& SpectrumSeriesColor(
+    SpectrumPlotColors& colors,
+    SpectrumPlotSeries series) noexcept
+{
+    switch (series) {
+    case SpectrumPlotSeries::RawSpectrum:
+        return colors.raw_spectrum;
+    case SpectrumPlotSeries::GaussianSmoothing:
+        return colors.gaussian_smoothing;
+    case SpectrumPlotSeries::MedianSmoothing:
+        return colors.median_smoothing;
+    }
+    return colors.raw_spectrum;
+}
+
+const PlotSeriesColor& SpectrumSeriesColor(
+    const SpectrumPlotColors& colors,
+    SpectrumPlotSeries series) noexcept
+{
+    switch (series) {
+    case SpectrumPlotSeries::RawSpectrum:
+        return colors.raw_spectrum;
+    case SpectrumPlotSeries::GaussianSmoothing:
+        return colors.gaussian_smoothing;
+    case SpectrumPlotSeries::MedianSmoothing:
+        return colors.median_smoothing;
+    }
+    return colors.raw_spectrum;
+}
+
+std::string_view SpectrumSeriesStableId(
+    SpectrumPlotSeries series) noexcept
+{
+    switch (series) {
+    case SpectrumPlotSeries::RawSpectrum:
+        return kRawSpectrumPlotSeriesId;
+    case SpectrumPlotSeries::GaussianSmoothing:
+        return kGaussianSmoothingPlotSeriesId;
+    case SpectrumPlotSeries::MedianSmoothing:
+        return kMedianSmoothingPlotSeriesId;
+    }
+    return kRawSpectrumPlotSeriesId;
+}
+
+ImVec4 ResolveSpectrumSeriesColor(
+    const SpectrumPlotColors& colors,
+    SpectrumPlotSeries series,
+    const SemanticPalette& theme_palette,
+    StablePlotSeriesColorAssignments& assignments)
+{
+    return ResolvePlotSeriesColor(
+        SpectrumSeriesColor(colors, series),
+        theme_palette,
+        assignments,
+        SpectrumSeriesStableId(series));
+}
+
 ImVec4 ApplyRawSpectrumSmoothingEmphasis(
     const PlotSeriesColor& selection,
     const ImVec4& resolved_color) noexcept
@@ -1162,12 +1219,32 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         const SpectrumValueVector& y_values = snapshot->current_spectrum.y_values;
         const std::string& name = snapshot->current_spectrum.name;
 
+        // Reserve the built-in curves in a fixed order even when a curve is
+        // hidden. Visibility changes must not reassign another curve's Auto
+        // palette slot.
+        const SemanticPalette& palette =
+            ActiveSemanticPalette();
+        const ImVec4 raw_color =
+            ResolveSpectrumSeriesColor(
+                style.colors,
+                SpectrumPlotSeries::RawSpectrum,
+                palette,
+                state.series_color_assignments);
+        const ImVec4 gaussian_color =
+            ResolveSpectrumSeriesColor(
+                style.colors,
+                SpectrumPlotSeries::GaussianSmoothing,
+                palette,
+                state.series_color_assignments);
+        const ImVec4 median_color =
+            ResolveSpectrumSeriesColor(
+                style.colors,
+                SpectrumPlotSeries::MedianSmoothing,
+                palette,
+                state.series_color_assignments);
+
         ImPlotSpec base_spec;
-        base_spec.LineColor = ResolvePlotSeriesColor(
-            style.line_color,
-            ActiveSemanticPalette(),
-            state.series_color_assignments,
-            kRawSpectrumPlotSeriesId);
+        base_spec.LineColor = raw_color;
         base_spec.LineWeight = style.line_weight;
         base_spec.MarkerLineColor = base_spec.LineColor;
         base_spec.MarkerFillColor = base_spec.LineColor;
@@ -1194,7 +1271,7 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             if (smoothing_active) {
                 raw_spec.LineColor =
                     ApplyRawSpectrumSmoothingEmphasis(
-                        style.line_color,
+                        style.colors.raw_spectrum,
                         raw_spec.LineColor);
                 raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
             }
@@ -1245,13 +1322,13 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Gaussian,
                 "SpecForgeGaussianSmoothedSpectrum",
-                ActiveSemanticPalette().smoothing_gaussian);
+                gaussian_color);
         }
         if (MedianSmoothingActive(state)) {
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Median,
                 "SpecForgeMedianSmoothedSpectrum",
-                ActiveSemanticPalette().smoothing_median);
+                median_color);
         }
 
         const bool hovered = ImPlot::IsPlotHovered();
