@@ -42,6 +42,36 @@ std::string PathText(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
+std::optional<SourceCollectionSampleTransitionReason>
+PresentationReasonForNavigationRequest(
+    SampleNavigationRequestKind kind)
+{
+    switch (kind) {
+    case SampleNavigationRequestKind::Previous:
+        return SourceCollectionSampleTransitionReason::Previous;
+    case SampleNavigationRequestKind::Next:
+        return SourceCollectionSampleTransitionReason::Next;
+    case SampleNavigationRequestKind::LocateRow:
+        return SourceCollectionSampleTransitionReason::LocateRow;
+    case SampleNavigationRequestKind::LocateSequencePosition:
+        return SourceCollectionSampleTransitionReason::
+            LocateSequencePosition;
+    case SampleNavigationRequestKind::LocateSourceRowInSequence:
+        return SourceCollectionSampleTransitionReason::
+            LocateSourceRowInSequence;
+    case SampleNavigationRequestKind::LocateSampleName:
+    case SampleNavigationRequestKind::LocateSampleNameMatch:
+        return SourceCollectionSampleTransitionReason::LocateSampleName;
+    case SampleNavigationRequestKind::RestoreLabelUndoPosition:
+        return SourceCollectionSampleTransitionReason::Restore;
+    case SampleNavigationRequestKind::LabelAdvance:
+        // Labeling auto-advance is only presentation-valid when paired with
+        // the label-write outcome that requested it.
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 class SourceCollectionSessionStatePersistence {
@@ -550,6 +580,56 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
     SourceCollectionSessionIntent intent,
     NavigationTargetResolutionReport* target_resolution)
 {
+    const std::optional<std::size_t> presented_sample_before =
+        PresentedSampleIndex();
+    const std::optional<std::size_t> effective_sample_before =
+        EffectiveSampleNavigationIndex();
+    const std::optional<std::string> source_key_before =
+        roster_->current_source_key();
+    std::optional<SourceCollectionSampleTransitionReason>
+        requested_navigation_reason;
+    bool source_activation_intent = false;
+    bool navigation_reconciliation_intent = false;
+    switch (intent.kind) {
+    case SourceCollectionSessionIntentKind::SourceCollection:
+        source_activation_intent =
+            intent.source_collection.kind ==
+                SourceCollectionIntentKind::SwitchActive ||
+            intent.source_collection.kind ==
+                SourceCollectionIntentKind::Remove;
+        navigation_reconciliation_intent =
+            intent.source_collection.kind ==
+                SourceCollectionIntentKind::AddReadOnlyAnnotationResult ||
+            intent.source_collection.kind ==
+                SourceCollectionIntentKind::RemoveReadOnlyAnnotationResult;
+        break;
+    case SourceCollectionSessionIntentKind::SampleNavigation:
+        if (intent.sample_navigation.kind ==
+            SampleNavigationIntentKind::Move) {
+            requested_navigation_reason =
+                PresentationReasonForNavigationRequest(
+                    intent.sample_navigation.request.kind);
+        } else if (intent.sample_navigation.kind ==
+                   SampleNavigationIntentKind::
+                       CommitSampleNameSelection) {
+            requested_navigation_reason =
+                SourceCollectionSampleTransitionReason::
+                    LocateSampleName;
+        }
+        break;
+    case SourceCollectionSessionIntentKind::ActiveSampleWorkflow:
+        navigation_reconciliation_intent = true;
+        if (intent.active_sample_workflow.kind ==
+            ActiveSampleWorkflowIntentKind::UndoLastLabelWrite) {
+            requested_navigation_reason =
+                SourceCollectionSampleTransitionReason::Restore;
+        }
+        break;
+    case SourceCollectionSessionIntentKind::SampleFiltering:
+    case SourceCollectionSessionIntentKind::SampleSorting:
+        navigation_reconciliation_intent = true;
+        break;
+    }
     const NavigationLatencyTimePoint pending_activation_started_at =
         target_resolution != nullptr ? NavigationLatencyTrace::Now()
                                      : NavigationLatencyTimePoint{};
@@ -661,8 +741,91 @@ SourceCollectionSessionResult SourceCollectionSession::Submit(
         active_identity && !active_identity->id.empty()) {
         ++live_workflow_revisions_[active_identity->id];
     }
+    const std::optional<std::size_t> effective_sample_after =
+        EffectiveSampleNavigationIndex();
+    const std::optional<std::string> source_key_after =
+        roster_->current_source_key();
+    bool presentation_transition_recorded = false;
+    const bool explicit_navigation_selected_target =
+        requested_navigation_reason &&
+        *requested_navigation_reason !=
+            SourceCollectionSampleTransitionReason::Previous &&
+        *requested_navigation_reason !=
+            SourceCollectionSampleTransitionReason::Next;
+    if (result.label_write &&
+        result.label_write->write.changed &&
+        result.label_write->write.advance_requested &&
+        result.navigation.has_active_source &&
+        result.navigation.target_found &&
+        result.label_write->write.sample_index !=
+            result.navigation.current_index) {
+        const SampleLabelWriteResult& write =
+            result.label_write->write;
+        RecordSampleTransition(
+            SourceCollectionSampleTransitionReason::
+                LabelingAutoAdvance,
+            write.sample_index,
+            result.navigation.current_index,
+            write.current_code);
+        presentation_transition_recorded = true;
+    } else if (requested_navigation_reason &&
+               result.navigation.has_active_source &&
+               result.navigation.target_found &&
+               (effective_sample_after != effective_sample_before ||
+                explicit_navigation_selected_target)) {
+        if (presented_sample_before ==
+            result.navigation.current_index) {
+            presentation_transition_recorded =
+                sample_transition_.has_value();
+            sample_transition_.reset();
+        } else {
+            const bool already_recorded =
+                sample_transition_ &&
+                sample_transition_->reason ==
+                    *requested_navigation_reason &&
+                sample_transition_->from_sample_index ==
+                    presented_sample_before &&
+                sample_transition_->current_sample_index ==
+                    result.navigation.current_index &&
+                !sample_transition_->accepted_label_value;
+            if (!already_recorded) {
+                RecordSampleTransition(
+                    *requested_navigation_reason,
+                    presented_sample_before,
+                    result.navigation.current_index);
+                presentation_transition_recorded = true;
+            }
+        }
+    } else if (source_activation_intent &&
+               source_key_after != source_key_before) {
+        RecordSampleTransition(
+            deferred_restore_active_
+                ? SourceCollectionSampleTransitionReason::Restore
+                : SourceCollectionSampleTransitionReason::
+                      SourceActivation,
+            std::nullopt,
+            PresentedSampleIndex());
+        presentation_transition_recorded = true;
+    } else if (navigation_reconciliation_intent &&
+               result.action.navigation_inputs_changed) {
+        RecordSampleTransition(
+            SourceCollectionSampleTransitionReason::
+                NavigationInputReconciliation,
+            presented_sample_before,
+            effective_sample_after);
+        presentation_transition_recorded = true;
+    } else if (result.action.navigation_inputs_changed &&
+               effective_sample_after != effective_sample_before) {
+        RecordSampleTransition(
+            SourceCollectionSampleTransitionReason::
+                NavigationInputReconciliation,
+            presented_sample_before,
+            effective_sample_after);
+        presentation_transition_recorded = true;
+    }
     result.view_invalidated =
         result.view_invalidated ||
+        presentation_transition_recorded ||
         result.action.source_roster_changed ||
         result.action.snapshot_changed ||
         result.action.workflow_changed ||
@@ -734,6 +897,13 @@ const SourceCollectionSessionView& SourceCollectionSession::View()
     view.labeling = workflow_->LabelingView(view.current_sample_snapshot);
     view.filter = workflow_->BuildFilterView(snapshot);
     view.sorting = workflow_->BuildSortingView(snapshot);
+    if (sample_transition_ &&
+        (!sample_transition_->current_sample_index ||
+         (view.current_sample_snapshot &&
+          view.current_sample_snapshot->collection.current_index ==
+              *sample_transition_->current_sample_index))) {
+        view.sample_transition = sample_transition_;
+    }
     view.persistence = PersistenceHealth();
     session_view_cache_ =
         std::make_shared<SourceCollectionSessionView>(
@@ -1010,6 +1180,8 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         return result;
     }
     SpectrumSnapshotHandle previous_snapshot = roster_->snapshot();
+    const std::optional<std::size_t> previous_sample_index =
+        PresentedSampleIndex();
     std::optional<PendingSampleNavigation> pending_navigation =
         workflow_->pending_sample_navigation();
     const std::string prepared_path_key = SourcePathIdentityKey(path);
@@ -1113,6 +1285,15 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
                 SourceCollectionLoadErrorKind::
                     PreparedNavigationUnavailable;
         }
+        if (reconciled_index) {
+            RecordSampleTransition(
+                SourceCollectionSampleTransitionReason::
+                    NavigationInputReconciliation,
+                previous_sample_index,
+                reconciled_index);
+        } else {
+            sample_transition_.reset();
+        }
         result.view_invalidated = true;
         InvalidateView();
         retire_folder_listing_generation();
@@ -1185,6 +1366,19 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
         active_snapshot->collection.current_index != *active_index) {
         result.follow_up_spectrum_index = *active_index;
         roster_->RememberActiveSourceIndex(*active_index);
+    }
+    if (!completes_pending_navigation) {
+        const std::optional<std::size_t> activation_from_sample =
+            prepared_for_presented_source
+                ? previous_sample_index
+                : std::nullopt;
+        RecordSampleTransition(
+            deferred_restore_active_
+                ? SourceCollectionSampleTransitionReason::Restore
+                : SourceCollectionSampleTransitionReason::
+                      SourceActivation,
+            activation_from_sample,
+            active_index);
     }
     result.action.navigation_inputs_changed = true;
     result.loaded = true;
@@ -1268,17 +1462,21 @@ bool SourceCollectionSession::CancelPendingSampleNavigation(
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    sample_transition_.reset();
     InvalidateView();
     return true;
 }
 
 bool SourceCollectionSession::CancelActivePendingSampleNavigation()
 {
-    if (!workflow_->pending_sample_index()) {
+    const std::optional<std::size_t> pending_index =
+        workflow_->pending_sample_index();
+    if (!pending_index) {
         return false;
     }
     workflow_->CancelDeferredSampleNavigation();
     pending_background_spectrum_index_.reset();
+    sample_transition_.reset();
     InvalidateView();
     return true;
 }
@@ -1288,6 +1486,8 @@ SourceCollectionSession::RunMaintenance(
     LocalUserStateSaveScheduler::TimePoint now)
 {
     SourceCollectionSessionResult result;
+    const std::optional<std::size_t> presented_sample_before =
+        PresentedSampleIndex();
     const LocalUserStateHealthView persistence_before =
         PersistenceHealth();
     const std::optional<std::size_t>
@@ -1311,6 +1511,14 @@ SourceCollectionSession::RunMaintenance(
         result,
         pending_sample_index_before,
         pending_source_path_before);
+    if (result.action.navigation_inputs_changed) {
+        RecordSampleTransition(
+            SourceCollectionSampleTransitionReason::
+                NavigationInputReconciliation,
+            presented_sample_before,
+            EffectiveSampleNavigationIndex());
+        result.view_invalidated = true;
+    }
     if (result.view_invalidated) {
         InvalidateView();
     }
@@ -1491,6 +1699,32 @@ void SourceCollectionSession::MarkSourceSessionCacheDirty()
 void SourceCollectionSession::InvalidateView()
 {
     ++session_view_revision_;
+}
+
+std::optional<std::size_t>
+SourceCollectionSession::PresentedSampleIndex() const
+{
+    const SpectrumSnapshotHandle snapshot =
+        CurrentSampleSnapshot();
+    if (!snapshot) {
+        return std::nullopt;
+    }
+    return snapshot->collection.current_index;
+}
+
+void SourceCollectionSession::RecordSampleTransition(
+    SourceCollectionSampleTransitionReason reason,
+    std::optional<std::size_t> from_sample_index,
+    std::optional<std::size_t> current_sample_index,
+    std::optional<int> accepted_label_value)
+{
+    sample_transition_ =
+        SourceCollectionSampleTransitionView{
+            .reason = reason,
+            .from_sample_index = from_sample_index,
+            .current_sample_index = current_sample_index,
+            .accepted_label_value = accepted_label_value,
+        };
 }
 
 void SourceCollectionSession::AppendPendingBackgroundRetirement(

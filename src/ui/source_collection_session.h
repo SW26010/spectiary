@@ -366,6 +366,14 @@ private:
     void ApplyWorkflowTransitionOutcome(
         SourceCollectionSessionResult& result,
         SampleWorkflowTransitionOutcome outcome);
+    [[nodiscard]] std::optional<std::size_t>
+    PresentedSampleIndex() const;
+    void RecordSampleTransition(
+        SourceCollectionSampleTransitionReason reason,
+        std::optional<std::size_t> from_sample_index,
+        std::optional<std::size_t> current_sample_index,
+        std::optional<int> accepted_label_value =
+            std::nullopt);
     void FinalizePendingSourceFollowUp(
         SourceCollectionSessionResult& result,
         std::optional<std::size_t>
@@ -384,6 +392,8 @@ private:
     std::optional<std::size_t> pending_background_spectrum_index_;
     std::vector<BackgroundRetirementHandle> pending_background_retirement_;
     std::unordered_map<std::string, std::uint64_t> live_workflow_revisions_;
+    std::optional<SourceCollectionSampleTransitionView>
+        sample_transition_;
     std::shared_ptr<SourceCollectionSessionView> session_view_cache_;
     std::vector<BackgroundRetirementHandle>
         pending_session_view_retirement_;

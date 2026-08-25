@@ -234,6 +234,32 @@ struct SourceCollectionSampleSortingView {
     std::vector<SourceCollectionSampleSortSourceView> available_sources;
 };
 
+enum class SourceCollectionSampleTransitionReason {
+    Previous,
+    Next,
+    LabelingAutoAdvance,
+    LocateRow,
+    LocateSequencePosition,
+    LocateSourceRowInSequence,
+    LocateSampleName,
+    NavigationInputReconciliation,
+    SourceActivation,
+    Restore,
+};
+
+// Transient, read-only context for presenting the most recent effective sample
+// transition. Source-row indexes are explicit so presentation code never has to
+// infer the source sample from the current navigation position. When activation
+// changes the roster source key, from_sample_index is empty because that row
+// belongs to the previous source rather than the active view context.
+struct SourceCollectionSampleTransitionView {
+    SourceCollectionSampleTransitionReason reason =
+        SourceCollectionSampleTransitionReason::SourceActivation;
+    std::optional<std::size_t> from_sample_index;
+    std::optional<std::size_t> current_sample_index;
+    std::optional<int> accepted_label_value;
+};
+
 enum class SourceCollectionSourceState {
     Unavailable,
     Error,
@@ -284,6 +310,8 @@ struct SourceCollectionSessionView {
     SourceCollectionLabelingView labeling;
     SourceCollectionFilterView filter;
     SourceCollectionSampleSortingView sorting;
+    std::optional<SourceCollectionSampleTransitionView>
+        sample_transition;
     LocalUserStateHealthView persistence;
 };
 
