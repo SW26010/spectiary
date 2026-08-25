@@ -1,5 +1,6 @@
 #include "ui/spectral_lines_panel.h"
 #include "ui/spectral_lines_name_localization.h"
+#include "ui/theme.h"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -49,14 +50,16 @@ void RenderWrappedStatusText(const ImVec4& color, std::string_view text)
 
 ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
 {
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
     switch (severity) {
     case SpectrumDiagnosticSeverity::Error:
-        return ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        return palette.error;
     case SpectrumDiagnosticSeverity::Warning:
-        return ImVec4(0.95f, 0.74f, 0.30f, 1.0f);
+        return palette.warning;
     case SpectrumDiagnosticSeverity::Info:
     default:
-        return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
+        return palette.muted;
     }
 }
 
@@ -237,7 +240,7 @@ void SpectralLinesPanelUi::Render(
             state.persistence.save_diagnostic_detail);
     } else if (state.persistence.recovered) {
         RenderWrappedStatusText(
-            ImVec4(0.30f, 0.69f, 0.31f, 1.0f),
+            ActiveSemanticPalette().success,
             UiText(
                 language,
                 UiTextId::SpectralLinePersistenceRecovered));

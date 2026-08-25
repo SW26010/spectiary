@@ -22,6 +22,8 @@ inline constexpr std::string_view
     kAutomationUiLanguageSettingName = "ui.language";
 inline constexpr std::string_view
     kAutomationUiScaleSettingName = "ui.scale";
+inline constexpr std::string_view
+    kAutomationUiThemeSettingName = "ui.theme";
 
 enum class AutomationCommandKind {
     StateGet,

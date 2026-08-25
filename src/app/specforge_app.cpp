@@ -24,7 +24,9 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -53,9 +55,71 @@ constexpr auto kAutomationIdlePollInterval =
 constexpr UINT_PTR kPresentationRefreshTimer = 0x5350U;
 constexpr UINT kPresentationRefreshDelayMs = 500U;
 constexpr float kDefaultWindowsDpi = 96.0f;
-constexpr std::array<float, 4> kClearColor = {0.08f, 0.09f, 0.10f, 1.0f};
 constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
 constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
+
+struct AutomationSystemThemeFixtureResult {
+    bool present = false;
+    std::optional<ThemeId> theme;
+};
+
+AutomationSystemThemeFixtureResult
+ReadAutomationSystemThemeFixture(
+    const std::optional<AutomationStartupConfiguration>&
+        automation)
+{
+    if (!automation) {
+        return {};
+    }
+
+    const std::filesystem::path fixture_path =
+        automation->state_root /
+        kAutomationSystemThemeTestFixtureName;
+    std::error_code exists_error;
+    if (!std::filesystem::is_regular_file(
+            fixture_path,
+            exists_error) ||
+        exists_error) {
+        return {};
+    }
+
+    std::ifstream fixture(
+        fixture_path,
+        std::ios::binary);
+    if (!fixture) {
+        return {.present = true};
+    }
+    std::string value{
+        std::istreambuf_iterator<char>(fixture),
+        std::istreambuf_iterator<char>()};
+    while (!value.empty() &&
+           (value.back() == '\r' ||
+            value.back() == '\n' ||
+            value.back() == ' ' ||
+            value.back() == '\t')) {
+        value.pop_back();
+    }
+    const std::size_t first =
+        value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return {.present = true};
+    }
+    value.erase(0, first);
+
+    if (value == kBuiltInDarkThemeStableId) {
+        return {
+            .present = true,
+            .theme = BuiltInDarkThemeId(),
+        };
+    }
+    if (value == kBuiltInLightThemeStableId) {
+        return {
+            .present = true,
+            .theme = BuiltInLightThemeId(),
+        };
+    }
+    return {.present = true};
+}
 
 std::string HResultMessage(std::string_view action, HRESULT result)
 {
@@ -242,17 +306,12 @@ std::string_view MetadataValue(const std::vector<SpectrumMetadataEntry>& metadat
     return {};
 }
 
-void ApplyTitleBarTheme(HWND hwnd)
+void ApplyTitleBarTheme(
+    HWND hwnd,
+    ThemeColorScheme color_scheme)
 {
-    const ThemeId resolved_theme = ResolveThemeId(
-        ThemeSelection::FollowSystem(),
-        ReadWindowsSystemTheme());
-    const ThemeDescriptor* descriptor =
-        FindBuiltInThemeDescriptor(resolved_theme);
     const BOOL use_dark_title_bar =
-        descriptor == nullptr ||
-                descriptor->color_scheme ==
-                    ThemeColorScheme::Dark
+        color_scheme == ThemeColorScheme::Dark
             ? TRUE
             : FALSE;
     HRESULT result = DwmSetWindowAttribute(
@@ -554,7 +613,7 @@ void SpecForgeApp::Initialize(
     ui_.RegisterSourceLoadCompletionReadyCallback([completion_window = window_.hwnd()]() noexcept {
         PostSourceLoadCompletionReady(completion_window);
     });
-    ApplyTitleBarTheme(window_.hwnd());
+    (void)ResolveAndApplyTheme(true);
 
     const HRESULT renderer_result = renderer_.Initialize(
         window_.hwnd(),
@@ -641,11 +700,15 @@ void SpecForgeApp::InitializeUiBackends()
     const std::optional<std::filesystem::path>& ui_font_path =
         ui_fonts.cjk_font ? ui_fonts.cjk_font : ui_fonts.scientific_font;
 
-    ImGui::StyleColorsDark();
+    ApplyImGuiThemeColors(
+        ResolvedThemeDescriptor(),
+        ImGui::GetStyle());
+    ApplyImPlotThemeColors(
+        ResolvedThemeDescriptor(),
+        ImPlot::GetStyle());
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         ImGuiStyle& style = ImGui::GetStyle();
         style.WindowRounding = 0.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
     base_imgui_style_ = ImGui::GetStyle();
     ApplyUiScale(
@@ -687,6 +750,14 @@ void SpecForgeApp::InitializeUiBackends()
         throw std::runtime_error("Failed to initialize the Dear ImGui DirectX 11 backend.");
     }
 
+    viewport_renderer_.SetClearColor(
+        ResolvedThemeDescriptor().clear_color);
+    viewport_renderer_.SetNativeWindowThemeCallback(
+        [this](HWND hwnd) {
+            ApplyTitleBarTheme(
+                hwnd,
+                ResolvedThemeDescriptor().color_scheme);
+        });
     if (!viewport_renderer_.Initialize(renderer_.factory(), renderer_.device(), renderer_.context())) {
         ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
@@ -900,7 +971,8 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
 
     {
         ProfileTimer timer(profile_, "render_pass", frame_index_);
-        const HRESULT begin_result = renderer_.BeginFrame(kClearColor);
+        const HRESULT begin_result = renderer_.BeginFrame(
+            ResolvedThemeDescriptor().clear_color);
         if (begin_result == DXGI_ERROR_WAS_STILL_DRAWING) {
             LogPresentationUpdates();
             return RenderFrameOutcome::AcquireRetry;
@@ -982,6 +1054,8 @@ RenderFrameOutcome SpecForgeApp::RenderFrame()
         latency_presentations,
         viewport_states);
     LogPresentationUpdates();
+    ApplyPendingApplicationSettings(
+        "user_scale_changed");
     return present_result == S_FALSE
                ? RenderFrameOutcome::PresentRetry
                : RenderFrameOutcome::Presented;
@@ -1381,7 +1455,9 @@ void SpecForgeApp::ExitFullscreen()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-    ApplyTitleBarTheme(hwnd);
+    ApplyTitleBarTheme(
+        hwnd,
+        ResolvedThemeDescriptor().color_scheme);
     profile_.WriteEvent("fullscreen", {ProfileSink::Field::Bool("enabled", false)});
     LogDisplayEnvironment("fullscreen_exit");
 }
@@ -2017,6 +2093,10 @@ void SpecForgeApp::ApplyPendingApplicationSettings(
     bool request_frame)
 {
     bool applied = false;
+    if (ui_.TakeAppliedThemeSelection()) {
+        (void)ResolveAndApplyTheme(true);
+        applied = true;
+    }
     if (const std::optional<int> percentage =
             ui_.TakeAppliedUiScalePercentage()) {
         ApplyUiScale(
@@ -2032,6 +2112,81 @@ void SpecForgeApp::ApplyPendingApplicationSettings(
     if (applied && request_frame) {
         render_wake_scheduler_.RequestFrame();
     }
+}
+
+bool SpecForgeApp::ResolveAndApplyTheme(
+    bool refresh_native_windows)
+{
+    const ThemeSelection selection =
+        ui_.theme_selection();
+    std::optional<ThemeId> system_theme;
+    if (selection.policy ==
+        ThemeSelectionPolicy::FollowSystem) {
+        const AutomationSystemThemeFixtureResult
+            fixture =
+                ReadAutomationSystemThemeFixture(
+                    automation_configuration_);
+        system_theme = fixture.present
+            ? fixture.theme
+            : ReadWindowsSystemTheme();
+    }
+    const ThemeDescriptor& next_theme =
+        ResolveBuiltInThemeDescriptor(
+            selection,
+            system_theme);
+    const bool changed =
+        !theme_initialized_ ||
+        next_theme.id != resolved_theme_id_;
+    resolved_theme_id_ = next_theme.id;
+    theme_initialized_ = true;
+
+    const ThemeDescriptor& theme =
+        ResolvedThemeDescriptor();
+    if (changed) {
+        ActivateTheme(theme);
+        ui_.RefreshThemeColors();
+        viewport_renderer_.SetClearColor(
+            theme.clear_color);
+        if (ImGui::GetCurrentContext() != nullptr) {
+            ApplyImGuiThemeColors(
+                theme,
+                ImGui::GetStyle());
+            if (ImPlot::GetCurrentContext() != nullptr) {
+                ApplyImPlotThemeColors(
+                    theme,
+                    ImPlot::GetStyle());
+            }
+            if (imgui_initialized_) {
+                ApplyImGuiThemeColors(
+                    theme,
+                    base_imgui_style_);
+            }
+        }
+    }
+
+    if ((changed || refresh_native_windows) &&
+        window_.hwnd() != nullptr) {
+        ApplyTitleBarTheme(
+            window_.hwnd(),
+            theme.color_scheme);
+    }
+    if ((changed || refresh_native_windows) &&
+        imgui_initialized_) {
+        viewport_renderer_.RefreshNativeWindowThemes();
+    }
+    return changed;
+}
+
+const ThemeDescriptor&
+SpecForgeApp::ResolvedThemeDescriptor() const
+{
+    if (const ThemeDescriptor* descriptor =
+            FindBuiltInThemeDescriptor(
+                resolved_theme_id_)) {
+        return *descriptor;
+    }
+    return *FindBuiltInThemeDescriptor(
+        BuiltInDarkThemeId());
 }
 
 void SpecForgeApp::ServiceAutomationSettingGet(
@@ -2071,6 +2226,16 @@ void SpecForgeApp::ServiceAutomationSettingGet(
                 ui_.ui_scale_percentage()));
         return;
     }
+    if (parameters->name ==
+        kAutomationUiThemeSettingName) {
+        automation_server_->Complete(
+            command,
+            AutomationStringSettingResult(
+                parameters->name,
+                ThemeSelectionStableValue(
+                    ui_.theme_selection())));
+        return;
+    }
     automation_server_->Fail(
         command,
         "unsupported_setting",
@@ -2094,12 +2259,15 @@ void SpecForgeApp::ServiceAutomationSettingSet(
     enum class SupportedSetting {
         Language,
         UiScale,
+        Theme,
     };
     SupportedSetting setting =
         SupportedSetting::Language;
     UiLanguage requested_language =
         UiLanguage::Count;
     int requested_scale = 0;
+    ThemeSelection requested_theme =
+        ThemeSelection::FollowSystem();
     if (parameters->name ==
         kAutomationUiLanguageSettingName) {
         setting = SupportedSetting::Language;
@@ -2142,6 +2310,25 @@ void SpecForgeApp::ServiceAutomationSettingSet(
         }
         requested_scale =
             static_cast<int>(*value);
+    } else if (
+        parameters->name ==
+        kAutomationUiThemeSettingName) {
+        setting = SupportedSetting::Theme;
+        const auto* value =
+            std::get_if<std::string>(
+                &parameters->value);
+        if (value == nullptr) {
+            automation_server_->Fail(
+                command,
+                "setting_type_mismatch",
+                "ui.theme requires a string value.");
+            return;
+        }
+        requested_theme =
+            ParseThemeSelectionStableValue(*value)
+                .value_or(
+                    ThemeSelection::Explicit(
+                        ThemeId(*value)));
     } else {
         automation_server_->Fail(
             command,
@@ -2159,12 +2346,23 @@ void SpecForgeApp::ServiceAutomationSettingSet(
         ui_.ui_language();
     const int previous_scale =
         ui_.ui_scale_percentage();
-    const ApplicationSettingsResult result =
-        setting == SupportedSetting::Language
-        ? ui_.SetUiLanguageForAutomation(
-              requested_language)
-        : ui_.SetUiScaleForAutomation(
-              requested_scale);
+    const ThemeSelection previous_theme =
+        ui_.theme_selection();
+    ApplicationSettingsResult result;
+    switch (setting) {
+    case SupportedSetting::Language:
+        result = ui_.SetUiLanguageForAutomation(
+            requested_language);
+        break;
+    case SupportedSetting::UiScale:
+        result = ui_.SetUiScaleForAutomation(
+            requested_scale);
+        break;
+    case SupportedSetting::Theme:
+        result = ui_.SetThemeSelectionForAutomation(
+            requested_theme);
+        break;
+    }
     if (result.outcome ==
         ApplicationSettingsOutcome::Rejected) {
         automation_server_->Fail(
@@ -2194,13 +2392,20 @@ void SpecForgeApp::ServiceAutomationSettingSet(
             parameters->name,
             UiLanguageSettingValue(current),
             current != previous_language);
-    } else {
+    } else if (setting == SupportedSetting::UiScale) {
         const int current =
             ui_.ui_scale_percentage();
         body = AutomationIntegerSettingResult(
             parameters->name,
             current,
             current != previous_scale);
+    } else {
+        const ThemeSelection current =
+            ui_.theme_selection();
+        body = AutomationStringSettingResult(
+            parameters->name,
+            ThemeSelectionStableValue(current),
+            current != previous_theme);
     }
     automation_server_->Complete(
         command,
@@ -4304,11 +4509,12 @@ LRESULT SpecForgeApp::HandleWindowMessage(HWND hwnd, UINT message, WPARAM wparam
         break;
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
-        ui_.RefreshSystemColors();
-        ApplyTitleBarTheme(hwnd);
+        if (ResolveAndApplyTheme(true)) {
+            render_wake_scheduler_.RequestFrame();
+        }
         return 0;
     case WM_DWMCOLORIZATIONCOLORCHANGED:
-        ui_.RefreshSystemColors();
+        (void)ResolveAndApplyTheme(true);
         return 0;
     case WM_DISPLAYCHANGE:
         LogDisplayEnvironment("display_change");

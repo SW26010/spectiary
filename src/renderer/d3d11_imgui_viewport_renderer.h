@@ -6,7 +6,9 @@
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <chrono>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +49,11 @@ public:
     bool Initialize(IDXGIFactory2* factory, ID3D11Device* device, ID3D11DeviceContext* device_context);
     void Shutdown() noexcept;
     void SetCompositorClockPaced(bool paced) noexcept { compositor_clock_paced_ = paced; }
+    void SetClearColor(
+        const std::array<float, 4>& clear_color) noexcept;
+    void SetNativeWindowThemeCallback(
+        std::function<void(HWND)> callback);
+    void RefreshNativeWindowThemes();
     void RefreshPresentationTargets();
 
     [[nodiscard]] D3D11RendererError TakeLastError() noexcept;
@@ -75,6 +82,8 @@ private:
     D3D11RendererError last_error_;
     std::vector<D3D11ViewportPresentationUpdate> presentation_updates_;
     std::vector<D3D11ViewportPresentCompletion> present_completions_;
+    std::array<float, 4> clear_color_{0.0f, 0.0f, 0.0f, 1.0f};
+    std::function<void(HWND)> native_window_theme_callback_;
     bool compositor_clock_paced_ = false;
 };
 

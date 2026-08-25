@@ -86,8 +86,8 @@ processes.
 The thin console accepts only:
 
 ```text
-setting get <ui.language|ui.scale>
-setting set <ui.language|ui.scale> <value>
+setting get <ui.language|ui.scale|ui.theme>
+setting set <ui.language|ui.scale|ui.theme> <value>
 panel get <files|navigation|annotations|labeling|filters|sorting|smoothing|information|spectral_lines>
 panel set <files|navigation|annotations|labeling|filters|sorting|smoothing|information|spectral_lines> <true|false>
 source open <absolute-file-or-directory>
@@ -266,6 +266,7 @@ Commands with parameters use these stable request shapes:
 ```json
 {"type":"request","request_id":"setting-get-1","command":"setting.get","params":{"name":"ui.language"}}
 {"type":"request","request_id":"setting-set-1","command":"setting.set","params":{"name":"ui.scale","value":125}}
+{"type":"request","request_id":"theme-set-1","command":"setting.set","params":{"name":"ui.theme","value":"specforge.theme.light"}}
 {"type":"request","request_id":"panel-get-1","command":"panel.get","params":{"name":"files"}}
 {"type":"request","request_id":"panel-set-1","command":"panel.set","params":{"name":"spectral_lines","visible":false}}
 {"type":"request","request_id":"open-1","command":"source.open","params":{"path":"C:\\fixtures\\spectra"}}
@@ -288,6 +289,11 @@ no field is silently ignored.
 | --- | --- | --- |
 | `ui.language` | string | exact persisted values `en` or `zh-Hans` |
 | `ui.scale` | integer | 80 through 150, inclusive |
+| `ui.theme` | string | `follow-system`, `specforge.theme.dark`, or `specforge.theme.light` |
+
+`ui.theme` reports and persists the selection policy value. In particular,
+`follow-system` remains `follow-system`; it is not replaced by whichever
+concrete Windows theme is currently resolved for rendering.
 
 `setting.get` completes with
 `"result":{"name":"<name>","value":<current-value>}`. `setting.set`
@@ -296,11 +302,12 @@ is successful and reports `changed:false`.
 
 Writes route through the same `ApplicationSettings::Apply` owner used by the
 Settings UI. That owner performs the existing validation and save-before-publish
-transition. The App then consumes the existing language/UI-scale notification,
-updates the localized UI or live ImGui scale, and requests a frame before the
-terminal response is completed. There is no automation settings copy and no
-direct settings-file mutation. Both production settings paths resolve below the
-launcher-pinned automation state root. The same App-owned drain runs before
+transition. The App then consumes the existing language/UI-scale/theme
+notification, updates the localized UI, live ImGui scale, or resolved theme,
+and requests a frame before the terminal response is completed. There is no
+automation settings copy and no direct settings-file mutation. All production
+settings paths resolve below the launcher-pinned automation state root. The
+same App-owned drain runs before
 automation dispatch and state observation, so a notification produced by the
 Settings UI cannot be skipped by a same-value `setting.set`, `state.get`, or
 `wait.idle`.

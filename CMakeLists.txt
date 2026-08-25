@@ -763,6 +763,8 @@ add_test(
         -WindowPeer "$<TARGET_FILE:specforge_win32_window_peer>"
         -LayoutSeed
             "${CMAKE_SOURCE_DIR}/tests/fixtures/imgui/no-auto-merge-floating.ini"
+        -ArtifactsDirectory
+            "${CMAKE_BINARY_DIR}/test-artifacts/theme-smoke"
 )
 set_tests_properties(
     specforge_imgui_viewport_ownership_integration_tests

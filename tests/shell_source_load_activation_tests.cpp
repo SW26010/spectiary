@@ -5486,6 +5486,23 @@ void TestAutomationSettingsUseApplicationSettingsOwner()
             !shell->TakeAppliedUiScalePercentage(),
         "a same-value automation write must preserve the production UI scale notification that was already pending from the Settings UI");
 
+    const specforge::ThemeSelection explicit_light =
+        specforge::ThemeSelection::Explicit(
+            specforge::BuiltInLightThemeId());
+    const specforge::ApplicationSettingsResult
+        theme_result = Access::ApplySettingsUiIntent(
+            *shell,
+            specforge::ApplicationSettingsIntent::
+                SetThemeSelection(explicit_light));
+    Require(
+        theme_result.outcome ==
+                specforge::ApplicationSettingsOutcome::Applied &&
+            shell->theme_selection() == explicit_light &&
+            shell->TakeAppliedThemeSelection() ==
+                explicit_light &&
+            !shell->TakeAppliedThemeSelection(),
+        "a Settings appearance change should publish one runtime theme notification through the application settings owner");
+
     const specforge::ApplicationSettingsResult panel_result =
         shell->SetPanelVisibilityForAutomation(
             specforge::ApplicationPanel::Navigation,

@@ -161,6 +161,10 @@ private:
     void ApplyPendingApplicationSettings(
         std::string_view scale_reason,
         bool request_frame = true);
+    [[nodiscard]] bool ResolveAndApplyTheme(
+        bool refresh_native_windows);
+    [[nodiscard]] const ThemeDescriptor&
+    ResolvedThemeDescriptor() const;
     void ServiceAutomationSettingGet(
         const AutomationQueuedCommand& command);
     void ServiceAutomationSettingSet(
@@ -262,6 +266,8 @@ private:
     bool window_visible_ = true;
     bool uncapped_pan_active_ = false;
     ImGuiStyle base_imgui_style_;
+    ThemeId resolved_theme_id_ = BuiltInDarkThemeId();
+    bool theme_initialized_ = false;
     float system_dpi_scale_ = 1.0f;
     float user_ui_scale_ = 1.0f;
     float effective_ui_scale_ = 1.0f;

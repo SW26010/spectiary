@@ -19,7 +19,9 @@ struct SpectrumPlotProfileContext {
 };
 
 struct SpectrumPlotStyle {
-    ImVec4 line_color = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
+    SpectrumPlotStyle();
+
+    ImVec4 line_color;
     float line_weight = 1.4f;
 };
 

@@ -299,6 +299,9 @@ public:
     [[nodiscard]] ApplicationSettingsResult
     SetUiScaleForAutomation(int percentage);
     [[nodiscard]] ApplicationSettingsResult
+    SetThemeSelectionForAutomation(
+        ThemeSelection selection);
+    [[nodiscard]] ApplicationSettingsResult
     SetPanelVisibilityForAutomation(
         ApplicationPanel panel,
         bool visible);
@@ -317,7 +320,7 @@ public:
     PanelPresentationStatusForAutomation() const noexcept;
     [[nodiscard]] bool
     ArmRuntimeResourceCancellationCheckpoint();
-    void RefreshSystemColors();
+    void RefreshThemeColors();
     void SetSpectralLineLabelFont(ImFont* font);
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();
@@ -328,8 +331,11 @@ public:
     TakeAppliedUiScalePercentage();
     [[nodiscard]] std::optional<UiLanguage>
     TakeAppliedUiLanguage();
+    [[nodiscard]] std::optional<ThemeSelection>
+    TakeAppliedThemeSelection();
     [[nodiscard]] int ui_scale_percentage() const;
     [[nodiscard]] UiLanguage ui_language() const;
+    [[nodiscard]] ThemeSelection theme_selection() const;
     [[nodiscard]] std::filesystem::path profile_output_directory() const;
     [[nodiscard]] bool immersive_plot_mode() const;
     [[nodiscard]] bool latency_sensitive_plot_interaction_active() const;
@@ -462,6 +468,7 @@ private:
     std::optional<NavigationLatencyTimePoint> pending_keyboard_next_at_;
     std::optional<int> applied_ui_scale_percentage_;
     std::optional<UiLanguage> applied_ui_language_;
+    std::optional<ThemeSelection> applied_theme_selection_;
     std::optional<ShellLocalStateFlushResult>
         local_state_flush_result_;
     std::optional<AutomationPresentationCandidate>

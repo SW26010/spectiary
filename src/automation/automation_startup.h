@@ -12,6 +12,13 @@
 
 namespace specforge {
 
+// Reserved inside an automation-owned state root. When present, this fixture
+// supplies the concrete Windows theme returned to FollowSystem resolution;
+// ordinary application launches never inspect it.
+inline constexpr std::wstring_view
+    kAutomationSystemThemeTestFixtureName =
+        L".specforge-system-theme-test.txt";
+
 struct AutomationStartupConfiguration {
     std::wstring pipe_name;
     std::string nonce;

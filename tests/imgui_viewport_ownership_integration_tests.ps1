@@ -7,11 +7,14 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WindowPeer,
     [Parameter(Mandatory = $true)]
-    [string]$LayoutSeed
+    [string]$LayoutSeed,
+    [Parameter(Mandatory = $true)]
+    [string]$ArtifactsDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
+Add-Type -AssemblyName System.Drawing
 
 function Assert-True {
     param(
@@ -338,6 +341,14 @@ public static class SpecForgeViewportOwnershipNative
         IntPtr window,
         int command);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessageW(
+        IntPtr window,
+        uint message,
+        IntPtr wparam,
+        IntPtr lparam);
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(
         IntPtr window,
@@ -394,6 +405,13 @@ public static class SpecForgeViewportOwnershipNative
 
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(
+        IntPtr window,
+        int attribute,
+        out int value,
+        int valueSize);
 
     private static string WindowClassName(IntPtr window)
     {
@@ -489,6 +507,37 @@ public static class SpecForgeViewportOwnershipNative
         uint processId;
         GetWindowThreadProcessId(window, out processId);
         return processId;
+    }
+
+    public static bool WindowUsesImmersiveDarkMode(IntPtr window)
+    {
+        const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+        int value;
+        int result = DwmGetWindowAttribute(
+            window,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            out value,
+            sizeof(int));
+        if (result < 0)
+        {
+            throw new InvalidOperationException(
+                "DwmGetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE) failed with HRESULT 0x" +
+                result.ToString("x8") + ".");
+        }
+        return value != 0;
+    }
+
+    public static void PostThemeChanged(IntPtr window)
+    {
+        const uint WM_THEMECHANGED = 0x031A;
+        if (!PostMessageW(
+                window,
+                WM_THEMECHANGED,
+                IntPtr.Zero,
+                IntPtr.Zero))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
     }
 
     public static Rect WindowRectangle(IntPtr window)
@@ -738,6 +787,231 @@ function Assert-Win32WindowPolicy {
                 (Format-Handle -Handle $owner) +
                 (', extended style is 0x{0:x}.' -f $extendedStyle))
     }
+
+}
+
+function Assert-WindowTitleBarTheme {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr[]]$Handles,
+        [Parameter(Mandatory = $true)]
+        [bool]$ExpectedDark,
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    foreach ($handle in $Handles) {
+        $actual =
+            [SpecForgeViewportOwnershipNative]::
+                WindowUsesImmersiveDarkMode($handle)
+        Assert-True `
+            -Condition ($actual -eq $ExpectedDark) `
+            -Message (
+                "$Phase expected HWND " +
+                (Format-Handle -Handle $handle) +
+                ' immersive-dark title bar to be ' +
+                $ExpectedDark + ', actual=' + $actual + '.')
+    }
+}
+
+function Wait-WindowTitleBarTheme {
+    param(
+        [Parameter(Mandatory = $true)]
+        [IntPtr[]]$Handles,
+        [Parameter(Mandatory = $true)]
+        [bool]$ExpectedDark,
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $matches = $true
+        foreach ($handle in $Handles) {
+            if (-not [SpecForgeViewportOwnershipNative]::
+                    IsWindow($handle) -or
+                [SpecForgeViewportOwnershipNative]::
+                    WindowUsesImmersiveDarkMode($handle) -ne
+                        $ExpectedDark) {
+                $matches = $false
+                break
+            }
+        }
+        if ($matches) {
+            return
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    Assert-WindowTitleBarTheme `
+        -Handles $Handles `
+        -ExpectedDark $ExpectedDark `
+        -Phase $Phase
+}
+
+function Assert-PngFrameCapture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    Assert-True `
+        -Condition (
+            (Test-Path -LiteralPath $Path -PathType Leaf) -and
+            (Get-Item -LiteralPath $Path).Length -gt 1024) `
+        -Message "$Phase did not publish a non-empty PNG frame capture."
+    $signature = [System.IO.File]::ReadAllBytes($Path)[0..7]
+    $expected = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+    Assert-True `
+        -Condition (
+            ($signature -join ',') -eq
+                ($expected -join ',')) `
+        -Message "$Phase frame capture did not have a valid PNG signature."
+}
+
+function Get-FileSha256Hex {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $algorithm =
+        [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        return [System.BitConverter]::ToString(
+            $algorithm.ComputeHash($bytes)).Replace('-', '')
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Get-FrameLuminanceStatistics {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $bitmap = [System.Drawing.Bitmap]::new($Path)
+    try {
+        # Sample the stable central content area. This excludes the menu/top
+        # bar where frame timing text changes, and the outer resize border.
+        $left = [int][Math]::Floor($bitmap.Width * 0.125)
+        $right = [int][Math]::Ceiling($bitmap.Width * 0.875)
+        $top = [int][Math]::Floor($bitmap.Height * 0.20)
+        $bottom = [int][Math]::Ceiling($bitmap.Height * 0.90)
+        $step = 6
+        $values =
+            [System.Collections.Generic.List[double]]::new()
+        [double]$sum = 0.0
+        for ($y = $top; $y -lt $bottom; $y += $step) {
+            for ($x = $left; $x -lt $right; $x += $step) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $luminance =
+                    (0.2126 * [double]$pixel.R +
+                     0.7152 * [double]$pixel.G +
+                     0.0722 * [double]$pixel.B) / 255.0
+                $values.Add($luminance)
+                $sum += $luminance
+            }
+        }
+        Assert-True `
+            -Condition ($values.Count -gt 1000) `
+            -Message 'Frame luminance crop did not contain enough samples.'
+        [double[]]$ordered = $values.ToArray()
+        [Array]::Sort($ordered)
+        $middle = [int][Math]::Floor($ordered.Length / 2)
+        $median = if (($ordered.Length % 2) -eq 0) {
+            ($ordered[$middle - 1] + $ordered[$middle]) / 2.0
+        } else {
+            $ordered[$middle]
+        }
+        return [pscustomobject][ordered]@{
+            width = $bitmap.Width
+            height = $bitmap.Height
+            crop = [ordered]@{
+                left = $left
+                top = $top
+                right = $right
+                bottom = $bottom
+                step = $step
+            }
+            sample_count = $values.Count
+            mean_luminance = $sum / $values.Count
+            median_luminance = $median
+        }
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
+
+function Assert-LightFrameBrighterThanDarkFrame {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$Dark,
+        [Parameter(Mandatory = $true)]
+        [psobject]$Light,
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    $meanGap =
+        [double]$Light.mean_luminance -
+        [double]$Dark.mean_luminance
+    $medianGap =
+        [double]$Light.median_luminance -
+        [double]$Dark.median_luminance
+    Assert-True `
+        -Condition (
+            $meanGap -ge 0.20 -and
+            $medianGap -ge 0.20) `
+        -Message (
+            "$Phase expected stable light-frame luminance to exceed dark " +
+            'by at least 0.20; mean gap=' +
+            $meanGap.ToString('0.000') +
+            ', median gap=' +
+            $medianGap.ToString('0.000') + '.')
+}
+
+function Publish-ThemeArtifacts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Captures,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Statistics,
+        [Parameter(Mandatory = $true)]
+        [string]$Directory
+    )
+
+    [System.IO.Directory]::CreateDirectory($Directory) | Out-Null
+    $summaryCaptures = [ordered]@{}
+    foreach ($entry in $Captures.GetEnumerator()) {
+        $destination = Join-Path $Directory ([string]$entry.Key)
+        [System.IO.File]::Copy(
+            [string]$entry.Value,
+            $destination,
+            $true)
+        $summaryCaptures[[string]$entry.Key] = [ordered]@{
+            sha256 = Get-FileSha256Hex -Path $destination
+            luminance = $Statistics[[string]$entry.Key]
+        }
+    }
+    $summary = [ordered]@{
+        schema_version = 1
+        captured_at_utc =
+            [DateTime]::UtcNow.ToString('o')
+        comparison =
+            'central crop mean and median luminance; minimum light-dark gap 0.20'
+        captures = $summaryCaptures
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $Directory 'theme-frame-statistics.json'),
+        ($summary | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
 }
 
 function Assert-OwnershipGroupZOrder {
@@ -981,6 +1255,8 @@ $resolvedWindowPeer =
     (Resolve-Path -LiteralPath $WindowPeer).Path
 $resolvedLayoutSeed =
     (Resolve-Path -LiteralPath $LayoutSeed).Path
+$resolvedArtifactsDirectory =
+    [System.IO.Path]::GetFullPath($ArtifactsDirectory)
 $fixtureParent = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ('specforge-viewport-ownership-' +
@@ -988,6 +1264,16 @@ $fixtureParent = Join-Path `
 [System.IO.Directory]::CreateDirectory(
     $fixtureParent) | Out-Null
 $stateRoot = Join-Path $fixtureParent 'state'
+$darkCapturePath =
+    Join-Path $stateRoot 'artifacts\theme-dark.png'
+$lightCapturePath =
+    Join-Path $stateRoot 'artifacts\theme-light.png'
+$followDarkCapturePath =
+    Join-Path $stateRoot 'artifacts\theme-follow-system-dark.png'
+$followLightCapturePath =
+    Join-Path $stateRoot 'artifacts\theme-follow-system-light.png'
+$systemThemeFixturePath =
+    Join-Path $stateRoot '.specforge-system-theme-test.txt'
 $invalidStateRoot = Join-Path $fixtureParent 'invalid-state'
 $invalidSeed = Join-Path $fixtureParent 'malformed-layout.ini'
 $launcherProcess = $null
@@ -1319,6 +1605,231 @@ try {
         -SecondaryHandles $secondaryHandles `
         -PeerHandle $peerHandle
 
+    $darkTheme =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'setting set ui.theme specforge.theme.dark' `
+            -RequestId 'request-8'
+    Assert-True `
+        -Condition (
+            [string]$darkTheme.status -eq 'completed' -and
+            [string]$darkTheme.result.name -eq 'ui.theme' -and
+            [string]$darkTheme.result.value -eq
+                'specforge.theme.dark' -and
+            [bool]$darkTheme.result.changed) `
+        -Message 'The GUI must accept an explicit dark runtime theme selection.'
+    Assert-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $true `
+        -Phase 'Explicit dark runtime switch'
+
+    $darkCapture =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line "frame capture $darkCapturePath" `
+            -RequestId 'request-9'
+    Assert-True `
+        -Condition ([string]$darkCapture.status -eq 'completed') `
+        -Message 'Dark-theme GUI frame capture did not complete.'
+    Assert-PngFrameCapture `
+        -Path $darkCapturePath `
+        -Phase 'Explicit dark theme'
+
+    $lightTheme =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'setting set ui.theme specforge.theme.light' `
+            -RequestId 'request-10'
+    Assert-True `
+        -Condition (
+            [string]$lightTheme.status -eq 'completed' -and
+            [string]$lightTheme.result.name -eq 'ui.theme' -and
+            [string]$lightTheme.result.value -eq
+                'specforge.theme.light' -and
+            [bool]$lightTheme.result.changed) `
+        -Message 'The GUI must accept an explicit light runtime theme selection.'
+    Assert-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $false `
+        -Phase 'Explicit light runtime switch on existing HWNDs'
+
+    $lightCapture =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line "frame capture $lightCapturePath" `
+            -RequestId 'request-11'
+    Assert-True `
+        -Condition ([string]$lightCapture.status -eq 'completed') `
+        -Message 'Light-theme GUI frame capture did not complete.'
+    Assert-PngFrameCapture `
+        -Path $lightCapturePath `
+        -Phase 'Explicit light theme'
+
+    $darkStatistics =
+        Get-FrameLuminanceStatistics `
+            -Path $darkCapturePath
+    $lightStatistics =
+        Get-FrameLuminanceStatistics `
+            -Path $lightCapturePath
+    Assert-LightFrameBrighterThanDarkFrame `
+        -Dark $darkStatistics `
+        -Light $lightStatistics `
+        -Phase 'Explicit runtime theme switch'
+
+    $closeDetached =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'panel set spectral_lines false' `
+            -RequestId 'request-12'
+    Assert-True `
+        -Condition ([string]$closeDetached.status -eq 'completed') `
+        -Message 'The detached viewport recreation setup could not close Spectral Lines.'
+    [void](Wait-ForOwnershipWindows `
+        -GuiProcessId $guiProcessId `
+        -ExpectedSecondaryCount 1)
+
+    $reopenDetached =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'panel set spectral_lines true' `
+            -RequestId 'request-13'
+    Assert-True `
+        -Condition ([string]$reopenDetached.status -eq 'completed') `
+        -Message 'The detached viewport recreation setup could not reopen Spectral Lines.'
+    $recreatedWindows =
+        Wait-ForOwnershipWindows `
+            -GuiProcessId $guiProcessId
+    $recreatedSecondaryHandles = @(
+        $recreatedWindows.Secondary |
+            ForEach-Object { [IntPtr]$_.Handle })
+    $newSecondaryHandles = @(
+        $recreatedSecondaryHandles |
+            Where-Object { $secondaryHandles -notcontains $_ })
+    Assert-True `
+        -Condition (
+            $recreatedWindows.Main.Handle -eq $mainHandle -and
+            $newSecondaryHandles.Count -eq 1) `
+        -Message 'Reopening Spectral Lines should create exactly one future detached viewport HWND.'
+    Assert-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $recreatedSecondaryHandles)) `
+        -ExpectedDark $false `
+        -Phase 'Explicit light theme on a newly created detached HWND'
+    $secondaryHandles = $recreatedSecondaryHandles
+
+    [System.IO.File]::WriteAllText(
+        $systemThemeFixturePath,
+        'specforge.theme.dark',
+        [System.Text.UTF8Encoding]::new($false))
+    [SpecForgeViewportOwnershipNative]::
+        PostThemeChanged($mainHandle)
+    Wait-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $false `
+        -Phase 'Explicit light theme after a synthetic dark system-theme message'
+
+    $themeGet =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'setting get ui.theme' `
+            -RequestId 'request-14'
+    Assert-True `
+        -Condition (
+            [string]$themeGet.status -eq 'completed' -and
+            [string]$themeGet.result.value -eq
+                'specforge.theme.light') `
+        -Message 'An explicit theme must remain selected after a system-theme message.'
+
+    $followTheme =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line 'setting set ui.theme follow-system' `
+            -RequestId 'request-15'
+    Assert-True `
+        -Condition (
+            [string]$followTheme.status -eq 'completed' -and
+            [string]$followTheme.result.value -eq
+                'follow-system' -and
+            [bool]$followTheme.result.changed) `
+        -Message 'The GUI must restore Follow system without replacing it with a resolved boolean.'
+    Wait-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $true `
+        -Phase 'Follow-system dark fixture on main and detached HWNDs'
+
+    $followDarkCapture =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line "frame capture $followDarkCapturePath" `
+            -RequestId 'request-16'
+    Assert-True `
+        -Condition ([string]$followDarkCapture.status -eq 'completed') `
+        -Message 'Follow-system dark GUI frame capture did not complete.'
+    Assert-PngFrameCapture `
+        -Path $followDarkCapturePath `
+        -Phase 'Follow-system dark theme'
+
+    [System.IO.File]::WriteAllText(
+        $systemThemeFixturePath,
+        'specforge.theme.light',
+        [System.Text.UTF8Encoding]::new($false))
+    [SpecForgeViewportOwnershipNative]::
+        PostThemeChanged($mainHandle)
+    Wait-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $false `
+        -Phase 'Follow-system light transition through WM_THEMECHANGED'
+
+    $followLightCapture =
+        Send-LauncherRequest `
+            -Process $launcherProcess `
+            -Line "frame capture $followLightCapturePath" `
+            -RequestId 'request-17'
+    Assert-True `
+        -Condition ([string]$followLightCapture.status -eq 'completed') `
+        -Message 'Follow-system light GUI frame capture did not complete.'
+    Assert-PngFrameCapture `
+        -Path $followLightCapturePath `
+        -Phase 'Follow-system light theme'
+
+    $followDarkStatistics =
+        Get-FrameLuminanceStatistics `
+            -Path $followDarkCapturePath
+    $followLightStatistics =
+        Get-FrameLuminanceStatistics `
+            -Path $followLightCapturePath
+    Assert-LightFrameBrighterThanDarkFrame `
+        -Dark $followDarkStatistics `
+        -Light $followLightStatistics `
+        -Phase 'Follow-system WM_THEMECHANGED transition'
+
+    [System.IO.File]::WriteAllText(
+        $systemThemeFixturePath,
+        'specforge.theme.dark',
+        [System.Text.UTF8Encoding]::new($false))
+    [SpecForgeViewportOwnershipNative]::
+        PostThemeChanged($mainHandle)
+    Wait-WindowTitleBarTheme `
+        -Handles ([IntPtr[]](@($mainHandle) + $secondaryHandles)) `
+        -ExpectedDark $true `
+        -Phase 'Follow-system dark transition through WM_THEMECHANGED'
+
+    $themeCaptures = [ordered]@{
+        'theme-explicit-dark.png' = $darkCapturePath
+        'theme-explicit-light.png' = $lightCapturePath
+        'theme-follow-system-dark.png' = $followDarkCapturePath
+        'theme-follow-system-light.png' = $followLightCapturePath
+    }
+    $themeStatistics = [ordered]@{
+        'theme-explicit-dark.png' = $darkStatistics
+        'theme-explicit-light.png' = $lightStatistics
+        'theme-follow-system-dark.png' = $followDarkStatistics
+        'theme-follow-system-light.png' = $followLightStatistics
+    }
+    Publish-ThemeArtifacts `
+        -Captures $themeCaptures `
+        -Statistics $themeStatistics `
+        -Directory $resolvedArtifactsDirectory
+
     $peerProcess.StandardInput.WriteLine('quit')
     $peerProcess.StandardInput.Flush()
     Assert-True `
@@ -1337,7 +1848,7 @@ try {
         Send-LauncherRequest `
             -Process $launcherProcess `
             -Line 'app quit' `
-            -RequestId 'request-8'
+            -RequestId 'request-18'
     Assert-True `
         -Condition (
             [string]$quit.status -eq 'completed' -and
@@ -1353,7 +1864,9 @@ try {
             $launcherProcess.ExitCode + '. ' +
             $launch.StderrTask.GetAwaiter().GetResult())
     Write-Host (
-        'ImGui viewport ownership integration passed with stable owned auxiliary detached HWNDs ' +
+        'ImGui viewport ownership and runtime theme integration passed with luminance-verified dark/light/follow-system frame captures retained at ' +
+        $resolvedArtifactsDirectory +
+        ' and stable owned auxiliary detached HWNDs ' +
         (($secondaryHandles | ForEach-Object {
             Format-Handle -Handle $_
         }) -join ', ') + '.')

@@ -1,6 +1,7 @@
 #include "plot/spectrum_plot_renderer.h"
 
 #include "profile/profile_sink.h"
+#include "ui/theme.h"
 
 #include <imgui.h>
 #include <implot.h>
@@ -14,6 +15,12 @@
 #include <string_view>
 
 namespace specforge {
+
+SpectrumPlotStyle::SpectrumPlotStyle()
+    : line_color(ActiveSemanticPalette().plot_line)
+{
+}
+
 namespace {
 
 struct Bounds {
@@ -68,7 +75,9 @@ struct ScopedTransparentPlotStyle {
         ImPlot::PushStyleColor(ImPlotCol_AxisBg, transparent);
         ImPlot::PushStyleColor(ImPlotCol_AxisBgHovered, transparent);
         ImPlot::PushStyleColor(ImPlotCol_AxisBgActive, transparent);
-        ImPlot::PushStyleColor(ImPlotCol_Crosshairs, ImVec4(0.72f, 0.78f, 0.82f, 0.48f));
+        ImPlot::PushStyleColor(
+            ImPlotCol_Crosshairs,
+            ActiveSemanticPalette().plot_crosshair);
         ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
         ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0.0f, 0.0f));
         ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding, ImVec2(0.0f, 0.0f));
@@ -303,16 +312,18 @@ bool IsVisibleInPlot(const SpectralLineMarker& marker, const ImPlotRect& limits)
 
 ImVec4 SpectralLineColor(const SpectralLineMarker& marker)
 {
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
     if (marker.group == "Balmer") {
-        return ImVec4(0.95f, 0.42f, 0.35f, 0.78f);
+        return palette.spectral_balmer;
     }
     if (marker.group == "CN" || marker.group == "CH" || marker.group == "C2" || marker.group == "Isotope") {
-        return ImVec4(0.43f, 0.78f, 0.64f, 0.76f);
+        return palette.spectral_molecule;
     }
     if (marker.group == "Ba II" || marker.group == "Sr II") {
-        return ImVec4(0.95f, 0.72f, 0.32f, 0.78f);
+        return palette.spectral_heavy_element;
     }
-    return ImVec4(0.66f, 0.72f, 0.82f, 0.72f);
+    return palette.spectral_default;
 }
 
 void RenderSpectralLineOverlays(
@@ -631,8 +642,12 @@ void RenderEdgeAxisOverlay(const EdgeAxisMetrics& metrics)
 
     const ImVec2 plot_min = plot_pos;
     const ImVec2 plot_max(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
-    const ImU32 tick_color = ImGui::GetColorU32(ImVec4(0.72f, 0.78f, 0.82f, 0.58f));
-    const ImU32 label_color = ImGui::GetColorU32(ImVec4(0.78f, 0.84f, 0.88f, 0.74f));
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
+    const ImU32 tick_color =
+        ImGui::GetColorU32(palette.plot_grid);
+    const ImU32 label_color =
+        ImGui::GetColorU32(palette.plot_axis);
     ImPlot::PushPlotClipRect();
 
     const int x_tick_count = DesiredTickCount(plot_size.x, metrics.x_tick_target_spacing, 6, 14);
@@ -751,7 +766,8 @@ void RenderViewportLockOverlay(
     }
 
     const ImU32 icon_color = locked
-        ? IM_COL32_WHITE
+        ? ImGui::GetColorU32(
+              ActiveSemanticPalette().text)
         : ImGui::GetColorU32(ImGuiCol_TextDisabled);
     const float center_x = (button_min.x + button_max.x) * 0.5f;
     const float body_top = button_min.y + side * 0.49f;
@@ -1214,13 +1230,13 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Gaussian,
                 "SpecForgeGaussianSmoothedSpectrum",
-                ImVec4(0.94f, 0.36f, 0.22f, 1.0f));
+                ActiveSemanticPalette().smoothing_gaussian);
         }
         if (MedianSmoothingActive(state)) {
             plot_smoothed_curve(
                 SpectrumSmoothingMethod::Median,
                 "SpecForgeMedianSmoothedSpectrum",
-                ImVec4(0.20f, 0.72f, 0.58f, 1.0f));
+                ActiveSemanticPalette().smoothing_median);
         }
 
         const bool hovered = ImPlot::IsPlotHovered();

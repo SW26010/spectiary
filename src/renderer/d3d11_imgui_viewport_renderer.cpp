@@ -66,7 +66,39 @@ void D3D11ImGuiViewportRenderer::Shutdown() noexcept
     last_error_ = {};
     presentation_updates_.clear();
     present_completions_.clear();
+    native_window_theme_callback_ = {};
     compositor_clock_paced_ = false;
+}
+
+void D3D11ImGuiViewportRenderer::SetClearColor(
+    const std::array<float, 4>& clear_color) noexcept
+{
+    clear_color_ = clear_color;
+}
+
+void D3D11ImGuiViewportRenderer::SetNativeWindowThemeCallback(
+    std::function<void(HWND)> callback)
+{
+    native_window_theme_callback_ = std::move(callback);
+}
+
+void D3D11ImGuiViewportRenderer::RefreshNativeWindowThemes()
+{
+    if (!native_window_theme_callback_ ||
+        ImGui::GetCurrentContext() == nullptr) {
+        return;
+    }
+    const ImGuiPlatformIO& platform_io =
+        ImGui::GetPlatformIO();
+    for (ImGuiViewport* viewport : platform_io.Viewports) {
+        if (viewport == nullptr) {
+            continue;
+        }
+        if (const HWND hwnd = ViewportWindowHandle(*viewport);
+            hwnd != nullptr) {
+            native_window_theme_callback_(hwnd);
+        }
+    }
 }
 
 D3D11RendererError D3D11ImGuiViewportRenderer::TakeLastError() noexcept
@@ -137,6 +169,10 @@ void D3D11ImGuiViewportRenderer::CreateViewportWindow(ImGuiViewport* viewport)
     }
     data->monitor = data->presentation.refresh_state().monitor;
     viewport->RendererUserData = data;
+    if (instance->native_window_theme_callback_ &&
+        hwnd != nullptr) {
+        instance->native_window_theme_callback_(hwnd);
+    }
     instance->CollectPresentationUpdate(*viewport, data->presentation);
 }
 
@@ -194,9 +230,8 @@ void D3D11ImGuiViewportRenderer::RenderViewportWindow(ImGuiViewport* viewport, v
         instance->CollectPresentationUpdate(*viewport, data->presentation);
     }
 
-    constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     const HRESULT begin_result = data->presentation.BeginFrame(
-        clear_color,
+        instance->clear_color_.data(),
         (viewport->Flags & ImGuiViewportFlags_NoRendererClear) == 0,
         0);
     if (begin_result == DXGI_ERROR_WAS_STILL_DRAWING) {

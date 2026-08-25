@@ -6,6 +6,7 @@
 #include "platform/file_sha256.h"
 #include "ui/profile_recording_ui_state.h"
 #include "specforge/specforge_build_identity.h"
+#include "ui/theme.h"
 #include "ui/ui_scale_settings.h"
 
 #include <Windows.h>
@@ -126,6 +127,13 @@ constexpr float kInitialSettingsWidth = 860.0f;
 constexpr float kInitialSettingsHeight = 560.0f;
 constexpr auto kArtifactIdentityRetryDelay =
     std::chrono::milliseconds{250};
+
+ImVec4 SettingsFeedbackColor(bool warning)
+{
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
+    return warning ? palette.warning : palette.error;
+}
 
 constexpr std::array<SettingsSection, 7> kSettingsSections = {
     SettingsSection::General,
@@ -1132,9 +1140,8 @@ void SettingsPanelUi::RenderGeneral(
         const bool warning =
             setting_status.kind ==
             ApplicationSettingsStatusKind::LoadWarning;
-        const ImVec4 feedback_color = warning
-            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
-            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const ImVec4 feedback_color =
+            SettingsFeedbackColor(warning);
         const std::string_view feedback = UiText(
             language,
             warning
@@ -1163,7 +1170,13 @@ void SettingsPanelUi::RenderAppearance(
 
     int theme = AppearanceThemeOptionIndex(
         settings.theme_selection).value_or(0);
-    float accent_color[3] = {0.24f, 0.55f, 0.86f};
+    const ImVec4 semantic_accent =
+        ActiveSemanticPalette().accent;
+    float accent_color[3] = {
+        semantic_accent.x,
+        semantic_accent.y,
+        semantic_accent.z,
+    };
     const std::string theme_label =
         AppearanceThemeLabel(language);
     const std::string theme_items =
@@ -1204,9 +1217,8 @@ void SettingsPanelUi::RenderAppearance(
         const bool warning =
             appearance_status.kind ==
             ApplicationSettingsStatusKind::LoadWarning;
-        const ImVec4 feedback_color = warning
-            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
-            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const ImVec4 feedback_color =
+            SettingsFeedbackColor(warning);
         const UiTextId feedback_text_id = warning
             ? UiTextId::ThemeLoadWarning
             : (appearance_status.kind ==
@@ -1285,9 +1297,8 @@ void SettingsPanelUi::RenderAppearance(
     const bool warning =
         setting_status.kind ==
         ApplicationSettingsStatusKind::LoadWarning;
-    const ImVec4 feedback_color = warning
-        ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
-        : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+    const ImVec4 feedback_color =
+        SettingsFeedbackColor(warning);
     const UiTextId feedback_text_id = warning
         ? UiTextId::UiScaleLoadWarning
         : (setting_status.kind ==
@@ -1392,9 +1403,8 @@ void SettingsPanelUi::RenderLanguage(
         : UiTextId::LanguageLoadWarning;
     const std::string_view feedback =
         UiText(language, feedback_text_id);
-    const ImVec4 feedback_color = failed
-        ? ImVec4(0.95f, 0.35f, 0.30f, 1.0f)
-        : ImVec4(0.95f, 0.75f, 0.30f, 1.0f);
+    const ImVec4 feedback_color =
+        SettingsFeedbackColor(!failed);
     ImGui::PushTextWrapPos();
     ImGui::TextColored(
         feedback_color,
@@ -1446,9 +1456,8 @@ void SettingsPanelUi::RenderInput(
         const bool warning =
             setting_status.kind ==
             ApplicationSettingsStatusKind::LoadWarning;
-        const ImVec4 feedback_color = warning
-            ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
-            : ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        const ImVec4 feedback_color =
+            SettingsFeedbackColor(warning);
         const std::string_view feedback = UiText(
             language,
             warning
@@ -1650,7 +1659,10 @@ void SettingsPanelUi::RenderDataAndRecovery(
     if (!action_status_.empty()) {
         ImGui::Spacing();
         if (action_failed_) {
-            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.30f, 1.0f), "%s", action_status_.c_str());
+            ImGui::TextColored(
+                ActiveSemanticPalette().error,
+                "%s",
+                action_status_.c_str());
         } else {
             ImGui::TextDisabled("%s", action_status_.c_str());
         }
@@ -2001,9 +2013,7 @@ void SettingsPanelUi::RenderDiagnostics(
                 setting_status.kind,
                 language);
         ImGui::TextColored(
-            warning
-                ? ImVec4(0.95f, 0.75f, 0.30f, 1.0f)
-                : ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+            SettingsFeedbackColor(warning),
             "%.*s",
             static_cast<int>(feedback.size()),
             feedback.data());
@@ -2016,7 +2026,7 @@ void SettingsPanelUi::RenderDiagnostics(
         ImGui::Spacing();
         if (action_failed_) {
             ImGui::TextColored(
-                ImVec4(0.95f, 0.35f, 0.30f, 1.0f),
+                ActiveSemanticPalette().error,
                 "%s",
                 action_status_.c_str());
         } else {
@@ -2308,7 +2318,10 @@ void SettingsPanelUi::RenderAbout(
     if (!action_status_.empty()) {
         ImGui::Spacing();
         if (action_failed_) {
-            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.30f, 1.0f), "%s", action_status_.c_str());
+            ImGui::TextColored(
+                ActiveSemanticPalette().error,
+                "%s",
+                action_status_.c_str());
         } else {
             ImGui::TextDisabled("%s", action_status_.c_str());
         }

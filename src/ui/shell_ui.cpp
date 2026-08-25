@@ -5,11 +5,11 @@
 #include "platform/win32_text.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
+#include "ui/theme.h"
 #include "ui/top_bar_status_hover.h"
 #include "ui/top_bar_status_layout.h"
 
 #include <Windows.h>
-#include <dwmapi.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <shobjidl.h>
@@ -46,7 +46,6 @@ constexpr std::array<const char*, kApplicationPanelCount>
         "###SpecForgeInfoTagsV2",
         "###SpecForgeSpectralLinesV2",
     };
-const ImVec4 kFallbackSpectrumLineColor = ImVec4(0.34f, 0.63f, 0.86f, 1.0f);
 
 enum class ImmersivePlotAxisImplementation {
     NativeImPlot,
@@ -144,6 +143,8 @@ bool RenderTopBarStatus(
     const LocalUserStateHealthView& persistence,
     UiLanguage language)
 {
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImRect menu_bar_rect = window->MenuBarRect();
@@ -275,7 +276,9 @@ bool RenderTopBarStatus(
     if (operation_error) {
         if (layout.show_operation) {
             const float operation_start_x = cursor_x;
-            draw_text(operation_text, IM_COL32(242, 89, 77, 255));
+            draw_text(
+                operation_text,
+                ImGui::GetColorU32(palette.error));
             operation_rect = ImRect(
                 ImVec2(operation_start_x, text_y),
                 ImVec2(cursor_x, text_y + text_height));
@@ -286,8 +289,8 @@ bool RenderTopBarStatus(
             operation_text,
             show_persistence
                 ? (persistence_recovered
-                       ? IM_COL32(76, 175, 80, 255)
-                       : IM_COL32(245, 166, 35, 255))
+                       ? ImGui::GetColorU32(palette.success)
+                       : ImGui::GetColorU32(palette.warning))
                 : ImGui::GetColorU32(
                       source_load_active
                           ? ImGuiCol_Text
@@ -313,7 +316,7 @@ bool RenderTopBarStatus(
                     cursor_x + kRecordingIndicatorRadius,
                     text_y + text_height * 0.5f),
                 kRecordingIndicatorRadius,
-                IM_COL32(235, 64, 58, 255));
+                ImGui::GetColorU32(palette.error));
             cursor_x += kRecordingIndicatorRadius * 2.0f + kRecordingIndicatorSpacing;
         }
         draw_text(
@@ -504,58 +507,17 @@ std::string_view SeverityLabel(
 
 ImVec4 SeverityColor(SpectrumDiagnosticSeverity severity)
 {
+    const SemanticPalette& palette =
+        ActiveSemanticPalette();
     switch (severity) {
     case SpectrumDiagnosticSeverity::Error:
-        return ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+        return palette.error;
     case SpectrumDiagnosticSeverity::Warning:
-        return ImVec4(0.95f, 0.74f, 0.30f, 1.0f);
+        return palette.warning;
     case SpectrumDiagnosticSeverity::Info:
     default:
-        return ImVec4(0.62f, 0.70f, 0.78f, 1.0f);
+        return palette.muted;
     }
-}
-
-float RelativeLuminance(const ImVec4& color)
-{
-    return 0.2126f * color.x + 0.7152f * color.y + 0.0722f * color.z;
-}
-
-ImVec4 BlendColor(const ImVec4& color, const ImVec4& target, float amount)
-{
-    return ImVec4(
-        color.x + (target.x - color.x) * amount,
-        color.y + (target.y - color.y) * amount,
-        color.z + (target.z - color.z) * amount,
-        1.0f);
-}
-
-ImVec4 AdjustForDarkPlot(const ImVec4& color)
-{
-    if (RelativeLuminance(color) < 0.30f) {
-        return BlendColor(color, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.42f);
-    }
-    return color;
-}
-
-std::optional<ImVec4> WindowsAccentColor()
-{
-    DWORD colorization_color = 0;
-    BOOL opaque_blend = FALSE;
-    if (FAILED(DwmGetColorizationColor(&colorization_color, &opaque_blend))) {
-        return std::nullopt;
-    }
-
-    const float red = static_cast<float>((colorization_color >> 16U) & 0xffU) / 255.0f;
-    const float green = static_cast<float>((colorization_color >> 8U) & 0xffU) / 255.0f;
-    const float blue = static_cast<float>(colorization_color & 0xffU) / 255.0f;
-    return AdjustForDarkPlot(ImVec4(red, green, blue, 1.0f));
-}
-
-SpectrumPlotStyle ReadSystemSpectrumPlotStyle()
-{
-    SpectrumPlotStyle style;
-    style.line_color = WindowsAccentColor().value_or(kFallbackSpectrumLineColor);
-    return style;
 }
 
 std::string_view DiagnosticCodeLabel(SpectrumDiagnosticCode code)
@@ -1022,7 +984,7 @@ ShellUi::ShellUi(
                 std::move(
                     source_collection_identity));
         });
-    RefreshSystemColors();
+    RefreshThemeColors();
     BeginDeferredSourceRestore();
 }
 
@@ -1238,6 +1200,11 @@ void ShellUi::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
     if (settings_before.language != settings_after.language) {
         applied_ui_language_ = settings_after.language;
     }
+    if (settings_before.theme_selection !=
+        settings_after.theme_selection) {
+        applied_theme_selection_ =
+            settings_after.theme_selection;
+    }
     HandleSessionAction(
         source_activation_.RunMaintenance(now));
     spectral_lines_panel_.RunMaintenance(now);
@@ -1271,9 +1238,13 @@ void ShellUi::UnregisterSourceLoadCompletionReadyCallback()
     source_activation_.UnregisterCompletionReadyCallback();
 }
 
-void ShellUi::RefreshSystemColors()
+void ShellUi::RefreshThemeColors()
 {
-    spectrum_view_session_.Submit(SpectrumViewSessionCommand::SetPlotStyle(ReadSystemSpectrumPlotStyle()));
+    SpectrumPlotStyle style;
+    style.line_color =
+        ActiveSemanticPalette().plot_line;
+    spectrum_view_session_.Submit(
+        SpectrumViewSessionCommand::SetPlotStyle(style));
 }
 
 void ShellUi::SetSpectralLineLabelFont(ImFont* font)
@@ -1325,6 +1296,14 @@ ShellUi::TakeAppliedUiLanguage()
         std::nullopt);
 }
 
+std::optional<ThemeSelection>
+ShellUi::TakeAppliedThemeSelection()
+{
+    return std::exchange(
+        applied_theme_selection_,
+        std::nullopt);
+}
+
 int ShellUi::ui_scale_percentage() const
 {
     return application_settings_.View().ui_scale_percentage;
@@ -1333,6 +1312,11 @@ int ShellUi::ui_scale_percentage() const
 UiLanguage ShellUi::ui_language() const
 {
     return application_settings_.View().language;
+}
+
+ThemeSelection ShellUi::theme_selection() const
+{
+    return application_settings_.View().theme_selection;
 }
 
 std::filesystem::path ShellUi::profile_output_directory() const
@@ -1612,6 +1596,16 @@ ShellUi::SetUiScaleForAutomation(
     return ApplyApplicationSettingsIntent(
         ApplicationSettingsIntent::SetUiScale(
             percentage),
+        {});
+}
+
+ApplicationSettingsResult
+ShellUi::SetThemeSelectionForAutomation(
+    ThemeSelection selection)
+{
+    return ApplyApplicationSettingsIntent(
+        ApplicationSettingsIntent::SetThemeSelection(
+            std::move(selection)),
         {});
 }
 
@@ -2278,6 +2272,8 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
     }
 
     if (status.profile_open) {
+        const SemanticPalette& palette =
+            ActiveSemanticPalette();
         const std::string_view recording_label = UiText(
             language,
             UiTextId::PerformanceRecordingBadge);
@@ -2292,16 +2288,21 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
             window_pos.y + 12.0f);
         const ImVec2 label_max(label_min.x + text_size.x + 18.0f, label_min.y + text_size.y + 10.0f);
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
-        draw_list->AddRectFilled(label_min, label_max, IM_COL32(22, 22, 24, 220), 4.0f);
+        draw_list->AddRectFilled(
+            label_min,
+            label_max,
+            ImGui::GetColorU32(
+                palette.overlay_background),
+            4.0f);
         draw_list->AddCircleFilled(
             ImVec2(label_min.x + 9.0f, label_min.y + 5.0f + text_size.y * 0.5f),
             3.5f,
-            IM_COL32(235, 64, 58, 255));
+            ImGui::GetColorU32(palette.error));
         draw_list->AddText(
             ImVec2(
                 label_min.x + 17.0f,
                 label_min.y + 5.0f),
-            IM_COL32_WHITE,
+            ImGui::GetColorU32(palette.overlay_text),
             recording_label.data(),
             recording_label.data() +
                 recording_label.size());
@@ -3107,6 +3108,12 @@ ShellUi::ApplyApplicationSettingsIntent(
             ApplicationSetting::Language) {
         applied_ui_language_ =
             application_settings_.View().language;
+    } else if (
+        result.applied() &&
+        result.setting ==
+            ApplicationSetting::Appearance) {
+        applied_theme_selection_ =
+            application_settings_.View().theme_selection;
     }
     return result;
 }
