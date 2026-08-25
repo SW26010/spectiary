@@ -207,9 +207,13 @@ void TestResolvedDescriptorsOwnAllRenderingColors()
             dark.clear_color[2] < light.clear_color[2],
         "the descriptor should own distinct D3D clear colors for dark and light themes");
     Require(
-        SameColor(dark.palette.plot_line, dark.palette.accent) &&
-            SameColor(light.palette.plot_line, light.palette.accent),
-        "the built-in semantic palettes should keep plot emphasis aligned with the application accent");
+        SameColor(
+            dark.palette.plot_auto_series.front(),
+            dark.palette.accent) &&
+            SameColor(
+                light.palette.plot_auto_series.front(),
+                light.palette.accent),
+        "the first Auto series color should derive plot emphasis from the application accent without a duplicate legacy field");
 }
 
 void TestImGuiThemeApplicationUsesOfficialColorsAndOpaqueViewportBackground()

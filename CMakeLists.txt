@@ -327,6 +327,7 @@ add_library(specforge_desktop_ui STATIC
     src/app/native_window_title.cpp
     src/plot/plot_touchpad_gesture.cpp
     src/plot/scientific_label.cpp
+    src/plot/series_color.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
     src/ui/panel_session_interaction.cpp
@@ -1200,6 +1201,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_plot_touchpad_gesture_tests
     tests/plot_touchpad_gesture_tests.cpp
+    specforge_desktop_ui
+)
+specforge_add_test(
+    specforge_series_color_tests
+    tests/series_color_tests.cpp
     specforge_desktop_ui
 )
 specforge_add_test(

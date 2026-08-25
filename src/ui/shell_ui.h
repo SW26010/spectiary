@@ -320,7 +320,6 @@ public:
     PanelPresentationStatusForAutomation() const noexcept;
     [[nodiscard]] bool
     ArmRuntimeResourceCancellationCheckpoint();
-    void RefreshThemeColors();
     void SetSpectralLineLabelFont(ImFont* font);
     void EnterImmersivePlotMode();
     void ExitImmersivePlotMode();

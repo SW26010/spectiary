@@ -2,6 +2,7 @@
 
 #include "overlays/spectral_line_catalog.h"
 #include "plot/plot_touchpad_gesture.h"
+#include "plot/series_color.h"
 
 #include <imgui.h>
 
@@ -19,9 +20,8 @@ struct SpectrumPlotProfileContext {
 };
 
 struct SpectrumPlotStyle {
-    SpectrumPlotStyle();
-
-    ImVec4 line_color;
+    PlotSeriesColor line_color =
+        PlotSeriesColor::Auto();
     float line_weight = 1.4f;
 };
 
@@ -43,6 +43,12 @@ enum class SpectrumViewportRangeMode {
     Automatic,
     Locked,
 };
+
+// When smoothing is visible, only an Auto raw curve receives the standard
+// de-emphasis opacity. ExplicitColor is user-owned RGBA and remains exact.
+[[nodiscard]] ImVec4 ApplyRawSpectrumSmoothingEmphasis(
+    const PlotSeriesColor& selection,
+    const ImVec4& resolved_color) noexcept;
 
 [[nodiscard]] bool IsPlotPanDragActive(
     bool was_active,

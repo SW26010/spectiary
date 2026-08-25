@@ -43,6 +43,8 @@ struct SpectrumPlotState {
     SpectralLineLabelLayoutWorkspace spectral_line_name_layout;
     SpectralLineLabelLayoutWorkspace spectral_line_wavelength_layout;
     ScientificLabelCache scientific_label_cache;
+    StablePlotSeriesColorAssignments
+        series_color_assignments;
 };
 
 struct SpectrumPlotRenderResult {

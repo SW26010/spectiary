@@ -984,7 +984,6 @@ ShellUi::ShellUi(
                 std::move(
                     source_collection_identity));
         });
-    RefreshThemeColors();
     BeginDeferredSourceRestore();
 }
 
@@ -1236,15 +1235,6 @@ void ShellUi::RegisterSourceLoadCompletionReadyCallback(
 void ShellUi::UnregisterSourceLoadCompletionReadyCallback()
 {
     source_activation_.UnregisterCompletionReadyCallback();
-}
-
-void ShellUi::RefreshThemeColors()
-{
-    SpectrumPlotStyle style;
-    style.line_color =
-        ActiveSemanticPalette().plot_line;
-    spectrum_view_session_.Submit(
-        SpectrumViewSessionCommand::SetPlotStyle(style));
 }
 
 void ShellUi::SetSpectralLineLabelFont(ImFont* font)

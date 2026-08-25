@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -14,6 +15,8 @@ struct ImPlotStyle;
 namespace specforge {
 
 struct ThemeSelection;
+
+inline constexpr std::size_t kPlotAutoSeriesColorCount = 8;
 
 inline constexpr std::string_view kBuiltInDarkThemeStableId =
     "specforge.theme.dark";
@@ -57,7 +60,8 @@ struct SemanticPalette {
     ImVec4 warning{};
     ImVec4 error{};
     ImVec4 success{};
-    ImVec4 plot_line{};
+    std::array<ImVec4, kPlotAutoSeriesColorCount>
+        plot_auto_series{};
     ImVec4 plot_grid{};
     ImVec4 plot_axis{};
     ImVec4 annotation{};

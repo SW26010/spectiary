@@ -16,9 +16,17 @@
 
 namespace specforge {
 
-SpectrumPlotStyle::SpectrumPlotStyle()
-    : line_color(ActiveSemanticPalette().plot_line)
+ImVec4 ApplyRawSpectrumSmoothingEmphasis(
+    const PlotSeriesColor& selection,
+    const ImVec4& resolved_color) noexcept
 {
+    if (selection.mode() ==
+        PlotSeriesColorMode::ExplicitColor) {
+        return resolved_color;
+    }
+    ImVec4 de_emphasized = resolved_color;
+    de_emphasized.w = 0.30f;
+    return de_emphasized;
 }
 
 namespace {
@@ -1155,7 +1163,11 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
         const std::string& name = snapshot->current_spectrum.name;
 
         ImPlotSpec base_spec;
-        base_spec.LineColor = style.line_color;
+        base_spec.LineColor = ResolvePlotSeriesColor(
+            style.line_color,
+            ActiveSemanticPalette(),
+            state.series_color_assignments,
+            kRawSpectrumPlotSeriesId);
         base_spec.LineWeight = style.line_weight;
         base_spec.MarkerLineColor = base_spec.LineColor;
         base_spec.MarkerFillColor = base_spec.LineColor;
@@ -1180,7 +1192,10 @@ SpectrumPlotRenderResult RenderSpectrumPlot(
 
             ImPlotSpec raw_spec = base_spec;
             if (smoothing_active) {
-                raw_spec.LineColor.w = 0.30f;
+                raw_spec.LineColor =
+                    ApplyRawSpectrumSmoothingEmphasis(
+                        style.line_color,
+                        raw_spec.LineColor);
                 raw_spec.LineWeight = std::max(1.0f, style.line_weight * 0.80f);
             }
             if (!state.show_raw_curve) {

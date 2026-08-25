@@ -2144,7 +2144,6 @@ bool SpecForgeApp::ResolveAndApplyTheme(
         ResolvedThemeDescriptor();
     if (changed) {
         ActivateTheme(theme);
-        ui_.RefreshThemeColors();
         viewport_renderer_.SetClearColor(
             theme.clear_color);
         if (ImGui::GetCurrentContext() != nullptr) {
