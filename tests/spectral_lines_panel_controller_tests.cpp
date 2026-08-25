@@ -57,12 +57,46 @@ specforge::SpectralLineMarker Line(
     return marker;
 }
 
+specforge::SpectralLineMarker Band(
+    std::string id,
+    std::string label,
+    std::string group,
+    double start_vacuum_angstrom,
+    double end_vacuum_angstrom)
+{
+    specforge::SpectralLineMarker marker;
+    marker.id = std::move(id);
+    marker.label = std::move(label);
+    marker.kind = specforge::SpectralLineMarkerKind::Band;
+    marker.group = std::move(group);
+    marker.start_vacuum_angstrom = start_vacuum_angstrom;
+    marker.end_vacuum_angstrom = end_vacuum_angstrom;
+    marker.display_label = marker.label;
+    marker.source_ref = "test";
+    return marker;
+}
+
 specforge::SpectralLineCatalog GroupedCatalog()
 {
     specforge::SpectralLineCatalog catalog;
     catalog.markers.push_back(Line("h_beta", "H beta", "Balmer", 4862.683));
     catalog.markers.push_back(Line("h_alpha", "H alpha", "Balmer", 6564.614));
     catalog.markers.push_back(Line("ca_ii_8500", "Ca II", "Ca II", 8500.360));
+    return catalog;
+}
+
+specforge::SpectralLineCatalog LineAndBandCatalog()
+{
+    specforge::SpectralLineCatalog catalog;
+    catalog.markers.push_back(
+        Line("atomic_line", "Atomic line", "Atomic", 5000.0));
+    catalog.markers.push_back(
+        Band(
+            "molecular_band",
+            "Molecular band",
+            "Molecular",
+            5100.0,
+            5200.0));
     return catalog;
 }
 
@@ -706,7 +740,7 @@ void SeedLegacyMultiCatalogCache(
     Require(
         loaded.issue_kind ==
             specforge::CatalogUserStateCacheLoadIssueKind::None,
-        "legacy multi-catalog fixture should load its schema-four seed");
+        "legacy multi-catalog fixture should load its schema-five seed");
 
     specforge::CatalogUserState foreign_state =
         loaded.cache.catalogs.at("specforge.public");
@@ -727,13 +761,13 @@ void SeedLegacyMultiCatalogCache(
             loaded.cache,
             error),
         error.empty()
-            ? "legacy multi-catalog fixture should save its schema-four seed"
+            ? "legacy multi-catalog fixture should save its schema-five seed"
             : error);
     WriteTextFile(
         path,
         ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 4",
+            "\"schema_version\": 5",
             "\"schema_version\": " + std::to_string(schema_version)));
 }
 
@@ -1123,9 +1157,9 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
         specforge::SpectralLinePlotView plot_view = session.PlotView(Snapshot(true));
         Require(plot_view.visible_markers.size() == 3, "a supported snapshot should expose visible catalog markers");
         Require(
-            plot_view.visible_markers[0]->id == "h_beta" &&
-                plot_view.visible_markers[1]->id == "h_alpha" &&
-                plot_view.visible_markers[2]->id == "ca_ii_8500",
+            plot_view.visible_markers[0].marker->id == "h_beta" &&
+                plot_view.visible_markers[1].marker->id == "h_alpha" &&
+                plot_view.visible_markers[2].marker->id == "ca_ii_8500",
             "plot markers should preserve catalog order");
 
         RequireApplied(
@@ -1142,10 +1176,131 @@ void TestPlotViewProjectsOnlyPlotOverlayState()
             std::none_of(
                 plot_view.visible_markers.begin(),
                 plot_view.visible_markers.end(),
-                [](const specforge::SpectralLineMarker* marker) {
-                    return marker != nullptr && marker->id == "h_alpha";
+                [](const specforge::SpectralLinePlotMarker& entry) {
+                    return entry.marker != nullptr &&
+                           entry.marker->id == "h_alpha";
                 }),
             "plot view should not expose a marker hidden through catalog user state");
+    }
+    RemoveTestCache(path);
+}
+
+void TestLineAndBandColorsAreIndependentStableAndPersistent()
+{
+    const std::filesystem::path path =
+        TestCachePath("line_band_colors");
+    RemoveTestCache(path);
+    const specforge::PlotSeriesColor line_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.12f,
+            .green = 0.24f,
+            .blue = 0.36f,
+            .alpha = 0.48f,
+        });
+    const specforge::PlotSeriesColor band_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.81f,
+            .green = 0.62f,
+            .blue = 0.43f,
+            .alpha = 0.74f,
+        });
+
+    {
+        specforge::SpectralLinesPanelController session(
+            LineAndBandCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        const specforge::SpectralLinePlotView automatic =
+            session.PlotView(Snapshot(true));
+        Require(
+            automatic.visible_markers.size() == 2 &&
+                automatic.visible_markers[0].automatic_color_slot == 3 &&
+                automatic.visible_markers[1].automatic_color_slot == 4,
+            "line and band Auto colors should receive distinct stable slots after the three spectrum curves");
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::SetMarkerColor(
+                    "atomic_line",
+                    line_color)),
+            "line color override should apply");
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::SetMarkerColor(
+                    "molecular_band",
+                    band_color)),
+            "band color override should apply independently");
+
+        const specforge::SpectralLinePlotView customized =
+            session.PlotView(Snapshot(true));
+        Require(
+            customized.visible_markers[0].color == line_color &&
+                customized.visible_markers[1].color == band_color,
+            "plot projection should carry each marker's independent color model");
+
+        const specforge::CatalogUserStateView panel_view =
+            session.View();
+        bool line_seen = false;
+        bool band_seen = false;
+        for (const auto& view : panel_view.grouping_views) {
+            for (const auto& group : view.groups) {
+                for (const auto& marker : group.marker_references) {
+                    if (marker.marker_id == "atomic_line") {
+                        line_seen = marker.color == line_color &&
+                                    marker.automatic_color_slot == 3;
+                    }
+                    if (marker.marker_id == "molecular_band") {
+                        band_seen = marker.color == band_color &&
+                                    marker.automatic_color_slot == 4;
+                    }
+                }
+            }
+        }
+        Require(
+            line_seen && band_seen,
+            "panel references should expose the same color selection and stable slot as the plot");
+
+        RequireApplied(
+            session.Submit(
+                specforge::CatalogUserStateIntent::SetMarkerVisibility(
+                    "atomic_line",
+                    false)),
+            "line visibility should change");
+        const auto filtered = session.PlotView(Snapshot(true));
+        Require(
+            filtered.visible_markers.size() == 1 &&
+                filtered.visible_markers.front().marker->id ==
+                    "molecular_band" &&
+                filtered.visible_markers.front().automatic_color_slot == 4,
+            "hiding another marker must not renumber a band's stable Auto slot");
+        Require(session.Flush(), "line and band colors should persist");
+    }
+
+    {
+        specforge::SpectralLinesPanelController restarted(
+            LineAndBandCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            path);
+        const auto plot = restarted.PlotView(Snapshot(true));
+        Require(
+            plot.visible_markers.size() == 1 &&
+                plot.visible_markers.front().marker->id ==
+                    "molecular_band" &&
+                plot.visible_markers.front().color == band_color &&
+                plot.visible_markers.front().automatic_color_slot == 4,
+            "restart should round-trip a band's override, visibility, and stable slot");
+        const auto state =
+            specforge::LoadCatalogUserStateCache(path);
+        const auto& persisted =
+            state.cache.catalogs.at("specforge.public");
+        Require(
+            specforge::MarkerColor(persisted, "atomic_line") ==
+                    line_color &&
+                specforge::MarkerColor(
+                    persisted,
+                    "molecular_band") == band_color,
+            "persistence should retain line and band overrides independently even when one marker is hidden");
+        Require(restarted.Flush(), "clean restart should flush");
     }
     RemoveTestCache(path);
 }
@@ -1606,7 +1761,7 @@ void TestLegacyExactShapeNamesRemainUserOwnedAcrossRestart()
 
     const std::string rewritten = ReadFile(path);
     Require(
-        rewritten.find("\"schema_version\": 4") !=
+        rewritten.find("\"schema_version\": 5") !=
                 std::string::npos &&
             rewritten.find("\"name_source\"") ==
                 std::string::npos,
@@ -1951,7 +2106,7 @@ void TestPersistenceViewReportsLoadWarningRetryAndRecovery()
             session.View()
                     .persistence
                     .save_diagnostic_detail.find(
-                        "Could not save spectral-line grouping cache:") ==
+                        "Could not save spectral-line user-state cache:") ==
                 std::string::npos,
         "spectral-line view should expose retry state and raw diagnostics without an English application prefix");
 
@@ -2776,7 +2931,7 @@ void TestCurrentSchemaSemanticCorruptionFailsClosedWithoutMaintenanceRewrite()
         }
         Require(
             ReadFile(path) == corrupted,
-            "maintenance/destructor flush must preserve a semantically corrupt schema-four cache");
+            "maintenance/destructor flush must preserve a semantically corrupt schema-five cache");
     }
     RemoveTestCache(path);
 }
@@ -2792,13 +2947,13 @@ void TestLegacyIdentityCorruptionFailsClosedBeforeMigration()
         {"\"id\": \"group-2\"", "\"id\": \"group-1\""},
     };
 
-    for (const int schema_version : {1, 2, 3}) {
+    for (const int schema_version : {1, 2, 3, 4}) {
         for (const auto& [needle, replacement] : corruptions) {
             RemoveTestCache(path);
             SeedMultiProcessCache(path);
             std::string corrupted = ReplaceFirst(
                 ReadFile(path),
-                "\"schema_version\": 4",
+                "\"schema_version\": 5",
                 "\"schema_version\": " + std::to_string(schema_version));
             corrupted = ReplaceFirst(
                 std::move(corrupted),
@@ -2900,7 +3055,7 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
         SeedMultiProcessCache(path);
         std::string corrupted = ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 4",
+            "\"schema_version\": 5",
             "\"schema_version\": " + std::to_string(schema_version));
         corrupted = ReplaceFirst(
             std::move(corrupted),
@@ -2944,7 +3099,7 @@ void TestLegacyReferenceAndUnassignedCorruptionFailsClosedBeforeMigration()
         SeedMultiProcessCache(path);
         std::string corrupted = ReplaceFirst(
             ReadFile(path),
-            "\"schema_version\": 4",
+            "\"schema_version\": 5",
             "\"schema_version\": 3");
         corrupted = ReplaceFirst(
             std::move(corrupted),
@@ -3026,7 +3181,7 @@ void TestLegacyMultiCatalogMigrationFailsClosed()
 {
     const std::filesystem::path path =
         TestCachePath("legacy_multi_catalog_migration");
-    for (const int schema_version : {1, 2, 3}) {
+    for (const int schema_version : {1, 2, 3, 4}) {
         RemoveTestCache(path);
         SeedLegacyMultiCatalogCache(path, schema_version);
         const std::string legacy = ReadFile(path);
@@ -3041,8 +3196,10 @@ void TestLegacyMultiCatalogMigrationFailsClosed()
                 "legacy multi-catalog migration must fail closed without a foreign catalog definition");
             Require(
                 session.View().persistence.save_diagnostic_detail.find(
-                    "unrelated catalog") != std::string::npos,
-                "legacy multi-catalog rejection must explain the unsafe migration");
+                    "unrelated catalog") != std::string::npos &&
+                    session.View().persistence.save_diagnostic_detail.find(
+                        "schema 5") != std::string::npos,
+                "legacy multi-catalog rejection must identify the unsafe schema-five migration");
         }
         Require(
             ReadFile(path) == legacy,
@@ -3092,8 +3249,9 @@ void TestConcurrentCatalogStateReconciliation()
                 return std::any_of(
                     restarted_plot.visible_markers.begin(),
                     restarted_plot.visible_markers.end(),
-                    [marker_id](const specforge::SpectralLineMarker* marker) {
-                        return marker != nullptr && marker->id == marker_id;
+                    [marker_id](const specforge::SpectralLinePlotMarker& entry) {
+                        return entry.marker != nullptr &&
+                               entry.marker->id == marker_id;
                     });
             };
         Require(
@@ -3451,6 +3609,7 @@ int main(int argc, char* argv[])
         TestCatalogCommitLeasePathPreservesNativePath();
         TestForeignIdentitiesAreRejectedWithoutPersistence();
         TestPlotViewProjectsOnlyPlotOverlayState();
+        TestLineAndBandColorsAreIndependentStableAndPersistent();
         TestCacheLoadUsesDomainCanonicalizationAndPreservesUnresolvedMarkers();
         TestPersistentIntentUsesDomainCanonicalizationForSelection();
         TestGeneratedNamesPreserveStoredValuesAndOrigins();

@@ -86,6 +86,24 @@ ImVec4 ApplyRawSpectrumSmoothingEmphasis(
     return de_emphasized;
 }
 
+SpectralLineVisualColors ResolveSpectralLineVisualColors(
+    const SpectralLinePlotMarker& marker,
+    const SemanticPalette& theme_palette) noexcept
+{
+    const ImVec4 resolved = ResolvePlotSeriesColor(
+        marker.color,
+        theme_palette,
+        marker.automatic_color_slot);
+    return {
+        .marker_and_label = resolved,
+        .band_fill = ImVec4(
+            resolved.x,
+            resolved.y,
+            resolved.z,
+            resolved.w * 0.12f),
+    };
+}
+
 namespace {
 
 struct Bounds {
@@ -375,22 +393,6 @@ bool IsVisibleInPlot(const SpectralLineMarker& marker, const ImPlotRect& limits)
            *marker.end_vacuum_angstrom >= limits.X.Min && *marker.start_vacuum_angstrom <= limits.X.Max;
 }
 
-ImVec4 SpectralLineColor(const SpectralLineMarker& marker)
-{
-    const SemanticPalette& palette =
-        ActiveSemanticPalette();
-    if (marker.group == "Balmer") {
-        return palette.spectral_balmer;
-    }
-    if (marker.group == "CN" || marker.group == "CH" || marker.group == "C2" || marker.group == "Isotope") {
-        return palette.spectral_molecule;
-    }
-    if (marker.group == "Ba II" || marker.group == "Sr II") {
-        return palette.spectral_heavy_element;
-    }
-    return palette.spectral_default;
-}
-
 void RenderSpectralLineOverlays(
     const SpectrumPlotOverlays& overlays,
     bool force_new_layout_epoch,
@@ -438,22 +440,40 @@ void RenderSpectralLineOverlays(
 
     const std::size_t marker_count =
         overlays.spectral_lines != nullptr ? overlays.spectral_line_count : 0;
+    std::vector<SpectralLineVisualColors> resolved_colors;
+    resolved_colors.reserve(marker_count);
+    const SemanticPalette& palette = ActiveSemanticPalette();
+    for (std::size_t index = 0; index < marker_count; ++index) {
+        resolved_colors.push_back(
+            ResolveSpectralLineVisualColors(
+                overlays.spectral_lines[index],
+                palette));
+    }
     ImPlot::PushPlotClipRect();
     for (std::size_t index = 0; index < marker_count; ++index) {
-        const SpectralLineMarker* marker = overlays.spectral_lines[index];
+        const SpectralLineMarker* marker =
+            overlays.spectral_lines[index].marker;
         if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
             continue;
         }
 
-        const ImVec4 color = SpectralLineColor(*marker);
+        const SpectralLineVisualColors& colors =
+            resolved_colors[index];
+        const ImVec4 color = colors.marker_and_label;
 
         if (marker->kind == SpectralLineMarkerKind::Band) {
             const ImVec2 start_min = ImPlot::PlotToPixels(*marker->start_vacuum_angstrom, limits.Y.Min);
             const ImVec2 end_max = ImPlot::PlotToPixels(*marker->end_vacuum_angstrom, limits.Y.Max);
             const ImVec2 rect_min(std::min(start_min.x, end_max.x), std::min(start_min.y, end_max.y));
             const ImVec2 rect_max(std::max(start_min.x, end_max.x), std::max(start_min.y, end_max.y));
-            draw_list->AddRectFilled(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.10f)));
-            draw_list->AddRect(rect_min, rect_max, ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.34f)));
+            draw_list->AddRectFilled(
+                rect_min,
+                rect_max,
+                ImGui::GetColorU32(colors.band_fill));
+            draw_list->AddRect(
+                rect_min,
+                rect_max,
+                ImGui::GetColorU32(color));
         } else if (marker->vacuum_angstrom) {
             const double x = *marker->vacuum_angstrom;
             const ImVec2 bottom = ImPlot::PlotToPixels(x, limits.Y.Min);
@@ -522,7 +542,8 @@ void RenderSpectralLineOverlays(
 
         std::size_t label_index = 0;
         for (std::size_t index = 0; index < marker_count; ++index) {
-            const SpectralLineMarker* marker = overlays.spectral_lines[index];
+            const SpectralLineMarker* marker =
+                overlays.spectral_lines[index].marker;
             if (marker == nullptr || !IsVisibleInPlot(*marker, limits)) {
                 continue;
             }
@@ -552,9 +573,8 @@ void RenderSpectralLineOverlays(
                 wavelength_placements[label_index];
             ++label_index;
 
-            const ImVec4 color = SpectralLineColor(*marker);
-            const ImU32 text_color =
-                ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.95f));
+            const ImU32 text_color = ImGui::GetColorU32(
+                resolved_colors[index].marker_and_label);
             const SpectralLineVerticalLabelPlacement name_vertical =
                 PlaceSpectralLineNameLabel(
                     vertical_context,

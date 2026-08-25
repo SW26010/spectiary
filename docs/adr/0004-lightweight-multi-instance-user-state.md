@@ -31,9 +31,12 @@ of the result, and completion or failure of the atomic replacement. The live
 operating-system file handle owns the lease. The lease does not span the GUI
 instance lifetime or ordinary in-memory panel editing. Stable catalog view and
 group identities, field ownership, marker-reference membership, explicit
-ordering and selection intent, and remapped panel expansion keys define the
-merge boundary. The catalog controller and its reconciliation module own those
-semantics; the generic atomic-file and local-user-state facilities do not.
+ordering and selection intent, per-marker visibility and explicit-color fields,
+and remapped panel expansion keys define the merge boundary. A marker color
+Reset to Auto is an explicit field deletion for that stable marker identity;
+disjoint marker color edits survive concurrently. The catalog controller and
+its reconciliation module own those semantics; the generic atomic-file and
+local-user-state facilities do not.
 
 If the latest durable document cannot be trusted because parsing, schema,
 shape, semantic-identity, or allocator-history validation fails, the commit

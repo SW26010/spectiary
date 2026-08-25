@@ -568,11 +568,12 @@ std::vector<GroupingView> MergeViews(
     return result;
 }
 
-void MergeVisibility(
-    const std::unordered_map<std::string, bool>& base,
-    const std::unordered_map<std::string, bool>& local,
-    const std::unordered_map<std::string, bool>& latest,
-    std::unordered_map<std::string, bool>& result)
+template <typename Value>
+void MergeMarkerFields(
+    const std::unordered_map<std::string, Value>& base,
+    const std::unordered_map<std::string, Value>& local,
+    const std::unordered_map<std::string, Value>& latest,
+    std::unordered_map<std::string, Value>& result)
 {
     result.clear();
     std::unordered_set<std::string> keys;
@@ -735,11 +736,17 @@ bool ReconcileCatalogUserStateTask(
         ? local.active_view_id
         : latest.active_view_id;
     result.state.marker_visibility.clear();
-    MergeVisibility(
+    MergeMarkerFields(
         base.marker_visibility,
         local.marker_visibility,
         latest.marker_visibility,
         result.state.marker_visibility);
+    result.state.marker_colors.clear();
+    MergeMarkerFields(
+        base.marker_colors,
+        local.marker_colors,
+        latest.marker_colors,
+        result.state.marker_colors);
     result.state.grouping_views = MergeViews(
         base.grouping_views,
         local.grouping_views,

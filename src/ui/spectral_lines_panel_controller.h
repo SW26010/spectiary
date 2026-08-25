@@ -4,6 +4,7 @@
 #include "domain/spectrum_snapshot.h"
 #include "overlays/catalog_user_state_reconciliation.h"
 #include "overlays/spectral_line_catalog.h"
+#include "overlays/spectral_line_plot_marker.h"
 #include "overlays/spectral_line_user_state.h"
 
 #include <cstddef>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -82,6 +84,9 @@ struct CatalogUserStateIntent {
     [[nodiscard]] static CatalogUserStateIntent SetMarkerVisibility(
         std::string marker_id,
         bool visible);
+    [[nodiscard]] static CatalogUserStateIntent SetMarkerColor(
+        std::string marker_id,
+        PlotSeriesColor color);
 
 private:
     friend class SpectralLinesPanelController;
@@ -107,6 +112,7 @@ private:
         CopyMarkerReference,
         RemoveMarkerReference,
         SetMarkerVisibility,
+        SetMarkerColor,
     };
 
     explicit CatalogUserStateIntent(Kind kind);
@@ -119,6 +125,7 @@ private:
     std::string marker_id_;
     std::string text_;
     bool enabled_ = false;
+    PlotSeriesColor marker_color_ = PlotSeriesColor::Auto();
     CatalogUserRenameEditState rename_edit_state_ =
         CatalogUserRenameEditState::Unedited;
 };
@@ -144,6 +151,8 @@ struct SpectralLineMarkerReferenceView {
     bool resolved = false;
     bool visible = false;
     bool shared = false;
+    PlotSeriesColor color = PlotSeriesColor::Auto();
+    std::size_t automatic_color_slot = 0;
 };
 
 struct SpectralLineGroupView {
@@ -198,7 +207,7 @@ struct CatalogUserStateView {
 };
 
 struct SpectralLinePlotView {
-    std::vector<const SpectralLineMarker*> visible_markers;
+    std::vector<SpectralLinePlotMarker> visible_markers;
     bool marker_labels_visible = true;
     std::string_view layout_scope_id;
 };
@@ -236,6 +245,8 @@ private:
     [[nodiscard]] static CatalogUserStateResult Rejected(std::string message);
     [[nodiscard]] bool ViewExists(std::string_view view_id) const;
     [[nodiscard]] bool MarkerExists(std::string_view marker_id) const;
+    [[nodiscard]] std::size_t MarkerAutomaticColorSlot(
+        std::string_view marker_id) const;
     [[nodiscard]] GroupingView* FindUserGroupingView(std::string_view view_id);
     [[nodiscard]] const GroupingView* FindUserGroupingView(std::string_view view_id) const;
     [[nodiscard]] std::optional<GroupingView> EffectiveGroupingView(std::string_view view_id) const;
@@ -256,6 +267,8 @@ private:
     CatalogUserStateCache user_state_cache_;
     CatalogUserState user_state_;
     CatalogPanelState panel_state_;
+    StablePlotSeriesColorAssignments marker_color_assignments_;
+    std::unordered_map<std::string, std::size_t> marker_auto_slots_;
     std::filesystem::path user_state_cache_path_;
     CatalogUserState reconciliation_base_state_;
     CatalogPanelState reconciliation_base_panel_state_;

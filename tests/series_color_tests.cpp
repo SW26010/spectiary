@@ -337,6 +337,77 @@ void TestSmoothingEmphasisPreservesExplicitRgba()
         "smoothing presentation must preserve a user's complete explicit RGBA value");
 }
 
+void TestSpectralLineVisualsShareOneResolvedColor()
+{
+    const specforge::SemanticPalette& dark =
+        specforge::FindBuiltInThemeDescriptor(
+            specforge::BuiltInDarkThemeId())
+            ->palette;
+    const specforge::SemanticPalette& light =
+        specforge::FindBuiltInThemeDescriptor(
+            specforge::BuiltInLightThemeId())
+            ->palette;
+    specforge::SpectralLinePlotMarker automatic;
+    automatic.automatic_color_slot = 3;
+
+    const auto dark_colors =
+        specforge::ResolveSpectralLineVisualColors(
+            automatic,
+            dark);
+    const auto light_colors =
+        specforge::ResolveSpectralLineVisualColors(
+            automatic,
+            light);
+    Require(
+        SameColor(
+            dark_colors.marker_and_label,
+            dark.plot_auto_series[3]) &&
+            SameColor(
+                light_colors.marker_and_label,
+                light.plot_auto_series[3]) &&
+            !SameColor(
+                dark_colors.marker_and_label,
+                light_colors.marker_and_label),
+        "an Auto spectral marker and its label should follow the assigned slot in the active theme palette");
+    Require(
+        NearlyEqual(
+            dark_colors.band_fill.x,
+            dark_colors.marker_and_label.x) &&
+            NearlyEqual(
+                dark_colors.band_fill.y,
+                dark_colors.marker_and_label.y) &&
+            NearlyEqual(
+                dark_colors.band_fill.z,
+                dark_colors.marker_and_label.z) &&
+            NearlyEqual(
+                dark_colors.band_fill.w,
+                dark_colors.marker_and_label.w * 0.12f),
+        "band fill should derive only opacity from the marker-and-label color");
+
+    const ImVec4 custom(0.11f, 0.22f, 0.33f, 0.44f);
+    automatic.color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = custom.x,
+            .green = custom.y,
+            .blue = custom.z,
+            .alpha = custom.w,
+        });
+    Require(
+        SameColor(
+            specforge::ResolveSpectralLineVisualColors(
+                automatic,
+                dark)
+                .marker_and_label,
+            custom) &&
+            SameColor(
+                specforge::ResolveSpectralLineVisualColors(
+                    automatic,
+                    light)
+                    .marker_and_label,
+                custom),
+        "an explicit spectral marker and label RGBA should be exact and theme-independent");
+}
+
 }  // namespace
 
 int main()
@@ -348,5 +419,6 @@ int main()
     TestAutoResolutionTracksResolvedTheme();
     TestExplicitColorWinsAndReturningToAutoReusesSlot();
     TestSmoothingEmphasisPreservesExplicitRgba();
+    TestSpectralLineVisualsShareOneResolvedColor();
     return 0;
 }

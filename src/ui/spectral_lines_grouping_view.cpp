@@ -1,5 +1,7 @@
+#include "plot/series_color.h"
 #include "ui/spectral_lines_grouping_view.h"
 #include "ui/spectral_lines_name_localization.h"
+#include "ui/theme.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -776,6 +778,54 @@ void SpectralLinesGroupingViewUi::Render(
                 }
 
                 ImGui::SameLine();
+                PlotSeriesColor color_selection = reference.color;
+                const ImVec4 resolved_color = ResolvePlotSeriesColor(
+                    color_selection,
+                    ActiveSemanticPalette(),
+                    reference.automatic_color_slot);
+                float marker_rgba[4]{
+                    resolved_color.x,
+                    resolved_color.y,
+                    resolved_color.z,
+                    resolved_color.w,
+                };
+                if (!resolved) {
+                    ImGui::BeginDisabled();
+                }
+                ImGui::SetNextItemWidth(ImGui::GetFrameHeight());
+                if (ImGui::ColorEdit4(
+                        "##marker_color",
+                        marker_rgba,
+                        ImGuiColorEditFlags_NoInputs |
+                            ImGuiColorEditFlags_AlphaBar |
+                            ImGuiColorEditFlags_AlphaPreviewHalf) &&
+                    resolved) {
+                    color_selection =
+                        PlotSeriesColor::ExplicitColor({
+                            .red = marker_rgba[0],
+                            .green = marker_rgba[1],
+                            .blue = marker_rgba[2],
+                            .alpha = marker_rgba[3],
+                        });
+                    (void)panel.Submit(
+                        CatalogUserStateIntent::SetMarkerColor(
+                            reference.marker_id,
+                            color_selection));
+                }
+                if (!resolved) {
+                    ImGui::EndDisabled();
+                }
+                if (ImGui::IsItemHovered(
+                        ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    const std::string_view tooltip =
+                        UiText(language, UiTextId::CurveColor);
+                    ImGui::SetTooltip(
+                        "%.*s",
+                        static_cast<int>(tooltip.size()),
+                        tooltip.data());
+                }
+
+                ImGui::SameLine();
                 ImGuiTreeNodeFlags marker_flags =
                     ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet |
                     ImGuiTreeNodeFlags_SpanFullWidth;
@@ -823,43 +873,63 @@ void SpectralLinesGroupingViewUi::Render(
                         language);
                     ImGui::EndDragDropSource();
                 }
-                if (editable && ImGui::BeginPopupContextItem("marker_context")) {
+                if (ImGui::BeginPopupContextItem("marker_context")) {
                     ImGui::TextUnformatted(label.c_str());
                     ImGui::Separator();
-                    const std::string copy_to_group_label =
+                    ImGui::BeginDisabled(
+                        !resolved ||
+                        color_selection.mode() ==
+                            PlotSeriesColorMode::Auto);
+                    const std::string reset_color_label =
                         StableUiLabel(
                             language,
-                            UiTextId::CopyToGroup,
-                            "SpecForgeCopySpectralLineMarkerToGroup");
-                    if (ImGui::BeginMenu(
-                            copy_to_group_label.c_str())) {
-                        bool has_target = false;
-                        for (const SpectralLineGroupView& target_group : view.groups) {
-                            if (target_group.id == group.id || target_group.is_unassigned) {
-                                continue;
+                            UiTextId::ResetColorToAuto,
+                            "SpecForgeResetSpectralLineColorToAuto");
+                    if (ImGui::Selectable(
+                            reset_color_label.c_str())) {
+                        (void)panel.Submit(
+                            CatalogUserStateIntent::SetMarkerColor(
+                                reference.marker_id,
+                                PlotSeriesColor::Auto()));
+                    }
+                    ImGui::EndDisabled();
+                    if (editable) {
+                        ImGui::Separator();
+                        const std::string copy_to_group_label =
+                            StableUiLabel(
+                                language,
+                                UiTextId::CopyToGroup,
+                                "SpecForgeCopySpectralLineMarkerToGroup");
+                        if (ImGui::BeginMenu(
+                                copy_to_group_label.c_str())) {
+                            bool has_target = false;
+                            for (const SpectralLineGroupView& target_group : view.groups) {
+                                if (target_group.id == group.id || target_group.is_unassigned) {
+                                    continue;
+                                }
+                                has_target = true;
+                                const std::string target_label =
+                                    LocalizedGroupName(
+                                        language,
+                                        target_group) +
+                                    "###" +
+                                    target_group.id;
+                                if (ImGui::Selectable(target_label.c_str())) {
+                                    (void)panel.Submit(CatalogUserStateIntent::CopyMarkerReference(
+                                        view.id,
+                                        reference.marker_id,
+                                        group.id,
+                                        target_group.id));
+                                }
                             }
-                            has_target = true;
-                            const std::string target_label =
-                                LocalizedGroupName(
-                                    language,
-                                    target_group) +
-                                "###" +
-                                target_group.id;
-                            if (ImGui::Selectable(target_label.c_str())) {
-                                (void)panel.Submit(CatalogUserStateIntent::CopyMarkerReference(
-                                    view.id,
-                                    reference.marker_id,
-                                    group.id,
-                                    target_group.id));
+                            if (!has_target) {
+                                RenderDisabledText(
+                                    UiText(
+                                        language,
+                                        UiTextId::NoOtherGroups));
                             }
+                            ImGui::EndMenu();
                         }
-                        if (!has_target) {
-                            RenderDisabledText(
-                                UiText(
-                                    language,
-                                    UiTextId::NoOtherGroups));
-                        }
-                        ImGui::EndMenu();
                     }
                     ImGui::EndPopup();
                 }

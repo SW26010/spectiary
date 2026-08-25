@@ -1,6 +1,6 @@
 #pragma once
 
-#include "overlays/spectral_line_catalog.h"
+#include "overlays/spectral_line_plot_marker.h"
 #include "plot/plot_touchpad_gesture.h"
 #include "plot/series_color.h"
 
@@ -57,7 +57,7 @@ struct SpectrumPlotStyle {
     StablePlotSeriesColorAssignments& assignments);
 
 struct SpectrumPlotOverlays {
-    const SpectralLineMarker* const* spectral_lines = nullptr;
+    const SpectralLinePlotMarker* spectral_lines = nullptr;
     std::size_t spectral_line_count = 0;
     bool show_spectral_line_labels = true;
     std::string_view layout_scope_id;
@@ -74,6 +74,17 @@ enum class SpectrumViewportRangeMode {
     Automatic,
     Locked,
 };
+
+struct SpectralLineVisualColors {
+    ImVec4 marker_and_label;
+    ImVec4 band_fill;
+};
+
+// One resolution path feeds line/band outlines and labels. Band fill keeps
+// the same RGB and derives only presentation opacity from the resolved RGBA.
+[[nodiscard]] SpectralLineVisualColors ResolveSpectralLineVisualColors(
+    const SpectralLinePlotMarker& marker,
+    const SemanticPalette& theme_palette) noexcept;
 
 // When smoothing is visible, only an Auto raw curve receives the standard
 // de-emphasis opacity. ExplicitColor is user-owned RGBA and remains exact.

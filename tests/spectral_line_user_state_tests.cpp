@@ -104,6 +104,57 @@ void TestPublicCatalogIdentityIsStable()
     Require(identity.id == "specforge.public", "public catalog identity should be fixed");
 }
 
+void TestMarkerColorsCanonicalizeAutoAndValidateExplicitRgba()
+{
+    specforge::CatalogUserState state =
+        specforge::MakeCatalogUserState(
+            specforge::PublicSpectralLineCatalogIdentity());
+    Require(
+        specforge::MarkerColor(state, "h_alpha").mode() ==
+            specforge::PlotSeriesColorMode::Auto,
+        "a marker without an override should resolve from canonical Auto state");
+
+    const specforge::PlotSeriesColor custom =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.12f,
+            .green = 0.34f,
+            .blue = 0.56f,
+            .alpha = 0.78f,
+        });
+    specforge::SetMarkerColor(state, "h_alpha", custom);
+    Require(
+        specforge::MarkerColor(state, "h_alpha") == custom &&
+            state.marker_colors.size() == 1,
+        "an explicit marker color should be stored by stable marker identity");
+
+    specforge::SetMarkerColor(
+        state,
+        "h_alpha",
+        specforge::PlotSeriesColor::Auto());
+    Require(
+        state.marker_colors.empty() &&
+            specforge::MarkerColor(state, "h_alpha").mode() ==
+                specforge::PlotSeriesColorMode::Auto,
+        "Reset to Auto should erase the override instead of retaining an Auto payload");
+
+    state.marker_colors.emplace(
+        "h_beta",
+        specforge::PlotSeriesColor::Auto());
+    specforge::CatalogPanelState panel_state;
+    const auto canonicalized =
+        specforge::CanonicalizeCatalogUserState(
+            state,
+            panel_state,
+            GroupedCatalog(),
+            specforge::PublicSpectralLineCatalogIdentity(),
+            specforge::BuildCatalogGroupingView(
+                GroupedCatalog(),
+                specforge::PublicSpectralLineCatalogIdentity()));
+    Require(
+        canonicalized.changed && state.marker_colors.empty(),
+        "canonicalization should remove legacy or malformed Auto override entries");
+}
+
 void TestEmptyCachedGroupNameRecoversWithGeneratedProvenance()
 {
     const specforge::SpectralLineCatalog catalog =
@@ -553,6 +604,26 @@ void TestCacheRoundTrip()
         specforge::MakeCatalogUserState(specforge::PublicSpectralLineCatalogIdentity());
     state.active_view_id = "view-1";
     state.marker_visibility["h_alpha"] = false;
+    const specforge::PlotSeriesColor line_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.125f,
+            .green = 0.25f,
+            .blue = 0.5f,
+            .alpha = 0.75f,
+        });
+    const specforge::PlotSeriesColor band_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.8f,
+            .green = 0.6f,
+            .blue = 0.4f,
+            .alpha = 0.2f,
+        });
+    specforge::SetMarkerColor(state, "h_alpha", line_color);
+    specforge::SetMarkerColor(state, "molecular_band", band_color);
+    specforge::SetMarkerColor(
+        state,
+        "auto_marker",
+        specforge::PlotSeriesColor::Auto());
 
     specforge::GroupingView view;
     view.id = "view-1";
@@ -579,6 +650,14 @@ void TestCacheRoundTrip()
     Require(catalog != loaded.cache.catalogs.end(), "cache should preserve public catalog state");
     Require(catalog->second.active_view_id == "view-1", "cache should preserve active view");
     Require(!specforge::IsMarkerVisible(catalog->second, "h_alpha"), "cache should preserve marker visibility");
+    Require(
+        specforge::MarkerColor(catalog->second, "h_alpha") ==
+                line_color &&
+            specforge::MarkerColor(
+                catalog->second,
+                "molecular_band") == band_color &&
+            !catalog->second.marker_colors.contains("auto_marker"),
+        "cache should round-trip independent line and band overrides while keeping Auto absent");
     Require(catalog->second.grouping_views.size() == 1, "cache should preserve user grouping views");
     const auto panel = loaded.cache.catalog_panel_state.find("specforge.public");
     Require(panel != loaded.cache.catalog_panel_state.end(), "cache should preserve public panel state separately");
@@ -586,6 +665,96 @@ void TestCacheRoundTrip()
         panel->second.expanded_group_ids.find(specforge::GroupExpansionKey("view-1", "group-1")) !=
             panel->second.expanded_group_ids.end(),
         "cache should preserve expanded group ids");
+}
+
+void TestSchemaFourMarkerColorsMigrateToAuto()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_spectral_line_schema_four_color_migration_test.json";
+    {
+        std::ofstream stream(path);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 4,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "",
+      "next_view_sequence": 1,
+      "next_group_sequence": 1,
+      "reserved_view_ids": [],
+      "reserved_group_ids": [],
+      "marker_visibility": {},
+      "grouping_views": []
+    }
+  },
+  "catalog_panel_state": {}
+})json";
+    }
+
+    const auto loaded =
+        specforge::LoadCatalogUserStateCache(path);
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    Require(loaded.warning.empty(), loaded.warning);
+    Require(
+        loaded.schema_version == 4 && loaded.requires_save,
+        "schema four should load as a supported one-time migration");
+    const auto match =
+        loaded.cache.catalogs.find("specforge.public");
+    Require(
+        match != loaded.cache.catalogs.end() &&
+            match->second.marker_colors.empty() &&
+            specforge::MarkerColor(match->second, "h_alpha").mode() ==
+                specforge::PlotSeriesColorMode::Auto,
+        "legacy catalogs without color state should migrate every marker to Auto");
+}
+
+void TestSchemaFiveRejectsCorruptMarkerColor()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_spectral_line_corrupt_color_test.json";
+    {
+        std::ofstream stream(path);
+        stream << R"json({
+  "format_kind": "specforge.catalog_user_state.cache",
+  "schema_version": 5,
+  "catalogs": {
+    "specforge.public": {
+      "active_view_id": "",
+      "next_view_sequence": 1,
+      "next_group_sequence": 1,
+      "reserved_view_ids": [],
+      "reserved_group_ids": [],
+      "marker_visibility": {},
+      "marker_colors": {
+        "h_alpha": {
+          "mode": "explicit-color",
+          "red": "1.5",
+          "green": "0.2",
+          "blue": "0.3",
+          "alpha": "1"
+        }
+      },
+      "grouping_views": []
+    }
+  },
+  "catalog_panel_state": {}
+})json";
+    }
+
+    const auto loaded =
+        specforge::LoadCatalogUserStateCache(path);
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    Require(
+        loaded.issue_kind ==
+                specforge::CatalogUserStateCacheLoadIssueKind::InvalidDocument &&
+            loaded.cache.catalogs.empty() &&
+            loaded.diagnostic_detail.find("RGBA channels") !=
+                std::string::npos,
+        "a corrupt current-schema marker color should fail closed with a diagnostic");
 }
 
 void TestCacheLoadLeavesCanonicalizationToTheDomain()
@@ -1174,6 +1343,57 @@ void TestCatalogTaskReconciliationMergesDisjointChanges()
         "task reconciliation should merge independent panel expansion keys");
 }
 
+void TestCatalogTaskReconciliationMergesColorOverridesAndReset()
+{
+    const specforge::CatalogIdentity identity =
+        specforge::PublicSpectralLineCatalogIdentity();
+    specforge::CatalogUserState base =
+        specforge::MakeCatalogUserState(identity);
+    specforge::SetMarkerColor(
+        base,
+        "h_alpha",
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.1f,
+            .green = 0.2f,
+            .blue = 0.3f,
+            .alpha = 0.4f,
+        }));
+
+    specforge::CatalogUserState local = base;
+    specforge::SetMarkerColor(
+        local,
+        "h_alpha",
+        specforge::PlotSeriesColor::Auto());
+    specforge::CatalogUserState latest = base;
+    const specforge::PlotSeriesColor peer_color =
+        specforge::PlotSeriesColor::ExplicitColor({
+            .red = 0.9f,
+            .green = 0.8f,
+            .blue = 0.7f,
+            .alpha = 0.6f,
+        });
+    specforge::SetMarkerColor(latest, "h_beta", peer_color);
+
+    specforge::CatalogUserStateReconciliationResult result;
+    std::string diagnostic;
+    Require(
+        specforge::ReconcileCatalogUserStateTask(
+            base,
+            local,
+            latest,
+            {},
+            {},
+            {},
+            result,
+            diagnostic),
+        diagnostic);
+    Require(
+        !result.state.marker_colors.contains("h_alpha") &&
+            specforge::MarkerColor(result.state, "h_beta") ==
+                peer_color,
+        "a local Reset to Auto and a peer marker override should both survive three-way merge");
+}
+
 void TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict()
 {
     const specforge::CatalogIdentity identity =
@@ -1411,6 +1631,7 @@ int main()
 {
     try {
         TestPublicCatalogIdentityIsStable();
+        TestMarkerColorsCanonicalizeAutoAndValidateExplicitRgba();
         TestEmptyCachedGroupNameRecoversWithGeneratedProvenance();
         TestDefaultMarkerVisibilityIsVisible();
         TestSearchStateDoesNotBulkToggleMarkers();
@@ -1424,6 +1645,8 @@ int main()
         TestUngroupedCatalogHasNoCatalogGroupingView();
         TestCatalogGroupingViewUsesUniqueGroupIds();
         TestCacheRoundTrip();
+        TestSchemaFourMarkerColorsMigrateToAuto();
+        TestSchemaFiveRejectsCorruptMarkerColor();
         TestCacheLoadLeavesCanonicalizationToTheDomain();
         TestLegacySchemaTwoEditableNamesRemainUserOwned();
         TestCacheSaveReplacesExistingFileWithoutLeavingTempFile();
@@ -1435,6 +1658,7 @@ int main()
         TestUnsupportedCacheSchemaIsWarningOnly();
         TestSchemaThreeRejectsExcessiveGeneratedCopyCount();
         TestCatalogTaskReconciliationMergesDisjointChanges();
+        TestCatalogTaskReconciliationMergesColorOverridesAndReset();
         TestCatalogTaskReconciliationResolvesAddedIdAndSelectionConflict();
         TestCatalogTaskReconciliationPreservesExplicitOrderAndReservations();
         TestCatalogTaskReconciliationRemapsIdsDeterministically();

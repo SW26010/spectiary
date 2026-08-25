@@ -1,6 +1,7 @@
 #pragma once
 
 #include "overlays/spectral_line_catalog.h"
+#include "plot/series_color_model.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -62,6 +63,9 @@ struct CatalogUserState {
     CatalogIdentity catalog_identity;
     std::string active_view_id;
     std::unordered_map<std::string, bool> marker_visibility;
+    // Absence is the canonical Auto value. Only per-marker explicit
+    // overrides are persisted, so Auto never carries stale RGBA payload.
+    std::unordered_map<std::string, PlotSeriesColor> marker_colors;
     std::vector<GroupingView> grouping_views;
 
     // Persisted high-water marks keep generated identities monotonic across
@@ -129,7 +133,7 @@ CanonicalizeCatalogUserState(
     std::string& diagnostic,
     bool require_allocator_history = false);
 
-// Legacy schema one/two/three state is validated before startup
+// Legacy schema one/two/three/four state is validated before startup
 // canonicalization.  It intentionally checks identity and reference
 // invariants only: those schemas predate the explicit unassigned-group flag
 // and allocator history, so those values are migrated after this gate.
@@ -165,6 +169,13 @@ CanonicalizeCatalogUserState(
 
 [[nodiscard]] bool IsMarkerVisible(const CatalogUserState& state, const std::string& marker_id);
 void SetMarkerVisible(CatalogUserState& state, const std::string& marker_id, bool visible);
+[[nodiscard]] PlotSeriesColor MarkerColor(
+    const CatalogUserState& state,
+    std::string_view marker_id);
+void SetMarkerColor(
+    CatalogUserState& state,
+    std::string marker_id,
+    PlotSeriesColor color);
 [[nodiscard]] GroupVisibilityState VisibilityStateForGroup(
     const CatalogUserState& state,
     const UserGroup& group,

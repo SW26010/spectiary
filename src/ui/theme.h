@@ -68,10 +68,6 @@ struct SemanticPalette {
     ImVec4 overlay_background{};
     ImVec4 overlay_text{};
     ImVec4 plot_crosshair{};
-    ImVec4 spectral_balmer{};
-    ImVec4 spectral_molecule{};
-    ImVec4 spectral_heavy_element{};
-    ImVec4 spectral_default{};
 };
 
 struct ThemeDescriptor {

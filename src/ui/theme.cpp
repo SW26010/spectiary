@@ -36,10 +36,6 @@ SemanticPalette DarkSemanticPalette()
         .overlay_background = ImVec4(0.086f, 0.086f, 0.094f, 0.86f),
         .overlay_text = ImVec4(1.0f, 1.0f, 1.0f, 1.0f),
         .plot_crosshair = ImVec4(0.72f, 0.78f, 0.82f, 0.48f),
-        .spectral_balmer = ImVec4(0.95f, 0.42f, 0.35f, 0.78f),
-        .spectral_molecule = ImVec4(0.43f, 0.78f, 0.64f, 0.76f),
-        .spectral_heavy_element = ImVec4(0.95f, 0.72f, 0.32f, 0.78f),
-        .spectral_default = ImVec4(0.66f, 0.72f, 0.82f, 0.72f),
     };
 }
 
@@ -71,10 +67,6 @@ SemanticPalette LightSemanticPalette()
         .overlay_background = ImVec4(0.97f, 0.97f, 0.98f, 0.92f),
         .overlay_text = ImVec4(0.08f, 0.09f, 0.10f, 1.0f),
         .plot_crosshair = ImVec4(0.20f, 0.27f, 0.34f, 0.55f),
-        .spectral_balmer = ImVec4(0.72f, 0.12f, 0.10f, 0.82f),
-        .spectral_molecule = ImVec4(0.08f, 0.48f, 0.30f, 0.82f),
-        .spectral_heavy_element = ImVec4(0.68f, 0.38f, 0.02f, 0.82f),
-        .spectral_default = ImVec4(0.28f, 0.34f, 0.42f, 0.78f),
     };
 }
 

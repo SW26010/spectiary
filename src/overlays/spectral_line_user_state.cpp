@@ -604,6 +604,18 @@ bool ValidateCatalogUserStateCacheForReconciliation(
                 return fail("marker visibility identity must not be empty");
             }
         }
+        for (const auto& [marker_id, color] : state.marker_colors) {
+            if (marker_id.empty()) {
+                return fail("marker color identity must not be empty");
+            }
+            if (color.mode() != PlotSeriesColorMode::ExplicitColor ||
+                !color.explicit_color()) {
+                return fail("marker color overrides must be explicit colors");
+            }
+            if (!IsValidRgbaColor(*color.explicit_color())) {
+                return fail("marker color channels must be finite values from zero to one");
+            }
+        }
         for (const std::string& id : state.reserved_view_ids) {
             if (id.empty() || id == CatalogGroupingViewId()) {
                 return fail("reserved view identity must be a user identity");
@@ -1045,6 +1057,17 @@ CatalogUserStateCanonicalizationResult CanonicalizeCatalogUserState(
         }
     }
 
+    for (auto iterator = state.marker_colors.begin();
+         iterator != state.marker_colors.end();) {
+        if (iterator->first.empty() ||
+            iterator->second.mode() == PlotSeriesColorMode::Auto) {
+            iterator = state.marker_colors.erase(iterator);
+            result.changed = true;
+        } else {
+            ++iterator;
+        }
+    }
+
     std::unordered_set<std::string> valid_expansion_keys;
     if (catalog_grouping_view) {
         for (const UserGroup& group : catalog_grouping_view->groups) {
@@ -1105,6 +1128,33 @@ void SetMarkerVisible(CatalogUserState& state, const std::string& marker_id, boo
     if (!marker_id.empty()) {
         state.marker_visibility[marker_id] = visible;
     }
+}
+
+PlotSeriesColor MarkerColor(
+    const CatalogUserState& state,
+    std::string_view marker_id)
+{
+    const auto match = state.marker_colors.find(std::string(marker_id));
+    return match == state.marker_colors.end()
+        ? PlotSeriesColor::Auto()
+        : match->second;
+}
+
+void SetMarkerColor(
+    CatalogUserState& state,
+    std::string marker_id,
+    PlotSeriesColor color)
+{
+    if (marker_id.empty()) {
+        return;
+    }
+    if (color.mode() == PlotSeriesColorMode::Auto) {
+        state.marker_colors.erase(marker_id);
+        return;
+    }
+    state.marker_colors.insert_or_assign(
+        std::move(marker_id),
+        std::move(color));
 }
 
 GroupVisibilityState VisibilityStateForGroup(

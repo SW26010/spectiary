@@ -5,11 +5,16 @@
 #include "app/local_user_state_paths.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <limits>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -19,7 +24,9 @@ namespace specforge {
 namespace {
 
 constexpr const char* kCacheFormatKind = "specforge.catalog_user_state.cache";
-constexpr int kCacheSchemaVersion = 4;
+constexpr int kCacheSchemaVersion = 5;
+constexpr std::string_view kExplicitColorMode =
+    "explicit-color";
 
 CatalogUserStateCacheBeforeReplaceHook g_before_replace_hook_for_tests;
 
@@ -71,6 +78,53 @@ std::string ReadStringMember(const JsonValue& value, std::string_view key)
 bool ReadBoolMember(const JsonValue& value, std::string_view key, bool fallback)
 {
     return ReadJsonBoolMember(value, key, fallback);
+}
+
+std::optional<double> ParseFiniteDouble(
+    const JsonValue& object,
+    std::string_view key)
+{
+    const std::optional<std::string> text =
+        ReadJsonStringMember(object, key);
+    if (!text || text->empty()) {
+        return std::nullopt;
+    }
+    double value = 0.0;
+    const std::from_chars_result parsed = std::from_chars(
+        text->data(),
+        text->data() + text->size(),
+        value,
+        std::chars_format::general);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != text->data() + text->size() ||
+        !std::isfinite(value)) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+std::optional<std::string> EncodeFiniteFloat(float value)
+{
+    if (!std::isfinite(value)) {
+        return std::nullopt;
+    }
+    std::array<char, 64> buffer{};
+    const std::to_chars_result encoded = std::to_chars(
+        buffer.data(),
+        buffer.data() + buffer.size(),
+        value,
+        std::chars_format::general,
+        std::numeric_limits<float>::max_digits10);
+    if (encoded.ec != std::errc{}) {
+        return std::nullopt;
+    }
+    return std::string(buffer.data(), encoded.ptr);
+}
+
+bool EncodedColorChannelIsUsable(
+    const std::optional<double>& value)
+{
+    return value && *value >= 0.0 && *value <= 1.0;
 }
 
 GeneratedNameSource ReadGeneratedNameSource(
@@ -459,7 +513,8 @@ ValidateCatalogCacheBodyShape(
     const JsonValue& catalogs,
     const JsonValue* panel_state,
     bool require_unassigned_flag,
-    bool require_allocator_history)
+    bool require_allocator_history,
+    bool require_marker_colors)
 {
     for (const auto& [identity_id, catalog] :
          catalogs.object) {
@@ -546,6 +601,51 @@ ValidateCatalogCacheBodyShape(
                     ".marker_visibility[" +
                     marker_id +
                     "] must be a boolean";
+            }
+        }
+        const JsonValue* marker_colors =
+            ObjectMember(catalog, "marker_colors");
+        if (marker_colors == nullptr && require_marker_colors) {
+            return catalog_path + ".marker_colors is missing";
+        }
+        if (marker_colors != nullptr) {
+            if (marker_colors->kind != JsonValue::Kind::Object) {
+                return catalog_path +
+                    ".marker_colors must be an object";
+            }
+            for (const auto& [marker_id, encoded] :
+                 marker_colors->object) {
+                const std::string color_path =
+                    catalog_path + ".marker_colors[" +
+                    marker_id + "]";
+                if (marker_id.empty()) {
+                    return catalog_path +
+                        ".marker_colors contains an empty marker identity key";
+                }
+                if (encoded.kind != JsonValue::Kind::Object) {
+                    return color_path + " must be an object";
+                }
+                const std::optional<std::string> mode =
+                    ReadJsonStringMember(encoded, "mode");
+                if (!mode || *mode != kExplicitColorMode) {
+                    return color_path +
+                        ".mode must be \"explicit-color\"";
+                }
+                const std::optional<double> red =
+                    ParseFiniteDouble(encoded, "red");
+                const std::optional<double> green =
+                    ParseFiniteDouble(encoded, "green");
+                const std::optional<double> blue =
+                    ParseFiniteDouble(encoded, "blue");
+                const std::optional<double> alpha =
+                    ParseFiniteDouble(encoded, "alpha");
+                if (!EncodedColorChannelIsUsable(red) ||
+                    !EncodedColorChannelIsUsable(green) ||
+                    !EncodedColorChannelIsUsable(blue) ||
+                    !EncodedColorChannelIsUsable(alpha)) {
+                    return color_path +
+                        " RGBA channels must be finite strings from zero to one";
+                }
             }
         }
         if (const JsonValue* expanded =
@@ -807,6 +907,36 @@ std::unordered_map<std::string, bool> ReadMarkerVisibility(const JsonValue& valu
     return visibility;
 }
 
+std::unordered_map<std::string, PlotSeriesColor>
+ReadMarkerColors(const JsonValue& value)
+{
+    std::unordered_map<std::string, PlotSeriesColor> colors;
+    if (value.kind != JsonValue::Kind::Object) {
+        return colors;
+    }
+    for (const auto& [marker_id, encoded] : value.object) {
+        const std::optional<double> red =
+            ParseFiniteDouble(encoded, "red");
+        const std::optional<double> green =
+            ParseFiniteDouble(encoded, "green");
+        const std::optional<double> blue =
+            ParseFiniteDouble(encoded, "blue");
+        const std::optional<double> alpha =
+            ParseFiniteDouble(encoded, "alpha");
+        if (red && green && blue && alpha) {
+            colors.emplace(
+                marker_id,
+                PlotSeriesColor::ExplicitColor({
+                    .red = static_cast<float>(*red),
+                    .green = static_cast<float>(*green),
+                    .blue = static_cast<float>(*blue),
+                    .alpha = static_cast<float>(*alpha),
+                }));
+        }
+    }
+    return colors;
+}
+
 void WriteMarkerReferences(std::ostream& stream, const std::vector<MarkerReference>& references, int indent)
 {
     const std::string base(static_cast<std::size_t>(indent), ' ');
@@ -944,8 +1074,8 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
     VersionedJsonCacheLoadResult cache = LoadVersionedJsonCacheFile(
         path,
         kCacheFormatKind,
-        {1, 2, 3, kCacheSchemaVersion},
-        "spectral-line grouping cache");
+        {1, 2, 3, 4, kCacheSchemaVersion},
+        "spectral-line user-state cache");
     if (!cache.document) {
         result.issue_kind =
             CatalogCacheLoadIssueKind(
@@ -970,7 +1100,7 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
                 ? "missing object member \"catalogs\""
                 : "member \"catalogs\" must be an object";
         result.warning =
-            "Ignored invalid spectral-line grouping cache.";
+            "Ignored invalid spectral-line user-state cache.";
         return result;
     }
     const JsonValue* panel_state =
@@ -985,7 +1115,7 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         result.diagnostic_detail =
             "member \"catalog_panel_state\" must be an object";
         result.warning =
-            "Ignored invalid spectral-line grouping cache.";
+            "Ignored invalid spectral-line user-state cache.";
         return result;
     }
     if (std::optional<std::string> body_issue =
@@ -993,15 +1123,15 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
                 *catalogs,
                 panel_state,
                 cache.document->schema_version >= 3,
-                cache.document->schema_version ==
-                    kCacheSchemaVersion)) {
+                cache.document->schema_version >= 4,
+                cache.document->schema_version >= 5)) {
         result.issue_kind =
             CatalogUserStateCacheLoadIssueKind::
                 InvalidDocument;
         result.diagnostic_detail =
             std::move(*body_issue);
         result.warning =
-            "Ignored invalid spectral-line grouping cache.";
+            "Ignored invalid spectral-line user-state cache.";
         return result;
     }
     result.requires_save =
@@ -1041,6 +1171,10 @@ CatalogUserStateCacheLoadResult LoadCatalogUserStateCache(const std::filesystem:
         if (const JsonValue* marker_visibility = ObjectMember(catalog_value, "marker_visibility")) {
             state.marker_visibility = ReadMarkerVisibility(*marker_visibility);
         }
+        if (const JsonValue* marker_colors =
+                ObjectMember(catalog_value, "marker_colors")) {
+            state.marker_colors = ReadMarkerColors(*marker_colors);
+        }
         if (const JsonValue* expanded = ObjectMember(catalog_value, "expanded_group_ids")) {
             result.cache.catalog_panel_state[identity_id].expanded_group_ids = ReadExpandedGroupIds(*expanded);
         }
@@ -1075,8 +1209,22 @@ bool SaveCatalogUserStateCache(
 {
     error.clear();
     if (path.empty()) {
-        error = "spectral-line grouping cache path is empty";
+        error = "spectral-line user-state cache path is empty";
         return false;
+    }
+
+    for (const auto& [catalog_id, state] : cache.catalogs) {
+        for (const auto& [marker_id, selection] :
+             state.marker_colors) {
+            if (marker_id.empty() ||
+                !selection.explicit_color() ||
+                !IsValidRgbaColor(*selection.explicit_color())) {
+                error =
+                    "catalog marker color override is invalid for " +
+                    catalog_id + "/" + marker_id;
+                return false;
+            }
+        }
     }
 
     const std::vector<std::string> catalog_keys = SortedCacheKeys(cache.catalogs);
@@ -1085,7 +1233,7 @@ bool SaveCatalogUserStateCache(
         path,
         kCacheFormatKind,
         kCacheSchemaVersion,
-        "spectral-line grouping cache",
+        "spectral-line user-state cache",
         [&](std::ostream& stream, std::string&) {
             stream << ",\n";
             stream << "  \"catalogs\": {\n";
@@ -1143,6 +1291,51 @@ bool SaveCatalogUserStateCache(
                     stream << (index + 1 == marker_ids.size() ? "\n" : ",\n");
                 }
                 if (!marker_ids.empty()) {
+                    stream << "      ";
+                }
+                stream << "},\n";
+
+                stream << "      \"marker_colors\": {";
+                const std::vector<std::string> color_marker_ids =
+                    SortedCacheKeys(state.marker_colors);
+                if (!color_marker_ids.empty()) {
+                    stream << "\n";
+                }
+                for (std::size_t index = 0;
+                     index < color_marker_ids.size();
+                     ++index) {
+                    const std::string& marker_id =
+                        color_marker_ids[index];
+                    const RgbaColor& color =
+                        *state.marker_colors.at(marker_id).explicit_color();
+                    const std::optional<std::string> red =
+                        EncodeFiniteFloat(color.red);
+                    const std::optional<std::string> green =
+                        EncodeFiniteFloat(color.green);
+                    const std::optional<std::string> blue =
+                        EncodeFiniteFloat(color.blue);
+                    const std::optional<std::string> alpha =
+                        EncodeFiniteFloat(color.alpha);
+                    if (!red || !green || !blue || !alpha) {
+                        return false;
+                    }
+                    stream << "        ";
+                    WriteJsonString(stream, marker_id);
+                    stream << ": { \"mode\": \"explicit-color\", \"red\": ";
+                    WriteJsonString(stream, *red);
+                    stream << ", \"green\": ";
+                    WriteJsonString(stream, *green);
+                    stream << ", \"blue\": ";
+                    WriteJsonString(stream, *blue);
+                    stream << ", \"alpha\": ";
+                    WriteJsonString(stream, *alpha);
+                    stream << " }";
+                    stream <<
+                        (index + 1 == color_marker_ids.size()
+                             ? "\n"
+                             : ",\n");
+                }
+                if (!color_marker_ids.empty()) {
                     stream << "      ";
                 }
                 stream << "},\n";

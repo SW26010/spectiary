@@ -98,6 +98,9 @@ implementation has one active catalog at a time. The panel should expose:
   identity and marker id;
 - per-marker visibility shared by every grouping view for the same catalog
   identity;
+- per-marker Auto or explicit RGBA color shared by every grouping view for the
+  same catalog identity, with Reset to Auto represented by removing the
+  override;
 - text search over marker identity and display fields;
 - a plot-label toggle.
 
@@ -136,9 +139,12 @@ The merge ownership is intentionally narrow:
   is retained under a fresh deterministic id; both additions remain visible.
   A local deletion is a tombstone for that entity and wins over a concurrent
   edit to the same entity.
-- names, generated-name provenance, unassigned flags, and per-marker visibility
-  are field-owned. A field unchanged by the stale task is taken from the latest
-  durable state; a field changed by the task wins a same-field conflict.
+- names, generated-name provenance, unassigned flags, per-marker visibility,
+  and per-marker explicit color overrides are field-owned. A field unchanged
+  by the stale task is taken from the latest durable state; a field changed by
+  the task wins a same-field conflict. Removing a color override is the marker
+  color field's Reset-to-Auto tombstone and does not erase a peer's change to a
+  different marker.
 - marker references are keyed by catalog identity plus marker id. Disjoint
   additions/removals survive, while a removal from a group is a local tombstone
   for that group reference.
@@ -161,11 +167,11 @@ fails its body-shape checks, or violates semantic identity invariants (such as
 empty/duplicate view or group identities, group identity reuse, or invalid
 reference identity) is untrusted before any replacement. Maintenance,
 destructor, and explicit task writes fail closed with the parser/semantic
-diagnostic and leave the durable file untouched. Schema-one/two/three
+diagnostic and leave the durable file untouched. Schema-one/two/three/four
 documents are supported migration inputs only when every persisted catalog
 entry belongs to the catalog being migrated; a legacy multi-catalog document
 without domain definitions for all entries fails closed rather than producing
-a partially migrated schema-four file. A single-catalog legacy document is
+a partially migrated schema-five file. A single-catalog legacy document is
 checked for raw view/group identity uniqueness, current-catalog marker
 references, and (for schema three) the unassigned identity/flag pairing before
 canonicalization, then canonicalized under the commit lease and validated again
@@ -189,6 +195,13 @@ between grouping-view tabs does not change plot visibility. Plot code does not
 read config files, does not know subtype presets, and does not inspect
 loader-specific metadata. It only respects the snapshot capability flags and
 draws the supplied markers against the current X axis.
+
+Every line and band owns an independent `Auto / ExplicitColor` selection keyed
+by stable catalog identity plus marker id. Auto colors use the shared
+theme-aware plot-series palette and a stable slot that is unaffected by frame,
+filter, grouping, or visibility order. Explicit RGBA is theme-independent.
+Line strokes and band outlines use the same resolved color as both labels; a
+band fill may derive lower opacity while retaining that resolved RGB.
 
 Labels should be staggered for nearby markers. Dense catalogs must remain
 readable enough for inspection; hiding labels must keep the reference lines and

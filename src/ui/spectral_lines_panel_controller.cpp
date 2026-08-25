@@ -321,6 +321,16 @@ CatalogUserStateIntent CatalogUserStateIntent::SetMarkerVisibility(std::string m
     return intent;
 }
 
+CatalogUserStateIntent CatalogUserStateIntent::SetMarkerColor(
+    std::string marker_id,
+    PlotSeriesColor color)
+{
+    CatalogUserStateIntent intent(Kind::SetMarkerColor);
+    intent.marker_id_ = std::move(marker_id);
+    intent.marker_color_ = std::move(color);
+    return intent;
+}
+
 SpectralLinesPanelController::SpectralLinesPanelController(
     std::filesystem::path packaged_catalog_path)
     : SpectralLinesPanelController(
@@ -349,6 +359,23 @@ SpectralLinesPanelController::SpectralLinesPanelController(
       user_state_cache_path_(std::move(user_state_cache_path)),
       cache_persistence_(kSaveDebounce, kSaveRetry)
 {
+    // Spectrum curves and catalog markers share one stable palette namespace.
+    // Reserving the three built-in curves first prevents the first catalog
+    // marker from duplicating the raw spectrum's Auto color.
+    (void)marker_color_assignments_.SlotFor(
+        kRawSpectrumPlotSeriesId);
+    (void)marker_color_assignments_.SlotFor(
+        kGaussianSmoothingPlotSeriesId);
+    (void)marker_color_assignments_.SlotFor(
+        kMedianSmoothingPlotSeriesId);
+    for (const SpectralLineMarker& marker : catalog_.markers) {
+        const std::string stable_id =
+            catalog_identity_.id + ".marker." + marker.id;
+        marker_auto_slots_.insert_or_assign(
+            marker.id,
+            marker_color_assignments_.SlotFor(stable_id));
+    }
+
     CatalogUserStateCacheLoadResult load_result = LoadCatalogUserStateCache(user_state_cache_path_);
     if (load_result.issue_kind ==
             CatalogUserStateCacheLoadIssueKind::None &&
@@ -372,7 +399,7 @@ SpectralLinesPanelController::SpectralLinesPanelController(
                 "legacy catalog user-state cache is not trusted before "
                 "canonicalization: " + legacy_validation_error;
             load_result.warning =
-                "Ignored invalid legacy spectral-line grouping cache.";
+                "Ignored invalid legacy spectral-line user-state cache.";
             load_result.requires_save = false;
         }
     }
@@ -775,6 +802,25 @@ CatalogUserStateResult SpectralLinesPanelController::Submit(CatalogUserStateInte
         }
         SetMarkerVisible(user_state_, intent.marker_id_, intent.enabled_);
         return Applied(true);
+
+    case CatalogUserStateIntent::Kind::SetMarkerColor:
+        if (!MarkerExists(intent.marker_id_)) {
+            return Rejected("Marker identity does not belong to the current spectral-line catalog.");
+        }
+        if (intent.marker_color_.explicit_color() &&
+            !IsValidRgbaColor(
+                *intent.marker_color_.explicit_color())) {
+            return Rejected("Marker color channels must be finite values from zero to one.");
+        }
+        if (MarkerColor(user_state_, intent.marker_id_) ==
+            intent.marker_color_) {
+            return NoChange();
+        }
+        SetMarkerColor(
+            user_state_,
+            std::move(intent.marker_id_),
+            std::move(intent.marker_color_));
+        return Applied(true);
     }
 
     return Rejected("Unknown catalog user state intent.");
@@ -843,6 +889,11 @@ CatalogUserStateView SpectralLinesPanelController::View() const
                 marker_view.resolved = marker != nullptr;
                 marker_view.visible = marker != nullptr && IsMarkerVisible(user_state_, reference.marker_id);
                 marker_view.shared = IsSharedMarkerReference(reference_counts, reference);
+                marker_view.color = MarkerColor(
+                    user_state_,
+                    reference.marker_id);
+                marker_view.automatic_color_slot =
+                    MarkerAutomaticColorSlot(reference.marker_id);
                 if (marker != nullptr) {
                     marker_view.label = marker->label;
                     marker_view.wavelength_text = MarkerWavelengthText(*marker);
@@ -880,7 +931,12 @@ SpectralLinePlotView SpectralLinesPanelController::PlotView(
     result.visible_markers.reserve(catalog_.markers.size());
     for (const SpectralLineMarker& marker : catalog_.markers) {
         if (IsMarkerVisible(user_state_, marker.id)) {
-            result.visible_markers.push_back(&marker);
+            result.visible_markers.push_back({
+                .marker = &marker,
+                .color = MarkerColor(user_state_, marker.id),
+                .automatic_color_slot =
+                    MarkerAutomaticColorSlot(marker.id),
+            });
         }
     }
     return result;
@@ -968,11 +1024,11 @@ SpectralLinesPanelController::SaveCatalogUserState()
     CatalogUserState latest_state =
         MakeCatalogUserState(catalog_identity_);
     if (latest_load.requires_save) {
-        // Schema-one/two/three state is a supported migration input only
+        // Schema-one/two/three/four state is a supported migration input only
         // when every persisted entry belongs to this controller's catalog.
         // Without the corresponding domain catalog, another legacy entry
         // cannot be canonicalized and validated before the whole document is
-        // rewritten as schema four.
+        // rewritten as schema five.
         const bool has_unrelated_catalog = std::any_of(
             latest_load.cache.catalogs.begin(),
             latest_load.cache.catalogs.end(),
@@ -988,7 +1044,7 @@ SpectralLinesPanelController::SaveCatalogUserState()
         if (has_unrelated_catalog || has_unrelated_panel_state) {
             error =
                 "legacy catalog user-state cache contains unrelated catalog "
-                "entries and cannot be safely migrated to schema 4";
+                "entries and cannot be safely migrated to schema 5";
             return {
                 .saved = false,
                 .error = std::move(error),
@@ -1195,6 +1251,15 @@ bool SpectralLinesPanelController::MarkerExists(std::string_view marker_id) cons
            std::any_of(catalog_.markers.begin(), catalog_.markers.end(), [&](const SpectralLineMarker& marker) {
                return marker.id == marker_id;
            });
+}
+
+std::size_t SpectralLinesPanelController::MarkerAutomaticColorSlot(
+    std::string_view marker_id) const
+{
+    const auto match = marker_auto_slots_.find(std::string(marker_id));
+    return match == marker_auto_slots_.end()
+        ? 0
+        : match->second;
 }
 
 GroupingView* SpectralLinesPanelController::FindUserGroupingView(std::string_view view_id)

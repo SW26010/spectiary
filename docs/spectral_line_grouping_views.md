@@ -168,7 +168,7 @@ The cache should be normalized and versioned:
 ```json
 {
   "format_kind": "specforge.catalog_user_state.cache",
-  "schema_version": 4,
+  "schema_version": 5,
   "catalogs": {
     "specforge.public": {
       "active_view_id": "view-1",
@@ -178,6 +178,15 @@ The cache should be normalized and versioned:
       "reserved_group_ids": [],
       "marker_visibility": {
         "h_alpha": true
+      },
+      "marker_colors": {
+        "h_alpha": {
+          "mode": "explicit-color",
+          "red": "0.95",
+          "green": "0.42",
+          "blue": "0.35",
+          "alpha": "1"
+        }
       },
       "grouping_views": [
         {
@@ -206,9 +215,11 @@ The cache should be normalized and versioned:
 ```
 
 Schema 3 introduced explicit, writer-owned generated-name provenance. Schema 4
-adds the required monotonic allocator high-water marks and durable identity
-reservation sets. Generated
-names participate in UI localization only when a supported schema stores that
+added the required monotonic allocator high-water marks and durable identity
+reservation sets. Schema 5 adds `marker_colors`, which stores only per-marker
+`explicit-color` RGBA overrides keyed by stable marker id. An absent marker
+entry is canonical Auto state; a theme-resolved Auto color is never persisted.
+Generated names participate in UI localization only when a supported schema stores that
 provenance explicitly.
 
 Schema 1 and 2 do not contain immutable name provenance. Every editable grouping
@@ -217,7 +228,8 @@ verbatim in every language, including names shaped like `Grouping 1`, `Group 1`,
 or `Catalog grouping view copy`. Migration must not infer ownership from editable
 text, ids, or array order.
 
-The cache body is validated before migration is scheduled. A legacy cache with
+Schemas 1 through 4 are supported migration inputs. The cache body is validated
+before migration is scheduled. A legacy cache with
 only the catalog currently being migrated must first pass raw view/group
 identity checks, current-catalog marker-reference checks, and schema-three
 unassigned identity/flag checks; only then is it canonicalized, validated, and
@@ -226,10 +238,11 @@ generated-name provenance. Empty, duplicate, cross-catalog, or mismatched
 legacy identities are therefore preserved as failure evidence rather than
 repaired. A legacy cache containing unrelated
 catalog or panel state entries is not safely migratable without their domain
-definitions and is therefore rejected without a partial schema-four rewrite.
-A current-schema cache missing allocator/history fields, with zero or
-insufficient high-water marks, with an uncovered persisted identity, or with
-duplicate reservation entries is invalid and is never rewritten or merged. An
+definitions and is therefore rejected without a partial schema-five rewrite.
+A current-schema cache missing `marker_colors` or allocator/history fields,
+with zero or insufficient high-water marks, with an uncovered persisted
+identity, with duplicate reservation entries, or with a malformed marker color
+mode/RGBA payload is invalid and is never rewritten or merged. An
 invalid body is reported and is never rewritten merely by opening and closing
 the application.
 

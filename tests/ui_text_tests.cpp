@@ -1017,20 +1017,20 @@ void TestSpectralLineMappingsAreExact()
             "未加载公共目录标记。"},
         ExpectedText{
             UiTextId::SpectralLineCacheReadFailed,
-            "Could not read spectral-line grouping cache.",
-            "无法读取谱线分组缓存。"},
+            "Could not read spectral-line user-state cache.",
+            "无法读取谱线用户状态缓存。"},
         ExpectedText{
             UiTextId::SpectralLineCacheInvalid,
-            "Ignored invalid spectral-line grouping cache.",
-            "已忽略无效的谱线分组缓存。"},
+            "Ignored invalid spectral-line user-state cache.",
+            "已忽略无效的谱线用户状态缓存。"},
         ExpectedText{
             UiTextId::SpectralLineCacheUnsupported,
-            "Ignored unsupported spectral-line grouping cache.",
-            "已忽略不受支持的谱线分组缓存。"},
+            "Ignored unsupported spectral-line user-state cache.",
+            "已忽略不受支持的谱线用户状态缓存。"},
         ExpectedText{
             UiTextId::SpectralLinePersistenceRetrying,
-            "Could not save spectral-line grouping cache. Retrying.",
-            "无法保存谱线分组缓存，正在重试。"},
+            "Could not save spectral-line user-state cache. Retrying.",
+            "无法保存谱线用户状态缓存，正在重试。"},
         ExpectedText{
             UiTextId::SpectralLinePersistenceRecovered,
             "Spectral-line state persistence recovered.",
