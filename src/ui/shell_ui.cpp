@@ -3,6 +3,7 @@
 #include "app/runtime_paths.h"
 #include "platform/win32_process_launcher.h"
 #include "platform/win32_text.h"
+#include "ui/immersive_context_overlay.h"
 #include "ui/profile_recording_ui_state.h"
 #include "ui/sample_workflow_shortcut.h"
 #include "ui/theme.h"
@@ -2293,6 +2294,14 @@ void ShellUi::RenderImmersivePlot(const ShellStatus& status)
             touchpad_gestures_);
     if (plot_feedback.plot_submitted) {
         RecordSpectrumDrawSubmission(status.frame_index, viewport_id, snapshot);
+    }
+    if (const auto context_overlay =
+            BuildImmersiveContextOverlayView(
+                immersive_plot_mode_,
+                SessionView(),
+                language)) {
+        (void)RenderImmersiveContextOverlay(
+            *context_overlay);
     }
 
     if (status.profile_open) {

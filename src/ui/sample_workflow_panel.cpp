@@ -2,6 +2,7 @@
 
 #include "app/local_user_state.h"
 #include "ui/sample_annotation_labeling_rules.h"
+#include "ui/sample_label_presentation.h"
 #include "ui/sample_labeling_issue_text.h"
 
 #include <imgui.h>
@@ -84,28 +85,6 @@ void RenderDisabledText(std::string_view text)
         "%.*s",
         static_cast<int>(text.size()),
         text.data());
-}
-
-std::string LocalizedSampleLabelValue(
-    UiLanguage language,
-    const SampleLabelSet& label_set,
-    int code)
-{
-    if (code == kUnlabeledSampleLabelCode) {
-        const bool use_cjk_punctuation =
-            language ==
-            UiLanguage::SimplifiedChinese;
-        return std::string(
-                   UiText(
-                       language,
-                       UiTextId::UnlabeledValue)) +
-               (use_cjk_punctuation ? "（" : " (") +
-               std::to_string(code) +
-               (use_cjk_punctuation ? "）" : ")");
-    }
-    return FormatSampleLabelValue(
-        label_set,
-        code);
 }
 
 std::string LabelingTaskDisplayName(

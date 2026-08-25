@@ -330,7 +330,9 @@ add_library(specforge_desktop_ui STATIC
     src/plot/series_color.cpp
     src/plot/spectral_line_label_layout.cpp
     src/plot/spectrum_plot.cpp
+    src/ui/immersive_context_overlay.cpp
     src/ui/panel_session_interaction.cpp
+    src/ui/sample_label_presentation.cpp
     src/ui/sample_workflow_shortcut.cpp
     src/ui/sample_workflow_panel.cpp
     src/ui/settings_panel.cpp

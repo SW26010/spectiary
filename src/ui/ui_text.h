@@ -407,6 +407,8 @@ enum class UiTextId {
     DeleteTask,
     LabelingProgress,
     CurrentLabelValue,
+    ImmersiveLabelPrefix,
+    ImmersivePreviousLabelPrefix,
     RememberedRow,
     Resume,
     SaveStatus,

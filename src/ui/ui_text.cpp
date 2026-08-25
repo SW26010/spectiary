@@ -686,6 +686,8 @@ constexpr std::array kTextCatalog = {
         "Progress: %llu labeled / %llu",
         "进度：已标注 %llu / %llu"},
     UiTextEntry{"Current: %s", "当前：%s"},
+    UiTextEntry{"Label: ", "标签："},
+    UiTextEntry{"Previous label: ", "上一样本标签："},
     UiTextEntry{
         "Remembered row: %llu",
         "记忆行：%llu"},

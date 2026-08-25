@@ -1,5 +1,6 @@
 #include "ui/spectrum_view_session.h"
 
+#include "ui/immersive_context_overlay.h"
 #include "ui/sample_workflow_preparation.h"
 #include "ui/source_collection_activation_transaction.h"
 #include "ui/source_collection_load_queue_internal.h"
@@ -7,6 +8,7 @@
 #include "ui/spectrum_view_state_cache_io.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <implot.h>
 
 #include <atomic>
@@ -237,7 +239,216 @@ public:
         ImGui::EndFrame();
         return feedback;
     }
+
+    struct OverlayFrameFeedback {
+        specforge::ImmersiveContextOverlayRenderResult render;
+        ImGuiID plot_input_id_before_overlay = 0;
+        ImGuiID plot_input_id_after_overlay = 0;
+    };
+
+    OverlayFrameFeedback RenderOverlayFrame(
+        const specforge::ImmersiveContextOverlayView& overlay,
+        ImVec2 mouse_position)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DeltaTime = 1.0f / 60.0f;
+        io.DisplaySize = ImVec2(800.0f, 600.0f);
+        io.AddMousePosEvent(mouse_position.x, mouse_position.y);
+        ImGui::NewFrame();
+
+        constexpr ImGuiWindowFlags kWindowFlags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(800.0f, 600.0f), ImGuiCond_Always);
+        Require(
+            ImGui::Begin("Immersive context overlay test", nullptr, kWindowFlags),
+            "test overlay window should be visible");
+        ImGui::InvisibleButton(
+            "##PlotInputSurface",
+            ImGui::GetContentRegionAvail());
+        OverlayFrameFeedback feedback;
+        feedback.plot_input_id_before_overlay =
+            GImGui->LastItemData.ID;
+        feedback.render =
+            specforge::RenderImmersiveContextOverlay(
+                overlay);
+        feedback.plot_input_id_after_overlay =
+            GImGui->LastItemData.ID;
+        ImGui::End();
+        ImGui::EndFrame();
+        return feedback;
+    }
 };
+
+specforge::SourceCollectionSessionView
+MakeImmersiveContextSessionView()
+{
+    specforge::SourceCollectionSessionView view;
+    view.current_sample_snapshot =
+        MakeSnapshot(
+            {1.0, 2.0, 3.0},
+            {3.0, 2.0, 1.0});
+    view.navigation.resolved_sequence_position = {
+        .zero_based_position = 4,
+        .sequence_length = 1000,
+    };
+    // Conflicting legacy fields make accidental fallback immediately visible.
+    view.navigation.sequence_count = 7;
+    view.navigation.current_sequence_position = 1;
+    view.labeling.has_active_task = true;
+    view.labeling.current_index = 4;
+    view.labeling.current_code = 3;
+    view.labeling.label_set.labels = {
+        {3, "C", 'c'},
+        {4, "D", 'd'},
+    };
+    return view;
+}
+
+void TestImmersiveContextOverlayUsesResolvedPositionAndCurrentLabel()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeImmersiveContextSessionView();
+    const auto overlay =
+        specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English);
+    Require(
+        overlay.has_value(),
+        "immersive context should be available for a resolved sample");
+    Require(
+        overlay->sequence_position_text == "5 / 1000",
+        "immersive position should use only the resolved sequence pair");
+    Require(
+        overlay->labeling_context_text == "Label: C" &&
+            !overlay->presents_previous_label,
+        "immersive context should present the current compact label");
+
+    view.labeling.current_code =
+        specforge::kUnlabeledSampleLabelCode;
+    const auto unset =
+        specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English);
+    Require(
+        unset &&
+            unset->labeling_context_text ==
+                "Label: Unlabeled (-1)",
+        "immersive unset labels should reuse the labeling-panel sentinel semantics");
+}
+
+void TestImmersiveContextOverlayTracksAutoAdvanceProvenance()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeImmersiveContextSessionView();
+    view.labeling.auto_advance = true;
+    view.labeling.current_index = 5;
+    view.labeling.current_code = 4;
+    view.sample_transition =
+        specforge::SourceCollectionSampleTransitionView{
+            .reason = specforge::SourceCollectionSampleTransitionReason::LabelingAutoAdvance,
+            .from_sample_index = 4,
+            .current_sample_index = 5,
+            .accepted_label_value = 3,
+        };
+    const auto auto_advance =
+        specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English);
+    Require(
+        auto_advance &&
+            auto_advance->labeling_context_text ==
+                "Previous label: C" &&
+            auto_advance->presents_previous_label,
+        "labeling auto-advance should present the accepted previous label");
+
+    view.sample_transition =
+        specforge::SourceCollectionSampleTransitionView{
+            .reason = specforge::SourceCollectionSampleTransitionReason::LocateRow,
+            .from_sample_index = 5,
+            .current_sample_index = 4,
+        };
+    const auto manual =
+        specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English);
+    Require(
+        manual &&
+            manual->labeling_context_text == "Label: D" &&
+            !manual->presents_previous_label,
+        "manual navigation should restore current-label presentation");
+}
+
+void TestImmersiveContextOverlayIsImmersiveOnlyAndHandlesUnavailableContext()
+{
+    specforge::SourceCollectionSessionView view =
+        MakeImmersiveContextSessionView();
+    Require(
+        !specforge::BuildImmersiveContextOverlayView(
+            false,
+            view,
+            specforge::UiLanguage::English),
+        "normal plot mode must not expose the immersive context overlay");
+
+    view.labeling.has_active_task = false;
+    const auto position_only =
+        specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English);
+    Require(
+        position_only &&
+            position_only->sequence_position_text == "5 / 1000" &&
+            position_only->labeling_context_text.empty(),
+        "without an active labeling task the overlay should show position only");
+
+    view.navigation.resolved_sequence_position.zero_based_position.reset();
+    Require(
+        !specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English),
+        "an unavailable resolved position must not fall back to legacy navigation fields");
+
+    view.navigation.resolved_sequence_position.zero_based_position = 4;
+    view.current_sample_snapshot.reset();
+    Require(
+        !specforge::BuildImmersiveContextOverlayView(
+            true,
+            view,
+            specforge::UiLanguage::English),
+        "a pending navigation cursor must not present a position before its sample is shown");
+}
+
+void TestImmersiveContextOverlayDrawsWithoutCapturingPlotInput()
+{
+    ScopedPlotUi ui;
+    const ScopedPlotUi::OverlayFrameFeedback feedback =
+        ui.RenderOverlayFrame(
+            specforge::ImmersiveContextOverlayView{
+                .sequence_position_text = "5 / 1000",
+                .labeling_context_text = "Label: C",
+            },
+            ImVec2(30.0f, 30.0f));
+    Require(
+        feedback.render.rendered,
+        "immersive context component should submit draw commands");
+    Require(
+        feedback.plot_input_id_before_overlay != 0 &&
+            feedback.plot_input_id_after_overlay ==
+                feedback.plot_input_id_before_overlay,
+        "draw-list overlay should not register an item over the plot input surface");
+    Require(
+        feedback.render.min.x < 50.0f &&
+            feedback.render.min.y < 50.0f &&
+            feedback.render.max.y < 150.0f,
+        "immersive context should stay in the upper-left, away from Keep View in the lower-left");
+}
 
 void ConfigureGaussianSmoothing(specforge::SpectrumViewSession& session)
 {
@@ -1238,6 +1449,10 @@ void TestActivationPresentationBindingResetsAndRetiresHeavyViewResources()
 
 int main()
 {
+    TestImmersiveContextOverlayUsesResolvedPositionAndCurrentLabel();
+    TestImmersiveContextOverlayTracksAutoAdvanceProvenance();
+    TestImmersiveContextOverlayIsImmersiveOnlyAndHandlesUnavailableContext();
+    TestImmersiveContextOverlayDrawsWithoutCapturingPlotInput();
     TestViewportTransitionPolicyUsesChangeReason();
     TestLockedViewportStateCacheRoundTripsAndClears();
     TestSpectrumColorCacheSupportsLegacyAndDamagedEntries();

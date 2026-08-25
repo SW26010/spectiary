@@ -821,6 +821,8 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::DeleteTask, "Delete task", "删除任务"},
         ExpectedText{UiTextId::LabelingProgress, "Progress: %llu labeled / %llu", "进度：已标注 %llu / %llu"},
         ExpectedText{UiTextId::CurrentLabelValue, "Current: %s", "当前：%s"},
+        ExpectedText{UiTextId::ImmersiveLabelPrefix, "Label: ", "标签："},
+        ExpectedText{UiTextId::ImmersivePreviousLabelPrefix, "Previous label: ", "上一样本标签："},
         ExpectedText{UiTextId::RememberedRow, "Remembered row: %llu", "记忆行：%llu"},
         ExpectedText{UiTextId::Resume, "Resume", "继续"},
         ExpectedText{UiTextId::SaveStatus, "Save: %s", "保存：%s"},
