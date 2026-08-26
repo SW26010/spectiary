@@ -1,0 +1,5 @@
+#ASDF 1.0.0
+%YAML 1.1
+--- !core/asdf-1.1.0
+key: [
+...

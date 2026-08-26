@@ -1,0 +1,189 @@
+{
+  "reference": {
+    "asdf": "5.3.1",
+    "asdf_standard_version": "1.5.0",
+    "schema_version": "1.0.0"
+  },
+  "fixtures": [
+    {
+      "name": "minimal",
+      "path": "minimal.asdf",
+      "semantic_path": "minimal.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "2830ea404bd7860416294af98c16622f4048cf8eed310d71774c698e148d1155"
+    },
+    {
+      "name": "unicode",
+      "path": "unicode.asdf",
+      "semantic_path": "unicode.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "95b07a2495b92a4f700024ddf056cf5a229362f05f0eee0594d4135e204abf68"
+    },
+    {
+      "name": "folder_roster",
+      "path": "folder_roster.asdf",
+      "semantic_path": "folder_roster.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "a0d081f58ca3b6b8b69d404e90425b47cbe5b36a2af60c28a13f1376fe05fc79"
+    },
+    {
+      "name": "npy_with_names",
+      "path": "npy_with_names.asdf",
+      "semantic_path": "npy_with_names.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "4f386c9ce493ccbe477da70afef0cb570a3f4f6b4526106ba75d80d5b18a6eb5"
+    },
+    {
+      "name": "npy_source_index",
+      "path": "npy_source_index.asdf",
+      "semantic_path": "npy_source_index.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "6dbddcd5990f70a26b97153a1f9902784c6c2e3589044880d77f93370d4986b4"
+    },
+    {
+      "name": "mixed_unlabeled",
+      "path": "mixed_unlabeled.asdf",
+      "semantic_path": "mixed_unlabeled.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "6ab201d2535fc63af0a951041c9782385e2d06b889c481c0191bdc44e15871b3"
+    },
+    {
+      "name": "large_values",
+      "path": "large_values.asdf",
+      "semantic_path": "large_values.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "3fc08263386f0cfd0b115ac42691bb3ae4529ac21f369c007cd9d9e26f7f4f27"
+    },
+    {
+      "name": "forward_unknown",
+      "path": "forward_unknown.asdf",
+      "semantic_path": "forward_unknown.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "1d4448ff82145093ad4ab2646f6df064318eaf6cc8dd1517a47d2c66ea18193c"
+    },
+    {
+      "name": "invalid_count",
+      "path": "invalid_count.asdf",
+      "semantic_path": "invalid_count.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "sample_count/value count",
+      "sha256": "019f9252f0490169310091b7c5ba888c2b55a011434aa16d0e6c42e7558454ff"
+    },
+    {
+      "name": "invalid_duplicate_label",
+      "path": "invalid_duplicate_label.asdf",
+      "semantic_path": "invalid_duplicate_label.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "label codes unique",
+      "sha256": "3c5a907d4974dccbf5072cf51add31b550f7e7b162870f5a709b4a7b0a31072c"
+    },
+    {
+      "name": "invalid_sentinel_collision",
+      "path": "invalid_sentinel_collision.asdf",
+      "semantic_path": "invalid_sentinel_collision.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "label code collides with unlabeled",
+      "sha256": "9d76919803bafb0ffe03c1c6804e645318d000b6740b853dcb02026b90138e30"
+    },
+    {
+      "name": "invalid_undefined_value",
+      "path": "invalid_undefined_value.asdf",
+      "semantic_path": "invalid_undefined_value.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "values reference defined labels",
+      "sha256": "bfb57561d0d478e87604155c4cb3f520444233d82ad3dcd31a6060e4cd480243"
+    },
+    {
+      "name": "profile_zlib",
+      "path": "profile_zlib.asdf",
+      "semantic_path": "profile_zlib.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": true,
+      "expected_error": "",
+      "sha256": "588609a6337351caa82474eab1b0b4938b56b29b4906d70b5727af7d661a4021"
+    },
+    {
+      "name": "profile_checksum",
+      "path": "profile_checksum.asdf",
+      "semantic_path": "profile_checksum.semantic.json",
+      "structurally_valid": true,
+      "semantically_valid": true,
+      "native_profile_supported": false,
+      "expected_error": "unsupported wire profile",
+      "sha256": "dea779b8be9e61f0552c7e9724890db034716fc843b41e9d63a189fbdb788bc7"
+    },
+    {
+      "name": "malformed_bad_magic",
+      "path": "malformed_bad_magic.asdf",
+      "semantic_path": "",
+      "structurally_valid": false,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "structural",
+      "sha256": "bbd064e36b0b000f9db71c3b2f83e14558d18681c3ab97a311ba2b98cd8eed0c"
+    },
+    {
+      "name": "malformed_yaml",
+      "path": "malformed_yaml.asdf",
+      "semantic_path": "",
+      "structurally_valid": false,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "structural",
+      "sha256": "ea7835a71f190a0970fa6488fd0c1983463fd43edbb7febc379fde1f7d447182"
+    },
+    {
+      "name": "malformed_truncated_block",
+      "path": "malformed_truncated_block.asdf",
+      "semantic_path": "",
+      "structurally_valid": false,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "structural",
+      "sha256": "2ea3a1d014b7c380bdb038e0fcfe6cae65a4bc5a0bd63bb3fe0235c045a61b13"
+    },
+    {
+      "name": "malformed_zlib_payload",
+      "path": "malformed_zlib_payload.asdf",
+      "semantic_path": "",
+      "structurally_valid": false,
+      "semantically_valid": false,
+      "native_profile_supported": false,
+      "expected_error": "structural",
+      "sha256": "15be51a3cc9b434c3dd0c8c942f9f6fa51ba7334bcacb4ae58acf77ee043b6bf"
+    }
+  ]
+}

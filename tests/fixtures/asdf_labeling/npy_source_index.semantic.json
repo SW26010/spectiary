@@ -1,0 +1,38 @@
+{
+  "format_kind": "specforge.sample_labeling",
+  "schema_version": "1.0.0",
+  "source_kind": "npy",
+  "source_name": "matrix.npy",
+  "source_fingerprint": "sha256:npy-index",
+  "sample_count": 4,
+  "roster_identity_kind": "source_index",
+  "sample_names": [],
+  "annotation_kind": "categorical_integer",
+  "annotation_name": "NPY index labels",
+  "missing_semantic": "unlabeled",
+  "missing_value": -1,
+  "task_id": "npy-index-task",
+  "task_name": "NPY index labels",
+  "labels": [
+    {
+      "code": 0,
+      "name": "Galaxy",
+      "shortcut": "g"
+    },
+    {
+      "code": 1,
+      "name": "Quasar",
+      "shortcut": "q"
+    }
+  ],
+  "values": [
+    -1,
+    0,
+    1,
+    0
+  ],
+  "values_dtype": "int32",
+  "values_shape": [
+    4
+  ]
+}

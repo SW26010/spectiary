@@ -1,0 +1,36 @@
+{
+  "format_kind": "specforge.sample_labeling",
+  "schema_version": "1.0.0",
+  "source_kind": "npy",
+  "source_name": "bad-label.npy",
+  "source_fingerprint": "sha256:bad-label",
+  "sample_count": 2,
+  "roster_identity_kind": "source_index",
+  "sample_names": [],
+  "annotation_kind": "categorical_integer",
+  "annotation_name": "Bad label",
+  "missing_semantic": "unlabeled",
+  "missing_value": -1,
+  "task_id": "bad-label",
+  "task_name": "Bad label",
+  "labels": [
+    {
+      "code": 0,
+      "name": "A",
+      "shortcut": ""
+    },
+    {
+      "code": 0,
+      "name": "B",
+      "shortcut": ""
+    }
+  ],
+  "values": [
+    0,
+    1
+  ],
+  "values_dtype": "int32",
+  "values_shape": [
+    2
+  ]
+}

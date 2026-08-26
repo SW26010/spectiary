@@ -13,6 +13,7 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "OFF",
         "SPECFORGE_BUILD_SOURCE_MODE": "working_tree",
         "SPECFORGE_BUILD_SOURCE_REVISION": ""
       }
@@ -66,6 +67,20 @@
       }
     },
     {
+      "name": "ninja-msvc-debug-asdf-labeling-spike",
+      "displayName": "Ninja MSVC Debug with ASDF labeling spike",
+      "inherits": [
+        "base",
+        "dynamic-deps-base"
+      ],
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON",
+        "VCPKG_MANIFEST_FEATURES": "asdf-labeling-spike"
+      }
+    },
+    {
       "name": "ninja-msvc-release-static",
       "displayName": "Ninja MSVC Static Release",
       "inherits": [
@@ -75,6 +90,20 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ninja-msvc-release-static-asdf-labeling-spike",
+      "displayName": "Ninja MSVC static Release with ASDF labeling spike",
+      "inherits": [
+        "base",
+        "static-release-base"
+      ],
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON",
+        "VCPKG_MANIFEST_FEATURES": "asdf-labeling-spike"
       }
     }
   ],
@@ -94,8 +123,16 @@
       "configurePreset": "ninja-msvc-debug"
     },
     {
+      "name": "ninja-msvc-debug-asdf-labeling-spike",
+      "configurePreset": "ninja-msvc-debug-asdf-labeling-spike"
+    },
+    {
       "name": "ninja-msvc-release-static",
       "configurePreset": "ninja-msvc-release-static"
+    },
+    {
+      "name": "ninja-msvc-release-static-asdf-labeling-spike",
+      "configurePreset": "ninja-msvc-release-static-asdf-labeling-spike"
     }
   ]
 }

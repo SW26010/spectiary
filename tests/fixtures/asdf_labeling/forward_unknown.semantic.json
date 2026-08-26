@@ -1,0 +1,36 @@
+{
+  "format_kind": "specforge.sample_labeling",
+  "schema_version": "1.0.0",
+  "source_kind": "npy",
+  "source_name": "future.npy",
+  "source_fingerprint": "sha256:future",
+  "sample_count": 2,
+  "roster_identity_kind": "source_index",
+  "sample_names": [],
+  "annotation_kind": "categorical_integer",
+  "annotation_name": "Future fields",
+  "missing_semantic": "unlabeled",
+  "missing_value": -1,
+  "task_id": "future-task",
+  "task_name": "Future fields",
+  "labels": [
+    {
+      "code": 0,
+      "name": "Galaxy",
+      "shortcut": "g"
+    },
+    {
+      "code": 1,
+      "name": "Quasar",
+      "shortcut": "q"
+    }
+  ],
+  "values": [
+    0,
+    1
+  ],
+  "values_dtype": "int32",
+  "values_shape": [
+    2
+  ]
+}

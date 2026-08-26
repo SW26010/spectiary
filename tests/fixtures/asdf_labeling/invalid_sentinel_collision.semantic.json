@@ -1,0 +1,30 @@
+{
+  "format_kind": "specforge.sample_labeling",
+  "schema_version": "1.0.0",
+  "source_kind": "npy",
+  "source_name": "bad-sentinel.npy",
+  "source_fingerprint": "sha256:bad-sentinel",
+  "sample_count": 1,
+  "roster_identity_kind": "source_index",
+  "sample_names": [],
+  "annotation_kind": "categorical_integer",
+  "annotation_name": "Bad sentinel",
+  "missing_semantic": "unlabeled",
+  "missing_value": -1,
+  "task_id": "bad-sentinel",
+  "task_name": "Bad sentinel",
+  "labels": [
+    {
+      "code": -1,
+      "name": "Collision",
+      "shortcut": ""
+    }
+  ],
+  "values": [
+    -1
+  ],
+  "values_dtype": "int32",
+  "values_shape": [
+    1
+  ]
+}

@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SPECFORGE_EMBED_PUBLIC_SPECTRAL_LINES "Embed the public spectral line catalog in the executable." OFF)
+option(
+    SPECFORGE_BUILD_ASDF_LABELING_SPIKE
+    "Build the ASDF labeling research spike."
+    OFF
+)
 set(SPECFORGE_BUILD_SOURCE_MODE "" CACHE STRING "SpecForge build source mode.")
 set_property(CACHE SPECFORGE_BUILD_SOURCE_MODE PROPERTY STRINGS working_tree head)
 set(SPECFORGE_BUILD_SOURCE_REVISION "" CACHE STRING "Full Git object ID for head source mode.")
@@ -528,6 +533,10 @@ add_custom_target(specforge_metadata
 )
 
 enable_testing()
+
+if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
+    add_subdirectory(tools/asdf_labeling_spike)
+endif()
 
 set(SPECFORGE_PORTABLE_TEST_RUNTIME_DIRECTORY
     "${CMAKE_BINARY_DIR}/portable-tests/$<CONFIG>"

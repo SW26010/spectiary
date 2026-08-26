@@ -11,6 +11,8 @@ imgui.ini
 specforge-imgui*.ini
 logs/
 *.log
+__pycache__/
+*.py[cod]
 
 # Local/private spectral overlay configuration and research notes.
 config/*.local.*
