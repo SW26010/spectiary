@@ -1,247 +1,280 @@
-# Distribution Capability and Linkage Are Not Binary-Identity Constraints
+# Distribution Capability and Dependency Linkage Policy
 
-Status: Accepted.
-
-This decision supersedes only the cross-distribution executable-identity
-requirement in
+Status: Accepted. Supersedes
 [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md).
-ADR 0003's deployment metadata, storage-profile selection, preflight, and
-artifact-binding rules remain accepted.
+
+ADR 0003 is retained as decision history. This ADR replaces its release-artifact
+model rather than treating the former single-executable rule as a constraint to
+work around.
 
 ## Context
 
-ADR 0003 deliberately removed compile-time Portable and Installed profiles so
-one channel-neutral `SpecForge.exe` could be reused across Standalone, Portable,
-and future installed packaging channels. That is a useful implementation shape
-while the dependency graph permits it, and the current build does not need to
-change merely because this ADR exists.
+ADR 0003 solved a real problem: Portable and Installed storage policy had been
+encoded into compile-time release profiles, which unnecessarily produced
+different executables. It replaced that model with deployment metadata and a
+single channel-neutral `SpecForge.exe`.
 
-It is not, however, a useful long-term architecture constraint.
+The single-executable result was useful, but it mixed several independent
+questions into one artifact rule:
 
-SpecForge's product principle is to remain lightweight, fast, and focused. That
-principle does not require every distribution to contain the same executable
-bytes, every capability to exist in a single-file Standalone artifact, or every
-third-party dependency to be linked statically. Treating executable identity as
-a hard invariant can instead work against the product goal by forcing one or
-more of the following:
+- what capabilities a release provides;
+- which implementation provides a capability;
+- whether a dependency is linked statically or dynamically;
+- how a release is packaged and distributed;
+- where SpecForge-owned mutable state is stored;
+- how an individual executable is identified and verified.
 
-- statically linking a large or frequently updated dependency only so all
-  channels can share one EXE;
-- carrying optional or heavyweight runtimes in the baseline artifact even when
-  most users do not need them;
-- maintaining a handwritten fallback implementation beside a mature library
-  solely so a dependency-free Standalone build can claim the same feature;
-- choosing a dependency or integration architecture based on packaging shape
-  rather than correctness, maintenance cost, and the user-facing capability.
+These concerns should not constrain one another.
 
-FITS is the immediate motivating example. FITS is a core user-facing capability,
-but core capability does not imply that its implementation must be handwritten
-or statically linked. If CFITSIO is selected as the supported FITS implementation,
-SpecForge should not keep a second minimal FITS reader merely to preserve
-byte-identical executables or full Standalone parity.
+SpecForge's product direction is `Lightweight. Fast. Fluid.`. That requires the
+baseline application to stay small, responsive, and operationally simple. It
+does not require every distribution to expose the same capability set, every
+release channel to contain byte-identical executables, or every dependency to be
+statically linked.
 
-ASDF illustrates the same issue from the other direction. A Python-based ASDF
-adapter may naturally bring a Python runtime and Python packages. Requiring that
-runtime to be folded into every distribution would make the baseline artifact
-heavier without improving users who never open ASDF data.
+FITS is the immediate example. FITS is a core SpecForge capability, but that
+does not imply that SpecForge should maintain its own FITS implementation. If
+CFITSIO is the appropriate supported implementation, using CFITSIO directly is
+preferable to retaining a second handwritten reader only so a dependency-free
+Standalone executable can preserve feature parity or binary identity.
 
-The invariant that matters is behavioral: for a given SpecForge version and a
-given declared capability set, supported inputs and operations should have the
-same defined semantics. SHA-256 equality between executables from different
-distribution channels is not a product invariant.
+ASDF demonstrates the same issue at a larger scale. A Python-based ASDF adapter
+may naturally require a Python runtime and Python packages. Folding those into
+every artifact merely to preserve one executable shape would make the baseline
+product heavier for users who do not need ASDF.
+
+The architecture therefore needs to preserve product behavior and release
+clarity without treating executable identity as a product requirement.
 
 ## Decision
 
-SpecForge adopts the following release and dependency policy.
+### Distribution formats do not define executable identity
 
-### Cross-distribution executable identity is not required
-
-Standalone, Portable, Installer, WinGet, Scoop, or future distribution channels
+Standalone, Portable, Installer, WinGet, Scoop, and future distribution formats
 are not required to contain byte-identical `SpecForge.exe` files.
 
-Installed and Portable packages may continue to reuse one executable when that
-falls out naturally from the build and packaging design. Standalone may also
-continue to use that executable today. This is an implementation convenience,
-not a contract that future dependencies must preserve.
+They may continue to share one executable whenever that is naturally convenient.
+The current build and packaging paths do not need to change merely because this
+ADR is accepted. Shared executable bytes are an implementation property, not an
+architecture invariant.
 
-No immediate build-system or packaging change is required by this ADR.
+No future dependency, capability, or packaging decision should be distorted
+solely to preserve cross-distribution executable hash equality.
 
-### Standalone does not guarantee the full capability set
+### Standalone is not the normative full-feature artifact
 
-Standalone is allowed to expose a reduced capability set when full parity would
-materially increase artifact size, introduce heavyweight runtime requirements,
-or distort dependency architecture.
+Standalone is a convenience distribution optimized for being small and
+self-contained. It does not guarantee the complete SpecForge capability set.
 
-Any such reduction must be explicit, deterministic, documented, and testable.
-A release must not silently present a feature as equivalent when the Standalone
-artifact actually uses a materially different or incomplete implementation.
+A capability may be absent from Standalone even when it is a core product
+capability, if providing it would require dependencies or runtime components
+that conflict materially with the Standalone size or self-containment goal.
 
-A capability omitted from Standalone may remain fully supported in Portable and
-installed distributions.
+Such differences must be explicit, deterministic, documented, and tested.
+Standalone must not silently substitute a materially different or incomplete
+implementation while presenting it as equivalent to the supported implementation
+used elsewhere.
 
-### Dynamic linking is an accepted implementation choice
+### Capability, distribution, and storage are separate dimensions
 
-Static linkage is not a SpecForge architecture requirement. Dynamic linkage is
-accepted when it is the better engineering choice.
+A capability set describes what an artifact can do. Distribution describes how
+that artifact is delivered. Storage profile describes where SpecForge-owned
+mutable state is written.
 
-Linkage is decided per dependency using the factors relevant to that dependency,
-including:
+None of these dimensions is inferred from linkage shape, DLL presence, install
+path, parent process, registry state, or other environmental heuristics.
 
-- whether the capability belongs to the baseline product or is optional;
-- dependency and runtime footprint;
+The deployment metadata model introduced by ADR 0003 remains useful and is
+carried forward here:
+
+- `distribution` records the packaging channel;
+- `storage_profile` explicitly selects SpecForge-owned mutable-state storage;
+- `portable` storage uses `<package-root>\Data`;
+- `local_app_data` storage uses `%LOCALAPPDATA%\SpecForge`;
+- absent deployment metadata continues to represent Standalone with
+  `local_app_data` storage unless a later ADR changes that behavior;
+- invalid explicit deployment metadata continues to fail startup rather than
+  silently selecting another storage root.
+
+Capability composition is allowed to differ between artifacts. It must not be
+encoded indirectly by abusing `distribution` or `storage_profile` as a feature
+flag.
+
+### Static and dynamic linkage are both accepted
+
+SpecForge has no all-static or all-dynamic linkage policy.
+
+Linkage is decided per dependency according to the engineering properties of
+that dependency, including:
+
+- whether the associated capability is baseline or optional;
+- binary and runtime footprint;
 - maintenance and upgrade cadence;
 - ABI and toolchain constraints;
 - packaging and deployment complexity;
-- licensing and redistribution constraints;
+- licensing and redistribution requirements;
 - startup, memory, and runtime-performance effects;
-- whether independent replacement or isolation is valuable.
+- whether independent replacement, isolation, or adapter boundaries are useful.
 
-A core capability may use a dynamic library. An optional capability may still be
-statically linked when that is simpler and sufficiently small. The labels
-"core" and "optional" influence the decision but do not mechanically determine
-linkage.
+A core capability may use a dynamically linked library. An optional capability
+may use a statically linked library. "Core" and "optional" are product concepts,
+not mechanical linkage rules.
 
-### Do not duplicate mature implementations to preserve packaging symmetry
+### Prefer one supported implementation over packaging-driven fallbacks
 
-SpecForge must not maintain a second parser, codec, backend, or equivalent
-infrastructure implementation solely to keep Standalone dependency-free or to
-preserve identical executable bytes across distribution channels.
+SpecForge should use mature upstream libraries where they are the better
+implementation choice and should not maintain duplicate infrastructure merely to
+preserve Standalone parity or executable identity.
 
-In particular, if CFITSIO becomes the supported FITS implementation, the
-handwritten FITS path may be removed rather than retained as a Standalone
-fallback. A separate implementation is justified only when it has an independent
-product or engineering purpose that would remain valid even if cross-channel
-binary identity were irrelevant.
+For FITS, if CFITSIO is selected as the supported implementation, the handwritten
+FITS reader may be removed rather than retained as a fallback. A second FITS
+implementation is justified only if it has an independent product or engineering
+purpose that would still exist without any Standalone or cross-channel binary
+identity requirement.
 
-Optional adapters are different: a deliberately optional adapter may be absent,
-and its absence may remove the corresponding capability. That is capability
-composition, not a hidden fallback between two supposedly equivalent
-implementations.
+The same rule applies to parsers, codecs, runtimes, backends, and similar
+infrastructure.
 
-### Lightweight describes baseline cost, not the sum of every extension
+Optional adapters are not fallbacks. If an adapter is deliberately optional,
+its absence means the corresponding capability is unavailable; SpecForge should
+report that state explicitly.
 
-The `Lightweight. Fast. Fluid.` product direction applies primarily to the cost
-required to obtain and run the baseline spectrum-inspection workflow.
+### Lightweight means low baseline cost
 
-Heavyweight or language-runtime-backed capabilities may be distributed as
-separate adapters or dependency sets so users who do not need them do not pay
-that download, install, startup, or maintenance cost. Such extensions must not
-move heavyweight work into the plot interaction hot path.
+`Lightweight. Fast. Fluid.` describes the cost of obtaining and running the
+baseline spectrum-inspection workflow, not the sum of every capability that the
+project may eventually support.
+
+Heavyweight dependencies, language runtimes, or specialized adapters should be
+scoped to the artifacts or capability packages that need them when doing so
+keeps the baseline product smaller and simpler.
+
+This rule does not require aggressive modularization in advance. Dependencies
+should remain statically linked or embedded while that is the simpler and better
+engineering choice. Separation is introduced when a real dependency justifies
+it.
+
+### Artifact identity remains per artifact
+
+Dropping cross-distribution executable equality does not weaken verification of
+an individual artifact.
+
+Schema 5 `artifact.sha256` continues to bind metadata to the exact
+`SpecForge.exe` beside it. The production ordering remains:
+
+```text
+link -> sign -> hash -> metadata finalization -> package
+```
+
+when signing is introduced.
+
+A package verifier may and should require that the executable copied into that
+specific package is identical to the finalized build artifact from which that
+package was produced. It must not assume that an executable belonging to one
+distribution is identical to an executable produced for another distribution.
 
 ## Consequences
 
-The current release architecture may remain unchanged until a real dependency
-or packaging decision benefits from divergence.
+The current release pipeline may remain exactly as it is until a concrete
+change benefits from a different linkage or capability shape.
 
-Future packaging is free to choose, for example:
+Future artifacts are free to evolve toward a model such as:
 
 ```text
 Standalone
-  smaller / self-contained
-  may expose a reduced capability set
+  small and self-contained
+  capability set may be reduced
 
 Portable
-  full selected capability set
-  may include adjacent DLLs or adapters
+  selected full capability set
+  may contain adjacent DLLs, runtimes, or adapters
 
 Installed
-  full selected capability set
-  may include adjacent DLLs or adapters
+  selected full capability set
+  may contain adjacent DLLs, runtimes, or adapters
 ```
 
-This freedom has several positive consequences:
+This permits mature libraries to replace handwritten infrastructure without
+requiring duplicate fallback paths. Large or specialized dependencies no longer
+need to be forced into every artifact. Python and similar runtimes can remain
+scoped to the capabilities that actually require them.
 
-- mature libraries can replace handwritten infrastructure without requiring a
-  duplicate fallback;
-- a large dependency does not have to be forced into the baseline executable;
-- Python or other language runtimes can remain scoped to capabilities that need
-  them;
-- static versus dynamic linkage can be chosen for engineering reasons rather
-  than cross-channel hash equality;
-- Standalone can remain genuinely small even if the overall product grows.
+Once artifact capability sets diverge, the release matrix becomes more explicit:
 
-It also increases the release matrix once distributions actually diverge:
-
-- support and diagnostics may need to identify distribution and capability set;
-- tests must cover the capability contract of each shipped artifact;
 - release documentation must state material capability differences;
-- cross-channel verification cannot assume that executable hashes are equal.
+- diagnostics should identify the running artifact and available capabilities;
+- artifact-level tests must cover the capability contract that is actually
+  shipped;
+- shared capabilities should use common conformance tests across artifacts where
+  practical;
+- missing optional components must produce an explicit unavailable state.
 
-Each individual artifact still requires strong internal identity binding. The
-schema 5 `artifact.sha256` continues to bind a metadata sidecar to the exact
-`SpecForge.exe` beside it. Portable verification may continue to require that
-the build-directory EXE and the EXE copied into that same Portable package are
-identical. This ADR removes only the requirement that an EXE from one release
-channel must also equal the EXE from another channel.
-
-Deployment distribution and storage profile remain orthogonal to feature and
-linkage decisions. A dynamic dependency must not be used as an implicit signal
-for Portable versus Installed storage behavior; ADR 0003 remains the authority
-for that policy.
+A future metadata schema may record capabilities when composition becomes
+complex enough to justify machine-readable declarations. This ADR does not
+require such a schema change before an actual divergent artifact exists.
 
 ## Rejected Alternatives
 
-### Require one byte-identical executable for every distribution
+### Preserve one byte-identical executable across every distribution
 
-Rejected as a long-term invariant. It is simple to verify, but it can force
-static linkage, heavyweight baseline dependencies, duplicate fallbacks, or other
-architecture choices whose only purpose is preserving executable identity.
+Rejected as an architecture invariant. It is convenient while cheap, but it can
+force dependency, implementation, or packaging choices whose only purpose is to
+preserve hash equality.
 
-Byte-identical reuse remains welcome when it is naturally achievable.
+Byte-identical reuse remains welcome when it happens naturally.
 
-### Require Standalone to provide every product capability
+### Guarantee full Standalone feature parity
 
-Rejected because a single-file or otherwise highly self-contained artifact
-should not become the lowest common denominator for the complete product.
-Standalone may trade capability breadth for a smaller and simpler artifact as
-long as the difference is explicit.
+Rejected. Standalone should not become the lowest common denominator that
+determines which dependencies or implementations the rest of SpecForge may use.
+Its reduced capability set is acceptable when that is the appropriate tradeoff
+for a small self-contained artifact.
 
-### Keep a built-in fallback for every dynamically supplied core dependency
+### Maintain a built-in fallback for every dynamically supplied dependency
 
-Rejected. This makes the executable appear self-sufficient while creating two
-implementations whose behavior, edge cases, security fixes, and tests must stay
-in sync. A fallback is justified only by an independent product requirement,
-not by binary-identity preservation.
+Rejected. Two nominally equivalent implementations create duplicated parsing or
+backend logic, separate edge cases, duplicated tests, and independent maintenance
+burden. Packaging symmetry alone is not sufficient justification.
 
-### Require all dependencies to be dynamic
+### Require every core dependency to be static
 
-Rejected for the same reason that all-static linkage is rejected: linkage is a
-per-dependency engineering decision. Small, stable, ubiquitous dependencies may
-remain simpler to link statically.
+Rejected. A dependency can serve a core capability while remaining dynamically
+linked when size, maintenance, ABI, upgrade, or deployment considerations make
+that the better choice.
+
+### Require every optional dependency to be dynamic
+
+Rejected. Optionality does not imply dynamic linkage. Small and stable optional
+components may still be simpler to compile into an artifact.
 
 ## Validation Contract
 
-Until distributions actually diverge, existing build and Portable-package
-verification remain valid and do not need to be weakened.
+Existing verification remains valid until a release actually diverges. This ADR
+must not be used as a reason to weaken current checks preemptively.
 
-When a future change introduces different executables or capability sets, that
-change must add validation appropriate to the new shape:
+When different executables or capability sets are introduced, the implementing
+change must update validation so that:
 
-- every shipped EXE is finalized and bound to its own metadata digest;
-- a package verifier compares an EXE only with the source artifact for that
-  package, not with unrelated distribution channels;
+- each shipped executable is finalized and bound to its own metadata digest;
+- each package is verified against the exact source executable used to build
+  that package;
+- no cross-distribution hash equality is assumed;
 - material capability differences are declared and covered by artifact-level
   smoke or integration tests;
-- shared capabilities use common conformance tests across distributions where
-  practical;
-- a missing optional adapter produces an explicit unsupported/unavailable
-  capability state rather than silently switching to a materially different
-  implementation;
-- if a mature library replaces a handwritten core implementation, tests target
-  the selected supported implementation rather than requiring parity with a
-  second implementation kept only for Standalone.
-
-A future metadata schema may record capability information if release
-composition becomes complex enough that human-facing release documentation is
-insufficient. This ADR does not require that schema change before there is an
-actual divergent artifact to describe.
+- shared capabilities retain common behavioral tests where practical;
+- missing optional components produce an explicit unsupported/unavailable state;
+- replacing a handwritten implementation with a mature library tests the chosen
+  supported implementation rather than preserving a second implementation only
+  for Standalone.
 
 ## Related Decisions and Documents
 
+- [ADR 0002: Release Profiles Are Separate Artifacts](0002-release-profile-artifacts.md)
+  is historical and was already superseded by ADR 0003.
 - [ADR 0003: Runtime Deployment Metadata Selects Storage](0003-runtime-deployment-metadata.md)
-  remains authoritative for distribution metadata and storage-profile
-  selection.
-- [Release Artifacts](../release_artifacts.md) remains authoritative for the
-  current schema 5 executable/metadata binding and Portable package verifier.
+  is superseded by this ADR.
+- [Release Artifacts](../release_artifacts.md) remains the contract for the
+  current schema 5 artifact and Portable pipeline until an implementation
+  change updates that document.
 - [Technical Direction](../technical_direction.md) remains authoritative for
-  the lightweight native product direction and dependency-selection principles.
+  the native, lightweight, performance-first product direction.
