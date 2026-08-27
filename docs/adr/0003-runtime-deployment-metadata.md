@@ -1,7 +1,11 @@
 # Runtime Deployment Metadata Selects Storage
 
-Status: Accepted. Supersedes
-[ADR 0002: Release Profiles Are Separate Artifacts](0002-release-profile-artifacts.md).
+Status: Superseded by
+[ADR 0006: Distribution Capability and Dependency Linkage Policy](0006-distribution-capability-and-linkage-policy.md).
+
+This document is retained as decision history. ADR 0006 replaces its release
+artifact model while carrying forward the deployment-metadata and storage rules
+that remain useful.
 
 ## Context
 
