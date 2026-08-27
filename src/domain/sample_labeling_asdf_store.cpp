@@ -49,12 +49,73 @@ std::optional<SampleLabelingAsdfStoreError> SourceCompatibilityError(
     return std::nullopt;
 }
 
+std::optional<SampleLabelingAsdfStoreError> PreservationIdentityError(
+    const SampleLabelingDocument& original,
+    const SampleLabelingDocument& replacement)
+{
+    if (original.format_kind == replacement.format_kind &&
+        original.schema_version == replacement.schema_version &&
+        original.source.base_identity == replacement.source.base_identity &&
+        original.source.kind == replacement.source.kind &&
+        original.source.name == replacement.source.name &&
+        original.source.fingerprint == replacement.source.fingerprint &&
+        original.source.sample_count == replacement.source.sample_count &&
+        original.source.roster.identity_kind ==
+            replacement.source.roster.identity_kind &&
+        original.source.roster.sample_names ==
+            replacement.source.roster.sample_names &&
+        original.annotation.kind == replacement.annotation.kind &&
+        original.labeling.id == replacement.labeling.id) {
+        return std::nullopt;
+    }
+    return SampleLabelingAsdfStoreError{
+        .kind = SampleLabelingAsdfStoreErrorKind::
+            PreservationIdentityMismatch,
+        .message =
+            "metadata rewrite document identity does not match the opened ASDF generation"};
+}
+
 SampleLabelingAsdfStoreWriteResult WriteAtomically(
     const std::filesystem::path& path,
     const SampleLabelingDocument& document,
     const BeforeReplace& before_replace) noexcept
 {
     try {
+        std::optional<SampleLabelingAsdfDurableBase> existing_base;
+        std::error_code exists_error;
+        const bool target_exists = std::filesystem::exists(
+            path, exists_error);
+        if (exists_error) {
+            return SampleLabelingAsdfStoreWriteResult{
+                .error = UnexpectedStoreError(
+                    "could not inspect the existing ASDF labeling document: " +
+                    exists_error.message())};
+        }
+        if (target_exists) {
+            SampleLabelingAsdfReadResult existing =
+                ReadSampleLabelingAsdfDocument(path);
+            if (!existing.succeeded()) {
+                return SampleLabelingAsdfStoreWriteResult{
+                    .error = CodecStoreError(existing.error)};
+            }
+            if (!existing.durable_base ||
+                !existing.durable_base->valid()) {
+                return SampleLabelingAsdfStoreWriteResult{
+                    .error = {
+                        .kind = SampleLabelingAsdfStoreErrorKind::
+                            DurableBaseUnavailable,
+                        .message =
+                            "existing ASDF labeling document cannot safely preserve forward-compatible metadata"}};
+            }
+            if (const std::optional<SampleLabelingAsdfStoreError> mismatch =
+                    PreservationIdentityError(
+                        *existing.document, document)) {
+                return SampleLabelingAsdfStoreWriteResult{
+                    .error = std::move(*mismatch)};
+            }
+            existing_base = std::move(*existing.durable_base);
+        }
+
         std::optional<SampleLabelingAsdfError> codec_error;
         AtomicFileWriteOptions options;
         options.open_mode = std::ios::binary | std::ios::trunc;
@@ -64,11 +125,15 @@ SampleLabelingAsdfStoreWriteResult WriteAtomically(
         const bool written = WriteFileAtomically(
             path,
             options,
-            [&document, &codec_error](
+            [&document, &existing_base, &codec_error](
                 std::ostream& stream,
                 std::string& error) {
-                const SampleLabelingAsdfWriteResult result =
-                    WriteSampleLabelingAsdfDocument(stream, document);
+                const SampleLabelingAsdfWriteResult result = existing_base
+                    ? RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+                          *existing_base,
+                          stream,
+                          document)
+                    : WriteSampleLabelingAsdfDocument(stream, document);
                 if (!result.succeeded()) {
                     codec_error = result.error;
                     error = result.error.message;
@@ -100,6 +165,77 @@ SampleLabelingAsdfStoreWriteResult WriteAtomically(
         return SampleLabelingAsdfStoreWriteResult{
             .error = UnexpectedStoreError(
                 "atomic ASDF labeling document write failed")};
+    }
+}
+
+SampleLabelingAsdfStoreWriteResult RewriteDocumentAtomically(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const BeforeReplace& before_replace) noexcept
+{
+    if (!snapshot.durable_base().valid()) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = {
+                .kind = SampleLabelingAsdfStoreErrorKind::
+                    DurableBaseUnavailable,
+                .message =
+                    "ASDF labeling document durable base is unavailable"}};
+    }
+    if (const std::optional<SampleLabelingAsdfStoreError> mismatch =
+            PreservationIdentityError(
+                snapshot.document(), document)) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = std::move(*mismatch)};
+    }
+    try {
+        std::optional<SampleLabelingAsdfError> codec_error;
+        AtomicFileWriteOptions options;
+        options.open_mode = std::ios::binary | std::ios::trunc;
+        options.target_description = "ASDF labeling document";
+        options.before_replace = before_replace;
+        std::string atomic_error;
+        const bool written = WriteFileAtomically(
+            snapshot.path(),
+            options,
+            [&snapshot, &document, &codec_error](
+                std::ostream& stream,
+                std::string& error) {
+                const SampleLabelingAsdfWriteResult result =
+                    RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+                        snapshot.durable_base(),
+                        stream,
+                        document);
+                if (!result.succeeded()) {
+                    codec_error = result.error;
+                    error = result.error.message;
+                    return false;
+                }
+                return true;
+            },
+            &atomic_error);
+        if (!written) {
+            return SampleLabelingAsdfStoreWriteResult{
+                .error = codec_error
+                    ? CodecStoreError(*codec_error)
+                    : UnexpectedStoreError(
+                          atomic_error.empty()
+                              ? "atomic ASDF labeling metadata rewrite failed"
+                              : std::move(atomic_error))};
+        }
+        return SampleLabelingAsdfStoreWriteResult{.written = true};
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "atomic ASDF labeling metadata rewrite allocation failed")};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "atomic ASDF labeling metadata rewrite failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "atomic ASDF labeling metadata rewrite failed")};
     }
 }
 
@@ -258,6 +394,14 @@ RewriteSampleLabelingAsdfValuesAtomically(
     return RewriteAtomically(snapshot, values, {});
 }
 
+SampleLabelingAsdfStoreWriteResult
+RewriteSampleLabelingAsdfDocumentAtomically(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document) noexcept
+{
+    return RewriteDocumentAtomically(snapshot, document, {});
+}
+
 namespace sample_labeling_asdf_store_test_seam {
 
 SampleLabelingAsdfStoreWriteResult WriteWithBeforeReplace(
@@ -274,6 +418,16 @@ SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
     const BeforeReplace& before_replace) noexcept
 {
     return RewriteAtomically(snapshot, values, before_replace);
+}
+
+SampleLabelingAsdfStoreWriteResult
+RewriteDocumentWithBeforeReplace(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const BeforeReplace& before_replace) noexcept
+{
+    return RewriteDocumentAtomically(
+        snapshot, document, before_replace);
 }
 
 }  // namespace sample_labeling_asdf_store_test_seam

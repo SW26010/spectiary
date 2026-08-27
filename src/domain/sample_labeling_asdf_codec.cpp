@@ -1,5 +1,7 @@
 #include "domain/sample_labeling_asdf_codec.h"
 
+#include "domain/stable_sha256.h"
+
 #include "specforge/specforge_build_identity.h"
 
 #include <yaml-cpp/yaml.h>
@@ -30,6 +32,7 @@ namespace specforge {
 struct SampleLabelingAsdfDurableBase::State {
     std::vector<unsigned char> encoded_prefix;
     std::vector<std::int32_t> label_codes;
+    std::string preservation_identity_digest;
     std::size_t sample_count = 0;
     std::size_t metadata_bytes = 0;
     std::size_t roster_string_width = 0;
@@ -71,6 +74,43 @@ constexpr std::uint64_t kMaximumReusablePrefixBytes =
     std::numeric_limits<std::uint16_t>::max();
 constexpr std::array<unsigned char, 4> kBlockMagic{0xd3, 'B', 'L', 'K'};
 constexpr std::array<unsigned char, 4> kZlibCompression{'z', 'l', 'i', 'b'};
+constexpr std::string_view kYamlStringTag = "tag:yaml.org,2002:str";
+
+void AppendIdentityDigestField(StableSha256& digest,
+    std::string_view value)
+{
+    digest.Append(std::to_string(value.size()));
+    digest.Append(":");
+    digest.Append(value);
+    digest.Append(";");
+}
+
+[[nodiscard]] std::string PreservationIdentityDigest(
+    const SampleLabelingDocument& document)
+{
+    StableSha256 digest;
+    AppendIdentityDigestField(
+        digest, "specforge.sample_labeling.asdf-preservation-identity-v1");
+    AppendIdentityDigestField(digest, document.format_kind);
+    AppendIdentityDigestField(digest, document.schema_version);
+    AppendIdentityDigestField(digest, document.source.base_identity);
+    AppendIdentityDigestField(digest, document.source.kind);
+    AppendIdentityDigestField(digest, document.source.name);
+    AppendIdentityDigestField(digest, document.source.fingerprint);
+    AppendIdentityDigestField(
+        digest, std::to_string(document.source.sample_count));
+    AppendIdentityDigestField(
+        digest, document.source.roster.identity_kind);
+    AppendIdentityDigestField(digest,
+        std::to_string(document.source.roster.sample_names.size()));
+    for (const std::string& sample_name :
+        document.source.roster.sample_names) {
+        AppendIdentityDigestField(digest, sample_name);
+    }
+    AppendIdentityDigestField(digest, document.annotation.kind);
+    AppendIdentityDigestField(digest, document.labeling.id);
+    return digest.FinishHex();
+}
 
 class CodecFailure : public std::runtime_error {
 public:
@@ -2007,7 +2047,12 @@ private:
 
 class StringAppendStreamBuffer final : public std::streambuf {
 public:
-    explicit StringAppendStreamBuffer(std::string& output) : output_(output) {}
+    explicit StringAppendStreamBuffer(std::string& output,
+        std::size_t maximum_size =
+            std::numeric_limits<std::size_t>::max())
+        : output_(output), maximum_size_(maximum_size)
+    {
+    }
 
 protected:
     std::streamsize xsputn(const char* text, std::streamsize count) override
@@ -2015,7 +2060,12 @@ protected:
         if (count < 0) {
             return 0;
         }
-        output_.append(text, static_cast<std::size_t>(count));
+        const std::size_t size = static_cast<std::size_t>(count);
+        if (output_.size() > maximum_size_ ||
+            size > maximum_size_ - output_.size()) {
+            return 0;
+        }
+        output_.append(text, size);
         return count;
     }
 
@@ -2024,12 +2074,16 @@ protected:
         if (traits_type::eq_int_type(character, traits_type::eof())) {
             return traits_type::not_eof(character);
         }
+        if (output_.size() >= maximum_size_) {
+            return traits_type::eof();
+        }
         output_.push_back(traits_type::to_char_type(character));
         return character;
     }
 
 private:
     std::string& output_;
+    std::size_t maximum_size_;
 };
 
 [[nodiscard]] std::size_t MeasureMetadataSize(
@@ -2062,6 +2116,215 @@ private:
             "ASDF YAML metadata size changed during emission");
     }
     return result;
+}
+
+[[nodiscard]] YAML::Node YamlStringNode(std::string_view value)
+{
+    YAML::Node node{std::string(value)};
+    node.SetTag(std::string{kYamlStringTag});
+    return node;
+}
+
+void SetYamlString(YAML::Node parent,
+    std::string_view key,
+    std::string_view value)
+{
+    parent[std::string(key)] = YamlStringNode(value);
+}
+
+void PreserveParsedStringScalarTypes(YAML::Node node,
+    std::unordered_set<int>& visited_positions)
+{
+    if (!node || node.IsNull()) {
+        return;
+    }
+    const YAML::Mark mark = node.Mark();
+    if (!mark.is_null() &&
+        !visited_positions.insert(mark.pos).second) {
+        return;
+    }
+    if (node.IsScalar()) {
+        if (node.Tag() == "!") {
+            node.SetTag(std::string{kYamlStringTag});
+        }
+        return;
+    }
+    if (node.IsSequence()) {
+        for (YAML::Node child : node) {
+            PreserveParsedStringScalarTypes(
+                child, visited_positions);
+        }
+        return;
+    }
+    if (node.IsMap()) {
+        for (const auto& entry : node) {
+            PreserveParsedStringScalarTypes(
+                entry.first, visited_positions);
+            PreserveParsedStringScalarTypes(
+                entry.second, visited_positions);
+        }
+    }
+}
+
+void PreserveParsedStringScalarTypes(YAML::Node root)
+{
+    std::unordered_set<int> visited_positions;
+    PreserveParsedStringScalarTypes(
+        std::move(root), visited_positions);
+}
+
+void SetCanonicalArrayDescriptor(YAML::Node node,
+    std::uint64_t source_index,
+    std::size_t count,
+    std::optional<std::size_t> roster_width)
+{
+    node.SetTag("tag:stsci.edu:asdf/" +
+                std::string{kSampleLabelingAsdfNdarrayTag});
+    node["source"] = source_index;
+    if (roster_width) {
+        YAML::Node datatype(YAML::NodeType::Sequence);
+        datatype.push_back(YamlStringNode("ucs4"));
+        datatype.push_back(*roster_width);
+        node["datatype"] = std::move(datatype);
+    } else {
+        node["datatype"] = YamlStringNode("int32");
+    }
+    node["byteorder"] = YamlStringNode("little");
+    YAML::Node shape(YAML::NodeType::Sequence);
+    shape.push_back(count);
+    node["shape"] = std::move(shape);
+}
+
+[[nodiscard]] YAML::Node MapNodeOrNew(YAML::Node parent,
+    std::string_view key)
+{
+    YAML::Node node = parent[std::string(key)];
+    if (!node || !node.IsMap()) {
+        node = YAML::Node(YAML::NodeType::Map);
+        parent[std::string(key)] = node;
+    }
+    return node;
+}
+
+[[nodiscard]] YAML::Node LabelNodeForCode(
+    const YAML::Node& labels,
+    std::int32_t code)
+{
+    if (labels && labels.IsSequence()) {
+        for (const YAML::Node& label : labels) {
+            if (label.IsMap() && label["code"] &&
+                label["code"].as<std::int32_t>() == code) {
+                return label;
+            }
+        }
+    }
+    return YAML::Node(YAML::NodeType::Map);
+}
+
+[[nodiscard]] std::string BuildMetadataPreservingUnknownFields(
+    std::span<const unsigned char> encoded_prefix,
+    std::size_t metadata_bytes,
+    const SampleLabelingDocument& document,
+    std::size_t roster_width)
+{
+    if (metadata_bytes > encoded_prefix.size()) {
+        Fail(SampleLabelingAsdfErrorKind::IoFailure,
+            "durable ASDF metadata prefix is inconsistent");
+    }
+    const std::string original_metadata(
+        reinterpret_cast<const char*>(encoded_prefix.data()),
+        metadata_bytes);
+    YAML::Node root = YAML::Load(original_metadata);
+    if (!root || !root.IsMap()) {
+        Fail(SampleLabelingAsdfErrorKind::IoFailure,
+            "durable ASDF metadata tree is unavailable");
+    }
+    PreserveParsedStringScalarTypes(root);
+
+    root.SetTag("tag:stsci.edu:asdf/" +
+                std::string{kSampleLabelingAsdfRootTag});
+    YAML::Node library = MapNodeOrNew(root, "asdf_library");
+    library.SetTag("tag:stsci.edu:asdf/core/software-1.0.0");
+    SetYamlString(library, "name", "SpecForge");
+    SetYamlString(
+        library, "version", build_info::kSpecForgeVersion);
+    SetYamlString(root, "format_kind", document.format_kind);
+    SetYamlString(root, "schema_version", document.schema_version);
+
+    YAML::Node source = MapNodeOrNew(root, "source_collection");
+    SetYamlString(source, "identity", document.source.base_identity);
+    SetYamlString(source, "source_kind", document.source.kind);
+    SetYamlString(source, "name", document.source.name);
+    SetYamlString(source, "fingerprint", document.source.fingerprint);
+    source["sample_count"] = document.source.sample_count;
+
+    const bool explicit_roster = document.source.roster.identity_kind ==
+                                 kSampleLabelingDocumentExplicitNamesRoster;
+    YAML::Node roster = MapNodeOrNew(root, "sample_roster");
+    SetYamlString(
+        roster, "identity_kind", document.source.roster.identity_kind);
+    if (explicit_roster) {
+        YAML::Node names = MapNodeOrNew(roster, "names");
+        SetCanonicalArrayDescriptor(names,
+            0,
+            document.source.roster.sample_names.size(),
+            roster_width);
+    } else {
+        roster.remove("names");
+    }
+
+    YAML::Node annotation = MapNodeOrNew(root, "annotation");
+    SetYamlString(annotation, "kind", document.annotation.kind);
+    SetYamlString(annotation, "name", document.annotation.name);
+    YAML::Node values = MapNodeOrNew(annotation, "values");
+    SetCanonicalArrayDescriptor(values,
+        explicit_roster ? 1U : 0U,
+        document.annotation.values.size(),
+        std::nullopt);
+    YAML::Node missing = MapNodeOrNew(annotation, "missing");
+    SetYamlString(
+        missing, "semantic", document.annotation.missing.semantic);
+    missing["value"] = document.annotation.missing.value;
+
+    YAML::Node task = MapNodeOrNew(root, "labeling_task");
+    SetYamlString(task, "id", document.labeling.id);
+    SetYamlString(task, "name", document.labeling.name);
+    const YAML::Node previous_labels = task["labels"];
+    YAML::Node labels(YAML::NodeType::Sequence);
+    for (const SampleLabelingDocumentLabel& label :
+        document.labeling.labels) {
+        YAML::Node node = LabelNodeForCode(previous_labels, label.code);
+        node["code"] = label.code;
+        SetYamlString(node, "name", label.name);
+        if (label.shortcut.empty()) {
+            node.remove("shortcut");
+        } else {
+            SetYamlString(node, "shortcut", label.shortcut);
+        }
+        labels.push_back(node);
+    }
+    task["labels"] = std::move(labels);
+
+    std::string metadata;
+    metadata.reserve(std::min<std::size_t>(
+        metadata_bytes + 128U, kMaximumMetadataBytes));
+    metadata.append("#ASDF ")
+        .append(kSampleLabelingAsdfFileFormatVersion)
+        .append("\n#ASDF_STANDARD ")
+        .append(kSampleLabelingAsdfStandardVersion)
+        .append("\n%YAML 1.1\n%TAG ! tag:stsci.edu:asdf/\n--- ");
+    StringAppendStreamBuffer buffer(metadata, kMaximumMetadataBytes);
+    std::ostream metadata_stream(&buffer);
+    YAML::Emitter body(metadata_stream);
+    body.SetIndent(2);
+    body << root;
+    if (!body.good() || !metadata_stream ||
+        metadata.size() > kMaximumMetadataBytes - 5U) {
+        Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+            "preserved ASDF YAML metadata exceeds the production limit");
+    }
+    metadata.append("\n...\n");
+    return metadata;
 }
 
 [[nodiscard]] std::uint64_t CanonicalYamlTextResidentBytes(
@@ -2266,6 +2529,8 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
             auto state =
                 std::make_shared<SampleLabelingAsdfDurableBase::State>();
             state->encoded_prefix = std::move(reusable_prefix);
+            state->preservation_identity_digest =
+                PreservationIdentityDigest(parsed.document);
             state->sample_count = parsed.document.source.sample_count;
             state->metadata_bytes = validated_metadata_bytes;
             state->roster_block_reused = parsed.roster_array.has_value();
@@ -2464,6 +2729,88 @@ SampleLabelingAsdfWriteResult WriteSampleLabelingAsdfDocument(
         if (!output) {
             Fail(SampleLabelingAsdfErrorKind::IoFailure,
                 "could not complete ASDF labeling document write");
+        }
+        return SampleLabelingAsdfWriteResult{
+            .written = true, .roster_block_reused = false, .error = {}};
+    } catch (const CodecFailure& failure) {
+        return SampleLabelingAsdfWriteResult{
+            .error = ErrorFromFailure(failure)};
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfWriteResult{
+            .error = {SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
+                "ASDF codec allocation failed"}};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfWriteResult{.error = UnexpectedError(error)};
+    } catch (...) {
+        return SampleLabelingAsdfWriteResult{
+            .error = {SampleLabelingAsdfErrorKind::IoFailure,
+                "ASDF codec operation failed"}};
+    }
+}
+
+SampleLabelingAsdfWriteResult
+RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const SampleLabelingAsdfDurableBase& durable_base,
+    std::ostream& output,
+    const SampleLabelingDocument& document) noexcept
+{
+    try {
+        if (!durable_base.state_) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "metadata rewrite requires a validated durable base");
+        }
+        const SampleLabelingAsdfDurableBase::State& state =
+            *durable_base.state_;
+        ValidateDocumentText(document);
+        if (state.preservation_identity_digest !=
+            PreservationIdentityDigest(document)) {
+            Fail(SampleLabelingAsdfErrorKind::SemanticValidationFailed,
+                "metadata rewrite document identity does not match the durable base");
+        }
+
+        const bool explicit_roster =
+            document.source.roster.identity_kind ==
+            kSampleLabelingDocumentExplicitNamesRoster;
+        const std::size_t roster_width = explicit_roster
+            ? MeasureRosterStringWidth(document.source.roster.sample_names)
+            : 0U;
+        ValidateProfilePreflight(BuildWriterProfilePreflight(document,
+            roster_width,
+            state.metadata_bytes,
+            state.encoded_prefix.size(),
+            0));
+        ValidateDocumentBusinessSemantics(document);
+        const std::string metadata =
+            BuildMetadataPreservingUnknownFields(
+                state.encoded_prefix,
+                state.metadata_bytes,
+                document,
+                roster_width);
+
+        std::unique_ptr<DeflateSpool> roster_spool;
+        if (explicit_roster) {
+            roster_spool = EncodeRosterToSpool(
+                document.source.roster.sample_names, roster_width);
+        }
+        std::unique_ptr<DeflateSpool> values_spool =
+            EncodeValuesToSpool(document.annotation.values);
+
+        const std::uint64_t reusable_prefix_bytes = metadata.size() +
+            (roster_spool ? roster_spool->block_size() : 0U);
+        ValidateProfilePreflight(BuildWriterProfilePreflight(document,
+            roster_width,
+            metadata.size(),
+            reusable_prefix_bytes,
+            reusable_prefix_bytes + values_spool->block_size()));
+
+        WriteText(output, metadata);
+        if (roster_spool) {
+            roster_spool->WriteBlock(output);
+        }
+        values_spool->WriteBlock(output);
+        if (!output) {
+            Fail(SampleLabelingAsdfErrorKind::IoFailure,
+                "could not complete forward-compatible ASDF metadata rewrite");
         }
         return SampleLabelingAsdfWriteResult{
             .written = true, .roster_block_reused = false, .error = {}};

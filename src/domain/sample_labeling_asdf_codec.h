@@ -64,6 +64,11 @@ private:
         const SampleLabelingAsdfDurableBase& durable_base,
         std::ostream& output,
         std::span<const std::int32_t> values) noexcept;
+    friend SampleLabelingAsdfWriteResult
+    RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+        const SampleLabelingAsdfDurableBase& durable_base,
+        std::ostream& output,
+        const SampleLabelingDocument& document) noexcept;
 };
 
 struct SampleLabelingAsdfReadResult {
@@ -168,5 +173,20 @@ RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
     const SampleLabelingAsdfDurableBase& durable_base,
     std::ostream& output,
     std::span<const std::int32_t> values) noexcept;
+
+// Metadata-changing rewrite seam for an opened v1 document. Known canonical
+// fields are replaced from document while unrecognized YAML mapping entries at
+// the root and inside canonical maps are carried forward. Label-entry metadata
+// is matched by stable label code. Roster and values blocks are encoded again,
+// so this starts a new durable generation and the old base must be discarded.
+// A detached SampleLabelingDocument intentionally cannot request this rewrite:
+// the validated durable base binds the source/roster, annotation kind, and task
+// identity of the metadata being retained, and a mismatched replacement is
+// rejected before output.
+[[nodiscard]] SampleLabelingAsdfWriteResult
+RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+    const SampleLabelingAsdfDurableBase& durable_base,
+    std::ostream& output,
+    const SampleLabelingDocument& document) noexcept;
 
 }  // namespace specforge

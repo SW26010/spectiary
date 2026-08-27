@@ -1637,6 +1637,98 @@ def interoperability(fixtures: Path, native: Path, production_native: Path) -> d
             }
         )
 
+        forward_record = next(
+            fixture
+            for fixture in manifest["fixtures"]
+            if fixture["name"] == "forward_unknown"
+        )
+        forward_fixture = fixtures / forward_record["path"]
+        forward_origin = Path(temporary) / "forward-typed-scalars.asdf"
+        forward_bytes = forward_fixture.read_bytes()
+        forward_needle = (
+            b"future_vendor: {new_flag: true, new_text: preserve or ignore}\n"
+        )
+        forward_replacement = (
+            b"future_vendor: {new_flag: true, new_text: preserve or ignore, "
+            b"string_boolean: \"true\", string_integer: \"1\", "
+            b"real_integer: 1}\n"
+        )
+        if forward_bytes.count(forward_needle) != 1:
+            raise RuntimeError(
+                "forward scalar-type oracle patch target was not unique"
+            )
+        forward_origin.write_bytes(
+            forward_bytes.replace(forward_needle, forward_replacement, 1)
+        )
+        forward_rewrite = Path(temporary) / "production-forward-metadata-rewrite.asdf"
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "rewrite-metadata-oracle",
+                str(forward_origin),
+                str(forward_rewrite),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "production forward-metadata rewrite failed: "
+                f"{completed.stderr}"
+            )
+        with asdf.open(forward_rewrite, lazy_load=False, memmap=False) as opened:
+            forward_errors = _semantic_errors(opened.tree)
+            forward_summary = _semantic_summary(opened.tree)
+            future_vendor = opened.tree.get("future_vendor")
+            future_vendor_preserved = (
+                future_vendor is not None
+                and type(future_vendor.get("new_flag")) is bool
+                and future_vendor.get("new_flag") is True
+                and future_vendor.get("new_text") == "preserve or ignore"
+                and type(future_vendor.get("string_boolean")) is str
+                and future_vendor.get("string_boolean") == "true"
+                and type(future_vendor.get("string_integer")) is str
+                and future_vendor.get("string_integer") == "1"
+                and type(future_vendor.get("real_integer")) is int
+                and future_vendor.get("real_integer") == 1
+                and type(opened.tree["labeling_task"]["labels"][0]["shortcut"])
+                is str
+                and opened.tree["labeling_task"]["labels"][0]["shortcut"] == "1"
+            )
+        expected_forward = json.loads(
+            (fixtures / forward_record["semantic_path"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        expected_forward["annotation_name"] = "Forward metadata edited"
+        expected_forward["task_name"] = "Forward metadata edited"
+        expected_forward["labels"][0]["name"] = "Edited Galaxy"
+        expected_forward["labels"][0]["shortcut"] = "1"
+        if (
+            forward_errors
+            or forward_summary != expected_forward
+            or not future_vendor_preserved
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected the metadata rewrite, changed "
+                "known semantics, or lost forward-compatible metadata"
+            )
+        forward_compressions = _asdf_block_compressions(forward_rewrite)
+        if forward_compressions != ["zlib"]:
+            raise RuntimeError(
+                "production forward-metadata rewrite did not retain one zlib block"
+            )
+        records.append(
+            {
+                "fixture": "production-forward-metadata-rewrite",
+                "status": "python-forward-fields/production-full-rewrite/asdf-5.3.1-preserved",
+                "returncode": 0,
+                "compressions": forward_compressions,
+            }
+        )
+
         for fixture_name in ("profile_zlib", "npy_source_index"):
             fixture_record = next(
                 fixture

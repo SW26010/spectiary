@@ -18,6 +18,7 @@ enum class SampleLabelingAsdfStoreErrorKind {
     None,
     CodecFailure,
     SourceMismatch,
+    PreservationIdentityMismatch,
     DurableBaseUnavailable,
     AtomicWriteFailure,
 };
@@ -110,11 +111,23 @@ OpenSampleLabelingAsdfDocumentStore(
     const SampleLabelingSourceCompatibility& source,
     const SampleLabelingAsdfReadCheckpoint& checkpoint = {}) noexcept;
 
-// Publishes a new full-document generation. Every snapshot previously opened
-// for this path must be discarded and reopened before another rewrite.
+// Publishes a new full-document generation. If path already contains a readable
+// production-profile v1 document, this operation first obtains its durable base
+// and preserves forward-compatible unknown metadata. An existing document that
+// cannot provide such a base is rejected instead of being silently replaced.
+// Every snapshot previously opened for this path must be discarded and
+// reopened before another rewrite.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
 WriteSampleLabelingAsdfDocumentAtomically(
     const std::filesystem::path& path,
+    const SampleLabelingDocument& document) noexcept;
+
+// Metadata-changing rewrite of one opened generation. This preserves unknown
+// metadata from the snapshot while replacing the known canonical fields from
+// document. The snapshot is stale after success and must be discarded.
+[[nodiscard]] SampleLabelingAsdfStoreWriteResult
+RewriteSampleLabelingAsdfDocumentAtomically(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& document) noexcept;
 
 // Safe to repeat with one snapshot only while this store is the sole writer
@@ -138,6 +151,12 @@ using BeforeReplace = std::function<void(
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult RewriteWithBeforeReplace(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     std::span<const std::int32_t> values,
+    const BeforeReplace& before_replace) noexcept;
+
+[[nodiscard]] SampleLabelingAsdfStoreWriteResult
+RewriteDocumentWithBeforeReplace(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
     const BeforeReplace& before_replace) noexcept;
 
 }  // namespace sample_labeling_asdf_store_test_seam

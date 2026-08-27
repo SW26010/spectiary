@@ -82,8 +82,12 @@ writer -> Python reader, and Python zlib writer -> native label-only rewrite ->
 both readers. It also runs the production writer's complete YAML-special scalar
 matrix through the pinned official ASDF 5.3.1 reader; opens explicit-roster and
 source-index production writes and rewrites; and rewrites Python-origin inputs
-through the production component. Every branch is compared using complete
-canonical semantics. The explicit-roster path additionally verifies that the
+through the production component. The Python-written `forward_unknown` fixture
+also passes through the production metadata-changing rewrite; ASDF 5.3.1 checks
+the edited known semantics, retained future metadata, and ambiguous scalar
+runtime types without string coercion. Every branch
+is compared using complete canonical semantics. The explicit-roster path
+additionally verifies that the
 encoded Unicode roster block is byte-for-byte unchanged while the values block
 is replaced. A differential duplicate-key case confirms that official ASDF
 selects the last value while the production reader/rewrite rejects the

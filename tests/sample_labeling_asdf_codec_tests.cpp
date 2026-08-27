@@ -1507,6 +1507,127 @@ void TestSourceIndexRewriteUsesSingleValuesBlock()
     std::filesystem::remove(output_path, cleanup_error);
 }
 
+void TestMetadataRewritePreservesForwardUnknownFields()
+{
+    const std::filesystem::path input_path =
+        TempPath("_forward_metadata_input.asdf");
+    const std::filesystem::path output_path =
+        TempPath("_forward_metadata_output.asdf");
+    const specforge::SampleLabelingDocument original = ProductionDocument();
+    Require(
+        WriteDocument(input_path, original).succeeded(),
+        "forward-metadata input should be written");
+
+    std::vector<unsigned char> bytes = ReadAllBytes(input_path);
+    ReplaceTextOnce(bytes,
+        "\nschema_version: ",
+        "\nfuture_root:\n"
+        "  string_token: \"true\"\n"
+        "  real_boolean: true\n"
+        "  real_integer: 1\n"
+        "schema_version: ");
+    ReplaceTextOnce(bytes,
+        "\n  sample_count: 3\nsample_roster:",
+        "\n  future_source: \"source-survives\"\n  sample_count: 3\nsample_roster:");
+    ReplaceTextOnce(bytes,
+        "\n  names: !core/ndarray-1.0.0",
+        "\n  future_roster: \"roster-survives\"\n  names: !core/ndarray-1.0.0");
+    ReplaceTextOnce(bytes,
+        "    shape: [3]\n  missing:",
+        "    shape: [3]\n    future_values: \"values-survive\"\n  missing:");
+    ReplaceTextOnce(bytes,
+        "\n    value: -1\nlabeling_task:",
+        "\n    value: -1\n    future_missing: \"missing-survives\"\nlabeling_task:");
+    ReplaceTextOnce(bytes,
+        "\n  labels:\n",
+        "\n  future_task: \"task-survives\"\n  labels:\n");
+    ReplaceTextOnce(bytes,
+        "    shortcut: \"g\"\n",
+        "    shortcut: \"g\"\n    future_label: \"label-survives\"\n");
+    WriteAllBytes(input_path, bytes);
+
+    const specforge::SampleLabelingAsdfReadResult opened =
+        specforge::ReadSampleLabelingAsdfDocument(input_path);
+    Require(
+        opened.succeeded() && opened.durable_base,
+        "forward-metadata input should expose a durable base");
+    specforge::SampleLabelingDocument edited = *opened.document;
+    edited.annotation.name = "Edited annotation";
+    edited.annotation.values = {1, 1, 0};
+    edited.labeling.name = "Edited task";
+    edited.labeling.labels[0].name = "Edited Galaxy";
+    edited.labeling.labels[0].shortcut = "1";
+
+    specforge::SampleLabelingDocument unrelated = edited;
+    unrelated.labeling.id = "another-task";
+    std::ostringstream mismatch_output(std::ios::binary);
+    const specforge::SampleLabelingAsdfWriteResult identity_mismatch =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *opened.durable_base,
+            mismatch_output,
+            unrelated);
+    Require(
+        !identity_mismatch.succeeded() &&
+            identity_mismatch.error.kind ==
+                specforge::SampleLabelingAsdfErrorKind::
+                    SemanticValidationFailed &&
+            mismatch_output.str().empty(),
+        "public metadata rewrite must reject a durable base from another document identity before output");
+
+    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+    Require(output.good(), "forward-metadata output should open");
+    const specforge::SampleLabelingAsdfWriteResult rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+            *opened.durable_base,
+            output,
+            edited);
+    output.close();
+    Require(
+        rewrite.succeeded() && !rewrite.roster_block_reused,
+        rewrite.error.message.empty()
+            ? "metadata rewrite should succeed and encode a new generation"
+            : rewrite.error.message);
+
+    const std::vector<unsigned char> rewritten_bytes =
+        ReadAllBytes(output_path);
+    const std::string rewritten(
+        reinterpret_cast<const char*>(rewritten_bytes.data()),
+        rewritten_bytes.size());
+    for (const std::string_view token : {
+             "source-survives",
+             "roster-survives",
+             "values-survive",
+             "missing-survives",
+             "task-survives",
+             "label-survives",
+         }) {
+        Require(
+            rewritten.find(token) != std::string::npos,
+            "metadata rewrite should retain every unknown metadata token");
+    }
+    Require(
+        rewritten.find("string_token: true") == std::string::npos &&
+            rewritten.find("shortcut: 1") == std::string::npos,
+        "metadata rewrite must not emit string scalars with YAML-ambiguous plain spelling");
+    Require(
+        rewritten.find("real_boolean: true") != std::string::npos &&
+            rewritten.find("real_integer: 1") != std::string::npos,
+        "metadata rewrite must not stringify genuine unknown booleans or integers");
+
+    const specforge::SampleLabelingAsdfReadResult reopened =
+        specforge::ReadSampleLabelingAsdfDocument(output_path);
+    Require(
+        reopened.succeeded() &&
+            JsonEquals(
+                SemanticSummary(*reopened.document),
+                SemanticSummary(edited)),
+        "metadata rewrite should replace every edited canonical field");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(input_path, cleanup_error);
+    std::filesystem::remove(output_path, cleanup_error);
+}
+
 void TestRewriteRejectsUnverifiedRosterBlocks()
 {
     const specforge::SampleLabelingAsdfReadResult corrupt =
@@ -1821,6 +1942,39 @@ int main(int argc, char* argv[])
             }
             return 0;
         }
+        if (argc == 4 &&
+            std::string_view(argv[1]) == "rewrite-metadata-oracle") {
+            const specforge::SampleLabelingAsdfReadResult read =
+                specforge::ReadSampleLabelingAsdfDocument(argv[2]);
+            if (!read.succeeded() || !read.durable_base) {
+                std::cerr << "production metadata oracle input did not produce "
+                             "a durable base\n";
+                return 1;
+            }
+            specforge::SampleLabelingDocument edited = *read.document;
+            edited.annotation.name = "Forward metadata edited";
+            edited.labeling.name = "Forward metadata edited";
+            edited.labeling.labels[0].name = "Edited Galaxy";
+            edited.labeling.labels[0].shortcut = "1";
+            std::ofstream output(
+                argv[3], std::ios::binary | std::ios::trunc);
+            if (!output) {
+                std::cerr << "production metadata oracle output failed to open\n";
+                return 1;
+            }
+            const specforge::SampleLabelingAsdfWriteResult rewrite =
+                specforge::RewriteSampleLabelingAsdfDocumentPreservingUnknownMetadata(
+                    *read.durable_base,
+                    output,
+                    edited);
+            output.close();
+            if (!rewrite.succeeded()) {
+                std::cerr << "production metadata oracle rewrite failed: "
+                          << rewrite.error.message << '\n';
+                return 1;
+            }
+            return 0;
+        }
         if (argc == 6 &&
             std::string_view(argv[1]) == "rewrite-production-oracle") {
             const std::size_t index =
@@ -1879,6 +2033,7 @@ int main(int argc, char* argv[])
         TestWriterEmitsSourceIndexProductionProfileAndRoundTrips();
         TestLabelRewriteReusesRosterBlockVerbatim();
         TestSourceIndexRewriteUsesSingleValuesBlock();
+        TestMetadataRewritePreservesForwardUnknownFields();
         TestRewriteRejectsUnverifiedRosterBlocks();
         TestReaderCompatibilityProfileCannotBecomeDurableVerbatim();
         TestDurableRosterRequiresDefaultZlibFlevel();

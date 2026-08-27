@@ -314,11 +314,38 @@ before any output is created. Invalid rewrite index and undefined replacement
 label return code 2. No tested input called `abort`, `exit`, or crashed the
 process.
 
-Unknown fields are accepted and ignored by the native reader. The label-only
-block-reuse rewrite preserves the metadata prefix byte-for-byte, so unknown
-metadata survives that path. A full native object-model read/write still drops
-unknown nodes; production must retain them or explicitly define that a full
-canonical reconstruction may discard them.
+Unknown fields are accepted without projecting them into the canonical domain
+model. They remain owned by the validated durable generation instead. The
+label-only block-reuse rewrite preserves the metadata prefix byte-for-byte. A
+metadata-changing rewrite reparses that validated tree, replaces every known v1
+field from the edited canonical document, and emits the unrecognized mapping
+entries again. Unknown entries are retained at the root and inside the standard
+software, source, roster, ndarray descriptor, annotation/missing, task, and
+label maps; label-entry metadata follows the stable label code across name or
+shortcut edits. Removed labels and roster constructs do not retain metadata
+that belonged only to the removed known entity.
+
+The merge preserves YAML scalar types rather than only scalar text. Parsed
+quoted/string-tagged unknown scalars and every replacement canonical string are
+emitted with an explicit YAML string type, while genuine unknown booleans and
+integers retain their non-string types. The pinned ASDF 5.3.1 oracle checks
+ambiguous spellings such as string `"true"`, string `"1"`, numeric shortcut
+`"1"`, boolean `true`, and integer `1` by runtime type rather than by `str(...)`
+normalization.
+
+This preservation path deliberately requires a durable base from a successful
+read. A detached canonical object can create a new document, but it cannot
+claim ownership of unknown metadata that it never observed. The atomic store
+uses the preservation rewrite for snapshot-based metadata edits and also when a
+path-based full write finds an existing readable production-profile v1 file.
+If an existing file cannot provide a safe durable base, replacement is rejected
+instead of silently discarding forward metadata. Every successful full rewrite
+starts a new generation and requires reopening before another rewrite. The
+source/roster identity, annotation kind, and stable task id must still match the
+opened generation; preservation is rejected rather than carrying opaque fields
+into a different logical document. This identity is bound into the codec's
+durable state and enforced by the public rewrite primitive itself; the store
+check provides an earlier domain-specific error but is not the only guard.
 
 ## Native codec comparison
 
@@ -426,9 +453,8 @@ outside that completed promotion is to:
 1. connect the atomic document store to the existing output lease,
    write-ahead recovery, retry, and persistence owner;
 2. measure the native reuse path itself at 1M scale;
-3. decide and test unknown-field preservation on rewrite;
-4. fuzz YAML/block headers, integer bounds, Unicode, and truncated inputs;
-5. continue rejecting nonzero checksums unless separately justified and broaden
+3. fuzz YAML/block headers, integer bounds, Unicode, and truncated inputs;
+4. continue rejecting nonzero checksums unless separately justified and broaden
    fuzz coverage beyond the checked corrupt-zlib/truncated fixtures.
 
 The pinned Python oracle and dedicated native-spike preset are enforced by the

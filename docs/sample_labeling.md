@@ -768,6 +768,16 @@ the value count matches the source collection's spectrum count.
 The ASDF codec remains a caller-owned stream component. A separate domain
 document store owns source-aware open, the immutable durable roster/base
 snapshot, atomic full-document replacement, and atomic value-only rewrites.
+Value-only rewrites retain the validated metadata/roster prefix verbatim.
+Metadata-changing rewrites merge edited known v1 fields into that validated
+generation so forward-compatible unknown mapping entries survive; label-local
+unknown entries are associated by stable label code. A full rewrite of an
+existing path must obtain such a durable base and fail safely when it cannot,
+rather than reconstructing only the old reader's object model and silently
+dropping future fields. It must also retain the opened source/roster identity,
+annotation kind, and stable task id so opaque metadata is not transplanted into
+another logical document. A successful metadata rewrite invalidates the old
+snapshot and requires reopening the new generation.
 Controller leases, recovery state, retry policy, and UI activation remain above
 that store and are not codec responsibilities.
 

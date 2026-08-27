@@ -107,6 +107,30 @@ void WriteAllBytes(
     Require(stream.good(), "test ASDF output should flush");
 }
 
+void ReplaceTextOnce(std::vector<unsigned char>& bytes,
+    std::string_view old_text,
+    std::string_view new_text)
+{
+    const auto found = std::search(
+        bytes.begin(), bytes.end(), old_text.begin(), old_text.end());
+    Require(found != bytes.end(), "ASDF store test patch target should exist");
+    const std::size_t offset = static_cast<std::size_t>(found - bytes.begin());
+    bytes.erase(found, found + static_cast<std::ptrdiff_t>(old_text.size()));
+    bytes.insert(
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+        new_text.begin(),
+        new_text.end());
+}
+
+bool ContainsText(
+    std::span<const unsigned char> bytes,
+    std::string_view text)
+{
+    return std::search(
+               bytes.begin(), bytes.end(), text.begin(), text.end()) !=
+           bytes.end();
+}
+
 bool HasTemporarySibling(const std::filesystem::path& target)
 {
     const std::string prefix = target.filename().string() + ".tmp.";
@@ -266,6 +290,20 @@ void TestAtomicFullWriteAndSourceAwareOpen()
                 specforge::SampleLabelingAsdfStoreErrorKind::
                     DurableBaseUnavailable,
         "writable store open should reject a compatibility profile without a durable base");
+    specforge::SampleLabelingDocument replacement = document;
+    replacement.labeling.name = "unsafe replacement must fail";
+    const specforge::SampleLabelingAsdfStoreWriteResult refused_replacement =
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            compatibility_path,
+            replacement);
+    Require(
+        !refused_replacement.succeeded() &&
+            refused_replacement.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    DurableBaseUnavailable &&
+            ReadAllBytes(compatibility_path) == compatibility_bytes &&
+            !HasTemporarySibling(compatibility_path),
+        "full write should refuse an existing document whose unknown metadata cannot be preserved safely");
 }
 
 void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
@@ -327,6 +365,90 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
                     second_values.begin(),
                     second_values.end()),
         "rewritten ASDF values should be visible after reopen");
+}
+
+void TestMetadataChangingRewritesPreserveForwardUnknownFields()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge-asdf-store-forward-metadata");
+    const std::filesystem::path path = directory / "labels.asdf";
+    const specforge::SampleLabelingDocument original = MakeDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(path, original)
+            .succeeded(),
+        "forward-metadata store fixture should write");
+
+    std::vector<unsigned char> bytes = ReadAllBytes(path);
+    ReplaceTextOnce(bytes,
+        "\nschema_version: ",
+        "\nfuture_root: \"store-root-survives\"\nschema_version: ");
+    ReplaceTextOnce(bytes,
+        "    shortcut: \"a\"\n",
+        "    shortcut: \"a\"\n    future_label: \"store-label-survives\"\n");
+    WriteAllBytes(path, bytes);
+
+    specforge::SampleLabelingAsdfStoreOpenResult opened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            CompatibleSource(original));
+    Require(opened.succeeded(), "forward-metadata store fixture should open");
+    specforge::SampleLabelingDocument edited = opened.snapshot->document();
+    edited.labeling.name = "Edited through snapshot";
+    edited.labeling.labels[0].name = "snapshot edit";
+    const specforge::SampleLabelingAsdfStoreWriteResult snapshot_rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+            *opened.snapshot,
+            edited);
+    Require(
+        snapshot_rewrite.succeeded(),
+        snapshot_rewrite.error.message.empty()
+            ? "snapshot metadata rewrite should succeed"
+            : snapshot_rewrite.error.message);
+    Require(
+        ContainsText(ReadAllBytes(path), "store-root-survives") &&
+            ContainsText(ReadAllBytes(path), "store-label-survives"),
+        "snapshot metadata rewrite should preserve unknown metadata");
+
+    specforge::SampleLabelingAsdfStoreOpenResult reopened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            CompatibleSource(original));
+    Require(
+        reopened.succeeded() &&
+            reopened.snapshot->document().labeling.name ==
+                edited.labeling.name,
+        "metadata rewrite should publish the edited canonical document");
+    const std::vector<unsigned char> before_identity_mismatch =
+        ReadAllBytes(path);
+    specforge::SampleLabelingDocument unrelated =
+        reopened.snapshot->document();
+    unrelated.labeling.id = "another-task";
+    const specforge::SampleLabelingAsdfStoreWriteResult identity_mismatch =
+        specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+            *reopened.snapshot,
+            unrelated);
+    Require(
+        !identity_mismatch.succeeded() &&
+            identity_mismatch.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    PreservationIdentityMismatch &&
+            ReadAllBytes(path) == before_identity_mismatch &&
+            !HasTemporarySibling(path),
+        "metadata preservation must not carry unknown fields into another document identity");
+    specforge::SampleLabelingDocument edited_again =
+        reopened.snapshot->document();
+    edited_again.annotation.name = "Edited through path write";
+    const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            path,
+            edited_again);
+    Require(
+        path_rewrite.succeeded() &&
+            ContainsText(ReadAllBytes(path), "store-root-survives") &&
+            ContainsText(ReadAllBytes(path), "store-label-survives"),
+        path_rewrite.error.message.empty()
+            ? "path-based full rewrite should not bypass unknown metadata preservation"
+            : path_rewrite.error.message);
 }
 
 void TestWriteFailuresPreserveThePreviousDocument()
@@ -398,6 +520,32 @@ void TestWriteFailuresPreserveThePreviousDocument()
             !HasTemporarySibling(path),
         "a rewrite codec failure should preserve the previous document");
 
+    bool metadata_publish_hook_reached = false;
+    specforge::SampleLabelingDocument metadata_edit =
+        opened.snapshot->document();
+    metadata_edit.labeling.name = "metadata publication must abort";
+    const specforge::SampleLabelingAsdfStoreWriteResult
+        metadata_publish_abort =
+            specforge::sample_labeling_asdf_store_test_seam::
+                RewriteDocumentWithBeforeReplace(
+                    *opened.snapshot,
+                    metadata_edit,
+                    [&metadata_publish_hook_reached](
+                        const auto&, const auto&) {
+                        metadata_publish_hook_reached = true;
+                        throw std::runtime_error(
+                            "injected metadata pre-replacement publication abort");
+                    });
+    Require(
+        metadata_publish_hook_reached &&
+            !metadata_publish_abort.succeeded() &&
+            metadata_publish_abort.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    AtomicWriteFailure &&
+            ReadAllBytes(path) == original &&
+            !HasTemporarySibling(path),
+        "a metadata rewrite pre-replacement abort should preserve the previous document and clean its temporary file");
+
     bool rewrite_publish_hook_reached = false;
     const std::array<std::int32_t, 3> replacement = {7, 7, 2};
     const specforge::SampleLabelingAsdfStoreWriteResult
@@ -429,6 +577,7 @@ int main()
     try {
         TestAtomicFullWriteAndSourceAwareOpen();
         TestValueOnlyRewriteReusesRosterBlockWithoutReopen();
+        TestMetadataChangingRewritesPreserveForwardUnknownFields();
         TestWriteFailuresPreserveThePreviousDocument();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
