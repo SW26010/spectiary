@@ -758,7 +758,10 @@ label-result writer and legacy read adapter; canonical ASDF v1 is additionally
 supported as a source-aware, read-only annotation adapter. Until the ASDF
 persistence owner is connected, NPY output rejects `.asdf` paths and its lease
 identity always protects both the selected result path and the adjacent
-`<stem>.sf-labels.json`. Future adapters such as CSV can be added if they can
+`<stem>.sf-labels.json`. Output artifact ownership is declared by format rather
+than inferred from a filename extension: canonical ASDF owns one document,
+while legacy NPY owns the `.npy` result and its `.sf-labels.json` sidecar.
+Future adapters such as CSV can be added if they can
 produce or consume the same per-sample annotation result shape and validate that
 the value count matches the source collection's spectrum count.
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI

@@ -1098,11 +1098,19 @@ void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
             : error);
 
     Require(
-        specforge::SampleAnnotationArtifactIdentities(explicit_path, false)
-                .stable_path_keys.size() == 2 &&
-            specforge::SampleAnnotationArtifactIdentities(npy_path, false)
+        specforge::SampleAnnotationArtifactIdentities(
+            explicit_path,
+            specforge::SampleLabelingOutputArtifactFormat::
+                CanonicalAsdf,
+            false)
+                .stable_path_keys.size() == 1 &&
+            specforge::SampleAnnotationArtifactIdentities(
+                npy_path,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+                false)
                     .stable_path_keys.size() == 2,
-        "the current NPY writer lease must protect a sidecar for every selected output extension");
+        "artifact ownership should distinguish canonical ASDF from legacy NPY plus sidecar");
 
     std::error_code cleanup_error;
     std::filesystem::remove(explicit_path, cleanup_error);

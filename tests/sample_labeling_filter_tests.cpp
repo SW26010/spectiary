@@ -606,7 +606,7 @@ void TestSampleLabelResultWritesCompactNpy()
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
 }
 
-void TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar()
+void TestOutputArtifactOwnershipIsFormatAware()
 {
     const std::filesystem::path directory =
         FreshTestDirectory("specforge_npy_owner_asdf_boundary");
@@ -648,17 +648,21 @@ void TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar()
             !std::filesystem::exists(sidecar_path),
         "a rejected ASDF output must not create a disguised NPY file or shared sidecar");
 
-    const specforge::SampleAnnotationArtifactIdentitySet asdf_identities =
+    const specforge::SampleAnnotationArtifactIdentitySet
+        canonical_asdf_identities =
         specforge::SampleAnnotationArtifactIdentities(
             asdf_path,
+            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
             false);
     const specforge::SampleAnnotationArtifactIdentitySet npy_identities =
         specforge::SampleAnnotationArtifactIdentities(
             npy_path,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
             false);
     std::size_t shared_identity_count = 0;
     for (const std::string& asdf_identity :
-         asdf_identities.stable_path_keys) {
+         canonical_asdf_identities.stable_path_keys) {
         shared_identity_count += static_cast<std::size_t>(
             std::find(
                 npy_identities.stable_path_keys.begin(),
@@ -667,10 +671,21 @@ void TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar()
             npy_identities.stable_path_keys.end());
     }
     Require(
-        asdf_identities.stable_path_keys.size() == 2 &&
+        canonical_asdf_identities.stable_path_keys.size() == 1 &&
             npy_identities.stable_path_keys.size() == 2 &&
-            shared_identity_count == 1,
-        "foo.asdf and foo.npy writer leases must conflict on their shared metadata sidecar");
+            shared_identity_count == 0,
+        "canonical ASDF should own one file while legacy NPY owns its result and sidecar");
+
+    const specforge::SampleAnnotationArtifactIdentitySet
+        rejected_npy_writer_identities =
+            specforge::SampleAnnotationArtifactIdentities(
+                asdf_path,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+                false);
+    Require(
+        rejected_npy_writer_identities.stable_path_keys.size() == 2,
+        "the current NPY writer ownership must remain two-file even when its rejected path has an ASDF extension");
 }
 
 void TestSampleLabelResultWritesMetadataSidecar()
@@ -3686,6 +3701,8 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
             alias_output,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
             "alias-source",
             "alias-task"),
         "an existing output and its junction alias must share one cache conflict identity");
@@ -3701,6 +3718,8 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
             alias_future,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
             "alias-source",
             "alias-task"),
         "a missing output must use its resolved parent identity plus leaf name");
@@ -3804,6 +3823,8 @@ void TestExistingHardLinksShareFileObjectIdentity()
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
             alias_output,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
             "alias-source",
             "alias-task"),
         "hard links to one existing result must share a cache conflict identity");
@@ -3865,6 +3886,8 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
         directory / "shared.npy";
     const std::filesystem::path csv_output =
         directory / "shared.csv";
+    const std::filesystem::path asdf_output =
+        directory / "shared.asdf";
     Require(
         specforge::SampleAnnotationIoAdapter::
             MetadataPathForResult(npy_output) ==
@@ -3889,9 +3912,19 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
         specforge::HasSampleLabelingOutputPathConflict(
             cache,
             csv_output,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
             "csv-source",
             "csv-task"),
         "output conflict checks must include the derived metadata sidecar");
+    Require(
+        !specforge::HasSampleLabelingOutputPathConflict(
+            cache,
+            asdf_output,
+            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
+            "asdf-source",
+            "asdf-task"),
+        "canonical ASDF must not conflict with a legacy NPY sidecar that shares only its stem");
 
     specforge::SampleLabelingSourceState second_source;
     second_source.sample_count = 3;
@@ -4057,7 +4090,9 @@ void TestOfflineOutputLeaseFallsBackToStablePathIdentity()
 
     const specforge::SampleAnnotationArtifactIdentitySet identities =
         specforge::SampleAnnotationArtifactIdentities(
-            output_path);
+            output_path,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar);
     Require(
         !identities.stable_path_keys.empty(),
         "offline output identity should always retain its normalized path key");
@@ -7216,7 +7251,7 @@ int main(int argc, char* argv[])
         TestChangingUnusedSampleLabelCode();
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
-        TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar();
+        TestOutputArtifactOwnershipIsFormatAware();
         TestSampleLabelResultWritesMetadataSidecar();
         TestAnnotationAdapterRoundTripsLabelArtifacts();
         TestAnnotationAdapterRejectsEmptyTaskIdBeforeWriting();

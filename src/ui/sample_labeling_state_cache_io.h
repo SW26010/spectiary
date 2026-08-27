@@ -1,6 +1,6 @@
 #pragma once
 
-#include "domain/sample_labeling.h"
+#include "domain/sample_annotation_io.h"
 
 #include <chrono>
 #include <cstddef>
@@ -106,6 +106,7 @@ SampleLabelingStateCoordinationDirectories(
 [[nodiscard]] bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,
     const std::filesystem::path& output_path,
+    SampleLabelingOutputArtifactFormat format,
     std::string_view source_identity,
     std::string_view task_id);
 

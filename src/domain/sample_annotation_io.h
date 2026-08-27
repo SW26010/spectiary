@@ -19,11 +19,16 @@ namespace specforge {
 
 using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
+enum class SampleLabelingOutputArtifactFormat {
+    CanonicalAsdf,
+    LegacyNpyWithSidecar,
+};
+
 struct SampleAnnotationArtifactIdentitySet {
-    // Artifact set owned by the current NPY label-result writer. It always
-    // includes both the selected result path and <stem>.sf-labels.json,
-    // regardless of the selected path's extension. Read-only annotation
-    // dependency capture is format-aware and separate from this lease set.
+    // Complete artifact set owned by one labeling output. Canonical ASDF owns
+    // only its document path; legacy NPY owns both the result path and its
+    // adjacent <stem>.sf-labels.json. Read-only annotation dependency capture
+    // is separate from this output lease set.
     // Non-probing identities keep an offline historical artifact addressable.
     std::vector<std::string> stable_path_keys;
     // Physical identities collapse junction, drive-mapping, and UNC aliases
@@ -36,6 +41,7 @@ struct SampleAnnotationArtifactIdentitySet {
 [[nodiscard]] SampleAnnotationArtifactIdentitySet
 SampleAnnotationArtifactIdentities(
     const std::filesystem::path& result_path,
+    SampleLabelingOutputArtifactFormat format,
     bool resolve_physical_paths = true);
 
 enum class SampleAnnotationKind {

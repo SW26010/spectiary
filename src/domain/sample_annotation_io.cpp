@@ -668,6 +668,7 @@ SampleAnnotationResult ReadAnnotationAsdfValues(
 SampleAnnotationArtifactIdentitySet
 SampleAnnotationArtifactIdentities(
     const std::filesystem::path& result_path,
+    SampleLabelingOutputArtifactFormat format,
     bool resolve_physical_paths)
 {
     SampleAnnotationArtifactIdentitySet identities;
@@ -675,10 +676,13 @@ SampleAnnotationArtifactIdentities(
         return identities;
     }
 
-    const std::vector<std::filesystem::path> paths = {
-        result_path,
-        SampleAnnotationIoAdapter::MetadataPathForResult(
-            result_path)};
+    std::vector<std::filesystem::path> paths = {result_path};
+    if (format ==
+        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
+        paths.push_back(
+            SampleAnnotationIoAdapter::MetadataPathForResult(
+                result_path));
+    }
     identities.all_paths_physically_resolved =
         resolve_physical_paths;
     for (const std::filesystem::path& path : paths) {

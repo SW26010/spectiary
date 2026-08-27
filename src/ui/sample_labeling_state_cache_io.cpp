@@ -538,6 +538,8 @@ bool ValidateCacheStructure(
             if (task.output_path->empty() ||
                 SampleAnnotationArtifactIdentities(
                     *task.output_path,
+                    SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar,
                     false)
                     .stable_path_keys.empty()) {
                 SetError(
@@ -564,11 +566,13 @@ using OutputOwnersByPath =
 
 std::vector<std::string> OutputArtifactOwnerKeys(
     const std::filesystem::path& output_path,
+    SampleLabelingOutputArtifactFormat format,
     bool resolve_physical_paths)
 {
     const SampleAnnotationArtifactIdentitySet identities =
         SampleAnnotationArtifactIdentities(
             output_path,
+            format,
             resolve_physical_paths);
     std::vector<std::string> keys;
     keys.reserve(
@@ -612,6 +616,8 @@ OutputOwnersByPath CollectOutputOwners(
             for (const std::string& artifact_key :
                  OutputArtifactOwnerKeys(
                      *task.output_path,
+                     SampleLabelingOutputArtifactFormat::
+                         LegacyNpyWithSidecar,
                      resolve_physical_paths)) {
                 owners[artifact_key].insert(owner);
             }
@@ -1431,6 +1437,7 @@ bool CommitSampleLabelingStateCachePatch(
 bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,
     const std::filesystem::path& output_path,
+    SampleLabelingOutputArtifactFormat format,
     std::string_view source_identity,
     std::string_view task_id)
 {
@@ -1438,6 +1445,7 @@ bool HasSampleLabelingOutputPathConflict(
     for (std::string key :
          OutputArtifactOwnerKeys(
              output_path,
+             format,
              true)) {
         requested_keys.insert(std::move(key));
     }
@@ -1454,6 +1462,8 @@ bool HasSampleLabelingOutputPathConflict(
             for (const std::string& candidate_key :
                  OutputArtifactOwnerKeys(
                      *task.output_path,
+                     SampleLabelingOutputArtifactFormat::
+                         LegacyNpyWithSidecar,
                      true)) {
                 if (requested_keys.contains(
                         candidate_key)) {

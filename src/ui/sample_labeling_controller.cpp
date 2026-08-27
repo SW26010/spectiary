@@ -85,6 +85,7 @@ std::string TemporarySlotEditLeaseKey(
 
 std::vector<std::string> OutputEditLeaseKeys(
     const SampleLabelingTask& task,
+    SampleLabelingOutputArtifactFormat format,
     bool resolve_physical_paths = true)
 {
     if (!task.output_path) {
@@ -93,6 +94,7 @@ std::vector<std::string> OutputEditLeaseKeys(
     const SampleAnnotationArtifactIdentitySet identities =
         SampleAnnotationArtifactIdentities(
             *task.output_path,
+            format,
             resolve_physical_paths);
     std::vector<std::string> keys;
     keys.reserve(
@@ -2901,8 +2903,12 @@ SampleLabelingController::PrepareTaskActivation(
             });
     if (hydrated_task ==
             hydrated_source->second.tasks.end() ||
-        OutputEditLeaseKeys(*hydrated_task) !=
-            OutputEditLeaseKeys(*structural_task)) {
+        OutputEditLeaseKeys(
+            *hydrated_task,
+            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) !=
+            OutputEditLeaseKeys(
+                *structural_task,
+                SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar)) {
         preparation.error =
             "labeling task identity changed while acquiring its edit lease";
         return preparation;
@@ -3223,6 +3229,7 @@ SampleLabelingController::TryAttachOutputLease(
     std::vector<std::string> output_keys =
         OutputEditLeaseKeys(
             task,
+            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
             resolve_physical_paths);
     if (!resolve_physical_paths) {
         // The normalized-path leases are the synchronous coordination
@@ -3362,6 +3369,7 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
     const std::vector<std::string> required_output_keys =
         OutputEditLeaseKeys(
             task,
+            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
             false);
     const bool required_output_leases_held =
         !task.output_path ||
@@ -3808,6 +3816,7 @@ SampleLabelingController::LatestCacheHasOutputConflict(
     return HasSampleLabelingOutputPathConflict(
         latest.cache,
         *candidate.output_path,
+        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
         *active_source_identity_,
         candidate.task_id);
 }
