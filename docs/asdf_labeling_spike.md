@@ -18,8 +18,10 @@ production persistence lifecycle.
    zero checksum, no block index, and little-endian `int32`/UCS-4 payloads.
    Atomic label autosave copies an unchanged encoded roster block verbatim and
    re-encodes only the values block. The promoted production codec component
-   implements and interoperably validates this path; output-lease and atomic
-   persistence lifecycle integration remain separate follow-up work.
+   implements and interoperably validates this path. The domain document store
+   now owns source-aware open, durable-base reuse, and atomic replacement;
+   controller/output-lease lifecycle integration remains separate follow-up
+   work.
 5. The checked-in corpus contains 9 approved valid documents, 1 standard-valid
    document outside the narrow wire profile, 4 ASDF-valid semantic violations,
    and 4 structurally malformed documents.
@@ -188,9 +190,10 @@ per array integer and would need a bounded streaming/specialized path for this
 workload. The promoted production ASDF codec is direct-to-vector and implements
 native zlib read/write plus preservation/copying of encoded unchanged blocks.
 Its compressed writer, reader, and block-reuse paths pass the Python
-interoperability matrix. The remaining integration work belongs to the
-output-lease and atomic persistence lifecycle; recompressing the roster on every
-edit would still require reopening the JSON decision.
+interoperability matrix. The atomic document store now owns durable-base and
+replacement lifecycle below the controller. Remaining work is to connect that
+store to output leases, recovery, and retry policy; recompressing the roster on
+every edit would still require reopening the JSON decision.
 
 ## Missing / unlabeled representation
 
@@ -420,8 +423,8 @@ The #74 production component now uses bounded streaming block I/O instead of
 the spike's whole-file `ReadAll` seam. Remaining integration and hardening work
 outside that completed promotion is to:
 
-1. integrate the subset as a library with the existing output lease,
-   write-ahead recovery, retry, and atomic-file owner;
+1. connect the atomic document store to the existing output lease,
+   write-ahead recovery, retry, and persistence owner;
 2. measure the native reuse path itself at 1M scale;
 3. decide and test unknown-field preservation on rewrite;
 4. fuzz YAML/block headers, integer bounds, Unicode, and truncated inputs;

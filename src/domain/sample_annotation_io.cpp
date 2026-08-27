@@ -566,34 +566,6 @@ SampleAnnotationResult ReadAnnotationNpyValues(
     return result;
 }
 
-void ValidateAsdfSourceCompatibility(
-    const SampleLabelingDocument& document,
-    const SampleAnnotationSourceCompatibility& source)
-{
-    if (document.source.sample_count != source.sample_count) {
-        throw AsdfAnnotationError(
-            "ASDF labeling document sample count does not match the source collection");
-    }
-    if (document.source.base_identity != source.base_identity ||
-        document.source.name != source.source_name ||
-        document.source.fingerprint != source.source_fingerprint) {
-        throw AsdfAnnotationError(
-            "ASDF labeling document source identity does not match the source collection");
-    }
-    if (document.source.roster.identity_kind ==
-        kSampleLabelingDocumentExplicitNamesRoster) {
-        if (source.sample_names.size() != source.sample_count ||
-            document.source.roster.sample_names.size() != source.sample_names.size() ||
-            !std::equal(
-                document.source.roster.sample_names.begin(),
-                document.source.roster.sample_names.end(),
-                source.sample_names.begin())) {
-            throw AsdfAnnotationError(
-                "ASDF labeling document roster does not match the source collection order");
-        }
-    }
-}
-
 SampleAnnotationResult ReadAnnotationAsdfValues(
     const std::filesystem::path& path,
     const SampleAnnotationSourceCompatibility& source,
@@ -628,7 +600,13 @@ SampleAnnotationResult ReadAnnotationAsdfValues(
     }
 
     const SampleLabelingDocument& document = *read.document;
-    ValidateAsdfSourceCompatibility(document, source);
+    if (const std::optional<SampleLabelingSourceCompatibilityError> mismatch =
+            CheckSampleLabelingSourceCompatibility(
+                document,
+                source,
+                cancellation_checkpoint)) {
+        throw AsdfAnnotationError(mismatch->message);
+    }
     // Annotation attachment does not persist through the codec's rewrite
     // seam. Drop its potentially large encoded roster snapshot before
     // projecting a second values representation.

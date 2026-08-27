@@ -764,6 +764,13 @@ while legacy NPY owns the `.npy` result and its `.sf-labels.json` sidecar.
 Future adapters such as CSV can be added if they can
 produce or consume the same per-sample annotation result shape and validate that
 the value count matches the source collection's spectrum count.
+
+The ASDF codec remains a caller-owned stream component. A separate domain
+document store owns source-aware open, the immutable durable roster/base
+snapshot, atomic full-document replacement, and atomic value-only rewrites.
+Controller leases, recovery state, retry policy, and UI activation remain above
+that store and are not codec responsibilities.
+
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save
 state without parsing storage formats or reimplementing dtype, shape, or write

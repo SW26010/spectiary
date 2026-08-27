@@ -244,8 +244,10 @@ add_library(specforge_core STATIC
     src/domain/sample_annotation_io.cpp
     src/domain/sample_filter.cpp
     src/domain/sample_labeling_asdf_codec.cpp
+    src/domain/sample_labeling_asdf_store.cpp
     src/domain/sample_labeling.cpp
     src/domain/sample_labeling_document.cpp
+    src/domain/sample_labeling_source_compatibility.cpp
     src/domain/source_collection_identity_digest.cpp
     src/domain/source_collection_manifest.cpp
     src/domain/source_open_resolution.cpp
@@ -1197,6 +1199,11 @@ specforge_add_test(
 specforge_add_test(
     specforge_sample_labeling_asdf_codec_tests
     tests/sample_labeling_asdf_codec_tests.cpp
+    specforge_core
+)
+specforge_add_test(
+    specforge_sample_labeling_asdf_store_tests
+    tests/sample_labeling_asdf_store_tests.cpp
     specforge_core
 )
 target_compile_definitions(

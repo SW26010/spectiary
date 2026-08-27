@@ -2,6 +2,7 @@
 
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_document.h"
+#include "domain/sample_labeling_source_compatibility.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -62,17 +63,8 @@ struct SampleAnnotationValue {
     SemanticValue semantic;
 };
 
-// Synchronous view of the canonical base source identity and roster used to
-// decide whether an attached labeling document belongs to the active source.
-// context_fingerprint is intentionally absent because annotations contribute
-// to it and therefore cannot identify the annotation-independent base source.
-struct SampleAnnotationSourceCompatibility {
-    std::string_view base_identity;
-    std::string_view source_name;
-    std::string_view source_fingerprint;
-    std::size_t sample_count = 0;
-    std::span<const std::string> sample_names;
-};
+using SampleAnnotationSourceCompatibility =
+    SampleLabelingSourceCompatibility;
 
 struct SampleAnnotationResult {
     std::string name;
