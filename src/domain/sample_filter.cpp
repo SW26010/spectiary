@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -37,6 +38,110 @@ void AddOption(
     option.sample_count = 1;
     option.represents_unlabeled_value = represents_unlabeled_value;
     options.push_back(std::move(option));
+}
+
+struct IndexedAnnotationLabel {
+    const std::string* name = nullptr;
+    bool represents_unlabeled_value = false;
+};
+
+struct AnnotationLabelIndex {
+    bool active = false;
+    std::unordered_map<int, IndexedAnnotationLabel> labels_by_code;
+};
+
+AnnotationLabelIndex BuildAnnotationLabelIndex(
+    const SampleAnnotationResult& annotation,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    AnnotationLabelIndex index;
+    const std::size_t canonical_label_count =
+        annotation.labeling_document
+            ? annotation.labeling_document->labeling.labels.size()
+            : 0U;
+    const std::size_t legacy_label_count =
+        annotation.label_metadata
+            ? annotation.label_metadata->label_set.labels.size()
+            : 0U;
+    if (legacy_label_count <=
+        std::numeric_limits<std::size_t>::max() -
+            canonical_label_count) {
+        index.labels_by_code.reserve(
+            canonical_label_count + legacy_label_count);
+    }
+
+    std::size_t visited = 0;
+    const auto poll = [&]() {
+        if ((visited++ & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+    };
+    if (annotation.labeling_document) {
+        index.active = true;
+        const SampleLabelingDocument& document =
+            *annotation.labeling_document;
+        index.labels_by_code.try_emplace(
+            document.annotation.missing.value,
+            IndexedAnnotationLabel{
+                .represents_unlabeled_value = true});
+        for (const SampleLabelingDocumentLabel& label :
+            document.labeling.labels) {
+            poll();
+            index.labels_by_code.try_emplace(
+                label.code,
+                IndexedAnnotationLabel{.name = &label.name});
+        }
+    }
+    if (annotation.label_metadata) {
+        index.active = true;
+        const SampleLabelResultMetadata& metadata =
+            *annotation.label_metadata;
+        index.labels_by_code.try_emplace(
+            metadata.unlabeled_sentinel,
+            IndexedAnnotationLabel{
+                .represents_unlabeled_value = true});
+        for (const SampleLabelDefinition& label :
+            metadata.label_set.labels) {
+            poll();
+            index.labels_by_code.try_emplace(
+                label.code,
+                IndexedAnnotationLabel{.name = &label.name});
+        }
+    }
+    return index;
+}
+
+const IndexedAnnotationLabel* FindIndexedAnnotationLabel(
+    const AnnotationLabelIndex& index,
+    const std::optional<int>& code)
+{
+    if (!code || !index.active) {
+        return nullptr;
+    }
+    const auto match = index.labels_by_code.find(*code);
+    return match == index.labels_by_code.end() ? nullptr : &match->second;
+}
+
+std::string FormatIndexedAnnotationValue(
+    const SampleAnnotationResult& annotation,
+    const SampleAnnotationValue& value,
+    const AnnotationLabelIndex& index,
+    const std::optional<int>& code)
+{
+    if (code && index.active) {
+        const IndexedAnnotationLabel* label =
+            FindIndexedAnnotationLabel(index, code);
+        if (label == nullptr) {
+            return std::to_string(*code);
+        }
+        if (label->represents_unlabeled_value) {
+            return "Unlabeled (" + std::to_string(*code) + ")";
+        }
+        if (label->name != nullptr) {
+            return *label->name + " (" + std::to_string(*code) + ")";
+        }
+    }
+    return FormatSampleAnnotationValue(annotation, value);
 }
 
 const SampleFilterSource* FindSource(
@@ -194,6 +299,8 @@ SampleFilterSource BuildAnnotationFilterSource(
     source.filterable = annotation.kind != SampleAnnotationKind::ContinuousFloat;
     source.value_keys_by_sample.reserve(annotation.values.size());
 
+    const AnnotationLabelIndex label_index =
+        BuildAnnotationLabelIndex(annotation, cancellation_checkpoint);
     std::unordered_map<std::string, std::size_t> option_indices;
     for (std::size_t index = 0; index < annotation.values.size(); ++index) {
         if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
@@ -201,23 +308,27 @@ SampleFilterSource BuildAnnotationFilterSource(
         }
         const SampleAnnotationValue& value = annotation.values[index];
         const std::string key = SampleAnnotationValueKey(value);
-        const std::string display_text = FormatSampleAnnotationValue(annotation, value);
         const std::optional<int> integer_value = SampleAnnotationValueAsInt(value);
+        const IndexedAnnotationLabel* indexed_label =
+            FindIndexedAnnotationLabel(label_index, integer_value);
         const bool represents_unlabeled_value =
-            integer_value &&
-            ((annotation.labeling_document &&
-              *integer_value ==
-                  annotation.labeling_document->annotation.missing.value) ||
-             (annotation.label_metadata &&
-              *integer_value ==
-                  annotation.label_metadata->unlabeled_sentinel));
+            indexed_label != nullptr &&
+            indexed_label->represents_unlabeled_value;
         source.value_keys_by_sample.push_back(key);
         if (source.filterable) {
+            const bool needs_display_text =
+                option_indices.find(key) == option_indices.end();
             AddOption(
                 source.options,
                 option_indices,
                 key,
-                display_text,
+                needs_display_text
+                    ? FormatIndexedAnnotationValue(
+                          annotation,
+                          value,
+                          label_index,
+                          integer_value)
+                    : std::string{},
                 represents_unlabeled_value);
         }
     }

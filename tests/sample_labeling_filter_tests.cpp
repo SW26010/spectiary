@@ -7110,6 +7110,64 @@ void TestSampleFiltersStackCategoricalConditions()
         "label filter should identify its unlabeled option semantically");
 }
 
+void TestCanonicalAnnotationFilterIndexesLargeLabelSet()
+{
+    constexpr int kLabelCount = 4096;
+    constexpr std::size_t kSampleCount = 16'384;
+
+    auto document =
+        std::make_shared<specforge::SampleLabelingDocument>();
+    document->labeling.labels.reserve(kLabelCount);
+    for (int code = 0; code < kLabelCount; ++code) {
+        document->labeling.labels.push_back(
+            specforge::SampleLabelingDocumentLabel{
+                code,
+                "label-" + std::to_string(code),
+                {}});
+    }
+
+    specforge::SampleAnnotationResult annotation;
+    annotation.name = "canonical-labels";
+    annotation.kind =
+        specforge::SampleAnnotationKind::CategoricalInteger;
+    annotation.labeling_document = std::move(document);
+    annotation.values.reserve(kSampleCount);
+    for (std::size_t index = 0; index < kSampleCount; ++index) {
+        annotation.values.push_back(specforge::SampleAnnotationValue{
+            std::int64_t{index % 2U == 0U
+                    ? kLabelCount - 1
+                    : specforge::kUnlabeledSampleLabelCode}});
+    }
+
+    const specforge::SampleFilterSource source =
+        specforge::BuildAnnotationFilterSource(annotation);
+    Require(
+        source.options.size() == 2,
+        "canonical annotation filtering should collapse repeated codes");
+    const auto labeled = std::find_if(
+        source.options.begin(),
+        source.options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "4095";
+        });
+    Require(
+        labeled != source.options.end() &&
+            labeled->display_text == "label-4095 (4095)" &&
+            labeled->sample_count == kSampleCount / 2U,
+        "canonical filter options should use the pre-indexed label display");
+    const auto unlabeled = std::find_if(
+        source.options.begin(),
+        source.options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.represents_unlabeled_value;
+        });
+    Require(
+        unlabeled != source.options.end() &&
+            unlabeled->display_text == "Unlabeled (-1)" &&
+            unlabeled->sample_count == kSampleCount / 2U,
+        "canonical filter options should preserve missing-value semantics");
+}
+
 void TestFloatingAnnotationsAreNotFilterable()
 {
     specforge::SampleAnnotationResult annotation;
@@ -7253,6 +7311,7 @@ int main(int argc, char* argv[])
         TestOrdinaryTaskSavePreservesLatestExplicitSelection();
         TestTargetLeaseIsReleasedAfterProcessTermination();
         TestSampleFiltersStackCategoricalConditions();
+        TestCanonicalAnnotationFilterIndexesLargeLabelSet();
         TestFloatingAnnotationsAreNotFilterable();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
