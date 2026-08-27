@@ -1,4 +1,6 @@
 #include "domain/spectrum_snapshot.h"
+#include "domain/sample_labeling_asdf_codec.h"
+#include "domain/sample_labeling_document.h"
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
@@ -444,6 +446,110 @@ void TestControllerRestoresAndRemovesProvidedAnnotations()
         "removing an annotation should advance the active context generation");
     context = controller.active_context();
     Require(context != nullptr && context->annotations.empty(), "removed annotation should leave active context");
+}
+
+void TestControllerAttachesAsdfLabelingDocumentForActiveSource()
+{
+    const std::filesystem::path source_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_asdf_annotation_source.npy";
+    const std::filesystem::path annotation_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_asdf_annotation.asdf";
+    const std::filesystem::path cache_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_asdf_annotation_state.json";
+    std::error_code cleanup_error;
+    std::filesystem::remove(cache_path, cleanup_error);
+    WriteNpy(
+        source_path,
+        "<f8",
+        {3, 2},
+        BytesFor<double>({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        MakeSnapshot(source_path, "file:source", 3, 0));
+    const std::optional<specforge::SourceCollectionIdentity> identity =
+        controller.active_source_identity();
+    Require(identity.has_value(), "active source identity should exist");
+
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = identity->id;
+    document.source.kind = "npy";
+    document.source.name = identity->source_name;
+    document.source.fingerprint = identity->source_fingerprint;
+    document.source.sample_count = identity->spectrum_count;
+    document.source.roster.identity_kind =
+        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+    document.annotation.name = "review-code";
+    document.annotation.values = {-1, 4, 4};
+    document.labeling.id = "review-task";
+    document.labeling.name = "Review task";
+    document.labeling.labels = {{4, "reviewed", "r"}};
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        Require(stream.good(), "navigation ASDF fixture should open");
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(stream, document);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "navigation ASDF fixture should write"
+                : write.error.message);
+    }
+
+    std::string message;
+    Require(
+        controller.AddReadOnlyAnnotationToActiveSource(
+            annotation_path,
+            &message),
+        message.empty()
+            ? "ASDF annotation should attach to active navigation source"
+            : message);
+    const specforge::SourceCollectionManifest* context =
+        controller.active_context();
+    Require(
+        context != nullptr && context->annotations.size() == 1,
+        "attached ASDF annotation should enter the active manifest");
+    const specforge::SampleAnnotationResult& annotation =
+        context->annotations.front();
+    Require(
+        annotation.labeling_document != nullptr &&
+            annotation.labeling_document->labeling.id == "review-task" &&
+            annotation.labeling_document->annotation.name == "review-code" &&
+            annotation.labeling_document->labeling.labels.front().name ==
+                "reviewed" &&
+            !annotation.label_metadata.has_value(),
+        "navigation attach should preserve canonical ASDF task and label semantics");
+
+    document.source.base_identity = "wrong-source";
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(stream, document);
+        Require(write.succeeded(), "mismatched ASDF fixture should write");
+    }
+    Require(
+        !controller.AddReadOnlyAnnotationToActiveSource(
+            annotation_path,
+            &message),
+        "ASDF annotation from another source must not replace the attachment");
+    context = controller.active_context();
+    Require(
+        context != nullptr && context->annotations.size() == 1 &&
+            context->annotations.front().labeling_document->source
+                    .base_identity == identity->id,
+        "rejected ASDF replacement should leave the compatible snapshot attached");
+
+    std::filesystem::remove(source_path, cleanup_error);
+    std::filesystem::remove(annotation_path, cleanup_error);
+    std::filesystem::remove(cache_path, cleanup_error);
 }
 
 void TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity()
@@ -1736,6 +1842,7 @@ int main()
     TestControllerReloadsCompanionContextOnReactivate();
     TestControllerAddsManualAnnotationToActiveContext();
     TestControllerRestoresAndRemovesProvidedAnnotations();
+    TestControllerAttachesAsdfLabelingDocumentForActiveSource();
     TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity();
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerDebouncesNavigationStatePersistence();

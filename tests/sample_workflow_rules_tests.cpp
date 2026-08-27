@@ -4,11 +4,13 @@
 #include "ui/sample_sorting_sources.h"
 #include "ui/sample_workflow_source_policy.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -229,6 +231,76 @@ void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
     Require(
         count_mismatch_plan.kind == specforge::SampleAnnotationLabelingActivationKind::None,
         "a same-path local task must not activate when its sample count differs");
+}
+
+void TestCanonicalAsdfAnnotationRemainsReadOnly()
+{
+    const std::filesystem::path path = TempPath("_canonical.asdf");
+    specforge::SampleAnnotationResult annotation =
+        MakeIntegerAnnotation("wire annotation", path, {-1, 5, 9});
+    annotation.relationship =
+        specforge::SampleAnnotationWorkflowRelationship::
+            ExternalLabelResult;
+    auto document =
+        std::make_shared<specforge::SampleLabelingDocument>();
+    document->source.base_identity = "source-base";
+    document->source.kind = "npy";
+    document->source.name = "source.npy";
+    document->source.fingerprint = "source-fingerprint";
+    document->source.sample_count = 3;
+    document->annotation.name = "quality-code";
+    document->annotation.values = {-1, 5, 9};
+    document->labeling.id = "canonical-quality";
+    document->labeling.name = "Canonical quality";
+    document->labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    annotation.labeling_document = std::move(document);
+
+    specforge::SampleAnnotationLabelingActivationPlan plan =
+        specforge::PlanSampleAnnotationLabelingActivation(
+            specforge::SampleAnnotationLabelingActivationRequest{
+                .annotation = &annotation});
+    Require(
+        plan.kind ==
+                specforge::SampleAnnotationLabelingActivationKind::
+                    None,
+        "canonical ASDF annotations must not enter the NPY task persistence owner");
+
+    std::vector<specforge::SampleLabelingTask> tasks;
+    tasks.push_back(
+        MakeTask(
+            "canonical-quality",
+            "Canonical quality",
+            3,
+            path));
+    plan = specforge::PlanSampleAnnotationLabelingActivation(
+        specforge::SampleAnnotationLabelingActivationRequest{
+            .annotation = &annotation,
+            .active_source_tasks = &tasks});
+    Require(
+        plan.kind ==
+                specforge::SampleAnnotationLabelingActivationKind::
+                    None &&
+            specforge::FindLocalTaskForLoadedAnnotation(
+                &tasks,
+                annotation) == nullptr,
+        "canonical ASDF annotations must remain read-only even when a local task shares their path");
+
+    const specforge::SampleFilterSource filter =
+        specforge::BuildAnnotationFilterSource(annotation);
+    const auto unlabeled = std::find_if(
+        filter.options.begin(),
+        filter.options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "-1";
+        });
+    Require(
+        unlabeled != filter.options.end() &&
+            unlabeled->represents_unlabeled_value &&
+            unlabeled->display_text == "Unlabeled (-1)",
+        "canonical missing semantics should project into annotation filtering");
 }
 
 void TestSampleNameSortingSource()
@@ -658,6 +730,7 @@ int main()
     TestMetadataActivationPlanReusesExistingTask();
     TestMetadataCreatePlanAvoidsTaskIdCollision();
     TestMetadataActivationPlanRejectsSamePathIdentityMismatch();
+    TestCanonicalAsdfAnnotationRemainsReadOnly();
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
     TestTypedAnnotationSortingPreservesNumericPrecision();

@@ -208,6 +208,9 @@ const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
     const std::vector<SampleLabelingTask>* active_source_tasks,
     const SampleAnnotationResult& annotation)
 {
+    if (annotation.labeling_document) {
+        return nullptr;
+    }
     if (annotation.label_metadata) {
         return FindTaskByMetadataOutput(active_source_tasks, annotation, *annotation.label_metadata);
     }
@@ -236,8 +239,14 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
     }
 
     const SampleAnnotationResult& annotation = *request.annotation;
+    // Canonical ASDF documents remain read-only annotations until the ASDF
+    // writer owns task hydration, output leasing, and atomic persistence.
+    if (annotation.labeling_document) {
+        return plan;
+    }
     if (request.active_task != nullptr) {
-        if (request.metadata == nullptr || request.active_task->task_id != request.metadata->task_id) {
+        if (request.metadata == nullptr ||
+            request.active_task->task_id != request.metadata->task_id) {
             return plan;
         }
     }

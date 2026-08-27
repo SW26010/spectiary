@@ -2,13 +2,16 @@
 
 #include "app/local_user_state_json.h"
 #include "domain/npy_array_io.h"
+#include "domain/sample_labeling_asdf_codec.h"
 #include "domain/source_path_identity.h"
 #include "platform/atomic_file.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -38,6 +41,14 @@ public:
     }
 };
 
+class AsdfAnnotationError : public std::runtime_error {
+public:
+    explicit AsdfAnnotationError(std::string message)
+        : std::runtime_error(std::move(message))
+    {
+    }
+};
+
 std::string PathToUtf8(const std::filesystem::path& path)
 {
     const auto utf8 = path.u8string();
@@ -48,6 +59,23 @@ std::string FileNameToUtf8(const std::filesystem::path& path)
 {
     const std::filesystem::path filename = path.filename();
     return filename.empty() ? PathToUtf8(path) : PathToUtf8(filename);
+}
+
+std::string LowerAscii(std::string value)
+{
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return value;
+}
+
+bool IsAsdfLabelingPath(const std::filesystem::path& path)
+{
+    return LowerAscii(PathToUtf8(path.extension())) == ".asdf";
 }
 
 std::filesystem::path Utf8ToPath(const std::string& value)
@@ -82,15 +110,32 @@ bool PathExists(const std::filesystem::path& path)
     return std::filesystem::exists(path, error) && !error;
 }
 
-bool ValidateLabelMetadataContract(
+bool ValidateNpyLabelOutputPath(
     const std::filesystem::path& result_path,
-    const SampleLabelingTask& task,
     std::string* error_message)
 {
     if (result_path.empty()) {
         if (error_message != nullptr) {
             *error_message = "label output path is empty";
         }
+        return false;
+    }
+    if (IsAsdfLabelingPath(result_path)) {
+        if (error_message != nullptr) {
+            *error_message =
+                "ASDF label output is unavailable until the ASDF persistence owner is enabled";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ValidateLabelMetadataContract(
+    const std::filesystem::path& result_path,
+    const SampleLabelingTask& task,
+    std::string* error_message)
+{
+    if (!ValidateNpyLabelOutputPath(result_path, error_message)) {
         return false;
     }
     if (task.task_id.empty()) {
@@ -521,6 +566,103 @@ SampleAnnotationResult ReadAnnotationNpyValues(
     return result;
 }
 
+void ValidateAsdfSourceCompatibility(
+    const SampleLabelingDocument& document,
+    const SampleAnnotationSourceCompatibility& source)
+{
+    if (document.source.sample_count != source.sample_count) {
+        throw AsdfAnnotationError(
+            "ASDF labeling document sample count does not match the source collection");
+    }
+    if (document.source.base_identity != source.base_identity ||
+        document.source.name != source.source_name ||
+        document.source.fingerprint != source.source_fingerprint) {
+        throw AsdfAnnotationError(
+            "ASDF labeling document source identity does not match the source collection");
+    }
+    if (document.source.roster.identity_kind ==
+        kSampleLabelingDocumentExplicitNamesRoster) {
+        if (source.sample_names.size() != source.sample_count ||
+            document.source.roster.sample_names.size() != source.sample_names.size() ||
+            !std::equal(
+                document.source.roster.sample_names.begin(),
+                document.source.roster.sample_names.end(),
+                source.sample_names.begin())) {
+            throw AsdfAnnotationError(
+                "ASDF labeling document roster does not match the source collection order");
+        }
+    }
+}
+
+SampleAnnotationResult ReadAnnotationAsdfValues(
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
+{
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+    std::exception_ptr cancellation;
+    const SampleLabelingAsdfReadCheckpoint codec_checkpoint =
+        cancellation_checkpoint
+            ? SampleLabelingAsdfReadCheckpoint{
+                  [&cancellation_checkpoint, &cancellation]() {
+                      try {
+                          cancellation_checkpoint();
+                      } catch (...) {
+                          cancellation = std::current_exception();
+                          throw;
+                      }
+                  }}
+            : SampleLabelingAsdfReadCheckpoint{};
+    SampleLabelingAsdfReadResult read =
+        ReadSampleLabelingAsdfDocument(path, codec_checkpoint);
+    if (cancellation) {
+        std::rethrow_exception(cancellation);
+    }
+    if (!read.succeeded()) {
+        throw AsdfAnnotationError(
+            read.error.message.empty()
+                ? "could not read the ASDF labeling document"
+                : read.error.message);
+    }
+
+    const SampleLabelingDocument& document = *read.document;
+    ValidateAsdfSourceCompatibility(document, source);
+    // Annotation attachment does not persist through the codec's rewrite
+    // seam. Drop its potentially large encoded roster snapshot before
+    // projecting a second values representation.
+    read.durable_base.reset();
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+
+    SampleAnnotationResult result;
+    result.name = document.labeling.name;
+    result.path = path;
+    result.kind = SampleAnnotationKind::CategoricalInteger;
+    result.dtype = "<i4";
+    result.dtype_name = std::string{kInt32DtypeText};
+    result.relationship =
+        SampleAnnotationWorkflowRelationship::ExternalLabelResult;
+    result.values.reserve(document.annotation.values.size());
+    for (std::size_t index = 0;
+         index < document.annotation.values.size();
+         ++index) {
+        if ((index & 0xfffU) == 0U && cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        result.values.push_back(SampleAnnotationValue{
+            static_cast<std::int64_t>(document.annotation.values[index])});
+    }
+    result.labeling_document =
+        std::make_shared<SampleLabelingDocument>(std::move(*read.document));
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+    return result;
+}
+
 }  // namespace
 
 SampleAnnotationArtifactIdentitySet
@@ -589,7 +731,48 @@ std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::LoadCancelable(
     std::string* error_message) const
 {
     try {
+        if (IsAsdfLabelingPath(path)) {
+            throw AsdfAnnotationError(
+                "ASDF labeling documents require source collection identity and roster validation");
+        }
         return ReadAnnotationNpyValues(path, expected_count, cancellation_checkpoint);
+    } catch (const std::exception& error) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        if (error_message != nullptr) {
+            *error_message = error.what();
+        }
+        return std::nullopt;
+    }
+}
+
+std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::LoadForSource(
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    std::string* error_message) const
+{
+    return LoadForSourceCancelable(path, source, {}, error_message);
+}
+
+std::optional<SampleAnnotationResult>
+SampleAnnotationIoAdapter::LoadForSourceCancelable(
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint,
+    std::string* error_message) const
+{
+    try {
+        if (IsAsdfLabelingPath(path)) {
+            return ReadAnnotationAsdfValues(
+                path,
+                source,
+                cancellation_checkpoint);
+        }
+        return ReadAnnotationNpyValues(
+            path,
+            source.sample_count,
+            cancellation_checkpoint);
     } catch (const std::exception& error) {
         if (cancellation_checkpoint) {
             cancellation_checkpoint();
@@ -660,6 +843,9 @@ bool SampleAnnotationIoAdapter::SaveLabelArray(
     const SampleLabelingTask& task,
     std::string* error_message) const
 {
+    if (!ValidateNpyLabelOutputPath(path, error_message)) {
+        return false;
+    }
     AtomicFileWriteOptions options;
     options.open_mode = std::ios::binary | std::ios::trunc;
     options.target_description = "sample label result";
@@ -826,6 +1012,25 @@ std::string FormatSampleAnnotationValue(
     const SampleAnnotationResult& annotation,
     const SampleAnnotationValue& value)
 {
+    if (annotation.labeling_document) {
+        if (const std::optional<int> code =
+                SampleAnnotationValueAsInt(value)) {
+            const SampleLabelingDocument& document =
+                *annotation.labeling_document;
+            if (*code == document.annotation.missing.value) {
+                return "Unlabeled (" + std::to_string(*code) + ")";
+            }
+            const auto label = std::find_if(
+                document.labeling.labels.begin(),
+                document.labeling.labels.end(),
+                [code](const SampleLabelingDocumentLabel& candidate) {
+                    return candidate.code == *code;
+                });
+            if (label != document.labeling.labels.end()) {
+                return label->name + " (" + std::to_string(*code) + ")";
+            }
+        }
+    }
     if (annotation.label_metadata) {
         if (const std::optional<int> code = SampleAnnotationValueAsInt(value)) {
             return FormatSampleLabelValue(

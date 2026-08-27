@@ -86,6 +86,9 @@ SampleNavigationRequest BuildAutoAdvanceRequest(const SampleLabelingTask& task)
 std::optional<SampleLabelResultMetadata> LoadVerifiedLabelMetadataForAnnotation(
     const SampleAnnotationResult& annotation)
 {
+    if (annotation.labeling_document) {
+        return std::nullopt;
+    }
     if (annotation.label_metadata) {
         return annotation.label_metadata;
     }
@@ -137,7 +140,10 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     } else {
         view.missing = true;
     }
-    view.can_activate_labeling = local_task != nullptr || annotation.kind == SampleAnnotationKind::CategoricalInteger;
+    view.can_activate_labeling =
+        local_task != nullptr ||
+        (annotation.kind == SampleAnnotationKind::CategoricalInteger &&
+         !annotation.labeling_document);
     view.can_filter_samples = local_task != nullptr || annotation.kind != SampleAnnotationKind::ContinuousFloat;
     view.can_sort_samples = local_task == nullptr &&
                             annotation.relationship == SampleAnnotationWorkflowRelationship::PlainAnnotation &&
@@ -1224,14 +1230,35 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, annotation_path);
     std::optional<SampleAnnotationResult> loaded_annotation;
     if (annotation == nullptr) {
-        const std::size_t sample_count = navigation_.spectrum_count().value_or(0);
+        const std::optional<SourceCollectionIdentity> source_identity =
+            navigation_.active_source_identity();
+        if (!source_identity) {
+            return outcome;
+        }
         std::string load_error;
         loaded_annotation =
-            SampleAnnotationIoAdapter{}.Load(annotation_path, sample_count, &load_error);
+            SampleAnnotationIoAdapter{}.LoadForSource(
+                annotation_path,
+                SampleAnnotationSourceCompatibility{
+                    .base_identity = source_identity->id,
+                    .source_name = source_identity->source_name,
+                    .source_fingerprint =
+                        source_identity->source_fingerprint,
+                    .sample_count = source_identity->spectrum_count,
+                    .sample_names = context->sample_names,
+                },
+                &load_error);
         if (!loaded_annotation) {
             return outcome;
         }
         annotation = &*loaded_annotation;
+    }
+
+    // ASDF is intentionally read-only in the reader-first integration. Do not
+    // hand its path to the NPY persistence owner before ASDF task persistence
+    // is wired end-to-end.
+    if (annotation->labeling_document) {
+        return outcome;
     }
 
     const SampleLabelingTask* active_task = labeling_.View().active_task;

@@ -606,6 +606,73 @@ void TestSampleLabelResultWritesCompactNpy()
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
 }
 
+void TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge_npy_owner_asdf_boundary");
+    const std::filesystem::path asdf_path = directory / "labels.asdf";
+    const std::filesystem::path npy_path = directory / "labels.npy";
+    const std::filesystem::path sidecar_path =
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(
+            asdf_path);
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "quality",
+            "Quality",
+            3);
+    const specforge::SampleAnnotationIoAdapter adapter;
+
+    std::string error;
+    Require(
+        !adapter.SaveLabelArray(asdf_path, task, &error) &&
+            error.find("ASDF label output") != std::string::npos,
+        "the NPY array writer should reject an ASDF output path");
+    error.clear();
+    Require(
+        !adapter.SaveLabelMetadata(
+            asdf_path,
+            task,
+            nullptr,
+            &error) &&
+            error.find("ASDF label output") != std::string::npos,
+        "the NPY sidecar writer should reject an ASDF output path");
+    const specforge::SampleLabelResultWriteOutcome outcome =
+        adapter.SaveLabelResult(asdf_path, task);
+    Require(
+        !outcome.array_saved && !outcome.metadata_saved &&
+            outcome.message.find("ASDF label output") !=
+                std::string::npos,
+        "the paired NPY persistence boundary should reject ASDF before writing either artifact");
+    Require(
+        !std::filesystem::exists(asdf_path) &&
+            !std::filesystem::exists(sidecar_path),
+        "a rejected ASDF output must not create a disguised NPY file or shared sidecar");
+
+    const specforge::SampleAnnotationArtifactIdentitySet asdf_identities =
+        specforge::SampleAnnotationArtifactIdentities(
+            asdf_path,
+            false);
+    const specforge::SampleAnnotationArtifactIdentitySet npy_identities =
+        specforge::SampleAnnotationArtifactIdentities(
+            npy_path,
+            false);
+    std::size_t shared_identity_count = 0;
+    for (const std::string& asdf_identity :
+         asdf_identities.stable_path_keys) {
+        shared_identity_count += static_cast<std::size_t>(
+            std::find(
+                npy_identities.stable_path_keys.begin(),
+                npy_identities.stable_path_keys.end(),
+                asdf_identity) !=
+            npy_identities.stable_path_keys.end());
+    }
+    Require(
+        asdf_identities.stable_path_keys.size() == 2 &&
+            npy_identities.stable_path_keys.size() == 2 &&
+            shared_identity_count == 1,
+        "foo.asdf and foo.npy writer leases must conflict on their shared metadata sidecar");
+}
+
 void TestSampleLabelResultWritesMetadataSidecar()
 {
     specforge::SampleLabelingTask task = specforge::CreateSampleLabelingTask("quality", "Quality", 3);
@@ -7091,6 +7158,7 @@ int main(int argc, char* argv[])
         TestChangingUnusedSampleLabelCode();
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
+        TestNpyPersistenceOwnerRejectsAsdfOutputAndProtectsSidecar();
         TestSampleLabelResultWritesMetadataSidecar();
         TestAnnotationAdapterRoundTripsLabelArtifacts();
         TestAnnotationAdapterRejectsEmptyTaskIdBeforeWriting();

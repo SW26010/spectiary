@@ -1,12 +1,15 @@
 #pragma once
 
 #include "domain/sample_labeling.h"
+#include "domain/sample_labeling_document.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -17,6 +20,10 @@ namespace specforge {
 using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
 struct SampleAnnotationArtifactIdentitySet {
+    // Artifact set owned by the current NPY label-result writer. It always
+    // includes both the selected result path and <stem>.sf-labels.json,
+    // regardless of the selected path's extension. Read-only annotation
+    // dependency capture is format-aware and separate from this lease set.
     // Non-probing identities keep an offline historical artifact addressable.
     std::vector<std::string> stable_path_keys;
     // Physical identities collapse junction, drive-mapping, and UNC aliases
@@ -49,6 +56,18 @@ struct SampleAnnotationValue {
     SemanticValue semantic;
 };
 
+// Synchronous view of the canonical base source identity and roster used to
+// decide whether an attached labeling document belongs to the active source.
+// context_fingerprint is intentionally absent because annotations contribute
+// to it and therefore cannot identify the annotation-independent base source.
+struct SampleAnnotationSourceCompatibility {
+    std::string_view base_identity;
+    std::string_view source_name;
+    std::string_view source_fingerprint;
+    std::size_t sample_count = 0;
+    std::span<const std::string> sample_names;
+};
+
 struct SampleAnnotationResult {
     std::string name;
     std::filesystem::path path;
@@ -56,7 +75,13 @@ struct SampleAnnotationResult {
     std::string dtype;
     std::string dtype_name;
     SampleAnnotationWorkflowRelationship relationship = SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    // Legacy NPY companion metadata only. Canonical ASDF semantics live in
+    // labeling_document and are not recast as sidecar-era fields.
     std::optional<SampleLabelResultMetadata> label_metadata;
+    // Present for self-contained canonical labeling documents. The immutable
+    // shared value keeps task, source, roster, and annotation semantics intact
+    // while existing annotation views consume their projected values/metadata.
+    std::shared_ptr<const SampleLabelingDocument> labeling_document;
     std::string metadata_warning;
     std::vector<SampleAnnotationValue> values;
 };
@@ -83,6 +108,15 @@ public:
     [[nodiscard]] std::optional<SampleAnnotationResult> LoadCancelable(
         const std::filesystem::path& path,
         std::size_t expected_count,
+        const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint,
+        std::string* error_message = nullptr) const;
+    [[nodiscard]] std::optional<SampleAnnotationResult> LoadForSource(
+        const std::filesystem::path& path,
+        const SampleAnnotationSourceCompatibility& source,
+        std::string* error_message = nullptr) const;
+    [[nodiscard]] std::optional<SampleAnnotationResult> LoadForSourceCancelable(
+        const std::filesystem::path& path,
+        const SampleAnnotationSourceCompatibility& source,
         const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint,
         std::string* error_message = nullptr) const;
     [[nodiscard]] std::optional<LoadedSampleLabelResult> LoadLabelResult(

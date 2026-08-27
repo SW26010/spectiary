@@ -725,14 +725,14 @@ std::optional<std::filesystem::path> ShowAnnotationFilePicker(
     const std::array<std::wstring, 2> filter_names = {
         Utf8ToWide(UiText(
             language,
-            UiTextId::NumpyAnnotationArraysFilter)),
+            UiTextId::SampleAnnotationFilesFilter)),
         Utf8ToWide(UiText(
             language,
             UiTextId::AllFilesFilter)),
     };
     const std::array<COMDLG_FILTERSPEC, 2>
         annotation_filters = {{
-            {filter_names[0].c_str(), L"*.npy"},
+            {filter_names[0].c_str(), L"*.npy;*.asdf"},
             {filter_names[1].c_str(), L"*.*"},
         }};
     const std::wstring title = Utf8ToWide(UiText(

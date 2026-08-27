@@ -2,6 +2,8 @@
 #include "domain/fits_file_reader.h"
 #include "domain/npy_array_io.h"
 #include "domain/sample_annotation_io.h"
+#include "domain/sample_labeling_asdf_codec.h"
+#include "domain/sample_labeling_document.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_collection_identity_digest.h"
 #include "domain/stable_sha256.h"
@@ -863,6 +865,305 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     std::filesystem::remove(signed_path, cleanup_error);
     std::filesystem::remove(unsigned_path, cleanup_error);
     std::filesystem::remove(floating_path, cleanup_error);
+}
+
+specforge::SampleLabelingDocument MakeAnnotationAsdfDocument()
+{
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = "source-base-v1";
+    document.source.kind = "npy";
+    document.source.name = "source_X.npy";
+    document.source.fingerprint = "source-fingerprint-v1";
+    document.source.sample_count = 3;
+    document.source.roster.identity_kind =
+        std::string{specforge::kSampleLabelingDocumentExplicitNamesRoster};
+    document.source.roster.sample_names = {
+        "sample-a",
+        "sample-b",
+        "sample-c",
+    };
+    document.annotation.name = "quality-code";
+    document.annotation.values = {-1, 2, 7};
+    document.labeling.id = "quality-task-id";
+    document.labeling.name = "Quality review";
+    document.labeling.labels = {
+        {2, "accepted", "a"},
+        {7, "rejected", "r"},
+    };
+    return document;
+}
+
+void WriteAnnotationAsdf(
+    const std::filesystem::path& path,
+    const specforge::SampleLabelingDocument& document)
+{
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    Require(stream.good(), "ASDF annotation fixture should open");
+    const specforge::SampleLabelingAsdfWriteResult write =
+        specforge::WriteSampleLabelingAsdfDocument(stream, document);
+    Require(
+        write.succeeded(),
+        write.error.message.empty()
+            ? "ASDF annotation fixture should write"
+            : write.error.message);
+    stream.close();
+    Require(stream.good(), "ASDF annotation fixture should flush");
+}
+
+void TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource()
+{
+    const std::filesystem::path explicit_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_annotation_adapter_explicit.asdf";
+    const std::filesystem::path source_index_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_annotation_adapter_source_index.asdf";
+    const std::filesystem::path npy_path =
+        std::filesystem::temp_directory_path() /
+        "specforge_annotation_adapter_legacy.npy";
+
+    const specforge::SampleLabelingDocument explicit_document =
+        MakeAnnotationAsdfDocument();
+    WriteAnnotationAsdf(explicit_path, explicit_document);
+
+    const std::vector<std::string> sample_names = {
+        "sample-a",
+        "sample-b",
+        "sample-c",
+    };
+    const specforge::SampleAnnotationSourceCompatibility compatible_source{
+        .base_identity = "source-base-v1",
+        .source_name = "source_X.npy",
+        .source_fingerprint = "source-fingerprint-v1",
+        .sample_count = 3,
+        .sample_names = sample_names,
+    };
+
+    const specforge::SampleAnnotationIoAdapter adapter;
+    std::string error;
+    const std::optional<specforge::SampleAnnotationResult> loaded =
+        adapter.LoadForSource(explicit_path, compatible_source, &error);
+    Require(
+        loaded.has_value(),
+        error.empty() ? "compatible ASDF annotation should load" : error);
+    Require(
+        loaded->kind == SampleAnnotationKind::CategoricalInteger &&
+            loaded->dtype_name == "int32" && loaded->values.size() == 3,
+        "ASDF annotation should project its int32 values");
+    Require(
+        specforge::SampleAnnotationValueAsInt(loaded->values[0]) == -1 &&
+            specforge::SampleAnnotationValueAsInt(loaded->values[1]) == 2 &&
+            specforge::SampleAnnotationValueAsInt(loaded->values[2]) == 7,
+        "ASDF annotation values should be lossless");
+    Require(
+        loaded->relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    ExternalLabelResult &&
+            !loaded->label_metadata.has_value(),
+        "ASDF annotation should remain distinct from legacy sidecar metadata");
+    Require(
+        loaded->labeling_document != nullptr &&
+            loaded->labeling_document->labeling.id ==
+                "quality-task-id" &&
+            loaded->labeling_document->labeling.name ==
+                "Quality review" &&
+            loaded->labeling_document->labeling.labels.size() == 2 &&
+            loaded->labeling_document->labeling.labels[1].name ==
+                "rejected" &&
+            loaded->labeling_document->labeling.labels[1].shortcut ==
+                "r" &&
+            loaded->labeling_document->annotation.name == "quality-code" &&
+            loaded->labeling_document->source.base_identity ==
+                "source-base-v1" &&
+            loaded->labeling_document->source.roster.sample_names ==
+                sample_names,
+        "ASDF canonical task, labels, source, roster, and annotation identity should remain available");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            *loaded,
+            loaded->values[2]) == "rejected (7)" &&
+            specforge::FormatSampleAnnotationValue(
+                *loaded,
+                loaded->values[0]) == "Unlabeled (-1)",
+        "ASDF canonical labels should project through annotation display semantics");
+
+    error.clear();
+    Require(
+        !adapter.Load(explicit_path, 3, &error).has_value() &&
+            error.find("source collection identity") != std::string::npos,
+        "count-only annotation loads must not bypass ASDF source validation");
+
+    const std::vector<std::string> reordered_names = {
+        "sample-b",
+        "sample-a",
+        "sample-c",
+    };
+    const specforge::SampleAnnotationSourceCompatibility reordered_source{
+        .base_identity = "source-base-v1",
+        .source_name = "source_X.npy",
+        .source_fingerprint = "source-fingerprint-v1",
+        .sample_count = 3,
+        .sample_names = reordered_names,
+    };
+    specforge::SourceCollectionManifest rejected_manifest;
+    std::string rejection_message;
+    Require(
+        !specforge::IngestReadOnlySampleAnnotation(
+            rejected_manifest,
+            explicit_path,
+            reordered_source,
+            &rejection_message),
+        "an ASDF roster in a different order must not attach");
+    Require(
+        rejected_manifest.annotations.empty() &&
+            rejected_manifest.diagnostics.size() == 1 &&
+            rejected_manifest.diagnostics.front().detail.find("roster") !=
+                std::string::npos,
+        "roster rejection should remain a structured annotation diagnostic");
+
+    const specforge::SampleAnnotationSourceCompatibility wrong_identity{
+        .base_identity = "different-source-base",
+        .source_name = "source_X.npy",
+        .source_fingerprint = "source-fingerprint-v1",
+        .sample_count = 3,
+        .sample_names = sample_names,
+    };
+    error.clear();
+    Require(
+        !adapter.LoadForSource(
+             explicit_path,
+             wrong_identity,
+             &error)
+             .has_value() &&
+            error.find("source identity") != std::string::npos,
+        "ASDF base source identity mismatches must be rejected");
+
+    specforge::SampleLabelingDocument source_index_document =
+        explicit_document;
+    source_index_document.source.roster.identity_kind =
+        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+    source_index_document.source.roster.sample_names.clear();
+    WriteAnnotationAsdf(source_index_path, source_index_document);
+    error.clear();
+    const std::optional<specforge::SampleAnnotationResult>
+        loaded_source_index = adapter.LoadForSource(
+            source_index_path,
+            compatible_source,
+            &error);
+    Require(
+        loaded_source_index.has_value() &&
+            loaded_source_index->labeling_document != nullptr &&
+            loaded_source_index->labeling_document->source.roster
+                    .identity_kind ==
+                specforge::kSampleLabelingDocumentSourceIndexRoster,
+        error.empty()
+            ? "source-index ASDF annotation should attach by base identity"
+            : error);
+
+    WriteNpy(
+        npy_path,
+        "<i4",
+        {3},
+        BytesFor<std::int32_t>({-1, 2, 7}));
+    specforge::SampleLabelingTask legacy_task =
+        specforge::CreateSampleLabelingTask(
+            "legacy-task",
+            "Legacy task",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            legacy_task.label_set,
+            specforge::SampleLabelDefinition{2, "accepted", 'a'}),
+        "legacy sidecar fixture label should be valid");
+    std::string metadata_error;
+    Require(
+        adapter.SaveLabelMetadata(
+            npy_path,
+            legacy_task,
+            nullptr,
+            &metadata_error),
+        metadata_error.empty()
+            ? "legacy sidecar fixture should save"
+            : metadata_error);
+    error.clear();
+    const std::optional<specforge::SampleAnnotationResult> legacy_loaded =
+        adapter.LoadForSource(npy_path, compatible_source, &error);
+    Require(
+        legacy_loaded.has_value() &&
+            legacy_loaded->label_metadata.has_value() &&
+            legacy_loaded->label_metadata->task_id == "legacy-task" &&
+            legacy_loaded->labeling_document == nullptr,
+        error.empty()
+            ? "source-aware dispatch should preserve NPY plus sidecar loading"
+            : error);
+
+    Require(
+        specforge::SampleAnnotationArtifactIdentities(explicit_path, false)
+                .stable_path_keys.size() == 2 &&
+            specforge::SampleAnnotationArtifactIdentities(npy_path, false)
+                    .stable_path_keys.size() == 2,
+        "the current NPY writer lease must protect a sidecar for every selected output extension");
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(explicit_path, cleanup_error);
+    std::filesystem::remove(source_index_path, cleanup_error);
+    std::filesystem::remove(npy_path, cleanup_error);
+    std::filesystem::remove(
+        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(npy_path),
+        cleanup_error);
+}
+
+void TestCancelableAsdfAnnotationLoadStopsInsideCodecRead()
+{
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        "specforge_cancelable_annotation.asdf";
+    specforge::SampleLabelingDocument document =
+        MakeAnnotationAsdfDocument();
+    document.source.roster.identity_kind =
+        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+    document.source.roster.sample_names.clear();
+    WriteAnnotationAsdf(path, document);
+
+    const specforge::SampleAnnotationSourceCompatibility source{
+        .base_identity = document.source.base_identity,
+        .source_name = document.source.name,
+        .source_fingerprint = document.source.fingerprint,
+        .sample_count = document.source.sample_count,
+    };
+
+    class CancellationMarker final : public std::runtime_error {
+    public:
+        CancellationMarker()
+            : std::runtime_error("ASDF annotation cancellation marker")
+        {
+        }
+    };
+
+    std::size_t cancellation_checks = 0;
+    bool canceled = false;
+    try {
+        (void)specforge::SampleAnnotationIoAdapter{}
+            .LoadForSourceCancelable(
+                path,
+                source,
+                [&cancellation_checks]() {
+                    if (++cancellation_checks >= 4) {
+                        throw CancellationMarker();
+                    }
+                });
+    } catch (const CancellationMarker&) {
+        canceled = true;
+    }
+    Require(
+        canceled,
+        "ASDF annotation cancellation should propagate from inside the codec reader");
+    Require(
+        cancellation_checks >= 4,
+        "ASDF annotation loading should poll during bounded codec I/O");
+
+    std::error_code error;
+    std::filesystem::remove(path, error);
 }
 
 void TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch()
@@ -1842,6 +2143,8 @@ int main()
     TestLoadsNpySampleAnnotationContext();
     TestLoadsReadOnlyAnnotationDtypes();
     TestAnnotationAdapterPreservesWideNumericSemantics();
+    TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource();
+    TestCancelableAsdfAnnotationLoadStopsInsideCodecRead();
     TestAnnotationAdapterRejectsLabelShapeAndDtypeMismatch();
     TestSharedAnnotationIngestionPreservesMetadataWarningsWithoutDuplicates();
     TestRejectsMismatchedSampleAnnotationLength();

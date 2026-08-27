@@ -261,7 +261,10 @@ std::vector<SourceCollectionFileDependencyState> CaptureAnnotationDependencies(
             continue;
         }
         expanded.push_back(path);
-        expanded.push_back(SampleAnnotationIoAdapter::MetadataPathForResult(path));
+        if (ExtensionLower(path) != ".asdf") {
+            expanded.push_back(
+                SampleAnnotationIoAdapter::MetadataPathForResult(path));
+        }
     }
 
     std::vector<SourceCollectionFileDependencyState> dependencies;
@@ -587,32 +590,20 @@ SourceCollectionManifest LoadSourceCollectionManifestCancelable(
     return manifest;
 }
 
-bool IngestReadOnlySampleAnnotation(
-    SourceCollectionManifest& manifest,
-    const std::filesystem::path& path,
-    std::size_t expected_count,
-    std::string* message)
-{
-    return IngestReadOnlySampleAnnotationCancelable(manifest, path, expected_count, {}, message);
-}
+namespace {
 
-bool IngestReadOnlySampleAnnotationCancelable(
+bool FinishReadOnlySampleAnnotationIngestion(
     SourceCollectionManifest& manifest,
     const std::filesystem::path& path,
-    std::size_t expected_count,
+    std::optional<SampleAnnotationResult> annotation,
+    std::string load_error,
     const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
     std::string* message)
 {
-    Checkpoint(cancellation_checkpoint);
-    std::string load_error;
-    std::optional<SampleAnnotationResult> annotation =
-        SampleAnnotationIoAdapter{}.LoadCancelable(
-            path,
-            expected_count,
-            cancellation_checkpoint,
-            &load_error);
     if (!annotation) {
-        std::string ignored_message = "Ignored " + FileNameToUtf8(path.filename()) + ": " + load_error + ".";
+        std::string ignored_message =
+            "Ignored " + FileNameToUtf8(path.filename()) + ": " +
+            load_error + ".";
         manifest.diagnostics.push_back({
             .kind =
                 SourceCollectionManifestDiagnosticKind::
@@ -654,6 +645,79 @@ bool IngestReadOnlySampleAnnotationCancelable(
     }
     Checkpoint(cancellation_checkpoint);
     return true;
+}
+
+}  // namespace
+
+bool IngestReadOnlySampleAnnotation(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    std::string* message)
+{
+    return IngestReadOnlySampleAnnotationCancelable(manifest, path, expected_count, {}, message);
+}
+
+bool IngestReadOnlySampleAnnotation(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    std::string* message)
+{
+    return IngestReadOnlySampleAnnotationCancelable(
+        manifest,
+        path,
+        source,
+        {},
+        message);
+}
+
+bool IngestReadOnlySampleAnnotationCancelable(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    std::size_t expected_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    std::string* message)
+{
+    Checkpoint(cancellation_checkpoint);
+    std::string load_error;
+    std::optional<SampleAnnotationResult> annotation =
+        SampleAnnotationIoAdapter{}.LoadCancelable(
+            path,
+            expected_count,
+            cancellation_checkpoint,
+            &load_error);
+    return FinishReadOnlySampleAnnotationIngestion(
+        manifest,
+        path,
+        std::move(annotation),
+        std::move(load_error),
+        cancellation_checkpoint,
+        message);
+}
+
+bool IngestReadOnlySampleAnnotationCancelable(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    std::string* message)
+{
+    Checkpoint(cancellation_checkpoint);
+    std::string load_error;
+    std::optional<SampleAnnotationResult> annotation =
+        SampleAnnotationIoAdapter{}.LoadForSourceCancelable(
+            path,
+            source,
+            cancellation_checkpoint,
+            &load_error);
+    return FinishReadOnlySampleAnnotationIngestion(
+        manifest,
+        path,
+        std::move(annotation),
+        std::move(load_error),
+        cancellation_checkpoint,
+        message);
 }
 
 bool SourceCollectionManifestContainsAnnotation(

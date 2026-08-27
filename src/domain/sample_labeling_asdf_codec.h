@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -36,6 +37,7 @@ struct SampleLabelingAsdfError {
 
 struct SampleLabelingAsdfReadResult;
 struct SampleLabelingAsdfWriteResult;
+using SampleLabelingAsdfReadCheckpoint = std::function<void()>;
 
 // Immutable snapshot of the already-validated metadata and encoded roster
 // prefix belonging to one opened canonical document. Keeping this handle lets
@@ -55,7 +57,8 @@ private:
     std::shared_ptr<const State> state_;
 
     friend SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
-        const std::filesystem::path& path) noexcept;
+        const std::filesystem::path& path,
+        const SampleLabelingAsdfReadCheckpoint& checkpoint) noexcept;
     friend SampleLabelingAsdfWriteResult
     RewriteSampleLabelingAsdfValuesPreservingRosterBlock(
         const SampleLabelingAsdfDurableBase& durable_base,
@@ -91,7 +94,8 @@ struct SampleLabelingAsdfWriteResult {
 // fixed little-endian/zlib roster profile with FLEVEL=2 receives a durable
 // reuse base.
 [[nodiscard]] SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
-    const std::filesystem::path& path) noexcept;
+    const std::filesystem::path& path,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {}) noexcept;
 
 namespace sample_labeling_asdf_test_seam {
 

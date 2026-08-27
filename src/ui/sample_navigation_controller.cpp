@@ -1422,7 +1422,17 @@ bool SampleNavigationController::LoadReadOnlyAnnotationIntoSession(
     const std::filesystem::path& path,
     std::string* message)
 {
-    return IngestReadOnlySampleAnnotation(session.manifest, path, session.spectrum_count, message);
+    return IngestReadOnlySampleAnnotation(
+        session.manifest,
+        path,
+        SampleAnnotationSourceCompatibility{
+            .base_identity = session.source_collection_identity,
+            .source_name = session.source_name,
+            .source_fingerprint = session.source_fingerprint,
+            .sample_count = session.spectrum_count,
+            .sample_names = session.manifest.sample_names,
+        },
+        message);
 }
 
 void SampleNavigationController::EnsureStateCacheLoaded()

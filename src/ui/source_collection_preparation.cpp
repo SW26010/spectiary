@@ -49,7 +49,14 @@ void LoadRestoredAnnotations(
         (void)IngestReadOnlySampleAnnotationCancelable(
             context.manifest,
             annotation_path,
-            context.identity.spectrum_count,
+            SampleAnnotationSourceCompatibility{
+                .base_identity = context.identity.id,
+                .source_name = context.identity.source_name,
+                .source_fingerprint =
+                    context.identity.source_fingerprint,
+                .sample_count = context.identity.spectrum_count,
+                .sample_names = context.manifest.sample_names,
+            },
             checkpoint);
     }
 }

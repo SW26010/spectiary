@@ -178,7 +178,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"FITS files", "FITS 文件"},
     UiTextEntry{"All files", "所有文件"},
     UiTextEntry{"Open annotation file", "打开标注文件"},
-    UiTextEntry{"NumPy annotation arrays", "NumPy 标注数组"},
+    UiTextEntry{"Sample annotation files", "样本标注文件"},
     UiTextEntry{"Save labeling annotation", "保存标注结果"},
     UiTextEntry{"NumPy label arrays", "NumPy 标签数组"},
     UiTextEntry{

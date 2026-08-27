@@ -112,10 +112,21 @@ using SourceCollectionCancellationCheckpoint = std::function<void()>;
     const std::filesystem::path& path,
     std::size_t expected_count,
     std::string* message = nullptr);
+[[nodiscard]] bool IngestReadOnlySampleAnnotation(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    std::string* message = nullptr);
 [[nodiscard]] bool IngestReadOnlySampleAnnotationCancelable(
     SourceCollectionManifest& manifest,
     const std::filesystem::path& path,
     std::size_t expected_count,
+    const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
+    std::string* message = nullptr);
+[[nodiscard]] bool IngestReadOnlySampleAnnotationCancelable(
+    SourceCollectionManifest& manifest,
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
     const SourceCollectionCancellationCheckpoint& cancellation_checkpoint,
     std::string* message = nullptr);
 [[nodiscard]] bool SourceCollectionManifestContainsAnnotation(

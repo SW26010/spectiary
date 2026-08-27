@@ -203,8 +203,14 @@ SampleFilterSource BuildAnnotationFilterSource(
         const std::string key = SampleAnnotationValueKey(value);
         const std::string display_text = FormatSampleAnnotationValue(annotation, value);
         const std::optional<int> integer_value = SampleAnnotationValueAsInt(value);
-        const bool represents_unlabeled_value = annotation.label_metadata && integer_value &&
-                                                *integer_value == annotation.label_metadata->unlabeled_sentinel;
+        const bool represents_unlabeled_value =
+            integer_value &&
+            ((annotation.labeling_document &&
+              *integer_value ==
+                  annotation.labeling_document->annotation.missing.value) ||
+             (annotation.label_metadata &&
+              *integer_value ==
+                  annotation.label_metadata->unlabeled_sentinel));
         source.value_keys_by_sample.push_back(key);
         if (source.filterable) {
             AddOption(

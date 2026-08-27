@@ -94,6 +94,22 @@ one annotation value per spectrum sample. If the annotation result length does
 not match the source collection's spectrum count, SpecForge must not attach it
 to that source collection.
 
+Manual/read-only annotation attachment accepts both the existing NPY forms and
+canonical `.asdf` labeling documents. ASDF attachment is source-aware: the
+document's base identity, source name, source fingerprint, and sample count must
+match the active base collection. An `explicit_names` roster must additionally
+match the active canonical sample names exactly and in source order;
+`source_index` relies on the matching base identity to define that order. A
+successful attach retains the complete canonical document (task identity/name,
+label definitions, annotation identity/values, source identity, and roster)
+while projecting the values and label definitions into the existing annotation
+views. Count-only attachment APIs do not accept ASDF because they cannot prove
+roster compatibility. Existing `.npy` and `.npy` plus `.sf-labels.json` reads
+remain unchanged. This reader integration does not move output persistence away
+from its current owner: an attached ASDF row is not exposed for editable task
+activation, and programmatic activation is a no-op. ASDF task hydration and
+writer lifecycle integration are a later step.
+
 ## Manual Labeling
 
 Manual labeling normally starts with the source collection's single temporary
@@ -737,11 +753,14 @@ loaded sample annotation result: one value per spectrum sample, with a known
 value kind such as categorical integer, categorical string, or continuous
 floating point.
 
-Format-specific details belong behind annotation I/O. NPY is the only
-first-implementation adapter, not the domain model. Future adapters such as CSV
-can be added if they can produce or consume the same per-sample annotation result
-shape and validate that the value count matches the source collection's spectrum
-count.
+Format-specific details belong behind annotation I/O. NPY remains the current
+label-result writer and legacy read adapter; canonical ASDF v1 is additionally
+supported as a source-aware, read-only annotation adapter. Until the ASDF
+persistence owner is connected, NPY output rejects `.asdf` paths and its lease
+identity always protects both the selected result path and the adjacent
+`<stem>.sf-labels.json`. Future adapters such as CSV can be added if they can
+produce or consume the same per-sample annotation result shape and validate that
+the value count matches the source collection's spectrum count.
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save
 state without parsing storage formats or reimplementing dtype, shape, or write

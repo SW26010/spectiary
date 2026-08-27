@@ -1,5 +1,7 @@
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "domain/sample_labeling_asdf_codec.h"
+#include "domain/sample_labeling_document.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/sample_annotation_labeling_rules.h"
@@ -1002,6 +1004,15 @@ void TestAssigningLabelAutoAdvancesInsideSession()
     Require(
         loaded_indices == std::vector<std::size_t>({0, 1, 0}),
         "session should load only the opened, auto-advanced, and verified sample snapshots");
+}
+
+std::string ReadBinaryFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open binary file for reading");
+    return std::string(
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>());
 }
 
 void TestLabelAutoAdvanceExposesNonAdjacentFilteredTransition()
@@ -3297,6 +3308,78 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
     Require(
         session.View().labeling.current_code == 1,
         "switching source identity should discard the previous source's label undo history");
+}
+
+void TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner()
+{
+    const std::filesystem::path source_path = UniqueTempPath(".npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_read_only.asdf");
+    TouchFile(source_path);
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(session, OpenSourceCollection(source_path, 0));
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        session.CurrentSourceSnapshot();
+    Require(snapshot != nullptr, "ASDF read-only fixture needs an active source");
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = identity.id;
+    document.source.kind = "npy";
+    document.source.name = identity.source_name;
+    document.source.fingerprint = identity.source_fingerprint;
+    document.source.sample_count = identity.spectrum_count;
+    document.source.roster.identity_kind =
+        std::string{
+            specforge::kSampleLabelingDocumentSourceIndexRoster};
+    document.annotation.name = "quality-code";
+    document.annotation.values = {5, -1, 9};
+    document.labeling.id = "canonical-quality";
+    document.labeling.name = "Canonical quality";
+    document.labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "ASDF read-only fixture should write"
+                : write.error.message);
+    }
+    const std::string original_bytes = ReadBinaryFile(annotation_path);
+
+    specforge::SourceCollectionSessionResult result =
+        Submit(session, AddReadOnlyAnnotation(annotation_path));
+    Require(result.loaded, "compatible ASDF annotation should attach");
+    Require(
+        session.View().navigation.current_annotations.size() == 1 &&
+            !session.View().navigation.current_annotations[0]
+                 .can_activate_labeling &&
+            session.View().navigation.current_annotations[0]
+                    .display_text == "bad (5)",
+        "ASDF annotation should expose canonical labels but no editable activation");
+
+    result = Submit(
+        session,
+        ActivateLabelingTaskFromAnnotation(annotation_path));
+    Require(
+        !result.action.workflow_changed &&
+            !session.View().labeling.has_active_task,
+        "programmatic ASDF activation must not create a task owned by the NPY writer");
+    Require(
+        ReadBinaryFile(annotation_path) == original_bytes,
+        "rejected ASDF activation must preserve the original file verbatim");
 }
 
 void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
@@ -8302,6 +8385,7 @@ void RunAllTests()
     TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask();
     TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
+    TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();

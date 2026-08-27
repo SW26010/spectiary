@@ -125,7 +125,7 @@ enum class UiTextId {
     FitsFilesFilter,
     AllFilesFilter,
     OpenAnnotationFileDialog,
-    NumpyAnnotationArraysFilter,
+    SampleAnnotationFilesFilter,
     SaveLabelingAnnotationDialog,
     NumpyLabelArraysFilter,
     ChooseProfileOutputFolderDialog,

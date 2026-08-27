@@ -93,6 +93,14 @@ private:
     throw CodecFailure(kind, std::move(message));
 }
 
+void PollReadCheckpoint(
+    const SampleLabelingAsdfReadCheckpoint& checkpoint)
+{
+    if (checkpoint) {
+        checkpoint();
+    }
+}
+
 [[nodiscard]] std::size_t CheckedSizeProduct(std::uint64_t left,
     std::uint64_t right,
     std::string_view description)
@@ -125,10 +133,13 @@ void SeekInput(std::istream& input, std::uint64_t offset)
     }
 }
 
-void ReadExact(std::istream& input, std::span<unsigned char> destination)
+void ReadExact(std::istream& input,
+    std::span<unsigned char> destination,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     std::size_t offset = 0;
     while (offset < destination.size()) {
+        PollReadCheckpoint(checkpoint);
         const std::size_t chunk =
             std::min(destination.size() - offset, kIoChunkBytes);
         input.read(reinterpret_cast<char*>(destination.data() + offset),
@@ -147,10 +158,11 @@ void ReadExact(std::istream& input, std::span<unsigned char> destination)
 
 void ReadExactAt(std::istream& input,
     std::uint64_t offset,
-    std::span<unsigned char> destination)
+    std::span<unsigned char> destination,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     SeekInput(input, offset);
-    ReadExact(input, destination);
+    ReadExact(input, destination, checkpoint);
 }
 
 class MemoryInputBuffer final : public std::streambuf {
@@ -249,7 +261,8 @@ struct MetadataTree {
                : line;
 }
 
-[[nodiscard]] MetadataTree ReadMetadataTree(std::istream& input)
+[[nodiscard]] MetadataTree ReadMetadataTree(std::istream& input,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     MetadataTree tree;
     std::size_t line_number = 0;
@@ -281,6 +294,9 @@ struct MetadataTree {
     };
 
     while (!terminated) {
+        if (tree.bytes.size() % kIoChunkBytes == 0) {
+            PollReadCheckpoint(checkpoint);
+        }
         const int next = input.get();
         if (next == std::char_traits<char>::eof()) {
             if (input.bad()) {
@@ -357,20 +373,22 @@ struct BlockDescriptor {
 [[nodiscard]] bool PrefixAt(std::istream& input,
     std::uint64_t offset,
     std::uint64_t file_size,
-    std::string_view prefix)
+    std::string_view prefix,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     if (offset > file_size || prefix.size() > file_size - offset) {
         return false;
     }
     std::vector<unsigned char> bytes(prefix.size());
-    ReadExactAt(input, offset, bytes);
+    ReadExactAt(input, offset, bytes, checkpoint);
     return std::equal(prefix.begin(), prefix.end(), bytes.begin());
 }
 
 void ValidateBlockIndex(std::istream& input,
     std::uint64_t offset,
     std::uint64_t file_size,
-    const std::vector<BlockDescriptor>& blocks)
+    const std::vector<BlockDescriptor>& blocks,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     constexpr std::string_view header = "#ASDF BLOCK INDEX\n";
     constexpr std::string_view yaml_start = "%YAML 1.1\n---\n";
@@ -382,7 +400,7 @@ void ValidateBlockIndex(std::istream& input,
             "ASDF block index exceeds the production limit");
     }
     std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
-    ReadExactAt(input, offset, bytes);
+    ReadExactAt(input, offset, bytes, checkpoint);
     const std::string_view text(
         reinterpret_cast<const char*>(bytes.data()), bytes.size());
     if (!text.starts_with(header) ||
@@ -438,7 +456,8 @@ void ValidateBlockIndex(std::istream& input,
 
 [[nodiscard]] std::vector<BlockDescriptor> ScanBlocks(std::istream& input,
     std::uint64_t file_size,
-    std::uint64_t offset)
+    std::uint64_t offset,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     std::vector<BlockDescriptor> blocks;
     while (offset < file_size) {
@@ -454,7 +473,8 @@ void ValidateBlockIndex(std::istream& input,
                     file_size - offset, padding_chunk.size()));
             ReadExactAt(input,
                 offset,
-                std::span<unsigned char>(padding_chunk.data(), chunk_size));
+                std::span<unsigned char>(padding_chunk.data(), chunk_size),
+                checkpoint);
             std::size_t consumed = 0;
             for (; consumed < chunk_size; ++consumed) {
                 const unsigned char byte = padding_chunk[consumed];
@@ -474,8 +494,9 @@ void ValidateBlockIndex(std::istream& input,
             }
         }
 
-        if (PrefixAt(input, offset, file_size, "#ASDF BLOCK INDEX")) {
-            ValidateBlockIndex(input, offset, file_size, blocks);
+        if (PrefixAt(
+                input, offset, file_size, "#ASDF BLOCK INDEX", checkpoint)) {
+            ValidateBlockIndex(input, offset, file_size, blocks, checkpoint);
             return blocks;
         }
         if (blocks.size() >= kMaximumBlockCount) {
@@ -483,7 +504,7 @@ void ValidateBlockIndex(std::istream& input,
                 "ASDF input contains too many internal blocks");
         }
         std::array<unsigned char, 6> prefix{};
-        ReadExactAt(input, offset, prefix);
+        ReadExactAt(input, offset, prefix, checkpoint);
         if (!std::equal(
                 kBlockMagic.begin(), kBlockMagic.end(), prefix.begin())) {
             Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
@@ -500,7 +521,7 @@ void ValidateBlockIndex(std::istream& input,
                 "ASDF block header exceeds the input file");
         }
         std::vector<unsigned char> header(header_size);
-        ReadExactAt(input, offset + 6, header);
+        ReadExactAt(input, offset + 6, header, checkpoint);
 
         const std::uint32_t flags = ReadBigEndian<std::uint32_t>(header, 0);
         if (flags != 0) {
@@ -572,7 +593,8 @@ private:
 
 [[nodiscard]] std::vector<unsigned char> DecodeBlockPayload(std::istream& input,
     const BlockDescriptor& block,
-    std::size_t expected_size)
+    std::size_t expected_size,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     if (expected_size > kMaximumDecodedBlockBytes) {
         Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
@@ -589,7 +611,7 @@ private:
                 "uncompressed ASDF block size is inconsistent");
         }
         std::vector<unsigned char> decoded(expected_size);
-        ReadExactAt(input, block.payload_offset, decoded);
+        ReadExactAt(input, block.payload_offset, decoded, checkpoint);
         return decoded;
     }
 
@@ -606,11 +628,14 @@ private:
     std::size_t encoded_remaining = block.encoded_size;
     int status = Z_OK;
     while (status != Z_STREAM_END) {
+        PollReadCheckpoint(checkpoint);
         if (state.avail_in == 0 && encoded_remaining != 0) {
             const std::size_t chunk =
                 std::min(encoded_remaining, encoded_chunk.size());
             ReadExact(
-                input, std::span<unsigned char>(encoded_chunk.data(), chunk));
+                input,
+                std::span<unsigned char>(encoded_chunk.data(), chunk),
+                checkpoint);
             state.next_in = reinterpret_cast<Bytef*>(encoded_chunk.data());
             state.avail_in = static_cast<uInt>(chunk);
             encoded_remaining -= chunk;
@@ -1250,20 +1275,22 @@ void ValidateBlockProfile(
 }
 
 [[nodiscard]] bool HasDefaultZlibFlevel(std::istream& input,
-    const BlockDescriptor& block)
+    const BlockDescriptor& block,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     if (block.compression != BlockCompression::Zlib ||
         block.encoded_size < 2U) {
         return false;
     }
     std::array<unsigned char, 2> zlib_header{};
-    ReadExactAt(input, block.payload_offset, zlib_header);
+    ReadExactAt(input, block.payload_offset, zlib_header, checkpoint);
     return (zlib_header[1] >> 6U) == 2U;
 }
 
 [[nodiscard]] bool HasReusablePrefixProfile(std::istream& input,
     const ParsedTree& parsed,
-    const std::vector<BlockDescriptor>& blocks)
+    const std::vector<BlockDescriptor>& blocks,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     bool reusable = parsed.values_array.little_endian;
     if (parsed.roster_array) {
@@ -1273,7 +1300,7 @@ void ValidateBlockProfile(
                roster.little_endian &&
                blocks[0].compression == BlockCompression::Zlib &&
                blocks[0].allocated_size == blocks[0].encoded_size &&
-               HasDefaultZlibFlevel(input, blocks[0]);
+               HasDefaultZlibFlevel(input, blocks[0], checkpoint);
     }
     return reusable && blocks.size() == 1 &&
            parsed.values_array.source_index == 0;
@@ -1418,7 +1445,8 @@ void ValidateProfilePreflight(const ProfilePreflight& profile)
 
 void DecodeRoster(std::istream& input,
     ParsedTree& parsed,
-    const std::vector<BlockDescriptor>& blocks)
+    const std::vector<BlockDescriptor>& blocks,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     if (!parsed.roster_array) {
         return;
@@ -1430,13 +1458,20 @@ void DecodeRoster(std::istream& input,
         CheckedSizeProduct(array.count, row_bytes, "sample roster block");
     const std::vector<unsigned char> payload = DecodeBlockPayload(input,
         ReferencedBlock(blocks, array.source_index, "sample roster"),
-        expected_size);
+        expected_size,
+        checkpoint);
 
     parsed.document.source.roster.sample_names.reserve(array.count);
     for (std::size_t row = 0; row < array.count; ++row) {
+        if ((row & 0xfffU) == 0U) {
+            PollReadCheckpoint(checkpoint);
+        }
         std::string decoded;
         bool padding = false;
         for (std::size_t column = 0; column < array.item_width; ++column) {
+            if (column != 0U && (column & 0x3fffU) == 0U) {
+                PollReadCheckpoint(checkpoint);
+            }
             const std::uint32_t codepoint = DecodeUint32(payload,
                 row * row_bytes + column * sizeof(std::uint32_t),
                 array.little_endian);
@@ -1457,16 +1492,21 @@ void DecodeRoster(std::istream& input,
 
 [[nodiscard]] std::vector<std::int32_t> DecodeValues(std::istream& input,
     const ArrayDescriptor& array,
-    const std::vector<BlockDescriptor>& blocks)
+    const std::vector<BlockDescriptor>& blocks,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     const std::size_t expected_size = CheckedSizeProduct(
         array.count, sizeof(std::int32_t), "annotation values block");
     const std::vector<unsigned char> payload = DecodeBlockPayload(input,
         ReferencedBlock(blocks, array.source_index, "annotation values"),
-        expected_size);
+        expected_size,
+        checkpoint);
     std::vector<std::int32_t> values;
     values.reserve(array.count);
     for (std::size_t index = 0; index < array.count; ++index) {
+        if ((index & 0xfffU) == 0U) {
+            PollReadCheckpoint(checkpoint);
+        }
         values.push_back(static_cast<std::int32_t>(DecodeUint32(
             payload, index * sizeof(std::int32_t), array.little_endian)));
     }
@@ -2098,14 +2138,15 @@ private:
 }
 
 [[nodiscard]] std::vector<unsigned char> ReadReusablePrefix(std::istream& input,
-    std::uint64_t size)
+    std::uint64_t size,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint = {})
 {
     if (size > std::numeric_limits<std::size_t>::max()) {
         Fail(SampleLabelingAsdfErrorKind::ResourceLimitExceeded,
             "reusable ASDF prefix exceeds the platform allocation limit");
     }
     std::vector<unsigned char> prefix(static_cast<std::size_t>(size));
-    ReadExactAt(input, 0, prefix);
+    ReadExactAt(input, 0, prefix, checkpoint);
     return prefix;
 }
 
@@ -2125,22 +2166,24 @@ private:
 }  // namespace
 
 SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
-    const std::filesystem::path& path) noexcept
+    const std::filesystem::path& path,
+    const SampleLabelingAsdfReadCheckpoint& checkpoint) noexcept
 {
     try {
+        PollReadCheckpoint(checkpoint);
         std::ifstream input(path, std::ios::binary);
         if (!input) {
             Fail(SampleLabelingAsdfErrorKind::OpenFailed,
                 "could not open ASDF labeling document");
         }
         const std::uint64_t file_size = InputFileSize(path);
-        const MetadataTree tree = ReadMetadataTree(input);
+        const MetadataTree tree = ReadMetadataTree(input, checkpoint);
         if (tree.end_offset > file_size) {
             Fail(SampleLabelingAsdfErrorKind::MalformedDocument,
                 "ASDF metadata exceeds the input file");
         }
         std::vector<BlockDescriptor> blocks =
-            ScanBlocks(input, file_size, tree.end_offset);
+            ScanBlocks(input, file_size, tree.end_offset, checkpoint);
         const std::uint64_t materialization_prefix_bytes =
             blocks.size() >= 2U ? blocks[1].raw_offset : tree.end_offset;
         ParsedTree parsed =
@@ -2148,7 +2191,7 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
         ValidateBlockProfile(parsed, blocks);
 
         const bool initially_reusable =
-            HasReusablePrefixProfile(input, parsed, blocks);
+            HasReusablePrefixProfile(input, parsed, blocks, checkpoint);
         const bool initially_explicit_roster = parsed.roster_array.has_value();
         std::size_t validated_metadata_bytes = tree.bytes.size();
         std::vector<unsigned char> reusable_prefix;
@@ -2164,16 +2207,21 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
                 g_before_reusable_prefix_capture(path);
             }
             reusable_prefix =
-                ReadReusablePrefix(input, values_block.raw_offset);
+                ReadReusablePrefix(
+                    input, values_block.raw_offset, checkpoint);
 
             // The durable bytes, metadata semantics, and hydrated roster must
             // all come from this one frozen prefix. The source file is never
             // consulted again for metadata or roster content.
             MemoryInputBuffer frozen_buffer(reusable_prefix);
             std::istream frozen_input(&frozen_buffer);
-            const MetadataTree frozen_tree = ReadMetadataTree(frozen_input);
+            const MetadataTree frozen_tree =
+                ReadMetadataTree(frozen_input, checkpoint);
             std::vector<BlockDescriptor> frozen_blocks = ScanBlocks(
-                frozen_input, reusable_prefix.size(), frozen_tree.end_offset);
+                frozen_input,
+                reusable_prefix.size(),
+                frozen_tree.end_offset,
+                checkpoint);
             if (initially_explicit_roster) {
                 if (frozen_blocks.size() != 1) {
                     Fail(SampleLabelingAsdfErrorKind::IoFailure,
@@ -2191,7 +2239,8 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
             parsed = ParseTree(frozen_tree, reusable_prefix.size());
             validated_metadata_bytes = frozen_tree.bytes.size();
             ValidateBlockProfile(parsed, blocks);
-            if (!HasReusablePrefixProfile(frozen_input, parsed, blocks)) {
+            if (!HasReusablePrefixProfile(
+                    frozen_input, parsed, blocks, checkpoint)) {
                 Fail(SampleLabelingAsdfErrorKind::IoFailure,
                     "ASDF source changed while its reusable prefix was "
                     "being captured");
@@ -2200,16 +2249,16 @@ SampleLabelingAsdfReadResult ReadSampleLabelingAsdfDocument(
                 frozen_tree.bytes.size(),
                 reusable_prefix.size(),
                 file_size));
-            DecodeRoster(frozen_input, parsed, blocks);
+            DecodeRoster(frozen_input, parsed, blocks, checkpoint);
         } else {
             ValidateProfilePreflight(
                 BuildReaderProfilePreflight(
                     parsed, tree.bytes.size(), 0, file_size));
-            DecodeRoster(input, parsed, blocks);
+            DecodeRoster(input, parsed, blocks, checkpoint);
         }
 
         parsed.document.annotation.values =
-            DecodeValues(input, parsed.values_array, blocks);
+            DecodeValues(input, parsed.values_array, blocks, checkpoint);
         ValidateDocumentSemantics(parsed.document);
 
         std::optional<SampleLabelingAsdfDurableBase> durable_base;
