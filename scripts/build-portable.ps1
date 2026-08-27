@@ -265,6 +265,7 @@ foreach ($propertyName in @(
     'windows_sdk_version',
     'dear_imgui',
     'implot',
+    'yaml_cpp',
     'zlib'
 )) {
     [void](Get-RequiredMetadataString `
@@ -361,6 +362,10 @@ Assert-SingleNoticeHeading `
     -Lines $thirdPartyNoticeLines `
     -ComponentName 'ImPlot' `
     -ExpectedHeading "ImPlot $($buildMetadata.implot)"
+Assert-SingleNoticeHeading `
+    -Lines $thirdPartyNoticeLines `
+    -ComponentName 'yaml-cpp' `
+    -ExpectedHeading "yaml-cpp $($buildMetadata.yaml_cpp)"
 Assert-SingleNoticeHeading `
     -Lines $thirdPartyNoticeLines `
     -ComponentName 'zlib' `

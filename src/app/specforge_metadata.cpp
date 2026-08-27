@@ -148,6 +148,16 @@ BuildMetadataReadResult ReadBuildMetadata(
         ReadRequiredMetadataString(*build, "dear_imgui");
     const std::optional<std::string> implot =
         ReadRequiredMetadataString(*build, "implot");
+    // yaml_cpp was added after schema 5 had already shipped.  A missing member
+    // therefore denotes the legacy schema 5 shape and is completed from the
+    // executable's generated build identity.  If the member is present it must
+    // still satisfy the ordinary required-string contract.
+    const JsonValue* yaml_cpp_member = JsonObjectMember(*build, "yaml_cpp");
+    const std::optional<std::string> yaml_cpp =
+        schema_version == metadata_contract::kSchema5Version &&
+            yaml_cpp_member != nullptr
+        ? ReadRequiredMetadataString(*build, "yaml_cpp")
+        : std::optional<std::string>{build_info::kBuildYamlCppVersion};
     const std::optional<std::string> zlib =
         ReadRequiredMetadataString(*build, "zlib");
 
@@ -181,7 +191,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     if (!product_name || !specforge_version || !configuration ||
         !target_architecture || !source_mode || !source_revision ||
         !compiler_id || !compiler_version || !cmake_version || !generator ||
-        !windows_sdk_version || !dear_imgui || !implot || !zlib) {
+        !windows_sdk_version || !dear_imgui || !implot || !yaml_cpp || !zlib) {
         return {};
     }
     metadata.compiler_id = *compiler_id;
@@ -191,6 +201,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.windows_sdk_version = *windows_sdk_version;
     metadata.dear_imgui_version = *dear_imgui;
     metadata.implot_version = *implot;
+    metadata.yaml_cpp_version = *yaml_cpp;
     metadata.zlib_version = *zlib;
     metadata.finalized_artifact = std::move(finalized_artifact);
 

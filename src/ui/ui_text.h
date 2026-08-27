@@ -210,6 +210,8 @@ enum class UiTextId {
     DearImGuiComponentFallback,
     ImPlotComponent,
     ImPlotComponentFallback,
+    YamlCppComponent,
+    YamlCppComponentFallback,
     ZlibComponent,
     ZlibComponentFallback,
     ModifiedStbNotice,

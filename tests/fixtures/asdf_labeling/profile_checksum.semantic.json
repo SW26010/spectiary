@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "folder",
   "source_name": "wire-profile",
+  "source_identity": "source:wire-profile",
   "source_fingerprint": "sha256:wire-profile",
   "sample_count": 3,
   "roster_identity_kind": "explicit_names",

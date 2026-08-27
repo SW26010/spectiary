@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "matrix.npy",
+  "source_identity": "source:npy-index",
   "source_fingerprint": "sha256:npy-index",
   "sample_count": 4,
   "roster_identity_kind": "source_index",

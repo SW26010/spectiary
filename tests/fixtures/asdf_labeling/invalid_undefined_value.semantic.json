@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "bad-value.npy",
+  "source_identity": "source:bad-value",
   "source_fingerprint": "sha256:bad-value",
   "sample_count": 2,
   "roster_identity_kind": "source_index",

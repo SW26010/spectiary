@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "folder",
   "source_name": "mixed",
+  "source_identity": "source:mixed",
   "source_fingerprint": "sha256:mixed",
   "sample_count": 6,
   "roster_identity_kind": "explicit_names",

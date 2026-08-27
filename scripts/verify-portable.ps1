@@ -145,6 +145,15 @@ if ($windowsSdkVersion -isnot [string] -or
     $windowsSdkVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
     throw 'Portable build metadata windows_sdk_version must be a non-empty dotted numeric version.'
 }
+$yamlCppVersion = Get-RequiredProperty `
+    -Object $build `
+    -Name 'yaml_cpp' `
+    -Description 'Portable build metadata'
+if ($yamlCppVersion -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($yamlCppVersion) -or
+    $yamlCppVersion -cne $yamlCppVersion.Trim()) {
+    throw 'Portable build metadata yaml_cpp must be a non-empty unpadded string.'
+}
 
 $deployment = Get-RequiredProperty `
     -Object $metadata `

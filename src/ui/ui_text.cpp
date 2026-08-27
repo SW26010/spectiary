@@ -331,6 +331,8 @@ constexpr std::array kTextCatalog = {
         "Dear ImGui（docking / Win32 / DirectX 11）— MIT 许可证"},
     UiTextEntry{"ImPlot %s - MIT License", "ImPlot %s — MIT 许可证"},
     UiTextEntry{"ImPlot - MIT License", "ImPlot — MIT 许可证"},
+    UiTextEntry{"yaml-cpp %s - MIT License", "yaml-cpp %s — MIT 许可证"},
+    UiTextEntry{"yaml-cpp - MIT License", "yaml-cpp — MIT 许可证"},
     UiTextEntry{"zlib %s - zlib License", "zlib %s — zlib 许可证"},
     UiTextEntry{"zlib - zlib License", "zlib — zlib 许可证"},
     UiTextEntry{

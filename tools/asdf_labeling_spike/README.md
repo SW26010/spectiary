@@ -4,8 +4,9 @@ This directory contains the reproducible experiments for GitHub issue #77. It
 is deliberately separate from the production labeling persistence path. The
 approved semantic model remains owned by issue #74.
 
-The reference oracle is Python `asdf` 5.3.1 with `asdf-standard` 1.5.0. Install
-the pinned environment into an ignored build directory:
+The reference oracle is Python `asdf` 5.3.1 with `asdf-standard` 1.5.0. For
+ad-hoc experiments, install the pinned environment into an ignored build
+directory:
 
 ```powershell
 python -m pip install --target build/asdf-labeling-spike-python -r tools/asdf_labeling_spike/requirements.txt
@@ -50,16 +51,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-deb
   -Configure -Preset ninja-msvc-debug-asdf-labeling-spike
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
   -Preset ninja-msvc-debug-asdf-labeling-spike -Target specforge_asdf_labeling_spike_native
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
+  -Configure
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
+  -Target specforge_sample_labeling_asdf_codec_tests
 python tools/asdf_labeling_spike/asdf_spike.py interoperability `
   --fixtures tests/fixtures/asdf_labeling `
   --native build/ninja-msvc-debug-asdf-labeling-spike/tools/asdf_labeling_spike/specforge_asdf_labeling_spike_native.exe `
+  --production-native build/ninja-msvc-debug/specforge_sample_labeling_asdf_codec_tests.exe `
   --output build/asdf-labeling-spike-results/interoperability.json
+```
+
+The required CTest/CI route provisions the oracle in the dedicated preset's
+build tree and runs both native executables from that tree:
+
+```powershell
+python -m pip install --target build/ninja-msvc-debug-asdf-labeling-spike/asdf-labeling-spike-python `
+  -r tools/asdf_labeling_spike/requirements.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
+  -Configure -Preset ninja-msvc-debug-asdf-labeling-spike
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ninja-msvc-debug.ps1 `
+  -Preset ninja-msvc-debug-asdf-labeling-spike `
+  -Target specforge_asdf_labeling_interoperability_targets
+ctest --test-dir build/ninja-msvc-debug-asdf-labeling-spike `
+  -R '^specforge_asdf_labeling_interoperability$' --output-on-failure
 ```
 
 The matrix proves Python zlib writer -> native reader, native level-6 zlib
 writer -> Python reader, and Python zlib writer -> native label-only rewrite ->
-both readers. The rewrite test verifies that the encoded Unicode roster block
-is byte-for-byte unchanged while the values block is replaced. The native CLI
+both readers. It also runs the production writer's complete YAML-special scalar
+matrix through the pinned official ASDF 5.3.1 reader; opens explicit-roster and
+source-index production writes and rewrites; and rewrites Python-origin inputs
+through the production component. Every branch is compared using complete
+canonical semantics. The explicit-roster path additionally verifies that the
+encoded Unicode roster block is byte-for-byte unchanged while the values block
+is replaced. A differential duplicate-key case confirms that official ASDF
+selects the last value while the production reader/rewrite rejects the
+ambiguous document before creating output. The native CLI
 also exposes that seam directly for an already validated input document:
 
 ```powershell

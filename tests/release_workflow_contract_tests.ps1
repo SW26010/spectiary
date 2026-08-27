@@ -51,6 +51,9 @@ Assert-True `
     -Condition $presetsText.Contains('"name": "vs2022-x64-release-static"') `
     -Message 'Portable release packaging must retain the Visual Studio 2022 static Release preset.'
 Assert-True `
+    -Condition $presetsText.Contains('"VCPKG_MANIFEST_FEATURES": ""') `
+    -Message 'Every preset must clear the retired ASDF spike manifest feature from an existing CMake cache.'
+Assert-True `
     -Condition ($buildBody.Contains('runs-on: windows-2022') -and -not $buildBody.Contains('runs-on: windows-latest')) `
     -Message 'The portable release build must use windows-2022 so the required Visual Studio 2022 generator is available.'
 Assert-True `

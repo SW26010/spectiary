@@ -200,6 +200,7 @@ bool ValidateSchema5BuildMetadata(
         !IsRequiredMetadataString(metadata.generator) ||
         !IsRequiredMetadataString(metadata.dear_imgui_version) ||
         !IsRequiredMetadataString(metadata.implot_version) ||
+        !IsRequiredMetadataString(metadata.yaml_cpp_version) ||
         !IsRequiredMetadataString(metadata.zlib_version)) {
         return fail("configured build metadata contains an empty or padded required string");
     }

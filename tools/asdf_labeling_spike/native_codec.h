@@ -21,6 +21,7 @@ struct LabelingDocument {
     std::string schema_version;
     std::string source_kind;
     std::string source_name;
+    std::string source_identity;
     std::string source_fingerprint;
     std::uint64_t sample_count = 0;
     std::string roster_identity_kind;

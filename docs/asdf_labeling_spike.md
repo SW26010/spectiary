@@ -17,20 +17,21 @@ production persistence lifecycle.
 4. The second-round writer recommendation is internal zlib level 6 blocks,
    zero checksum, no block index, and little-endian `int32`/UCS-4 payloads.
    Atomic label autosave copies an unchanged encoded roster block verbatim and
-   re-encodes only the values block. The native subset now implements and
-   interoperably validates this path; production integration remains separate.
+   re-encodes only the values block. The promoted production codec component
+   implements and interoperably validates this path; output-lease and atomic
+   persistence lifecycle integration remain separate follow-up work.
 5. The checked-in corpus contains 9 approved valid documents, 1 standard-valid
    document outside the narrow wire profile, 4 ASDF-valid semantic violations,
    and 4 structurally malformed documents.
-6. The strictly scoped native codec is the recommended production starting
-   point. `asdf-cxx` 8.0.0 is not recommended without a substantially broader
-   patch than its current error and string-array model permits.
+6. The strictly scoped native codec is now the production component. `asdf-cxx`
+   8.0.0 is not recommended without a substantially broader patch than its
+   current error and string-array model permits.
 7. Compact JSON + whole-document zlib is competitive in size and full-rewrite
    throughput, so JSON is not rejected on performance grounds. ASDF remains the
    canonical recommendation because its standard typed arrays and independently
    encoded blocks permit a verified 13-19 ms 1M-sample autosave path. The native
-   subset now proves the same block-preserving wire operation; production must
-   retain that property or reconsider JSON before locking the profile.
+   production component retains the same block-preserving wire operation; a
+   future regression of that property would reopen the JSON decision.
 
 ## Reference environment
 
@@ -41,9 +42,11 @@ written to the ignored `build/asdf-labeling-spike-results` directory; every
 experiment is reproducible from `tools/asdf_labeling_spike/README.md`.
 
 The golden corpus is in `tests/fixtures/asdf_labeling`. Its `manifest.json`
-pins SHA-256 for every file and records the expected structural and semantic
-result. Semantic JSON companions deliberately compare the durable meaning,
-not Python or C++ codec object types.
+pins SHA-256 for every ASDF fixture and records the expected structural and
+semantic result. Semantic JSON companions deliberately compare the durable
+meaning, not Python or C++ codec object types. The production native codec test
+verifies every listed ASDF hash before using any fixture expectation, so ASDF
+byte drift is a required CTest failure.
 
 ## Approved sample roster representation
 
@@ -182,12 +185,12 @@ JSON is intrinsically slow.
 The implementation comparison is not free for either candidate. SpecForge has
 an in-tree JSON parser, but its generic `JsonValue` model materializes an object
 per array integer and would need a bounded streaming/specialized path for this
-workload. The minimal ASDF codec is direct-to-vector and now implements native
-zlib read/write plus preservation/copying of encoded unchanged blocks. The
-compressed writer, reader, and block-reuse paths pass the Python interoperability
-matrix. Production still needs to integrate the subset without regressing this
-property; recompressing the roster on every edit would require reopening the
-JSON decision.
+workload. The promoted production ASDF codec is direct-to-vector and implements
+native zlib read/write plus preservation/copying of encoded unchanged blocks.
+Its compressed writer, reader, and block-reuse paths pass the Python
+interoperability matrix. The remaining integration work belongs to the
+output-lease and atomic persistence lifecycle; recompressing the roster on every
+edit would still require reopening the JSON decision.
 
 ## Missing / unlabeled representation
 
@@ -241,10 +244,14 @@ The second-round recommended v1 writer profile is intentionally narrow:
 - internal blocks only; external/streamed blocks are rejected;
 - zlib level 6 for roster and values blocks;
 - checksum bytes all zero;
-- no block index emitted; readers may ignore a present standard block index;
+- no block index emitted; readers validate a present standard block index
+  against the scanned block offsets, then ignore it for block discovery;
 - little-endian int32 values and little-endian UCS-4 roster strings;
 - label-only atomic rewrites preserve the unchanged encoded roster block and
   re-encode only the values block;
+- a roster is eligible for durable verbatim reuse only when its zlib stream
+  declares `FLEVEL=2`, the level-6 production class; other valid zlib levels
+  remain compatibility-readable but cannot seed a durable rewrite;
 - exact checked arithmetic for header, allocated/used/data sizes, shape, item
   width, source index, and payload bounds.
 
@@ -261,6 +268,12 @@ label-value rewrite parses and re-encodes only the values block, copies the
 encoded roster block verbatim, preserves the original metadata bytes, and emits
 no block index. Nonzero checksums and unsupported compression identifiers remain
 controlled rejections.
+
+Production compression is file-backed and bounded: values and UCS-4 roster
+words are generated in fixed-size chunks, streamed through level-6 deflate to
+temporary spools, then emitted as a small block header followed by the spool.
+The codec never holds a raw ndarray payload, a complete compressed payload, and
+a second complete block copy at the same time.
 
 ## Golden fixtures and interoperability
 
@@ -285,10 +298,18 @@ profile, were read by the native spike and compared semantically equal. The
 checksum fixture and all 8 malformed or semantic-invalid fixtures returned
 controlled native error code 2. The native writer emitted zlib for both Unicode
 roster and values blocks; Python ASDF opened and semantically validated it. The
-native rewrite of the Python zlib fixture was accepted by both readers, and its
-roster block was byte-for-byte identical to the input. Invalid rewrite index and
-undefined replacement label also returned code 2. No tested input called
-`abort`, `exit`, or crashed the process.
+production writer's complete YAML-special scalar matrix is escaped and
+round-trips unchanged through the pinned official ASDF 5.3.1 reader. The same
+oracle opens production explicit-roster and source-index full writes and durable
+rewrites, compares every canonical semantic field, and verifies that the
+encoded roster block is byte-for-byte identical across the explicit-roster
+rewrite. Python-origin explicit-roster and source-index fixtures are also
+rewritten through the production component and then compared by the official
+reader. A differential duplicate-key document is interpreted with the last
+value by official ASDF 5.3.1 but is rejected by the production reader/rewrite
+before any output is created. Invalid rewrite index and undefined replacement
+label return code 2. No tested input called `abort`, `exit`, or crashed the
+process.
 
 Unknown fields are accepted and ignored by the native reader. The label-only
 block-reuse rewrite preserves the metadata prefix byte-for-byte, so unknown
@@ -339,15 +360,49 @@ unknown-field tolerance, business invariant validation, and label-only rewrites
 that preserve the encoded roster block. It explicitly rejects streamed,
 checksummed, corrupt/truncated-zlib, oversized, or otherwise unsupported input.
 
-The dependency is isolated behind the non-default vcpkg
-`asdf-labeling-spike` feature and dedicated CMake presets. Ordinary production
-presets remove yaml-cpp. The
+The dependency entered the production manifest when this codec was promoted
+from the spike. Production presets now require yaml-cpp alongside zlib; the
+dedicated spike presets remain only for reproducing the #77 measurements. The
 measured artifacts were:
 
 - static MSVC Release executable: 578,048 bytes;
 - dynamic MSVC Debug executable: 931,328 bytes;
 - dynamic Debug yaml-cpp DLL: 996,352 bytes.
 - dynamic Debug zlib DLL: 214,016 bytes.
+
+The production profile audit distinguishes compatibility reads from durable
+emission. The reader may hydrate zero-checksum uncompressed or big-endian
+ASDF 1.5 inputs so approved research fixtures can be migrated, but such an
+explicit roster never becomes a reusable durable base. Every full write and
+label-only rewrite emits the fixed little-endian, zlib-level-6, zero-checksum
+profile. Reader hydration, full writes, and durable rewrites all run the same
+shape/resource preflight for sample and roster counts, ndarray sizes, metadata,
+reusable-prefix and file sizes. Its 512 MiB contract covers codec-controlled
+bulk allocations, decoded payloads, canonical text, and explicitly sized
+scratch buffers; it is not a strict bound on process RSS, yaml-cpp's internal
+DOM, allocator overhead, or platform library internals. Before copying an
+alias-expanded scalar into the canonical document, the reader accounts that
+canonical text and the label vector/sorted-index capacity. The writer uses a
+counting stream to obtain the exact escaped metadata size and performs the same
+preflight before reserving or building the YAML buffer. Roster uniqueness uses
+a roster-sized sorted index vector instead of copied strings in hash nodes, so
+its scratch capacity is included exactly; writer/rewrite compression uses
+fixed-memory, file-backed deflate spools whose codec scratch allowance is
+included in the same preflight. All declared-size arithmetic is checked,
+profile counts have explicit limits, and allocation failures return controlled
+errors.
+
+Every YAML mapping in the accepted profile, including unknown nested mappings,
+must use unique scalar keys. The production reader checks this recursively
+before field extraction and refuses to create a durable base for ambiguous
+metadata. This is required because yaml-cpp 0.9 selects the first duplicate
+while the pinned ASDF 5.3.1 oracle selects the last.
+
+Canonical YAML scalars are emitted as double-quoted UTF-8. The writer escapes
+the full C0/DEL/C1 control ranges, quote and backslash, NEL/NBSP, Unicode line
+and paragraph separators, BOM, and the YAML boundary noncharacters. The native
+reader and pinned ASDF 5.3.1 oracle both round-trip the complete scalar matrix
+without semantic changes.
 
 This route remains the recommended architecture because the code and dependency
 surface track the contract directly, its errors are controllable, the static
@@ -359,20 +414,20 @@ write, and block-reuse interoperability directions.
 | asdf-cxx 8.0.0 | Fail: no string ndarray | Fail: cannot emit approved roster | Fail: abort/exit paths | Reject |
 | strict minimal subset | Pass: 9/9 approved fixtures, including Python zlib | Pass: both blocks zlib; Python semantic equality | 9/9 golden rejections plus 2 invalid rewrites controlled | Recommend |
 
-## Remaining blockers before production use
+## Follow-up work after codec promotion
 
-The spike is evidence, not the #74 production implementation. Before locking
-the production codec, #74 must still:
+The #74 production component now uses bounded streaming block I/O instead of
+the spike's whole-file `ReadAll` seam. Remaining integration and hardening work
+outside that completed promotion is to:
 
 1. integrate the subset as a library with the existing output lease,
    write-ahead recovery, retry, and atomic-file owner;
-2. replace the spike's whole-file `ReadAll` seam with the production streaming/
-   mapped I/O owner and measure the native reuse path itself at 1M scale;
+2. measure the native reuse path itself at 1M scale;
 3. decide and test unknown-field preservation on rewrite;
 4. fuzz YAML/block headers, integer bounds, Unicode, and truncated inputs;
 5. continue rejecting nonzero checksums unless separately justified and broaden
-   fuzz coverage beyond the checked corrupt-zlib/truncated fixtures;
-6. add CI provisioning for the pinned Python oracle and dedicated native-spike
-   preset.
+   fuzz coverage beyond the checked corrupt-zlib/truncated fixtures.
 
-These blockers do not change the approved semantic representation.
+The pinned Python oracle and dedicated native-spike preset are enforced by the
+required `specforge_asdf_labeling_interoperability` CTest in CI. These remaining
+items do not change the approved semantic representation.

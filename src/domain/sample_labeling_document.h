@@ -139,4 +139,10 @@ struct SampleLabelingDocumentValidationResult {
 [[nodiscard]] SampleLabelingDocumentValidationResult
 ValidateSampleLabelingDocument(const SampleLabelingDocument& document);
 
+// Production codec paths use the same semantic rules without retaining an
+// attacker-controlled number of diagnostics.
+[[nodiscard]] SampleLabelingDocumentValidationResult
+ValidateSampleLabelingDocumentFailFast(
+    const SampleLabelingDocument& document);
+
 }  // namespace specforge

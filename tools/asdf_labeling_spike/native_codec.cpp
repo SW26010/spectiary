@@ -515,6 +515,7 @@ void ValidateDocument(const LabelingDocument& document)
     }
     RequireUtf8(document.source_kind, "source_kind");
     RequireUtf8(document.source_name, "source_name");
+    RequireUtf8(document.source_identity, "source_identity");
     RequireUtf8(document.source_fingerprint, "source_fingerprint");
     RequireUtf8(document.annotation_name, "annotation_name");
     RequireUtf8(document.task_id, "task_id");
@@ -589,6 +590,7 @@ LabelingDocument ReadLabelingDocument(const std::filesystem::path& path)
     const YAML::Node source = RequiredNode(root, "source_collection");
     document.source_kind = RequiredScalar<std::string>(source, "source_kind");
     document.source_name = RequiredScalar<std::string>(source, "name");
+    document.source_identity = RequiredScalar<std::string>(source, "identity");
     document.source_fingerprint = RequiredScalar<std::string>(source, "fingerprint");
     document.sample_count = RequiredScalar<std::uint64_t>(source, "sample_count");
 
@@ -905,6 +907,7 @@ void WriteLabelingDocument(const std::filesystem::path& path, const LabelingDocu
              << "format_kind: " << QuoteYaml(document.format_kind) << "\n"
              << "schema_version: " << QuoteYaml(document.schema_version) << "\n"
              << "source_collection:\n"
+             << "  identity: " << QuoteYaml(document.source_identity) << "\n"
              << "  source_kind: " << QuoteYaml(document.source_kind) << "\n"
              << "  name: " << QuoteYaml(document.source_name) << "\n"
              << "  fingerprint: " << QuoteYaml(document.source_fingerprint) << "\n"
@@ -984,6 +987,7 @@ std::string SemanticJson(const LabelingDocument& document)
         << "\"schema_version\":" << QuoteJson(document.schema_version) << ','
         << "\"source_kind\":" << QuoteJson(document.source_kind) << ','
         << "\"source_name\":" << QuoteJson(document.source_name) << ','
+        << "\"source_identity\":" << QuoteJson(document.source_identity) << ','
         << "\"source_fingerprint\":" << QuoteJson(document.source_fingerprint) << ','
         << "\"sample_count\":" << document.sample_count << ','
         << "\"roster_identity_kind\":" << QuoteJson(document.roster_identity_kind) << ','
@@ -1022,6 +1026,7 @@ LabelingDocument NativeFixture()
     document.schema_version = std::string(kSchemaVersion);
     document.source_kind = "folder";
     document.source_name = "Native fixture";
+    document.source_identity = "source:native-fixture";
     document.source_fingerprint = "sha256:native-fixture";
     document.sample_count = 3;
     document.roster_identity_kind = "explicit_names";

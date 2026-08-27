@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "one.npy",
+  "source_identity": "source:minimal",
   "source_fingerprint": "sha256:minimal",
   "sample_count": 1,
   "roster_identity_kind": "source_index",

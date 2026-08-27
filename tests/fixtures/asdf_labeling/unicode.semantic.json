@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "folder",
   "source_name": "巡天样本",
+  "source_identity": "source:unicode",
   "source_fingerprint": "sha256:unicode",
   "sample_count": 3,
   "roster_identity_kind": "explicit_names",

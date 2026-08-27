@@ -5,12 +5,17 @@
 
 #include <algorithm>
 #include <cctype>
+#include <numeric>
 #include <string>
-#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
+
+struct ValidationComplete final {
+    SampleLabelingDocumentValidationIssue issue;
+};
 
 bool HasNonWhitespaceText(std::string_view value)
 {
@@ -21,9 +26,13 @@ bool HasNonWhitespaceText(std::string_view value)
 
 void AddIssue(
     SampleLabelingDocumentValidationResult& result,
+    bool fail_fast,
     SampleLabelingDocumentValidationIssueKind kind,
     std::size_t index = kSampleLabelingDocumentNoIssueIndex)
 {
+    if (fail_fast) {
+        throw ValidationComplete{{kind, index}};
+    }
     result.issues.push_back({kind, index});
 }
 
@@ -67,35 +76,48 @@ SampleLabelingDocument BuildSampleLabelingDocument(
     return document;
 }
 
-SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
-    const SampleLabelingDocument& document)
+namespace {
+
+SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(
+    const SampleLabelingDocument& document,
+    bool fail_fast)
 {
     SampleLabelingDocumentValidationResult result;
     if (document.format_kind != kSampleLabelingDocumentFormatKind) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedFormatKind);
     }
     if (document.schema_version != kSampleLabelingDocumentSchemaVersion) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedSchemaVersion);
     }
 
     if (!HasNonWhitespaceText(document.source.base_identity)) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::MissingSourceBaseIdentity);
     }
     if (!HasNonWhitespaceText(document.source.kind)) {
-        AddIssue(result, SampleLabelingDocumentValidationIssueKind::MissingSourceKind);
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::MissingSourceKind);
     }
     if (!HasNonWhitespaceText(document.source.name)) {
-        AddIssue(result, SampleLabelingDocumentValidationIssueKind::MissingSourceName);
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::MissingSourceName);
     }
     if (!HasNonWhitespaceText(document.source.fingerprint)) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::MissingSourceFingerprint);
     }
 
@@ -108,10 +130,12 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
     if (!explicit_names && !source_index) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedRosterIdentityKind);
     } else if (source_index && !document.source.roster.sample_names.empty()) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::SourceIndexRosterHasNames);
     }
 
@@ -120,9 +144,9 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
             document.source.sample_count) {
             AddIssue(
                 result,
+                fail_fast,
                 SampleLabelingDocumentValidationIssueKind::RosterSampleCountMismatch);
         }
-        std::unordered_set<std::string> names;
         for (std::size_t index = 0;
              index < document.source.roster.sample_names.size();
              ++index) {
@@ -131,14 +155,37 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
             if (!HasNonWhitespaceText(name)) {
                 AddIssue(
                     result,
+                    fail_fast,
                     SampleLabelingDocumentValidationIssueKind::EmptySampleName,
                     index);
             }
-            if (!names.insert(name).second) {
+        }
+
+        // Keep duplicate detection bounded and allocation-predictable. The
+        // order vector references canonical strings instead of copying every
+        // roster name into hash-table nodes and buckets.
+        std::vector<std::size_t> name_order(
+            document.source.roster.sample_names.size());
+        std::iota(name_order.begin(), name_order.end(), std::size_t{0});
+        std::ranges::sort(name_order,
+            [&document](std::size_t left, std::size_t right) {
+                const std::string& left_name =
+                    document.source.roster.sample_names[left];
+                const std::string& right_name =
+                    document.source.roster.sample_names[right];
+                return left_name < right_name ||
+                       (left_name == right_name && left < right);
+            });
+        for (std::size_t index = 1; index < name_order.size(); ++index) {
+            const std::size_t previous = name_order[index - 1U];
+            const std::size_t current = name_order[index];
+            if (document.source.roster.sample_names[previous] ==
+                document.source.roster.sample_names[current]) {
                 AddIssue(
                     result,
+                    fail_fast,
                     SampleLabelingDocumentValidationIssueKind::DuplicateSampleName,
-                    index);
+                    current);
             }
         }
     }
@@ -147,57 +194,63 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
         kSampleLabelingDocumentCategoricalIntegerKind) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedAnnotationKind);
     }
     if (!HasNonWhitespaceText(document.annotation.name)) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::MissingAnnotationName);
     }
     if (document.annotation.missing.semantic !=
         kSampleLabelingDocumentUnlabeledSemantic) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::UnsupportedMissingSemantic);
     }
     if (document.annotation.missing.value !=
         kSampleLabelingDocumentUnlabeledValue) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::InvalidUnlabeledValue);
     }
     if (document.annotation.values.size() != document.source.sample_count) {
         AddIssue(
             result,
+            fail_fast,
             SampleLabelingDocumentValidationIssueKind::AnnotationSampleCountMismatch);
     }
 
     if (!HasNonWhitespaceText(document.labeling.id)) {
-        AddIssue(result, SampleLabelingDocumentValidationIssueKind::MissingTaskId);
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::MissingTaskId);
     }
     if (!HasNonWhitespaceText(document.labeling.name)) {
-        AddIssue(result, SampleLabelingDocumentValidationIssueKind::MissingTaskName);
+        AddIssue(
+            result,
+            fail_fast,
+            SampleLabelingDocumentValidationIssueKind::MissingTaskName);
     }
 
-    std::unordered_set<std::int32_t> label_codes;
-    std::unordered_set<char> label_shortcuts;
     for (std::size_t index = 0; index < document.labeling.labels.size(); ++index) {
         const SampleLabelingDocumentLabel& label =
             document.labeling.labels[index];
         if (label.code == kSampleLabelingDocumentUnlabeledValue) {
             AddIssue(
                 result,
+                fail_fast,
                 SampleLabelingDocumentValidationIssueKind::ReservedLabelCode,
-                index);
-        } else if (!label_codes.insert(label.code).second) {
-            AddIssue(
-                result,
-                SampleLabelingDocumentValidationIssueKind::DuplicateLabelCode,
                 index);
         }
         if (!HasNonWhitespaceText(label.name)) {
             AddIssue(
                 result,
+                fail_fast,
                 SampleLabelingDocumentValidationIssueKind::MissingLabelName,
                 index);
         }
@@ -206,32 +259,120 @@ SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
                 !IsValidSampleLabelShortcut(label.shortcut.front())) {
                 AddIssue(
                     result,
+                    fail_fast,
                     SampleLabelingDocumentValidationIssueKind::InvalidLabelShortcut,
                     index);
-            } else {
-                const char normalized =
-                    NormalizeSampleLabelShortcut(label.shortcut.front());
-                if (!label_shortcuts.insert(normalized).second) {
-                    AddIssue(
-                        result,
-                        SampleLabelingDocumentValidationIssueKind::DuplicateLabelShortcut,
-                        index);
-                }
             }
         }
     }
 
+    // Reuse one bounded index vector for label-code and shortcut uniqueness
+    // plus value membership. This avoids implementation-dependent hash nodes,
+    // buckets, and rehash peaks at the production label-count boundary.
+    std::vector<std::size_t> label_order(document.labeling.labels.size());
+    std::iota(label_order.begin(), label_order.end(), std::size_t{0});
+    const auto code_less = [&document](std::size_t left, std::size_t right) {
+        const std::int32_t left_code = document.labeling.labels[left].code;
+        const std::int32_t right_code = document.labeling.labels[right].code;
+        return left_code < right_code ||
+               (left_code == right_code && left < right);
+    };
+    std::ranges::sort(label_order, code_less);
+    for (std::size_t index = 1; index < label_order.size(); ++index) {
+        const std::size_t previous = label_order[index - 1U];
+        const std::size_t current = label_order[index];
+        const std::int32_t code = document.labeling.labels[current].code;
+        if (code != kSampleLabelingDocumentUnlabeledValue &&
+            code == document.labeling.labels[previous].code) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::DuplicateLabelCode,
+                current);
+        }
+    }
+
+    const auto valid_shortcut = [&document](std::size_t index) {
+        const std::string& shortcut =
+            document.labeling.labels[index].shortcut;
+        return shortcut.size() == 1U &&
+               IsValidSampleLabelShortcut(shortcut.front());
+    };
+    std::ranges::sort(label_order,
+        [&document, &valid_shortcut](std::size_t left, std::size_t right) {
+            const bool left_valid = valid_shortcut(left);
+            const bool right_valid = valid_shortcut(right);
+            if (left_valid != right_valid) {
+                return left_valid;
+            }
+            if (!left_valid) {
+                return left < right;
+            }
+            const char left_shortcut = NormalizeSampleLabelShortcut(
+                document.labeling.labels[left].shortcut.front());
+            const char right_shortcut = NormalizeSampleLabelShortcut(
+                document.labeling.labels[right].shortcut.front());
+            return left_shortcut < right_shortcut ||
+                   (left_shortcut == right_shortcut && left < right);
+        });
+    for (std::size_t index = 1; index < label_order.size(); ++index) {
+        const std::size_t previous = label_order[index - 1U];
+        const std::size_t current = label_order[index];
+        if (!valid_shortcut(previous) || !valid_shortcut(current)) {
+            break;
+        }
+        if (NormalizeSampleLabelShortcut(
+                document.labeling.labels[previous].shortcut.front()) ==
+            NormalizeSampleLabelShortcut(
+                document.labeling.labels[current].shortcut.front())) {
+            AddIssue(
+                result,
+                fail_fast,
+                SampleLabelingDocumentValidationIssueKind::DuplicateLabelShortcut,
+                current);
+        }
+    }
+
+    std::ranges::sort(label_order, code_less);
+
     for (std::size_t index = 0; index < document.annotation.values.size(); ++index) {
         const std::int32_t value = document.annotation.values[index];
         if (value != kSampleLabelingDocumentUnlabeledValue &&
-            !label_codes.contains(value)) {
+            !std::ranges::binary_search(label_order,
+                value,
+                {},
+                [&document](std::size_t label_index) {
+                    return document.labeling.labels[label_index].code;
+                })) {
             AddIssue(
                 result,
+                fail_fast,
                 SampleLabelingDocumentValidationIssueKind::UndefinedAnnotationValue,
                 index);
         }
     }
     return result;
+}
+
+}  // namespace
+
+SampleLabelingDocumentValidationResult ValidateSampleLabelingDocument(
+    const SampleLabelingDocument& document)
+{
+    return ValidateSampleLabelingDocumentImpl(document, false);
+}
+
+SampleLabelingDocumentValidationResult
+ValidateSampleLabelingDocumentFailFast(
+    const SampleLabelingDocument& document)
+{
+    try {
+        return ValidateSampleLabelingDocumentImpl(document, true);
+    } catch (const ValidationComplete& complete) {
+        SampleLabelingDocumentValidationResult result;
+        result.issues.push_back(complete.issue);
+        return result;
+    }
 }
 
 }  // namespace specforge

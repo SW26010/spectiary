@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "bad-sentinel.npy",
+  "source_identity": "source:bad-sentinel",
   "source_fingerprint": "sha256:bad-sentinel",
   "sample_count": 1,
   "roster_identity_kind": "source_index",

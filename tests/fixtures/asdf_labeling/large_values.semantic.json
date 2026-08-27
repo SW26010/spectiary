@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "large.npy",
+  "source_identity": "source:large",
   "source_fingerprint": "sha256:large",
   "sample_count": 100000,
   "roster_identity_kind": "source_index",

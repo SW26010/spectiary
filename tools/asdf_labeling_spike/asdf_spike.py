@@ -69,6 +69,7 @@ def _tree(
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
         "source_collection": {
+            "identity": f"source:{source_fingerprint.removeprefix('sha256:')}",
             "source_kind": source_kind,
             "name": source_name,
             "fingerprint": source_fingerprint,
@@ -129,6 +130,7 @@ def _semantic_summary(tree: Any) -> dict[str, Any]:
         "schema_version": str(tree["schema_version"]),
         "source_kind": str(source["source_kind"]),
         "source_name": str(source["name"]),
+        "source_identity": str(source["identity"]),
         "source_fingerprint": str(source["fingerprint"]),
         "sample_count": int(source["sample_count"]),
         "roster_identity_kind": str(roster["identity_kind"]),
@@ -797,6 +799,7 @@ def _json_document(names: list[str], values: list[int]) -> dict[str, Any]:
         "format_kind": FORMAT_KIND,
         "schema_version": SCHEMA_VERSION,
         "source_collection": {
+            "identity": "source:benchmark",
             "source_kind": "folder",
             "name": "benchmark",
             "fingerprint": "sha256:benchmark",
@@ -1257,8 +1260,58 @@ def second_round_benchmark(output: Path, scales: list[int]) -> dict[str, Any]:
     return {"asdf": asdf.__version__, "case_count": len(results), "results": results}
 
 
-def interoperability(fixtures: Path, native: Path) -> dict[str, Any]:
+def _yaml_special_character_matrix() -> str:
+    return (
+        "yaml-indicators:-?:,[]{}#&*!|>'\"%@`/\\ space "
+        + "".join(chr(codepoint) for codepoint in range(0x20))
+        + "".join(chr(codepoint) for codepoint in range(0x7F, 0xA0))
+        + "\u00a0\u2028\u2029\ufeff\ufffe\uffff"
+    )
+
+
+def _production_explicit_semantic_summary(values: list[int]) -> dict[str, Any]:
+    return {
+        "format_kind": "specforge.sample_labeling",
+        "schema_version": "1.0.0",
+        "source_kind": "folder",
+        "source_name": "巡天样本",
+        "source_identity": "sha256-v1:production-source",
+        "source_fingerprint": "sha256-v1:production-fingerprint",
+        "sample_count": 3,
+        "roster_identity_kind": "explicit_names",
+        "sample_names": ["alpha.fits", "星系-β.fits", "échelle-γ.fits"],
+        "annotation_kind": "categorical_integer",
+        "annotation_name": "天体分类",
+        "missing_semantic": "unlabeled",
+        "missing_value": -1,
+        "task_id": "task-alpha",
+        "task_name": "天体分类",
+        "labels": [
+            {"code": 0, "name": "Galaxy", "shortcut": "g"},
+            {"code": 1, "name": "Quasar", "shortcut": "q"},
+        ],
+        "values": values,
+        "values_dtype": "int32",
+        "values_shape": [3],
+    }
+
+
+def _production_source_index_semantic_summary(
+    values: list[int], source_name: str = "巡天样本"
+) -> dict[str, Any]:
+    summary = _production_explicit_semantic_summary(values)
+    summary["source_name"] = source_name
+    summary["roster_identity_kind"] = "source_index"
+    summary["sample_names"] = []
+    return summary
+
+
+def interoperability(fixtures: Path, native: Path, production_native: Path) -> dict[str, Any]:
     manifest = json.loads((fixtures / "manifest.json").read_text(encoding="utf-8"))
+    if asdf.__version__ != manifest["reference"]["asdf"]:
+        raise RuntimeError(
+            f"interoperability oracle must use ASDF {manifest['reference']['asdf']}, got {asdf.__version__}"
+        )
     records: list[dict[str, Any]] = []
     for fixture in manifest["fixtures"]:
         command = [str(native), "read", str(fixtures / fixture["path"])]
@@ -1306,6 +1359,357 @@ def interoperability(fixtures: Path, native: Path) -> dict[str, Any]:
                 "compressions": native_compressions,
             }
         )
+
+        production_yaml_specials_path = Path(temporary) / "production-yaml-specials.asdf"
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "write-yaml-specials-oracle",
+                str(production_yaml_specials_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"production writer YAML-special case failed: {completed.stderr}")
+        with asdf.open(
+            production_yaml_specials_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_yaml_specials_errors = _semantic_errors(opened.tree)
+            production_yaml_specials_summary = _semantic_summary(opened.tree)
+        expected_yaml_specials = _production_source_index_semantic_summary(
+            [-1, 0, 1], _yaml_special_character_matrix()
+        )
+        if (
+            production_yaml_specials_errors
+            or production_yaml_specials_summary != expected_yaml_specials
+        ):
+            raise RuntimeError(
+                "official ASDF oracle did not preserve the complete "
+                "production YAML-special source-index semantics"
+            )
+        records.append(
+            {
+                "fixture": "production-writer-yaml-specials",
+                "status": "production-writer/asdf-5.3.1-reader-all-yaml-specials-equal",
+                "returncode": 0,
+            }
+        )
+
+        production_explicit_path = Path(temporary) / "production-explicit.asdf"
+        production_rewrite_path = Path(temporary) / "production-explicit-rewrite.asdf"
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "write-explicit-roster-oracle",
+                str(production_explicit_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"production explicit-roster writer failed: {completed.stderr}"
+            )
+        with asdf.open(
+            production_explicit_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_explicit_errors = _semantic_errors(opened.tree)
+            production_explicit_summary = _semantic_summary(opened.tree)
+        expected_production_explicit = _production_explicit_semantic_summary(
+            [-1, 0, 1]
+        )
+        if (
+            production_explicit_errors
+            or production_explicit_summary != expected_production_explicit
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected or changed the production "
+                "two-block writer semantics"
+            )
+        production_explicit_compressions = _asdf_block_compressions(
+            production_explicit_path
+        )
+        if production_explicit_compressions != ["zlib", "zlib"]:
+            raise RuntimeError(
+                "production explicit-roster writer did not emit two zlib blocks"
+            )
+
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "rewrite-explicit-roster-oracle",
+                str(production_explicit_path),
+                str(production_rewrite_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"production explicit-roster rewrite failed: {completed.stderr}"
+            )
+        with asdf.open(
+            production_rewrite_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_rewrite_errors = _semantic_errors(opened.tree)
+            production_rewrite_summary = _semantic_summary(opened.tree)
+        expected_production_rewrite = _production_explicit_semantic_summary(
+            [0, 0, 1]
+        )
+        if (
+            production_rewrite_errors
+            or production_rewrite_summary != expected_production_rewrite
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected or changed the production "
+                "two-block rewrite semantics"
+            )
+        if _asdf_raw_block(
+            production_explicit_path, 0
+        ) != _asdf_raw_block(production_rewrite_path, 0):
+            raise RuntimeError(
+                "production two-block rewrite did not preserve the roster block verbatim"
+            )
+        production_rewrite_compressions = _asdf_block_compressions(
+            production_rewrite_path
+        )
+        if production_rewrite_compressions != ["zlib", "zlib"]:
+            raise RuntimeError(
+                "production explicit-roster rewrite did not retain two zlib blocks"
+            )
+        records.append(
+            {
+                "fixture": "production-explicit-writer-rewrite",
+                "status": "production-writer+rewrite/asdf-5.3.1-semantic-equal+roster-verbatim",
+                "returncode": 0,
+                "compressions": production_rewrite_compressions,
+            }
+        )
+
+        production_source_index_path = Path(temporary) / "production-source-index.asdf"
+        production_source_index_rewrite_path = (
+            Path(temporary) / "production-source-index-rewrite.asdf"
+        )
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "write-source-index-oracle",
+                str(production_source_index_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"production source-index writer failed: {completed.stderr}"
+            )
+        with asdf.open(
+            production_source_index_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_source_index_errors = _semantic_errors(opened.tree)
+            production_source_index_summary = _semantic_summary(opened.tree)
+        if (
+            production_source_index_errors
+            or production_source_index_summary
+            != _production_source_index_semantic_summary([-1, 0, 1])
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected or changed the production "
+                "source-index writer semantics"
+            )
+        if _asdf_block_compressions(production_source_index_path) != ["zlib"]:
+            raise RuntimeError(
+                "production source-index writer did not emit one zlib block"
+            )
+
+        production_duplicate_key_path = (
+            Path(temporary) / "production-duplicate-key.asdf"
+        )
+        duplicate_bytes = production_source_index_path.read_bytes()
+        duplicate_needle = b"  sample_count: 3\n"
+        duplicate_replacement = (
+            b"  sample_count: 3\n  sample_count: 4\n"
+        )
+        if duplicate_bytes.count(duplicate_needle) != 1:
+            raise RuntimeError(
+                "production duplicate-key oracle patch target was not unique"
+            )
+        production_duplicate_key_path.write_bytes(
+            duplicate_bytes.replace(
+                duplicate_needle, duplicate_replacement, 1
+            )
+        )
+        with asdf.open(
+            production_duplicate_key_path, lazy_load=False, memmap=False
+        ) as opened:
+            oracle_duplicate_sample_count = int(
+                opened.tree["source_collection"]["sample_count"]
+            )
+        if oracle_duplicate_sample_count != 4:
+            raise RuntimeError(
+                "official ASDF oracle no longer resolves the duplicate key "
+                "to the last value"
+            )
+        duplicate_rewrite_path = (
+            Path(temporary) / "production-duplicate-key-rewrite.asdf"
+        )
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "rewrite-production-oracle",
+                str(production_duplicate_key_path),
+                str(duplicate_rewrite_path),
+                "0",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 1 or duplicate_rewrite_path.exists():
+            raise RuntimeError(
+                "production reader/rewrite did not reject ambiguous duplicate "
+                "YAML mapping keys before creating output"
+            )
+        records.append(
+            {
+                "fixture": "production-duplicate-key-reader-rewrite",
+                "status": "asdf-5.3.1-last-value/production-controlled-rejection",
+                "returncode": completed.returncode,
+                "oracle_sample_count": oracle_duplicate_sample_count,
+            }
+        )
+
+        completed = subprocess.run(
+            [
+                str(production_native),
+                "rewrite-production-oracle",
+                str(production_source_index_path),
+                str(production_source_index_rewrite_path),
+                "0",
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"production source-index rewrite failed: {completed.stderr}"
+            )
+        with asdf.open(
+            production_source_index_rewrite_path, lazy_load=False, memmap=False
+        ) as opened:
+            production_source_index_rewrite_errors = _semantic_errors(opened.tree)
+            production_source_index_rewrite_summary = _semantic_summary(opened.tree)
+        if (
+            production_source_index_rewrite_errors
+            or production_source_index_rewrite_summary
+            != _production_source_index_semantic_summary([1, 0, 1])
+        ):
+            raise RuntimeError(
+                "official ASDF oracle rejected or changed the production "
+                "source-index rewrite semantics"
+            )
+        if _asdf_block_compressions(production_source_index_rewrite_path) != [
+            "zlib"
+        ]:
+            raise RuntimeError(
+                "production source-index rewrite did not retain one zlib block"
+            )
+        records.append(
+            {
+                "fixture": "production-source-index-writer-rewrite",
+                "status": "production-source-index-writer+rewrite/asdf-5.3.1-semantic-equal",
+                "returncode": 0,
+                "compressions": ["zlib"],
+            }
+        )
+
+        for fixture_name in ("profile_zlib", "npy_source_index"):
+            fixture_record = next(
+                fixture
+                for fixture in manifest["fixtures"]
+                if fixture["name"] == fixture_name
+            )
+            python_origin = fixtures / fixture_record["path"]
+            production_origin_rewrite = (
+                Path(temporary) / f"production-rewrite-{fixture_name}.asdf"
+            )
+            completed = subprocess.run(
+                [
+                    str(production_native),
+                    "rewrite-production-oracle",
+                    str(python_origin),
+                    str(production_origin_rewrite),
+                    "0",
+                    "0",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    f"Python-origin production rewrite failed for {fixture_name}: "
+                    f"{completed.stderr}"
+                )
+            with asdf.open(
+                production_origin_rewrite, lazy_load=False, memmap=False
+            ) as opened:
+                production_origin_errors = _semantic_errors(opened.tree)
+                production_origin_summary = _semantic_summary(opened.tree)
+            expected_origin = json.loads(
+                (fixtures / fixture_record["semantic_path"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            expected_origin["values"][0] = 0
+            if production_origin_errors or production_origin_summary != expected_origin:
+                raise RuntimeError(
+                    "official ASDF oracle rejected or changed the Python-origin "
+                    f"production rewrite semantics for {fixture_name}"
+                )
+            expected_compressions = (
+                ["zlib", "zlib"]
+                if fixture_name == "profile_zlib"
+                else ["zlib"]
+            )
+            origin_compressions = _asdf_block_compressions(
+                production_origin_rewrite
+            )
+            if origin_compressions != expected_compressions:
+                raise RuntimeError(
+                    f"Python-origin production rewrite profile changed for {fixture_name}: "
+                    f"{origin_compressions}"
+                )
+            if fixture_name == "profile_zlib" and _asdf_raw_block(
+                python_origin, 0
+            ) != _asdf_raw_block(production_origin_rewrite, 0):
+                raise RuntimeError(
+                    "Python-origin production rewrite did not preserve the roster "
+                    "block verbatim"
+                )
+            records.append(
+                {
+                    "fixture": f"python-origin-production-rewrite-{fixture_name}",
+                    "status": "python-writer/production-rewrite/asdf-5.3.1-semantic-equal",
+                    "returncode": 0,
+                    "compressions": origin_compressions,
+                }
+            )
 
         rewrite_source = fixtures / "profile_zlib.asdf"
         rewrite_path = Path(temporary) / "native-rewrite.asdf"
@@ -1364,7 +1768,12 @@ def interoperability(fixtures: Path, native: Path) -> dict[str, Any]:
             if completed.returncode != 2:
                 raise RuntimeError(f"native rewrite did not reject {case_name}: {completed.returncode}")
             records.append({"fixture": case_name, "status": "native-controlled-rejection", "returncode": 2})
-    return {"asdf": asdf.__version__, "native": str(native), "records": records}
+    return {
+        "asdf": asdf.__version__,
+        "native": str(native),
+        "production_native": str(production_native),
+        "records": records,
+    }
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -1388,6 +1797,7 @@ def main() -> int:
     interop = subparsers.add_parser("interoperability")
     interop.add_argument("--fixtures", type=Path, required=True)
     interop.add_argument("--native", type=Path, required=True)
+    interop.add_argument("--production-native", type=Path, required=True)
     interop.add_argument("--output", type=Path, required=True)
     internal = subparsers.add_parser("_benchmark_case")
     internal.add_argument("spec")
@@ -1411,7 +1821,7 @@ def main() -> int:
         result = second_round_benchmark(args.output, args.scales)
         print(json.dumps({"asdf": result["asdf"], "benchmark_cases": result["case_count"]}, ensure_ascii=False, indent=2))
     elif args.command == "interoperability":
-        result = interoperability(args.fixtures, args.native)
+        result = interoperability(args.fixtures, args.native, args.production_native)
         _write_json(args.output, result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "_benchmark_case":

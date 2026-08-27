@@ -136,6 +136,7 @@ std::string Schema5Metadata(
         "    \"windows_sdk_version\": null,\n"
         "    \"dear_imgui\": \"1.92.5\",\n"
         "    \"implot\": \"0.17\",\n"
+        "    \"yaml_cpp\": \"0.9.0\",\n"
         "    \"zlib\": \"1.3.1\"";
     if (include_completed_at) {
         document +=
@@ -390,13 +391,14 @@ void TestSchema5StrictParsing()
     const specforge::BuildMetadata& metadata =
         *fixture.build_metadata.metadata;
     Require(
-        metadata.finalized_artifact &&
+        metadata.yaml_cpp_version == "0.9.0" &&
+            metadata.finalized_artifact &&
             metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
             metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
             metadata.finalized_artifact->artifact.sha256 ==
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "schema 5 should expose the finalized timestamp and artifact identity");
+        "schema 5 should expose dependency, timestamp, and artifact identity");
 
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
@@ -404,6 +406,50 @@ void TestSchema5StrictParsing()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     const std::filesystem::path path = root / "metadata.json";
+
+    std::string legacy_schema5 = Schema5Metadata();
+    const std::size_t yaml_cpp_begin =
+        legacy_schema5.find("    \"yaml_cpp\": ");
+    Require(
+        yaml_cpp_begin != std::string::npos,
+        "schema 5 compatibility fixture should contain yaml_cpp before mutation");
+    const std::size_t yaml_cpp_end =
+        legacy_schema5.find('\n', yaml_cpp_begin);
+    Require(
+        yaml_cpp_end != std::string::npos,
+        "schema 5 yaml_cpp fixture line should terminate");
+    legacy_schema5.erase(
+        yaml_cpp_begin,
+        yaml_cpp_end - yaml_cpp_begin + 1U);
+    WriteTextFile(path, legacy_schema5);
+    const specforge::SpecForgeMetadataReadResult legacy_without_yaml_cpp =
+        specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
+    Require(
+        !legacy_without_yaml_cpp.startup_error &&
+            legacy_without_yaml_cpp.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available &&
+            legacy_without_yaml_cpp.build_metadata.metadata,
+        "schema 5 sidecars created before yaml-cpp provenance must remain available");
+
+    std::string malformed_yaml_cpp = Schema5Metadata();
+    const std::size_t yaml_cpp_value =
+        malformed_yaml_cpp.find("\"yaml_cpp\": \"0.9.0\"");
+    Require(
+        yaml_cpp_value != std::string::npos,
+        "schema 5 malformed yaml_cpp fixture should contain its value");
+    malformed_yaml_cpp.replace(
+        yaml_cpp_value,
+        std::string_view("\"yaml_cpp\": \"0.9.0\"").size(),
+        "\"yaml_cpp\": false");
+    WriteTextFile(path, malformed_yaml_cpp);
+    const specforge::SpecForgeMetadataReadResult malformed_yaml_cpp_result =
+        specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
+    Require(
+        !malformed_yaml_cpp_result.startup_error &&
+            malformed_yaml_cpp_result.build_metadata.status ==
+                specforge::BuildMetadataStatus::Unavailable &&
+            !malformed_yaml_cpp_result.build_metadata.metadata,
+        "present but malformed yaml_cpp provenance must remain unavailable");
 
     WriteTextFile(
         path,

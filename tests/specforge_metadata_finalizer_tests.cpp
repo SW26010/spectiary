@@ -81,6 +81,7 @@ specforge::BuildMetadata ConfiguredBuildMetadata()
         .windows_sdk_version = std::nullopt,
         .dear_imgui_version = "1.92.5",
         .implot_version = "0.17",
+        .yaml_cpp_version = "0.9.0",
         .zlib_version = "1.3.1",
     };
 }
@@ -130,8 +131,12 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
     specforge::SpecForgeMetadataFinalizerOptions options =
         OptionsFor(root);
     options.utc_now = [] { return FixedUtcTime(); };
-    const bool finalized = specforge::FinalizeSpecForgeMetadata(options);
-    Require(finalized, "finalizer should write schema 5 metadata");
+    std::string error;
+    const bool finalized =
+        specforge::FinalizeSpecForgeMetadata(options, &error);
+    Require(
+        finalized,
+        "finalizer should write schema 5 metadata: " + error);
     Require(
         std::filesystem::exists(metadata_path),
         "successful finalization should replace the metadata target");

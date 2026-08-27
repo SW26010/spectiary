@@ -20,6 +20,7 @@ include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
 set(SPECFORGE_BUILD_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
@@ -109,6 +110,7 @@ set(SPECFORGE_APPLICATION_ICON
 include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
 specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
 specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
+specforge_read_vcpkg_package_version(yaml-cpp SPECFORGE_YAML_CPP_VERSION)
 specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
 specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
@@ -122,6 +124,11 @@ specforge_require_notice_heading(
 )
 specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "yaml-cpp"
+    "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}"
+)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
     "zlib"
     "zlib ${SPECFORGE_ZLIB_VERSION}"
 )
@@ -129,6 +136,7 @@ message(STATUS
     "Resolved third-party versions: "
     "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, "
     "ImPlot ${SPECFORGE_IMPLOT_VERSION}, "
+    "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}, "
     "zlib ${SPECFORGE_ZLIB_VERSION}"
 )
 
@@ -235,6 +243,7 @@ add_library(specforge_core STATIC
     src/domain/npy_array_io.cpp
     src/domain/sample_annotation_io.cpp
     src/domain/sample_filter.cpp
+    src/domain/sample_labeling_asdf_codec.cpp
     src/domain/sample_labeling.cpp
     src/domain/sample_labeling_document.cpp
     src/domain/source_collection_identity_digest.cpp
@@ -273,7 +282,7 @@ target_include_directories(specforge_core PRIVATE
 )
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
-target_link_libraries(specforge_core PRIVATE ZLIB::ZLIB bcrypt)
+target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp ZLIB::ZLIB bcrypt)
 
 add_library(specforge_imgui_layout STATIC
     src/app/imgui_layout_persistence.cpp
@@ -1029,6 +1038,7 @@ add_test(
         -RepoRoot "${CMAKE_SOURCE_DIR}"
         -DearImGuiVersion "${SPECFORGE_IMGUI_VERSION}"
         -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
+        -YamlCppVersion "${SPECFORGE_YAML_CPP_VERSION}"
         -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
         -BuiltExecutable "$<TARGET_FILE:specforge_native>"
         -GeneratedManifest "${SPECFORGE_MANIFEST}"
@@ -1184,6 +1194,23 @@ specforge_add_test(
     tests/sample_labeling_document_tests.cpp
     specforge_core
 )
+specforge_add_test(
+    specforge_sample_labeling_asdf_codec_tests
+    tests/sample_labeling_asdf_codec_tests.cpp
+    specforge_core
+)
+target_compile_definitions(
+    specforge_sample_labeling_asdf_codec_tests
+    PRIVATE
+        SPECFORGE_ASDF_LABELING_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/asdf_labeling"
+        SPECFORGE_EXPECTED_VERSION="${PROJECT_VERSION}"
+)
+if(SPECFORGE_BUILD_ASDF_LABELING_SPIKE)
+    add_dependencies(
+        specforge_asdf_labeling_interoperability_targets
+        specforge_sample_labeling_asdf_codec_tests
+    )
+endif()
 specforge_add_test(
     specforge_source_collection_session_tests
     tests/source_collection_session_tests.cpp

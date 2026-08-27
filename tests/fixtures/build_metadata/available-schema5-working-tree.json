@@ -16,6 +16,7 @@
     "windows_sdk_version": null,
     "dear_imgui": "1.92.5",
     "implot": "0.17",
+    "yaml_cpp": "0.9.0",
     "zlib": "1.3.1",
     "completed_at_utc": "2026-08-05T09:21:32Z"
   },

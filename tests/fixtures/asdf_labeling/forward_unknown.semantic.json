@@ -3,6 +3,7 @@
   "schema_version": "1.0.0",
   "source_kind": "npy",
   "source_name": "future.npy",
+  "source_identity": "source:future",
   "source_fingerprint": "sha256:future",
   "sample_count": 2,
   "roster_identity_kind": "source_index",

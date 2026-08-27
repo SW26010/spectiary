@@ -2163,6 +2163,12 @@ void SettingsPanelUi::RenderAbout(
         ImGui::BulletText(
             UiText(
                 language,
+                UiTextId::YamlCppComponent)
+                .data(),
+            metadata.yaml_cpp_version.c_str());
+        ImGui::BulletText(
+            UiText(
+                language,
                 UiTextId::ZlibComponent)
                 .data(),
             metadata.zlib_version.c_str());
@@ -2188,6 +2194,17 @@ void SettingsPanelUi::RenderAbout(
             UiText(
                 language,
                 UiTextId::ImPlotComponentFallback)
+                .data());
+        ImGui::BulletText(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::YamlCppComponentFallback)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::YamlCppComponentFallback)
                 .data());
         ImGui::BulletText(
             "%.*s",

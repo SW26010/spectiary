@@ -14,6 +14,7 @@ inline constexpr char kBuildGenerator[] = "@SPECFORGE_BUILD_GENERATOR@";
 inline constexpr char kBuildWindowsSdkVersion[] = "@SPECFORGE_BUILD_WINDOWS_SDK_VERSION@";
 inline constexpr char kBuildDearImguiVersion[] = "@SPECFORGE_IMGUI_VERSION@";
 inline constexpr char kBuildImPlotVersion[] = "@SPECFORGE_IMPLOT_VERSION@";
+inline constexpr char kBuildYamlCppVersion[] = "@SPECFORGE_YAML_CPP_VERSION@";
 inline constexpr char kBuildZlibVersion[] = "@SPECFORGE_ZLIB_VERSION@";
 
 }  // namespace specforge::build_info

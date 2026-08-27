@@ -43,12 +43,15 @@ $env:VCPKG_ROOT
 
 - `imgui[docking-experimental,win32-binding,dx11-binding]`
 - `implot`
+- `yaml-cpp`
 - `zlib`
 
 manifest 固定 `builtin-baseline`，避免依赖版本跟随本机 `VCPKG_ROOT` checkout 漂移。
 
 DirectX 11 来自 Windows SDK；`specforge_renderer` 封装 DX11/DXGI presentation，`specforge_native` 负责 Win32/DWM shell。
-`zlib` 只用于受限 `.fits.gz` 单光谱读取路径。
+`yaml-cpp` 用于 production ASDF sample-labeling 文档的受限 YAML metadata
+解析；`zlib` 用于该 codec 的固定压缩 profile，以及受限 `.fits.gz`
+单光谱读取路径。
 
 ## SDR 色彩与 presentation 契约
 

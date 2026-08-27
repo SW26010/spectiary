@@ -10,6 +10,9 @@ param(
     [string]$ImPlotVersion,
 
     [Parameter(Mandatory = $true)]
+    [string]$YamlCppVersion,
+
+    [Parameter(Mandatory = $true)]
     [string]$ZlibVersion,
 
     [Parameter(Mandatory = $true)]
@@ -670,6 +673,7 @@ $expectedBuildMetadata = [ordered]@{
     configuration = $Configuration
     dear_imgui = $DearImGuiVersion
     implot = $ImPlotVersion
+    yaml_cpp = $YamlCppVersion
     zlib = $ZlibVersion
 }
 foreach ($expectedProperty in $expectedBuildMetadata.GetEnumerator()) {
@@ -774,6 +778,8 @@ foreach ($expected in @(
     'Copyright (c) 2014-2026 Omar Cornut',
     "ImPlot $ImPlotVersion",
     'Copyright (c) 2020 Evan Pezent',
+    "yaml-cpp $YamlCppVersion",
+    'Copyright (c) 2008-2015 Jesse Beder',
     "zlib $ZlibVersion",
     '(C) 1995-2026 Jean-loup Gailly and Mark Adler',
     'Copyright (c) 2017 Sean Barrett',
@@ -1103,6 +1109,7 @@ Assert-Contains $aboutSource `
     'About build source revision'
 Assert-Contains $aboutSource 'metadata.dear_imgui_version' 'About Dear ImGui metadata version'
 Assert-Contains $aboutSource 'metadata.implot_version' 'About ImPlot metadata version'
+Assert-Contains $aboutSource 'metadata.yaml_cpp_version' 'About yaml-cpp metadata version'
 Assert-Contains $aboutSource 'metadata.zlib_version' 'About zlib metadata version'
 
 $generatedBuildIdentityText = Get-Content -Raw -LiteralPath $GeneratedBuildIdentity
@@ -1111,7 +1118,8 @@ foreach ($expectedIdentityText in @(
     "kBuildConfiguration[] = `"$Configuration`"",
     "kTargetArchitecture[] = `"$TargetArchitecture`"",
     "kBuildSourceMode[] = `"$SourceMode`"",
-    "kBuildSourceRevision[] = `"$SourceRevision`""
+    "kBuildSourceRevision[] = `"$SourceRevision`"",
+    "kBuildYamlCppVersion[] = `"$YamlCppVersion`""
 )) {
     Assert-Contains `
         $generatedBuildIdentityText `
@@ -1556,6 +1564,20 @@ try {
             Remove = $false
             Value = 'current'
             ExpectedMessage = 'invalid windows_sdk_version'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata missing yaml-cpp provenance'
+            PropertyName = 'yaml_cpp'
+            Remove = $true
+            Value = $null
+            ExpectedMessage = "missing non-empty string 'yaml_cpp'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata yaml-cpp provenance disagrees with notices'
+            PropertyName = 'yaml_cpp'
+            Remove = $false
+            Value = '999.0.0'
+            ExpectedMessage = 'THIRD_PARTY_NOTICES.txt is stale for yaml-cpp'
         },
         [pscustomobject]@{
             Description = 'Working-tree revision as null array'

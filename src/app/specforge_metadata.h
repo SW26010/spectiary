@@ -68,6 +68,7 @@ struct BuildMetadata {
     std::optional<std::string> windows_sdk_version;
     std::string dear_imgui_version;
     std::string implot_version;
+    std::string yaml_cpp_version;
     std::string zlib_version;
     std::optional<FinalizedArtifactMetadata> finalized_artifact;
 };

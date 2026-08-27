@@ -12,14 +12,7 @@
       ]
     },
     "implot",
+    "yaml-cpp",
     "zlib"
-  ],
-  "features": {
-    "asdf-labeling-spike": {
-      "description": "Build the non-production ASDF labeling codec spike",
-      "dependencies": [
-        "yaml-cpp"
-      ]
-    }
-  }
+  ]
 }

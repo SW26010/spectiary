@@ -28,6 +28,7 @@ finalization fields:
 | Location | Requirement |
 | --- | --- |
 | `schema_version` | Integer `5`. |
+| `build.yaml_cpp` | Current producers write the non-empty, unpadded yaml-cpp package version. Runtime readers keep schema 5 sidecars created before this field was introduced compatible by treating an absent member as legacy provenance; a present but malformed member remains unavailable. |
 | `build.completed_at_utc` | A valid UTC timestamp in exactly `YYYY-MM-DDTHH:mm:ssZ` form. It has no fractional seconds or offset. |
 | `artifact.file` | Exactly `SpecForge.exe`. On Windows, the finalizer accepts this filename case-insensitively; another filename is rejected. |
 | `artifact.sha256` | The lowercase, 64-character SHA-256 digest of that final `SpecForge.exe`. |
@@ -37,6 +38,13 @@ control characters where applicable. Compiler and CMake versions use dotted
 numeric forms. `source_mode` is `working_tree` with a JSON `null`
 `source_revision`, or `head` with a full 40-character lowercase Git object ID.
 The executable architecture is `amd64`.
+
+The schema number stays at 5 for the yaml-cpp provenance addition because the
+runtime reader distinguishes legacy absence from malformed presence. New
+finalizer output and Portable packages are stricter: they must contain
+`build.yaml_cpp`, and the Portable dependency-notice heading must carry the
+same yaml-cpp version. Thus old schema 5 development sidecars remain readable
+without permitting a newly published package to omit or falsify the dependency.
 
 `windows_sdk_version` may be JSON `null` for a development build when CMake
 does not expose an authoritative SDK selection. A formal Portable package must

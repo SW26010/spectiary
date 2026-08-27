@@ -95,6 +95,39 @@ jobs:
             -BuildDirectory build\ninja-msvc-debug `
             -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
 
+      - name: Install pinned ASDF interoperability oracle
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          python -m pip install --disable-pip-version-check `
+            --target build\ninja-msvc-debug-asdf-labeling-spike\asdf-labeling-spike-python `
+            -r tools\asdf_labeling_spike\requirements.txt
+
+      - name: Build ASDF interoperability targets
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Configure `
+            -Preset ninja-msvc-debug-asdf-labeling-spike `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
+            -TimeoutSec 600
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-ninja-msvc-debug.ps1 `
+            -Preset ninja-msvc-debug-asdf-labeling-spike `
+            -Target specforge_asdf_labeling_interoperability_targets `
+            -VcvarsPath "$env:SPECFORGE_VCVARS_PATH" `
+            -LogDir "$env:AUTOMATION_RUN_ROOT\asdf-build" `
+            -TimeoutSec 900
+
+      - name: Run pinned ASDF 5.3.1 interoperability CTest
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          ctest --test-dir build\ninja-msvc-debug-asdf-labeling-spike `
+            -R '^specforge_asdf_labeling_interoperability$' `
+            --output-on-failure
+
       - name: Upload headless logs and failure evidence
         timeout-minutes: 5
         if: ${{ always() }}

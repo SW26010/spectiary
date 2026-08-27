@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -312,14 +313,40 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
     }
 }
 
+void TestFailFastValidatorBoundsDiagnostics()
+{
+    specforge::SampleLabelingDocument document = ValidDocument();
+    document.source.sample_count = 25'000;
+    document.source.roster.identity_kind =
+        std::string{specforge::kSampleLabelingDocumentSourceIndexRoster};
+    document.source.roster.sample_names.clear();
+    document.annotation.values.assign(document.source.sample_count, 42);
+
+    const auto result =
+        specforge::ValidateSampleLabelingDocumentFailFast(document);
+    Require(
+        result.issues.size() == 1 &&
+            result.issues.front().kind ==
+                specforge::SampleLabelingDocumentValidationIssueKind::
+                    UndefinedAnnotationValue,
+        "fail-fast validation must retain only the first semantic diagnostic");
+}
+
 }  // namespace
 
 int main()
 {
-    TestBuildSeparatesCanonicalDocumentFromTaskSessionState();
-    TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes();
-    TestValidatorEnforcesSampleAlignmentAndRosterShape();
-    TestValidatorEnforcesLabelAndUnlabeledInvariants();
-    TestValidatorRejectsUnsupportedDocumentSemantics();
-    return 0;
+    try {
+        TestBuildSeparatesCanonicalDocumentFromTaskSessionState();
+        TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes();
+        TestValidatorEnforcesSampleAlignmentAndRosterShape();
+        TestValidatorEnforcesLabelAndUnlabeledInvariants();
+        TestValidatorRejectsUnsupportedDocumentSemantics();
+        TestFailFastValidatorBoundsDiagnostics();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "sample labeling document test failure: "
+                  << error.what() << '\n';
+        return 1;
+    }
 }

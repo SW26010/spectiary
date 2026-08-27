@@ -15,7 +15,8 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "OFF",
         "SPECFORGE_BUILD_SOURCE_MODE": "working_tree",
-        "SPECFORGE_BUILD_SOURCE_REVISION": ""
+        "SPECFORGE_BUILD_SOURCE_REVISION": "",
+        "VCPKG_MANIFEST_FEATURES": ""
       }
     },
     {
@@ -76,8 +77,7 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON",
-        "VCPKG_MANIFEST_FEATURES": "asdf-labeling-spike"
+        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON"
       }
     },
     {
@@ -102,8 +102,7 @@
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON",
-        "VCPKG_MANIFEST_FEATURES": "asdf-labeling-spike"
+        "SPECFORGE_BUILD_ASDF_LABELING_SPIKE": "ON"
       }
     }
   ],
