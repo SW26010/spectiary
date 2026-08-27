@@ -236,6 +236,7 @@ add_library(specforge_core STATIC
     src/domain/sample_annotation_io.cpp
     src/domain/sample_filter.cpp
     src/domain/sample_labeling.cpp
+    src/domain/sample_labeling_document.cpp
     src/domain/source_collection_identity_digest.cpp
     src/domain/source_collection_manifest.cpp
     src/domain/source_open_resolution.cpp
@@ -1177,6 +1178,11 @@ specforge_add_test(
     specforge_sample_labeling_filter_tests
     tests/sample_labeling_filter_tests.cpp
     specforge_sessions
+)
+specforge_add_test(
+    specforge_sample_labeling_document_tests
+    tests/sample_labeling_document_tests.cpp
+    specforge_core
 )
 specforge_add_test(
     specforge_source_collection_session_tests
