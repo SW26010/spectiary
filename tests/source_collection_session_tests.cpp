@@ -323,7 +323,10 @@ public:
         std::filesystem::path workflow_cache,
         specforge::SampleLabelingController::
             CanonicalValuesPublisher
-                canonical_values_publisher = {})
+                canonical_values_publisher = {},
+        specforge::SampleLabelingController::
+            CanonicalDocumentPublisher
+                canonical_document_publisher = {})
         : specforge::SourceCollectionSession(
               source_session_cache,
               navigation_cache,
@@ -331,7 +334,8 @@ public:
               workflow_cache,
               specforge::SampleLabelingStateCacheLoadPolicy::
                   AllowPersistentOutputs,
-              std::move(canonical_values_publisher)),
+              std::move(canonical_values_publisher),
+              std::move(canonical_document_publisher)),
           preparation_(PreparationAdapters(
               std::move(loader),
               navigation_cache,
@@ -3481,6 +3485,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
 
     std::vector<std::size_t> loaded_indices;
     std::size_t canonical_publication_attempts = 0;
+    std::size_t canonical_document_publication_attempts = 0;
     PreparedSession session(
         [&loaded_indices, source_path](
             const std::filesystem::path& path,
@@ -3521,6 +3526,41 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
                 RewriteSampleLabelingAsdfValuesAtomically(
                     owner_snapshot,
                     values);
+        },
+        [&canonical_document_publication_attempts](
+            const specforge::SampleLabelingAsdfOpenSnapshot&
+                owner_snapshot,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::
+                SampleLabelingCanonicalSourceDescriptor& source) {
+            ++canonical_document_publication_attempts;
+            if (canonical_document_publication_attempts == 1) {
+                const specforge::SampleLabelingAsdfStoreWriteResult
+                    write = specforge::
+                        RewriteSampleLabelingAsdfDocumentAtomically(
+                            owner_snapshot,
+                            document);
+                if (!write.succeeded()) {
+                    return specforge::
+                        SampleLabelingAsdfStoreGenerationWriteResult{
+                            .error = write.error};
+                }
+                return specforge::
+                    SampleLabelingAsdfStoreGenerationWriteResult{
+                        .document_replaced = true,
+                        .error = {
+                            .kind = specforge::
+                                SampleLabelingAsdfStoreErrorKind::
+                                    AtomicWriteFailure,
+                            .message =
+                                "injected session metadata reopen failure"}};
+            }
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    owner_snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
         });
     const specforge::SourceCollectionSessionResult opened =
         session.Open(
@@ -3754,6 +3794,98 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             after_retry.sorting.active_source_id ==
                 "source-order",
         "canonical retry publication should rebuild filter and sorting projections from the advanced generation");
+
+    const specforge::SourceCollectionSessionResult
+        metadata_edited =
+            Submit(
+                session,
+                UpdateActiveLabel(
+                    9,
+                    specforge::SampleLabelDefinition{
+                        11,
+                        "excellent generation C",
+                        'e'},
+                    true));
+    const specforge::SourceCollectionSessionView
+        after_failed_metadata_edit = session.View();
+    Require(
+        metadata_edited.changed &&
+            canonical_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 1 &&
+            after_failed_metadata_edit.labeling.save_state.kind ==
+                specforge::SampleLabelSaveStateKind::Failed,
+        "a session metadata rewrite whose replacement cannot reopen should remain visibly failed and retryable");
+
+    specforge::SourceCollectionSessionResult
+        metadata_maintenance;
+    bool metadata_retry_published = false;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const std::optional<
+            specforge::LocalUserStateSaveScheduler::TimePoint>
+            deadline = session.NextMaintenanceDeadline();
+        Require(
+            deadline.has_value(),
+            "failed session metadata reopen should expose a retry deadline");
+        metadata_maintenance =
+            session.RunMaintenance(*deadline);
+        if (canonical_document_publication_attempts >= 2) {
+            metadata_retry_published = true;
+            break;
+        }
+    }
+    const specforge::SampleLabelingAsdfReadResult
+        metadata_generation =
+            specforge::ReadSampleLabelingAsdfDocument(
+                annotation_path);
+    const specforge::SourceCollectionSessionView
+        after_metadata_edit = session.View();
+    const auto metadata_filter_source = std::find_if(
+        after_metadata_edit.filter.sources.begin(),
+        after_metadata_edit.filter.sources.end(),
+        [&canonical_source_id](const auto& source) {
+            return source.id == canonical_source_id;
+        });
+    const auto generation_c_option =
+        metadata_filter_source ==
+                after_metadata_edit.filter.sources.end()
+        ? static_cast<const specforge::SampleFilterValueOption*>(
+              nullptr)
+        : [&metadata_filter_source]() {
+              const auto option = std::find_if(
+                  metadata_filter_source->options.begin(),
+                  metadata_filter_source->options.end(),
+                  [](const auto& candidate) {
+                      return candidate.key == "11";
+                  });
+              return option ==
+                      metadata_filter_source->options.end()
+                  ? static_cast<const specforge::
+                        SampleFilterValueOption*>(nullptr)
+                  : &*option;
+          }();
+    Require(
+        metadata_retry_published &&
+            metadata_maintenance.action
+                .navigation_inputs_changed &&
+            canonical_publication_attempts == 2 &&
+            canonical_document_publication_attempts == 2 &&
+            after_metadata_edit.labeling.save_state.kind ==
+                specforge::SampleLabelSaveStateKind::
+                    AutosavedToOutput &&
+            metadata_generation.succeeded() &&
+            metadata_generation.document->labeling.labels.size() == 2 &&
+            metadata_generation.document->labeling.labels[1].code == 11 &&
+            metadata_generation.document->labeling.labels[1].name ==
+                "excellent generation C" &&
+            metadata_generation.document->labeling.labels[1].shortcut ==
+                "e" &&
+            metadata_generation.document->annotation.values ==
+                std::vector<std::int32_t>({5, 11, 11}) &&
+            generation_c_option != nullptr &&
+            generation_c_option->display_text ==
+                "excellent generation C (11)" &&
+            generation_c_option->sample_count == 2,
+        "session retry should reopen a replaced metadata generation, publish recoded values and definitions together, bypass the values-only writer, and refresh the attached generation");
 
     const specforge::SourceCollectionSessionResult deactivated =
         Submit(

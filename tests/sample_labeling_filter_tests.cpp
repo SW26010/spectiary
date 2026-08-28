@@ -18,8 +18,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -194,6 +196,65 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
     Require(stream.good(), "could not open text file for writing");
     stream << contents;
     Require(stream.good(), "could not write text file");
+}
+
+std::vector<unsigned char> ReadBinaryFile(
+    const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    Require(stream.good(), "could not open binary file for reading");
+    return std::vector<unsigned char>(
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>());
+}
+
+void WriteBinaryFile(
+    const std::filesystem::path& path,
+    std::span<const unsigned char> bytes)
+{
+    std::ofstream stream(
+        path,
+        std::ios::binary | std::ios::trunc);
+    Require(stream.good(), "could not open binary file for writing");
+    stream.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+    stream.close();
+    Require(stream.good(), "could not write binary file");
+}
+
+void ReplaceBinaryTextOnce(
+    std::vector<unsigned char>& bytes,
+    std::string_view old_text,
+    std::string_view new_text)
+{
+    const auto found = std::search(
+        bytes.begin(),
+        bytes.end(),
+        old_text.begin(),
+        old_text.end());
+    Require(found != bytes.end(), "binary patch target should exist");
+    const std::size_t offset =
+        static_cast<std::size_t>(found - bytes.begin());
+    bytes.erase(
+        found,
+        found + static_cast<std::ptrdiff_t>(old_text.size()));
+    bytes.insert(
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+        new_text.begin(),
+        new_text.end());
+}
+
+bool BinaryFileContains(
+    const std::filesystem::path& path,
+    std::string_view text)
+{
+    const std::vector<unsigned char> bytes = ReadBinaryFile(path);
+    return std::search(
+               bytes.begin(),
+               bytes.end(),
+               text.begin(),
+               text.end()) != bytes.end();
 }
 
 std::filesystem::path FreshTestDirectory(std::string_view name);
@@ -1005,7 +1066,7 @@ void TestCanonicalAsdfValueFailureRetainsOverlayAndRetries()
         "canonical value retry should publish the checkpointed generation, reuse the roster, and clear the overlay");
 }
 
-void TestCanonicalAsdfMetadataMutationsRemainPendingOnly()
+void TestCanonicalAsdfMetadataMutationsPublishFullGenerations()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
@@ -1022,11 +1083,23 @@ void TestCanonicalAsdfMetadataMutationsRemainPendingOnly()
             original)
             .succeeded(),
         "canonical metadata boundary fixture should publish its initial generation");
+    std::vector<unsigned char> forward_bytes =
+        ReadBinaryFile(asdf_path);
+    ReplaceBinaryTextOnce(
+        forward_bytes,
+        "\nschema_version: ",
+        "\nfuture_root: \"metadata-root-survives\"\nschema_version: ");
+    ReplaceBinaryTextOnce(
+        forward_bytes,
+        "    shortcut: \"a\"\n",
+        "    shortcut: \"a\"\n    future_label: \"metadata-label-survives\"\n");
+    WriteBinaryFile(asdf_path, forward_bytes);
     SaveCanonicalOwnerCache(
         cache_path,
         asdf_path);
 
-    std::size_t canonical_publication_calls = 0;
+    std::size_t value_publication_calls = 0;
+    std::size_t document_publication_calls = 0;
     specforge::SampleLabelingController controller(
         cache_path,
         [](const std::filesystem::path& path) {
@@ -1039,17 +1112,36 @@ void TestCanonicalAsdfMetadataMutationsRemainPendingOnly()
                 task,
                 source);
         },
-        [&canonical_publication_calls](
+        [&value_publication_calls](
             specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
             std::span<const std::int32_t> values) {
-            ++canonical_publication_calls;
+            ++value_publication_calls;
             return specforge::RewriteSampleLabelingAsdfValuesAtomically(
                 snapshot,
                 values);
+        },
+        [&document_publication_calls](
+            const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++document_publication_calls;
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(source));
         });
     controller.ActivateSource(
         CanonicalOwnerSourceIdentity(),
         CanonicalOwnerSourceDescriptor());
+    const std::optional<specforge::SampleAnnotationResult>
+        initial_projection =
+            controller.ActiveCanonicalAsdfAnnotationProjection();
+    Require(
+        initial_projection && initial_projection->labeling_document,
+        "canonical metadata fixture should expose its initial generation");
+    const std::shared_ptr<const specforge::SampleLabelingDocument>
+        initial_generation = initial_projection->labeling_document;
 
     const specforge::SampleLabelingOperationResult renamed =
         controller.RenameActiveTask(
@@ -1071,57 +1163,224 @@ void TestCanonicalAsdfMetadataMutationsRemainPendingOnly()
     Require(
         renamed.changed && added.changed && edited.changed &&
             removed.changed && code_changed.changed &&
-            !renamed.output_save_attempted &&
-            !added.output_save_attempted &&
-            !edited.output_save_attempted &&
-            !removed.output_save_attempted &&
-            !code_changed.output_save_attempted &&
+            renamed.output_save_attempted && renamed.output_saved &&
+            added.output_save_attempted && added.output_saved &&
+            edited.output_save_attempted && edited.output_saved &&
+            removed.output_save_attempted && removed.output_saved &&
+            code_changed.output_save_attempted &&
+            code_changed.output_saved &&
             !code_changed.output_retry_scheduled &&
-            canonical_publication_calls == 0 &&
+            value_publication_calls == 0 &&
+            document_publication_calls == 5 &&
             !controller.NextMaintenanceDeadline(),
-        "canonical metadata mutations must remain cache-only and must not enter the values publisher or retry scheduler");
+        "canonical metadata mutations should publish and reopen one full document generation each without using the values-only path");
 
-    const specforge::SampleLabelingAsdfStoreOpenResult unchanged =
+    const specforge::SampleLabelingAsdfStoreOpenResult published =
         specforge::OpenSampleLabelingAsdfDocumentStore(
             asdf_path,
             specforge::SampleLabelingCompatibilityView(
                 CanonicalOwnerSourceDescriptor()));
     const specforge::SampleLabelingStateCacheLoadResult
-        pending_cache =
+        clean_cache =
             specforge::LoadSampleLabelingStateCache(
                 cache_path);
-    const specforge::SampleLabelingTask* pending_task =
+    const specforge::SampleLabelingTask* clean_task =
         FindTask(
-            pending_cache.cache,
+            clean_cache.cache,
+            "canonical-source",
+            "quality-task");
+    const std::optional<specforge::SampleAnnotationResult>
+        current_projection =
+            controller.ActiveCanonicalAsdfAnnotationProjection();
+    Require(
+        published.succeeded() &&
+            published.snapshot->document().annotation.name ==
+                original.annotation.name &&
+            published.snapshot->document().labeling.name ==
+                "Locally renamed canonical task" &&
+            published.snapshot->document().labeling.labels.size() == 2 &&
+            published.snapshot->document().labeling.labels[0].code == 2 &&
+            published.snapshot->document().labeling.labels[0].name ==
+                "locally edited" &&
+            published.snapshot->document().labeling.labels[0].shortcut ==
+                "e" &&
+            published.snapshot->document().labeling.labels[1].code == 8 &&
+            published.snapshot->document().labeling.labels[1].name ==
+                "recoded" &&
+            published.snapshot->document().labeling.labels[1].shortcut ==
+                "c" &&
+            published.snapshot->document().annotation.values ==
+                std::vector<std::int32_t>({-1, 2, 8}) &&
+            BinaryFileContains(
+                asdf_path,
+                "metadata-root-survives") &&
+            BinaryFileContains(
+                asdf_path,
+                "metadata-label-survives") &&
+            clean_task != nullptr &&
+            !clean_task->metadata_save_pending &&
+            clean_task->pending_sample_indices.empty() &&
+            current_projection &&
+            current_projection->labeling_document &&
+            current_projection->labeling_document !=
+                initial_generation &&
+            current_projection->labeling_document->annotation.values ==
+                std::vector<std::int32_t>({-1, 2, 8}),
+        "metadata and recoded values should publish as one reopened generation while preserving forward-compatible metadata");
+}
+
+void TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_metadata_reopen_retry");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const specforge::SampleLabelingDocument original =
+        CanonicalOwnerDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            original)
+            .succeeded(),
+        "canonical metadata reopen fixture should publish its initial generation");
+    std::vector<unsigned char> initial_bytes =
+        ReadBinaryFile(asdf_path);
+    ReplaceBinaryTextOnce(
+        initial_bytes,
+        "\nschema_version: ",
+        "\nfuture_root: \"old-generation\"\nschema_version: ");
+    WriteBinaryFile(asdf_path, initial_bytes);
+    SaveCanonicalOwnerCache(cache_path, asdf_path);
+
+    std::size_t document_publication_calls = 0;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource* source) {
+            return specforge::PublishLegacySampleLabelingTaskOutput(
+                task,
+                source);
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [&document_publication_calls](
+            const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++document_publication_calls;
+            if (document_publication_calls == 1) {
+                const specforge::SampleLabelingAsdfStoreWriteResult write =
+                    specforge::RewriteSampleLabelingAsdfDocumentAtomically(
+                        snapshot,
+                        document);
+                if (!write.succeeded()) {
+                    return specforge::
+                        SampleLabelingAsdfStoreGenerationWriteResult{
+                            .error = write.error};
+                }
+                return specforge::
+                    SampleLabelingAsdfStoreGenerationWriteResult{
+                        .document_replaced = true,
+                        .error = {
+                            .kind = specforge::
+                                SampleLabelingAsdfStoreErrorKind::
+                                    AtomicWriteFailure,
+                            .message =
+                                "injected post-rewrite reopen failure"}};
+            }
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(source));
+        });
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    const std::optional<specforge::SampleAnnotationResult>
+        initial_projection =
+            controller.ActiveCanonicalAsdfAnnotationProjection();
+    Require(
+        initial_projection && initial_projection->labeling_document,
+        "canonical reopen fixture should expose its initial snapshot");
+    const std::shared_ptr<const specforge::SampleLabelingDocument>
+        initial_generation = initial_projection->labeling_document;
+
+    const specforge::SampleLabelingOperationResult failed =
+        controller.RenameActiveTask(
+            "Renamed through retry");
+    const specforge::SampleLabelingTask* failed_task =
+        ActiveTask(controller);
+    const specforge::SampleLabelingAsdfStoreOpenResult
+        replaced_generation =
+            specforge::OpenSampleLabelingAsdfDocumentStore(
+                asdf_path,
+                specforge::SampleLabelingCompatibilityView(
+                    CanonicalOwnerSourceDescriptor()));
+    Require(
+        failed.changed && failed.state_saved &&
+            failed.output_save_attempted &&
+            !failed.output_saved &&
+            failed.output_retry_scheduled &&
+            document_publication_calls == 1 &&
+            failed_task != nullptr &&
+            failed_task->metadata_save_pending &&
+            !controller.ActiveCanonicalAsdfAnnotationProjection() &&
+            replaced_generation.succeeded() &&
+            replaced_generation.snapshot->document().labeling.name ==
+                "Renamed through retry",
+        "a post-rewrite reopen failure must remain pending and discard the stale active snapshot instead of reporting success");
+
+    std::vector<unsigned char> newer_bytes =
+        ReadBinaryFile(asdf_path);
+    ReplaceBinaryTextOnce(
+        newer_bytes,
+        "old-generation",
+        "new-generation");
+    WriteBinaryFile(asdf_path, newer_bytes);
+
+    const specforge::SampleLabelingMaintenanceResult maintenance =
+        RunMaintenanceUntilIdle(controller);
+    const specforge::SampleLabelingTask* retried_task =
+        ActiveTask(controller);
+    const std::optional<specforge::SampleAnnotationResult>
+        retried_projection =
+            controller.ActiveCanonicalAsdfAnnotationProjection();
+    const specforge::SampleLabelingStateCacheLoadResult clean_cache =
+        specforge::LoadSampleLabelingStateCache(cache_path);
+    const specforge::SampleLabelingTask* clean_task =
+        FindTask(
+            clean_cache.cache,
             "canonical-source",
             "quality-task");
     Require(
-        unchanged.succeeded() &&
-            unchanged.snapshot->document().labeling.name ==
-                original.labeling.name &&
-            unchanged.snapshot->document().labeling.labels.size() ==
-                original.labeling.labels.size() &&
-            unchanged.snapshot->document().labeling.labels[0].code ==
-                original.labeling.labels[0].code &&
-            unchanged.snapshot->document().labeling.labels[0].name ==
-                original.labeling.labels[0].name &&
-            unchanged.snapshot->document().labeling.labels[0].shortcut ==
-                original.labeling.labels[0].shortcut &&
-            unchanged.snapshot->document().labeling.labels[1].code ==
-                original.labeling.labels[1].code &&
-            unchanged.snapshot->document().labeling.labels[1].name ==
-                original.labeling.labels[1].name &&
-            unchanged.snapshot->document().labeling.labels[1].shortcut ==
-                original.labeling.labels[1].shortcut &&
-            unchanged.snapshot->document().annotation.values ==
-                original.annotation.values &&
-            pending_task != nullptr &&
-            pending_task->metadata_save_pending &&
-            pending_task->pending_sample_indices ==
-                std::unordered_set<std::size_t>({2}) &&
-            pending_task->values ==
-                std::vector<int>({-1, -1, 8}),
-        "unsupported canonical metadata edits should leave the ASDF generation untouched and remain durable in local state");
+        document_publication_calls == 2 &&
+            maintenance.output_retry_attempted &&
+            maintenance.canonical_output_published &&
+            retried_task != nullptr &&
+            !retried_task->metadata_save_pending &&
+            retried_task->pending_sample_indices.empty() &&
+            retried_projection &&
+            retried_projection->labeling_document &&
+            retried_projection->labeling_document !=
+                initial_generation &&
+            retried_projection->labeling_document->labeling.name ==
+                "Renamed through retry" &&
+            BinaryFileContains(asdf_path, "new-generation") &&
+            !BinaryFileContains(asdf_path, "old-generation") &&
+            clean_task != nullptr &&
+            !clean_task->metadata_save_pending,
+        "retry must reopen the current durable generation before rewriting so stale unknown metadata cannot overwrite a newer file");
 }
 
 void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
@@ -8602,7 +8861,8 @@ int main(int argc, char* argv[])
         TestSampleLabelingOutputFormatMigrationAndRoundTrip();
         TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay();
         TestCanonicalAsdfValueFailureRetainsOverlayAndRetries();
-        TestCanonicalAsdfMetadataMutationsRemainPendingOnly();
+        TestCanonicalAsdfMetadataMutationsPublishFullGenerations();
+        TestCanonicalAsdfMetadataReopenFailureRetriesFromCurrentGeneration();
         TestCanonicalAsdfProjectionDowngradesWhenDeactivated();
         TestCanonicalRevalidationRetainsLeaseForPendingRecoveryPatch();
         TestCanonicalAsdfTaskOwnerFailsClosed();

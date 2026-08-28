@@ -290,7 +290,9 @@ public:
         SampleLabelingStateCacheLoadPolicy
             labeling_state_cache_load_policy,
         SampleLabelingController::CanonicalValuesPublisher
-            canonical_values_publisher);
+            canonical_values_publisher,
+        SampleLabelingController::CanonicalDocumentPublisher
+            canonical_document_publisher = {});
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;

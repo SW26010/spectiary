@@ -464,37 +464,59 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
     specforge::SampleLabelingDocument edited = opened.snapshot->document();
     edited.labeling.name = "Edited through snapshot";
     edited.labeling.labels[0].name = "snapshot edit";
-    const specforge::SampleLabelingAsdfStoreWriteResult snapshot_rewrite =
-        specforge::RewriteSampleLabelingAsdfDocumentAtomically(
-            *opened.snapshot,
-            edited);
+    const std::shared_ptr<const specforge::SampleLabelingDocument>
+        old_generation = opened.snapshot->document_handle();
+    specforge::SampleLabelingSourceCompatibility
+        incompatible_source = CompatibleSource(original);
+    incompatible_source.source_kind = "fits";
+    const std::vector<unsigned char> before_incompatible_source =
+        ReadAllBytes(path);
+    const specforge::SampleLabelingAsdfStoreGenerationWriteResult
+        incompatible_rewrite =
+            specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    *opened.snapshot,
+                    edited,
+                    incompatible_source);
     Require(
-        snapshot_rewrite.succeeded(),
+        !incompatible_rewrite.succeeded() &&
+            !incompatible_rewrite.document_replaced &&
+            incompatible_rewrite.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    SourceMismatch &&
+            ReadAllBytes(path) == before_incompatible_source &&
+            !HasTemporarySibling(path),
+        "metadata publication should reject an incompatible reopen descriptor before replacing the durable document");
+
+    specforge::SampleLabelingAsdfStoreGenerationWriteResult
+        snapshot_rewrite =
+        specforge::RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+            *opened.snapshot,
+            edited,
+            CompatibleSource(original));
+    Require(
+        snapshot_rewrite.succeeded() &&
+            snapshot_rewrite.document_replaced &&
+            snapshot_rewrite.snapshot->document_handle() !=
+                old_generation &&
+            snapshot_rewrite.snapshot->document().labeling.name ==
+                edited.labeling.name,
         snapshot_rewrite.error.message.empty()
-            ? "snapshot metadata rewrite should succeed"
+            ? "snapshot metadata rewrite should reopen a new generation"
             : snapshot_rewrite.error.message);
     Require(
         ContainsText(ReadAllBytes(path), "store-root-survives") &&
             ContainsText(ReadAllBytes(path), "store-label-survives"),
         "snapshot metadata rewrite should preserve unknown metadata");
 
-    specforge::SampleLabelingAsdfStoreOpenResult reopened =
-        specforge::OpenSampleLabelingAsdfDocumentStore(
-            path,
-            CompatibleSource(original));
-    Require(
-        reopened.succeeded() &&
-            reopened.snapshot->document().labeling.name ==
-                edited.labeling.name,
-        "metadata rewrite should publish the edited canonical document");
     const std::vector<unsigned char> before_identity_mismatch =
         ReadAllBytes(path);
     specforge::SampleLabelingDocument unrelated =
-        reopened.snapshot->document();
+        snapshot_rewrite.snapshot->document();
     unrelated.labeling.id = "another-task";
     const specforge::SampleLabelingAsdfStoreWriteResult identity_mismatch =
         specforge::RewriteSampleLabelingAsdfDocumentAtomically(
-            *reopened.snapshot,
+            *snapshot_rewrite.snapshot,
             unrelated);
     Require(
         !identity_mismatch.succeeded() &&
@@ -505,7 +527,7 @@ void TestMetadataChangingRewritesPreserveForwardUnknownFields()
             !HasTemporarySibling(path),
         "metadata preservation must not carry unknown fields into another document identity");
     specforge::SampleLabelingDocument edited_again =
-        reopened.snapshot->document();
+        snapshot_rewrite.snapshot->document();
     edited_again.annotation.name = "Edited through path write";
     const specforge::SampleLabelingAsdfStoreWriteResult path_rewrite =
         specforge::WriteSampleLabelingAsdfDocumentAtomically(

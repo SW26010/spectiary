@@ -541,7 +541,9 @@ SourceCollectionSession::SourceCollectionSession(
     SampleLabelingStateCacheLoadPolicy
         labeling_state_cache_load_policy,
     SampleLabelingController::CanonicalValuesPublisher
-        canonical_values_publisher)
+        canonical_values_publisher,
+    SampleLabelingController::CanonicalDocumentPublisher
+        canonical_document_publisher)
     : roster_(std::make_unique<SourceCollectionRoster>()),
       workflow_(std::make_unique<SampleWorkflowCoordinator>(
           std::move(navigation_state_cache_path),
@@ -558,7 +560,8 @@ SourceCollectionSession::SourceCollectionSession(
               return LoadSampleWorkflowStateCache(
                   path);
           },
-          std::move(canonical_values_publisher))),
+          std::move(canonical_values_publisher),
+          std::move(canonical_document_publisher))),
       source_session_state_(std::make_unique<SourceCollectionSessionStatePersistence>(
           std::move(source_session_state_cache_path)))
 {

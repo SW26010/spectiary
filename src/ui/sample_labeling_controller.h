@@ -118,6 +118,11 @@ public:
         std::function<SampleLabelingAsdfStoreWriteResult(
             SampleLabelingAsdfOpenSnapshot&,
             std::span<const std::int32_t>)>;
+    using CanonicalDocumentPublisher =
+        std::function<SampleLabelingAsdfStoreGenerationWriteResult(
+            const SampleLabelingAsdfOpenSnapshot&,
+            const SampleLabelingDocument&,
+            const SampleLabelingCanonicalSourceDescriptor&)>;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
@@ -133,6 +138,12 @@ public:
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher,
         CanonicalValuesPublisher canonical_values_publisher);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalValuesPublisher canonical_values_publisher,
+        CanonicalDocumentPublisher canonical_document_publisher);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -355,7 +366,8 @@ private:
         SampleLabelingTask& task,
         const SourceState* source_state,
         TaskEditLeaseSet& leases,
-        SampleLabelingAsdfOpenSnapshot* asdf_snapshot);
+        std::optional<SampleLabelingAsdfOpenSnapshot>*
+            asdf_snapshot);
     [[nodiscard]] SampleLabelOutputPublicationResult
         PersistLegacyTaskOutput(
             SampleLabelingTask& task,
@@ -364,7 +376,8 @@ private:
         PersistCanonicalTaskOutput(
             SampleLabelingTask& task,
             const SourceState* source_state,
-            SampleLabelingAsdfOpenSnapshot* asdf_snapshot);
+            std::optional<SampleLabelingAsdfOpenSnapshot>*
+                asdf_snapshot);
     [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
         std::string_view source_identity,
         const SourceState& state,
@@ -506,6 +519,7 @@ private:
     StateCacheLoader state_cache_loader_;
     LegacyOutputPublisher legacy_output_publisher_;
     CanonicalValuesPublisher canonical_values_publisher_;
+    CanonicalDocumentPublisher canonical_document_publisher_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;

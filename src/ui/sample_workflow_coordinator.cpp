@@ -49,6 +49,20 @@ DefaultCanonicalValuesPublisher()
     };
 }
 
+SampleLabelingController::CanonicalDocumentPublisher
+DefaultCanonicalDocumentPublisher()
+{
+    return [](
+               const SampleLabelingAsdfOpenSnapshot& snapshot,
+               const SampleLabelingDocument& document,
+               const SampleLabelingCanonicalSourceDescriptor& source) {
+        return RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+            snapshot,
+            document,
+            SampleLabelingCompatibilityView(source));
+    };
+}
+
 struct ActiveSampleWorkflowIdentity {
     bool present = false;
     std::string source_identity;
@@ -368,7 +382,9 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
     WorkflowStateCacheLoader workflow_state_cache_loader,
     SampleLabelingController::CanonicalValuesPublisher
-        canonical_values_publisher)
+        canonical_values_publisher,
+    SampleLabelingController::CanonicalDocumentPublisher
+        canonical_document_publisher)
     : navigation_(std::move(navigation_state_cache_path)),
       labeling_(
           std::move(labeling_state_cache_path),
@@ -376,7 +392,10 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
           DefaultLegacyOutputPublisher(),
           canonical_values_publisher
               ? std::move(canonical_values_publisher)
-              : DefaultCanonicalValuesPublisher()),
+              : DefaultCanonicalValuesPublisher(),
+          canonical_document_publisher
+              ? std::move(canonical_document_publisher)
+              : DefaultCanonicalDocumentPublisher()),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
       workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
@@ -1536,6 +1555,12 @@ SampleWorkflowCoordinator::UpsertActiveLabel(
     const SampleLabelingOperationResult operation =
         labeling_.UpsertActiveLabel(std::move(label));
     outcome.changed = operation.changed;
+    ApplyLabelingLeaseIssue(outcome, operation);
+    if (operation.output_saved) {
+        outcome.action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            outcome.action.navigation_inputs_changed;
+    }
     if (outcome.changed) {
         ClearLabelUndoHistory();
         ApplyNavigationInputEffects(
@@ -1560,6 +1585,12 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::UpdateActiveLabel(
     const SampleLabelingOperationResult operation =
         labeling_.UpdateActiveLabel(original_code, std::move(label), allow_used_code_change);
     outcome.changed = operation.changed;
+    ApplyLabelingLeaseIssue(outcome, operation);
+    if (operation.output_saved) {
+        outcome.action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            outcome.action.navigation_inputs_changed;
+    }
     if (outcome.changed) {
         ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&
@@ -1587,6 +1618,12 @@ SampleWorkflowCoordinator::RemoveActiveLabel(int code)
         active_task == nullptr ? std::string{} : BuildLabelingFilterSourceId(*active_task);
     const SampleLabelingOperationResult operation = labeling_.RemoveActiveLabel(code);
     outcome.changed = operation.changed;
+    ApplyLabelingLeaseIssue(outcome, operation);
+    if (operation.output_saved) {
+        outcome.action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            outcome.action.navigation_inputs_changed;
+    }
     if (outcome.changed) {
         ClearLabelUndoHistory();
         if (!sample_filter_source_id.empty() &&

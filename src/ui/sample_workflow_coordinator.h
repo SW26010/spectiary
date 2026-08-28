@@ -104,7 +104,9 @@ public:
         SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
         WorkflowStateCacheLoader workflow_state_cache_loader,
         SampleLabelingController::CanonicalValuesPublisher
-            canonical_values_publisher);
+            canonical_values_publisher,
+        SampleLabelingController::CanonicalDocumentPublisher
+            canonical_document_publisher = {});
 
     [[nodiscard]] SampleWorkflowTransitionOutcome Apply(
         SourceCollectionIntent intent,

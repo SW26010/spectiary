@@ -22,6 +22,7 @@ enum class SampleLabelingAsdfStoreErrorKind {
     PreservationIdentityMismatch,
     DurableBaseUnavailable,
     AtomicWriteFailure,
+    PublishedGenerationMismatch,
 };
 
 struct SampleLabelingAsdfStoreError {
@@ -121,6 +122,21 @@ struct SampleLabelingAsdfStoreWriteResult {
     }
 };
 
+// Result of a metadata-changing publication. document_replaced distinguishes
+// an atomic rewrite that reached disk from a failure before replacement. A
+// replaced document is not considered published to the owner session until it
+// has been reopened and returned as the new writable generation.
+struct SampleLabelingAsdfStoreGenerationWriteResult {
+    std::optional<SampleLabelingAsdfOpenSnapshot> snapshot;
+    bool document_replaced = false;
+    SampleLabelingAsdfStoreError error;
+
+    [[nodiscard]] bool succeeded() const noexcept
+    {
+        return snapshot.has_value();
+    }
+};
+
 [[nodiscard]] SampleLabelingAsdfStoreOpenResult
 OpenSampleLabelingAsdfDocumentStore(
     const std::filesystem::path& path,
@@ -145,6 +161,17 @@ WriteSampleLabelingAsdfDocumentAtomically(
 RewriteSampleLabelingAsdfDocumentAtomically(
     const SampleLabelingAsdfOpenSnapshot& snapshot,
     const SampleLabelingDocument& document) noexcept;
+
+// Validates source against the intended document before replacement, publishes
+// known metadata and values as one document generation, then opens and verifies
+// that exact known generation before returning a writable snapshot. Once
+// document_replaced is true, the caller must discard the old snapshot even if
+// reopen or verification fails.
+[[nodiscard]] SampleLabelingAsdfStoreGenerationWriteResult
+RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source) noexcept;
 
 // Safe to repeat with one snapshot only while this store is the sole writer
 // and every intervening publication is a value-only rewrite through it.

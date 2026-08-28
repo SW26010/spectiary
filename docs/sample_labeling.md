@@ -814,11 +814,19 @@ synchronizes the attached annotation generation before the active snapshot can
 be released and invalidates filter/sort projections that may have consumed the
 older generation. Canonical retries run only while their source is active with
 its matching descriptor; switching sources parks the durable overlay and that
-source's next activation re-arms publication. Task names and label definitions
-remain outside this writer:
-when canonical metadata is pending, the values publisher and its retry path do
-not run. Creating new ASDF owners and publishing metadata changes remain later
-writer steps.
+source's next activation re-arms publication. Task renames and label
+add/edit/remove operations, including shortcuts and used-code rewrites, build a
+complete replacement generation from the opened snapshot plus the latest task
+metadata and values. They publish through the full-document atomic rewrite so
+known metadata, values, and forward-compatible unknown metadata remain one
+canonical generation. The old snapshot is invalid as soon as replacement
+reaches disk; the mutation is successful only after the replacement reopens and
+its known generation matches the intended document. The requested reopen source
+descriptor is checked against that intended document before replacement, so an
+incompatible public-store call cannot alter the durable owner. If reopen fails,
+the local overlay remains pending, the stale snapshot is discarded, and retry
+first opens the current durable file before rewriting it. Creating a new ASDF
+owner remains a later writer step.
 
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save

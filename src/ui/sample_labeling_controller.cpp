@@ -44,8 +44,8 @@ bool ShouldRetryOutputSave(const SampleLabelingTask& task)
             task.save_state.kind ==
                 SampleLabelSaveStateKind::Failed;
     case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
-        return !task.metadata_save_pending &&
-            !task.pending_sample_indices.empty() &&
+        return (task.metadata_save_pending ||
+                !task.pending_sample_indices.empty()) &&
             (task.save_state.kind ==
                  SampleLabelSaveStateKind::Pending ||
              task.save_state.kind ==
@@ -282,6 +282,81 @@ bool CanonicalTaskMetadataMatchesSnapshot(
     return true;
 }
 
+std::optional<SampleLabelingDocument>
+BuildCanonicalDocumentReplacement(
+    const SampleLabelingTask& task,
+    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    std::string* error_message)
+{
+    const SampleLabelingDocument& current = snapshot.document();
+    if (task.task_id != current.labeling.id ||
+        task.values.size() != current.annotation.values.size()) {
+        if (error_message != nullptr) {
+            *error_message =
+                "canonical ASDF metadata publication does not match the opened owner generation";
+        }
+        return std::nullopt;
+    }
+
+    SampleLabelingDocument replacement = current;
+    replacement.annotation.values.clear();
+    replacement.annotation.values.reserve(task.values.size());
+    for (const int value : task.values) {
+        const std::int64_t widened =
+            static_cast<std::int64_t>(value);
+        if (widened <
+                std::numeric_limits<std::int32_t>::min() ||
+            widened >
+                std::numeric_limits<std::int32_t>::max()) {
+            if (error_message != nullptr) {
+                *error_message =
+                    "canonical ASDF label value is outside the int32 range";
+            }
+            return std::nullopt;
+        }
+        replacement.annotation.values.push_back(
+            static_cast<std::int32_t>(value));
+    }
+
+    replacement.labeling.name = task.task_name;
+    replacement.labeling.labels.clear();
+    replacement.labeling.labels.reserve(
+        task.label_set.labels.size());
+    for (const SampleLabelDefinition& label :
+         task.label_set.labels) {
+        const std::int64_t widened =
+            static_cast<std::int64_t>(label.code);
+        if (widened <
+                std::numeric_limits<std::int32_t>::min() ||
+            widened >
+                std::numeric_limits<std::int32_t>::max()) {
+            if (error_message != nullptr) {
+                *error_message =
+                    "canonical ASDF label code is outside the int32 range";
+            }
+            return std::nullopt;
+        }
+        replacement.labeling.labels.push_back(
+            SampleLabelingDocumentLabel{
+                .code = static_cast<std::int32_t>(label.code),
+                .name = label.name,
+                .shortcut = label.shortcut == '\0'
+                    ? std::string{}
+                    : std::string(1, label.shortcut)});
+    }
+
+    if (!ValidateSampleLabelingDocumentFailFast(
+             replacement)
+             .valid()) {
+        if (error_message != nullptr) {
+            *error_message =
+                "canonical ASDF metadata publication produced an invalid document";
+        }
+        return std::nullopt;
+    }
+    return replacement;
+}
+
 bool CanDeleteTask(const SampleLabelingTask& task)
 {
     if (!task.output_path) {
@@ -386,12 +461,36 @@ SampleLabelingController::SampleLabelingController(
     StateCacheLoader state_cache_loader,
     LegacyOutputPublisher legacy_output_publisher,
     CanonicalValuesPublisher canonical_values_publisher)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          std::move(legacy_output_publisher),
+          std::move(canonical_values_publisher),
+          [](const SampleLabelingAsdfOpenSnapshot& snapshot,
+             const SampleLabelingDocument& document,
+             const SampleLabelingCanonicalSourceDescriptor& source) {
+              return RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                  snapshot,
+                  document,
+                  SampleLabelingCompatibilityView(source));
+          })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    LegacyOutputPublisher legacy_output_publisher,
+    CanonicalValuesPublisher canonical_values_publisher,
+    CanonicalDocumentPublisher canonical_document_publisher)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
       legacy_output_publisher_(
           std::move(legacy_output_publisher)),
       canonical_values_publisher_(
           std::move(canonical_values_publisher)),
+      canonical_document_publisher_(
+          std::move(canonical_document_publisher)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -2376,9 +2475,7 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
                 *task,
                 ActiveSource(),
                 active_task_leases_,
-                active_asdf_snapshot_
-                    ? &*active_asdf_snapshot_
-                    : nullptr);
+                &active_asdf_snapshot_);
         result.output_save_attempted =
             attempt.publication.attempted;
         result.output_saved =
@@ -2428,7 +2525,8 @@ SampleLabelingController::PersistTaskOutput(
     SampleLabelingTask& task,
     const SourceState* source_state,
     TaskEditLeaseSet& leases,
-    SampleLabelingAsdfOpenSnapshot* asdf_snapshot)
+    std::optional<SampleLabelingAsdfOpenSnapshot>*
+        asdf_snapshot)
 {
     TaskOutputPersistenceAttempt attempt;
     switch (task.output_format) {
@@ -2489,10 +2587,11 @@ SampleLabelOutputPublicationResult
 SampleLabelingController::PersistCanonicalTaskOutput(
     SampleLabelingTask& task,
     const SourceState* source_state,
-    SampleLabelingAsdfOpenSnapshot* asdf_snapshot)
+    std::optional<SampleLabelingAsdfOpenSnapshot>*
+        asdf_snapshot)
 {
     SampleLabelOutputPublicationResult result;
-    if (task.metadata_save_pending ||
+    if (!task.metadata_save_pending &&
         task.pending_sample_indices.empty()) {
         return result;
     }
@@ -2510,26 +2609,86 @@ SampleLabelingController::PersistCanonicalTaskOutput(
     if (!task.output_path ||
         !task.values_are_authoritative ||
         asdf_snapshot == nullptr ||
+        !*asdf_snapshot ||
         !OutputPathMatches(
             *task.output_path,
-            asdf_snapshot->path()) ||
-        asdf_snapshot->document().labeling.id !=
+            (*asdf_snapshot)->path()) ||
+        (*asdf_snapshot)->document().labeling.id !=
             task.task_id ||
-        asdf_snapshot->document().annotation.values.size() !=
+        (*asdf_snapshot)->document().annotation.values.size() !=
             task.values.size() ||
         (source_state != nullptr &&
          source_state->sample_count != task.values.size())) {
         fail(
-            "canonical ASDF value publication does not have a matching durable owner generation");
+            "canonical ASDF publication does not have a matching durable owner generation");
         return result;
     }
+
+    SampleLabelingAsdfOpenSnapshot& snapshot =
+        **asdf_snapshot;
+    if (task.metadata_save_pending) {
+        if (!active_source_descriptor_ ||
+            !active_source_identity_ ||
+            active_source_descriptor_->base_identity !=
+                *active_source_identity_ ||
+            active_source_descriptor_->base_identity !=
+                snapshot.document().source.base_identity ||
+            active_source_descriptor_->sample_count !=
+                task.values.size()) {
+            fail(
+                "canonical ASDF metadata publication does not have a matching source generation");
+            return result;
+        }
+
+        std::string replacement_error;
+        std::optional<SampleLabelingDocument> replacement =
+            BuildCanonicalDocumentReplacement(
+                task,
+                snapshot,
+                &replacement_error);
+        if (!replacement) {
+            fail(
+                replacement_error.empty()
+                    ? "could not build the canonical ASDF metadata generation"
+                    : std::move(replacement_error),
+                false);
+            return result;
+        }
+
+        SampleLabelingAsdfStoreGenerationWriteResult generation =
+            canonical_document_publisher_(
+                snapshot,
+                *replacement,
+                *active_source_descriptor_);
+        const bool published =
+            generation.document_replaced &&
+            generation.succeeded();
+        result.artifacts_replaced =
+            generation.document_replaced;
+        if (generation.document_replaced) {
+            *asdf_snapshot = std::move(generation.snapshot);
+        }
+        if (!published) {
+            fail(
+                generation.error.message.empty()
+                    ? "could not publish and reopen canonical ASDF metadata"
+                    : std::move(generation.error.message));
+            return result;
+        }
+
+        result.published = true;
+        MarkSampleLabelTaskPersisted(
+            task,
+            SampleLabelSaveStateKind::AutosavedToOutput);
+        return result;
+    }
+
     if (!CanonicalTaskMetadataMatchesSnapshot(
             task,
-            asdf_snapshot->document())) {
+            snapshot.document())) {
         task.metadata_save_pending = true;
         fail(
-            "canonical ASDF metadata changed and requires a metadata-capable publisher",
-            false);
+            "canonical ASDF metadata changed and requires a full-document publication");
         return result;
     }
 
@@ -2552,7 +2711,7 @@ SampleLabelingController::PersistCanonicalTaskOutput(
     }
     const SampleLabelingAsdfStoreWriteResult write =
         canonical_values_publisher_(
-            *asdf_snapshot,
+            snapshot,
             values);
     if (!write.succeeded()) {
         fail(
@@ -2851,6 +3010,11 @@ SampleLabelingController::TaskOutputRetryResult
 SampleLabelingController::TryRetryOutputSaves()
 {
     EnsureStateCacheLoaded();
+    // A metadata rewrite invalidates its input snapshot as soon as atomic
+    // replacement succeeds. If the mandatory reopen failed, restore the
+    // selected owner from the current file generation before any retry can
+    // publish again.
+    static_cast<void>(RestoreActiveTaskLease());
 
     TaskOutputRetryResult result;
     bool cache_changed = false;
@@ -2947,12 +3111,8 @@ SampleLabelingController::TryRetryOutputSaves()
                     &state,
                     persistence_leases,
                     is_active_task
-                        ? (active_asdf_snapshot_
-                               ? &*active_asdf_snapshot_
-                               : nullptr)
-                        : (preparation.asdf_snapshot
-                               ? &*preparation.asdf_snapshot
-                               : nullptr));
+                        ? &active_asdf_snapshot_
+                        : &preparation.asdf_snapshot);
             const bool lease_is_current =
                 attempt.lease_status ==
                 ExclusiveFileLeaseAcquireStatus::Acquired;
@@ -4189,22 +4349,24 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         }
         return true;
     }
-    const bool canonical_source_generation_stale =
+    const bool canonical_generation_requires_reopen =
         active->output_format ==
             SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
-        active_asdf_snapshot_ && active_source_descriptor_ &&
-        (!active_asdf_snapshot_source_descriptor_generation_ ||
-             *active_asdf_snapshot_source_descriptor_generation_ !=
-                 active_source_descriptor_generation_);
+        (!active_asdf_snapshot_ ||
+         (active_source_descriptor_ &&
+          (!active_asdf_snapshot_source_descriptor_generation_ ||
+           *active_asdf_snapshot_source_descriptor_generation_ !=
+               active_source_descriptor_generation_)));
     const std::string revalidating_source_identity =
-        canonical_source_generation_stale
+        canonical_generation_requires_reopen
         ? *active_source_identity_
         : std::string{};
     const std::string revalidating_task_id =
-        canonical_source_generation_stale
+        canonical_generation_requires_reopen
         ? active->task_id
         : std::string{};
-    if (active_source_identity_ &&
+    if (!canonical_generation_requires_reopen &&
+        active_source_identity_ &&
         ActiveTaskLeaseMatches(
             *active_source_identity_,
             *active)) {
@@ -4216,11 +4378,11 @@ bool SampleLabelingController::RestoreActiveTaskLease()
             *active_source_identity_);
         return false;
     }
-    if (canonical_source_generation_stale) {
+    if (canonical_generation_requires_reopen) {
         // Preserve the already-held owner leases while the changed source
-        // generation is reopened. PrepareTaskActivation can adopt this set;
-        // a failure releases it unless an unpersisted task recovery patch
-        // still needs protection.
+        // generation or a post-rewrite missing snapshot is reopened.
+        // PrepareTaskActivation can adopt this set; a failure releases it
+        // unless an unpersisted task recovery patch still needs protection.
         DeferActiveTaskLeases();
     }
     TaskActivationPreparation preparation =
@@ -4278,7 +4440,7 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         }
         state->active_task_id.reset();
         ReleaseActiveTaskLease();
-        if (canonical_source_generation_stale) {
+        if (canonical_generation_requires_reopen) {
             ReleaseDeferredTaskLeaseUnlessRecoveryPending(
                 revalidating_source_identity,
                 revalidating_task_id);
