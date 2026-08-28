@@ -25,6 +25,30 @@ constexpr auto kWorkflowStateSaveDebounce = 500ms;
 constexpr auto kWorkflowStateSaveRetry = 2s;
 constexpr std::size_t kMaxLabelUndoEntries = 256;
 
+SampleLabelingController::LegacyOutputPublisher
+DefaultLegacyOutputPublisher()
+{
+    return [](
+               SampleLabelingTask& task,
+               const SampleLabelResultMetadataSource* source) {
+        return PublishLegacySampleLabelingTaskOutput(
+            task,
+            source);
+    };
+}
+
+SampleLabelingController::CanonicalValuesPublisher
+DefaultCanonicalValuesPublisher()
+{
+    return [](
+               SampleLabelingAsdfOpenSnapshot& snapshot,
+               std::span<const std::int32_t> values) {
+        return RewriteSampleLabelingAsdfValuesAtomically(
+            snapshot,
+            values);
+    };
+}
+
 struct ActiveSampleWorkflowIdentity {
     bool present = false;
     std::string source_identity;
@@ -327,8 +351,32 @@ SampleWorkflowCoordinator::SampleWorkflowCoordinator(
     std::filesystem::path workflow_state_cache_path,
     SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
     WorkflowStateCacheLoader workflow_state_cache_loader)
+    : SampleWorkflowCoordinator(
+          std::move(navigation_state_cache_path),
+          std::move(labeling_state_cache_path),
+          std::move(workflow_state_cache_path),
+          std::move(labeling_state_cache_loader),
+          std::move(workflow_state_cache_loader),
+          {})
+{
+}
+
+SampleWorkflowCoordinator::SampleWorkflowCoordinator(
+    std::filesystem::path navigation_state_cache_path,
+    std::filesystem::path labeling_state_cache_path,
+    std::filesystem::path workflow_state_cache_path,
+    SampleLabelingController::StateCacheLoader labeling_state_cache_loader,
+    WorkflowStateCacheLoader workflow_state_cache_loader,
+    SampleLabelingController::CanonicalValuesPublisher
+        canonical_values_publisher)
     : navigation_(std::move(navigation_state_cache_path)),
-      labeling_(std::move(labeling_state_cache_path), std::move(labeling_state_cache_loader)),
+      labeling_(
+          std::move(labeling_state_cache_path),
+          std::move(labeling_state_cache_loader),
+          DefaultLegacyOutputPublisher(),
+          canonical_values_publisher
+              ? std::move(canonical_values_publisher)
+              : DefaultCanonicalValuesPublisher()),
       workflow_state_cache_path_(std::move(workflow_state_cache_path)),
       workflow_state_cache_loader_(std::move(workflow_state_cache_loader)),
       workflow_state_persistence_(kWorkflowStateSaveDebounce, kWorkflowStateSaveRetry)
@@ -2068,10 +2116,19 @@ SampleWorkflowCoordinator::RunMaintenance(
         labeling_.active_source_tasks_generation();
     SampleWorkflowTransitionOutcome outcome;
     navigation_.RunMaintenance(now);
-    labeling_.RunMaintenance(now);
+    const SampleLabelingMaintenanceResult
+        labeling_maintenance =
+            labeling_.RunMaintenance(now);
+    const bool canonical_attachment_refreshed =
+        labeling_maintenance.canonical_output_published &&
+        SynchronizeActiveCanonicalAsdfAttachment();
     if (labeling_.active_source_tasks_generation() !=
-        labeling_generation_before) {
+            labeling_generation_before ||
+        labeling_maintenance.canonical_output_published) {
         DiscardPreparedViewCaches();
+        outcome.action.navigation_inputs_changed =
+            canonical_attachment_refreshed ||
+            outcome.action.navigation_inputs_changed;
         ApplyNavigationInputEffects(
             outcome,
             ReconcileNavigationInputs(
@@ -2469,6 +2526,12 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::ApplyLabelWriteResult
 
     if (record_undo) {
         RecordLabelUndo(write);
+    }
+
+    if (result.operation.output_saved) {
+        outcome.action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            outcome.action.navigation_inputs_changed;
     }
 
     const SampleLabelingTask* task = labeling_.View().active_task;

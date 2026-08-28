@@ -320,12 +320,18 @@ public:
         std::filesystem::path source_session_cache,
         std::filesystem::path navigation_cache,
         std::filesystem::path labeling_cache,
-        std::filesystem::path workflow_cache)
+        std::filesystem::path workflow_cache,
+        specforge::SampleLabelingController::
+            CanonicalValuesPublisher
+                canonical_values_publisher = {})
         : specforge::SourceCollectionSession(
               source_session_cache,
               navigation_cache,
               labeling_cache,
-              workflow_cache),
+              workflow_cache,
+              specforge::SampleLabelingStateCacheLoadPolicy::
+                  AllowPersistentOutputs,
+              std::move(canonical_values_publisher)),
           preparation_(PreparationAdapters(
               std::move(loader),
               navigation_cache,
@@ -3474,6 +3480,7 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
         "canonical owner cache fixture should save");
 
     std::vector<std::size_t> loaded_indices;
+    std::size_t canonical_publication_attempts = 0;
     PreparedSession session(
         [&loaded_indices, source_path](
             const std::filesystem::path& path,
@@ -3492,7 +3499,29 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             "_canonical_owner_navigation.json"),
         labeling_cache,
         UniqueTempPath(
-            "_canonical_owner_workflow.json"));
+            "_canonical_owner_workflow.json"),
+        [&canonical_publication_attempts](
+            specforge::SampleLabelingAsdfOpenSnapshot&
+                owner_snapshot,
+            std::span<const std::int32_t> values) {
+            ++canonical_publication_attempts;
+            if (canonical_publication_attempts == 1) {
+                return specforge::
+                    sample_labeling_asdf_store_test_seam::
+                        RewriteWithBeforeReplace(
+                            owner_snapshot,
+                            values,
+                            [](const std::filesystem::path&,
+                               const std::filesystem::path&) {
+                                throw std::runtime_error(
+                                    "injected canonical session publication failure");
+                            });
+            }
+            return specforge::
+                RewriteSampleLabelingAsdfValuesAtomically(
+                    owner_snapshot,
+                    values);
+        });
     const specforge::SourceCollectionSessionResult opened =
         session.Open(
             source_path,
@@ -3610,17 +3639,136 @@ void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
             generation_b_filter->sample_count == 3,
         "filter projection should follow the hydrated controller generation instead of the stale attached document");
 
+    const std::string canonical_source_id =
+        after_activation.filter.available_sources[0].id;
+    Require(
+        Submit(
+            session,
+            AddSampleFilterSource(
+                canonical_source_id))
+            .action.workflow_changed,
+        "canonical retry fixture should add the owner as a filter source");
+    Require(
+        Submit(
+            session,
+            SetSampleSortSource(
+                "source-order"))
+            .action.navigation_inputs_changed,
+        "canonical retry fixture should activate an existing sorting source");
+
     const specforge::SourceCollectionSessionResult edited =
         Submit(
             session,
             AssignActiveLabelToCurrentSample(5));
+    const specforge::SourceCollectionSessionView after_edit =
+        session.View();
     Require(
         edited.label_write &&
             edited.label_write->write.changed &&
             edited.label_write->operation.state_saved &&
-            ReadBinaryFile(annotation_path) ==
-                newer_generation_bytes,
-        "canonical owner edits should checkpoint only the local pending overlay until the ASDF writer is connected");
+            edited.label_write->operation.output_save_attempted &&
+            !edited.label_write->operation.output_saved &&
+            edited.label_write->operation.output_retry_scheduled &&
+            canonical_publication_attempts == 1,
+        "canonical session edit should retain its durable overlay after the injected publication failure");
+    Require(
+        ReadBinaryFile(annotation_path) ==
+            newer_generation_bytes,
+        "failed canonical publication should retain the old trusted ASDF generation");
+    Require(
+        after_edit.navigation.current_annotations.size() == 1 &&
+            after_edit.navigation.current_annotations[0]
+                    .display_text ==
+                "bad generation B (5)",
+        "failed canonical publication should still present the newest runtime overlay while the task is active");
+
+    specforge::SourceCollectionSessionResult maintenance;
+    bool retry_published = false;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const std::optional<
+            specforge::LocalUserStateSaveScheduler::
+                TimePoint>
+            deadline = session.NextMaintenanceDeadline();
+        Require(
+            deadline.has_value(),
+            "failed canonical publication should expose a retry deadline");
+        maintenance = session.RunMaintenance(*deadline);
+        if (canonical_publication_attempts >= 2) {
+            retry_published = true;
+            break;
+        }
+    }
+
+    const specforge::SampleLabelingAsdfReadResult
+        persisted_generation =
+            specforge::ReadSampleLabelingAsdfDocument(
+                annotation_path);
+    const specforge::SourceCollectionSessionView after_retry =
+        session.View();
+    const auto refreshed_filter_source = std::find_if(
+        after_retry.filter.sources.begin(),
+        after_retry.filter.sources.end(),
+        [&canonical_source_id](const auto& source) {
+            return source.id == canonical_source_id;
+        });
+    const auto find_refreshed_option =
+        [&refreshed_filter_source, &after_retry](
+            std::string_view key) {
+            if (refreshed_filter_source ==
+                after_retry.filter.sources.end()) {
+                return static_cast<const specforge::
+                    SampleFilterValueOption*>(nullptr);
+            }
+            const auto option = std::find_if(
+                refreshed_filter_source->options.begin(),
+                refreshed_filter_source->options.end(),
+                [key](const auto& candidate) {
+                    return candidate.key == key;
+                });
+            return option ==
+                    refreshed_filter_source->options.end()
+                ? nullptr
+                : &*option;
+        };
+    const specforge::SampleFilterValueOption*
+        refreshed_bad = find_refreshed_option("5");
+    const specforge::SampleFilterValueOption*
+        refreshed_good = find_refreshed_option("9");
+    Require(
+        retry_published &&
+            maintenance.action.navigation_inputs_changed &&
+            persisted_generation.succeeded() &&
+            persisted_generation.document->annotation.values ==
+                std::vector<std::int32_t>({5, 9, 9}) &&
+            persisted_generation.document->labeling.name ==
+                newer_document.labeling.name,
+        "maintenance should expose canonical retry publication and persist only the newest values generation");
+    Require(
+        refreshed_filter_source !=
+                after_retry.filter.sources.end() &&
+            refreshed_bad != nullptr &&
+            refreshed_bad->sample_count == 1 &&
+            refreshed_good != nullptr &&
+            refreshed_good->sample_count == 2 &&
+            after_retry.sorting.active &&
+            after_retry.sorting.active_source_id ==
+                "source-order",
+        "canonical retry publication should rebuild filter and sorting projections from the advanced generation");
+
+    const specforge::SourceCollectionSessionResult deactivated =
+        Submit(
+            session,
+            DeactivateActiveLabelingTask());
+    const specforge::SourceCollectionSessionView after_deactivation =
+        session.View();
+    Require(
+        deactivated.action.workflow_changed &&
+            !after_deactivation.labeling.has_active_task &&
+            after_deactivation.navigation.current_annotations.size() == 1 &&
+            after_deactivation.navigation.current_annotations[0]
+                    .display_text ==
+                "bad generation B (5)",
+        "deactivation after canonical retry should retain the newly published attached generation");
 }
 
 void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()

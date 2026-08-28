@@ -6,6 +6,7 @@
 #include <ios>
 #include <new>
 #include <utility>
+#include <vector>
 
 namespace specforge {
 namespace {
@@ -322,7 +323,7 @@ SampleLabelingAsdfOpenSnapshot::SampleLabelingAsdfOpenSnapshot(
     SampleLabelingAsdfDurableBase durable_base)
     : path_(std::move(path)),
       document_(
-          std::make_shared<const SampleLabelingDocument>(
+          std::make_shared<SampleLabelingDocument>(
               std::move(document))),
       durable_base_(std::move(durable_base))
 {
@@ -396,10 +397,34 @@ WriteSampleLabelingAsdfDocumentAtomically(
 
 SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    SampleLabelingAsdfOpenSnapshot& snapshot,
     std::span<const std::int32_t> values) noexcept
 {
-    return RewriteAtomically(snapshot, values, {});
+    try {
+        std::vector<std::int32_t> published_values(
+            values.begin(),
+            values.end());
+        SampleLabelingAsdfStoreWriteResult result =
+            RewriteAtomically(snapshot, values, {});
+        if (result.succeeded()) {
+            snapshot.document_->annotation.values =
+                std::move(published_values);
+        }
+        return result;
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling snapshot generation allocation failed")};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling snapshot generation failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling snapshot generation failed")};
+    }
 }
 
 SampleLabelingAsdfStoreWriteResult

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -43,6 +44,12 @@ bool ShouldRetryOutputSave(const SampleLabelingTask& task)
             task.save_state.kind ==
                 SampleLabelSaveStateKind::Failed;
     case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
+        return !task.metadata_save_pending &&
+            !task.pending_sample_indices.empty() &&
+            (task.save_state.kind ==
+                 SampleLabelSaveStateKind::Pending ||
+             task.save_state.kind ==
+                 SampleLabelSaveStateKind::Failed);
     case SampleLabelingOutputArtifactFormat::None:
         return false;
     }
@@ -243,6 +250,38 @@ SampleLabelResultMetadataSource SourceMetadataFromState(const SampleLabelingCont
     return source;
 }
 
+bool CanonicalTaskMetadataMatchesSnapshot(
+    const SampleLabelingTask& task,
+    const SampleLabelingDocument& document)
+{
+    if (task.task_id != document.labeling.id ||
+        task.task_name != document.labeling.name ||
+        task.label_set.labels.size() !=
+            document.labeling.labels.size()) {
+        return false;
+    }
+    for (std::size_t index = 0;
+         index < task.label_set.labels.size();
+         ++index) {
+        const SampleLabelDefinition& task_label =
+            task.label_set.labels[index];
+        const SampleLabelingDocumentLabel& document_label =
+            document.labeling.labels[index];
+        const std::string task_shortcut =
+            task_label.shortcut == '\0'
+            ? std::string{}
+            : std::string(1, task_label.shortcut);
+        if (static_cast<std::int64_t>(task_label.code) !=
+                static_cast<std::int64_t>(
+                    document_label.code) ||
+            task_label.name != document_label.name ||
+            task_shortcut != document_label.shortcut) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool CanDeleteTask(const SampleLabelingTask& task)
 {
     if (!task.output_path) {
@@ -329,10 +368,30 @@ SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
     LegacyOutputPublisher legacy_output_publisher)
+    : SampleLabelingController(
+          std::move(state_cache_path),
+          std::move(state_cache_loader),
+          std::move(legacy_output_publisher),
+          [](SampleLabelingAsdfOpenSnapshot& snapshot,
+             std::span<const std::int32_t> values) {
+              return RewriteSampleLabelingAsdfValuesAtomically(
+                  snapshot,
+                  values);
+          })
+{
+}
+
+SampleLabelingController::SampleLabelingController(
+    std::filesystem::path state_cache_path,
+    StateCacheLoader state_cache_loader,
+    LegacyOutputPublisher legacy_output_publisher,
+    CanonicalValuesPublisher canonical_values_publisher)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
       legacy_output_publisher_(
           std::move(legacy_output_publisher)),
+      canonical_values_publisher_(
+          std::move(canonical_values_publisher)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -1460,7 +1519,8 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         persistence_attempt = PersistTaskOutput(
             task,
             state,
-            preparation.leases);
+            preparation.leases,
+            nullptr);
         if (persistence_attempt.lease_status !=
             ExclusiveFileLeaseAcquireStatus::Acquired) {
             std::string recovery_error;
@@ -2001,7 +2061,8 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     persistence_attempt = PersistTaskOutput(
         candidate,
         state,
-        candidate_output_lease);
+        candidate_output_lease,
+        nullptr);
     const SampleLabelOutputPublicationResult& publication =
         persistence_attempt.publication;
 
@@ -2314,7 +2375,10 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
             PersistTaskOutput(
                 *task,
                 ActiveSource(),
-                active_task_leases_);
+                active_task_leases_,
+                active_asdf_snapshot_
+                    ? &*active_asdf_snapshot_
+                    : nullptr);
         result.output_save_attempted =
             attempt.publication.attempted;
         result.output_saved =
@@ -2363,7 +2427,8 @@ SampleLabelingController::TaskOutputPersistenceAttempt
 SampleLabelingController::PersistTaskOutput(
     SampleLabelingTask& task,
     const SourceState* source_state,
-    TaskEditLeaseSet& leases)
+    TaskEditLeaseSet& leases,
+    SampleLabelingAsdfOpenSnapshot* asdf_snapshot)
 {
     TaskOutputPersistenceAttempt attempt;
     switch (task.output_format) {
@@ -2378,7 +2443,8 @@ SampleLabelingController::PersistTaskOutput(
         attempt.publication =
             PersistCanonicalTaskOutput(
                 task,
-                source_state);
+                source_state,
+                asdf_snapshot);
         break;
     case SampleLabelingOutputArtifactFormat::None:
         attempt.publication.message =
@@ -2422,14 +2488,86 @@ SampleLabelingController::PersistLegacyTaskOutput(
 SampleLabelOutputPublicationResult
 SampleLabelingController::PersistCanonicalTaskOutput(
     SampleLabelingTask& task,
-    const SourceState* source_state)
+    const SourceState* source_state,
+    SampleLabelingAsdfOpenSnapshot* asdf_snapshot)
 {
-    static_cast<void>(task);
-    static_cast<void>(source_state);
-    // Canonical publication is deliberately an empty slot in this refactor.
-    // The durable pending overlay remains the only write performed here until
-    // the ASDF publisher is connected in a later change.
-    return {};
+    SampleLabelOutputPublicationResult result;
+    if (task.metadata_save_pending ||
+        task.pending_sample_indices.empty()) {
+        return result;
+    }
+
+    result.attempted = true;
+    const auto fail = [&task, &result](
+                          std::string message,
+                          bool retryable = true) {
+        result.retryable = retryable;
+        result.message = std::move(message);
+        MarkSampleLabelTaskSaveFailed(
+            task,
+            result.message);
+    };
+    if (!task.output_path ||
+        !task.values_are_authoritative ||
+        asdf_snapshot == nullptr ||
+        !OutputPathMatches(
+            *task.output_path,
+            asdf_snapshot->path()) ||
+        asdf_snapshot->document().labeling.id !=
+            task.task_id ||
+        asdf_snapshot->document().annotation.values.size() !=
+            task.values.size() ||
+        (source_state != nullptr &&
+         source_state->sample_count != task.values.size())) {
+        fail(
+            "canonical ASDF value publication does not have a matching durable owner generation");
+        return result;
+    }
+    if (!CanonicalTaskMetadataMatchesSnapshot(
+            task,
+            asdf_snapshot->document())) {
+        task.metadata_save_pending = true;
+        fail(
+            "canonical ASDF metadata changed and requires a metadata-capable publisher",
+            false);
+        return result;
+    }
+
+    std::vector<std::int32_t> values;
+    values.reserve(task.values.size());
+    for (const int value : task.values) {
+        const std::int64_t widened =
+            static_cast<std::int64_t>(value);
+        if (widened <
+                std::numeric_limits<std::int32_t>::min() ||
+            widened >
+                std::numeric_limits<std::int32_t>::max()) {
+            fail(
+                "canonical ASDF label value is outside the int32 range",
+                false);
+            return result;
+        }
+        values.push_back(
+            static_cast<std::int32_t>(value));
+    }
+    const SampleLabelingAsdfStoreWriteResult write =
+        canonical_values_publisher_(
+            *asdf_snapshot,
+            values);
+    if (!write.succeeded()) {
+        fail(
+            write.error.message.empty()
+                ? "could not publish canonical ASDF label values"
+                : write.error.message);
+        return result;
+    }
+
+    result.published = true;
+    result.artifacts_replaced = true;
+    MarkSampleLabelTaskPersisted(
+        task,
+        SampleLabelSaveStateKind::AutosavedToOutput);
+    return result;
 }
 
 bool SampleLabelingController::CommitTaskRecoveryCheckpoint(
@@ -2709,12 +2847,12 @@ void SampleLabelingController::QueueOutputRetry()
     output_retry_scheduler_.MarkDirty();
 }
 
-bool SampleLabelingController::TryRetryOutputSaves()
+SampleLabelingController::TaskOutputRetryResult
+SampleLabelingController::TryRetryOutputSaves()
 {
     EnsureStateCacheLoaded();
 
-    bool attempted = false;
-    bool all_succeeded = true;
+    TaskOutputRetryResult result;
     bool cache_changed = false;
     for (auto& [identity, state] : sources_) {
         for (std::size_t task_index = 0;
@@ -2725,7 +2863,25 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 ++task_index;
                 continue;
             }
-            attempted = true;
+            // A canonical owner can only be reopened against the descriptor
+            // of its active source. Do not feed an inactive source through
+            // the current source's descriptor or keep the global scheduler
+            // retrying that guaranteed mismatch. Source activation re-arms
+            // pending owners after installing their descriptor.
+            if (task.output_format ==
+                    SampleLabelingOutputArtifactFormat::
+                        CanonicalAsdf &&
+                (!active_source_identity_ ||
+                 *active_source_identity_ != identity ||
+                 !active_source_descriptor_ ||
+                 active_source_descriptor_->base_identity !=
+                     identity ||
+                 active_source_descriptor_->sample_count !=
+                     state.sample_count)) {
+                ++task_index;
+                continue;
+            }
+            result.attempted = true;
             const bool is_active_task =
                 active_source_identity_ &&
                 *active_source_identity_ == identity &&
@@ -2742,7 +2898,7 @@ bool SampleLabelingController::TryRetryOutputSaves()
                     false);
                 if (preparation.lease_status !=
                     ExclusiveFileLeaseAcquireStatus::Acquired) {
-                    all_succeeded = false;
+                    result.all_succeeded = false;
                     ++task_index;
                     continue;
                 }
@@ -2761,7 +2917,7 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 if (preparation.refresh_status !=
                         TaskRefreshStatus::Ready ||
                     !preparation.task) {
-                    all_succeeded = false;
+                    result.all_succeeded = false;
                     ++task_index;
                     continue;
                 }
@@ -2789,15 +2945,28 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 PersistTaskOutput(
                     task,
                     &state,
-                    persistence_leases);
+                    persistence_leases,
+                    is_active_task
+                        ? (active_asdf_snapshot_
+                               ? &*active_asdf_snapshot_
+                               : nullptr)
+                        : (preparation.asdf_snapshot
+                               ? &*preparation.asdf_snapshot
+                               : nullptr));
             const bool lease_is_current =
                 attempt.lease_status ==
                 ExclusiveFileLeaseAcquireStatus::Acquired;
-            all_succeeded =
+            result.all_succeeded =
                 (attempt.publication.published ||
                  !attempt.publication.retryable) &&
                 lease_is_current &&
-                all_succeeded;
+                result.all_succeeded;
+            result.canonical_output_published =
+                result.canonical_output_published ||
+                (task.output_format ==
+                     SampleLabelingOutputArtifactFormat::
+                         CanonicalAsdf &&
+                 attempt.publication.published);
             if (!lease_is_current &&
                 is_active_task) {
                 state.active_task_id.reset();
@@ -2819,15 +2988,15 @@ bool SampleLabelingController::TryRetryOutputSaves()
         }
     }
 
-    if (!attempted) {
-        return true;
+    if (!result.attempted) {
+        return result;
     }
 
     if (cache_changed) {
         QueueStateSave();
     }
     Touch();
-    return all_succeeded;
+    return result;
 }
 
 std::optional<SampleLabelingTask>
@@ -4322,19 +4491,25 @@ SampleLabelingController::LatestCacheHasOutputConflict(
         *active_source_identity_);
 }
 
-bool SampleLabelingController::MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now)
+SampleLabelingMaintenanceResult
+SampleLabelingController::MaybeRetryOutputSaves(
+    LocalUserStateSaveScheduler::TimePoint now)
 {
     if (!output_retry_scheduler_.ShouldAttemptSave(now)) {
-        return false;
+        return {};
     }
 
-    const bool all_succeeded = TryRetryOutputSaves();
-    if (all_succeeded) {
+    const TaskOutputRetryResult retry =
+        TryRetryOutputSaves();
+    if (retry.all_succeeded) {
         output_retry_scheduler_.MarkSaveSucceeded();
     } else {
         output_retry_scheduler_.MarkSaveFailed();
     }
-    return true;
+    return SampleLabelingMaintenanceResult{
+        .output_retry_attempted = true,
+        .canonical_output_published =
+            retry.canonical_output_published};
 }
 
 bool SampleLabelingController::TrySaveStateCache(
@@ -4433,27 +4608,30 @@ bool SampleLabelingController::TrySaveStateCache(
     return saved;
 }
 
-void SampleLabelingController::RunMaintenance(LocalUserStateSaveScheduler::TimePoint now)
+SampleLabelingMaintenanceResult
+SampleLabelingController::RunMaintenance(
+    LocalUserStateSaveScheduler::TimePoint now)
 {
     // Output retry is a consumer of the pending overlay. Never let it run
     // ahead of a dirty cache patch that may contain a newer generation.
     if (state_cache_save_scheduler_.dirty()) {
         if (!state_cache_save_scheduler_.ShouldAttemptSave(now)) {
-            return;
+            return {};
         }
         if (!TrySaveStateCache()) {
             state_cache_save_scheduler_.MarkSaveFailed();
-            return;
+            return {};
         }
     }
 
-    const bool output_retry_attempted =
+    SampleLabelingMaintenanceResult result =
         MaybeRetryOutputSaves(now);
-    if (output_retry_attempted &&
+    if (result.output_retry_attempted &&
         state_cache_save_scheduler_.dirty() &&
         !TrySaveStateCache()) {
         state_cache_save_scheduler_.MarkSaveFailed();
     }
+    return result;
 }
 
 std::optional<LocalUserStateSaveScheduler::TimePoint> SampleLabelingController::NextMaintenanceDeadline() const

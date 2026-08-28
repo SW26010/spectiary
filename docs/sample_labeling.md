@@ -802,9 +802,23 @@ remembered position, and sparse pending overlays are applied afterward. The
 controller keeps the resulting `SampleLabelingAsdfOpenSnapshot` as the active
 durable generation only in memory; it is never serialized into the state cache.
 Malformed documents, source/roster mismatches, and task-id mismatches fail the
-activation without falling back to legacy NPY hydration. This hydration slice
-checkpoints new edits only as pending local overlays; publishing those edits to
-the ASDF generation and creating new ASDF owners remain later writer steps.
+activation without falling back to legacy NPY hydration. Assigning or clearing
+values first commits the newest sparse overlay to the local cache and then
+atomically publishes the complete authoritative values through the opened ASDF
+snapshot. Value-only publication reuses the durable metadata/roster prefix,
+advances the in-memory document generation, and clears the corresponding sparse
+overlay only after replacement succeeds. A failed replacement leaves the old
+ASDF generation trusted, retains the newest sparse overlay, and schedules an
+owner-aware retry. A successful foreground publication or maintenance retry
+synchronizes the attached annotation generation before the active snapshot can
+be released and invalidates filter/sort projections that may have consumed the
+older generation. Canonical retries run only while their source is active with
+its matching descriptor; switching sources parks the durable overlay and that
+source's next activation re-arms publication. Task names and label definitions
+remain outside this writer:
+when canonical metadata is pending, the values publisher and its retry path do
+not run. Creating new ASDF owners and publishing metadata changes remain later
+writer steps.
 
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save

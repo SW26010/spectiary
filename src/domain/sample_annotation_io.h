@@ -71,9 +71,11 @@ struct SampleAnnotationResult {
     // Legacy NPY companion metadata only. Canonical ASDF semantics live in
     // labeling_document and are not recast as sidecar-era fields.
     std::optional<SampleLabelResultMetadata> label_metadata;
-    // Present for self-contained canonical labeling documents. The immutable
-    // shared value keeps task, source, roster, and annotation semantics intact
-    // while existing annotation views consume their projected values/metadata.
+    // Present for self-contained canonical labeling documents. The read-only
+    // shared handle keeps task/source/roster metadata intact while annotation
+    // views consume projected values. A writable owner session may advance
+    // only the document's values after atomic publication; the coordinator
+    // invalidates affected projections in the same maintenance transition.
     std::shared_ptr<const SampleLabelingDocument> labeling_document;
     std::string metadata_warning;
     std::vector<SampleAnnotationValue> values;

@@ -33,13 +33,14 @@ struct SampleLabelingAsdfStoreError {
 };
 
 struct SampleLabelingAsdfStoreOpenResult;
+struct SampleLabelingAsdfStoreWriteResult;
 
-// One immutable, source-validated open generation. The document is the
-// generation read from disk; the durable base remains reusable for successive
-// value-only rewrites because those rewrites preserve its metadata/roster
-// prefix verbatim. A full write or any external replacement starts a new file
-// generation and requires reopening the store; using this old snapshot after
-// that point could restore its old metadata/roster prefix.
+// One source-validated open generation. The document advances after each
+// successful value-only rewrite, while the durable base remains reusable
+// because those rewrites preserve its metadata/roster prefix verbatim. A full
+// write or any external replacement starts a new file generation and requires
+// reopening the store; using this old snapshot after that point could restore
+// its old metadata/roster prefix.
 class SampleLabelingAsdfOpenSnapshot {
 public:
     SampleLabelingAsdfOpenSnapshot(
@@ -80,7 +81,11 @@ private:
         SampleLabelingAsdfDurableBase durable_base);
 
     std::filesystem::path path_;
-    std::shared_ptr<const SampleLabelingDocument> document_;
+    // The open generation owns one stable document object. Value-only
+    // publications replace only its values vector so metadata and an explicit
+    // roster are never copied on the autosave path. Public handles remain
+    // read-only and observe the advanced generation.
+    std::shared_ptr<SampleLabelingDocument> document_;
     SampleLabelingAsdfDurableBase durable_base_;
 
     friend struct SampleLabelingAsdfStoreOpenResult;
@@ -89,6 +94,10 @@ private:
         const std::filesystem::path& path,
         const SampleLabelingSourceCompatibility& source,
         const SampleLabelingAsdfReadCheckpoint& checkpoint) noexcept;
+    friend SampleLabelingAsdfStoreWriteResult
+    RewriteSampleLabelingAsdfValuesAtomically(
+        SampleLabelingAsdfOpenSnapshot& snapshot,
+        std::span<const std::int32_t> values) noexcept;
 };
 
 struct SampleLabelingAsdfStoreOpenResult {
@@ -141,7 +150,7 @@ RewriteSampleLabelingAsdfDocumentAtomically(
 // and every intervening publication is a value-only rewrite through it.
 [[nodiscard]] SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
-    const SampleLabelingAsdfOpenSnapshot& snapshot,
+    SampleLabelingAsdfOpenSnapshot& snapshot,
     std::span<const std::int32_t> values) noexcept;
 
 namespace sample_labeling_asdf_store_test_seam {

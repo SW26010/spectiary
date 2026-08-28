@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -368,6 +369,11 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
             path,
             CompatibleSource(document));
     Require(opened.succeeded(), "rewrite fixture should open");
+    const std::shared_ptr<const specforge::SampleLabelingDocument>
+        generation_handle =
+            opened.snapshot->document_handle();
+    const std::string* const roster_storage =
+        generation_handle->source.roster.sample_names.data();
     const std::vector<unsigned char> roster_before =
         FirstRawBlock(ReadAllBytes(path));
 
@@ -378,9 +384,18 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
             first_values);
     Require(
         first_rewrite.succeeded() &&
-            first_rewrite.roster_block_reused,
+            first_rewrite.roster_block_reused &&
+            opened.snapshot->document_handle().get() ==
+                generation_handle.get() &&
+            opened.snapshot->document().source.roster
+                    .sample_names.data() ==
+                roster_storage &&
+            opened.snapshot->document().annotation.values ==
+                std::vector<std::int32_t>(
+                    first_values.begin(),
+                    first_values.end()),
         first_rewrite.error.message.empty()
-            ? "value-only rewrite should reuse the roster block"
+            ? "value-only rewrite should reuse the roster block and advance the open snapshot"
             : first_rewrite.error.message);
     Require(
         FirstRawBlock(ReadAllBytes(path)) == roster_before,
@@ -392,9 +407,18 @@ void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
             *opened.snapshot,
             second_values);
     Require(
-        second_rewrite.succeeded() &&
-            second_rewrite.roster_block_reused,
-        "one opened durable base should support repeated rewrites");
+            second_rewrite.succeeded() &&
+            second_rewrite.roster_block_reused &&
+            opened.snapshot->document_handle().get() ==
+                generation_handle.get() &&
+            opened.snapshot->document().source.roster
+                    .sample_names.data() ==
+                roster_storage &&
+            opened.snapshot->document().annotation.values ==
+                std::vector<std::int32_t>(
+                    second_values.begin(),
+                    second_values.end()),
+        "one opened durable base should support repeated rewrites and track the current values generation");
     Require(
         FirstRawBlock(ReadAllBytes(path)) == roster_before,
         "repeated rewrites should keep the same encoded roster bytes");
@@ -561,9 +585,11 @@ void TestWriteFailuresPreserveThePreviousDocument()
         !rewrite_codec_failure.succeeded() &&
             rewrite_codec_failure.error.kind ==
                 specforge::SampleLabelingAsdfStoreErrorKind::CodecFailure &&
+            opened.snapshot->document().annotation.values ==
+                document.annotation.values &&
             ReadAllBytes(path) == original &&
             !HasTemporarySibling(path),
-        "a rewrite codec failure should preserve the previous document");
+        "a rewrite codec failure should preserve the previous document and open snapshot");
 
     bool metadata_publish_hook_reached = false;
     specforge::SampleLabelingDocument metadata_edit =

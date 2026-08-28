@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -99,6 +100,11 @@ struct SampleLabelingPreparedSourceActivationResult {
     bool prepared_task_projection_changed = false;
 };
 
+struct SampleLabelingMaintenanceResult {
+    bool output_retry_attempted = false;
+    bool canonical_output_published = false;
+};
+
 class SampleLabelingController {
 public:
     using SourceState = SampleLabelingSourceState;
@@ -108,6 +114,10 @@ public:
         std::function<SampleLabelOutputPublicationResult(
         SampleLabelingTask&,
         const SampleLabelResultMetadataSource*)>;
+    using CanonicalValuesPublisher =
+        std::function<SampleLabelingAsdfStoreWriteResult(
+            SampleLabelingAsdfOpenSnapshot&,
+            std::span<const std::int32_t>)>;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
@@ -118,6 +128,11 @@ public:
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
         LegacyOutputPublisher legacy_output_publisher);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalValuesPublisher canonical_values_publisher);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -189,7 +204,8 @@ public:
     [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();
     [[nodiscard]] SampleLabelingOperationResult DeleteActiveTask();
     [[nodiscard]] SampleLabelingOperationResult RememberActivePosition(std::size_t sample_index);
-    void RunMaintenance(LocalUserStateSaveScheduler::TimePoint now);
+    SampleLabelingMaintenanceResult RunMaintenance(
+        LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] std::optional<LocalUserStateSaveScheduler::TimePoint> NextMaintenanceDeadline() const;
     [[nodiscard]] bool FlushStateCache();
     [[nodiscard]] bool state_save_pending() const;
@@ -296,6 +312,12 @@ private:
         std::string lease_error;
     };
 
+    struct TaskOutputRetryResult {
+        bool attempted = false;
+        bool all_succeeded = true;
+        bool canonical_output_published = false;
+    };
+
     [[nodiscard]] SampleLabelingTask* ActiveTask();
     [[nodiscard]] const SampleLabelingTask* ActiveTask() const;
     [[nodiscard]] SampleLabelingTask* TemporaryTask();
@@ -332,7 +354,8 @@ private:
     [[nodiscard]] TaskOutputPersistenceAttempt PersistTaskOutput(
         SampleLabelingTask& task,
         const SourceState* source_state,
-        TaskEditLeaseSet& leases);
+        TaskEditLeaseSet& leases,
+        SampleLabelingAsdfOpenSnapshot* asdf_snapshot);
     [[nodiscard]] SampleLabelOutputPublicationResult
         PersistLegacyTaskOutput(
             SampleLabelingTask& task,
@@ -340,7 +363,8 @@ private:
     [[nodiscard]] SampleLabelOutputPublicationResult
         PersistCanonicalTaskOutput(
             SampleLabelingTask& task,
-            const SourceState* source_state);
+            const SourceState* source_state,
+            SampleLabelingAsdfOpenSnapshot* asdf_snapshot);
     [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
         std::string_view source_identity,
         const SourceState& state,
@@ -366,8 +390,11 @@ private:
     void EnsureStateCacheLoaded();
     void QueueStateSave();
     void QueueOutputRetry();
-    [[nodiscard]] bool TryRetryOutputSaves();
-    [[nodiscard]] bool MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now);
+    [[nodiscard]] TaskOutputRetryResult
+        TryRetryOutputSaves();
+    [[nodiscard]] SampleLabelingMaintenanceResult
+        MaybeRetryOutputSaves(
+            LocalUserStateSaveScheduler::TimePoint now);
     [[nodiscard]] bool TrySaveStateCache(
         bool wait_for_commit_lock = false);
     [[nodiscard]] TaskActivationPreparation
@@ -478,6 +505,7 @@ private:
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
     LegacyOutputPublisher legacy_output_publisher_;
+    CanonicalValuesPublisher canonical_values_publisher_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;

@@ -282,6 +282,15 @@ public:
             labeling_state_cache_load_policy =
                 SampleLabelingStateCacheLoadPolicy::
                     AllowPersistentOutputs);
+    SourceCollectionSession(
+        std::filesystem::path source_session_state_cache_path,
+        std::filesystem::path navigation_state_cache_path,
+        std::filesystem::path labeling_state_cache_path,
+        std::filesystem::path workflow_state_cache_path,
+        SampleLabelingStateCacheLoadPolicy
+            labeling_state_cache_load_policy,
+        SampleLabelingController::CanonicalValuesPublisher
+            canonical_values_publisher);
     ~SourceCollectionSession();
 
     SourceCollectionSession(SourceCollectionSession&&) noexcept;
