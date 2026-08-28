@@ -2709,6 +2709,8 @@ void TestTemporaryDraftRecoveryViewReportsFormalTaskIdentityConflict()
             3);
     formal_task.output_path =
         UniqueTempPath("_recovery_formal_task_identity_conflict.npy");
+    formal_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingSourceState source_state;
     source_state.sample_count = 3;
     source_state.tasks = {
@@ -3199,6 +3201,8 @@ void TestAnnotationLocalMatchRequiresSidecarTaskId()
     specforge::SampleLabelingTask local_task =
         specforge::CreateSampleLabelingTask("local-task", "Local task", 2);
     local_task.output_path = annotation_path;
+    local_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     local_task.values = {5, -1};
 
     specforge::SampleLabelingSourceState source_state;
@@ -7961,6 +7965,8 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
         draft != source->second.tasks.end() && draft->output_path,
         "navigation refresh fixture should find its formalized draft");
     draft->output_path.reset();
+    draft->output_format =
+        specforge::SampleLabelingOutputArtifactFormat::None;
     Require(
         specforge::SaveSampleLabelingStateCache(
             fixture.labeling_cache,

@@ -377,6 +377,8 @@ void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveState
 void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::path output_path)
 {
     task.output_path = std::move(output_path);
+    task.output_format =
+        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     task.pending_sample_indices.clear();
     task.metadata_save_pending = true;
 
@@ -428,6 +430,13 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     SampleLabelTaskPersistResult result;
     result.output_path_selected = task.output_path.has_value();
     if (!task.output_path) {
+        return result;
+    }
+    if (task.output_format !=
+        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) {
+        result.message =
+            "labeling output format is not owned by the legacy NPY writer";
+        MarkSampleLabelTaskSaveFailed(task, result.message);
         return result;
     }
 

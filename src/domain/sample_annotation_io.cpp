@@ -650,7 +650,10 @@ SampleAnnotationArtifactIdentities(
     bool resolve_physical_paths)
 {
     SampleAnnotationArtifactIdentitySet identities;
-    if (result_path.empty()) {
+    if (result_path.empty() ||
+        (format != SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+         format !=
+             SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar)) {
         return identities;
     }
 

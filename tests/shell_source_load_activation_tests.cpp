@@ -5939,6 +5939,8 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
             's'});
     task.values = {-1, 2, 2};
     task.output_path = output_path;
+    task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
         specforge::PersistSampleLabelingTaskResult(
             task,

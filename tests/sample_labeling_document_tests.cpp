@@ -138,6 +138,8 @@ specforge::SampleLabelingDocument ValidDocument()
     task.skip_labeled_on_advance = true;
     task.remembered_position = 2;
     task.output_path = "ignored-session-output.npy";
+    task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     task.pending_sample_indices = {1};
     task.metadata_save_pending = true;
     task.save_state.kind = specforge::SampleLabelSaveStateKind::Pending;

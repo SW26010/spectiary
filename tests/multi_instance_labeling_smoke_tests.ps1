@@ -1452,7 +1452,7 @@ try {
     }
     $cacheDocument = [ordered]@{
         format_kind = 'specforge.sample_labeling_tasks.cache'
-        schema_version = 2
+        schema_version = 3
         sources = @($seedSources)
     }
     Write-Utf8File `

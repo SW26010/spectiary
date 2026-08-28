@@ -277,6 +277,8 @@ int WriteLabelingSeedFixture(
     task.auto_advance = true;
     if (output_path) {
         task.output_path = *output_path;
+        task.output_format =
+            specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
         if (HasArgument(
                 argc,
                 argv,
@@ -642,6 +644,8 @@ int wmain(int argc, wchar_t** argv)
                     2U);
     persistent_task.output_path =
         forbidden_output;
+    persistent_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingSourceState
         persistent_source;
     persistent_source.sample_count = 2U;

@@ -61,6 +61,12 @@ enum class SampleLabelSaveMessageKind {
     SystemDetail,
 };
 
+enum class SampleLabelingOutputArtifactFormat {
+    None,
+    LegacyNpyWithSidecar,
+    CanonicalAsdf,
+};
+
 struct SampleLabelSaveState {
     SampleLabelSaveStateKind kind = SampleLabelSaveStateKind::InternalDraftOnly;
     std::size_t pending_count = 0;
@@ -76,7 +82,11 @@ struct SampleLabelingTask {
     bool auto_advance = false;
     bool skip_labeled_on_advance = false;
     std::optional<std::size_t> remembered_position;
+    // Formal output ownership is explicit state. A path is present exactly
+    // when the format is not None; callers must not infer it from a suffix.
     std::optional<std::filesystem::path> output_path;
+    SampleLabelingOutputArtifactFormat output_format =
+        SampleLabelingOutputArtifactFormat::None;
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;

@@ -105,9 +105,7 @@ SampleLabelingStateCoordinationDirectories(
 
 [[nodiscard]] bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,
-    const std::filesystem::path& output_path,
-    SampleLabelingOutputArtifactFormat format,
-    std::string_view source_identity,
-    std::string_view task_id);
+    const SampleLabelingTask& candidate,
+    std::string_view source_identity);
 
 }  // namespace specforge

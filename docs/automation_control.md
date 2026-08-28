@@ -43,10 +43,11 @@ The labeling seed is automation-launch preparation, not a label mutation
 command or a profile importer. The launcher requires an existing regular file
 outside both ordinary and automation state roots and pins that read-only file
 identity while the production labeling-cache reader validates and materializes
-it. Automation seeds are deliberately narrower than ordinary user caches: every
-task must be an internal draft and every `output_path` must be `null`. Any
-non-null output reference is rejected before the production reader hydrates or
-accesses it, and the GUI's background production load applies the same policy.
+it. Automation seeds are deliberately narrower than ordinary user caches: in
+state-cache schema 3, every task must be an internal draft with `output.path`
+set to `null` and `output.format` set to `"none"`. Any formal output owner is
+rejected before the production reader hydrates or accesses it, and the GUI's
+background production load applies the same policy.
 This avoids turning automation seeding into a general output import/write
 interface.
 

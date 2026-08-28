@@ -29,7 +29,7 @@ namespace specforge {
 namespace {
 
 constexpr const char* kStateFormatKind = "specforge.sample_labeling_tasks.cache";
-constexpr int kStateSchemaVersion = 2;
+constexpr int kStateSchemaVersion = 3;
 
 const JsonValue* ObjectMember(const JsonValue& value, std::string_view key)
 {
@@ -132,6 +132,93 @@ std::string_view SaveMessageKindText(
     default:
         return "none";
     }
+}
+
+std::optional<SampleLabelingOutputArtifactFormat> ParseOutputFormat(
+    std::string_view text)
+{
+    if (text == "none") {
+        return SampleLabelingOutputArtifactFormat::None;
+    }
+    if (text == "legacy_npy_with_sidecar") {
+        return SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+    }
+    if (text == "canonical_asdf") {
+        return SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    }
+    return std::nullopt;
+}
+
+std::string_view OutputFormatText(
+    SampleLabelingOutputArtifactFormat format)
+{
+    switch (format) {
+    case SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar:
+        return "legacy_npy_with_sidecar";
+    case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
+        return "canonical_asdf";
+    case SampleLabelingOutputArtifactFormat::None:
+    default:
+        return "none";
+    }
+}
+
+bool ParseTaskOutput(
+    const JsonValue& task_object,
+    int schema_version,
+    SampleLabelingTask& task)
+{
+    if (schema_version < kStateSchemaVersion) {
+        const JsonValue* output_path =
+            ObjectMember(task_object, "output_path");
+        if (output_path == nullptr ||
+            output_path->kind == JsonValue::Kind::Null) {
+            return true;
+        }
+        std::optional<std::filesystem::path> path =
+            ReadPersistedPathReference(*output_path);
+        if (!path || path->empty()) {
+            return false;
+        }
+        task.output_path = std::move(*path);
+        task.output_format =
+            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+        return true;
+    }
+
+    const JsonValue* output = ObjectMember(task_object, "output");
+    if (output == nullptr || output->kind != JsonValue::Kind::Object) {
+        return false;
+    }
+    const std::optional<std::string> format_text =
+        ReadStringMember(*output, "format");
+    if (!format_text) {
+        return false;
+    }
+    const std::optional<SampleLabelingOutputArtifactFormat> format =
+        ParseOutputFormat(*format_text);
+    if (!format) {
+        return false;
+    }
+    const JsonValue* output_path = ObjectMember(*output, "path");
+    if (output_path == nullptr) {
+        return false;
+    }
+    if (*format == SampleLabelingOutputArtifactFormat::None) {
+        if (output_path->kind != JsonValue::Kind::Null) {
+            return false;
+        }
+        task.output_format = *format;
+        return true;
+    }
+    std::optional<std::filesystem::path> path =
+        ReadPersistedPathReference(*output_path);
+    if (!path || path->empty()) {
+        return false;
+    }
+    task.output_path = std::move(*path);
+    task.output_format = *format;
+    return true;
 }
 
 bool ApplyPendingValues(
@@ -241,7 +328,8 @@ ParsedTask ParseTask(
     const JsonValue& task_object,
     std::size_t sample_count,
     const std::function<void()>& cancellation_checkpoint,
-    bool hydrate_persistent_output)
+    bool hydrate_persistent_output,
+    int schema_version)
 {
     if (task_object.kind != JsonValue::Kind::Object) {
         return {};
@@ -304,14 +392,8 @@ ParsedTask ParseTask(
             malformed = true;
         }
     }
-    if (const JsonValue* output_path = ObjectMember(task_object, "output_path")) {
-        if (std::optional<std::filesystem::path> path = ReadPersistedPathReference(*output_path);
-            path && !path->empty()) {
-            task.output_path = std::move(*path);
-        } else if (output_path->kind != JsonValue::Kind::Null) {
-            malformed = true;
-        }
-    }
+    malformed =
+        !ParseTaskOutput(task_object, schema_version, task) || malformed;
     bool output_load_failed = false;
     std::string output_load_error;
     bool metadata_load_failed = false;
@@ -505,6 +587,44 @@ void SetError(
     }
 }
 
+bool ValidateOutputOwnership(
+    const SampleLabelingStateCache& cache,
+    std::string* error_message)
+{
+    for (const auto& [source_identity, state] : cache.sources) {
+        (void)source_identity;
+        for (const SampleLabelingTask& task : state.tasks) {
+            if (!task.output_path) {
+                if (task.output_format ==
+                    SampleLabelingOutputArtifactFormat::None) {
+                    continue;
+                }
+                SetError(
+                    error_message,
+                    "sample-labeling cache contains an output format without a path");
+                return false;
+            }
+            if ((task.output_format !=
+                     SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+                 task.output_format !=
+                     SampleLabelingOutputArtifactFormat::
+                         LegacyNpyWithSidecar) ||
+                task.output_path->empty() ||
+                SampleAnnotationArtifactIdentities(
+                    *task.output_path,
+                    task.output_format,
+                    false)
+                    .stable_path_keys.empty()) {
+                SetError(
+                    error_message,
+                    "sample-labeling cache contains an invalid output path or format");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool ValidateCacheStructure(
     const SampleLabelingStateCache& cache,
     std::string* error_message)
@@ -532,21 +652,6 @@ bool ValidateCacheStructure(
                     "sample-labeling cache task sample count does not match its source");
                 return false;
             }
-            if (!task.output_path) {
-                continue;
-            }
-            if (task.output_path->empty() ||
-                SampleAnnotationArtifactIdentities(
-                    *task.output_path,
-                    SampleLabelingOutputArtifactFormat::
-                        LegacyNpyWithSidecar,
-                    false)
-                    .stable_path_keys.empty()) {
-                SetError(
-                    error_message,
-                    "sample-labeling cache contains an invalid output path");
-                return false;
-            }
         }
         if (state.active_task_id &&
             !task_ids.contains(*state.active_task_id)) {
@@ -556,7 +661,7 @@ bool ValidateCacheStructure(
             return false;
         }
     }
-    return true;
+    return ValidateOutputOwnership(cache, error_message);
 }
 
 using OutputOwnerSet =
@@ -616,8 +721,7 @@ OutputOwnersByPath CollectOutputOwners(
             for (const std::string& artifact_key :
                  OutputArtifactOwnerKeys(
                      *task.output_path,
-                     SampleLabelingOutputArtifactFormat::
-                         LegacyNpyWithSidecar,
+                     task.output_format,
                      resolve_physical_paths)) {
                 owners[artifact_key].insert(owner);
             }
@@ -673,11 +777,8 @@ bool ApplyPatch(
                     cache.sources.find(entry.first);
                 for (const SampleLabelingTask& task :
                      entry.second.task_upserts) {
-                    if (!task.output_path) {
-                        continue;
-                    }
                     if (source == cache.sources.end()) {
-                        return true;
+                        return task.output_path.has_value();
                     }
                     const auto existing = std::find_if(
                         source->second.tasks.begin(),
@@ -686,11 +787,14 @@ bool ApplyPatch(
                             return candidate.task_id ==
                                 task.task_id;
                         });
-                    if (existing ==
-                            source->second.tasks.end() ||
-                        !existing->output_path ||
-                        *existing->output_path !=
-                            *task.output_path) {
+                    if (existing == source->second.tasks.end()) {
+                        if (task.output_path) {
+                            return true;
+                        }
+                        continue;
+                    }
+                    if (existing->output_path != task.output_path ||
+                        existing->output_format != task.output_format) {
                         return true;
                     }
                 }
@@ -961,7 +1065,7 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
         LoadVersionedJsonCacheFile(
             path,
             kStateFormatKind,
-            {1, kStateSchemaVersion},
+            {1, 2, kStateSchemaVersion},
             "sample-labeling task record",
             cancellation_checkpoint);
     switch (cache.issue_kind) {
@@ -1091,29 +1195,26 @@ SampleLabelingStateCacheLoadResult LoadSampleLabelingStateCache(
                     if (cancellation_checkpoint) {
                         cancellation_checkpoint();
                     }
-                    if (policy ==
-                            SampleLabelingStateCacheLoadPolicy::
-                                InternalDraftsOnly) {
-                        const JsonValue* output_path =
-                            ObjectMember(
-                                task_object,
-                                "output_path");
-                        if (output_path != nullptr &&
-                            output_path->kind !=
-                                JsonValue::Kind::Null) {
-                            result.cache = {};
-                            result.warning =
-                                "Persistent labeling output paths are not permitted in an automation state seed.";
-                            return result;
-                        }
-                    }
                     ParsedTask parsed = ParseTask(
                         task_object,
                         state.sample_count,
                         cancellation_checkpoint,
                         policy !=
                             SampleLabelingStateCacheLoadPolicy::
-                                AllowPersistentOutputsWithoutResultHydration);
+                                AllowPersistentOutputsWithoutResultHydration &&
+                            policy !=
+                                SampleLabelingStateCacheLoadPolicy::
+                                    InternalDraftsOnly,
+                        cache.document->schema_version);
+                    if (policy ==
+                            SampleLabelingStateCacheLoadPolicy::
+                                InternalDraftsOnly &&
+                        parsed.task && parsed.task->output_path) {
+                        result.cache = {};
+                        result.warning =
+                            "Persistent labeling output paths are not permitted in an automation state seed.";
+                        return result;
+                    }
                     if (parsed.task) {
                         const bool duplicate_task_id =
                             !parsed_task_ids
@@ -1184,6 +1285,9 @@ bool SaveSampleLabelingStateCache(
     if (path.empty()) {
         return false;
     }
+    if (!ValidateOutputOwnership(cache, error_message)) {
+        return false;
+    }
 
     const std::vector<std::string> keys = SortedCacheKeys(cache.sources);
 
@@ -1242,13 +1346,20 @@ bool SaveSampleLabelingStateCache(
                         stream << "null";
                     }
                     stream << ",\n";
-                    stream << "          \"output_path\": ";
+                    stream << "          \"output\": {\n";
+                    stream << "            \"path\": ";
                     if (task.output_path) {
                         WritePersistedPathReference(stream, *task.output_path);
                     } else {
                         stream << "null";
                     }
                     stream << ",\n";
+                    stream << "            \"format\": ";
+                    WriteJsonString(
+                        stream,
+                        OutputFormatText(task.output_format));
+                    stream << "\n";
+                    stream << "          },\n";
                     stream << "          \"labels\": [";
                     if (!task.label_set.labels.empty()) {
                         stream << "\n";
@@ -1436,16 +1547,17 @@ bool CommitSampleLabelingStateCachePatch(
 
 bool HasSampleLabelingOutputPathConflict(
     const SampleLabelingStateCache& cache,
-    const std::filesystem::path& output_path,
-    SampleLabelingOutputArtifactFormat format,
-    std::string_view source_identity,
-    std::string_view task_id)
+    const SampleLabelingTask& candidate,
+    std::string_view source_identity)
 {
+    if (!candidate.output_path) {
+        return false;
+    }
     std::unordered_set<std::string> requested_keys;
     for (std::string key :
          OutputArtifactOwnerKeys(
-             output_path,
-             format,
+             *candidate.output_path,
+             candidate.output_format,
              true)) {
         requested_keys.insert(std::move(key));
     }
@@ -1456,14 +1568,13 @@ bool HasSampleLabelingOutputPathConflict(
                 continue;
             }
             if (candidate_source == source_identity &&
-                task.task_id == task_id) {
+                task.task_id == candidate.task_id) {
                 continue;
             }
             for (const std::string& candidate_key :
                  OutputArtifactOwnerKeys(
                      *task.output_path,
-                     SampleLabelingOutputArtifactFormat::
-                         LegacyNpyWithSidecar,
+                     task.output_format,
                      true)) {
                 if (requested_keys.contains(
                         candidate_key)) {

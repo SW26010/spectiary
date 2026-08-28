@@ -745,6 +745,15 @@ user's local SpecForge application data directory, consistent with catalog user
 state persistence. Writes should be debounced, flushed on normal shutdown, and
 retried after non-blocking save failures.
 
+Each `SampleLabelingTask` persists its formal output ownership as an explicit
+path-and-format pair. State-cache schema 3 writes this as `output.path` plus
+`output.format`; temporary drafts use `none`, current formal tasks use
+`legacy_npy_with_sidecar`, and `canonical_asdf` is reserved for the future ASDF
+persistence owner. Schema 1 and 2 records with a non-null `output_path` migrate
+explicitly to legacy NPY ownership. Output leases, conflict detection, and
+recovery projection checks use the task's stored format rather than guessing
+from its filename extension.
+
 ## Annotation I/O
 
 The sample-labeling model should treat annotation storage formats as adapters.

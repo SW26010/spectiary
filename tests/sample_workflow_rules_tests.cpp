@@ -45,6 +45,8 @@ specforge::SampleLabelingTask MakeTask(
         specforge::CreateSampleLabelingTask(std::move(task_id), std::move(task_name), sample_count);
     if (!output_path.empty()) {
         task.output_path = std::move(output_path);
+        task.output_format =
+            specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     }
     return task;
 }

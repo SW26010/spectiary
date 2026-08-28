@@ -141,6 +141,22 @@ std::string PathToUtf8(const std::filesystem::path& path)
     return std::string(utf8.begin(), utf8.end());
 }
 
+specforge::SampleLabelingTask OutputTask(
+    std::string task_id,
+    const std::filesystem::path& output_path,
+    specforge::SampleLabelingOutputArtifactFormat output_format)
+{
+    std::string task_name = task_id;
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            std::move(task_id),
+            std::move(task_name),
+            3);
+    task.output_path = output_path;
+    task.output_format = output_format;
+    return task;
+}
+
 void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
 {
     std::ofstream stream(path, std::ios::trunc);
@@ -148,6 +164,8 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
     stream << contents;
     Require(stream.good(), "could not write text file");
 }
+
+std::filesystem::path FreshTestDirectory(std::string_view name);
 
 void TestSampleLabelingStateCacheRoundTrip()
 {
@@ -165,6 +183,10 @@ void TestSampleLabelingStateCacheRoundTrip()
     Require(specforge::AssignSampleLabel(task, 1, 5).accepted, "adapter fixture should accept sample value");
     specforge::MarkSampleLabelTaskPersisted(task, specforge::SampleLabelSaveStateKind::InternalDraftOnly);
     task.remembered_position = 2;
+    Require(
+        task.output_format ==
+            specforge::SampleLabelingOutputArtifactFormat::None,
+        "a temporary task should have no formal output owner");
 
     specforge::SampleLabelingStateCache cache;
     specforge::SampleLabelingSourceState state;
@@ -173,6 +195,15 @@ void TestSampleLabelingStateCacheRoundTrip()
     state.tasks.push_back(std::move(task));
     cache.sources.emplace("source-identity", std::move(state));
     Require(specforge::SaveSampleLabelingStateCache(cache_path, cache), "sample-labeling cache should save");
+
+    const std::string cache_text = ReadTextFile(cache_path);
+    Require(
+        cache_text.find("\"schema_version\": 3") != std::string::npos &&
+            cache_text.find("\"output\": {") != std::string::npos &&
+            cache_text.find("\"path\": null") != std::string::npos &&
+            cache_text.find("\"format\": \"none\"") != std::string::npos &&
+            cache_text.find("\"output_path\"") == std::string::npos,
+        "schema 3 should persist an explicit output owner for temporary tasks");
 
     const specforge::SampleLabelingStateCacheLoadResult loaded =
         specforge::LoadSampleLabelingStateCache(cache_path);
@@ -191,6 +222,93 @@ void TestSampleLabelingStateCacheRoundTrip()
         specforge::FindSampleLabel(restored_task.label_set, 5) != nullptr,
         "label set should round-trip");
     Require(restored_task.values.size() == 3 && restored_task.values[1] == 5, "draft values should round-trip");
+}
+
+void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge_labeling_output_format_cache");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path legacy_output =
+        directory / "legacy.npy";
+    const auto legacy_utf8 = legacy_output.generic_u8string();
+    const std::string legacy_text(
+        legacy_utf8.begin(),
+        legacy_utf8.end());
+    WriteTextFile(
+        cache_path,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_labeling_tasks.cache\",\n"
+        "  \"schema_version\": 2,\n"
+        "  \"sources\": [{\n"
+        "    \"identity\": \"legacy-source\",\n"
+        "    \"sample_count\": 3,\n"
+        "    \"tasks\": [{\n"
+        "      \"task_id\": \"legacy-task\",\n"
+        "      \"task_name\": \"Legacy task\",\n"
+        "      \"output_path\": \"" + legacy_text + "\",\n"
+        "      \"labels\": []\n"
+        "    }]\n"
+        "  }]\n"
+        "}\n");
+
+    specforge::SampleLabelingStateCacheLoadResult migrated =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    Require(migrated.warning.empty(), migrated.warning);
+    specforge::SampleLabelingTask& legacy_task =
+        migrated.cache.sources.at("legacy-source").tasks.front();
+    Require(
+        legacy_task.output_path ==
+                std::optional<std::filesystem::path>{legacy_output} &&
+            legacy_task.output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+        "schema 1/2 output_path should migrate explicitly to legacy NPY ownership");
+
+    specforge::SampleLabelingTask canonical_task =
+        OutputTask(
+            "canonical-task",
+            directory / "canonical.asdf",
+            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf);
+    migrated.cache.sources.at("legacy-source").tasks.push_back(
+        canonical_task);
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            migrated.cache),
+        "migrated output formats should save as schema 3");
+    const std::string cache_text = ReadTextFile(cache_path);
+    Require(
+        cache_text.find("\"schema_version\": 3") != std::string::npos &&
+            cache_text.find("\"output_path\"") == std::string::npos &&
+            cache_text.find("\"format\": \"legacy_npy_with_sidecar\"") !=
+                std::string::npos &&
+            cache_text.find("\"format\": \"canonical_asdf\"") !=
+                std::string::npos,
+        "schema 3 should persist formal output path and format together");
+
+    const specforge::SampleLabelingStateCacheLoadResult round_tripped =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    Require(round_tripped.warning.empty(), round_tripped.warning);
+    const auto& tasks =
+        round_tripped.cache.sources.at("legacy-source").tasks;
+    Require(
+        tasks.size() == 2 &&
+            tasks[0].output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar &&
+            tasks[1].output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
+        "schema 3 should restore each formal task's persisted output owner");
 }
 
 void TestSampleLabelingStateCacheReportsCorruptJson()
@@ -1568,11 +1686,20 @@ void TestExternalOutputIsResultSourceOfTruth()
             controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
         Require(save.output_saved && save.state_saved, "controller should persist output-backed task");
         const specforge::SampleLabelingTask* task = ActiveTask(controller);
-        Require(task != nullptr, "task should remain active after output path is selected");
+        Require(
+            task != nullptr &&
+                task->output_format ==
+                    specforge::SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar,
+            "the existing save flow should formalize the task under legacy NPY ownership");
     }
 
     const std::string cache_text = ReadTextFile(cache_path);
-    Require(cache_text.find("\"output_path\"") != std::string::npos, "task record should keep the output path");
+    Require(
+        cache_text.find("\"output\": {") != std::string::npos &&
+            cache_text.find("\"format\": \"legacy_npy_with_sidecar\"") !=
+                std::string::npos,
+        "task record should keep the formal output path and format");
     Require(cache_text.find("\"values\"") == std::string::npos, "output-backed task record must not duplicate label values");
 
     {
@@ -1580,7 +1707,12 @@ void TestExternalOutputIsResultSourceOfTruth()
         restored.ActivateSource("source-identity", 3);
         const specforge::SampleLabelingTask* task = ActiveTask(restored);
         Require(task != nullptr, "output-backed task should restore");
-        Require(task->output_path && *task->output_path == output_path, "output path should restore");
+        Require(
+            task->output_path && *task->output_path == output_path &&
+                task->output_format ==
+                    specforge::SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar,
+            "legacy output path and format should restore");
         Require(task->values.size() == 3 && task->values[1] == 5, "output-backed task should load values from NPY");
     }
 }
@@ -1776,7 +1908,10 @@ void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
     }
 
     const std::string cache_text = ReadTextFile(cache_path);
-    Require(cache_text.find("\"output_path\": null") != std::string::npos, "failed first save should not bind output");
+    Require(
+        cache_text.find("\"path\": null") != std::string::npos &&
+            cache_text.find("\"format\": \"none\"") != std::string::npos,
+        "failed first save should not bind a formal output owner");
     Require(cache_text.find("\"values\"") != std::string::npos, "failed first save should retain full draft values");
     Require(cache_text.find("-1, 5, -1") != std::string::npos, "draft cache should retain the labeled sample");
 
@@ -1849,6 +1984,8 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
             'r'});
     repaired.values = {7, -1, 7};
     repaired.output_path = output_path;
+    repaired.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     const specforge::SampleLabelTaskPersistResult persisted =
         specforge::PersistSampleLabelingTaskResult(
             repaired,
@@ -1967,7 +2104,11 @@ void TestFailedExternalOutputPersistsPendingOverlay()
     Require(output_values[1] == -1, "failed external output should remain the source-of-truth base");
 
     const std::string cache_text = ReadTextFile(cache_path);
-    Require(cache_text.find("\"output_path\"") != std::string::npos, "task record should keep the output path");
+    Require(
+        cache_text.find("\"output\": {") != std::string::npos &&
+            cache_text.find("\"format\": \"legacy_npy_with_sidecar\"") !=
+                std::string::npos,
+        "task record should keep the formal output path and format");
     Require(cache_text.find("\"values\"") == std::string::npos, "output-backed task record must not duplicate all values");
     Require(cache_text.find("\"pending_values\"") != std::string::npos, "failed output state should keep pending overlay");
     Require(cache_text.find("\"save_state\": \"failed\"") != std::string::npos, "failed output state should persist");
@@ -2592,6 +2733,8 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
         {7, "changed", 'c'}};
     first_task.values = {5, -1, -1};
     first_task.output_path = first_output;
+    first_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
         specforge::PersistSampleLabelingTaskResult(
             first_task,
@@ -2609,6 +2752,8 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
         {7, "changed", 'c'}};
     second_task.values = {-1, 7, -1};
     second_task.output_path = second_output;
+    second_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
         specforge::PersistSampleLabelingTaskResult(
             second_task,
@@ -3693,6 +3838,8 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
             "Real task",
             3);
     conflict_task.output_path = real_output;
+    conflict_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     conflict_source.tasks.push_back(conflict_task);
     conflict_cache.sources.emplace(
         "real-source",
@@ -3700,11 +3847,12 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
     Require(
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
-            alias_output,
-            specforge::SampleLabelingOutputArtifactFormat::
-                LegacyNpyWithSidecar,
-            "alias-source",
-            "alias-task"),
+            OutputTask(
+                "alias-task",
+                alias_output,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar),
+            "alias-source"),
         "an existing output and its junction alias must share one cache conflict identity");
 
     const std::filesystem::path real_future =
@@ -3717,11 +3865,12 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
     Require(
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
-            alias_future,
-            specforge::SampleLabelingOutputArtifactFormat::
-                LegacyNpyWithSidecar,
-            "alias-source",
-            "alias-task"),
+            OutputTask(
+                "alias-task",
+                alias_future,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar),
+            "alias-source"),
         "a missing output must use its resolved parent identity plus leaf name");
 
     specforge::SampleLabelingStateCache lease_cache;
@@ -3743,6 +3892,8 @@ void TestOutputPathAliasesShareConflictAndLeaseIdentity()
                 task_id,
                 3);
         task.output_path = output_path;
+        task.output_format =
+            specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
         source.tasks.push_back(std::move(task));
         lease_cache.sources.emplace(
             source_identity,
@@ -3815,6 +3966,8 @@ void TestExistingHardLinksShareFileObjectIdentity()
             "First task",
             3);
     first_task.output_path = first_output;
+    first_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     first_source.tasks.push_back(first_task);
     conflict_cache.sources.emplace(
         "first-source",
@@ -3822,11 +3975,12 @@ void TestExistingHardLinksShareFileObjectIdentity()
     Require(
         specforge::HasSampleLabelingOutputPathConflict(
             conflict_cache,
-            alias_output,
-            specforge::SampleLabelingOutputArtifactFormat::
-                LegacyNpyWithSidecar,
-            "alias-source",
-            "alias-task"),
+            OutputTask(
+                "alias-task",
+                alias_output,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar),
+            "alias-source"),
         "hard links to one existing result must share a cache conflict identity");
 
     specforge::SampleLabelingSourceState alias_source;
@@ -3837,6 +3991,8 @@ void TestExistingHardLinksShareFileObjectIdentity()
             "Alias task",
             3);
     alias_task.output_path = alias_output;
+    alias_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     alias_source.tasks.push_back(alias_task);
     conflict_cache.sources.emplace(
         "alias-source",
@@ -3904,6 +4060,8 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
             "NPY task",
             3);
     first_task.output_path = npy_output;
+    first_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     first_source.tasks.push_back(first_task);
     cache.sources.emplace(
         "npy-source",
@@ -3911,19 +4069,21 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
     Require(
         specforge::HasSampleLabelingOutputPathConflict(
             cache,
-            csv_output,
-            specforge::SampleLabelingOutputArtifactFormat::
-                LegacyNpyWithSidecar,
-            "csv-source",
-            "csv-task"),
+            OutputTask(
+                "csv-task",
+                csv_output,
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar),
+            "csv-source"),
         "output conflict checks must include the derived metadata sidecar");
     Require(
         !specforge::HasSampleLabelingOutputPathConflict(
             cache,
-            asdf_output,
-            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
-            "asdf-source",
-            "asdf-task"),
+            OutputTask(
+                "asdf-task",
+                asdf_output,
+                specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf),
+            "asdf-source"),
         "canonical ASDF must not conflict with a legacy NPY sidecar that shares only its stem");
 
     specforge::SampleLabelingSourceState second_source;
@@ -3934,10 +4094,22 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
             "CSV task",
             3);
     second_task.output_path = csv_output;
+    second_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     second_source.tasks.push_back(second_task);
     cache.sources.emplace(
         "csv-source",
         second_source);
+    specforge::SampleLabelingSourceState asdf_source;
+    asdf_source.sample_count = 3;
+    asdf_source.tasks.push_back(
+        OutputTask(
+            "asdf-task",
+            asdf_output,
+            specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf));
+    cache.sources.emplace(
+        "asdf-source",
+        std::move(asdf_source));
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
@@ -3960,11 +4132,18 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
     specforge::SampleLabelingController second(
         cache_path,
         structural_loader);
+    specforge::SampleLabelingController canonical(
+        cache_path,
+        structural_loader);
     first.ActivateSource("npy-source", 3);
     second.ActivateSource("csv-source", 3);
+    canonical.ActivateSource("asdf-source", 3);
     Require(
         first.ActivateTask("npy-task").accepted,
         "first artifact-set editor should acquire its result and sidecar leases");
+    Require(
+        canonical.ActivateTask("asdf-task").accepted,
+        "canonical ASDF should acquire only its document lease from persisted task ownership");
     const specforge::SampleLabelingOperationResult rejected =
         second.ActivateTask("csv-task");
     Require(
@@ -3995,6 +4174,8 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
             "Offline task",
             3);
     offline_task.output_path = offline_output;
+    offline_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     offline_source.tasks.push_back(offline_task);
     cache.sources.emplace(
         "offline-source",
@@ -4042,6 +4223,8 @@ void TestOfflineHistoricalOutputDoesNotBlockUnrelatedPatch()
     new_offline_task.output_path =
         directory / "another-disconnected-volume" /
         "new.npy";
+    new_offline_task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingStateCachePatch unsafe;
     unsafe.sources["new-offline-source"].metadata =
         specforge::SampleLabelingSourceMetadataPatch{
@@ -4109,6 +4292,8 @@ void TestOfflineOutputLeaseFallsBackToStablePathIdentity()
             "Offline task",
             3);
     task.output_path = output_path;
+    task.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     source.tasks.push_back(std::move(task));
     cache.sources.emplace("offline-source", std::move(source));
     Require(
@@ -6043,6 +6228,8 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
                 source_identity,
                 3);
         task.output_path = shared_output;
+        task.output_format =
+            specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
         specforge::MarkSampleLabelTaskPersisted(
             task,
             specforge::SampleLabelSaveStateKind::
@@ -6092,6 +6279,8 @@ void TestHistoricalDuplicateOutputsRemainPatchable()
             "New conflict",
             3);
     introduced.output_path = shared_output;
+    introduced.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     specforge::SampleLabelingStateCachePatch conflicting;
     conflicting.sources["new-source"].metadata =
         specforge::SampleLabelingSourceMetadataPatch{
@@ -7244,6 +7433,7 @@ int main(int argc, char* argv[])
     }
     try {
         TestSampleLabelingStateCacheRoundTrip();
+        TestSampleLabelingOutputFormatMigrationAndRoundTrip();
         TestSampleLabelingStateCacheReportsCorruptJson();
         TestSampleLabelingStateCacheReportsUnsupportedSchema();
         TestSampleLabelTaskWritesStableCodes();

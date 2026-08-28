@@ -331,8 +331,11 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
         source->second.tasks.front();
     Require(
         restored_task.output_path &&
-            *restored_task.output_path == output_path,
-        "package-relative output should resolve under package root");
+            *restored_task.output_path == output_path &&
+            restored_task.output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+        "package-relative output and its legacy owner should restore together");
     Require(
         restored_task.values.size() == 3 &&
             restored_task.values[1] == 5,

@@ -20,11 +20,6 @@ namespace specforge {
 
 using SampleAnnotationCancellationCheckpoint = std::function<void()>;
 
-enum class SampleLabelingOutputArtifactFormat {
-    CanonicalAsdf,
-    LegacyNpyWithSidecar,
-};
-
 struct SampleAnnotationArtifactIdentitySet {
     // Complete artifact set owned by one labeling output. Canonical ASDF owns
     // only its document path; legacy NPY owns both the result path and its

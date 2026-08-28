@@ -85,7 +85,6 @@ std::string TemporarySlotEditLeaseKey(
 
 std::vector<std::string> OutputEditLeaseKeys(
     const SampleLabelingTask& task,
-    SampleLabelingOutputArtifactFormat format,
     bool resolve_physical_paths = true)
 {
     if (!task.output_path) {
@@ -94,7 +93,7 @@ std::vector<std::string> OutputEditLeaseKeys(
     const SampleAnnotationArtifactIdentitySet identities =
         SampleAnnotationArtifactIdentities(
             *task.output_path,
-            format,
+            task.output_format,
             resolve_physical_paths);
     std::vector<std::string> keys;
     keys.reserve(
@@ -138,6 +137,7 @@ bool SameTaskProjection(
         left.remembered_position ==
             right.remembered_position &&
         left.output_path == right.output_path &&
+        left.output_format == right.output_format &&
         left.pending_sample_indices ==
             right.pending_sample_indices &&
         left.metadata_save_pending ==
@@ -1130,6 +1130,8 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
 
     const auto output_match = std::find_if(state->tasks.begin(), state->tasks.end(), [&](const auto& task) {
         return task.output_path && task.values.size() == state->sample_count &&
+               task.output_format ==
+                   SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar &&
                OutputPathMatches(*task.output_path, output_path);
     });
     if (output_match != state->tasks.end()) {
@@ -1164,6 +1166,8 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
     RebuildSampleLabelingTaskStatistics(task);
     if (metadata_clean) {
         task.output_path = std::move(output_path);
+        task.output_format =
+            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
         MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
     } else {
         SelectSampleLabelTaskOutputPath(
@@ -2904,11 +2908,9 @@ SampleLabelingController::PrepareTaskActivation(
     if (hydrated_task ==
             hydrated_source->second.tasks.end() ||
         OutputEditLeaseKeys(
-            *hydrated_task,
-            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar) !=
+            *hydrated_task) !=
             OutputEditLeaseKeys(
-                *structural_task,
-                SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar)) {
+                *structural_task)) {
         preparation.error =
             "labeling task identity changed while acquiring its edit lease";
         return preparation;
@@ -3229,7 +3231,6 @@ SampleLabelingController::TryAttachOutputLease(
     std::vector<std::string> output_keys =
         OutputEditLeaseKeys(
             task,
-            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
             resolve_physical_paths);
     if (!resolve_physical_paths) {
         // The normalized-path leases are the synchronous coordination
@@ -3369,7 +3370,6 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
     const std::vector<std::string> required_output_keys =
         OutputEditLeaseKeys(
             task,
-            SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
             false);
     const bool required_output_leases_held =
         !task.output_path ||
@@ -3815,10 +3815,8 @@ SampleLabelingController::LatestCacheHasOutputConflict(
     }
     return HasSampleLabelingOutputPathConflict(
         latest.cache,
-        *candidate.output_path,
-        SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar,
-        *active_source_identity_,
-        candidate.task_id);
+        candidate,
+        *active_source_identity_);
 }
 
 bool SampleLabelingController::MaybeRetryOutputSaves(LocalUserStateSaveScheduler::TimePoint now)
