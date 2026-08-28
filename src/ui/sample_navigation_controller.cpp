@@ -552,6 +552,34 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
     return loaded;
 }
 
+bool SampleNavigationController::
+    RefreshAttachedAnnotationForActiveSource(
+        SampleAnnotationResult annotation)
+{
+    SourceSession* session = ActiveSession();
+    if (session == nullptr ||
+        annotation.path.empty() ||
+        annotation.values.size() !=
+            session->spectrum_count) {
+        return false;
+    }
+    const auto existing = std::find_if(
+        session->manifest.annotations.begin(),
+        session->manifest.annotations.end(),
+        [&annotation](const SampleAnnotationResult& candidate) {
+            return PathsReferToSameFile(
+                candidate.path,
+                annotation.path);
+        });
+    if (existing ==
+        session->manifest.annotations.end()) {
+        return false;
+    }
+    *existing = std::move(annotation);
+    ++active_context_generation_;
+    return true;
+}
+
 bool SampleNavigationController::RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path)
 {
     SourceSession* session = ActiveSession();

@@ -87,6 +87,10 @@ struct SampleLabelingTask {
     std::optional<std::filesystem::path> output_path;
     SampleLabelingOutputArtifactFormat output_format =
         SampleLabelingOutputArtifactFormat::None;
+    // Runtime projection provenance; never serialized. Canonical ASDF cache
+    // records carry only sparse local state, so their placeholder values are
+    // not data-bearing until projected over the canonical document.
+    bool values_are_authoritative = true;
     std::unordered_set<std::size_t> pending_sample_indices;
     bool metadata_save_pending = false;
     SampleLabelSaveState save_state;
@@ -139,6 +143,11 @@ struct SampleLabelTaskPersistResult {
 void RebuildSampleLabelingTaskStatistics(
     SampleLabelingTask& task,
     const std::function<void()>& cancellation_checkpoint = {});
+// Removes the snapshot-bound canonical base projection while retaining sparse
+// local pending values and session metadata. Prepared/cache-shaped state must
+// cross owner boundaries only in this structural form.
+[[nodiscard]] bool DowngradeCanonicalSampleLabelingTaskToStructural(
+    SampleLabelingTask& task) noexcept;
 
 [[nodiscard]] SampleLabelWriteResult AssignSampleLabel(
     SampleLabelingTask& task,

@@ -45,6 +45,25 @@ ActiveSampleWorkflowIdentity CaptureActiveSampleWorkflowIdentity(
         .task_id = task == nullptr ? std::string{} : task->task_id};
 }
 
+bool RefreshAttachedCanonicalAnnotation(
+    SourceCollectionManifest& manifest,
+    SampleAnnotationResult annotation)
+{
+    const auto attached = std::find_if(
+        manifest.annotations.begin(),
+        manifest.annotations.end(),
+        [&annotation](const SampleAnnotationResult& candidate) {
+            return SampleWorkflowPathsReferToSameFile(
+                candidate.path,
+                annotation.path);
+        });
+    if (attached == manifest.annotations.end()) {
+        return false;
+    }
+    *attached = std::move(annotation);
+    return true;
+}
+
 std::string LowerAscii(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -133,8 +152,36 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
                     annotation.metadata_warning,
             };
     }
-    if (local_task != nullptr && current_index < local_task->values.size()) {
-        view.display_text = FormatSampleLabelValue(local_task->label_set, local_task->values[current_index]);
+    if (local_task != nullptr &&
+        annotation.labeling_document &&
+        local_task->output_format ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+        !local_task->values_are_authoritative &&
+        current_index < annotation.labeling_document
+                            ->annotation.values.size()) {
+        int value = static_cast<int>(
+            annotation.labeling_document
+                ->annotation.values[current_index]);
+        if (local_task->pending_sample_indices.contains(
+                current_index) &&
+            current_index < local_task->values.size()) {
+            value = local_task->values[current_index];
+        }
+        if (local_task->metadata_save_pending) {
+            view.display_text = FormatSampleLabelValue(
+                local_task->label_set,
+                value);
+        } else {
+            view.display_text = FormatSampleAnnotationValue(
+                annotation,
+                SampleAnnotationValue{
+                    static_cast<std::int64_t>(value)});
+        }
+    } else if (local_task != nullptr &&
+               current_index < local_task->values.size()) {
+        view.display_text = FormatSampleLabelValue(
+            local_task->label_set,
+            local_task->values[current_index]);
     } else if (current_index < annotation.values.size()) {
         view.display_text = FormatSampleAnnotationValue(annotation, annotation.values[current_index]);
     } else {
@@ -152,8 +199,14 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     view.can_remove_annotation = local_task == nullptr;
     if (local_task != nullptr && local_task->output_path) {
         view.output_missing = !PathExists(*local_task->output_path);
-        view.metadata_missing = !PathExists(
-            SampleAnnotationIoAdapter::MetadataPathForResult(*local_task->output_path));
+        if (local_task->output_format ==
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar) {
+            view.metadata_missing = !PathExists(
+                SampleAnnotationIoAdapter::
+                    MetadataPathForResult(
+                        *local_task->output_path));
+        }
     }
     return view;
 }
@@ -179,8 +232,14 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_remove_annotation = false;
     if (task.output_path) {
         view.output_missing = !PathExists(*task.output_path);
-        view.metadata_missing = !PathExists(
-            SampleAnnotationIoAdapter::MetadataPathForResult(*task.output_path));
+        if (task.output_format ==
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar) {
+            view.metadata_missing = !PathExists(
+                SampleAnnotationIoAdapter::
+                    MetadataPathForResult(
+                        *task.output_path));
+        }
     }
     return view;
 }
@@ -570,6 +629,22 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
     }
 
     const SourceCollectionIdentity identity = context.identity;
+    const bool workflow_identity_changed =
+        !active_sample_workflow_identity_ ||
+        *active_sample_workflow_identity_ != identity.id;
+    const bool workflow_context_changed =
+        !active_sample_workflow_context_fingerprint_ ||
+        *active_sample_workflow_context_fingerprint_ !=
+            identity.context_fingerprint;
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        labeling_source_descriptor;
+    if (workflow_identity_changed || workflow_context_changed) {
+        labeling_source_descriptor =
+            BuildSampleLabelingCanonicalSourceDescriptor(
+                *snapshot,
+                identity,
+                context.manifest);
+    }
     AdoptPreparedCache(prepared_workflow.preparation_cache, result.background_retirement);
     if (active_sample_workflow_identity_ && *active_sample_workflow_identity_ != identity.id) {
         StoreActiveWorkflowState();
@@ -583,7 +658,19 @@ PreparedSampleWorkflowActivationResult SampleWorkflowCoordinator::SyncPreparedAc
                 identity,
                 std::move(
                     prepared_workflow
-                        .labeling_source_state));
+                        .labeling_source_state),
+                std::move(
+                    labeling_source_descriptor));
+    if (std::optional<SampleAnnotationResult>
+            canonical_attachment =
+                labeling_.
+                    ActiveCanonicalAsdfAnnotationProjection()) {
+        action.navigation_inputs_changed =
+            RefreshAttachedCanonicalAnnotation(
+                context.manifest,
+                std::move(*canonical_attachment)) ||
+            action.navigation_inputs_changed;
+    }
     if (labeling_activation.background_retirement) {
         result.background_retirement.push_back(
             std::move(
@@ -752,7 +839,25 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncKnownActiveSource
         ClearLabelUndoHistory();
     }
 
-    SyncSampleWorkflowSession(*identity, outcome.action);
+    const SourceCollectionManifest* context =
+        navigation_.active_context();
+    if (context == nullptr) {
+        ClearSampleWorkflow(outcome.action);
+        return CompleteTransition(
+            std::move(outcome),
+            snapshot,
+            presentation_revision_before,
+            true);
+    }
+    if (workflow_identity_changed || workflow_context_changed) {
+        SyncSampleWorkflowSession(
+            *identity,
+            BuildSampleLabelingCanonicalSourceDescriptor(
+                *snapshot,
+                *identity,
+                *context),
+            outcome.action);
+    }
     if (workflow_identity_changed || workflow_context_changed) {
         ApplyNavigationInputEffects(
             outcome,
@@ -786,6 +891,15 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSourceWithC
     const bool workflow_context_changed =
         !active_sample_workflow_context_fingerprint_ ||
         *active_sample_workflow_context_fingerprint_ != identity.context_fingerprint;
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        labeling_source_descriptor;
+    if (workflow_identity_changed || workflow_context_changed) {
+        labeling_source_descriptor =
+            BuildSampleLabelingCanonicalSourceDescriptor(
+                *snapshot,
+                identity,
+                context.manifest);
+    }
 
     if (workflow_identity_changed) {
         ClearLabelUndoHistory();
@@ -797,7 +911,12 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::SyncActiveSourceWithC
         identity,
         std::move(context.manifest),
         prepared_index);
-    SyncSampleWorkflowSession(identity, outcome.action);
+    if (labeling_source_descriptor) {
+        SyncSampleWorkflowSession(
+            identity,
+            std::move(*labeling_source_descriptor),
+            outcome.action);
+    }
     if (workflow_identity_changed || workflow_context_changed) {
         ApplyNavigationInputEffects(
             outcome,
@@ -1254,13 +1373,6 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         annotation = &*loaded_annotation;
     }
 
-    // ASDF is intentionally read-only in the reader-first integration. Do not
-    // hand its path to the NPY persistence owner before ASDF task persistence
-    // is wired end-to-end.
-    if (annotation->labeling_document) {
-        return outcome;
-    }
-
     const SampleLabelingTask* active_task = labeling_.View().active_task;
     const std::optional<SampleLabelResultMetadata> metadata = LoadVerifiedLabelMetadataForAnnotation(*annotation);
     SampleAnnotationLabelingActivationPlan plan = PlanSampleAnnotationLabelingActivation(
@@ -1278,14 +1390,19 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
         const SampleLabelingOperationResult activation =
             labeling_.ActivateTask(plan.task_id);
         ApplyLabelingLeaseIssue(outcome, activation);
+        const bool attachment_refreshed =
+            activation.accepted &&
+            SynchronizeActiveCanonicalAsdfAttachment();
         if (activation.accepted ||
             activation.task_projection_changed) {
             outcome.changed =
                 outcome.changed ||
-                activation.task_projection_changed;
+                activation.task_projection_changed ||
+                attachment_refreshed;
             outcome.invalidate_view =
                 outcome.invalidate_view ||
-                activation.task_projection_changed;
+                activation.task_projection_changed ||
+                attachment_refreshed;
             ClearLabelUndoHistory();
             ApplyNavigationInputEffects(
                 outcome,
@@ -1778,9 +1895,10 @@ SourceCollectionNavigationView SampleWorkflowCoordinator::NavigationView(const S
             }
 
             if (const std::vector<SampleLabelingTask>* tasks =
-                    labeling_.View().active_source_tasks) {
+                labeling_.View().active_source_tasks) {
                 for (const SampleLabelingTask& task : *tasks) {
-                    if (!task.output_path) {
+                    if (!task.output_path ||
+                        !task.values_are_authoritative) {
                         continue;
                     }
                     const bool already_loaded = std::any_of(
@@ -2017,6 +2135,8 @@ SampleWorkflowCoordinator::PersistenceStatus() const
 
 void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
     const SourceCollectionIdentity& identity,
+    SampleLabelingCanonicalSourceDescriptor
+        source_descriptor,
     SourceCollectionSessionAction& action)
 {
     if (identity.id.empty() || identity.spectrum_count == 0) {
@@ -2027,18 +2147,36 @@ void SampleWorkflowCoordinator::SyncSampleWorkflowSession(
         StoreActiveWorkflowState();
         active_sample_workflow_identity_ = identity.id;
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
-        labeling_.ActivateSource(identity);
+        labeling_.ActivateSource(
+            identity,
+            std::move(source_descriptor));
+        action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            action.navigation_inputs_changed;
         RestoreActiveWorkflowState(identity.id);
         action.workflow_changed = true;
     } else if (
         !active_sample_workflow_context_fingerprint_ ||
         *active_sample_workflow_context_fingerprint_ != identity.context_fingerprint) {
         active_sample_workflow_context_fingerprint_ = identity.context_fingerprint;
-        labeling_.ActivateSource(identity);
+        labeling_.ActivateSource(
+            identity,
+            std::move(source_descriptor));
+        action.navigation_inputs_changed =
+            SynchronizeActiveCanonicalAsdfAttachment() ||
+            action.navigation_inputs_changed;
         action.workflow_changed = true;
-    } else {
-        labeling_.ActivateSource(identity);
     }
+}
+
+bool SampleWorkflowCoordinator::
+    SynchronizeActiveCanonicalAsdfAttachment()
+{
+    std::optional<SampleAnnotationResult> projection =
+        labeling_.ActiveCanonicalAsdfAnnotationProjection();
+    return projection &&
+        navigation_.RefreshAttachedAnnotationForActiveSource(
+            std::move(*projection));
 }
 
 void SampleWorkflowCoordinator::ClearSampleWorkflow(SourceCollectionSessionAction& action)

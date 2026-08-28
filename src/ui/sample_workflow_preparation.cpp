@@ -107,6 +107,12 @@ PreparedSampleWorkflowState PrepareSampleWorkflowStateFromCache(
         }
     }
     if (prepared.labeling_source_state) {
+        for (SampleLabelingTask& task :
+             prepared.labeling_source_state->tasks) {
+            static_cast<void>(
+                DowngradeCanonicalSampleLabelingTaskToStructural(
+                    task));
+        }
         if (prepared.labeling_source_state->sample_count != 0 &&
             prepared.labeling_source_state->sample_count != context.identity.spectrum_count) {
             prepared.labeling_source_state->tasks.clear();

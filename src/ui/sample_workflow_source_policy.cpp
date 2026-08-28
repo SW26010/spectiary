@@ -1,5 +1,6 @@
 #include "ui/sample_workflow_source_policy.h"
 
+#include "domain/sample_labeling_document.h"
 #include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_sorting_sources.h"
 
@@ -113,24 +114,91 @@ bool IsLabelingSampleFilterCandidate(
     const SampleLabelingTask& task,
     std::size_t sample_count)
 {
-    return task.values.size() == sample_count;
+    return task.values_are_authoritative &&
+        task.values.size() == sample_count;
 }
 
-const SampleLabelingTask* FindLabelingFilterSourceById(
-    const std::vector<SampleLabelingTask>* active_source_tasks,
-    std::size_t sample_count,
+bool AttachedCanonicalDocumentIsAuthoritative(
+    const SampleAnnotationResult* annotation,
+    const SampleLabelingTask* local_task)
+{
+    return annotation != nullptr &&
+        annotation->labeling_document &&
+        local_task != nullptr &&
+        local_task->output_format ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+        !local_task->values_are_authoritative &&
+        !local_task->metadata_save_pending;
+}
+
+const SampleLabelingTask* EffectiveLoadedOwnerProjection(
+    const SampleAnnotationResult& annotation,
+    const SampleLabelingTask* local_task,
+    std::optional<SampleLabelingTask>* canonical_projection,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    if (local_task == nullptr ||
+        !annotation.labeling_document ||
+        local_task->output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
+        local_task->values_are_authoritative) {
+        return local_task;
+    }
+    *canonical_projection =
+        ProjectSampleLabelingDocumentTask(
+            *annotation.labeling_document,
+            *local_task,
+            cancellation_checkpoint);
+    return *canonical_projection
+        ? &**canonical_projection
+        : nullptr;
+}
+
+bool HasLabelingFilterSourceById(
+    const SampleWorkflowSourceContext& context,
     std::string_view source_id)
 {
-    if (active_source_tasks == nullptr) {
-        return nullptr;
+    if (context.labeling_tasks == nullptr) {
+        return false;
     }
-    for (const SampleLabelingTask& task : *active_source_tasks) {
-        if (BuildLabelingFilterSourceId(task) == source_id &&
-            IsLabelingSampleFilterCandidate(task, sample_count)) {
-            return &task;
+    if (context.collection != nullptr) {
+        for (const SampleAnnotationResult& annotation :
+             context.collection->annotations) {
+            const SampleLabelingTask* local_task =
+                FindLocalTaskForLoadedAnnotation(
+                    context.labeling_tasks,
+                    annotation);
+            if (local_task == nullptr) {
+                continue;
+            }
+            std::optional<SampleLabelingTask>
+                canonical_projection;
+            const SampleLabelingTask* effective_task =
+                EffectiveLoadedOwnerProjection(
+                    annotation,
+                    local_task,
+                    &canonical_projection,
+                    {});
+            if (effective_task != nullptr &&
+                BuildLabelingFilterSourceId(
+                    *effective_task) == source_id &&
+                IsLabelingSampleFilterCandidate(
+                    *effective_task,
+                    context.sample_count)) {
+                return true;
+            }
         }
     }
-    return nullptr;
+    for (const SampleLabelingTask& task :
+         *context.labeling_tasks) {
+        if (BuildLabelingFilterSourceId(task) == source_id &&
+            IsLabelingSampleFilterCandidate(
+                task,
+                context.sample_count)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool HasAnnotationFilterSourceById(
@@ -160,10 +228,9 @@ bool IsSampleFilterSourceAvailable(
                context.labeling_tasks,
                context.sample_count,
                source_id) ||
-           FindLabelingFilterSourceById(
-               context.labeling_tasks,
-               context.sample_count,
-               source_id) != nullptr;
+           HasLabelingFilterSourceById(
+               context,
+               source_id);
 }
 
 bool IsSampleSortSourceAvailable(
@@ -362,7 +429,12 @@ bool SampleWorkflowSourcePolicy::RenameAnnotationDisplayName(
         return false;
     }
     const std::string default_display_name =
-        local_task != nullptr ? local_task->task_name : annotation->name;
+        local_task == nullptr ||
+            AttachedCanonicalDocumentIsAuthoritative(
+                annotation,
+                local_task)
+        ? annotation->name
+        : local_task->task_name;
 
     bool changed = false;
     if (display_name.empty() || display_name == default_display_name) {
@@ -394,7 +466,12 @@ std::string SampleWorkflowSourcePolicy::AnnotationDisplayName(
     if (override != annotation_display_names_.end()) {
         return override->second;
     }
-    return local_task == nullptr ? annotation.name : local_task->task_name;
+    return local_task == nullptr ||
+            AttachedCanonicalDocumentIsAuthoritative(
+                &annotation,
+                local_task)
+        ? annotation.name
+        : local_task->task_name;
 }
 
 std::string SampleWorkflowSourcePolicy::LocalTaskAnnotationDisplayName(
@@ -880,18 +957,39 @@ std::vector<SampleFilterSource> SampleWorkflowSourcePolicy::BuildSelectedFilterS
             cancellation_checkpoint();
         }
         const SampleAnnotationResult& annotation = context.collection->annotations[annotation_index];
-        if (const SampleLabelingTask* local_task =
-                FindLocalTaskForLoadedAnnotation(context.labeling_tasks, annotation)) {
-            if (!IsLabelingSampleFilterCandidate(*local_task, context.sample_count)) {
+        const SampleLabelingTask* local_task =
+            FindLocalTaskForLoadedAnnotation(
+                context.labeling_tasks,
+                annotation);
+        if (local_task != nullptr) {
+            std::optional<SampleLabelingTask>
+                canonical_projection;
+            const SampleLabelingTask* effective_task =
+                EffectiveLoadedOwnerProjection(
+                    annotation,
+                    local_task,
+                    &canonical_projection,
+                    cancellation_checkpoint);
+            if (effective_task == nullptr ||
+                !IsLabelingSampleFilterCandidate(
+                    *effective_task,
+                    context.sample_count)) {
                 continue;
             }
-            const std::string source_id = BuildLabelingFilterSourceId(*local_task);
+            const std::string source_id =
+                BuildLabelingFilterSourceId(
+                    *effective_task);
             emitted_labeling_source_ids.insert(source_id);
             if (!IsSelectedFilterSource(source_id)) {
                 continue;
             }
-            SampleFilterSource source = BuildLabelingFilterSource(*local_task, cancellation_checkpoint);
-            source.name = AnnotationDisplayName(annotation, local_task);
+            SampleFilterSource source =
+                BuildLabelingFilterSource(
+                    *effective_task,
+                    cancellation_checkpoint);
+            source.name = AnnotationDisplayName(
+                annotation,
+                effective_task);
             filter_sources.push_back(std::move(source));
             continue;
         }
@@ -964,14 +1062,32 @@ const SourceCollectionFilterView& SampleWorkflowSourcePolicy::CachedFilterView(
                     cancellation_checkpoint();
                 }
                 const SampleAnnotationResult& annotation = context.collection->annotations[annotation_index];
-                if (const SampleLabelingTask* local_task =
-                        FindLocalTaskForLoadedAnnotation(context.labeling_tasks, annotation)) {
-                    if (!IsLabelingSampleFilterCandidate(*local_task, context.sample_count)) {
+                const SampleLabelingTask* local_task =
+                    FindLocalTaskForLoadedAnnotation(
+                        context.labeling_tasks,
+                        annotation);
+                if (local_task != nullptr) {
+                    std::optional<SampleLabelingTask>
+                        canonical_projection;
+                    const SampleLabelingTask* effective_task =
+                        EffectiveLoadedOwnerProjection(
+                            annotation,
+                            local_task,
+                            &canonical_projection,
+                            cancellation_checkpoint);
+                    if (effective_task == nullptr ||
+                        !IsLabelingSampleFilterCandidate(
+                            *effective_task,
+                            context.sample_count)) {
                         continue;
                     }
                     SampleFilterSource source =
-                        BuildLabelingFilterSource(*local_task, cancellation_checkpoint);
-                    source.name = AnnotationDisplayName(annotation, local_task);
+                        BuildLabelingFilterSource(
+                            *effective_task,
+                            cancellation_checkpoint);
+                    source.name = AnnotationDisplayName(
+                        annotation,
+                        effective_task);
                     emitted_labeling_source_ids.insert(source.id);
                     SourceCollectionFilterSourceView source_view =
                         BuildFilterSourceView(source, filters_, annotation.path);

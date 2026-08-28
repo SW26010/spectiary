@@ -32,7 +32,11 @@ bool HasPendingOutputSave(const SampleLabelingTask& task)
 
 bool ShouldRetryOutputSave(const SampleLabelingTask& task)
 {
-    return task.output_path && HasPendingOutputSave(task) &&
+    return task.output_path &&
+           task.output_format ==
+               SampleLabelingOutputArtifactFormat::
+                   LegacyNpyWithSidecar &&
+           HasPendingOutputSave(task) &&
            (task.save_state.kind == SampleLabelSaveStateKind::Pending ||
             task.save_state.kind == SampleLabelSaveStateKind::Failed);
 }
@@ -138,6 +142,8 @@ bool SameTaskProjection(
             right.remembered_position &&
         left.output_path == right.output_path &&
         left.output_format == right.output_format &&
+        left.values_are_authoritative ==
+            right.values_are_authoritative &&
         left.pending_sample_indices ==
             right.pending_sample_indices &&
         left.metadata_save_pending ==
@@ -432,6 +438,18 @@ SampleLabelingController::MergeRefreshedSourceState(
 
 void SampleLabelingController::ActivateSource(std::string source_identity, std::size_t sample_count)
 {
+    ActivateSourceInternal(
+        std::move(source_identity),
+        sample_count,
+        std::nullopt);
+}
+
+void SampleLabelingController::ActivateSourceInternal(
+    std::string source_identity,
+    std::size_t sample_count,
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        source_descriptor)
+{
     EnsureStateCacheLoaded();
     if (source_identity.empty() || sample_count == 0) {
         ClearActiveSource();
@@ -441,6 +459,19 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
     const bool active_source_changed =
         !active_source_identity_ ||
         *active_source_identity_ != source_identity;
+    if (active_source_changed) {
+        ReplaceActiveSourceDescriptor(std::nullopt);
+    }
+    if (source_descriptor) {
+        if (source_descriptor->base_identity ==
+                source_identity &&
+            source_descriptor->sample_count == sample_count) {
+            ReplaceActiveSourceDescriptor(
+                std::move(source_descriptor));
+        } else {
+            ReplaceActiveSourceDescriptor(std::nullopt);
+        }
+    }
     bool tasks_replaced = false;
     std::unordered_set<std::string> prepared_task_ids;
     std::unordered_set<std::string> preserved_local_task_ids;
@@ -565,7 +596,39 @@ void SampleLabelingController::ActivateSource(std::string source_identity, std::
 
 void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& identity)
 {
-    ActivateSource(identity.id, identity.spectrum_count);
+    ActivateSourceInternal(
+        identity.id,
+        identity.spectrum_count,
+        std::nullopt);
+    SourceState* state = ActiveSource();
+    if (state == nullptr) {
+        return;
+    }
+    state->source_name = identity.source_name;
+    state->source_fingerprint = identity.source_fingerprint;
+    state->context_fingerprint = identity.context_fingerprint;
+    MarkSourceMetadataUpsert(identity.id, *state);
+    QueueStateSave();
+    Touch();
+}
+
+void SampleLabelingController::ActivateSource(
+    const SourceCollectionIdentity& identity,
+    SampleLabelingCanonicalSourceDescriptor source_descriptor)
+{
+    if (source_descriptor.base_identity != identity.id ||
+        source_descriptor.source_name != identity.source_name ||
+        source_descriptor.source_fingerprint !=
+            identity.source_fingerprint ||
+        source_descriptor.sample_count != identity.spectrum_count) {
+        source_descriptor = {};
+    }
+    ActivateSourceInternal(
+        identity.id,
+        identity.spectrum_count,
+        std::optional<
+            SampleLabelingCanonicalSourceDescriptor>{
+            std::move(source_descriptor)});
     SourceState* state = ActiveSource();
     if (state == nullptr) {
         return;
@@ -581,7 +644,9 @@ void SampleLabelingController::ActivateSource(const SourceCollectionIdentity& id
 SampleLabelingPreparedSourceActivationResult
 SampleLabelingController::ActivatePreparedSource(
     const SourceCollectionIdentity& identity,
-    std::optional<SourceState> prepared_state)
+    std::optional<SourceState> prepared_state,
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        source_descriptor)
 {
     SampleLabelingPreparedSourceActivationResult result;
     if (identity.id.empty() || identity.spectrum_count == 0) {
@@ -593,9 +658,34 @@ SampleLabelingController::ActivatePreparedSource(
         ClearActiveSource();
         return result;
     }
+    if (prepared_state) {
+        for (SampleLabelingTask& task :
+             prepared_state->tasks) {
+            static_cast<void>(
+                DowngradeCanonicalSampleLabelingTaskToStructural(
+                    task));
+        }
+    }
     const bool active_source_changed =
         !active_source_identity_ ||
         *active_source_identity_ != identity.id;
+    if (active_source_changed) {
+        ReplaceActiveSourceDescriptor(std::nullopt);
+    }
+    if (source_descriptor) {
+        if (source_descriptor->base_identity == identity.id &&
+            source_descriptor->source_name ==
+                identity.source_name &&
+            source_descriptor->source_fingerprint ==
+                identity.source_fingerprint &&
+            source_descriptor->sample_count ==
+                identity.spectrum_count) {
+            ReplaceActiveSourceDescriptor(
+                std::move(source_descriptor));
+        } else {
+            ReplaceActiveSourceDescriptor(std::nullopt);
+        }
+    }
     if (active_source_changed) {
         ReleaseActiveTaskLeaseForTransition();
     }
@@ -760,6 +850,7 @@ std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgro
         resources.push_back(MakeBackgroundRetirementHandle(std::exchange(sources_, {})));
     }
     active_source_identity_.reset();
+    ReplaceActiveSourceDescriptor(std::nullopt);
     if (changed) {
         BumpActiveSourceTasksGeneration();
         Touch();
@@ -770,10 +861,12 @@ std::vector<BackgroundRetirementHandle> SampleLabelingController::ReleaseBackgro
 void SampleLabelingController::ClearActiveSource()
 {
     if (!active_source_identity_) {
+        ReplaceActiveSourceDescriptor(std::nullopt);
         return;
     }
     ReleaseActiveTaskLeaseForTransition();
     active_source_identity_.reset();
+    ReplaceActiveSourceDescriptor(std::nullopt);
     BumpActiveSourceTasksGeneration();
     Touch();
 }
@@ -783,6 +876,7 @@ void SampleLabelingController::RemoveSource(std::string_view source_identity)
     if (active_source_identity_ && *active_source_identity_ == source_identity) {
         ReleaseActiveTaskLeaseForTransition();
         active_source_identity_.reset();
+        ReplaceActiveSourceDescriptor(std::nullopt);
         BumpActiveSourceTasksGeneration();
         Touch();
     }
@@ -929,7 +1023,60 @@ std::optional<SampleLabelingController::SourceState> SampleLabelingController::S
 {
     EnsureStateCacheLoaded();
     const SourceState* state = MaterializeSource(source_identity);
-    return state == nullptr ? std::nullopt : std::optional<SourceState>{*state};
+    if (state == nullptr) {
+        return std::nullopt;
+    }
+    SourceState exported = *state;
+    for (SampleLabelingTask& task : exported.tasks) {
+        static_cast<void>(
+            DowngradeCanonicalSampleLabelingTaskToStructural(
+                task));
+    }
+    return exported;
+}
+
+std::optional<SampleAnnotationResult>
+SampleLabelingController::
+    ActiveCanonicalAsdfAnnotationProjection() const
+{
+    const SampleLabelingTask* task = ActiveTask();
+    if (task == nullptr ||
+        !task->values_are_authoritative ||
+        task->output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
+        !task->output_path ||
+        !active_asdf_snapshot_ ||
+        !OutputPathMatches(
+            *task->output_path,
+            active_asdf_snapshot_->path()) ||
+        active_asdf_snapshot_->document().labeling.id !=
+            task->task_id) {
+        return std::nullopt;
+    }
+
+    const std::shared_ptr<const SampleLabelingDocument>
+        document =
+            active_asdf_snapshot_->document_handle();
+    SampleAnnotationResult projection;
+    projection.name = document->labeling.name;
+    projection.path = active_asdf_snapshot_->path();
+    projection.kind =
+        SampleAnnotationKind::CategoricalInteger;
+    projection.dtype = "<i4";
+    projection.dtype_name = "int32";
+    projection.relationship =
+        SampleAnnotationWorkflowRelationship::
+            ExternalLabelResult;
+    projection.labeling_document = document;
+    projection.values.reserve(
+        document->annotation.values.size());
+    for (const std::int32_t value :
+         document->annotation.values) {
+        projection.values.push_back(
+            SampleAnnotationValue{
+                static_cast<std::int64_t>(value)});
+    }
+    return projection;
 }
 
 SampleLabelingOperationResult SampleLabelingController::CreateTask(
@@ -1053,6 +1200,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTask(
         TaskProjectionEffect::Unchanged);
     TransitionActiveTaskLeases(
         std::move(preparation.leases),
+        std::nullopt,
         result.state_saved);
     return preserve_refreshed_projection(
         std::move(result));
@@ -1365,6 +1513,7 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
     }
     TransitionActiveTaskLeases(
         std::move(preparation.leases),
+        std::nullopt,
         result.state_saved);
     return result;
 }
@@ -1648,6 +1797,7 @@ SampleLabelingController::ActivateTaskWithExpectation(
     }
     TransitionActiveTaskLeases(
         std::move(preparation.leases),
+        std::move(preparation.asdf_snapshot),
         result.state_saved);
     return result;
 }
@@ -2116,9 +2266,28 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
                 *task);
         }
     };
-    if ((persistence == PersistencePolicy::PersistOutputIfSelected ||
-         persistence ==
-             PersistencePolicy::PersistOutputIfSelectedInteractive) &&
+    const bool requests_output_persistence =
+        persistence == PersistencePolicy::
+            PersistOutputIfSelected ||
+        persistence == PersistencePolicy::
+            PersistOutputIfSelectedInteractive;
+    if (requests_output_persistence &&
+        task != nullptr && task->output_path &&
+        task->output_format ==
+            SampleLabelingOutputArtifactFormat::
+                CanonicalAsdf) {
+        // This slice hydrates existing canonical owners but does not yet
+        // publish ASDF edits. Keep the write-ahead overlay durable without
+        // ever handing the document path to the legacy NPY writer.
+        mark_task_upsert();
+        result.state_save_attempted = true;
+        result.state_saved = TrySaveStateCache(
+            persistence == PersistencePolicy::
+                PersistOutputIfSelected);
+        result.revision = revision_;
+        return result;
+    }
+    if (requests_output_persistence &&
         task != nullptr && task->output_path) {
         const bool wait_for_commit_lock =
             persistence == PersistencePolicy::PersistOutputIfSelected;
@@ -2616,6 +2785,75 @@ bool SampleLabelingController::TryRetryOutputSaves()
     return all_succeeded;
 }
 
+std::optional<SampleLabelingTask>
+SampleLabelingController::HydrateCanonicalAsdfTask(
+    const SampleLabelingTask& cached_task,
+    std::optional<SampleLabelingAsdfOpenSnapshot>* snapshot,
+    std::string* error_message) const
+{
+    if (!cached_task.output_path ||
+        cached_task.output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        if (error_message != nullptr) {
+            *error_message =
+                "canonical ASDF task owner is missing its document path";
+        }
+        return std::nullopt;
+    }
+    if (!active_source_descriptor_ ||
+        !active_source_identity_ ||
+        active_source_descriptor_->base_identity !=
+            *active_source_identity_) {
+        if (error_message != nullptr) {
+            *error_message =
+                "canonical source descriptor is unavailable for ASDF task hydration";
+        }
+        return std::nullopt;
+    }
+
+    SampleLabelingAsdfStoreOpenResult opened =
+        OpenSampleLabelingAsdfDocumentStore(
+            *cached_task.output_path,
+            SampleLabelingCompatibilityView(
+                *active_source_descriptor_));
+    if (!opened.succeeded()) {
+        if (error_message != nullptr) {
+            *error_message = opened.error.message.empty()
+                ? "could not open canonical ASDF task owner"
+                : opened.error.message;
+        }
+        return std::nullopt;
+    }
+
+    SampleLabelingAsdfOpenSnapshot opened_snapshot =
+        std::move(*opened.snapshot);
+    const SampleLabelingDocument& document =
+        opened_snapshot.document();
+    if (document.labeling.id != cached_task.task_id) {
+        if (error_message != nullptr) {
+            *error_message =
+                "ASDF labeling task identity does not match the local owner record";
+        }
+        return std::nullopt;
+    }
+
+    std::optional<SampleLabelingTask> hydrated =
+        ProjectSampleLabelingDocumentTask(
+            document,
+            cached_task);
+    if (!hydrated) {
+        if (error_message != nullptr) {
+            *error_message =
+                "ASDF labeling pending overlay is incompatible with the canonical task metadata or sample roster";
+        }
+        return std::nullopt;
+    }
+    if (snapshot != nullptr) {
+        *snapshot = std::move(opened_snapshot);
+    }
+    return hydrated;
+}
+
 SampleLabelingController::TaskActivationPreparation
 SampleLabelingController::PrepareTaskActivation(
     std::string_view source_identity,
@@ -2771,6 +3009,16 @@ SampleLabelingController::PrepareTaskActivation(
             preparation.error = output_lease.error;
             return preparation;
         }
+        if (known_task.output_format ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+            preparation.task = HydrateCanonicalAsdfTask(
+                known_task,
+                &preparation.asdf_snapshot,
+                &preparation.error);
+            if (!preparation.task) {
+                return preparation;
+            }
+        }
         preparation.refresh_status =
             TaskRefreshStatus::Ready;
         adopt_deferred_leases();
@@ -2853,6 +3101,37 @@ SampleLabelingController::PrepareTaskActivation(
             output_lease.status;
         preparation.error =
             std::move(output_lease.error);
+        return preparation;
+    }
+
+    if (structural_task->output_format ==
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        const SampleLabelingTask* overlay_task =
+            &*structural_task;
+        if (deferred != deferred_task_leases_.end()) {
+            if (const SampleLabelingTask* pending =
+                    PendingTaskUpsert(
+                        source_identity,
+                        known_task.task_id)) {
+                if (OutputEditLeaseKeys(*pending) !=
+                    OutputEditLeaseKeys(*structural_task)) {
+                    preparation.error =
+                        "labeling task identity changed while acquiring its edit lease";
+                    return preparation;
+                }
+                overlay_task = pending;
+            }
+        }
+        preparation.task = HydrateCanonicalAsdfTask(
+            *overlay_task,
+            &preparation.asdf_snapshot,
+            &preparation.error);
+        if (!preparation.task) {
+            return preparation;
+        }
+        preparation.refresh_status =
+            TaskRefreshStatus::Ready;
+        adopt_deferred_leases();
         return preparation;
     }
 
@@ -3365,7 +3644,7 @@ SampleLabelingController::TryAttachOutputLease(
 
 bool SampleLabelingController::ActiveTaskLeaseMatches(
     std::string_view source_identity,
-    const SampleLabelingTask& task) const
+    const SampleLabelingTask& task)
 {
     const std::vector<std::string> required_output_keys =
         OutputEditLeaseKeys(
@@ -3401,11 +3680,37 @@ bool SampleLabelingController::ActiveTaskLeaseMatches(
                           .output_artifacts[index]
                           .Held());
               }));
+    bool canonical_generation_matches =
+        task.output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    if (!canonical_generation_matches && task.output_path &&
+        active_asdf_snapshot_ && active_source_descriptor_ &&
+        OutputPathMatches(
+            active_asdf_snapshot_->path(),
+            *task.output_path) &&
+        active_asdf_snapshot_->document().labeling.id ==
+            task.task_id) {
+        canonical_generation_matches =
+            active_asdf_snapshot_source_descriptor_generation_ &&
+            *active_asdf_snapshot_source_descriptor_generation_ ==
+                active_source_descriptor_generation_;
+        if (!canonical_generation_matches &&
+            !CheckSampleLabelingSourceCompatibility(
+                 active_asdf_snapshot_->document(),
+                 SampleLabelingCompatibilityView(
+                     *active_source_descriptor_))
+                 .has_value()) {
+            active_asdf_snapshot_source_descriptor_generation_ =
+                active_source_descriptor_generation_;
+            canonical_generation_matches = true;
+        }
+    }
     return active_task_leases_.task_identity_key ==
                TaskIdentityEditLeaseKey(
                    source_identity,
                    task.task_id) &&
             required_output_leases_held &&
+            canonical_generation_matches &&
             (state_cache_path_.empty() ||
              active_task_leases_.task_identity.Held()) &&
            (task.output_path ||
@@ -3458,6 +3763,66 @@ void SampleLabelingController::AdoptActiveTaskLeases(
     active_task_leases_ = std::move(leases);
 }
 
+void SampleLabelingController::ReplaceActiveSourceDescriptor(
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        source_descriptor)
+{
+    active_source_descriptor_ = std::move(source_descriptor);
+    ++active_source_descriptor_generation_;
+}
+
+void SampleLabelingController::ReplaceActiveAsdfSnapshot(
+    std::optional<SampleLabelingAsdfOpenSnapshot>
+        asdf_snapshot)
+{
+    active_asdf_snapshot_ = std::move(asdf_snapshot);
+    if (active_asdf_snapshot_) {
+        active_asdf_snapshot_source_descriptor_generation_ =
+            active_source_descriptor_generation_;
+    } else {
+        active_asdf_snapshot_source_descriptor_generation_.reset();
+    }
+}
+
+bool SampleLabelingController::
+    DowngradeActiveCanonicalTaskProjection() noexcept
+{
+    if (!active_asdf_snapshot_) {
+        return false;
+    }
+    const SampleLabelingDocument& document =
+        active_asdf_snapshot_->document();
+    const auto source = sources_.find(
+        document.source.base_identity);
+    if (source == sources_.end()) {
+        return false;
+    }
+    const auto task = std::find_if(
+        source->second.tasks.begin(),
+        source->second.tasks.end(),
+        [&document](const SampleLabelingTask& candidate) {
+            return candidate.task_id ==
+                document.labeling.id;
+        });
+    if (task == source->second.tasks.end() ||
+        task->output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
+        !task->output_path ||
+        !OutputPathMatches(
+            active_asdf_snapshot_->path(),
+            *task->output_path) ||
+        !task->values_are_authoritative) {
+        return false;
+    }
+
+    if (!DowngradeCanonicalSampleLabelingTaskToStructural(
+            *task)) {
+        return false;
+    }
+    BumpActiveSourceTasksGeneration();
+    return true;
+}
+
 void SampleLabelingController::TransferActiveTemporarySlotLease(
     TaskEditLeaseSet& leases)
 {
@@ -3469,14 +3834,20 @@ void SampleLabelingController::TransferActiveTemporarySlotLease(
 
 void SampleLabelingController::TransitionActiveTaskLeases(
     TaskEditLeaseSet leases,
+    std::optional<SampleLabelingAsdfOpenSnapshot>
+        asdf_snapshot,
     bool pending_patch_saved)
 {
+    static_cast<void>(
+        DowngradeActiveCanonicalTaskProjection());
     const std::string task_identity_key =
         leases.task_identity_key;
     if (!pending_patch_saved) {
         DeferActiveTaskLeases();
     }
     AdoptActiveTaskLeases(std::move(leases));
+    ReplaceActiveAsdfSnapshot(
+        std::move(asdf_snapshot));
     if (!task_identity_key.empty()) {
         lease_unavailable_task_targets_.erase(
             task_identity_key);
@@ -3505,11 +3876,62 @@ void SampleLabelingController::ReleaseUnneededActiveLeaseComponents()
 
 void SampleLabelingController::DeferActiveTaskLeases()
 {
+    static_cast<void>(
+        DowngradeActiveCanonicalTaskProjection());
     if (!active_task_leases_.task_identity_key.empty()) {
         deferred_task_leases_.push_back(
             std::move(active_task_leases_));
     }
     active_task_leases_ = {};
+    ReplaceActiveAsdfSnapshot(std::nullopt);
+}
+
+bool SampleLabelingController::PendingRecoveryPatchProtectsTaskLease(
+    std::string_view source_identity,
+    std::string_view task_id) const
+{
+    const auto source = pending_cache_patch_.sources.find(
+        std::string(source_identity));
+    if (source == pending_cache_patch_.sources.end()) {
+        return false;
+    }
+    const SampleLabelingSourceStatePatch& patch =
+        source->second;
+    return std::any_of(
+               patch.task_upserts.begin(),
+               patch.task_upserts.end(),
+               [task_id](const SampleLabelingTask& task) {
+                   return task.task_id == task_id;
+               }) ||
+        std::find(
+            patch.task_tombstones.begin(),
+            patch.task_tombstones.end(),
+            task_id) != patch.task_tombstones.end();
+}
+
+void SampleLabelingController::ReleaseDeferredTaskLeaseUnlessRecoveryPending(
+    std::string_view source_identity,
+    std::string_view task_id)
+{
+    if (PendingRecoveryPatchProtectsTaskLease(
+            source_identity,
+            task_id)) {
+        return;
+    }
+    const std::string task_identity_key =
+        TaskIdentityEditLeaseKey(
+            source_identity,
+            task_id);
+    deferred_task_leases_.erase(
+        std::remove_if(
+            deferred_task_leases_.begin(),
+            deferred_task_leases_.end(),
+            [&task_identity_key](
+                const TaskEditLeaseSet& leases) {
+                return leases.task_identity_key ==
+                    task_identity_key;
+            }),
+        deferred_task_leases_.end());
 }
 
 void SampleLabelingController::ReleaseActiveTaskLeaseForTransition()
@@ -3553,6 +3975,21 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         }
         return true;
     }
+    const bool canonical_source_generation_stale =
+        active->output_format ==
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+        active_asdf_snapshot_ && active_source_descriptor_ &&
+        (!active_asdf_snapshot_source_descriptor_generation_ ||
+             *active_asdf_snapshot_source_descriptor_generation_ !=
+                 active_source_descriptor_generation_);
+    const std::string revalidating_source_identity =
+        canonical_source_generation_stale
+        ? *active_source_identity_
+        : std::string{};
+    const std::string revalidating_task_id =
+        canonical_source_generation_stale
+        ? active->task_id
+        : std::string{};
     if (active_source_identity_ &&
         ActiveTaskLeaseMatches(
             *active_source_identity_,
@@ -3564,6 +4001,13 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         lease_unavailable_source_identities_.erase(
             *active_source_identity_);
         return false;
+    }
+    if (canonical_source_generation_stale) {
+        // Preserve the already-held owner leases while the changed source
+        // generation is reopened. PrepareTaskActivation can adopt this set;
+        // a failure releases it unless an unpersisted task recovery patch
+        // still needs protection.
+        DeferActiveTaskLeases();
     }
     TaskActivationPreparation preparation =
         PrepareTaskActivation(
@@ -3577,6 +4021,10 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         preparation.refresh_status !=
             TaskRefreshStatus::Ready ||
         !preparation.task) {
+        if (DowngradeCanonicalSampleLabelingTaskToStructural(
+                *active)) {
+            BumpActiveSourceTasksGeneration();
+        }
         if (preparation.refresh_status ==
                 TaskRefreshStatus::Missing &&
             active_source_identity_) {
@@ -3616,6 +4064,11 @@ bool SampleLabelingController::RestoreActiveTaskLease()
         }
         state->active_task_id.reset();
         ReleaseActiveTaskLease();
+        if (canonical_source_generation_stale) {
+            ReleaseDeferredTaskLeaseUnlessRecoveryPending(
+                revalidating_source_identity,
+                revalidating_task_id);
+        }
         if (active_source_identity_ &&
             preparation.lease_status ==
                 ExclusiveFileLeaseAcquireStatus::Unavailable) {
@@ -3646,6 +4099,8 @@ bool SampleLabelingController::RestoreActiveTaskLease()
     }
     AdoptActiveTaskLeases(
         std::move(preparation.leases));
+    ReplaceActiveAsdfSnapshot(
+        std::move(preparation.asdf_snapshot));
     if (active_source_identity_) {
         lease_unavailable_task_targets_.erase(
             TaskIdentityEditLeaseKey(
@@ -3659,7 +4114,10 @@ bool SampleLabelingController::RestoreActiveTaskLease()
 
 void SampleLabelingController::ReleaseActiveTaskLease() noexcept
 {
+    static_cast<void>(
+        DowngradeActiveCanonicalTaskProjection());
     active_task_leases_ = {};
+    ReplaceActiveAsdfSnapshot(std::nullopt);
 }
 
 const SampleLabelingTask*

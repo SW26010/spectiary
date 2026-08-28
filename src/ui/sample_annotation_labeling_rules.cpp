@@ -209,7 +209,30 @@ const SampleLabelingTask* FindLocalTaskForLoadedAnnotation(
     const SampleAnnotationResult& annotation)
 {
     if (annotation.labeling_document) {
-        return nullptr;
+        if (active_source_tasks == nullptr ||
+            annotation.path.empty()) {
+            return nullptr;
+        }
+        const auto match = std::find_if(
+            active_source_tasks->begin(),
+            active_source_tasks->end(),
+            [&annotation](const SampleLabelingTask& task) {
+                return task.output_path &&
+                    task.output_format ==
+                        SampleLabelingOutputArtifactFormat::
+                            CanonicalAsdf &&
+                    task.task_id ==
+                        annotation.labeling_document
+                            ->labeling.id &&
+                    task.values.size() ==
+                        annotation.values.size() &&
+                    PathsReferToSameFile(
+                        *task.output_path,
+                        annotation.path);
+            });
+        return match == active_source_tasks->end()
+            ? nullptr
+            : &*match;
     }
     if (annotation.label_metadata) {
         return FindTaskByMetadataOutput(active_source_tasks, annotation, *annotation.label_metadata);
@@ -239,9 +262,21 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
     }
 
     const SampleAnnotationResult& annotation = *request.annotation;
-    // Canonical ASDF documents remain read-only annotations until the ASDF
-    // writer owns task hydration, output leasing, and atomic persistence.
     if (annotation.labeling_document) {
+        const SampleLabelingTask* existing_task =
+            FindLocalTaskForLoadedAnnotation(
+                request.active_source_tasks,
+                annotation);
+        if (existing_task == nullptr ||
+            (request.active_task != nullptr &&
+             request.active_task->task_id !=
+                 existing_task->task_id)) {
+            return plan;
+        }
+        plan.kind =
+            SampleAnnotationLabelingActivationKind::
+                ActivateExistingTask;
+        plan.task_id = existing_task->task_id;
         return plan;
     }
     if (request.active_task != nullptr) {

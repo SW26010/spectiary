@@ -19,9 +19,10 @@ production persistence lifecycle.
    Atomic label autosave copies an unchanged encoded roster block verbatim and
    re-encodes only the values block. The promoted production codec component
    implements and interoperably validates this path. The domain document store
-   now owns source-aware open, durable-base reuse, and atomic replacement;
-   controller/output-lease lifecycle integration remains separate follow-up
-   work.
+   now owns source-aware open, durable-base reuse, and atomic replacement. The
+   controller hydrates persisted canonical owners under their one-file output
+   lease and retains the opened generation; ASDF publication/retry integration
+   remains separate follow-up work.
 5. The checked-in corpus contains 9 approved valid documents, 1 standard-valid
    document outside the narrow wire profile, 4 ASDF-valid semantic violations,
    and 4 structurally malformed documents.
@@ -191,9 +192,12 @@ workload. The promoted production ASDF codec is direct-to-vector and implements
 native zlib read/write plus preservation/copying of encoded unchanged blocks.
 Its compressed writer, reader, and block-reuse paths pass the Python
 interoperability matrix. The atomic document store now owns durable-base and
-replacement lifecycle below the controller. Remaining work is to connect that
-store to output leases, recovery, and retry policy; recompressing the roster on
-every edit would still require reopening the JSON decision.
+replacement lifecycle below the controller. Persisted ASDF owners now open
+through that store after their output lease is acquired, with local sparse
+recovery overlays applied above the canonical generation. Remaining work is to
+publish those edits through the store and connect ASDF-specific retry policy;
+recompressing the roster on every edit would still require reopening the JSON
+decision.
 
 ## Missing / unlabeled representation
 

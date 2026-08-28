@@ -394,12 +394,19 @@ ParsedTask ParseTask(
     }
     malformed =
         !ParseTaskOutput(task_object, schema_version, task) || malformed;
+    if (task.output_format ==
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        task.values_are_authoritative = false;
+    }
     bool output_load_failed = false;
     std::string output_load_error;
     bool metadata_load_failed = false;
     bool metadata_retry_pending = false;
     std::string metadata_load_error;
-    if (task.output_path && hydrate_persistent_output) {
+    if (task.output_path && hydrate_persistent_output &&
+        task.output_format ==
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar) {
         std::optional<LoadedSampleLabelResult> loaded =
             SampleAnnotationIoAdapter{}.LoadLabelResult(
                 *task.output_path,

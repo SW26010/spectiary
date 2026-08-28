@@ -235,7 +235,7 @@ void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
         "a same-path local task must not activate when its sample count differs");
 }
 
-void TestCanonicalAsdfAnnotationRemainsReadOnly()
+void TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner()
 {
     const std::filesystem::path path = TempPath("_canonical.asdf");
     specforge::SampleAnnotationResult annotation =
@@ -268,7 +268,7 @@ void TestCanonicalAsdfAnnotationRemainsReadOnly()
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
                     None,
-        "canonical ASDF annotations must not enter the NPY task persistence owner");
+        "canonical ASDF annotations without a persisted owner must remain read-only");
 
     std::vector<specforge::SampleLabelingTask> tasks;
     tasks.push_back(
@@ -277,6 +277,9 @@ void TestCanonicalAsdfAnnotationRemainsReadOnly()
             "Canonical quality",
             3,
             path));
+    tasks[0].output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
     plan = specforge::PlanSampleAnnotationLabelingActivation(
         specforge::SampleAnnotationLabelingActivationRequest{
             .annotation = &annotation,
@@ -284,11 +287,23 @@ void TestCanonicalAsdfAnnotationRemainsReadOnly()
     Require(
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
-                    None &&
+                    ActivateExistingTask &&
+            plan.task_id == "canonical-quality" &&
             specforge::FindLocalTaskForLoadedAnnotation(
                 &tasks,
-                annotation) == nullptr,
-        "canonical ASDF annotations must remain read-only even when a local task shares their path");
+                annotation) == &tasks[0],
+        "canonical ASDF annotations should activate only their matching persisted canonical owner");
+
+    tasks[0].task_id = "different-task";
+    plan = specforge::PlanSampleAnnotationLabelingActivation(
+        specforge::SampleAnnotationLabelingActivationRequest{
+            .annotation = &annotation,
+            .active_source_tasks = &tasks});
+    Require(
+        plan.kind ==
+            specforge::SampleAnnotationLabelingActivationKind::
+                None,
+        "a same-path canonical owner with a different task identity must fail closed");
 
     const specforge::SampleFilterSource filter =
         specforge::BuildAnnotationFilterSource(annotation);
@@ -523,6 +538,109 @@ void TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting()
         "policy sort choice should use annotation values");
 }
 
+void TestCanonicalOwnerFilterCanBeAddedAndEvaluated()
+{
+    const std::filesystem::path annotation_path =
+        TempPath("_canonical_filter_owner.asdf");
+    {
+        std::ofstream fixture(annotation_path);
+        Require(
+            fixture.good(),
+            "canonical filter fixture path should be materialized");
+        fixture << "fixture";
+    }
+    specforge::SourceCollectionManifest manifest;
+    manifest.annotations.push_back(
+        MakeIntegerAnnotation(
+            "attached generation",
+            annotation_path,
+            {5, 9, 5}));
+    auto document =
+        std::make_shared<specforge::SampleLabelingDocument>();
+    document->annotation.name = "quality-code";
+    document->annotation.values = {5, 9, 5};
+    document->labeling.id = "canonical-quality";
+    document->labeling.name = "Canonical quality";
+    document->labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    manifest.annotations[0].labeling_document =
+        std::move(document);
+
+    std::vector<specforge::SampleLabelingTask> tasks;
+    tasks.push_back(
+        MakeTask(
+            "canonical-quality",
+            "structural cache placeholder",
+            3,
+            annotation_path));
+    tasks[0].output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    tasks[0].values_are_authoritative = false;
+
+    const specforge::SampleWorkflowSourceContext context{
+        .collection = &manifest,
+        .labeling_tasks = &tasks,
+        .sample_count = 3,
+    };
+    specforge::SampleWorkflowSourcePolicy policy;
+    const specforge::SourceCollectionFilterView available =
+        policy.BuildFilterView(context);
+    Require(
+        available.available_sources.size() == 1,
+        "an attached canonical owner should be visible through its effective document projection");
+
+    const std::string source_id =
+        specforge::BuildLabelingFilterSourceId(tasks[0]);
+    Require(
+        policy.AddFilterSource(context, source_id),
+        "an attached canonical owner exposed by the filter view should also be addable");
+    Require(
+        policy.SetFilterValueSelected(
+            context,
+            source_id,
+            "5",
+            true),
+        "an added canonical owner filter should accept a projected canonical value");
+    const specforge::SampleFilterEvaluation evaluation =
+        policy.EvaluateFilters(context);
+    Require(
+        evaluation.active &&
+            evaluation.included_count == 2 &&
+            evaluation.included_samples ==
+                std::vector<bool>({true, false, true}),
+        "canonical owner filter evaluation should use the same effective projection as its view");
+
+    tasks[0].values_are_authoritative = true;
+    tasks[0].task_name =
+        "Canonical quality generation B";
+    Require(
+        policy.AnnotationDisplayName(
+            manifest.annotations[0],
+            &tasks[0]) ==
+            "Canonical quality generation B",
+        "authoritative runtime projection should provide the current canonical display name");
+    Require(
+        !policy.RenameAnnotationDisplayName(
+            context,
+            annotation_path,
+            "Canonical quality generation B") &&
+            policy.StoreState()
+                .annotation_display_names.empty(),
+        "submitting the authoritative canonical name must not persist it as a local display override");
+    tasks[0].values_are_authoritative = false;
+    manifest.annotations[0].name =
+        "Canonical quality generation C";
+    Require(
+        policy.AnnotationDisplayName(
+            manifest.annotations[0],
+            &tasks[0]) ==
+            "Canonical quality generation C",
+        "a later attached canonical generation should remain visible after submitting generation B's default name");
+}
+
 void TestWorkflowSourcePolicyTracksOwnerGenerations()
 {
     const std::filesystem::path rank_path =
@@ -732,12 +850,13 @@ int main()
     TestMetadataActivationPlanReusesExistingTask();
     TestMetadataCreatePlanAvoidsTaskIdCollision();
     TestMetadataActivationPlanRejectsSamePathIdentityMismatch();
-    TestCanonicalAsdfAnnotationRemainsReadOnly();
+    TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner();
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
     TestTypedAnnotationSortingPreservesNumericPrecision();
     TestAnnotationSortingExclusions();
     TestWorkflowSourcePolicyOwnsDisplayNamesFilteringAndSorting();
+    TestCanonicalOwnerFilterCanBeAddedAndEvaluated();
     TestWorkflowSourcePolicyTracksOwnerGenerations();
     TestLegacyV2MappedAnnotationFilterKeysMigrateToCanonicalKeys();
     return 0;

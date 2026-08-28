@@ -1,5 +1,6 @@
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_document.h"
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_collection_manifest.h"
 
 #include <algorithm>
@@ -180,6 +181,71 @@ void TestBuildSeparatesCanonicalDocumentFromTaskSessionState()
         "builder output should satisfy canonical semantic invariants");
 }
 
+void TestCanonicalSourceDescriptorOwnsPreparedSourceFacts()
+{
+    specforge::SpectrumSnapshot snapshot;
+    snapshot.source.metadata = {
+        {"source_type", "npy_matrix", "domain"},
+        {"format", "npy", "domain"},
+    };
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        .id = "sha256-v1:descriptor-source",
+        .source_name = "descriptor.npy",
+        .source_fingerprint =
+            "sha256-v1:descriptor-fingerprint",
+        .context_fingerprint =
+            "sha256-v1:ignored-context",
+        .spectrum_count = 2,
+    };
+    context.manifest.sample_names = {
+        "sample-a",
+        "sample-b",
+    };
+
+    specforge::SampleLabelingCanonicalSourceDescriptor
+        descriptor =
+            specforge::
+                BuildSampleLabelingCanonicalSourceDescriptor(
+                    snapshot,
+                    context);
+    context.identity.id = "changed-after-build";
+    context.manifest.sample_names[0] =
+        "changed-after-build";
+    Require(
+        descriptor.base_identity ==
+                "sha256-v1:descriptor-source" &&
+            descriptor.source_kind == "npy" &&
+            descriptor.source_name == "descriptor.npy" &&
+            descriptor.source_fingerprint ==
+                "sha256-v1:descriptor-fingerprint" &&
+            descriptor.sample_count == 2 &&
+            descriptor.sample_names ==
+                std::vector<std::string>({
+                    "sample-a",
+                    "sample-b",
+                }),
+        "canonical descriptor should own source preparation facts without retaining annotation-sensitive context");
+
+    snapshot.source.metadata = {
+        {"source_type", "folder_collection", "domain"},
+        {"format", "fits", "domain"},
+    };
+    descriptor = specforge::
+        BuildSampleLabelingCanonicalSourceDescriptor(
+            snapshot,
+            specforge::SourceCollectionIdentity{
+                .id = "folder-source",
+                .source_name = "folder",
+                .source_fingerprint = "folder-fingerprint",
+                .spectrum_count = 1,
+            },
+            specforge::SourceCollectionManifest{});
+    Require(
+        descriptor.source_kind == "folder",
+        "folder collection identity should take precedence over the current member file format");
+}
+
 void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
 {
     specforge::SourceCollectionContext source_context;
@@ -315,6 +381,47 @@ void TestValidatorRejectsUnsupportedDocumentSemantics()
     }
 }
 
+void TestCanonicalProjectionRejectsUndefinedPendingCodes()
+{
+    const specforge::SampleLabelingDocument document =
+        ValidDocument();
+    specforge::SampleLabelingTask local_state =
+        specforge::CreateSampleLabelingTask(
+            document.labeling.id,
+            "local state",
+            document.annotation.values.size());
+    local_state.output_path = "canonical-owner.asdf";
+    local_state.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    local_state.values[1] = 42;
+    local_state.pending_sample_indices.insert(1);
+
+    Require(
+        !specforge::ProjectSampleLabelingDocumentTask(
+            document,
+            local_state),
+        "a pending code removed from canonical labels must fail projection instead of creating an undefined task value");
+
+    local_state.metadata_save_pending = true;
+    local_state.task_name = "Locally edited metadata";
+    local_state.label_set.labels = {
+        {0, "Galaxy", 'g'},
+        {1, "Quasar", 'q'},
+        {42, "Pending class", 'p'},
+    };
+    const std::optional<specforge::SampleLabelingTask>
+        metadata_projection =
+            specforge::ProjectSampleLabelingDocumentTask(
+                document,
+                local_state);
+    Require(
+        metadata_projection &&
+            metadata_projection->values ==
+                std::vector<int>({0, 42, 1}),
+        "pending values should be validated after a compatible local metadata overlay is applied");
+}
+
 void TestFailFastValidatorBoundsDiagnostics()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
@@ -340,10 +447,12 @@ int main()
 {
     try {
         TestBuildSeparatesCanonicalDocumentFromTaskSessionState();
+        TestCanonicalSourceDescriptorOwnsPreparedSourceFacts();
         TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes();
         TestValidatorEnforcesSampleAlignmentAndRosterShape();
         TestValidatorEnforcesLabelAndUnlabeledInvariants();
         TestValidatorRejectsUnsupportedDocumentSemantics();
+        TestCanonicalProjectionRejectsUndefinedPendingCodes();
         TestFailFastValidatorBoundsDiagnostics();
         return 0;
     } catch (const std::exception& error) {

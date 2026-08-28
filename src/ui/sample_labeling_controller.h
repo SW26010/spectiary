@@ -1,6 +1,8 @@
 #pragma once
 
 #include "app/local_user_state.h"
+#include "domain/sample_annotation_io.h"
+#include "domain/sample_labeling_asdf_store.h"
 #include "platform/exclusive_file_lease.h"
 #include "ui/background_retirement.h"
 #include "ui/sample_labeling_state_cache_io.h"
@@ -118,10 +120,15 @@ public:
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
+    void ActivateSource(
+        const SourceCollectionIdentity& identity,
+        SampleLabelingCanonicalSourceDescriptor source_descriptor);
     [[nodiscard]] SampleLabelingPreparedSourceActivationResult
         ActivatePreparedSource(
         const SourceCollectionIdentity& identity,
-        std::optional<SourceState> prepared_state);
+        std::optional<SourceState> prepared_state,
+        std::optional<SampleLabelingCanonicalSourceDescriptor>
+            source_descriptor = std::nullopt);
     [[nodiscard]] BackgroundRetirementHandle AdoptPreparedStateCache(
         std::shared_ptr<const SampleLabelingStateCacheLoadResult> cache_snapshot);
     [[nodiscard]] std::vector<BackgroundRetirementHandle> ReleaseBackgroundResourcesForShutdown();
@@ -134,6 +141,8 @@ public:
         active_source_tasks_generation() const;
     [[nodiscard]] std::optional<SourceState> SourceStateForIdentity(
         std::string_view source_identity);
+    [[nodiscard]] std::optional<SampleAnnotationResult>
+        ActiveCanonicalAsdfAnnotationProjection() const;
     [[nodiscard]] SampleLabelingOperationResult CreateTask(
         std::string task_id,
         std::string task_name);
@@ -260,6 +269,8 @@ private:
         TaskEditLeaseSet leases;
         SampleLabelingStateCache latest_cache;
         std::optional<SampleLabelingTask> task;
+        std::optional<SampleLabelingAsdfOpenSnapshot>
+            asdf_snapshot;
         bool reuses_active_temporary_slot = false;
         ExclusiveFileLeaseAcquireStatus lease_status =
             ExclusiveFileLeaseAcquireStatus::Failed;
@@ -293,6 +304,11 @@ private:
     [[nodiscard]] SourceState* ActiveSource();
     [[nodiscard]] const SourceState* ActiveSource() const;
     [[nodiscard]] SourceState* MaterializeSource(std::string_view source_identity);
+    void ActivateSourceInternal(
+        std::string source_identity,
+        std::size_t sample_count,
+        std::optional<SampleLabelingCanonicalSourceDescriptor>
+            source_descriptor);
     [[nodiscard]] SourceState MergeRefreshedSourceState(
         std::string_view source_identity,
         const SourceState& local,
@@ -355,6 +371,12 @@ private:
             bool reuse_deferred_lease,
             bool reuse_active_temporary_slot,
             bool allow_pending_task_recovery = false);
+    [[nodiscard]] std::optional<SampleLabelingTask>
+        HydrateCanonicalAsdfTask(
+            const SampleLabelingTask& cached_task,
+            std::optional<SampleLabelingAsdfOpenSnapshot>*
+                snapshot,
+            std::string* error_message) const;
     [[nodiscard]] SampleLabelingOperationResult
         ActivateTaskWithExpectation(
             std::string_view task_id,
@@ -381,7 +403,7 @@ private:
             bool resolve_physical_paths = true) const;
     [[nodiscard]] bool ActiveTaskLeaseMatches(
         std::string_view source_identity,
-        const SampleLabelingTask& task) const;
+        const SampleLabelingTask& task);
     [[nodiscard]] bool TaskIdentityLeaseHeld(
         const TaskEditLeaseSet& leases,
         std::string_view source_identity,
@@ -391,13 +413,30 @@ private:
         std::string_view task_id) const;
     void AdoptActiveTaskLeases(
         TaskEditLeaseSet leases);
+    void ReplaceActiveSourceDescriptor(
+        std::optional<SampleLabelingCanonicalSourceDescriptor>
+            source_descriptor);
+    void ReplaceActiveAsdfSnapshot(
+        std::optional<SampleLabelingAsdfOpenSnapshot>
+            asdf_snapshot);
+    [[nodiscard]] bool
+        DowngradeActiveCanonicalTaskProjection() noexcept;
     void TransferActiveTemporarySlotLease(
         TaskEditLeaseSet& leases);
     void TransitionActiveTaskLeases(
         TaskEditLeaseSet leases,
+        std::optional<SampleLabelingAsdfOpenSnapshot>
+            asdf_snapshot,
         bool pending_patch_saved);
     void ReleaseUnneededActiveLeaseComponents();
     void DeferActiveTaskLeases();
+    [[nodiscard]] bool
+        PendingRecoveryPatchProtectsTaskLease(
+            std::string_view source_identity,
+            std::string_view task_id) const;
+    void ReleaseDeferredTaskLeaseUnlessRecoveryPending(
+        std::string_view source_identity,
+        std::string_view task_id);
     void ReleaseActiveTaskLeaseForTransition();
     [[nodiscard]] bool RestoreActiveTaskLease();
     void ReleaseActiveTaskLease() noexcept;
@@ -451,6 +490,17 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::string>>
         recovery_untrusted_task_ids_by_source_;
     TaskEditLeaseSet active_task_leases_;
+    std::optional<SampleLabelingAsdfOpenSnapshot>
+        active_asdf_snapshot_;
+    std::optional<SampleLabelingCanonicalSourceDescriptor>
+        active_source_descriptor_;
+    // A canonical snapshot is compatible with exactly the descriptor
+    // generation against which it was opened or last revalidated. Reused
+    // navigation keeps both generations stable and therefore never scans the
+    // full roster again.
+    std::uint64_t active_source_descriptor_generation_ = 0;
+    std::optional<std::uint64_t>
+        active_asdf_snapshot_source_descriptor_generation_;
     std::vector<TaskEditLeaseSet> deferred_task_leases_;
     SampleLabelingStateCachePatch pending_cache_patch_;
     std::uint64_t revision_ = 0;

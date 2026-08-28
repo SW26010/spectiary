@@ -120,6 +120,8 @@ public:
     [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
         const std::filesystem::path& path,
         std::string* message = nullptr);
+    [[nodiscard]] bool RefreshAttachedAnnotationForActiveSource(
+        SampleAnnotationResult annotation);
     [[nodiscard]] bool RemoveReadOnlyAnnotationFromActiveSource(const std::filesystem::path& path);
     [[nodiscard]] bool RestoreReadOnlyAnnotationsForActiveSource(
         const std::vector<std::filesystem::path>& paths);

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -57,6 +58,12 @@ public:
 
     [[nodiscard]] const SampleLabelingDocument& document() const noexcept
     {
+        return *document_;
+    }
+
+    [[nodiscard]] std::shared_ptr<const SampleLabelingDocument>
+        document_handle() const noexcept
+    {
         return document_;
     }
 
@@ -73,7 +80,7 @@ private:
         SampleLabelingAsdfDurableBase durable_base);
 
     std::filesystem::path path_;
-    SampleLabelingDocument document_;
+    std::shared_ptr<const SampleLabelingDocument> document_;
     SampleLabelingAsdfDurableBase durable_base_;
 
     friend struct SampleLabelingAsdfStoreOpenResult;

@@ -76,6 +76,132 @@ SampleLabelingDocument BuildSampleLabelingDocument(
     return document;
 }
 
+std::optional<SampleLabelingTask>
+ProjectSampleLabelingDocumentTask(
+    const SampleLabelingDocument& document,
+    const SampleLabelingTask& local_state,
+    const std::function<void()>& cancellation_checkpoint)
+{
+    if (!local_state.output_path ||
+        local_state.output_format !=
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf ||
+        document.labeling.id != local_state.task_id ||
+        document.annotation.values.size() !=
+            local_state.values.size()) {
+        return std::nullopt;
+    }
+
+    SampleLabelingTask projected =
+        CreateSampleLabelingTask(
+            document.labeling.id,
+            document.labeling.name,
+            0);
+    projected.values.reserve(
+        document.annotation.values.size());
+    for (std::size_t index = 0;
+         index < document.annotation.values.size();
+         ++index) {
+        if ((index & 0xfffU) == 0U &&
+            cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        projected.values.push_back(
+            static_cast<int>(
+                document.annotation.values[index]));
+    }
+    projected.label_set.labels.reserve(
+        document.labeling.labels.size());
+    for (std::size_t index = 0;
+         index < document.labeling.labels.size();
+         ++index) {
+        if ((index & 0xfffU) == 0U &&
+            cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const SampleLabelingDocumentLabel& label =
+            document.labeling.labels[index];
+        projected.label_set.labels.push_back(
+            SampleLabelDefinition{
+                .code = static_cast<int>(label.code),
+                .name = label.name,
+                .shortcut = label.shortcut.empty()
+                    ? '\0'
+                    : label.shortcut.front(),
+            });
+    }
+
+    projected.auto_advance = local_state.auto_advance;
+    projected.skip_labeled_on_advance =
+        local_state.skip_labeled_on_advance;
+    projected.remembered_position =
+        local_state.remembered_position;
+    projected.output_path = local_state.output_path;
+    projected.output_format = local_state.output_format;
+    projected.values_are_authoritative = true;
+    projected.pending_sample_indices =
+        local_state.pending_sample_indices;
+    for (const std::size_t sample_index :
+         projected.pending_sample_indices) {
+        if (sample_index >= projected.values.size()) {
+            return std::nullopt;
+        }
+        projected.values[sample_index] =
+            local_state.values[sample_index];
+    }
+
+    projected.metadata_save_pending =
+        local_state.metadata_save_pending;
+    if (projected.metadata_save_pending) {
+        projected.task_name = local_state.task_name;
+        projected.label_set = local_state.label_set;
+    }
+
+    std::vector<int> defined_label_codes;
+    defined_label_codes.reserve(
+        projected.label_set.labels.size());
+    for (const SampleLabelDefinition& label :
+         projected.label_set.labels) {
+        defined_label_codes.push_back(label.code);
+    }
+    std::ranges::sort(defined_label_codes);
+    for (std::size_t index = 0;
+         index < projected.values.size();
+         ++index) {
+        if ((index & 0xfffU) == 0U &&
+            cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        const int value = projected.values[index];
+        if (value != kUnlabeledSampleLabelCode &&
+            !std::ranges::binary_search(
+                defined_label_codes,
+                value)) {
+            return std::nullopt;
+        }
+    }
+    projected.save_state = local_state.save_state;
+    projected.save_state.pending_count =
+        projected.pending_sample_indices.size();
+    const bool has_pending_output =
+        !projected.pending_sample_indices.empty() ||
+        projected.metadata_save_pending;
+    if (has_pending_output &&
+        projected.save_state.kind !=
+            SampleLabelSaveStateKind::Failed) {
+        projected.save_state.kind =
+            SampleLabelSaveStateKind::Pending;
+    } else if (!has_pending_output &&
+               projected.save_state.kind ==
+                   SampleLabelSaveStateKind::Pending) {
+        projected.save_state.kind =
+            SampleLabelSaveStateKind::AutosavedToOutput;
+    }
+    RebuildSampleLabelingTaskStatistics(
+        projected,
+        cancellation_checkpoint);
+    return projected;
+}
+
 namespace {
 
 SampleLabelingDocumentValidationResult ValidateSampleLabelingDocumentImpl(

@@ -71,6 +71,40 @@ SampleLabelingTask CreateSampleLabelingTask(
     return task;
 }
 
+bool DowngradeCanonicalSampleLabelingTaskToStructural(
+    SampleLabelingTask& task) noexcept
+{
+    if (task.output_format !=
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        return false;
+    }
+
+    bool changed = task.values_are_authoritative ||
+        task.labeled_count != 0 ||
+        !task.label_usage_counts.empty() ||
+        task.save_state.pending_count !=
+            task.pending_sample_indices.size();
+    for (std::size_t sample_index = 0;
+         sample_index < task.values.size();
+         ++sample_index) {
+        if (task.pending_sample_indices.contains(
+                sample_index)) {
+            continue;
+        }
+        changed = changed ||
+            task.values[sample_index] !=
+                kUnlabeledSampleLabelCode;
+        task.values[sample_index] =
+            kUnlabeledSampleLabelCode;
+    }
+    task.values_are_authoritative = false;
+    task.label_usage_counts.clear();
+    task.labeled_count = 0;
+    task.save_state.pending_count =
+        task.pending_sample_indices.size();
+    return changed;
+}
+
 bool IsValidSampleLabelShortcut(char shortcut)
 {
     const unsigned char value = static_cast<unsigned char>(shortcut);

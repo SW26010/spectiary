@@ -3332,7 +3332,7 @@ void TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner()
 
     specforge::SampleLabelingDocument document;
     document.source.base_identity = identity.id;
-    document.source.kind = "npy";
+    document.source.kind = "test";
     document.source.name = identity.source_name;
     document.source.fingerprint = identity.source_fingerprint;
     document.source.sample_count = identity.spectrum_count;
@@ -3384,6 +3384,533 @@ void TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner()
     Require(
         ReadBinaryFile(annotation_path) == original_bytes,
         "rejected ASDF activation must preserve the original file verbatim");
+}
+
+void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_canonical_owner.npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_canonical_owner.asdf");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_canonical_owner_labeling.json");
+    TouchFile(source_path);
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(
+            *snapshot);
+
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = identity.id;
+    document.source.kind = "test";
+    document.source.name = identity.source_name;
+    document.source.fingerprint =
+        identity.source_fingerprint;
+    document.source.sample_count = identity.spectrum_count;
+    document.source.roster.identity_kind =
+        std::string{
+            specforge::
+                kSampleLabelingDocumentSourceIndexRoster};
+    document.annotation.name = "quality-code";
+    document.annotation.values = {5, -1, 9};
+    document.labeling.id = "canonical-quality";
+    document.labeling.name = "Canonical quality";
+    document.labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "canonical owner fixture should write"
+                : write.error.message);
+    }
+    const std::string original_bytes =
+        ReadBinaryFile(annotation_path);
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "canonical-quality",
+            "stale cache name",
+            3);
+    cached.label_set.labels = {
+        {99, "stale cache label", 's'},
+    };
+    cached.values[1] = 9;
+    cached.pending_sample_indices.insert(1);
+    cached.output_path = annotation_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    cached.save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = identity.spectrum_count;
+    source_state.source_name = identity.source_name;
+    source_state.source_fingerprint =
+        identity.source_fingerprint;
+    source_state.context_fingerprint =
+        identity.context_fingerprint;
+    source_state.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(
+        identity.id,
+        std::move(source_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            labeling_cache,
+            cache),
+        "canonical owner cache fixture should save");
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "canonical owner session should reload its source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                3,
+                spectrum_index);
+        },
+        {},
+        UniqueTempPath(
+            "_canonical_owner_navigation.json"),
+        labeling_cache,
+        UniqueTempPath(
+            "_canonical_owner_workflow.json"));
+    const specforge::SourceCollectionSessionResult opened =
+        session.Open(
+            source_path,
+            0,
+            {annotation_path});
+    Require(
+        opened.loaded &&
+            !session.View().labeling.has_active_task,
+        "an inactive canonical owner should attach without becoming editable before activation");
+
+    const specforge::SourceCollectionSessionView before =
+        session.View();
+    Require(
+        before.navigation.current_annotations.size() == 1 &&
+            before.navigation.current_annotations[0].name ==
+                "Canonical quality" &&
+            before.navigation.current_annotations[0]
+                .display_text == "bad (5)" &&
+            before.navigation.current_annotations[0]
+                .can_activate_labeling &&
+            !before.navigation.current_annotations[0]
+                 .metadata_missing,
+        "an attached canonical owner should project canonical metadata and values without requiring a legacy sidecar");
+    Require(
+        before.filter.available_sources.size() == 1,
+        "an attached canonical owner should expose one local labeling filter source");
+    const auto good_filter = std::find_if(
+        before.filter.available_sources[0].options.begin(),
+        before.filter.available_sources[0].options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "9";
+        });
+    Require(
+        good_filter !=
+                before.filter.available_sources[0]
+                    .options.end() &&
+            good_filter->display_text == "good (9)" &&
+            good_filter->sample_count == 2,
+        "canonical filter projection should use the ASDF base plus the sparse pending overlay, not cache placeholders");
+
+    specforge::SampleLabelingDocument newer_document =
+        document;
+    newer_document.annotation.values = {9, -1, 9};
+    newer_document.labeling.name =
+        "Canonical quality generation B";
+    newer_document.labeling.labels = {
+        {5, "bad generation B", "b"},
+        {9, "good generation B", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                newer_document);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "newer canonical owner generation should publish"
+                : write.error.message);
+    }
+    const std::string newer_generation_bytes =
+        ReadBinaryFile(annotation_path);
+    Require(
+        newer_generation_bytes != original_bytes,
+        "generation fixture should replace the ASDF bytes after attachment and before activation");
+
+    const specforge::SourceCollectionSessionResult activated =
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(
+                annotation_path));
+    const specforge::SourceCollectionLabelingView& labeling =
+        session.View().labeling;
+    Require(
+        activated.action.workflow_changed &&
+            labeling.has_active_task &&
+            labeling.task_id == "canonical-quality" &&
+            labeling.task_name ==
+                "Canonical quality generation B" &&
+            labeling.current_code == 9 &&
+            labeling.label_set.labels.size() == 2 &&
+            labeling.output_path ==
+                std::optional<std::filesystem::path>{
+                    annotation_path},
+        "activating the attached owner should hydrate its editable task from the leased ASDF generation");
+
+    const specforge::SourceCollectionSessionView after_activation =
+        session.View();
+    Require(
+        after_activation.navigation.current_annotations.size() == 1 &&
+            after_activation.navigation.current_annotations[0].name ==
+                "Canonical quality generation B" &&
+            after_activation.navigation.current_annotations[0]
+                    .display_text ==
+                "good generation B (9)",
+        "annotation display should follow the hydrated controller generation instead of the stale attached document");
+    Require(
+        after_activation.filter.available_sources.size() == 1,
+        "hydrated canonical owner should remain available as one filter source");
+    const auto generation_b_filter = std::find_if(
+        after_activation.filter.available_sources[0].options.begin(),
+        after_activation.filter.available_sources[0].options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "9";
+        });
+    Require(
+        generation_b_filter !=
+                after_activation.filter.available_sources[0]
+                    .options.end() &&
+            generation_b_filter->display_text ==
+                "good generation B (9)" &&
+            generation_b_filter->sample_count == 3,
+        "filter projection should follow the hydrated controller generation instead of the stale attached document");
+
+    const specforge::SourceCollectionSessionResult edited =
+        Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+    Require(
+        edited.label_write &&
+            edited.label_write->write.changed &&
+            edited.label_write->operation.state_saved &&
+            ReadBinaryFile(annotation_path) ==
+                newer_generation_bytes,
+        "canonical owner edits should checkpoint only the local pending overlay until the ASDF writer is connected");
+}
+
+void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_canonical_deactivation_owner.npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_canonical_deactivation_owner.asdf");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_canonical_deactivation_owner_labeling.json");
+    TouchFile(source_path);
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+
+    specforge::SampleLabelingDocument generation_a;
+    generation_a.source.base_identity = identity.id;
+    generation_a.source.kind = "test";
+    generation_a.source.name = identity.source_name;
+    generation_a.source.fingerprint =
+        identity.source_fingerprint;
+    generation_a.source.sample_count =
+        identity.spectrum_count;
+    generation_a.source.roster.identity_kind =
+        std::string{
+            specforge::
+                kSampleLabelingDocumentSourceIndexRoster};
+    generation_a.annotation.name = "quality-code";
+    generation_a.annotation.values = {5, -1, 9};
+    generation_a.labeling.id = "canonical-quality";
+    generation_a.labeling.name =
+        "Canonical quality generation A";
+    generation_a.labeling.labels = {
+        {5, "bad generation A", "b"},
+        {9, "good generation A", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                generation_a);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "canonical deactivation generation A should write"
+                : write.error.message);
+    }
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "canonical-quality",
+            "structural cache owner",
+            3);
+    cached.output_path = annotation_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = identity.spectrum_count;
+    source_state.source_name = identity.source_name;
+    source_state.source_fingerprint =
+        identity.source_fingerprint;
+    source_state.context_fingerprint =
+        identity.context_fingerprint;
+    source_state.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(
+        identity.id,
+        std::move(source_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            labeling_cache,
+            cache),
+        "canonical deactivation owner cache should save");
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "canonical deactivation session should reload its source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                3,
+                spectrum_index);
+        },
+        {},
+        UniqueTempPath(
+            "_canonical_deactivation_navigation.json"),
+        labeling_cache,
+        UniqueTempPath(
+            "_canonical_deactivation_workflow.json"));
+    Require(
+        session.Open(
+                source_path,
+                0,
+                {annotation_path})
+            .loaded,
+        "canonical deactivation generation A should attach");
+
+    specforge::SampleLabelingDocument generation_b =
+        generation_a;
+    generation_b.annotation.values = {9, 9, -1};
+    generation_b.labeling.name =
+        "Canonical quality generation B";
+    generation_b.labeling.labels = {
+        {5, "bad generation B", "b"},
+        {9, "good generation B", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                generation_b);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "canonical deactivation generation B should publish"
+                : write.error.message);
+    }
+
+    Require(
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(
+                annotation_path))
+            .action.workflow_changed,
+        "canonical deactivation owner should hydrate generation B");
+    Require(
+        Submit(
+            session,
+            DeactivateActiveLabelingTask())
+            .action.workflow_changed,
+        "clean canonical generation B should deactivate");
+
+    const specforge::SourceCollectionSessionView view =
+        session.View();
+    Require(
+        !view.labeling.has_active_task &&
+            view.navigation.current_annotations.size() == 1 &&
+            view.navigation.current_annotations[0].name ==
+                "Canonical quality generation B" &&
+            view.navigation.current_annotations[0]
+                    .display_text ==
+                "good generation B (9)",
+        "deactivation must retain the hydrated attachment generation instead of falling back to generation A");
+    Require(
+        view.filter.available_sources.size() == 1,
+        "the inactive generation B owner should remain available as one filter source");
+    const auto generation_b_filter = std::find_if(
+        view.filter.available_sources[0].options.begin(),
+        view.filter.available_sources[0].options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "9";
+        });
+    Require(
+        generation_b_filter !=
+                view.filter.available_sources[0]
+                    .options.end() &&
+            generation_b_filter->display_text ==
+                "good generation B (9)" &&
+            generation_b_filter->sample_count == 2,
+        "inactive filtering must continue to evaluate the hydrated generation B attachment");
+}
+
+void TestInactiveUnattachedCanonicalOwnerIsNotDataBearing()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_inactive_canonical_owner.npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_inactive_canonical_owner.asdf");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_inactive_canonical_owner_labeling.json");
+    TouchFile(source_path);
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = identity.id;
+    document.source.kind = "test";
+    document.source.name = identity.source_name;
+    document.source.fingerprint =
+        identity.source_fingerprint;
+    document.source.sample_count = identity.spectrum_count;
+    document.source.roster.identity_kind =
+        std::string{
+            specforge::
+                kSampleLabelingDocumentSourceIndexRoster};
+    document.annotation.name = "quality-code";
+    document.annotation.values = {5, -1, 9};
+    document.labeling.id = "inactive-canonical-quality";
+    document.labeling.name = "Inactive canonical quality";
+    document.labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        const specforge::SampleLabelingAsdfWriteResult write =
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document);
+        Require(
+            write.succeeded(),
+            write.error.message.empty()
+                ? "inactive canonical owner fixture should write"
+                : write.error.message);
+    }
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "inactive-canonical-quality",
+            "structural cache placeholder",
+            3);
+    cached.values[1] = 9;
+    cached.pending_sample_indices.insert(1);
+    cached.output_path = annotation_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    cached.save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+
+    specforge::SampleLabelingSourceState source_state;
+    source_state.sample_count = identity.spectrum_count;
+    source_state.source_name = identity.source_name;
+    source_state.source_fingerprint =
+        identity.source_fingerprint;
+    source_state.context_fingerprint =
+        identity.context_fingerprint;
+    source_state.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(identity.id, std::move(source_state));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            labeling_cache,
+            cache),
+        "inactive canonical owner cache fixture should save");
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "inactive canonical owner session should reload its source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                3,
+                spectrum_index);
+        },
+        {},
+        UniqueTempPath(
+            "_inactive_canonical_owner_navigation.json"),
+        labeling_cache,
+        UniqueTempPath(
+            "_inactive_canonical_owner_workflow.json"));
+    const specforge::SourceCollectionSessionResult opened =
+        session.Open(source_path, 0, {});
+    Require(
+        opened.loaded &&
+            !session.View().labeling.has_active_task,
+        "inactive canonical owner should restore only as structural task state");
+
+    const specforge::SourceCollectionSessionView view =
+        session.View();
+    Require(
+        view.navigation.current_annotations.empty(),
+        "unattached canonical cache placeholders must not appear as annotation values");
+    Require(
+        view.filter.available_sources.empty(),
+        "unattached canonical cache placeholders must not appear as labeling filter sources");
 }
 
 void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
@@ -6395,6 +6922,43 @@ void TestPreparedCacheSnapshotPreventsUiCacheReload()
         "prepared commits and non-active state hints must not reopen either cache on the UI thread");
 }
 
+void TestKnownSourceSyncReusesTheLabelingSourceGeneration()
+{
+    specforge::SampleWorkflowCoordinator coordinator({}, {}, {});
+    const std::filesystem::path source_path =
+        UniqueTempPath("_known_source_generation.npy");
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(source_path, 3, 0);
+    specforge::SourceCollectionContext context;
+    context.identity = {
+        "known-source-generation",
+        "known source",
+        "known-source-fingerprint",
+        "known-context-generation",
+        3};
+    context.manifest.sample_names = {"a", "b", "c"};
+    specforge::PreparedSampleWorkflowState prepared =
+        PrepareWorkflow(snapshot, context, 0, {}, {});
+    Require(
+        coordinator
+            .SyncPreparedActiveSource(
+                "known-source-key",
+                snapshot,
+                context,
+                std::move(prepared))
+            .action.workflow_changed,
+        "known-source generation fixture should activate");
+
+    const specforge::SampleWorkflowTransitionOutcome reused =
+        coordinator.SyncKnownActiveSource(
+            "known-source-key",
+            snapshot);
+    Require(
+        !reused.invalidate_view &&
+            !reused.action.workflow_changed,
+        "same-generation known-source sync should reuse the labeling descriptor without reactivating the controller");
+}
+
 void TestPreparedProjectionsMoveIntoTheSessionView()
 {
     const std::filesystem::path source_path = UniqueTempPath("_prepared_projection.npy");
@@ -8392,6 +8956,9 @@ void RunAllTests()
     TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
     TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner();
+    TestCanonicalAsdfAnnotationActivatesPersistedOwner();
+    TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration();
+    TestInactiveUnattachedCanonicalOwnerIsNotDataBearing();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
@@ -8435,6 +9002,7 @@ void RunAllTests()
     TestLiveWorkflowContextReconciliationKeepsOldSnapshotWhenTargetChanges();
     TestSameIdentityPreparedReloadPreservesLiveWorkflowAndCurrentRow();
     TestPreparedCacheSnapshotPreventsUiCacheReload();
+    TestKnownSourceSyncReusesTheLabelingSourceGeneration();
     TestPreparedProjectionsMoveIntoTheSessionView();
     TestSessionOwnsStableViewInvalidationAndRetirement();
     TestRemovingInactiveSourceInvalidatesTheSessionView();

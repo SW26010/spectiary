@@ -300,7 +300,11 @@ private:
 
     void SyncSampleWorkflowSession(
         const SourceCollectionIdentity& identity,
+        SampleLabelingCanonicalSourceDescriptor
+            source_descriptor,
         SourceCollectionSessionAction& action);
+    [[nodiscard]] bool
+        SynchronizeActiveCanonicalAsdfAttachment();
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
     [[nodiscard]] NavigationInputReconcileEffects ReconcileNavigationInputs(
         const SpectrumSnapshotHandle& snapshot,

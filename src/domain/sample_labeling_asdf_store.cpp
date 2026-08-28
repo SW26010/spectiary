@@ -37,6 +37,12 @@ std::optional<SampleLabelingAsdfStoreError> SourceCompatibilityError(
     const SampleLabelingSourceCompatibility& source,
     const SampleLabelingAsdfReadCheckpoint& checkpoint)
 {
+    if (source.source_kind.empty()) {
+        return SampleLabelingAsdfStoreError{
+            .kind = SampleLabelingAsdfStoreErrorKind::SourceMismatch,
+            .message =
+                "canonical source kind is required to open a writable ASDF labeling owner"};
+    }
     if (const std::optional<SampleLabelingSourceCompatibilityError> mismatch =
             CheckSampleLabelingSourceCompatibility(
                 document,
@@ -315,7 +321,9 @@ SampleLabelingAsdfOpenSnapshot::SampleLabelingAsdfOpenSnapshot(
     SampleLabelingDocument document,
     SampleLabelingAsdfDurableBase durable_base)
     : path_(std::move(path)),
-      document_(std::move(document)),
+      document_(
+          std::make_shared<const SampleLabelingDocument>(
+              std::move(document))),
       durable_base_(std::move(durable_base))
 {
 }

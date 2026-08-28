@@ -105,10 +105,11 @@ label definitions, annotation identity/values, source identity, and roster)
 while projecting the values and label definitions into the existing annotation
 views. Count-only attachment APIs do not accept ASDF because they cannot prove
 roster compatibility. Existing `.npy` and `.npy` plus `.sf-labels.json` reads
-remain unchanged. This reader integration does not move output persistence away
-from its current owner: an attached ASDF row is not exposed for editable task
-activation, and programmatic activation is a no-op. ASDF task hydration and
-writer lifecycle integration are a later step.
+remain unchanged. An attached ASDF row becomes editable only when a matching
+local task record already declares the same path and canonical ASDF ownership
+and the document carries that task id. Without that persisted owner it remains
+read-only; SpecForge does not convert the document into a new legacy task or
+hand its path to the NPY writer.
 
 ## Manual Labeling
 
@@ -748,11 +749,13 @@ retried after non-blocking save failures.
 Each `SampleLabelingTask` persists its formal output ownership as an explicit
 path-and-format pair. State-cache schema 3 writes this as `output.path` plus
 `output.format`; temporary drafts use `none`, current formal tasks use
-`legacy_npy_with_sidecar`, and `canonical_asdf` is reserved for the future ASDF
-persistence owner. Schema 1 and 2 records with a non-null `output_path` migrate
-explicitly to legacy NPY ownership. Output leases, conflict detection, and
-recovery projection checks use the task's stored format rather than guessing
-from its filename extension.
+`legacy_npy_with_sidecar`, and existing canonical document owners use
+`canonical_asdf`. Schema 1 and 2 records with a non-null `output_path` migrate
+explicitly to legacy NPY ownership. Formal records do not duplicate the full
+values array in this cache; they retain only sparse pending values plus local
+session/recovery state. Output leases, conflict detection, and recovery
+projection checks use the task's stored format rather than guessing from its
+filename extension.
 
 ## Annotation I/O
 
@@ -762,10 +765,10 @@ loaded sample annotation result: one value per spectrum sample, with a known
 value kind such as categorical integer, categorical string, or continuous
 floating point.
 
-Format-specific details belong behind annotation I/O. NPY remains the current
-label-result writer and legacy read adapter; canonical ASDF v1 is additionally
-supported as a source-aware, read-only annotation adapter. Until the ASDF
-persistence owner is connected, NPY output rejects `.asdf` paths and its lease
+Format-specific details belong behind annotation I/O. NPY remains the writer
+for newly formalized tasks and the legacy read adapter; canonical ASDF v1 is
+additionally supported as a source-aware annotation and existing-task hydration
+adapter. NPY output rejects `.asdf` paths and its lease
 identity always protects both the selected result path and the adjacent
 `<stem>.sf-labels.json`. Output artifact ownership is declared by format rather
 than inferred from a filename extension: canonical ASDF owns one document,
@@ -789,6 +792,19 @@ another logical document. A successful metadata rewrite invalidates the old
 snapshot and requires reopening the new generation.
 Controller leases, recovery state, retry policy, and UI activation remain above
 that store and are not codec responsibilities.
+
+Activating a cached canonical owner first acquires the ASDF document's one-file
+output lease, then opens the document store against the controller's owned
+canonical source descriptor: base identity, source kind, source name,
+fingerprint, sample count, and canonical sample names. The opened document is
+authoritative for task id/name, labels, and base values. Local auto-advance,
+remembered position, and sparse pending overlays are applied afterward. The
+controller keeps the resulting `SampleLabelingAsdfOpenSnapshot` as the active
+durable generation only in memory; it is never serialized into the state cache.
+Malformed documents, source/roster mismatches, and task-id mismatches fail the
+activation without falling back to legacy NPY hydration. This hydration slice
+checkpoints new edits only as pending local overlays; publishing those edits to
+the ASDF generation and creating new ASDF owners remain later writer steps.
 
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save

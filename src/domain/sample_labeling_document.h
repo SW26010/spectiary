@@ -1,14 +1,17 @@
 #pragma once
 
+#include "domain/sample_labeling.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace specforge {
 
-struct SampleLabelingTask;
 struct SourceCollectionContext;
 
 inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
@@ -135,6 +138,15 @@ struct SampleLabelingDocumentValidationResult {
     std::string source_kind,
     const SourceCollectionContext& source_context,
     const SampleLabelingTask& task);
+
+// Builds the editable/runtime projection of one canonical document generation.
+// Canonical task metadata and values form the base; only local session state
+// and explicitly pending cache overlays are applied above it.
+[[nodiscard]] std::optional<SampleLabelingTask>
+ProjectSampleLabelingDocumentTask(
+    const SampleLabelingDocument& document,
+    const SampleLabelingTask& local_state,
+    const std::function<void()>& cancellation_checkpoint = {});
 
 [[nodiscard]] SampleLabelingDocumentValidationResult
 ValidateSampleLabelingDocument(const SampleLabelingDocument& document);

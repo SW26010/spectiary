@@ -1,6 +1,7 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "domain/sample_labeling_asdf_store.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
 #include "domain/stable_sha256.h"
@@ -75,6 +76,24 @@ const std::vector<specforge::SampleLabelingTask>* ActiveSourceTasks(
     const specforge::SampleLabelingController& controller)
 {
     return controller.View().active_source_tasks;
+}
+
+const specforge::SampleLabelingTask* ActiveSourceTask(
+    const specforge::SampleLabelingController& controller,
+    std::string_view task_id)
+{
+    const std::vector<specforge::SampleLabelingTask>* tasks =
+        ActiveSourceTasks(controller);
+    if (tasks == nullptr) {
+        return nullptr;
+    }
+    const auto task = std::find_if(
+        tasks->begin(),
+        tasks->end(),
+        [task_id](const specforge::SampleLabelingTask& candidate) {
+            return candidate.task_id == task_id;
+        });
+    return task == tasks->end() ? nullptr : &*task;
 }
 
 std::int32_t ReadLittleEndianI32(const std::array<unsigned char, 4>& bytes)
@@ -166,6 +185,10 @@ void WriteTextFile(const std::filesystem::path& path, std::string_view contents)
 }
 
 std::filesystem::path FreshTestDirectory(std::string_view name);
+const specforge::SampleLabelingTask* FindTask(
+    const specforge::SampleLabelingStateCache& cache,
+    std::string_view source_identity,
+    std::string_view task_id);
 
 void TestSampleLabelingStateCacheRoundTrip()
 {
@@ -418,6 +441,667 @@ std::filesystem::path FreshTestDirectory(
     std::filesystem::create_directories(directory, error);
     Require(!error, "could not create test directory");
     return directory;
+}
+
+specforge::SampleLabelingDocument
+CanonicalOwnerDocument()
+{
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = "canonical-source";
+    document.source.kind = "npy";
+    document.source.name = "spectra.npy";
+    document.source.fingerprint =
+        "canonical-source-fingerprint";
+    document.source.sample_count = 3;
+    document.source.roster.identity_kind =
+        std::string{
+            specforge::
+                kSampleLabelingDocumentExplicitNamesRoster};
+    document.source.roster.sample_names = {
+        "sample-a",
+        "sample-b",
+        "sample-c",
+    };
+    document.annotation.name = "quality-code";
+    document.annotation.values = {-1, 2, 7};
+    document.labeling.id = "quality-task";
+    document.labeling.name = "Canonical quality";
+    document.labeling.labels = {
+        {2, "accepted", "a"},
+        {7, "rejected", "r"},
+    };
+    return document;
+}
+
+specforge::SourceCollectionIdentity
+CanonicalOwnerSourceIdentity()
+{
+    return specforge::SourceCollectionIdentity{
+        .id = "canonical-source",
+        .source_name = "spectra.npy",
+        .source_fingerprint =
+            "canonical-source-fingerprint",
+        .context_fingerprint =
+            "annotation-sensitive-context",
+        .spectrum_count = 3,
+    };
+}
+
+specforge::SampleLabelingCanonicalSourceDescriptor
+CanonicalOwnerSourceDescriptor()
+{
+    return specforge::
+        SampleLabelingCanonicalSourceDescriptor{
+            .base_identity = "canonical-source",
+            .source_kind = "npy",
+            .source_name = "spectra.npy",
+            .source_fingerprint =
+                "canonical-source-fingerprint",
+            .sample_count = 3,
+            .sample_names = {
+                "sample-a",
+                "sample-b",
+                "sample-c",
+            },
+        };
+}
+
+void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_owner_hydration");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const specforge::SampleLabelingDocument document =
+        CanonicalOwnerDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            document)
+            .succeeded(),
+        "canonical owner fixture should publish its ASDF document");
+
+    specforge::SampleLabelingStateCache cache;
+    specforge::SampleLabelingSourceState source;
+    source.sample_count = 3;
+    source.source_name = "spectra.npy";
+    source.source_fingerprint =
+        "canonical-source-fingerprint";
+    source.active_task_id = "quality-task";
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "quality-task",
+            "stale cache name",
+            3);
+    cached.label_set.labels = {
+        {99, "stale cache label", 's'},
+    };
+    cached.output_path = asdf_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    cached.auto_advance = true;
+    cached.skip_labeled_on_advance = true;
+    cached.remembered_position = 2;
+    cached.values[1] = 7;
+    cached.pending_sample_indices.insert(1);
+    cached.save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+    source.tasks.push_back(cached);
+    cache.sources.emplace(
+        "canonical-source",
+        std::move(source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "canonical owner cache fixture should save");
+
+    const std::string cache_text =
+        ReadTextFile(cache_path);
+    Require(
+        cache_text.find("\"pending_values\"") !=
+                std::string::npos &&
+            cache_text.find("          \"values\":") ==
+                std::string::npos,
+        "canonical owner cache should retain only its sparse pending values");
+    const specforge::SampleLabelingStateCacheLoadResult
+        structural =
+            specforge::LoadSampleLabelingStateCache(
+                cache_path);
+    const specforge::SampleLabelingTask* structural_task =
+        FindTask(
+            structural.cache,
+            "canonical-source",
+            "quality-task");
+    Require(
+        structural.issue_kind ==
+                specforge::
+                    SampleLabelingStateCacheLoadIssueKind::
+                        None &&
+            structural_task != nullptr &&
+            structural_task->save_state.kind !=
+                specforge::SampleLabelSaveStateKind::Failed &&
+            structural_task->values ==
+                std::vector<int>({-1, 7, -1}),
+        "default cache load must leave canonical owners structural instead of sending them to the NPY loader");
+
+    {
+        specforge::SampleLabelingController controller(
+            cache_path);
+        controller.ActivateSource(
+            CanonicalOwnerSourceIdentity(),
+            CanonicalOwnerSourceDescriptor());
+        const specforge::SampleLabelingTask* task =
+            ActiveTask(controller);
+        Require(
+            task != nullptr &&
+                task->task_id == "quality-task" &&
+                task->task_name ==
+                    "Canonical quality" &&
+                task->label_set.labels.size() == 2 &&
+                task->label_set.labels[0].code == 2 &&
+                task->label_set.labels[0].name ==
+                    "accepted" &&
+                task->values ==
+                    std::vector<int>({-1, 7, 7}) &&
+                task->auto_advance &&
+                task->skip_labeled_on_advance &&
+                task->remembered_position ==
+                    std::optional<std::size_t>{2} &&
+                task->output_format ==
+                    specforge::
+                        SampleLabelingOutputArtifactFormat::
+                            CanonicalAsdf,
+            "canonical hydration should use ASDF metadata and base values before applying local session and pending state");
+
+        const specforge::SampleLabelingWriteOperationResult
+            write = controller.AssignLabel(0, 2);
+        Require(
+            write.write.accepted &&
+                write.operation.state_saved &&
+                !write.operation.output_save_attempted,
+            "hydration-only integration should checkpoint canonical edits without invoking an output writer");
+    }
+
+    const specforge::SampleLabelingAsdfStoreOpenResult
+        unchanged =
+            specforge::OpenSampleLabelingAsdfDocumentStore(
+                asdf_path,
+                specforge::SampleLabelingCompatibilityView(
+                    CanonicalOwnerSourceDescriptor()));
+    Require(
+        unchanged.succeeded() &&
+            unchanged.snapshot->document()
+                    .annotation.values ==
+                document.annotation.values,
+        "hydrating and editing an existing owner must not publish ASDF bytes in this slice");
+
+    specforge::SampleLabelingController reopened(
+        cache_path);
+    reopened.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(reopened) != nullptr &&
+            ActiveTask(reopened)->values ==
+                std::vector<int>({2, 7, 7}),
+        "a reopened canonical owner should replay the durable sparse cache overlay above the ASDF base");
+
+    specforge::SourceCollectionIdentity changed_context =
+        CanonicalOwnerSourceIdentity();
+    changed_context.context_fingerprint =
+        "changed-annotation-context";
+    reopened.ActivateSource(
+        changed_context,
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(reopened) != nullptr,
+        "a changed context generation should revalidate and retain a compatible canonical owner");
+
+    changed_context.context_fingerprint =
+        "changed-kind-context";
+    specforge::SampleLabelingCanonicalSourceDescriptor
+        wrong_kind = CanonicalOwnerSourceDescriptor();
+    wrong_kind.source_kind = "fits";
+    const std::uint64_t generation_before_failed_revalidation =
+        reopened.active_source_tasks_generation();
+    reopened.ActivateSource(
+        changed_context,
+        std::move(wrong_kind));
+    Require(
+        ActiveTask(reopened) == nullptr,
+        "a changed context generation must fail closed when the canonical source kind no longer matches");
+    const specforge::SampleLabelingTask* failed_owner =
+        ActiveSourceTask(reopened, "quality-task");
+    Require(
+        failed_owner != nullptr &&
+            !failed_owner->values_are_authoritative &&
+            failed_owner->values ==
+                std::vector<int>({2, 7, -1}) &&
+            failed_owner->pending_sample_indices ==
+                std::unordered_set<std::size_t>({0, 1}) &&
+            reopened.active_source_tasks_generation() >
+                generation_before_failed_revalidation,
+        "failed canonical revalidation must discard the stale base projection, retain only its pending overlay, and invalidate projection caches");
+
+    specforge::SampleLabelingController takeover(
+        cache_path);
+    takeover.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(takeover) != nullptr,
+        "failed canonical source revalidation without a pending recovery patch must immediately release the owner lease");
+}
+
+void TestCanonicalAsdfProjectionDowngradesWhenDeactivated()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_owner_deactivation");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "canonical deactivation fixture should publish its ASDF document");
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "quality-task",
+            "structural cache owner",
+            3);
+    cached.output_path = asdf_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    specforge::SampleLabelingSourceState source;
+    source.sample_count = 3;
+    source.source_name = "spectra.npy";
+    source.source_fingerprint =
+        "canonical-source-fingerprint";
+    source.active_task_id = "quality-task";
+    source.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(
+        "canonical-source",
+        std::move(source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "canonical deactivation cache fixture should save");
+
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->values_are_authoritative &&
+            ActiveTask(controller)->values ==
+                CanonicalOwnerDocument().annotation.values,
+        "canonical deactivation fixture should begin with a hydrated authoritative projection");
+
+    specforge::SampleLabelingSourceState authoritative_prepared_state;
+    authoritative_prepared_state.sample_count = 3;
+    authoritative_prepared_state.source_name = "spectra.npy";
+    authoritative_prepared_state.source_fingerprint =
+        "canonical-source-fingerprint";
+    authoritative_prepared_state.context_fingerprint =
+        "annotation-sensitive-context";
+    authoritative_prepared_state.active_task_id =
+        "quality-task";
+    authoritative_prepared_state.tasks =
+        *ActiveSourceTasks(controller);
+    authoritative_prepared_state.tasks[0].values[1] = 7;
+    authoritative_prepared_state.tasks[0]
+        .pending_sample_indices.insert(1);
+    authoritative_prepared_state.tasks[0].save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+
+    const std::optional<specforge::SampleLabelingSourceState>
+        exported_state = controller.SourceStateForIdentity(
+            "canonical-source");
+    Require(
+        exported_state &&
+            exported_state->tasks.size() == 1 &&
+            !exported_state->tasks[0]
+                 .values_are_authoritative &&
+            exported_state->tasks[0].values ==
+                std::vector<int>({-1, -1, -1}),
+        "exporting a prepared source must not copy a snapshot-bound canonical base projection");
+
+    const std::uint64_t generation_before_deactivation =
+        controller.active_source_tasks_generation();
+    const specforge::SampleLabelingOperationResult deactivated =
+        controller.DeactivateActiveTask();
+    Require(
+        deactivated.accepted &&
+            deactivated.changed &&
+            deactivated.state_saved,
+        "a clean canonical owner should deactivate after its selection is saved");
+    const specforge::SampleLabelingTask* structural =
+        ActiveSourceTask(controller, "quality-task");
+    Require(
+        structural != nullptr &&
+            !structural->values_are_authoritative &&
+            structural->values ==
+                std::vector<int>({-1, -1, -1}) &&
+            structural->pending_sample_indices.empty() &&
+            structural->labeled_count == 0 &&
+            structural->label_usage_counts.empty() &&
+            controller.active_source_tasks_generation() >
+                generation_before_deactivation,
+        "losing the canonical snapshot on deactivation must leave only structural local state and invalidate projection caches");
+
+    WriteTextFile(
+        asdf_path,
+        "not an ASDF document");
+    specforge::SampleLabelingController prepared_receiver(
+        cache_path);
+    const specforge::SampleLabelingPreparedSourceActivationResult
+        failed_prepared_activation =
+            prepared_receiver.ActivatePreparedSource(
+                CanonicalOwnerSourceIdentity(),
+                std::move(authoritative_prepared_state),
+                CanonicalOwnerSourceDescriptor());
+    const specforge::SampleLabelingTask* failed_prepared_owner =
+        ActiveSourceTask(
+            prepared_receiver,
+            "quality-task");
+    Require(
+        failed_prepared_activation
+                .prepared_task_projection_changed &&
+            ActiveTask(prepared_receiver) == nullptr &&
+            failed_prepared_owner != nullptr &&
+            !failed_prepared_owner
+                 ->values_are_authoritative &&
+            failed_prepared_owner->values ==
+                std::vector<int>({-1, 7, -1}) &&
+            failed_prepared_owner
+                    ->pending_sample_indices ==
+                std::unordered_set<std::size_t>({1}),
+        "a prepared canonical projection must fail closed to pending-only structural state when hydration cannot establish a snapshot");
+
+    std::error_code remove_error;
+    std::filesystem::remove(
+        asdf_path,
+        remove_error);
+    Require(
+        !remove_error,
+        "canonical deactivation fixture should remove its malformed generation");
+
+    specforge::SampleLabelingDocument next_generation =
+        CanonicalOwnerDocument();
+    next_generation.labeling.name =
+        "Canonical quality generation C";
+    next_generation.annotation.values = {7, -1, 2};
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            next_generation)
+            .succeeded(),
+        "deactivation should release the one-file owner lease for a later ASDF generation");
+
+    const specforge::SampleLabelingOperationResult reactivated =
+        controller.ActivateTask("quality-task");
+    Require(
+        reactivated.accepted &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->values_are_authoritative &&
+            ActiveTask(controller)->task_name ==
+                "Canonical quality generation C" &&
+            ActiveTask(controller)->values ==
+                std::vector<int>({7, -1, 2}),
+        "reactivating a downgraded owner must hydrate the current ASDF generation instead of reusing the retired projection");
+}
+
+void TestCanonicalRevalidationRetainsLeaseForPendingRecoveryPatch()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_revalidation_pending_patch");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "pending revalidation fixture should publish its canonical owner");
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "quality-task",
+            "structural cache owner",
+            3);
+    cached.output_path = asdf_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    specforge::SampleLabelingSourceState source;
+    source.sample_count = 3;
+    source.source_name = "spectra.npy";
+    source.source_fingerprint =
+        "canonical-source-fingerprint";
+    source.active_task_id = "quality-task";
+    source.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(
+        "canonical-source",
+        std::move(source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "pending revalidation cache fixture should save");
+
+    specforge::SampleLabelingController owner(cache_path);
+    owner.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(owner) != nullptr,
+        "pending revalidation fixture should hydrate its owner");
+
+    specforge::ExclusiveFileLeaseAcquireResult blocked_commit =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        blocked_commit.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "pending revalidation fixture should block its cache commit");
+    const specforge::SampleLabelingWriteOperationResult pending =
+        owner.AssignLabel(0, 2);
+    Require(
+        pending.write.changed &&
+            !pending.operation.state_saved &&
+            owner.state_save_pending(),
+        "pending revalidation fixture should retain an unpersisted recovery overlay");
+
+    specforge::SourceCollectionIdentity changed_context =
+        CanonicalOwnerSourceIdentity();
+    changed_context.context_fingerprint =
+        "incompatible-roster-context";
+    specforge::SampleLabelingCanonicalSourceDescriptor
+        incompatible = CanonicalOwnerSourceDescriptor();
+    incompatible.sample_names[0] = "renamed-sample-a";
+    owner.ActivateSource(
+        changed_context,
+        std::move(incompatible));
+    Require(
+        ActiveTask(owner) == nullptr,
+        "incompatible canonical roster should fail revalidation closed");
+
+    specforge::SampleLabelingController blocked(cache_path);
+    blocked.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(blocked) == nullptr,
+        "unpersisted recovery overlay must keep the deferred canonical owner lease");
+
+    blocked_commit.lease.Reset();
+    Require(
+        owner.FlushStateCache(),
+        "pending recovery overlay should flush after commit contention ends");
+    specforge::SampleLabelingController after_flush(
+        cache_path);
+    after_flush.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(after_flush) != nullptr &&
+            ActiveTask(after_flush)->values[0] == 2,
+        "successful recovery flush should release the deferred canonical owner lease and preserve the overlay");
+}
+
+void TestCanonicalAsdfTaskOwnerFailsClosed()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_owner_fail_closed");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    WriteTextFile(
+        asdf_path,
+        "not an ASDF document");
+
+    specforge::SampleLabelingStateCache cache;
+    specforge::SampleLabelingSourceState source;
+    source.sample_count = 3;
+    source.active_task_id = "quality-task";
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "quality-task",
+            "must not activate",
+            3);
+    cached.output_path = asdf_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    source.tasks.push_back(std::move(cached));
+    cache.sources.emplace(
+        "canonical-source",
+        std::move(source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "malformed canonical owner cache fixture should save");
+
+    {
+        specforge::SampleLabelingController controller(
+            cache_path);
+        controller.ActivateSource(
+            CanonicalOwnerSourceIdentity(),
+            CanonicalOwnerSourceDescriptor());
+        Require(
+            ActiveTask(controller) == nullptr,
+            "malformed canonical owner must fail closed instead of activating cache placeholders or falling back to NPY");
+    }
+
+    std::error_code replace_error;
+    std::filesystem::remove(
+        asdf_path,
+        replace_error);
+    Require(
+        !replace_error,
+        "source-mismatch fixture should remove the malformed generation");
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "source-mismatch fixture should publish a valid ASDF document");
+    specforge::SourceCollectionIdentity mismatched_identity =
+        CanonicalOwnerSourceIdentity();
+    mismatched_identity.source_fingerprint =
+        "different-active-fingerprint";
+    specforge::SampleLabelingCanonicalSourceDescriptor
+        mismatched_descriptor =
+            CanonicalOwnerSourceDescriptor();
+    mismatched_descriptor.source_fingerprint =
+        mismatched_identity.source_fingerprint;
+    specforge::SampleLabelingController mismatched(
+        cache_path);
+    mismatched.ActivateSource(
+        mismatched_identity,
+        std::move(mismatched_descriptor));
+    Require(
+        ActiveTask(mismatched) == nullptr,
+        "source-mismatched canonical owner must fail closed without falling back to legacy hydration");
+}
+
+void TestCanonicalAsdfTaskOwnerRejectsUndefinedPendingCode()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_owner_undefined_pending");
+    const std::filesystem::path asdf_path =
+        directory / "quality.asdf";
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_path,
+            CanonicalOwnerDocument())
+            .succeeded(),
+        "undefined pending fixture should publish its canonical generation");
+
+    specforge::SampleLabelingTask cached =
+        specforge::CreateSampleLabelingTask(
+            "quality-task",
+            "stale local state",
+            3);
+    cached.output_path = asdf_path;
+    cached.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    cached.values[1] = 99;
+    cached.pending_sample_indices.insert(1);
+    cached.save_state.kind =
+        specforge::SampleLabelSaveStateKind::Pending;
+
+    specforge::SampleLabelingSourceState source;
+    source.sample_count = 3;
+    source.source_name = "spectra.npy";
+    source.source_fingerprint =
+        "canonical-source-fingerprint";
+    source.active_task_id = "quality-task";
+    source.tasks.push_back(std::move(cached));
+    specforge::SampleLabelingStateCache cache;
+    cache.sources.emplace(
+        "canonical-source",
+        std::move(source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "undefined pending cache fixture should save");
+
+    specforge::SampleLabelingController controller(cache_path);
+    controller.ActivateSource(
+        CanonicalOwnerSourceIdentity(),
+        CanonicalOwnerSourceDescriptor());
+    Require(
+        ActiveTask(controller) == nullptr,
+        "a pending code absent from the leased canonical generation must fail activation closed");
 }
 
 std::size_t CountLeaseFiles(
@@ -4102,6 +4786,9 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
         second_source);
     specforge::SampleLabelingSourceState asdf_source;
     asdf_source.sample_count = 3;
+    asdf_source.source_name = "asdf-source.npy";
+    asdf_source.source_fingerprint =
+        "asdf-source-fingerprint";
     asdf_source.tasks.push_back(
         OutputTask(
             "asdf-task",
@@ -4110,6 +4797,24 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
     cache.sources.emplace(
         "asdf-source",
         std::move(asdf_source));
+    specforge::SampleLabelingDocument asdf_document;
+    asdf_document.source.base_identity =
+        "asdf-source";
+    asdf_document.source.kind = "npy";
+    asdf_document.source.name = "asdf-source.npy";
+    asdf_document.source.fingerprint =
+        "asdf-source-fingerprint";
+    asdf_document.source.sample_count = 3;
+    asdf_document.annotation.name = "ASDF task";
+    asdf_document.annotation.values = {-1, -1, -1};
+    asdf_document.labeling.id = "asdf-task";
+    asdf_document.labeling.name = "ASDF task";
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            asdf_output,
+            asdf_document)
+            .succeeded(),
+        "artifact-set fixture should publish its canonical owner");
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     Require(
@@ -4137,7 +4842,25 @@ void TestOutputArtifactSetSharesConflictAndLeaseIdentity()
         structural_loader);
     first.ActivateSource("npy-source", 3);
     second.ActivateSource("csv-source", 3);
-    canonical.ActivateSource("asdf-source", 3);
+    canonical.ActivateSource(
+        specforge::SourceCollectionIdentity{
+            .id = "asdf-source",
+            .source_name = "asdf-source.npy",
+            .source_fingerprint =
+                "asdf-source-fingerprint",
+            .context_fingerprint =
+                "asdf-context",
+            .spectrum_count = 3,
+        },
+        specforge::
+            SampleLabelingCanonicalSourceDescriptor{
+                .base_identity = "asdf-source",
+                .source_kind = "npy",
+                .source_name = "asdf-source.npy",
+                .source_fingerprint =
+                    "asdf-source-fingerprint",
+                .sample_count = 3,
+            });
     Require(
         first.ActivateTask("npy-task").accepted,
         "first artifact-set editor should acquire its result and sidecar leases");
@@ -7434,6 +8157,11 @@ int main(int argc, char* argv[])
     try {
         TestSampleLabelingStateCacheRoundTrip();
         TestSampleLabelingOutputFormatMigrationAndRoundTrip();
+        TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay();
+        TestCanonicalAsdfProjectionDowngradesWhenDeactivated();
+        TestCanonicalRevalidationRetainsLeaseForPendingRecoveryPatch();
+        TestCanonicalAsdfTaskOwnerFailsClosed();
+        TestCanonicalAsdfTaskOwnerRejectsUndefinedPendingCode();
         TestSampleLabelingStateCacheReportsCorruptJson();
         TestSampleLabelingStateCacheReportsUnsupportedSchema();
         TestSampleLabelTaskWritesStableCodes();

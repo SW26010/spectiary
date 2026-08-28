@@ -181,11 +181,56 @@ specforge::SampleLabelingSourceCompatibility CompatibleSource(
 {
     return specforge::SampleLabelingSourceCompatibility{
         .base_identity = document.source.base_identity,
+        .source_kind = document.source.kind,
         .source_name = document.source.name,
         .source_fingerprint = document.source.fingerprint,
         .sample_count = document.source.sample_count,
         .sample_names = document.source.roster.sample_names,
     };
+}
+
+void TestSourceKindMismatchIsRejected()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge-asdf-store-kind-mismatch");
+    const std::filesystem::path path =
+        directory / "labels.asdf";
+    const specforge::SampleLabelingDocument document = MakeDocument();
+    Require(
+        specforge::WriteSampleLabelingAsdfDocumentAtomically(
+            path,
+            document)
+            .succeeded(),
+        "source-kind mismatch fixture should write");
+
+    specforge::SampleLabelingSourceCompatibility wrong_kind =
+        CompatibleSource(document);
+    wrong_kind.source_kind = "fits";
+    const specforge::SampleLabelingAsdfStoreOpenResult opened =
+        specforge::OpenSampleLabelingAsdfDocumentStore(
+            path,
+            wrong_kind);
+    Require(
+        !opened.succeeded() &&
+            opened.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    SourceMismatch,
+        "store open should reject a different canonical source kind");
+
+    specforge::SampleLabelingSourceCompatibility missing_kind =
+        CompatibleSource(document);
+    missing_kind.source_kind = {};
+    const specforge::SampleLabelingAsdfStoreOpenResult
+        opened_without_kind =
+            specforge::OpenSampleLabelingAsdfDocumentStore(
+                path,
+                missing_kind);
+    Require(
+        !opened_without_kind.succeeded() &&
+            opened_without_kind.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    SourceMismatch,
+        "writable store open should not allow callers to bypass source-kind validation");
 }
 
 void TestAtomicFullWriteAndSourceAwareOpen()
@@ -575,6 +620,7 @@ void TestWriteFailuresPreserveThePreviousDocument()
 int main()
 {
     try {
+        TestSourceKindMismatchIsRejected();
         TestAtomicFullWriteAndSourceAwareOpen();
         TestValueOnlyRewriteReusesRosterBlockWithoutReopen();
         TestMetadataChangingRewritesPreserveForwardUnknownFields();
