@@ -590,8 +590,21 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         "default cache load must leave canonical owners structural instead of sending them to the NPY loader");
 
     {
+        std::size_t legacy_publication_calls = 0;
         specforge::SampleLabelingController controller(
-            cache_path);
+            cache_path,
+            [](const std::filesystem::path& path) {
+                return specforge::LoadSampleLabelingStateCache(
+                    path);
+            },
+            [&legacy_publication_calls](
+                specforge::SampleLabelingTask& task,
+                const specforge::SampleLabelResultMetadataSource* source) {
+                ++legacy_publication_calls;
+                return specforge::PublishLegacySampleLabelingTaskOutput(
+                    task,
+                    source);
+            });
         controller.ActivateSource(
             CanonicalOwnerSourceIdentity(),
             CanonicalOwnerSourceDescriptor());
@@ -623,8 +636,10 @@ void TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay()
         Require(
             write.write.accepted &&
                 write.operation.state_saved &&
-                !write.operation.output_save_attempted,
-            "hydration-only integration should checkpoint canonical edits without invoking an output writer");
+                !write.operation.output_save_attempted &&
+                !write.operation.output_retry_scheduled &&
+                legacy_publication_calls == 0,
+            "canonical dispatch should checkpoint edits without invoking or scheduling the legacy output publisher");
     }
 
     const specforge::SampleLabelingAsdfStoreOpenResult
@@ -1511,9 +1526,14 @@ void TestSampleLabelResultWritesMetadataSidecar()
     source.source_fingerprint = "size=12;mtime=1;dtype=<f8;shape=3x2";
     source.context_fingerprint = "context";
     source.spectrum_count = 3;
-    const specforge::SampleLabelTaskPersistResult result =
-        specforge::PersistSampleLabelingTaskResult(task, &source);
-    Require(result.output_saved, result.message.empty() ? "metadata-backed output should save" : result.message);
+    const specforge::SampleLabelOutputPublicationResult result =
+        specforge::PublishLegacySampleLabelingTaskOutput(task, &source);
+    Require(
+        result.attempted && result.published &&
+            result.artifacts_replaced && !result.retryable,
+        result.message.empty()
+            ? "metadata-backed output should publish through the generic result seam"
+            : result.message);
     Require(task.pending_sample_indices.empty(), "successful metadata-backed output should clear pending samples");
     Require(!task.metadata_save_pending, "successful metadata-backed output should clear metadata pending");
     Require(
@@ -1639,8 +1659,9 @@ void TestSampleAnnotationUsesMatchingLabelMetadata()
         cleanup_error);
 
     specforge::SelectSampleLabelTaskOutputPath(task, path);
-    const specforge::SampleLabelTaskPersistResult saved = specforge::PersistSampleLabelingTaskResult(task);
-    Require(saved.output_saved, saved.message.empty() ? "label result should save" : saved.message);
+    const specforge::SampleLabelOutputPublicationResult saved =
+        specforge::PublishLegacySampleLabelingTaskOutput(task);
+    Require(saved.published, saved.message.empty() ? "label result should save" : saved.message);
 
     std::string error;
     std::optional<specforge::SampleAnnotationResult> annotation =
@@ -1972,11 +1993,11 @@ void TestCreateFromAnnotationDefersPhysicalIdentityRefresh()
         },
         [&](specforge::SampleLabelingTask& task,
             const specforge::SampleLabelResultMetadataSource* source) {
-            specforge::SampleLabelTaskPersistResult result =
-                specforge::PersistSampleLabelingTaskResult(
+            specforge::SampleLabelOutputPublicationResult result =
+                specforge::PublishLegacySampleLabelingTaskOutput(
                     task,
                     source);
-            if (result.array_saved) {
+            if (result.artifacts_replaced) {
                 // The fixture holds the post-replacement FILE_ID to prove
                 // that the hot path relies on the normalized lease; physical
                 // alias coverage remains best-effort until a later refresh.
@@ -2041,7 +2062,7 @@ void TestCreateFromAnnotationWaitsForRecoveryCheckpoint()
         [&](specforge::SampleLabelingTask& task,
             const specforge::SampleLabelResultMetadataSource* source) {
             ++persist_calls;
-            return specforge::PersistSampleLabelingTaskResult(
+            return specforge::PublishLegacySampleLabelingTaskOutput(
                 task,
                 source);
         });
@@ -2231,17 +2252,18 @@ void TestControllerAtomicallyStartsOrResumesTemporaryTask()
                 SampleLabelResultMetadataSource* source) {
             if (!fail_output_save) {
                 return specforge::
-                    PersistSampleLabelingTaskResult(
+                    PublishLegacySampleLabelingTaskOutput(
                         task,
                         source);
             }
             specforge::MarkSampleLabelTaskSaveFailed(
                 task,
                 "disk full");
-            return specforge::SampleLabelTaskPersistResult{
-                .output_path_selected =
-                    task.output_path.has_value(),
-                .output_saved = false,
+            return specforge::SampleLabelOutputPublicationResult{
+                .attempted = true,
+                .published = false,
+                .artifacts_replaced = false,
+                .retryable = true,
                 .message = "disk full",
             };
         });
@@ -2670,12 +2692,12 @@ void TestPendingCreateCannotReplaceRepairedSameIdTask()
     repaired.output_path = output_path;
     repaired.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
-    const specforge::SampleLabelTaskPersistResult persisted =
-        specforge::PersistSampleLabelingTaskResult(
+    const specforge::SampleLabelOutputPublicationResult persisted =
+        specforge::PublishLegacySampleLabelingTaskOutput(
             repaired,
             nullptr);
     Require(
-        persisted.output_saved,
+        persisted.published,
         "repair fixture should persist its formal artifact set");
     specforge::SampleLabelingStateCache repaired_cache;
     specforge::SampleLabelingSourceState repaired_source;
@@ -2756,12 +2778,14 @@ void TestFailedExternalOutputPersistsPendingOverlay()
                 specforge::SampleLabelingTask& task,
                 const specforge::SampleLabelResultMetadataSource* source) {
                 if (!fail_output_save) {
-                    return specforge::PersistSampleLabelingTaskResult(task, source);
+                    return specforge::PublishLegacySampleLabelingTaskOutput(task, source);
                 }
                 specforge::MarkSampleLabelTaskSaveFailed(task, "disk full");
-                return specforge::SampleLabelTaskPersistResult{
-                    .output_path_selected = task.output_path.has_value(),
-                    .output_saved = false,
+                return specforge::SampleLabelOutputPublicationResult{
+                    .attempted = true,
+                    .published = false,
+                    .artifacts_replaced = false,
+                    .retryable = true,
                     .message = "disk full"};
             });
         controller.ActivateSource("source-identity", 3);
@@ -2834,12 +2858,14 @@ void TestFailedExternalOutputRetriesAfterBackoff()
             specforge::SampleLabelingTask& task,
             const specforge::SampleLabelResultMetadataSource* source) {
             if (!fail_output_save) {
-                return specforge::PersistSampleLabelingTaskResult(task, source);
+                return specforge::PublishLegacySampleLabelingTaskOutput(task, source);
             }
             specforge::MarkSampleLabelTaskSaveFailed(task, "disk full");
-            return specforge::SampleLabelTaskPersistResult{
-                .output_path_selected = task.output_path.has_value(),
-                .output_saved = false,
+            return specforge::SampleLabelOutputPublicationResult{
+                .attempted = true,
+                .published = false,
+                .artifacts_replaced = false,
+                .retryable = true,
                 .message = "disk full"};
         });
     controller.ActivateSource("source-identity", 3);
@@ -3044,17 +3070,19 @@ void TestSuccessfulOutputCannotRetainOlderPendingOverlay()
                     specforge::MarkSampleLabelTaskSaveFailed(
                         task,
                         "simulated array failure");
-                    return specforge::SampleLabelTaskPersistResult{
-                        .output_path_selected = true,
-                        .output_saved = false,
+                    return specforge::SampleLabelOutputPublicationResult{
+                        .attempted = true,
+                        .published = false,
+                        .artifacts_replaced = false,
+                        .retryable = true,
                         .message = "simulated array failure"};
                 }
-                specforge::SampleLabelTaskPersistResult result =
-                    specforge::PersistSampleLabelingTaskResult(
+                specforge::SampleLabelOutputPublicationResult result =
+                    specforge::PublishLegacySampleLabelingTaskOutput(
                         task,
                         source);
                 if (block_clean_commit &&
-                    result.array_saved) {
+                    result.artifacts_replaced) {
                     clean_commit_blocker =
                         specforge::TryAcquireExclusiveFileLease(
                             specforge::SampleLabelingStateCoordinationDirectory(
@@ -3420,10 +3448,10 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
     first_task.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
-        specforge::PersistSampleLabelingTaskResult(
+        specforge::PublishLegacySampleLabelingTaskOutput(
             first_task,
             nullptr)
-            .output_saved,
+            .published,
         "duplicate-id fixture should persist its first output");
 
     specforge::SampleLabelingTask second_task =
@@ -3439,10 +3467,10 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
     second_task.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
-        specforge::PersistSampleLabelingTaskResult(
+        specforge::PublishLegacySampleLabelingTaskOutput(
             second_task,
             nullptr)
-            .output_saved,
+            .published,
         "duplicate-id fixture should persist its second output");
 
     specforge::SampleLabelingStateCache cache;
@@ -3497,7 +3525,7 @@ void TestDuplicateTaskIdsFailClosedBeforeOutputPersistence()
             specforge::SampleLabelingTask& task,
             const specforge::SampleLabelResultMetadataSource* metadata) {
             ++persist_calls;
-            return specforge::PersistSampleLabelingTaskResult(
+            return specforge::PublishLegacySampleLabelingTaskOutput(
                 task,
                 metadata);
         });
@@ -4246,9 +4274,11 @@ void TestTemporaryDraftDeleteIgnoresUnrelatedFailedActiveFormalTask()
             specforge::MarkSampleLabelTaskSaveFailed(
                 task,
                 "simulated output failure");
-            return specforge::SampleLabelTaskPersistResult{
-                .output_path_selected = task.output_path.has_value(),
-                .output_saved = false,
+            return specforge::SampleLabelOutputPublicationResult{
+                .attempted = true,
+                .published = false,
+                .artifacts_replaced = false,
+                .retryable = true,
                 .message = "simulated output failure"};
         });
     controller.ActivateSource("shared-source", 3);
@@ -5487,7 +5517,7 @@ void TestTemporaryFormalizationRequiresRecoveryCheckpoint()
             [&](specforge::SampleLabelingTask& task,
                 const specforge::SampleLabelResultMetadataSource* source) {
                 ++persist_calls;
-                return specforge::PersistSampleLabelingTaskResult(
+                return specforge::PublishLegacySampleLabelingTaskOutput(
                     task,
                     source);
             });
@@ -6368,12 +6398,14 @@ void TestOutputRetryRespectsTaskLease()
                 specforge::MarkSampleLabelTaskSaveFailed(
                     task,
                     "retry fixture failure");
-                return specforge::SampleLabelTaskPersistResult{
-                    .output_path_selected = true,
-                    .output_saved = false,
+                return specforge::SampleLabelOutputPublicationResult{
+                    .attempted = true,
+                    .published = false,
+                    .artifacts_replaced = false,
+                    .retryable = true,
                     .message = "retry fixture failure"};
             }
-            return specforge::PersistSampleLabelingTaskResult(
+            return specforge::PublishLegacySampleLabelingTaskOutput(
                 task,
                 source);
         });

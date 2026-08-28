@@ -104,7 +104,8 @@ public:
     using SourceState = SampleLabelingSourceState;
     using StateCacheLoader =
         std::function<SampleLabelingStateCacheLoadResult(const std::filesystem::path&)>;
-    using TaskPersister = std::function<SampleLabelTaskPersistResult(
+    using LegacyOutputPublisher =
+        std::function<SampleLabelOutputPublicationResult(
         SampleLabelingTask&,
         const SampleLabelResultMetadataSource*)>;
 
@@ -116,7 +117,7 @@ public:
     SampleLabelingController(
         std::filesystem::path state_cache_path,
         StateCacheLoader state_cache_loader,
-        TaskPersister task_persister);
+        LegacyOutputPublisher legacy_output_publisher);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -289,9 +290,7 @@ private:
     };
 
     struct TaskOutputPersistenceAttempt {
-        SampleLabelTaskPersistResult persist_result;
-        bool output_saved = false;
-        bool artifacts_replaced = false;
+        SampleLabelOutputPublicationResult publication;
         ExclusiveFileLeaseAcquireStatus lease_status =
             ExclusiveFileLeaseAcquireStatus::Acquired;
         std::string lease_error;
@@ -334,6 +333,14 @@ private:
         SampleLabelingTask& task,
         const SourceState* source_state,
         TaskEditLeaseSet& leases);
+    [[nodiscard]] SampleLabelOutputPublicationResult
+        PersistLegacyTaskOutput(
+            SampleLabelingTask& task,
+            const SourceState* source_state);
+    [[nodiscard]] SampleLabelOutputPublicationResult
+        PersistCanonicalTaskOutput(
+            SampleLabelingTask& task,
+            const SourceState* source_state);
     [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
         std::string_view source_identity,
         const SourceState& state,
@@ -470,7 +477,7 @@ private:
     std::shared_ptr<const SampleLabelingStateCacheLoadResult> state_cache_snapshot_;
     std::filesystem::path state_cache_path_;
     StateCacheLoader state_cache_loader_;
-    TaskPersister task_persister_;
+    LegacyOutputPublisher legacy_output_publisher_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;

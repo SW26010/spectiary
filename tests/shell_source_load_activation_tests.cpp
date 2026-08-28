@@ -5942,10 +5942,10 @@ void TestMaintenanceResynchronizesRetainedNavigationTopology()
     task.output_format =
         specforge::SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
     Require(
-        specforge::PersistSampleLabelingTaskResult(
+        specforge::PublishLegacySampleLabelingTaskOutput(
             task,
             nullptr)
-            .output_saved,
+            .published,
         "maintenance topology fixture should persist its formal artifact set");
     specforge::SampleLabelingStateCache labeling_state;
     specforge::SampleLabelingSourceState labeling_source;

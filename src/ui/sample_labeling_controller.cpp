@@ -32,13 +32,21 @@ bool HasPendingOutputSave(const SampleLabelingTask& task)
 
 bool ShouldRetryOutputSave(const SampleLabelingTask& task)
 {
-    return task.output_path &&
-           task.output_format ==
-               SampleLabelingOutputArtifactFormat::
-                   LegacyNpyWithSidecar &&
-           HasPendingOutputSave(task) &&
-           (task.save_state.kind == SampleLabelSaveStateKind::Pending ||
-            task.save_state.kind == SampleLabelSaveStateKind::Failed);
+    if (!task.output_path || !HasPendingOutputSave(task)) {
+        return false;
+    }
+    switch (task.output_format) {
+    case SampleLabelingOutputArtifactFormat::
+        LegacyNpyWithSidecar:
+        return task.save_state.kind ==
+                   SampleLabelSaveStateKind::Pending ||
+            task.save_state.kind ==
+                SampleLabelSaveStateKind::Failed;
+    case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
+    case SampleLabelingOutputArtifactFormat::None:
+        return false;
+    }
+    return false;
 }
 
 bool OutputPathMatches(const std::filesystem::path& left, const std::filesystem::path& right)
@@ -310,7 +318,9 @@ SampleLabelingController::SampleLabelingController(
           std::move(state_cache_path),
           std::move(state_cache_loader),
           [](SampleLabelingTask& task, const SampleLabelResultMetadataSource* source) {
-              return PersistSampleLabelingTaskResult(task, source);
+              return PublishLegacySampleLabelingTaskOutput(
+                  task,
+                  source);
           })
 {
 }
@@ -318,10 +328,11 @@ SampleLabelingController::SampleLabelingController(
 SampleLabelingController::SampleLabelingController(
     std::filesystem::path state_cache_path,
     StateCacheLoader state_cache_loader,
-    TaskPersister task_persister)
+    LegacyOutputPublisher legacy_output_publisher)
     : state_cache_path_(std::move(state_cache_path)),
       state_cache_loader_(std::move(state_cache_loader)),
-      task_persister_(std::move(task_persister)),
+      legacy_output_publisher_(
+          std::move(legacy_output_publisher)),
       state_cache_save_scheduler_(kStateSaveDebounce, kStateSaveRetry),
       output_retry_scheduler_(kStateSaveRetry, kStateSaveRetry)
 {
@@ -1473,10 +1484,12 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
                     persistence_attempt.lease_status);
             rejected.changed = true;
             rejected.task_projection_changed = true;
-            rejected.output_save_attempted = true;
+            rejected.output_save_attempted =
+                persistence_attempt.publication.attempted;
             rejected.output_saved =
-                persistence_attempt.output_saved;
+                persistence_attempt.publication.published;
             rejected.output_retry_scheduled =
+                persistence_attempt.publication.retryable &&
                 ShouldRetryOutputSave(
                     state->tasks.back());
             rejected.state_save_scheduled = true;
@@ -1504,10 +1517,12 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
         PersistencePolicy::FlushStateSave,
         TaskProjectionEffect::Changed);
     if (!metadata_clean) {
-        result.output_save_attempted = true;
+        result.output_save_attempted =
+            persistence_attempt.publication.attempted;
         result.output_saved =
-            persistence_attempt.output_saved;
+            persistence_attempt.publication.published;
         result.output_retry_scheduled =
+            persistence_attempt.publication.retryable &&
             ShouldRetryOutputSave(
                 state->tasks.back());
     }
@@ -1987,8 +2002,8 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         candidate,
         state,
         candidate_output_lease);
-    const SampleLabelTaskPersistResult& persist_result =
-        persistence_attempt.persist_result;
+    const SampleLabelOutputPublicationResult& publication =
+        persistence_attempt.publication;
 
     const auto adopt_formal_output_lease = [this,
                                             &candidate_output_lease]() {
@@ -2004,7 +2019,7 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
                     .output_artifact_keys);
     };
     const auto mark_persistence_failure =
-        [&candidate, &persist_result](SampleLabelingTask& destination) {
+        [&candidate, &publication](SampleLabelingTask& destination) {
             destination.save_state.kind =
                 SampleLabelSaveStateKind::Failed;
             destination.save_state.pending_count =
@@ -2015,7 +2030,7 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
                     candidate.save_state.message_kind;
             } else {
                 destination.save_state.message_kind =
-                    persist_result.message.empty()
+                    publication.message.empty()
                     ? SampleLabelSaveMessageKind::OutputSaveFailed
                     : SampleLabelSaveMessageKind::SystemDetail;
             }
@@ -2024,13 +2039,13 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
                 destination.save_state.message =
                     !candidate.save_state.message.empty()
                     ? candidate.save_state.message
-                    : persist_result.message;
+                    : publication.message;
             } else {
                 destination.save_state.message.clear();
             }
         };
 
-    if (persistence_attempt.output_saved) {
+    if (persistence_attempt.publication.published) {
         *task = std::move(candidate);
         adopt_formal_output_lease();
     } else {
@@ -2057,7 +2072,7 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
         }
     }
 
-    if (persistence_attempt.output_saved) {
+    if (persistence_attempt.publication.published) {
         BumpActiveSourceTasksGeneration();
     }
     Touch();
@@ -2069,8 +2084,10 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     SampleLabelingOperationResult result;
     result.accepted = true;
     result.changed = true;
-    result.output_save_attempted = true;
-    result.output_saved = persistence_attempt.output_saved;
+    result.output_save_attempted =
+        persistence_attempt.publication.attempted;
+    result.output_saved =
+        persistence_attempt.publication.published;
     result.state_save_scheduled = true;
     result.state_save_attempted = true;
     result.state_saved = FlushStateCache();
@@ -2272,22 +2289,6 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
         persistence == PersistencePolicy::
             PersistOutputIfSelectedInteractive;
     if (requests_output_persistence &&
-        task != nullptr && task->output_path &&
-        task->output_format ==
-            SampleLabelingOutputArtifactFormat::
-                CanonicalAsdf) {
-        // This slice hydrates existing canonical owners but does not yet
-        // publish ASDF edits. Keep the write-ahead overlay durable without
-        // ever handing the document path to the legacy NPY writer.
-        mark_task_upsert();
-        result.state_save_attempted = true;
-        result.state_saved = TrySaveStateCache(
-            persistence == PersistencePolicy::
-                PersistOutputIfSelected);
-        result.revision = revision_;
-        return result;
-    }
-    if (requests_output_persistence &&
         task != nullptr && task->output_path) {
         const bool wait_for_commit_lock =
             persistence == PersistencePolicy::PersistOutputIfSelected;
@@ -2309,15 +2310,22 @@ SampleLabelingOperationResult SampleLabelingController::CompleteMutation(
             return result;
         }
 
-        result.output_save_attempted = true;
         TaskOutputPersistenceAttempt attempt =
             PersistTaskOutput(
                 *task,
                 ActiveSource(),
                 active_task_leases_);
-        result.output_saved = attempt.output_saved;
+        result.output_save_attempted =
+            attempt.publication.attempted;
+        result.output_saved =
+            attempt.publication.published;
         result.output_retry_scheduled =
+            attempt.publication.retryable &&
             ShouldRetryOutputSave(*task);
+        if (!attempt.publication.attempted) {
+            result.revision = revision_;
+            return result;
+        }
         if (attempt.lease_status !=
             ExclusiveFileLeaseAcquireStatus::Acquired) {
             SourceState* state = ActiveSource();
@@ -2358,17 +2366,26 @@ SampleLabelingController::PersistTaskOutput(
     TaskEditLeaseSet& leases)
 {
     TaskOutputPersistenceAttempt attempt;
-    const SourceState* state = source_state == nullptr ? ActiveSource() : source_state;
-    const SampleLabelResultMetadataSource source_metadata = state == nullptr
-        ? SampleLabelResultMetadataSource{}
-        : SourceMetadataFromState(*state);
-    const SampleLabelResultMetadataSource* source = state == nullptr ? nullptr : &source_metadata;
-    const SampleLabelTaskPersistResult result = task_persister_(task, source);
-    attempt.persist_result = result;
-    attempt.output_saved = result.output_saved;
-    attempt.artifacts_replaced =
-        result.array_saved || result.output_saved;
-    if (attempt.artifacts_replaced) {
+    switch (task.output_format) {
+    case SampleLabelingOutputArtifactFormat::
+        LegacyNpyWithSidecar:
+        attempt.publication =
+            PersistLegacyTaskOutput(
+                task,
+                source_state);
+        break;
+    case SampleLabelingOutputArtifactFormat::CanonicalAsdf:
+        attempt.publication =
+            PersistCanonicalTaskOutput(
+                task,
+                source_state);
+        break;
+    case SampleLabelingOutputArtifactFormat::None:
+        attempt.publication.message =
+            "labeling task has no formal output owner";
+        break;
+    }
+    if (attempt.publication.artifacts_replaced) {
         const ExclusiveFileLeaseAcquireResult refreshed_lease =
             TryAttachOutputLease(
                 leases,
@@ -2382,10 +2399,37 @@ SampleLabelingController::PersistTaskOutput(
                 refreshed_lease.error;
         }
     }
-    if (!result.output_saved && ShouldRetryOutputSave(task)) {
+    if (attempt.publication.retryable &&
+        ShouldRetryOutputSave(task)) {
         QueueOutputRetry();
     }
     return attempt;
+}
+
+SampleLabelOutputPublicationResult
+SampleLabelingController::PersistLegacyTaskOutput(
+    SampleLabelingTask& task,
+    const SourceState* source_state)
+{
+    const SourceState* state = source_state == nullptr ? ActiveSource() : source_state;
+    const SampleLabelResultMetadataSource source_metadata = state == nullptr
+        ? SampleLabelResultMetadataSource{}
+        : SourceMetadataFromState(*state);
+    const SampleLabelResultMetadataSource* source = state == nullptr ? nullptr : &source_metadata;
+    return legacy_output_publisher_(task, source);
+}
+
+SampleLabelOutputPublicationResult
+SampleLabelingController::PersistCanonicalTaskOutput(
+    SampleLabelingTask& task,
+    const SourceState* source_state)
+{
+    static_cast<void>(task);
+    static_cast<void>(source_state);
+    // Canonical publication is deliberately an empty slot in this refactor.
+    // The durable pending overlay remains the only write performed here until
+    // the ASDF publisher is connected in a later change.
+    return {};
 }
 
 bool SampleLabelingController::CommitTaskRecoveryCheckpoint(
@@ -2750,7 +2794,8 @@ bool SampleLabelingController::TryRetryOutputSaves()
                 attempt.lease_status ==
                 ExclusiveFileLeaseAcquireStatus::Acquired;
             all_succeeded =
-                attempt.output_saved &&
+                (attempt.publication.published ||
+                 !attempt.publication.retryable) &&
                 lease_is_current &&
                 all_succeeded;
             if (!lease_is_current &&

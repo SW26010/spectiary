@@ -110,10 +110,11 @@ struct SampleLabelWriteResult {
     std::size_t pending_count = 0;
 };
 
-struct SampleLabelTaskPersistResult {
-    bool output_path_selected = false;
-    bool array_saved = false;
-    bool output_saved = false;
+struct SampleLabelOutputPublicationResult {
+    bool attempted = false;
+    bool published = false;
+    bool artifacts_replaced = false;
+    bool retryable = false;
     std::string message;
 };
 
@@ -162,7 +163,8 @@ void MarkSampleLabelTaskSaveFailed(
     std::string message,
     SampleLabelSaveMessageKind message_kind =
         SampleLabelSaveMessageKind::SystemDetail);
-[[nodiscard]] SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
+[[nodiscard]] SampleLabelOutputPublicationResult
+PublishLegacySampleLabelingTaskOutput(
     SampleLabelingTask& task,
     const SampleLabelResultMetadataSource* source = nullptr);
 

@@ -457,12 +457,12 @@ void MarkSampleLabelTaskSaveFailed(
     task.save_state.message = std::move(message);
 }
 
-SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
+SampleLabelOutputPublicationResult
+PublishLegacySampleLabelingTaskOutput(
     SampleLabelingTask& task,
     const SampleLabelResultMetadataSource* source)
 {
-    SampleLabelTaskPersistResult result;
-    result.output_path_selected = task.output_path.has_value();
+    SampleLabelOutputPublicationResult result;
     if (!task.output_path) {
         return result;
     }
@@ -474,10 +474,12 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
         return result;
     }
 
+    result.attempted = true;
     const SampleLabelResultWriteOutcome write =
         SampleAnnotationIoAdapter{}.SaveLabelResult(*task.output_path, task, source);
-    result.array_saved = write.array_saved;
+    result.artifacts_replaced = write.array_saved;
     if (!write.array_saved) {
+        result.retryable = true;
         if (write.message.empty()) {
             result.message = "could not save label output";
             MarkSampleLabelTaskSaveFailed(
@@ -494,10 +496,11 @@ SampleLabelTaskPersistResult PersistSampleLabelingTaskResult(
     task.pending_sample_indices.clear();
     task.metadata_save_pending = true;
 
-    result.output_saved = write.metadata_saved;
+    result.published = write.metadata_saved;
     if (write.metadata_saved) {
         MarkSampleLabelTaskPersisted(task, SampleLabelSaveStateKind::AutosavedToOutput);
     } else {
+        result.retryable = true;
         if (write.message.empty()) {
             result.message =
                 "could not save label output metadata";

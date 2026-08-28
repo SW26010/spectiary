@@ -288,10 +288,10 @@ void TestSampleLabelingStateCacheStoresPackageRelativeOutputPath(
         specforge::AssignSampleLabel(task, 1, 5).accepted,
         "package-relative fixture should accept label value");
     specforge::SelectSampleLabelTaskOutputPath(task, output_path);
-    const specforge::SampleLabelTaskPersistResult persisted =
-        specforge::PersistSampleLabelingTaskResult(task);
+    const specforge::SampleLabelOutputPublicationResult persisted =
+        specforge::PublishLegacySampleLabelingTaskOutput(task);
     Require(
-        persisted.output_saved,
+        persisted.published,
         persisted.message.empty()
             ? "package-relative output should save"
             : persisted.message);
