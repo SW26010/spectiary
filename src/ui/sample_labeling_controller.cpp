@@ -2525,6 +2525,215 @@ SampleLabelingOperationResult SampleLabelingController::SaveActiveTemporaryTaskT
     return result;
 }
 
+SampleLabelingOperationResult
+SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
+    std::filesystem::path output_path)
+{
+    SampleLabelingTask* task = ActiveTask();
+    SourceState* state = ActiveSource();
+    if (task == nullptr || state == nullptr ||
+        !active_source_identity_ ||
+        !active_source_descriptor_ ||
+        !task->output_path ||
+        task->output_format !=
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar ||
+        !task->values_are_authoritative ||
+        output_path.empty() ||
+        !IsCanonicalAsdfOutputPath(output_path) ||
+        OutputPathMatches(
+            *task->output_path,
+            output_path) ||
+        active_source_descriptor_->base_identity !=
+            *active_source_identity_ ||
+        active_source_descriptor_->sample_count !=
+            task->values.size() ||
+        !ActiveTaskLeaseMatches(
+            *active_source_identity_,
+            *task)) {
+        return RejectOperation();
+    }
+
+    const auto local_conflict = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [task, &output_path](
+            const SampleLabelingTask& existing) {
+            return existing.task_id != task->task_id &&
+                existing.output_path &&
+                OutputPathMatches(
+                    *existing.output_path,
+                    output_path);
+        });
+    if (local_conflict != state->tasks.end()) {
+        return RejectOutputPathAlreadyUsed();
+    }
+
+    SampleLabelingTask candidate = *task;
+    candidate.output_path = std::move(output_path);
+    candidate.output_format =
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    candidate.initial_publication_pending = false;
+    candidate.values_are_authoritative = true;
+
+    TaskEditLeaseSet candidate_output_leases;
+    ExclusiveFileLeaseAcquireResult candidate_lease =
+        TryAttachOutputLease(
+            candidate_output_leases,
+            candidate);
+    if (candidate_lease.status !=
+        ExclusiveFileLeaseAcquireStatus::Acquired) {
+        return RejectLeaseAcquireStatus(
+            candidate_lease.status);
+    }
+    const std::optional<bool> latest_output_conflict =
+        LatestCacheHasOutputConflict(candidate);
+    if (!latest_output_conflict) {
+        return RejectEditTargetChanged();
+    }
+    if (*latest_output_conflict) {
+        return RejectOutputPathAlreadyUsed();
+    }
+
+    // Keep the legacy NPY+sidecar owner and its newest sparse overlay as the
+    // durable recovery record until the replacement ASDF has been published,
+    // reopened, and adopted. A crash anywhere before the second checkpoint
+    // therefore restores the old owner rather than a half-migrated task.
+    std::string checkpoint_error;
+    const bool legacy_checkpoint_saved =
+        state_cache_path_.empty() ||
+        CommitTaskRecoveryCheckpoint(
+            *active_source_identity_,
+            *state,
+            *task,
+            false,
+            &checkpoint_error);
+    if (!legacy_checkpoint_saved) {
+        SampleLabelingOperationResult rejected =
+            RejectOperation();
+        rejected.state_save_scheduled = true;
+        rejected.state_save_attempted = true;
+        rejected.issue =
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationCheckpointFailed;
+        rejected.diagnostic = checkpoint_error.empty()
+            ? "could not checkpoint the legacy owner before ASDF migration"
+            : checkpoint_error;
+        rejected.revision = revision_;
+        return rejected;
+    }
+
+    std::optional<SampleLabelingAsdfOpenSnapshot>
+        candidate_asdf_snapshot;
+    TaskOutputPersistenceAttempt persistence_attempt =
+        PublishCanonicalTaskCreation(
+            candidate,
+            candidate_output_leases,
+            &candidate_asdf_snapshot);
+    const bool canonical_generation_ready =
+        persistence_attempt.publication.published &&
+        persistence_attempt.lease_status ==
+            ExclusiveFileLeaseAcquireStatus::Acquired &&
+        candidate_asdf_snapshot.has_value();
+    if (!canonical_generation_ready) {
+        SampleLabelingOperationResult failed;
+        failed.accepted = true;
+        failed.output_save_attempted =
+            persistence_attempt.publication.attempted;
+        failed.output_saved = false;
+        failed.state_save_attempted =
+            !state_cache_path_.empty();
+        failed.state_saved = legacy_checkpoint_saved;
+        failed.issue =
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationPublicationFailed;
+        failed.diagnostic =
+            persistence_attempt.publication.message.empty()
+            ? "could not publish and open the migrated canonical ASDF owner"
+            : persistence_attempt.publication.message;
+        if (persistence_attempt.lease_status !=
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            failed.issue =
+                persistence_attempt.lease_status ==
+                    ExclusiveFileLeaseAcquireStatus::
+                        Unavailable
+                ? SampleLabelingOperationResult::Issue::
+                      EditLeaseUnavailable
+                : SampleLabelingOperationResult::Issue::
+                      EditLeaseFailed;
+        }
+        failed.revision = revision_;
+        return failed;
+    }
+
+    // The owner switch itself is durable before the controller releases any
+    // legacy artifact lease. If this commit fails, the newly written ASDF is
+    // left unowned and the unchanged NPY+sidecar pair remains authoritative.
+    std::string adoption_error;
+    const bool canonical_owner_saved =
+        state_cache_path_.empty() ||
+        CommitTaskRecoveryCheckpoint(
+            *active_source_identity_,
+            *state,
+            candidate,
+            false,
+            &adoption_error);
+    if (!canonical_owner_saved) {
+        SampleLabelingOperationResult failed;
+        failed.accepted = true;
+        failed.output_save_attempted = true;
+        failed.output_saved = false;
+        failed.state_save_scheduled = true;
+        failed.state_save_attempted = true;
+        failed.issue =
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationOwnerSwitchFailed;
+        failed.diagnostic = adoption_error.empty()
+            ? "could not checkpoint the canonical owner after ASDF migration"
+            : adoption_error;
+        failed.revision = revision_;
+        return failed;
+    }
+
+    std::vector<TaskEditLeaseSet::Component>
+        legacy_output_leases = std::move(
+            active_task_leases_.output_artifacts);
+    active_task_leases_.output_artifact_keys.clear();
+    *task = std::move(candidate);
+    active_task_leases_.output_artifacts =
+        std::move(
+            candidate_output_leases.output_artifacts);
+    active_task_leases_.output_artifact_keys =
+        std::move(
+            candidate_output_leases.output_artifact_keys);
+    ReplaceActiveAsdfSnapshot(
+        std::move(candidate_asdf_snapshot));
+    // Both the in-memory and durable owner now point at the opened ASDF
+    // generation. Releasing these components cannot expose a half-switched
+    // task to another instance.
+    legacy_output_leases.clear();
+
+    BumpActiveSourceTasksGeneration();
+    Touch();
+    MarkTaskUpsert(
+        *active_source_identity_,
+        *state,
+        *task);
+    QueueStateSave();
+
+    SampleLabelingOperationResult result;
+    result.accepted = true;
+    result.changed = true;
+    result.task_projection_changed = true;
+    result.output_save_attempted = true;
+    result.output_saved = true;
+    result.state_save_scheduled = true;
+    result.state_save_attempted = true;
+    result.state_saved = FlushStateCache();
+    result.revision = revision_;
+    return result;
+}
+
 bool SampleLabelingController::CanDeactivateActiveTask() const
 {
     const SampleLabelingTask* task = ActiveTask();
@@ -2652,6 +2861,17 @@ SampleLabelingController::RejectEditTargetChanged() const
     result.issue =
         SampleLabelingOperationResult::Issue::
             EditTargetChanged;
+    return result;
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::RejectOutputPathAlreadyUsed() const
+{
+    SampleLabelingOperationResult result =
+        RejectOperation();
+    result.issue =
+        SampleLabelingOperationResult::Issue::
+            OutputPathAlreadyUsed;
     return result;
 }
 
@@ -3040,7 +3260,7 @@ SampleLabelingController::PublishCanonicalTaskCreation(
             task);
     if (!ValidateSampleLabelingDocumentFailFast(document).valid()) {
         fail(
-            "temporary labeling task cannot form a valid canonical ASDF document");
+            "labeling task cannot form a valid canonical ASDF document");
         publication.retryable = false;
         return attempt;
     }

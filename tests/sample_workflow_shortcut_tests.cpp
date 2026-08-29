@@ -950,6 +950,34 @@ void TestCanonicalAnnotationActivationUsesSingleFileConfirmation()
         "ownerless plain annotation confirmation should retain its existing sidecar-creation wording");
 }
 
+void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
+{
+    specforge::SourceCollectionLabelingView view;
+    view.has_active_task = true;
+    view.active_task_is_temporary = true;
+    Require(
+        specforge::SampleWorkflowCanonicalOutputActionTextId(
+            view) == specforge::UiTextId::SaveTo,
+        "temporary task should retain the existing Save to action");
+
+    view.active_task_is_temporary = false;
+    view.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            LegacyNpyWithSidecar;
+    Require(
+        specforge::SampleWorkflowCanonicalOutputActionTextId(
+            view) == specforge::UiTextId::MigrateToAsdf,
+        "legacy owner should expose an explicit ASDF migration action");
+
+    view.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    Require(
+        !specforge::SampleWorkflowCanonicalOutputActionTextId(
+            view),
+        "canonical owner should not expose another ownership migration action");
+}
+
 void TestShortcutDisplayUsesKeyboardLegends()
 {
     Require(specforge::FormatSampleLabelShortcut('q') == "Q", "lowercase shortcut should display as Q");
@@ -3030,6 +3058,43 @@ void TestLabelingPanelLocalizesLeaseNotices()
         "lease notices should use the selected UI language instead of coordinator-authored English text");
 }
 
+void TestLabelingPanelLocalizesMigrationNotices()
+{
+    using Issue = specforge::SampleLabelingOperationResult::Issue;
+    constexpr std::array kCases = {
+        std::pair{
+            Issue::OutputPathAlreadyUsed,
+            specforge::UiTextId::OutputPathAlreadyUsed},
+        std::pair{
+            Issue::OutputMigrationCheckpointFailed,
+            specforge::UiTextId::LabelingMigrationCheckpointFailed},
+        std::pair{
+            Issue::OutputMigrationPublicationFailed,
+            specforge::UiTextId::LabelingMigrationPublicationFailed},
+        std::pair{
+            Issue::OutputMigrationOwnerSwitchFailed,
+            specforge::UiTextId::LabelingMigrationOwnerSwitchFailed},
+    };
+    for (const auto& [issue, text_id] : kCases) {
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionResult rejected;
+        rejected.labeling_issue = issue;
+        rejected.message = "unlocalized diagnostic must not be displayed";
+        specforge::SampleWorkflowPanelUiTestAccess::
+            CaptureLabelingOperationResult(
+                panel,
+                rejected,
+                specforge::UiLanguage::SimplifiedChinese);
+        Require(
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingOperationMessage(panel) ==
+            specforge::UiText(
+                specforge::UiLanguage::SimplifiedChinese,
+                text_id),
+            "migration notices should use stable localized issue text instead of diagnostics");
+    }
+}
+
 void TestConsecutiveLabelCommandsDoNotNeedASettlingFrame()
 {
     ScopedImGuiContext context;
@@ -3321,6 +3386,7 @@ void TestTabStillMovesControlFocus()
 int main()
 {
     TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
+    TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();
@@ -3348,6 +3414,7 @@ int main()
     TestLabelingPanelShowsPausedDraftSaveFailure();
     TestLabelingPanelSurfacesRejectedWorkflowMessage();
     TestLabelingPanelLocalizesLeaseNotices();
+    TestLabelingPanelLocalizesMigrationNotices();
     TestLabelingPanelClearsNoticeAfterActionOnlySuccess();
     TestConsecutiveLabelCommandsDoNotNeedASettlingFrame();
     TestUndoThenNavigationDoesNotNeedASettlingFrame();

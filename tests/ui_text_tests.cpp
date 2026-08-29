@@ -742,6 +742,18 @@ void TestSampleWorkflowMappingsAreExact()
             "This labeling task changed on disk and could not be activated from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图激活。"},
         ExpectedText{
+            UiTextId::LabelingMigrationCheckpointFailed,
+            "Could not checkpoint the legacy labeling owner before migration. The legacy owner remains active.",
+            "迁移前无法保存旧标注所有者的恢复检查点。旧所有者仍保持活动状态。"},
+        ExpectedText{
+            UiTextId::LabelingMigrationPublicationFailed,
+            "Could not publish and reopen the migrated ASDF document. The legacy owner remains active.",
+            "无法发布并重新打开迁移后的 ASDF 文档。旧所有者仍保持活动状态。"},
+        ExpectedText{
+            UiTextId::LabelingMigrationOwnerSwitchFailed,
+            "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
+            "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"},
+        ExpectedText{
             UiTextId::LabelingDeleteTargetChanged,
             "This labeling task changed on disk and could not be deleted from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
@@ -834,6 +846,7 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::AutoAdvance, "Auto-advance", "自动前进"},
         ExpectedText{UiTextId::SkipLabeled, "Skip labeled", "跳过已标注样本"},
         ExpectedText{UiTextId::SaveTo, "Save to...", "另存为…"},
+        ExpectedText{UiTextId::MigrateToAsdf, "Migrate to ASDF...", "迁移到 ASDF…"},
         ExpectedText{UiTextId::Labels, "Labels", "标签"},
         ExpectedText{UiTextId::AddLabel, "Add label", "添加标签"},
         ExpectedText{UiTextId::DefaultLabelName, "Label %d", "标签 %d"},
@@ -1598,7 +1611,11 @@ void TestLabelingIssueDescriptorIsTheSingleMapping()
     constexpr std::array kIssues = {
         Issue::EditLeaseUnavailable,
         Issue::EditLeaseFailed,
-        Issue::EditTargetChanged};
+        Issue::EditTargetChanged,
+        Issue::OutputPathAlreadyUsed,
+        Issue::OutputMigrationCheckpointFailed,
+        Issue::OutputMigrationPublicationFailed,
+        Issue::OutputMigrationOwnerSwitchFailed};
     for (const Issue issue : kIssues) {
         const specforge::SampleLabelingIssueTextDescriptor descriptor =
             specforge::SampleLabelingIssueTextFor(issue);

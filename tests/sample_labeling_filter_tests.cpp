@@ -9304,6 +9304,767 @@ void TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure()
         "the recovered draft must remain eligible for Save As");
 }
 
+void TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifacts()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_legacy_owner_migration");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path legacy_path =
+        directory / "legacy-labels.npy";
+    const std::filesystem::path legacy_metadata_path =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(legacy_path);
+    const std::filesystem::path canonical_path =
+        directory / "migrated-labels.asdf";
+    const std::string source_identity =
+        "legacy-migration-source";
+    const specforge::SourceCollectionIdentity identity{
+        .id = source_identity,
+        .source_name = "migration-source.npy",
+        .source_fingerprint = "migration-source-fingerprint",
+        .context_fingerprint = "migration-source-context",
+        .spectrum_count = 3,
+    };
+    const specforge::SampleLabelingCanonicalSourceDescriptor
+        descriptor{
+            .base_identity = source_identity,
+            .source_kind = "npy",
+            .source_name = identity.source_name,
+            .source_fingerprint =
+                identity.source_fingerprint,
+            .sample_count = 3,
+            .sample_names = {"alpha", "beta", "gamma"},
+        };
+
+    specforge::SampleLabelingTask legacy =
+        specforge::CreateSampleLabelingTask(
+            "legacy-task-id",
+            "Legacy quality task",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            legacy.label_set,
+            {5, "bad", 'b'}) &&
+            specforge::UpsertSampleLabel(
+                legacy.label_set,
+                {7, "good", 'g'}),
+        "legacy migration fixture should define its portable labels");
+    legacy.values = {-1, 5, -1};
+    specforge::RebuildSampleLabelingTaskStatistics(legacy);
+    specforge::SelectSampleLabelTaskOutputPath(
+        legacy,
+        legacy_path);
+    const specforge::SampleLabelResultMetadataSource
+        legacy_source{
+            .source_name = identity.source_name,
+            .source_fingerprint =
+                identity.source_fingerprint,
+            .context_fingerprint =
+                identity.context_fingerprint,
+            .spectrum_count = identity.spectrum_count,
+        };
+    Require(
+        specforge::PublishLegacySampleLabelingTaskOutput(
+            legacy,
+            &legacy_source)
+            .published,
+        "legacy migration fixture should publish its NPY and sidecar owner");
+    const std::vector<unsigned char> legacy_bytes =
+        ReadBinaryFile(legacy_path);
+    const std::vector<unsigned char> legacy_metadata_bytes =
+        ReadBinaryFile(legacy_metadata_path);
+
+    bool write_ahead_legacy_owner_observed = false;
+    int canonical_creation_calls = 0;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource*) {
+            specforge::MarkSampleLabelTaskSaveFailed(
+                task,
+                "injected legacy autosave failure");
+            return specforge::SampleLabelOutputPublicationResult{
+                .attempted = true,
+                .published = false,
+                .artifacts_replaced = false,
+                .retryable = true,
+                .message =
+                    "injected legacy autosave failure"};
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        },
+        [&cache_path,
+         &canonical_creation_calls,
+         &write_ahead_legacy_owner_observed,
+         &source_identity,
+         &legacy_path](
+            const std::filesystem::path& path,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++canonical_creation_calls;
+            const specforge::SampleLabelingStateCacheLoadResult
+                checkpoint =
+                    specforge::LoadSampleLabelingStateCache(
+                        cache_path,
+                        {},
+                        specforge::
+                            SampleLabelingStateCacheLoadPolicy::
+                                AllowPersistentOutputsWithoutResultHydration);
+            const specforge::SampleLabelingTask* checkpoint_task =
+                FindTask(
+                    checkpoint.cache,
+                    source_identity,
+                    "legacy-task-id");
+            write_ahead_legacy_owner_observed =
+                checkpoint.issue_kind ==
+                    specforge::
+                        SampleLabelingStateCacheLoadIssueKind::
+                            None &&
+                checkpoint_task != nullptr &&
+                checkpoint_task->output_path == legacy_path &&
+                checkpoint_task->output_format ==
+                    specforge::
+                        SampleLabelingOutputArtifactFormat::
+                            LegacyNpyWithSidecar &&
+                checkpoint_task->values ==
+                    std::vector<int>({7, -1, -1}) &&
+                checkpoint_task->pending_sample_indices.contains(0);
+            return specforge::
+                WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                    path,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        });
+    controller.ActivateSource(identity, descriptor);
+    Require(
+        controller.CreateTaskFromAnnotation(
+                      legacy.task_id,
+                      legacy.task_name,
+                      legacy.label_set,
+                      legacy.values,
+                      legacy_path,
+                      true)
+            .accepted,
+        "legacy migration fixture should activate the existing owner");
+    const specforge::SampleLabelingWriteOperationResult
+        pending_edit = controller.AssignLabel(0, 7);
+    Require(
+        pending_edit.write.changed &&
+            pending_edit.operation.output_save_attempted &&
+            !pending_edit.operation.output_saved,
+        "legacy migration fixture should retain a newest pending overlay over the old durable base");
+
+    specforge::ExclusiveFileLeaseAcquireResult old_lease_before =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            legacy_path);
+    Require(
+        old_lease_before.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Unavailable,
+        "active legacy owner should hold its old artifact lease before migration");
+
+    const specforge::SampleLabelingOperationResult migrated =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            canonical_path);
+    const specforge::SampleLabelingTask* active =
+        ActiveTask(controller);
+    Require(
+        migrated.output_save_attempted &&
+            migrated.output_saved &&
+            active != nullptr &&
+            active->task_id == "legacy-task-id" &&
+            active->task_name == "Legacy quality task" &&
+            active->output_path == canonical_path &&
+            active->output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        CanonicalAsdf &&
+            active->values ==
+                std::vector<int>({7, 5, -1}) &&
+            specforge::FindSampleLabel(
+                active->label_set,
+                5) != nullptr &&
+            specforge::FindSampleLabel(
+                active->label_set,
+                7) != nullptr,
+        "successful migration should preserve the legacy task identity, definitions, and newest values while switching ownership");
+    Require(
+        write_ahead_legacy_owner_observed &&
+            canonical_creation_calls == 1,
+        "migration should checkpoint the legacy owner and pending overlay before creating ASDF");
+    Require(
+        ReadBinaryFile(legacy_path) == legacy_bytes &&
+            ReadBinaryFile(legacy_metadata_path) ==
+                legacy_metadata_bytes,
+        "migration must not rewrite the original NPY or sidecar bytes");
+
+    const specforge::SampleLabelingAsdfReadResult read =
+        specforge::ReadSampleLabelingAsdfDocument(
+            canonical_path);
+    Require(
+        read.succeeded() &&
+            read.document->labeling.id ==
+                "legacy-task-id" &&
+            read.document->labeling.name ==
+                "Legacy quality task" &&
+            read.document->annotation.values ==
+                std::vector<std::int32_t>({7, 5, -1}) &&
+            read.document->source.roster.identity_kind ==
+                specforge::
+                    kSampleLabelingDocumentExplicitNamesRoster &&
+            read.document->source.roster.sample_names ==
+                descriptor.sample_names,
+        "migrated ASDF should use the current canonical source roster and preserve legacy task semantics");
+
+    const specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const specforge::SampleLabelingTask* cached =
+        FindTask(
+            cache.cache,
+            source_identity,
+            "legacy-task-id");
+    Require(
+        cache.issue_kind ==
+                specforge::
+                    SampleLabelingStateCacheLoadIssueKind::None &&
+            cached != nullptr &&
+            cached->output_path == canonical_path &&
+            cached->output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        CanonicalAsdf,
+        "successful migration should durably switch the task owner record to canonical ASDF");
+
+    specforge::ExclusiveFileLeaseAcquireResult old_lease_after =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            legacy_path);
+    Require(
+        old_lease_after.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "successful owner switch should release the old legacy artifact lease");
+    specforge::ExclusiveFileLeaseAcquireResult new_lease_after =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            canonical_path);
+    Require(
+        new_lease_after.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Unavailable,
+        "successful owner switch should retain the new canonical one-file lease");
+}
+
+void TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_legacy_owner_migration_failure");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path legacy_path =
+        directory / "legacy-labels.npy";
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(legacy_path);
+    const std::filesystem::path canonical_path =
+        directory / "failed-migration.asdf";
+    const std::filesystem::path checkpoint_failure_path =
+        directory / "checkpoint-failed-migration.asdf";
+    specforge::SampleLabelingTask legacy =
+        specforge::CreateSampleLabelingTask(
+            "legacy-failure-task",
+            "Legacy failure task",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            legacy.label_set,
+            {5, "bad", 'b'}),
+        "failed migration fixture should define its legacy label");
+    legacy.values = {-1, 5, -1};
+    specforge::RebuildSampleLabelingTaskStatistics(legacy);
+    specforge::SelectSampleLabelTaskOutputPath(
+        legacy,
+        legacy_path);
+    Require(
+        specforge::PublishLegacySampleLabelingTaskOutput(
+            legacy)
+            .published,
+        "failed migration fixture should publish its legacy owner");
+    const std::vector<unsigned char> legacy_bytes =
+        ReadBinaryFile(legacy_path);
+    const std::vector<unsigned char> metadata_bytes =
+        ReadBinaryFile(metadata_path);
+
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource*) {
+            specforge::MarkSampleLabelTaskSaveFailed(
+                task,
+                "injected legacy autosave failure");
+            return specforge::SampleLabelOutputPublicationResult{
+                .attempted = true,
+                .published = false,
+                .artifacts_replaced = false,
+                .retryable = true,
+                .message =
+                    "injected legacy autosave failure"};
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        },
+        [](const std::filesystem::path&,
+           const specforge::SampleLabelingDocument&,
+           const specforge::SampleLabelingCanonicalSourceDescriptor&) {
+            return specforge::
+                SampleLabelingAsdfStoreGenerationWriteResult{
+                    .document_replaced = false,
+                    .error = {
+                        .kind = specforge::
+                            SampleLabelingAsdfStoreErrorKind::
+                                AtomicWriteFailure,
+                        .message =
+                            "injected migration publication failure"}};
+        });
+    ActivateCanonicalTestSource(
+        controller,
+        "legacy-migration-failure-source",
+        3);
+    Require(
+        controller.CreateTaskFromAnnotation(
+                      legacy.task_id,
+                      legacy.task_name,
+                      legacy.label_set,
+                      legacy.values,
+                      legacy_path,
+                      true)
+            .accepted,
+        "failed migration fixture should activate its legacy owner");
+    const specforge::SampleLabelingWriteOperationResult pending_edit =
+        controller.AssignLabel(0, 5);
+    Require(
+        pending_edit.write.changed &&
+            !pending_edit.operation.output_saved,
+        "failed migration fixture should retain a pending value over its legacy base");
+
+    specforge::ExclusiveFileLeaseAcquireResult checkpoint_lock =
+        specforge::TryAcquireExclusiveFileLease(
+            specforge::SampleLabelingStateCoordinationDirectory(
+                cache_path) /
+            "cache-commit.lock");
+    Require(
+        checkpoint_lock.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+        "failed migration fixture should block its write-ahead checkpoint");
+    const specforge::SampleLabelingOperationResult checkpoint_failed =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            checkpoint_failure_path);
+    Require(
+        !checkpoint_failed.output_save_attempted &&
+            !checkpoint_failed.output_saved &&
+            checkpoint_failed.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    OutputMigrationCheckpointFailed &&
+            !checkpoint_failed.diagnostic.empty() &&
+            !std::filesystem::exists(
+                checkpoint_failure_path) &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->output_path == legacy_path,
+        "write-ahead checkpoint failure should expose a stable issue before touching ASDF or the legacy owner");
+    checkpoint_lock.lease.Reset();
+
+    const specforge::SampleLabelingOperationResult failed =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            canonical_path);
+    const specforge::SampleLabelingTask* active =
+        ActiveTask(controller);
+    Require(
+        failed.output_save_attempted &&
+            !failed.output_saved &&
+            failed.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    OutputMigrationPublicationFailed &&
+            !failed.diagnostic.empty() &&
+            active != nullptr &&
+            active->output_path == legacy_path &&
+            active->output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar &&
+            active->values ==
+                std::vector<int>({5, 5, -1}) &&
+            active->pending_sample_indices.contains(0) &&
+            !controller.ActiveCanonicalAsdfAnnotationProjection(),
+        "failed migration should keep the old legacy owner and its recovery overlay active");
+    Require(
+        ReadBinaryFile(legacy_path) == legacy_bytes &&
+            ReadBinaryFile(metadata_path) == metadata_bytes &&
+            !std::filesystem::exists(canonical_path),
+        "failed migration must leave both old legacy artifacts and the target path unchanged");
+
+    const specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const specforge::SampleLabelingTask* cached =
+        FindTask(
+            cache.cache,
+            "legacy-migration-failure-source",
+            "legacy-failure-task");
+    Require(
+        cached != nullptr &&
+            cached->output_path == legacy_path &&
+            cached->output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar &&
+            cached->values ==
+                std::vector<int>({5, -1, -1}) &&
+            cached->pending_sample_indices.contains(0),
+        "failed migration checkpoint should keep the legacy durable base plus newest sparse overlay");
+    specforge::ExclusiveFileLeaseAcquireResult old_lease_after =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            legacy_path);
+    Require(
+        old_lease_after.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Unavailable,
+        "failed migration should retain the active legacy artifact lease");
+}
+
+void TestLegacyOwnerMigrationRejectsUsedOutputPathWithStructuredIssue()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_legacy_owner_migration_conflict");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path legacy_path =
+        directory / "legacy-labels.npy";
+    const std::filesystem::path canonical_path =
+        directory / "reserved.asdf";
+
+    specforge::SampleLabelingTask legacy =
+        specforge::CreateSampleLabelingTask(
+            "legacy-conflict-task",
+            "Legacy conflict task",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            legacy.label_set,
+            {5, "bad", 'b'}),
+        "migration conflict fixture should define its legacy label");
+    legacy.values = {5, -1, -1};
+    specforge::RebuildSampleLabelingTaskStatistics(legacy);
+    specforge::SelectSampleLabelTaskOutputPath(
+        legacy,
+        legacy_path);
+    Require(
+        specforge::PublishLegacySampleLabelingTaskOutput(
+            legacy)
+            .published,
+        "migration conflict fixture should publish its legacy owner");
+
+    specforge::SampleLabelingController controller(cache_path);
+    ActivateCanonicalTestSource(
+        controller,
+        "legacy-migration-conflict-source",
+        3);
+    Require(
+        controller.CreateTaskFromAnnotation(
+                      legacy.task_id,
+                      legacy.task_name,
+                      legacy.label_set,
+                      legacy.values,
+                      legacy_path,
+                      true)
+                .accepted &&
+            controller.DeactivateActiveTask().accepted &&
+            controller.CreateTask(
+                          "reserved-canonical-task",
+                          "Reserved canonical task")
+                .accepted &&
+            controller.UpsertActiveLabel({7, "good", 'g'})
+                .changed &&
+            controller.AssignLabel(1, 7).write.changed &&
+            controller.SaveActiveTemporaryTaskToOutput(
+                          canonical_path,
+                          "Reserved canonical task")
+                .output_saved &&
+            controller.DeactivateActiveTask().accepted &&
+            controller.ActivateTask(legacy.task_id).accepted,
+        "migration conflict fixture should retain both formal task owners");
+
+    const specforge::SampleLabelingOperationResult conflict =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            canonical_path);
+    const specforge::SampleLabelingTask* active =
+        ActiveTask(controller);
+    Require(
+        !conflict.accepted &&
+            conflict.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    OutputPathAlreadyUsed &&
+            conflict.diagnostic.empty() &&
+            active != nullptr &&
+            active->task_id == legacy.task_id &&
+            active->output_path == legacy_path &&
+            active->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+        "migration should report a structured output-path conflict without changing the active legacy owner");
+}
+
+void TestLegacyOwnerMigrationOwnerSwitchCheckpointFailureKeepsLegacyOwnerAndCanRetry()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_legacy_owner_migration_owner_switch_failure");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path legacy_path =
+        directory / "legacy-labels.npy";
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(legacy_path);
+    const std::filesystem::path canonical_path =
+        directory / "published-but-unowned.asdf";
+    specforge::SampleLabelingTask legacy =
+        specforge::CreateSampleLabelingTask(
+            "legacy-owner-switch-task",
+            "Legacy owner switch task",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            legacy.label_set,
+            {5, "bad", 'b'}),
+        "owner-switch failure fixture should define its legacy label");
+    legacy.values = {-1, 5, -1};
+    specforge::RebuildSampleLabelingTaskStatistics(legacy);
+    specforge::SelectSampleLabelTaskOutputPath(
+        legacy,
+        legacy_path);
+    Require(
+        specforge::PublishLegacySampleLabelingTaskOutput(
+            legacy)
+            .published,
+        "owner-switch failure fixture should publish its legacy owner");
+    const std::vector<unsigned char> legacy_bytes =
+        ReadBinaryFile(legacy_path);
+    const std::vector<unsigned char> metadata_bytes =
+        ReadBinaryFile(metadata_path);
+
+    specforge::ExclusiveFileLease owner_switch_checkpoint_lock;
+    int canonical_creation_calls = 0;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource* source) {
+            return specforge::PublishLegacySampleLabelingTaskOutput(
+                task,
+                source);
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        },
+        [&owner_switch_checkpoint_lock,
+         &canonical_creation_calls,
+         &cache_path](
+            const std::filesystem::path& path,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++canonical_creation_calls;
+            specforge::SampleLabelingAsdfStoreGenerationWriteResult write =
+                specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                    path,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+            if (canonical_creation_calls == 1 && write.succeeded()) {
+                specforge::ExclusiveFileLeaseAcquireResult lock =
+                    specforge::TryAcquireExclusiveFileLease(
+                        specforge::SampleLabelingStateCoordinationDirectory(
+                            cache_path) /
+                        "cache-commit.lock");
+                Require(
+                    lock.status ==
+                        specforge::ExclusiveFileLeaseAcquireStatus::
+                            Acquired,
+                    "owner-switch failure fixture should block the owner-switch checkpoint after ASDF publication");
+                owner_switch_checkpoint_lock =
+                    std::move(lock.lease);
+            }
+            return write;
+        });
+    ActivateCanonicalTestSource(
+        controller,
+        "legacy-owner-switch-source",
+        3);
+    Require(
+        controller.CreateTaskFromAnnotation(
+                      legacy.task_id,
+                      legacy.task_name,
+                      legacy.label_set,
+                      legacy.values,
+                      legacy_path,
+                      true)
+            .accepted,
+        "owner-switch failure fixture should activate its legacy owner");
+
+    const specforge::SampleLabelingOperationResult failed =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            canonical_path);
+    const specforge::SampleLabelingTask* active =
+        ActiveTask(controller);
+    Require(
+        failed.output_save_attempted &&
+            !failed.output_saved &&
+            failed.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    OutputMigrationOwnerSwitchFailed &&
+            !failed.diagnostic.empty() &&
+            active != nullptr &&
+            active->output_path == legacy_path &&
+            active->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar &&
+            !controller.ActiveCanonicalAsdfAnnotationProjection(),
+        "owner-switch checkpoint failure should keep the active legacy owner and expose a stable failure kind");
+    Require(
+        ReadBinaryFile(legacy_path) == legacy_bytes &&
+            ReadBinaryFile(metadata_path) == metadata_bytes &&
+            specforge::ReadSampleLabelingAsdfDocument(
+                canonical_path)
+                .succeeded(),
+        "owner-switch checkpoint failure should leave old artifacts unchanged and the published ASDF complete but unowned");
+    const specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            cache_path,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const specforge::SampleLabelingTask* cached =
+        FindTask(
+            cache.cache,
+            "legacy-owner-switch-source",
+            legacy.task_id);
+    Require(
+        cached != nullptr &&
+            cached->output_path == legacy_path &&
+            cached->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar,
+        "owner-switch checkpoint failure should leave the durable task owner on its legacy base");
+    specforge::ExclusiveFileLeaseAcquireResult old_lease_after_failure =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            legacy_path);
+    specforge::ExclusiveFileLeaseAcquireResult unowned_asdf_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            canonical_path);
+    Require(
+        old_lease_after_failure.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Unavailable &&
+            unowned_asdf_lease.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Acquired,
+        "owner-switch checkpoint failure should retain old leases while releasing the unowned ASDF lease");
+
+    unowned_asdf_lease.lease.Reset();
+    owner_switch_checkpoint_lock.Reset();
+    const specforge::SampleLabelingOperationResult retried =
+        controller.MigrateActiveLegacyTaskToCanonicalAsdf(
+            canonical_path);
+    Require(
+        retried.output_saved &&
+            canonical_creation_calls == 2 &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->output_path == canonical_path &&
+            ActiveTask(controller)->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf,
+        "retry after owner-switch checkpoint recovery should adopt the canonical ASDF owner");
+    specforge::ExclusiveFileLeaseAcquireResult old_lease_after_retry =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            legacy_path);
+    specforge::ExclusiveFileLeaseAcquireResult new_lease_after_retry =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            canonical_path);
+    Require(
+        old_lease_after_retry.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Acquired &&
+            new_lease_after_retry.status ==
+                specforge::ExclusiveFileLeaseAcquireStatus::
+                    Unavailable,
+        "successful retry should release legacy leases and retain the canonical ASDF lease");
+}
+
 void TestCanonicalAnnotationFilterIndexesLargeLabelSet()
 {
     constexpr int kLabelCount = 4096;
@@ -9437,6 +10198,10 @@ int main(int argc, char* argv[])
         TestControllerAtomicallyStartsOrResumesTemporaryTask();
         TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure();
         TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure();
+        TestLegacyOwnerMigrationPublishesCanonicalAsdfWithoutChangingLegacyArtifacts();
+        TestLegacyOwnerMigrationFailureKeepsLegacyOwnerAndArtifacts();
+        TestLegacyOwnerMigrationRejectsUsedOutputPathWithStructuredIssue();
+        TestLegacyOwnerMigrationOwnerSwitchCheckpointFailureKeepsLegacyOwnerAndCanRetry();
         TestExternalOutputIsResultSourceOfTruth();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();
         TestOutputPathConflictIsRejectedWithinSource();

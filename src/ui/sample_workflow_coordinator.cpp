@@ -1760,10 +1760,19 @@ SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
 {
     SampleWorkflowTransitionOutcome outcome;
     const std::filesystem::path selected_output_path = output_path;
+    const SampleLabelingTask* active_task =
+        labeling_.View().active_task;
     const SampleLabelingOperationResult operation =
-        labeling_.SaveActiveTemporaryTaskToOutput(
-            std::move(output_path),
-            SampleLabelingTaskNameForOutputPath(selected_output_path));
+        active_task != nullptr &&
+            active_task->output_format ==
+                SampleLabelingOutputArtifactFormat::
+                    LegacyNpyWithSidecar
+        ? labeling_.MigrateActiveLegacyTaskToCanonicalAsdf(
+              std::move(output_path))
+        : labeling_.SaveActiveTemporaryTaskToOutput(
+              std::move(output_path),
+              SampleLabelingTaskNameForOutputPath(
+                  selected_output_path));
     ApplyLabelingLeaseIssue(outcome, operation);
     if (operation.output_saved) {
         (void)SynchronizeActiveCanonicalAsdfAttachment(
@@ -2181,6 +2190,7 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
                 !sequence.active || (!sequence.empty && sequence.ContainsSourceRow(*view.remembered_position));
         }
         view.output_path = task->output_path;
+        view.output_format = task->output_format;
         view.save_state = task->save_state;
         view.can_deactivate_task = labeling_.CanDeactivateActiveTask();
         view.can_delete_task = labeling_.CanDeleteActiveTask();

@@ -43,6 +43,10 @@ SampleWorkflowAnnotationActivationText(
     SampleAnnotationWorkflowRelationship relationship,
     SampleLabelingOutputArtifactFormat owner_format);
 
+[[nodiscard]] std::optional<UiTextId>
+SampleWorkflowCanonicalOutputActionTextId(
+    const SourceCollectionLabelingView& labeling_view);
+
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();

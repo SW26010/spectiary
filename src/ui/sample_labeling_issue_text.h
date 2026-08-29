@@ -37,6 +37,26 @@ SampleLabelingIssueTextFor(
             UiTextId::LabelingEditTargetChanged,
             "This labeling task changed on disk and could not be activated from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图激活。"};
+    case Issue::OutputPathAlreadyUsed:
+        return {
+            UiTextId::OutputPathAlreadyUsed,
+            "Output path is already used by another local labeling task.",
+            "该输出路径已被另一个本地标注任务使用。"};
+    case Issue::OutputMigrationCheckpointFailed:
+        return {
+            UiTextId::LabelingMigrationCheckpointFailed,
+            "Could not checkpoint the legacy labeling owner before migration. The legacy owner remains active.",
+            "迁移前无法保存旧标注所有者的恢复检查点。旧所有者仍保持活动状态。"};
+    case Issue::OutputMigrationPublicationFailed:
+        return {
+            UiTextId::LabelingMigrationPublicationFailed,
+            "Could not publish and reopen the migrated ASDF document. The legacy owner remains active.",
+            "无法发布并重新打开迁移后的 ASDF 文档。旧所有者仍保持活动状态。"};
+    case Issue::OutputMigrationOwnerSwitchFailed:
+        return {
+            UiTextId::LabelingMigrationOwnerSwitchFailed,
+            "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
+            "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"};
     case Issue::None:
     default:
         return {};

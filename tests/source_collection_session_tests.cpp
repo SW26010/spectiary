@@ -3515,6 +3515,105 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
         "plain annotation should become local after activation");
 }
 
+void TestActiveLegacyOwnerCanMigrateToCanonicalAsdf()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_migration_source.npy");
+    const std::filesystem::path legacy_path =
+        UniqueTempPath("_migration_labels.npy");
+    const std::filesystem::path metadata_path =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(legacy_path);
+    const std::filesystem::path canonical_path =
+        UniqueTempPath("_migration_labels.asdf");
+    specforge::SampleLabelSet labels;
+    labels.labels = {
+        {5, "bad", 'b'},
+        {7, "good", 'g'},
+    };
+    SaveLabelResultFixture(
+        legacy_path,
+        "session-legacy-task",
+        "Session legacy task",
+        {-1, 5, 7},
+        labels,
+        true);
+    const std::string legacy_bytes =
+        ReadBinaryFile(legacy_path);
+    const std::string metadata_bytes =
+        ReadBinaryFile(metadata_path);
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(
+            loaded_indices,
+            source_path,
+            3);
+    (void)Submit(
+        session,
+        OpenSourceCollection(source_path, 0));
+    Require(
+        Submit(
+            session,
+            AddReadOnlyAnnotation(legacy_path))
+            .loaded,
+        "legacy migration session should attach its NPY result");
+    (void)Submit(
+        session,
+        ActivateLabelingTaskFromAnnotation(legacy_path));
+    Require(
+        session.View().labeling.output_path == legacy_path &&
+            session.View().labeling.task_id ==
+                "session-legacy-task" &&
+            session.View().labeling.task_name ==
+                "Session legacy task",
+        "legacy migration session should begin with sidecar-owned task identity");
+
+    const specforge::SourceCollectionSessionResult migrated =
+        Submit(
+            session,
+            SetActiveLabelingOutputPath(canonical_path));
+    Require(
+        migrated.action.navigation_inputs_changed &&
+            session.View().labeling.output_path ==
+                canonical_path &&
+            std::filesystem::exists(canonical_path),
+        "explicit output selection on an active legacy owner should migrate it to ASDF");
+    Require(
+        ReadBinaryFile(legacy_path) == legacy_bytes &&
+            ReadBinaryFile(metadata_path) == metadata_bytes,
+        "session migration must leave the original NPY and sidecar bytes unchanged");
+    const specforge::SampleLabelingAsdfReadResult read =
+        specforge::ReadSampleLabelingAsdfDocument(
+            canonical_path);
+    Require(
+        read.succeeded() &&
+            read.document->labeling.id ==
+                "session-legacy-task" &&
+            read.document->labeling.name ==
+                "Session legacy task" &&
+            read.document->annotation.values ==
+                std::vector<std::int32_t>({-1, 5, 7}) &&
+            read.document->labeling.labels.size() == 2,
+        "session migration should preserve portable sidecar semantics in the canonical document");
+    Require(
+        std::any_of(
+            session.View()
+                .navigation.current_annotations.begin(),
+            session.View()
+                .navigation.current_annotations.end(),
+            [&canonical_path](
+                const specforge::
+                    SourceCollectionAnnotationValueView& annotation) {
+                return annotation.path == canonical_path &&
+                    annotation.relationship ==
+                        specforge::
+                            SampleAnnotationWorkflowRelationship::
+                                LocalLabelingTask;
+            }),
+        "successful migration should attach the new canonical owner to the current source session");
+}
+
 void TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
@@ -9903,6 +10002,7 @@ void RunAllTests()
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();
+    TestActiveLegacyOwnerCanMigrateToCanonicalAsdf();
     TestLoadedLocalTaskAnnotationStaysLocalWhenMetadataSidecarIsMissing();
     TestAnnotationLocalMatchRequiresSidecarTaskId();
     TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters();

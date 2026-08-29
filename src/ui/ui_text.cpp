@@ -597,6 +597,27 @@ constexpr std::array kTextCatalog = {
             SampleLabelingOperationResult::Issue::
                 EditTargetChanged).simplified_chinese},
     UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationCheckpointFailed).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationCheckpointFailed).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationPublicationFailed).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationPublicationFailed).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationOwnerSwitchFailed).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                OutputMigrationOwnerSwitchFailed).simplified_chinese},
+    UiTextEntry{
         "This labeling task changed on disk and could not be deleted from the stale view.",
         "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
     UiTextEntry{
@@ -704,6 +725,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Auto-advance", "自动前进"},
     UiTextEntry{"Skip labeled", "跳过已标注样本"},
     UiTextEntry{"Save to...", "另存为…"},
+    UiTextEntry{"Migrate to ASDF...", "迁移到 ASDF…"},
     UiTextEntry{"Labels", "标签"},
     UiTextEntry{"Add label", "添加标签"},
     UiTextEntry{"Label %d", "标签 %d"},

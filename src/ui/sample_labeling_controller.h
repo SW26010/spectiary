@@ -75,6 +75,10 @@ struct SampleLabelingOperationResult {
         EditLeaseUnavailable,
         EditLeaseFailed,
         EditTargetChanged,
+        OutputPathAlreadyUsed,
+        OutputMigrationCheckpointFailed,
+        OutputMigrationPublicationFailed,
+        OutputMigrationOwnerSwitchFailed,
     };
 
     bool accepted = false;
@@ -88,6 +92,9 @@ struct SampleLabelingOperationResult {
     bool state_saved = false;
     std::uint64_t revision = 0;
     Issue issue = Issue::None;
+    // Non-localized implementation detail for logs, tests, and diagnostics.
+    // Presentation layers must use issue instead of displaying this string.
+    std::string diagnostic;
 };
 
 struct SampleLabelingWriteOperationResult {
@@ -229,6 +236,13 @@ public:
     [[nodiscard]] SampleLabelingOperationResult SaveActiveTemporaryTaskToOutput(
         std::filesystem::path output_path,
         std::string task_name);
+    // Explicitly migrates an active legacy NPY+sidecar owner to a new
+    // canonical ASDF document. The legacy artifacts remain unchanged and stay
+    // authoritative unless the new document is published, reopened, and the
+    // owner switch is durably checkpointed.
+    [[nodiscard]] SampleLabelingOperationResult
+        MigrateActiveLegacyTaskToCanonicalAsdf(
+            std::filesystem::path output_path);
     [[nodiscard]] bool CanDeactivateActiveTask() const;
     [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();
@@ -371,6 +385,8 @@ private:
         RejectEditLeaseFailed() const;
     [[nodiscard]] SampleLabelingOperationResult
         RejectEditTargetChanged() const;
+    [[nodiscard]] SampleLabelingOperationResult
+        RejectOutputPathAlreadyUsed() const;
     [[nodiscard]] SampleLabelingOperationResult
         RejectLeaseAcquireStatus(
             ExclusiveFileLeaseAcquireStatus status) const;

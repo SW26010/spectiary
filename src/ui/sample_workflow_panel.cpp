@@ -1005,6 +1005,22 @@ SampleWorkflowAnnotationActivationText(
     };
 }
 
+std::optional<UiTextId>
+SampleWorkflowCanonicalOutputActionTextId(
+    const SourceCollectionLabelingView& labeling_view)
+{
+    if (labeling_view.active_task_is_temporary) {
+        return UiTextId::SaveTo;
+    }
+    if (labeling_view.has_active_task &&
+        labeling_view.output_format ==
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar) {
+        return UiTextId::MigrateToAsdf;
+    }
+    return std::nullopt;
+}
+
 std::string SampleWorkflowPanelUi::RecoveryDraftRowToken(
     const SourceCollectionLabelingView& labeling_view,
     std::size_t draft_index)
@@ -2395,13 +2411,19 @@ void SampleWorkflowPanelUi::RenderLabeling(
     if (!auto_advance) {
         ImGui::EndDisabled();
     }
-    if (labeling_view.active_task_is_temporary) {
+    if (const std::optional<UiTextId>
+            canonical_output_action =
+                SampleWorkflowCanonicalOutputActionTextId(
+                    labeling_view)) {
         ImGui::SameLine();
         const std::string save_to_label =
             StableUiLabel(
                 language,
-                UiTextId::SaveTo,
-                "SpecForgeSaveLabelingTaskTo");
+                *canonical_output_action,
+                *canonical_output_action ==
+                        UiTextId::MigrateToAsdf
+                    ? "SpecForgeMigrateLabelingTaskToAsdf"
+                    : "SpecForgeSaveLabelingTaskTo");
         if (ImGui::Button(
                 save_to_label.c_str())) {
             if (std::optional<std::filesystem::path> path = choose_output_path()) {

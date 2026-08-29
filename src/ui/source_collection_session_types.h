@@ -195,6 +195,8 @@ struct SourceCollectionLabelingView {
     std::optional<std::size_t> remembered_position;
     bool remembered_position_resumable = false;
     std::optional<std::filesystem::path> output_path;
+    SampleLabelingOutputArtifactFormat output_format =
+        SampleLabelingOutputArtifactFormat::None;
     SampleLabelSaveState save_state;
     bool can_deactivate_task = false;
     bool can_delete_task = false;

@@ -467,9 +467,11 @@ entries shown in `Sample Filters` and `Sample Sorting`; hover text should still
 reveal the original annotation path or file name so the source remains
 inspectable.
 
-Formal sample labeling task names and annotation display names are separate. The
-formal task name is derived from the filename chosen through `Save to...` and is
-written to portable metadata. Editing the annotation display name must not
+Formal sample labeling task names and annotation display names are separate. A
+temporary draft's first formal task name is derived from the filename chosen
+through `Save to...` and is written to portable metadata. Adopting an existing
+canonical ASDF preserves the document task name; migrating a legacy owner
+preserves the sidecar task name. Editing the annotation display name must not
 rename the task, output file, or portable metadata.
 
 After editable sample labeling exists, categorical annotation rows should expose
@@ -591,6 +593,35 @@ overlay are checkpointed before publication; a failed first publication restores
 the output-free draft immediately or through maintenance/restart recovery if the
 compensating checkpoint is temporarily unavailable. Locally created tasks may
 define and expand their own category sets.
+
+An active `legacy_npy_with_sidecar` owner exposes a separate explicit
+`Migrate to ASDF...` action. This is not standalone-ASDF adoption and does not
+rewrite the legacy result in place. The selected destination must be an `.asdf`
+path, and migration proceeds as one owner-transfer transaction:
+
+1. retain the active task-identity lease and both legacy artifact leases;
+2. acquire the destination ASDF one-file lease;
+3. synchronously checkpoint the legacy owner plus any sparse pending overlay;
+4. build the canonical document from the current task identity, task name,
+   label definitions, newest values, and the active source's canonical
+   descriptor/roster;
+5. atomically write and reopen the destination ASDF generation;
+6. synchronously checkpoint the task with `canonical_asdf` ownership;
+7. install the opened canonical snapshot and destination lease, then release
+   the old NPY and sidecar leases.
+
+The original `.npy` and `.sf-labels.json` bytes are never modified by this
+operation. If destination lease acquisition, write-ahead checkpoint, ASDF
+publication/reopen, or the durable owner switch fails, the old legacy owner
+remains the trusted durable base and its sparse recovery overlay remains in the
+local cache. A newly written ASDF whose owner-switch checkpoint fails is left as
+an unowned Save-As artifact; it does not silently replace the legacy owner. The
+user may retry the same explicit migration after the checkpoint failure is
+resolved; the retry revalidates and republishes the destination before adopting
+it. Path conflicts, write-ahead checkpoint failures, publication/reopen
+failures, and owner-switch checkpoint failures are reported as stable semantic
+error kinds mapped by the desktop UI to the selected language. Low-level I/O
+details remain diagnostic data and are not displayed as untranslated UI text.
 
 The first implementation should not allow two local sample labeling task records
 for the same source collection to point at the same output path. If the user
@@ -780,7 +811,10 @@ records do not duplicate the full values array in this cache; they retain only
 sparse pending values plus local session/recovery state. The write-ahead
 `initial_publication_pending` phase is
 durable only until canonical creation is adopted or reconciled back to a true
-temporary draft. Output leases, conflict detection, and recovery projection
+temporary draft. Legacy-to-ASDF migration does not use that temporary-only
+phase: its pre-publication checkpoint continues to name the legacy owner, and a
+second synchronous checkpoint changes the owner only after ASDF publication and
+reopen succeed. Output leases, conflict detection, and recovery projection
 checks use the task's stored format rather than guessing from its filename
 extension.
 
@@ -801,7 +835,9 @@ by promoting an existing NPY annotation. Its lease identity always protects both
 the selected result path and the adjacent `<stem>.sf-labels.json`. Output artifact
 ownership is declared by format rather than inferred from a filename extension:
 canonical ASDF owns one document, while legacy NPY owns the `.npy` result and
-its `.sf-labels.json` sidecar.
+its `.sf-labels.json` sidecar. Explicit migration creates a new canonical ASDF
+owner from the active legacy task without routing the destination through the
+legacy writer or changing either source artifact.
 Future adapters such as CSV can be added if they can
 produce or consume the same per-sample annotation result shape and validate that
 the value count matches the source collection's spectrum count.
