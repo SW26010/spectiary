@@ -222,8 +222,9 @@ that task rather than create another one. A formal categorical annotation may
 also be activated from the `Annotations` window.
 In the first implementation, closing a formal output-bound task should be
 disabled while it has pending or failed output saves, including pending or
-failed metadata sidecar saves. The user must wait for autosave to complete or
-fix the output save problem before deactivating that formal task. A temporary
+failed canonical-document or legacy metadata-sidecar saves. The user must wait
+for autosave to complete or fix the output save problem before deactivating that
+formal task. A temporary
 task whose first `Save to...` attempt fails remains output-free and recoverable:
 it keeps its temporary identity and error message and may be paused, deleted, or
 saved to the same or a different target. Tasks in the internal-autosave-draft
@@ -233,11 +234,13 @@ background retry and explicit pending-task surfacing.
 
 Deleting a sample labeling task is a separate explicit operation from closing
 or deactivating it. Delete removes the local task record and its internal draft.
-It must not delete the task's selected output `.npy` file or adjacent portable metadata sidecar. If the
-same output file is still loaded as an annotation later, SpecForge should treat
-it according to the normal plain/external/local matching rules rather than
-silently resurrecting the deleted local task record. Delete should be disabled
-while the task has pending or failed output saves, matching close/deactivate.
+It must not delete any artifact owned by the task's persisted format: neither a
+canonical ASDF document nor a legacy `.npy` result and its adjacent portable
+metadata sidecar. If the same output is still loaded as an annotation later,
+SpecForge should treat it according to the normal plain/external/local matching
+rules rather than silently resurrecting the deleted local task record. Delete
+should be disabled while the task has pending or failed output saves, matching
+close/deactivate.
 
 The visible sample filtering window should be named `Sample Filters`. In this
 document, `Sample filtering` remains the domain term for sample-filter ownership
@@ -324,9 +327,10 @@ sample-label-result evidence may be sorted by numeric value. Integer annotations
 with sample-label-result evidence must not be available for sample sorting in
 the first implementation, because their stored codes identify labels rather than
 rank. Sample-label-result evidence includes a matching local sample labeling
-task record, matching adjacent sample label result metadata such as
-`<stem>.sf-labels.json`, or a loaded annotation relationship that marks the
-values as an external or local sample label result.
+task record, a matching canonical ASDF document, matching adjacent legacy
+sample label result metadata such as `<stem>.sf-labels.json`, or a loaded
+annotation relationship that marks the values as an external or local sample
+label result.
 In the first implementation, an annotation should be available as a
 sample-sorting source only when every sample has a comparable value for that
 annotation. Annotation results with missing values, NaN values, or values that
@@ -475,23 +479,25 @@ say this is appropriate only when the user intentionally wants to edit that data
 or when the file represents an unfinished labeling task being restored, and it
 should recommend backing up the original data first.
 
-Adjacent sample label result metadata does not by itself make an annotation file
-the current user's own labeling task. If a categorical annotation has matching
-`<stem>.sf-labels.json` metadata but no matching local sample labeling task
-record for the active source collection and output path, SpecForge should treat
-it as an external label result and still show the in-place edit warning before
-editing it. If the matching local task record exists, SpecForge may restore or
-activate that task without the in-place edit warning because the user has
-already established that file as the task's output target.
+Portable labeling evidence is format-specific. A canonical ASDF document owns
+its task id, task metadata, source identity, roster, and values in one file. A
+legacy NPY result obtains equivalent labeling evidence from its adjacent
+`<stem>.sf-labels.json` sidecar. Neither a self-describing ASDF document nor a
+matching legacy sidecar by itself makes the output the current user's own task.
+Without a matching local task record for the active source and output path, the
+annotation is an external label result and still requires the in-place edit
+warning. With a matching local task record, SpecForge may restore or activate it
+without that warning because the user has already established the output owner.
 
 The annotation view should distinguish loaded per-sample data by workflow
 relationship:
 
-- Plain annotation: no matching sample label result metadata is available.
-- External label result: matching sample label result metadata is available, but
-  no matching local sample labeling task record exists.
-- Local labeling task: matching sample label result metadata is available and a
-  matching local sample labeling task record exists.
+- Plain annotation: neither a canonical labeling document nor matching legacy
+  sample-label metadata is available.
+- External label result: canonical document metadata or matching legacy
+  sidecar metadata is available, but no matching local task record exists.
+- Local labeling task: the format's labeling metadata and a matching local task
+  record both exist.
 
 Plain annotations should display their current raw annotation value. Writable
 integer categorical plain annotations may be dragged into `Labeling`, but doing
@@ -500,46 +506,48 @@ String and floating-point plain annotations are read-only in the first editable
 labeling implementation and should not expose a first-version labeling drag
 action.
 
-External label results should display the mapped label value from their adjacent
-sample label result metadata and be visibly marked as external. They may be
-dragged into `Labeling`, but doing so requires the in-place edit warning. If the
-user confirms, SpecForge creates a local task record whose output path points at
-that label result file.
+External label results should display the mapped label value from their
+canonical document or adjacent legacy metadata and be visibly marked as
+external. They may be dragged into `Labeling`, but doing so requires the
+in-place edit warning. If the user confirms, SpecForge creates a local task
+record whose output path and owner format point at that label result.
 
 Local labeling tasks should display the mapped label value and be visibly marked
-as local. If the task's output file or metadata sidecar is missing, the row
-should show the missing-output state and expose relink. A local labeling task may
-be clicked or dragged into `Labeling` to activate it without the in-place edit
-warning. If another sample labeling task is already active, the user must close
-or deactivate the current task before activating the local task from
-`Annotations`.
+as local. A canonical owner is missing when its ASDF document is unavailable; a
+legacy owner is incomplete when its NPY result, metadata sidecar, or both are
+unavailable. The row should show the corresponding missing-output state and
+expose relink. A local labeling task may be clicked or dragged into `Labeling`
+to activate it without the in-place edit warning. If another sample labeling
+task is already active, the user must close or deactivate the current task
+before activating the local task from `Annotations`.
 
-A local sample labeling task match requires the active source collection
-identity to match, the local task record's normalized output path to point to the
-annotation's label result file, the sidecar `task_id` to match the local task
-record's stable task id, and the sample/value count to match. Moving or renaming
-the output `.npy`, moving or renaming the adjacent metadata file, clearing local
-user state, copying another user's `.npy` plus metadata, or relinking a source
-collection may prevent SpecForge from recognizing a file as a local labeling
-task until the user explicitly reconnects it.
+A local task match always requires the active source collection identity, the
+local record's normalized output path and persisted owner format, stable task
+id, and sample/value count to match. For `canonical_asdf`, task id and source,
+roster, and value contracts come from the ASDF document itself. For
+`legacy_npy_with_sidecar`, the sidecar `task_id`, source summary, result
+reference, dtype, and count must match the NPY result and local record. Moving
+or renaming any required artifact, clearing local user state, copying another
+user's output, or relinking a source collection may prevent recognition until
+the user explicitly reconnects it.
 
-If a local sample labeling task record still exists but its selected output
-file, adjacent metadata file, or both are missing, SpecForge should keep the task
-record visible as a local labeling task with a missing-output state rather than
-downgrading it to a plain annotation or silently deleting it. The missing state
-may appear in the `Annotations` window for that local labeling task row, and in
-the `Labeling` window when the missing task is the active task restored from
-local state. The user should be able to manually relink the task by selecting the
-new label result file. Relink should then look for the adjacent
-`<stem>.sf-labels.json` metadata, validate the task id, source identity summary
-or explicit source relink confirmation, value count, dtype, and label-code
-compatibility, then update the local task record's output path.
+If a local record still exists but its format's required artifact set is
+missing, SpecForge should keep the task visible with a missing-output state
+rather than downgrading it to a plain annotation or silently deleting it. The
+missing state may appear in `Annotations`, and in `Labeling` when the missing
+task is restored as active local state. Manual relink selects a replacement
+output of the same owner format. Canonical relink validates the ASDF document's
+task id, source identity, roster, annotation kind/count, label definitions, and
+values. Legacy relink validates the NPY result plus adjacent
+`<stem>.sf-labels.json` task id, source summary or explicit source-relink
+confirmation, dtype, count, and label-code compatibility. Only after that
+validation does the local record adopt the new path.
 
 When the user imports or adds an annotation file, SpecForge may also use the
 same validation rules to automatically reconnect a missing local labeling task
-if the annotation file and adjacent metadata match that task record. This
-automatic relink should be limited to the imported annotation path and its
-adjacent metadata; SpecForge should not scan the broader filesystem looking for
+if the canonical document, or the legacy result and adjacent metadata, matches
+that task record. Automatic relink is limited to the imported path and its
+format-declared artifacts; SpecForge should not scan the broader filesystem for
 moved label results.
 
 Only writable first-implementation integer categorical annotation formats may be
@@ -554,20 +562,26 @@ back to the original output target is limited by that file's writable format and
 integer dtype. If a new numeric code cannot be represented safely, SpecForge
 should require the user to choose a different output target before saving.
 Activating an annotation as an existing local task must use the same identity
-validation as annotation relationship display. A metadata-backed annotation
-must match the local task's output path, sidecar `task_id`, and sample count; a
-path-only match must not activate a local task or overwrite its output. If the
+validation as annotation relationship display. A canonical annotation must
+match the local task's owner format and output path plus its embedded task id,
+source/roster identity, annotation kind, and sample count. A legacy annotation
+must match the output path, sidecar `task_id`, result contract, and sample count.
+A path-only match must not activate a local task or overwrite its output. If the
 same path is owned by a different local task, activation remains blocked and the
 annotation remains external.
 
 When a temporary task is started locally inside SpecForge, it does not need the
 in-place edit warning. It starts without an external output target and remains a
 local recovery draft until the user selects `Save to...`. Selecting the output
-location promotes it to a formal local labeling annotation only after both the
-label array and portable metadata sidecar are written successfully, derives its
-name from the chosen filename stem, and permits a fresh temporary task for the
-same source collection. A failed first write does not bind the path or rename
-the task. Locally created tasks may define and expand their own category sets.
+location requires an `.asdf` path and promotes it to a formal local labeling
+annotation only after one canonical document containing source identity, task
+metadata, roster, and values is atomically written and reopened successfully.
+The task derives its name from the chosen filename stem and then permits a fresh
+temporary task for the same source collection. The selected owner and pending
+overlay are checkpointed before publication; a failed first publication restores
+the output-free draft immediately or through maintenance/restart recovery if the
+compensating checkpoint is temporarily unavailable. Locally created tasks may
+define and expand their own category sets.
 
 The first implementation should not allow two local sample labeling task records
 for the same source collection to point at the same output path. If the user
@@ -748,14 +762,18 @@ retried after non-blocking save failures.
 
 Each `SampleLabelingTask` persists its formal output ownership as an explicit
 path-and-format pair. State-cache schema 3 writes this as `output.path` plus
-`output.format`; temporary drafts use `none`, current formal tasks use
-`legacy_npy_with_sidecar`, and existing canonical document owners use
-`canonical_asdf`. Schema 1 and 2 records with a non-null `output_path` migrate
-explicitly to legacy NPY ownership. Formal records do not duplicate the full
-values array in this cache; they retain only sparse pending values plus local
-session/recovery state. Output leases, conflict detection, and recovery
-projection checks use the task's stored format rather than guessing from its
-filename extension.
+`output.format`; temporary drafts use `none`, `Save to...` tasks and existing
+canonical document owners use `canonical_asdf`, and existing or explicitly
+adopted legacy-format owners use `legacy_npy_with_sidecar`. Explicit promotion
+of an existing NPY annotation is one such adoption. Schema 1 and 2 records with
+a non-null `output_path` migrate explicitly to legacy NPY ownership. Formal
+records do not duplicate the full values array in this cache; they retain only
+sparse pending values plus local session/recovery state. The write-ahead
+`initial_publication_pending` phase is
+durable only until canonical creation is adopted or reconciled back to a true
+temporary draft. Output leases, conflict detection, and recovery projection
+checks use the task's stored format rather than guessing from its filename
+extension.
 
 ## Annotation I/O
 
@@ -765,14 +783,16 @@ loaded sample annotation result: one value per spectrum sample, with a known
 value kind such as categorical integer, categorical string, or continuous
 floating point.
 
-Format-specific details belong behind annotation I/O. NPY remains the writer
-for newly formalized tasks and the legacy read adapter; canonical ASDF v1 is
-additionally supported as a source-aware annotation and existing-task hydration
-adapter. NPY output rejects `.asdf` paths and its lease
-identity always protects both the selected result path and the adjacent
-`<stem>.sf-labels.json`. Output artifact ownership is declared by format rather
-than inferred from a filename extension: canonical ASDF owns one document,
-while legacy NPY owns the `.npy` result and its `.sf-labels.json` sidecar.
+Format-specific details belong behind annotation I/O. Canonical ASDF v1 is the
+writer for newly formalized tasks and the source-aware annotation/task-hydration
+adapter. New canonical owners require an `.asdf` path before their write-ahead
+checkpoint is committed. NPY remains a read adapter and the persistence writer
+for existing or explicitly adopted legacy-format owners, including tasks created
+by promoting an existing NPY annotation. Its lease identity always protects both
+the selected result path and the adjacent `<stem>.sf-labels.json`. Output artifact
+ownership is declared by format rather than inferred from a filename extension:
+canonical ASDF owns one document, while legacy NPY owns the `.npy` result and
+its `.sf-labels.json` sidecar.
 Future adapters such as CSV can be added if they can
 produce or consume the same per-sample annotation result shape and validate that
 the value count matches the source collection's spectrum count.
@@ -826,7 +846,9 @@ descriptor is checked against that intended document before replacement, so an
 incompatible public-store call cannot alter the durable owner. If reopen fails,
 the local overlay remains pending, the stale snapshot is discarded, and retry
 first opens the current durable file before rewriting it. Creating a new ASDF
-owner remains a later writer step.
+owner uses a full canonical document write followed by source-aware reopen and
+generation validation. The controller adopts the formal owner only after both
+steps and output-lease refresh succeed.
 
 Annotation I/O belongs in a domain or service boundary, not in UI code. UI
 surfaces should consume loaded sample annotation results, task records, and save
@@ -839,20 +861,18 @@ external output file, but should not require one before labeling starts. Output
 formats should be compact and practical for C++ streaming reads and writes;
 verbose JSON is appropriate for drafts and recovery metadata, not as the
 preferred export format for large label arrays.
-The first export adapter should prioritize a one-dimensional `.npy` label array
-at the user's chosen output path, with one label value per spectrum sample.
+New formal labeling tasks use canonical ASDF so source identity, task metadata,
+roster, and the one-dimensional label values share one atomic generation.
 Numeric tasks write stable label codes, and the sample label set owns the
-interpretation from numeric code to user-facing label. Unlabeled samples in
-numeric tasks should use `-1`, so numeric label outputs should use a signed
-integer dtype. The first implementation should write new numeric label outputs
-as `int32`.
+interpretation from numeric code to user-facing label. Unlabeled samples use
+`-1`; the canonical v1 value array is signed `int32`.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 
-When a numeric sample label result is written to an explicit output location,
-SpecForge should also write portable sample label result metadata beside the
-compact `.npy` output. This metadata is a data-contract sidecar, not a copy of
-the local sample labeling task record. It should include a format kind, schema
+When a legacy NPY owner is written to its explicit output location, SpecForge
+also writes portable sample label result metadata beside the compact `.npy`
+output. This metadata is a data-contract sidecar, not a copy of the local sample
+labeling task record. It includes a format kind, schema
 version, referenced result file, stable task id, expected value count, expected
 dtype, unlabeled sentinel, task name, label code/name/shortcut entries, and the
 source collection identity summary when available. The referenced result file
@@ -867,16 +887,13 @@ retry state, or a local absolute source path.
 For an output file named `<stem>.npy`, the adjacent metadata file should be
 named `<stem>.sf-labels.json`.
 
-After an output location is selected, `autosaved to output` means the compact
-label result and its portable metadata have both been saved successfully. If the
-label result is saved but metadata save fails, the task remains pending or
-failed rather than claiming a complete output save.
-When a task has an output location, metadata-only changes such as label
-code/name/shortcut changes, unlabeled sentinel changes, or source identity
-summary changes should rewrite the adjacent sample label result metadata even
-when the label value array is unchanged. Such changes should enter the same
-pending or failed save-state path until the metadata sidecar is saved
-successfully.
+For a legacy NPY owner, `autosaved to output` means the compact label result and
+its portable metadata have both been saved successfully. If the label result is
+saved but metadata save fails, the task remains pending or failed. Metadata-only
+changes rewrite that sidecar even when the label value array is unchanged. For a
+canonical ASDF owner, `autosaved to output` means the complete intended values
+or metadata generation was atomically replaced and, for metadata-changing
+writes, reopened successfully.
 
 When loading an existing numeric label result, SpecForge should use adjacent
 sample label result metadata when it matches the label result file, value count,

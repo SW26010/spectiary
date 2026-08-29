@@ -6184,8 +6184,10 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_shell_recovery_projection.npy");
+    const std::filesystem::path legacy_annotation_path =
+        UniqueTempPath("_shell_recovery_projection_legacy_labels.npy");
     const std::filesystem::path formal_output_path =
-        UniqueTempPath("_shell_recovery_projection_labels.npy");
+        UniqueTempPath("_shell_recovery_projection_labels.asdf");
     const SourceSessionCachePaths cache_paths{
         .source_session = UniqueTempPath("_shell_recovery_projection_sources.json"),
         .navigation = UniqueTempPath("_shell_recovery_projection_navigation.json"),
@@ -6194,9 +6196,10 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     std::error_code cleanup_error;
     for (const std::filesystem::path& path : {
              source_path,
-             formal_output_path,
+             legacy_annotation_path,
              specforge::SampleAnnotationIoAdapter::
-                 MetadataPathForResult(formal_output_path),
+                 MetadataPathForResult(legacy_annotation_path),
+             formal_output_path,
              cache_paths.source_session,
              cache_paths.navigation,
              cache_paths.labeling,
@@ -6207,8 +6210,8 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     WriteFixture(source_path);
     specforge::SampleLabelingTask annotation_seed =
         specforge::CreateSampleLabelingTask(
-            "temporary-labeling-task",
-            "Formal task",
+            "legacy-formal-task",
+            "Legacy formal task",
             3);
     annotation_seed.label_set.labels.push_back(
         specforge::SampleLabelDefinition{
@@ -6217,7 +6220,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             'r'});
     const specforge::SampleLabelResultWriteOutcome annotation_write =
         specforge::SampleAnnotationIoAdapter{}.SaveLabelResult(
-            formal_output_path,
+            legacy_annotation_path,
             annotation_seed);
     Require(
         annotation_write.array_saved && annotation_write.metadata_saved,
@@ -6237,7 +6240,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             editor,
             source_path,
             0,
-            formal_output_path,
+            legacy_annotation_path,
             specforge::SampleWorkflowPreparationPaths{
                 .labeling_state_cache_path = cache_paths.labeling,
                 .workflow_state_cache_path = cache_paths.workflow,
@@ -6311,7 +6314,7 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
             session,
             source_path,
             0,
-            formal_output_path,
+            legacy_annotation_path,
             specforge::SampleWorkflowPreparationPaths{
                 .labeling_state_cache_path = cache_paths.labeling,
                 .workflow_state_cache_path = cache_paths.workflow,
@@ -6475,9 +6478,10 @@ void TestShellRecoveryProjectionDoesNotResetUnrelatedEditingState()
     shell.reset();
     for (const std::filesystem::path& path : {
              source_path,
-             formal_output_path,
+             legacy_annotation_path,
              specforge::SampleAnnotationIoAdapter::
-                 MetadataPathForResult(formal_output_path),
+                 MetadataPathForResult(legacy_annotation_path),
+             formal_output_path,
              cache_paths.source_session,
              cache_paths.navigation,
              cache_paths.labeling,

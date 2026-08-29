@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -95,6 +96,13 @@ struct SourceCollectionContext {
     SourceCollectionIdentity identity;
     SourceCollectionManifest manifest;
 };
+
+// Explicit canonical roster identity requires one non-blank, unique name for
+// every source row. Other source-provided names may still be useful display
+// data, but they cannot safely identify an ASDF roster generation.
+[[nodiscard]] bool SourceCollectionSampleNamesFormCanonicalRoster(
+    std::span<const std::string> sample_names,
+    std::size_t expected_count);
 
 using SourceCollectionFolderScanProgress = std::function<void(std::size_t processed_entry_count)>;
 using SourceCollectionCancellationCheckpoint = std::function<void()>;

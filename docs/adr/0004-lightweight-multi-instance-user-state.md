@@ -77,7 +77,9 @@ tombstone is committed. The stable lease remains held across a temporary
 draft becoming an output-backed task and never changes identity during that
 transition. Temporary tasks additionally hold one source-scoped draft-slot
 lease, while formal tasks also hold an output lease covering the complete
-artifact set: both the selected result path and its derived `.sf-labels.json`
+artifact set declared by their persisted owner format. A canonical ASDF owner
+protects its one document path; an existing or explicitly adopted legacy NPY
+owner protects both the selected result path and its derived `.sf-labels.json`
 metadata sidecar.
 
 Every output artifact contributes a normalized-path identity. This is the
@@ -100,13 +102,17 @@ alias protection rather than a guarantee of immediate post-replacement alias
 exclusion.
 
 Temporary-to-formal conversion first commits a write-ahead task checkpoint that
-contains the selected output path and pending recovery state. No result or
-metadata write begins until that checkpoint succeeds. If no artifact was
-replaced and the write fails, or a compensating checkpoint can be committed
-after a partial write, the checkpoint is restored to the existing temporary
-draft behavior. If compensation cannot commit, the formal pending checkpoint
-is retained so a later instance can recover it rather than treating the output
-as an unowned orphan.
+contains the selected `.asdf` output path, its canonical owner format, an
+`initial_publication_pending` phase, and the pending recovery overlay. No ASDF
+write begins until that checkpoint succeeds. The controller then publishes one
+full canonical document, reopens and validates that generation, refreshes the
+one-file lease, and only then adopts the formal owner. If publication or reopen
+fails, a compensating checkpoint restores the existing temporary-draft behavior.
+If compensation cannot commit, the formal pending checkpoint and lease are
+retained and maintenance is explicitly scheduled; once the checkpoint is
+durable and can be re-read, it is reconciled into a true output-free temporary
+draft. Restart performs the same reconciliation rather than treating the path as
+an established owner or an unowned orphan.
 
 The complete artifact-set lease prevents different stale task IDs or result
 extensions from creating parallel editors for one logical draft or output;

@@ -774,14 +774,14 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
     const std::array<std::wstring, 2> filter_names = {
         Utf8ToWide(UiText(
             language,
-            UiTextId::NumpyLabelArraysFilter)),
+            UiTextId::SampleAnnotationFilesFilter)),
         Utf8ToWide(UiText(
             language,
             UiTextId::AllFilesFilter)),
     };
     const std::array<COMDLG_FILTERSPEC, 2>
         label_output_filters = {{
-            {filter_names[0].c_str(), L"*.npy"},
+            {filter_names[0].c_str(), L"*.asdf"},
             {filter_names[1].c_str(), L"*.*"},
         }};
     const std::wstring title = Utf8ToWide(UiText(
@@ -792,7 +792,7 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
         static_cast<UINT>(label_output_filters.size()),
         label_output_filters.data());
     dialog->SetFileTypeIndex(1);
-    dialog->SetDefaultExtension(L"npy");
+    dialog->SetDefaultExtension(L"asdf");
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) || FAILED(show_result)) {

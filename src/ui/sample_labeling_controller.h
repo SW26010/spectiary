@@ -123,6 +123,11 @@ public:
             const SampleLabelingAsdfOpenSnapshot&,
             const SampleLabelingDocument&,
             const SampleLabelingCanonicalSourceDescriptor&)>;
+    using CanonicalCreationPublisher =
+        std::function<SampleLabelingAsdfStoreGenerationWriteResult(
+            const std::filesystem::path&,
+            const SampleLabelingDocument&,
+            const SampleLabelingCanonicalSourceDescriptor&)>;
 
     SampleLabelingController();
     explicit SampleLabelingController(std::filesystem::path state_cache_path);
@@ -144,6 +149,13 @@ public:
         LegacyOutputPublisher legacy_output_publisher,
         CanonicalValuesPublisher canonical_values_publisher,
         CanonicalDocumentPublisher canonical_document_publisher);
+    SampleLabelingController(
+        std::filesystem::path state_cache_path,
+        StateCacheLoader state_cache_loader,
+        LegacyOutputPublisher legacy_output_publisher,
+        CanonicalValuesPublisher canonical_values_publisher,
+        CanonicalDocumentPublisher canonical_document_publisher,
+        CanonicalCreationPublisher canonical_creation_publisher);
 
     void ActivateSource(std::string source_identity, std::size_t sample_count);
     void ActivateSource(const SourceCollectionIdentity& identity);
@@ -378,6 +390,12 @@ private:
             const SourceState* source_state,
             std::optional<SampleLabelingAsdfOpenSnapshot>*
                 asdf_snapshot);
+    [[nodiscard]] TaskOutputPersistenceAttempt
+        PublishCanonicalTaskCreation(
+            SampleLabelingTask& task,
+            TaskEditLeaseSet& leases,
+            std::optional<SampleLabelingAsdfOpenSnapshot>*
+                asdf_snapshot);
     [[nodiscard]] bool CommitTaskRecoveryCheckpoint(
         std::string_view source_identity,
         const SourceState& state,
@@ -520,6 +538,7 @@ private:
     LegacyOutputPublisher legacy_output_publisher_;
     CanonicalValuesPublisher canonical_values_publisher_;
     CanonicalDocumentPublisher canonical_document_publisher_;
+    CanonicalCreationPublisher canonical_creation_publisher_;
     LocalUserStateSaveScheduler state_cache_save_scheduler_;
     LocalUserStateSaveScheduler output_retry_scheduler_;
     LocalUserStateSaveStatus state_cache_save_status_;

@@ -1,6 +1,6 @@
 # Automation CI
 
-SpecForge automation is split into two CTest groups:
+SpecForge's automation workflow selects two CTest groups:
 
 | Group | CTest label | Environment | CI behavior |
 | --- | --- | --- | --- |
@@ -8,8 +8,10 @@ SpecForge automation is split into two CTest groups:
 | Interactive desktop coverage | `real-gui` | A visible Windows desktop, normally self-hosted | Runs only when the event/ref policy and `github.ref_protected == true` allow a protected `master` push, or an explicitly authorized `workflow_dispatch` on protected `master` with `run_real_gui=true`; otherwise the workflow publishes an explicit diagnostic |
 
 The required headless gate covers the automation protocol/control plane, state
-root and seed isolation, and the checked-in sample fixture contract. The
-comprehensive launcher workflow, the sample command sequences, and the
+root and seed isolation, the checked-in sample fixture contract, and the bounded
+sample-labeling controller/session regressions that protect canonical ASDF
+formalization and restart recovery. The comprehensive launcher workflow, the
+sample command sequences, and the
 two-process labeling coordination smoke are `real-gui` tests because they
 require a real Win32/D3D11 presentation path. They are not silently included
 in the hosted headless gate.
@@ -80,7 +82,7 @@ headroom.
 
 The CI helper maps `Headless` to `ci-headless` and `RealGui` to `real-gui`.
 The workflow and the helper use these exact labels; `required` is an additional
-CTest label on the five headless tests, not a different selector.
+CTest label on the seven headless tests, not a different selector.
 
 The real-GUI job is opt-in because an ordinary hosted Windows runner does not
 provide a stable interactive desktop contract for this D3D11 path. The job

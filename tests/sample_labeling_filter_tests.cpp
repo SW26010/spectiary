@@ -6,6 +6,7 @@
 #include "domain/source_path_identity.h"
 #include "domain/stable_sha256.h"
 #include "platform/exclusive_file_lease.h"
+#include "ui/sample_annotation_labeling_rules.h"
 #include "ui/sample_labeling_controller.h"
 #include "ui/sample_labeling_state_cache_io.h"
 
@@ -92,6 +93,34 @@ const std::vector<specforge::SampleLabelingTask>* ActiveSourceTasks(
     return controller.View().active_source_tasks;
 }
 
+void ActivateCanonicalTestSource(
+    specforge::SampleLabelingController& controller,
+    std::string source_identity,
+    std::size_t sample_count)
+{
+    const std::string source_name = source_identity + ".npy";
+    const std::string source_fingerprint =
+        "fingerprint:" + source_identity;
+    specforge::SourceCollectionIdentity identity{
+        .id = source_identity,
+        .source_name = source_name,
+        .source_fingerprint = source_fingerprint,
+        .context_fingerprint =
+            "context:" + source_identity,
+        .spectrum_count = sample_count,
+    };
+    controller.ActivateSource(
+        identity,
+        specforge::SampleLabelingCanonicalSourceDescriptor{
+            .base_identity = std::move(source_identity),
+            .source_kind = "npy",
+            .source_name = std::move(source_name),
+            .source_fingerprint =
+                std::move(source_fingerprint),
+            .sample_count = sample_count,
+        });
+}
+
 const specforge::SampleLabelingTask* ActiveSourceTask(
     const specforge::SampleLabelingController& controller,
     std::string_view task_id)
@@ -122,7 +151,10 @@ std::int32_t ReadLittleEndianI32(const std::array<unsigned char, 4>& bytes)
 std::vector<std::int32_t> ReadTestInt32NpyPayload(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
-    Require(stream.good(), "could not open written NPY file");
+    Require(
+        stream.good(),
+        "could not open written NPY file: " +
+            path.string());
 
     std::array<unsigned char, 6> magic = {};
     stream.read(reinterpret_cast<char*>(magic.data()), static_cast<std::streamsize>(magic.size()));
@@ -153,6 +185,19 @@ std::vector<std::int32_t> ReadTestInt32NpyPayload(const std::filesystem::path& p
         values.push_back(ReadLittleEndianI32(bytes));
     }
     return values;
+}
+
+std::vector<std::int32_t> ReadTestCanonicalAsdfValues(
+    const std::filesystem::path& path)
+{
+    const specforge::SampleLabelingAsdfReadResult read =
+        specforge::ReadSampleLabelingAsdfDocument(path);
+    Require(
+        read.succeeded(),
+        read.error.message.empty()
+            ? "could not read canonical ASDF output"
+            : read.error.message);
+    return read.document->annotation.values;
 }
 
 std::string ReadTextFile(const std::filesystem::path& path)
@@ -405,6 +450,85 @@ void TestSampleLabelingOutputFormatMigrationAndRoundTrip()
             tasks[1].output_format ==
                 specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf,
         "schema 3 should restore each formal task's persisted output owner");
+}
+
+void TestInterruptedInitialCanonicalPublicationRestoresTemporaryDraft()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_interrupted_initial_publication");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "interrupted.asdf";
+    const auto output_utf8_view =
+        output_path.generic_u8string();
+    const std::string output_utf8(
+        output_utf8_view.begin(),
+        output_utf8_view.end());
+    WriteTextFile(
+        cache_path,
+        "{\n"
+        "  \"format_kind\": \"specforge.sample_labeling_tasks.cache\",\n"
+        "  \"schema_version\": 3,\n"
+        "  \"sources\": [{\n"
+        "    \"identity\": \"interrupted-source\",\n"
+        "    \"sample_count\": 3,\n"
+        "    \"source_name\": \"interrupted-source.npy\",\n"
+        "    \"source_fingerprint\": \"fingerprint:interrupted-source\",\n"
+        "    \"context_fingerprint\": \"context:interrupted-source\",\n"
+        "    \"active_task_id\": \"interrupted-task\",\n"
+        "    \"tasks\": [{\n"
+        "      \"task_id\": \"interrupted-task\",\n"
+        "      \"task_name\": \"Interrupted formalization\",\n"
+        "      \"output\": {\n"
+        "        \"path\": { \"path_kind\": \"absolute\", \"path\": \"" +
+            output_utf8 + "\" },\n"
+        "        \"format\": \"canonical_asdf\"\n"
+        "      },\n"
+        "      \"initial_publication_pending\": true,\n"
+        "      \"labels\": [{ \"code\": 5, \"name\": \"accepted\", \"shortcut\": \"a\" }],\n"
+        "      \"save_state\": \"pending\",\n"
+        "      \"save_message\": \"\",\n"
+        "      \"save_message_kind\": \"none\",\n"
+        "      \"metadata_pending\": true,\n"
+        "      \"pending_values\": [{ \"index\": 1, \"value\": 5 }]\n"
+        "    }]\n"
+        "  }]\n"
+        "}\n");
+
+    specforge::SampleLabelingController recovered(
+        cache_path);
+    ActivateCanonicalTestSource(
+        recovered,
+        "interrupted-source",
+        3);
+    const specforge::SampleLabelingTask* task =
+        ActiveTask(recovered);
+    Require(
+        task != nullptr &&
+            !task->output_path &&
+            task->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::None &&
+            task->task_name ==
+                specforge::kTemporarySampleLabelingTaskName &&
+            task->values_are_authoritative &&
+            task->values == std::vector<int>({-1, 5, -1}) &&
+            TemporaryTask(recovered) == task,
+        "a restart between the initial checkpoint and ASDF creation must restore a real temporary draft");
+
+    const specforge::SampleLabelingOperationResult retried =
+        recovered.SaveActiveTemporaryTaskToOutput(
+            output_path,
+            "interrupted");
+    Require(
+        retried.output_saved &&
+            ActiveTask(recovered) != nullptr &&
+            ActiveTask(recovered)->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf &&
+            ReadTestCanonicalAsdfValues(output_path) ==
+                std::vector<std::int32_t>({-1, 5, -1}),
+        "the recovered temporary draft should remain available for a safe Save As retry");
 }
 
 void TestSampleLabelingStateCacheReportsCorruptJson()
@@ -1945,26 +2069,25 @@ void CreateFormalTask(
     controller.ActivateSource(
         std::move(source_identity),
         3);
+    specforge::SampleLabelSet label_set;
     Require(
-        controller.CreateTask(
+        specforge::UpsertSampleLabel(
+            label_set,
+            specforge::SampleLabelDefinition{
+                label_code,
+                task_id,
+                '\0'}),
+        "formal task fixture should define its legacy label metadata");
+    Require(
+        controller.CreateTaskFromAnnotation(
                       task_id,
-                      task_id)
-            .accepted,
-        "formal task fixture should create a temporary task");
-    Require(
-        controller.UpsertActiveLabel(
-                      specforge::SampleLabelDefinition{
-                          label_code,
-                          task_id,
-                          '\0'})
-            .changed,
-        "formal task fixture should add a label");
-    Require(
-        controller.SaveActiveTemporaryTaskToOutput(
+                      task_id,
+                      std::move(label_set),
+                      {-1, -1, -1},
                       output_path,
-                      task_id)
+                      false)
             .output_saved,
-        "formal task fixture should save its output");
+        "formal task fixture should save its existing legacy output owner");
     Require(
         controller.DeactivateActiveTask().changed,
         "formal task fixture should deactivate its task");
@@ -2849,7 +2972,7 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
     const std::filesystem::path cache_path =
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_single_temporary_state.json";
     const std::filesystem::path output_path =
-        std::filesystem::temp_directory_path() / "specforge_sample_labeling_formalized_result.npy";
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_formalized_result.asdf";
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
@@ -2858,7 +2981,10 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
         cleanup_error);
 
     specforge::SampleLabelingController controller(cache_path);
-    controller.ActivateSource("source-identity", 3);
+    ActivateCanonicalTestSource(
+        controller,
+        "source-identity",
+        3);
     Require(
         controller.CreateTask("temporary", "Temporary labeling task").accepted,
         "controller should create the first temporary task");
@@ -2883,6 +3009,29 @@ void TestControllerKeepsOneTemporaryTaskPerSource()
     const specforge::SampleLabelingOperationResult save =
         controller.SaveActiveTemporaryTaskToOutput(output_path, "Temporary labeling task");
     Require(save.output_saved && save.state_saved, "formalized task should persist before it is closed");
+    const specforge::SampleLabelingTask* formalized =
+        ActiveTask(controller);
+    Require(
+        formalized != nullptr &&
+            formalized->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            formalized->output_path ==
+                std::optional<std::filesystem::path>{
+                    output_path} &&
+            controller.ActiveCanonicalAsdfAnnotationProjection()
+                .has_value(),
+        "temporary formalization should adopt the opened canonical ASDF generation");
+    const specforge::SampleLabelingAsdfReadResult document =
+        specforge::ReadSampleLabelingAsdfDocument(
+            output_path);
+    Require(
+        document.succeeded() &&
+            document.document->labeling.id ==
+                temporary_task_id &&
+            document.document->annotation.values ==
+                std::vector<std::int32_t>({-1, 5, -1}),
+        "temporary formalization should publish task metadata and values as one canonical generation");
     Require(controller.DeactivateActiveTask().changed, "formalized task should be closable");
     Require(
         controller.CreateTask("temporary-2", "Temporary labeling task").accepted,
@@ -2939,15 +3088,15 @@ void TestControllerAtomicallyStartsOrResumesTemporaryTask()
         });
     controller.ActivateSource("source-identity", 3);
     Require(
-        controller.CreateTask("formal", "Formal").accepted,
-        "controller should create the formal task");
-    Require(
-        controller
-            .SaveActiveTemporaryTaskToOutput(
-                output_path,
-                "Formal")
+        controller.CreateTaskFromAnnotation(
+                      "formal",
+                      "Formal",
+                      {},
+                      {-1, -1, -1},
+                      output_path,
+                      false)
             .output_saved,
-        "controller should establish a clean formal task");
+        "controller should establish a clean existing legacy formal task");
     const specforge::SampleLabelingTask* formal_task =
         ActiveTask(controller);
     Require(
@@ -3053,13 +3202,20 @@ void TestExternalOutputIsResultSourceOfTruth()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
+        specforge::SampleLabelSet labels;
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
-            "controller should persist label definition");
-        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label draft value");
+            specforge::UpsertSampleLabel(
+                labels,
+                {5, "bad", 'b'}),
+            "legacy fixture should define its label metadata");
         const specforge::SampleLabelingOperationResult save =
-            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
+            controller.CreateTaskFromAnnotation(
+                "quality",
+                "Quality",
+                std::move(labels),
+                {-1, 5, -1},
+                output_path,
+                false);
         Require(save.output_saved && save.state_saved, "controller should persist output-backed task");
         const specforge::SampleLabelingTask* task = ActiveTask(controller);
         Require(
@@ -3108,13 +3264,20 @@ void TestMetadataOnlyChangesRewriteSidecarOnRetry()
 
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
+    specforge::SampleLabelSet initial_labels;
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
-        "controller should add initial label");
-    Require(controller.AssignLabel(1, 5).write.accepted, "controller should label a sample");
+        specforge::UpsertSampleLabel(
+            initial_labels,
+            {5, "bad", 'b'}),
+        "legacy metadata fixture should define its initial label");
     const specforge::SampleLabelingOperationResult initial_save =
-        controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality");
+        controller.CreateTaskFromAnnotation(
+            "quality",
+            "Quality",
+            std::move(initial_labels),
+            {-1, 5, -1},
+            output_path,
+            false);
     Require(initial_save.output_saved && initial_save.state_saved, "controller should persist initial output and metadata");
     Require(ReadTextFile(metadata_path).find("\"name\": \"bad\"") != std::string::npos, "initial metadata should contain the first label name");
 
@@ -3150,7 +3313,7 @@ void TestOutputPathConflictIsRejectedWithinSource()
     const std::filesystem::path cache_path =
         std::filesystem::temp_directory_path() / "specforge_sample_labeling_output_conflict_state.json";
     const std::filesystem::path output_path =
-        std::filesystem::temp_directory_path() / "specforge_sample_labeling_output_conflict.npy";
+        std::filesystem::temp_directory_path() / "specforge_sample_labeling_output_conflict.asdf";
     std::error_code cleanup_error;
     std::filesystem::remove(cache_path, cleanup_error);
     std::filesystem::remove(output_path, cleanup_error);
@@ -3160,7 +3323,10 @@ void TestOutputPathConflictIsRejectedWithinSource()
 
     {
         specforge::SampleLabelingController controller(cache_path);
-        controller.ActivateSource("source-identity", 3);
+        ActivateCanonicalTestSource(
+            controller,
+            "source-identity",
+            3);
         Require(controller.CreateTask("first", "First").accepted, "first task should be created");
         Require(
             controller.SaveActiveTemporaryTaskToOutput(output_path, "First").output_saved,
@@ -3183,7 +3349,10 @@ void TestOutputPathConflictIsRejectedWithinSource()
     }
 
     specforge::SampleLabelingController restored(cache_path);
-    restored.ActivateSource("source-identity", 3);
+    ActivateCanonicalTestSource(
+        restored,
+        "source-identity",
+        3);
     const specforge::SampleLabelingTask* second =
         ActiveTask(restored);
     Require(
@@ -3232,13 +3401,21 @@ void TestMissingExternalOutputRestoresFailedState()
     {
         specforge::SampleLabelingController controller(cache_path);
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
+        specforge::SampleLabelSet labels;
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
-            "controller should persist label definition");
-        Require(controller.AssignLabel(1, 5).write.accepted, "controller should label draft value");
+            specforge::UpsertSampleLabel(
+                labels,
+                {5, "bad", 'b'}),
+            "missing-output fixture should define its legacy metadata");
         Require(
-            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+            controller.CreateTaskFromAnnotation(
+                          "quality",
+                          "Quality",
+                          std::move(labels),
+                          {-1, 5, -1},
+                          output_path,
+                          false)
+                .output_saved,
             "controller should persist output-backed task");
     }
 
@@ -3256,15 +3433,22 @@ void TestMissingExternalOutputRestoresFailedState()
 
 void TestFailedFirstOutputSaveKeepsTemporaryDraftRecoveryValues()
 {
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_sample_labeling_draft_output_failure");
     const std::filesystem::path cache_path =
-        std::filesystem::temp_directory_path() / "specforge_sample_labeling_draft_output_failure_state.json";
-    const std::filesystem::path output_path = std::filesystem::temp_directory_path();
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "blocked.asdf";
+    std::filesystem::create_directories(output_path);
     std::error_code cleanup_error;
-    std::filesystem::remove(cache_path, cleanup_error);
 
     {
         specforge::SampleLabelingController controller(cache_path);
-        controller.ActivateSource("source-identity", 3);
+        ActivateCanonicalTestSource(
+            controller,
+            "source-identity",
+            3);
         Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
         Require(
             controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
@@ -3459,12 +3643,21 @@ void TestFailedExternalOutputPersistsPendingOverlay()
                     .message = "disk full"};
             });
         controller.ActivateSource("source-identity", 3);
-        Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
+        specforge::SampleLabelSet labels;
         Require(
-            controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
-            "controller should persist label definition");
+            specforge::UpsertSampleLabel(
+                labels,
+                {5, "bad", 'b'}),
+            "failed-output fixture should define its legacy metadata");
         Require(
-            controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+            controller.CreateTaskFromAnnotation(
+                          "quality",
+                          "Quality",
+                          std::move(labels),
+                          {-1, -1, -1},
+                          output_path,
+                          false)
+                .output_saved,
             "controller should start from a clean external output");
 
         fail_output_save = true;
@@ -3539,12 +3732,21 @@ void TestFailedExternalOutputRetriesAfterBackoff()
                 .message = "disk full"};
         });
     controller.ActivateSource("source-identity", 3);
-    Require(controller.CreateTask("quality", "Quality").accepted, "controller should create task");
+    specforge::SampleLabelSet labels;
     Require(
-        controller.UpsertActiveLabel(specforge::SampleLabelDefinition{5, "bad", 'b'}).changed,
-        "controller should persist label definition");
+        specforge::UpsertSampleLabel(
+            labels,
+            {5, "bad", 'b'}),
+        "retry fixture should define its legacy metadata");
     Require(
-        controller.SaveActiveTemporaryTaskToOutput(output_path, "Quality").output_saved,
+        controller.CreateTaskFromAnnotation(
+                      "quality",
+                      "Quality",
+                      std::move(labels),
+                      {-1, -1, -1},
+                      output_path,
+                      false)
+            .output_saved,
         "controller should establish a clean output before the simulated failure");
     fail_output_save = true;
     const specforge::SampleLabelingWriteOperationResult failed_write =
@@ -3593,14 +3795,18 @@ void TestOutputWriteWaitsForPendingOverlayCommit()
         directory / "labels.npy";
     specforge::SampleLabelingController controller(cache_path);
     controller.ActivateSource("shared-source", 3);
+    specforge::SampleLabelSet labels;
     Require(
-        controller.CreateTask("shared-task", "Shared task")
-            .accepted &&
-            controller.UpsertActiveLabel({5, "accepted", 'a'})
-                .changed &&
-            controller.SaveActiveTemporaryTaskToOutput(
+        specforge::UpsertSampleLabel(
+            labels,
+            {5, "accepted", 'a'}) &&
+            controller.CreateTaskFromAnnotation(
+                          "shared-task",
+                          "Shared task",
+                          std::move(labels),
+                          {-1, -1, -1},
                           output_path,
-                          "Shared task")
+                          false)
                 .output_saved,
         "pending-before-output fixture should establish a clean formal task");
 
@@ -3762,16 +3968,21 @@ void TestSuccessfulOutputCannotRetainOlderPendingOverlay()
                 return result;
             });
         controller.ActivateSource("shared-source", 3);
+        specforge::SampleLabelSet labels;
         Require(
-            controller.CreateTask("shared-task", "Shared task")
-                .accepted &&
-                controller.UpsertActiveLabel({5, "old", 'o'})
-                    .changed &&
-                controller.UpsertActiveLabel({7, "new", 'n'})
-                    .changed &&
-                controller.SaveActiveTemporaryTaskToOutput(
+            specforge::UpsertSampleLabel(
+                labels,
+                {5, "old", 'o'}) &&
+                specforge::UpsertSampleLabel(
+                    labels,
+                    {7, "new", 'n'}) &&
+                controller.CreateTaskFromAnnotation(
+                              "shared-task",
+                              "Shared task",
+                              std::move(labels),
+                              {-1, -1, -1},
                               output_path,
-                              "Shared task")
+                              false)
                     .output_saved,
             "overlay-generation fixture should establish a clean formal task with both labels");
 
@@ -3836,14 +4047,20 @@ void TestDifferentFormalTargetsMergeAcrossInstances()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path first_output =
-        directory / "first_y.npy";
+        directory / "first_y.asdf";
     const std::filesystem::path second_output =
-        directory / "second_y.npy";
+        directory / "second_y.asdf";
 
     specforge::SampleLabelingController first(cache_path);
     specforge::SampleLabelingController second(cache_path);
-    first.ActivateSource("source-first", 3);
-    second.ActivateSource("source-second", 3);
+    ActivateCanonicalTestSource(
+        first,
+        "source-first",
+        3);
+    ActivateCanonicalTestSource(
+        second,
+        "source-second",
+        3);
 
     Require(
         first.CreateTask("first-task", "First").accepted,
@@ -3882,10 +4099,10 @@ void TestDifferentFormalTargetsMergeAcrossInstances()
         "second formal target should merge its task record");
 
     Require(
-        ReadTestInt32NpyPayload(first_output)[0] == 5,
+        ReadTestCanonicalAsdfValues(first_output)[0] == 5,
         "first instance output should remain intact");
     Require(
-        ReadTestInt32NpyPayload(second_output)[1] == 7,
+        ReadTestCanonicalAsdfValues(second_output)[1] == 7,
         "second instance output should remain intact");
     const specforge::SampleLabelingStateCacheLoadResult loaded =
         specforge::LoadSampleLabelingStateCache(cache_path);
@@ -3965,10 +4182,13 @@ void TestStaleNewTaskDoesNotActivateLatestFormalTask()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path output_path =
-        directory / "formalized.npy";
+        directory / "formalized.asdf";
 
     specforge::SampleLabelingController first(cache_path);
-    first.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        first,
+        "shared-source",
+        3);
 
     Require(
         first.StartOrResumeTemporaryTask().accepted,
@@ -3976,7 +4196,10 @@ void TestStaleNewTaskDoesNotActivateLatestFormalTask()
     const std::string formal_task_id =
         ActiveTask(first)->task_id;
     specforge::SampleLabelingController stale(cache_path);
-    stale.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        stale,
+        "shared-source",
+        3);
     Require(
         TemporaryTask(stale) != nullptr &&
             TemporaryTask(stale)->task_id == formal_task_id,
@@ -4035,13 +4258,19 @@ void TestStaleExplicitCreateDoesNotActivateFormalizedDraft()
         directory / "sample-labeling-tasks.json";
 
     specforge::SampleLabelingController first(cache_path);
-    first.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        first,
+        "shared-source",
+        3);
     Require(
         first.CreateTask("shared-draft", "Original draft")
             .accepted,
         "first instance should create the named draft");
     specforge::SampleLabelingController stale(cache_path);
-    stale.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        stale,
+        "shared-source",
+        3);
     Require(
         TemporaryTask(stale) != nullptr &&
             TemporaryTask(stale)->task_id ==
@@ -4050,7 +4279,7 @@ void TestStaleExplicitCreateDoesNotActivateFormalizedDraft()
 
     Require(
         first.SaveActiveTemporaryTaskToOutput(
-                 directory / "formalized.npy",
+                 directory / "formalized.asdf",
                  "Formalized")
             .output_saved &&
             first.DeactivateActiveTask().state_saved,
@@ -4809,7 +5038,7 @@ void TestTemporaryDraftRecoveryDeleteConvergesFormalizedProjection()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path output_path =
-        directory / "formalized.npy";
+        directory / "formalized.asdf";
     {
         specforge::SampleLabelingController seed(cache_path);
         seed.ActivateSource("shared-source", 3);
@@ -4823,16 +5052,22 @@ void TestTemporaryDraftRecoveryDeleteConvergesFormalizedProjection()
     }
 
     specforge::SampleLabelingController stale(cache_path);
-    stale.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        stale,
+        "shared-source",
+        3);
     specforge::SampleLabelingController formalizer(cache_path);
-    formalizer.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        formalizer,
+        "shared-source",
+        3);
     Require(
         formalizer.ActivateTask("formalized-draft").accepted &&
             formalizer
                 .SaveActiveTemporaryTaskToOutput(
                     output_path,
                     "Formalized")
-                .state_saved &&
+                .output_saved &&
             formalizer.DeactivateActiveTask().state_saved,
         "formalized-delete fixture should convert and release the latest task");
 
@@ -4866,9 +5101,12 @@ void TestTemporaryRecoveryRejectsAlreadyActiveFormalTask()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path output_path =
-        directory / "formalized.npy";
+        directory / "formalized.asdf";
     specforge::SampleLabelingController controller(cache_path);
-    controller.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        controller,
+        "shared-source",
+        3);
     Require(
         controller.CreateTask(
                         "draft",
@@ -6175,7 +6413,7 @@ void TestTemporaryFormalizationRequiresRecoveryCheckpoint()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path output_path =
-        directory / "formalized.npy";
+        directory / "formalized.asdf";
     std::size_t persist_calls = 0;
     std::string task_id;
     {
@@ -6191,7 +6429,10 @@ void TestTemporaryFormalizationRequiresRecoveryCheckpoint()
                     task,
                     source);
             });
-        controller.ActivateSource("shared-source", 3);
+        ActivateCanonicalTestSource(
+            controller,
+            "shared-source",
+            3);
         Require(
             controller.CreateTask("temporary", "Temporary").accepted,
             "checkpoint fixture should create a temporary task");
@@ -6233,7 +6474,10 @@ void TestTemporaryFormalizationRequiresRecoveryCheckpoint()
     }
 
     specforge::SampleLabelingController recovered(cache_path);
-    recovered.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        recovered,
+        "shared-source",
+        3);
     Require(
         recovered.ActivateTask(task_id).accepted,
         "a restarted controller should reacquire the still-temporary task after checkpoint failure");
@@ -6256,7 +6500,7 @@ void TestTemporaryFormalizationKeepsStableTaskLease()
     const std::filesystem::path cache_path =
         directory / "sample-labeling-tasks.json";
     const std::filesystem::path output_path =
-        directory / "formalized_y.npy";
+        directory / "formalized_y.asdf";
     {
         specforge::SampleLabelingController seed(cache_path);
         seed.ActivateSource("shared-source", 3);
@@ -6271,8 +6515,14 @@ void TestTemporaryFormalizationKeepsStableTaskLease()
 
     specforge::SampleLabelingController first(cache_path);
     specforge::SampleLabelingController stale_second(cache_path);
-    first.ActivateSource("shared-source", 3);
-    stale_second.ActivateSource("shared-source", 3);
+    ActivateCanonicalTestSource(
+        first,
+        "shared-source",
+        3);
+    ActivateCanonicalTestSource(
+        stale_second,
+        "shared-source",
+        3);
     Require(
         first.ActivateTask("shared-task").accepted,
         "first instance should acquire the draft task lease");
@@ -8759,6 +9009,301 @@ void TestSampleFiltersStackCategoricalConditions()
         "label filter should identify its unlabeled option semantically");
 }
 
+void TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_formalization_reopen");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "formalized.asdf";
+    int legacy_publication_calls = 0;
+    int creation_publication_calls = 0;
+    bool initial_checkpoint_observed = false;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [&legacy_publication_calls](
+            specforge::SampleLabelingTask& task,
+            const specforge::SampleLabelResultMetadataSource* source) {
+            ++legacy_publication_calls;
+            return specforge::PublishLegacySampleLabelingTaskOutput(
+                task,
+                source);
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        },
+        [&creation_publication_calls,
+         &initial_checkpoint_observed,
+         &cache_path](
+            const std::filesystem::path& path,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++creation_publication_calls;
+            if (creation_publication_calls == 1) {
+                const std::string checkpoint =
+                    ReadTextFile(cache_path);
+                initial_checkpoint_observed =
+                    checkpoint.find(
+                        "\"initial_publication_pending\": true") !=
+                        std::string::npos &&
+                    checkpoint.find(
+                        "{ \"index\": 1, \"value\": 5 }") !=
+                        std::string::npos;
+                const specforge::SampleLabelingAsdfStoreWriteResult write =
+                    specforge::WriteSampleLabelingAsdfDocumentAtomically(
+                        path,
+                        document);
+                Require(
+                    write.succeeded(),
+                    "reopen-failure fixture should replace the canonical document");
+                return specforge::
+                    SampleLabelingAsdfStoreGenerationWriteResult{
+                        .document_replaced = true,
+                        .error = {
+                            .kind = specforge::
+                                SampleLabelingAsdfStoreErrorKind::
+                                    AtomicWriteFailure,
+                            .message =
+                                "injected owner reopen failure"}};
+            }
+            return specforge::
+                WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                    path,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        });
+    ActivateCanonicalTestSource(
+        controller,
+        "canonical-formalization-source",
+        3);
+    Require(
+        controller.CreateTask("draft", "Draft").accepted &&
+            controller.UpsertActiveLabel({5, "accepted", 'a'})
+                .changed &&
+            controller.AssignLabel(1, 5).write.changed,
+        "reopen-failure fixture should prepare its temporary draft");
+
+    const specforge::SampleLabelingOperationResult failed =
+        controller.SaveActiveTemporaryTaskToOutput(
+            output_path,
+            "Formalized");
+    Require(
+        failed.output_save_attempted &&
+            !failed.output_saved &&
+            failed.state_saved &&
+            ActiveTask(controller) != nullptr &&
+            !ActiveTask(controller)->output_path &&
+            ActiveTask(controller)->values ==
+                std::vector<int>({-1, 5, -1}) &&
+            controller.ActiveCanonicalAsdfAnnotationProjection() ==
+                std::nullopt,
+        "a replaced document that cannot be reopened must not be adopted as a formal owner");
+    Require(
+        specforge::ReadSampleLabelingAsdfDocument(output_path)
+                .succeeded(),
+        "reopen failure may leave a durable document but must retain the temporary recovery record");
+
+    const specforge::SampleLabelingOperationResult retried =
+        controller.SaveActiveTemporaryTaskToOutput(
+            output_path,
+            "Formalized");
+    Require(
+        retried.output_saved &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            controller.ActiveCanonicalAsdfAnnotationProjection()
+                .has_value() &&
+            initial_checkpoint_observed &&
+            creation_publication_calls == 2 &&
+            legacy_publication_calls == 0,
+        "retry should safely reopen and adopt the canonical owner without entering the legacy writer");
+
+    const std::filesystem::path descriptorless_cache =
+        directory / "descriptorless-state.json";
+    const std::filesystem::path descriptorless_output =
+        directory / "descriptorless.asdf";
+    specforge::SampleLabelingController descriptorless(
+        descriptorless_cache,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [&legacy_publication_calls](
+            specforge::SampleLabelingTask& task,
+            const specforge::SampleLabelResultMetadataSource* source) {
+            ++legacy_publication_calls;
+            return specforge::PublishLegacySampleLabelingTaskOutput(
+                task,
+                source);
+        });
+    descriptorless.ActivateSource(
+        "descriptorless-source",
+        3);
+    Require(
+        descriptorless.CreateTask("draft", "Draft").accepted,
+        "descriptorless fixture should create its local draft");
+    const specforge::SampleLabelingOperationResult rejected =
+        descriptorless.SaveActiveTemporaryTaskToOutput(
+            descriptorless_output,
+            "Formalized");
+    Require(
+        rejected.output_save_attempted &&
+            !rejected.output_saved &&
+            ActiveTask(descriptorless) != nullptr &&
+            !ActiveTask(descriptorless)->output_path &&
+            !std::filesystem::exists(descriptorless_output) &&
+            legacy_publication_calls == 0,
+        "missing canonical source facts must fail closed without falling back to a legacy owner");
+}
+
+void TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_labeling_canonical_formalization_compensation");
+    const std::filesystem::path cache_path =
+        directory / "sample-labeling-tasks.json";
+    const std::filesystem::path output_path =
+        directory / "formalized.asdf";
+    specforge::ExclusiveFileLease compensation_checkpoint_lock;
+    int creation_publication_calls = 0;
+    specforge::SampleLabelingController controller(
+        cache_path,
+        [](const std::filesystem::path& path) {
+            return specforge::LoadSampleLabelingStateCache(path);
+        },
+        [](specforge::SampleLabelingTask& task,
+           const specforge::SampleLabelResultMetadataSource* source) {
+            return specforge::PublishLegacySampleLabelingTaskOutput(
+                task,
+                source);
+        },
+        [](specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           std::span<const std::int32_t> values) {
+            return specforge::RewriteSampleLabelingAsdfValuesAtomically(
+                snapshot,
+                values);
+        },
+        [](const specforge::SampleLabelingAsdfOpenSnapshot& snapshot,
+           const specforge::SampleLabelingDocument& document,
+           const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            return specforge::
+                RewriteSampleLabelingAsdfDocumentAndReopenAtomically(
+                    snapshot,
+                    document,
+                    specforge::SampleLabelingCompatibilityView(
+                        source));
+        },
+        [&compensation_checkpoint_lock,
+         &creation_publication_calls,
+         &cache_path](
+            const std::filesystem::path& path,
+            const specforge::SampleLabelingDocument& document,
+            const specforge::SampleLabelingCanonicalSourceDescriptor& source) {
+            ++creation_publication_calls;
+            if (creation_publication_calls > 1) {
+                return specforge::
+                    WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+                        path,
+                        document,
+                        specforge::SampleLabelingCompatibilityView(
+                            source));
+            }
+            specforge::ExclusiveFileLeaseAcquireResult lock =
+                specforge::TryAcquireExclusiveFileLease(
+                    specforge::SampleLabelingStateCoordinationDirectory(
+                        cache_path) /
+                    "cache-commit.lock");
+            Require(
+                lock.status ==
+                    specforge::ExclusiveFileLeaseAcquireStatus::Acquired,
+                "compensation fixture should block the compensating checkpoint after initial publication fails");
+            compensation_checkpoint_lock =
+                std::move(lock.lease);
+            return specforge::
+                SampleLabelingAsdfStoreGenerationWriteResult{
+                    .document_replaced = false,
+                    .error = {
+                        .kind = specforge::
+                            SampleLabelingAsdfStoreErrorKind::
+                                AtomicWriteFailure,
+                        .message =
+                            "injected initial publication failure"}};
+        });
+    ActivateCanonicalTestSource(
+        controller,
+        "canonical-compensation-source",
+        3);
+    Require(
+        controller.CreateTask("draft", "Draft").accepted &&
+            controller.UpsertActiveLabel({5, "accepted", 'a'})
+                .changed &&
+            controller.AssignLabel(1, 5).write.changed,
+        "compensation fixture should prepare a temporary draft");
+
+    const specforge::SampleLabelingOperationResult failed =
+        controller.SaveActiveTemporaryTaskToOutput(
+            output_path,
+            "Formalized");
+    Require(
+        failed.output_save_attempted &&
+            !failed.output_saved &&
+            !failed.state_saved &&
+            failed.output_retry_scheduled &&
+            ActiveTask(controller) != nullptr &&
+            ActiveTask(controller)->initial_publication_pending &&
+            ActiveTask(controller)->output_path == output_path,
+        "a failed compensating checkpoint must retain the durable initial-publication owner and schedule recovery");
+
+    compensation_checkpoint_lock.Reset();
+    const auto deadline = controller.NextMaintenanceDeadline();
+    Require(
+        deadline.has_value(),
+        "failed compensation must arm maintenance recovery");
+    const specforge::SampleLabelingMaintenanceResult maintenance =
+        controller.RunMaintenance(
+            *deadline + std::chrono::seconds(5));
+    Require(
+        maintenance.output_retry_attempted &&
+            ActiveTask(controller) != nullptr &&
+            !ActiveTask(controller)->output_path &&
+            ActiveTask(controller)->output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::None &&
+            !ActiveTask(controller)->initial_publication_pending &&
+            ActiveTask(controller)->values ==
+                std::vector<int>({-1, 5, -1}) &&
+            !controller.NextMaintenanceDeadline(),
+        "maintenance must reconcile the durable initial-publication checkpoint back into an editable temporary draft");
+
+    const specforge::SampleLabelingOperationResult retried =
+        controller.SaveActiveTemporaryTaskToOutput(
+            output_path,
+            "Formalized");
+    Require(
+        retried.output_saved,
+        "the recovered draft must remain eligible for Save As");
+}
+
 void TestCanonicalAnnotationFilterIndexesLargeLabelSet()
 {
     constexpr int kLabelCount = 4096;
@@ -8859,6 +9404,7 @@ int main(int argc, char* argv[])
     try {
         TestSampleLabelingStateCacheRoundTrip();
         TestSampleLabelingOutputFormatMigrationAndRoundTrip();
+        TestInterruptedInitialCanonicalPublicationRestoresTemporaryDraft();
         TestCanonicalAsdfTaskOwnerHydratesWithPendingOverlay();
         TestCanonicalAsdfValueFailureRetainsOverlayAndRetries();
         TestCanonicalAsdfMetadataMutationsPublishFullGenerations();
@@ -8889,6 +9435,8 @@ int main(int argc, char* argv[])
         TestCreateFromAnnotationRefreshesLeaseAfterPartialWrite();
         TestControllerKeepsOneTemporaryTaskPerSource();
         TestControllerAtomicallyStartsOrResumesTemporaryTask();
+        TestCanonicalFormalizationFailsClosedAndRetriesAfterReopenFailure();
+        TestCanonicalFormalizationRecoversAfterCompensationCheckpointFailure();
         TestExternalOutputIsResultSourceOfTruth();
         TestMetadataOnlyChangesRewriteSidecarOnRetry();
         TestOutputPathConflictIsRejectedWithinSource();

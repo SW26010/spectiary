@@ -87,6 +87,10 @@ struct SampleLabelingTask {
     std::optional<std::filesystem::path> output_path;
     SampleLabelingOutputArtifactFormat output_format =
         SampleLabelingOutputArtifactFormat::None;
+    // Durable write-ahead phase used only while a temporary task is becoming
+    // its first canonical owner. A cache reader rolls this phase back to a
+    // real temporary draft if the process exits before publication completes.
+    bool initial_publication_pending = false;
     // Runtime projection provenance; never serialized. Canonical ASDF cache
     // records carry only sparse local state, so their placeholder values are
     // not data-bearing until projected over the canonical document.

@@ -867,6 +867,79 @@ void TestAnnotationAdapterPreservesWideNumericSemantics()
     std::filesystem::remove(floating_path, cleanup_error);
 }
 
+void TestPreservesNonCanonicalNpySampleNamesForNavigation()
+{
+    const auto verify_preserved = [](
+                                     std::string_view suffix,
+                                     std::initializer_list<std::string_view>
+                                         names) {
+        const std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("specforge_invalid_names_" + std::string(suffix) +
+             ".npy");
+        const std::filesystem::path name_path =
+            std::filesystem::temp_directory_path() /
+            ("specforge_invalid_names_" + std::string(suffix) +
+             "_name.npy");
+        WriteNpy(
+            path,
+            "<f8",
+            {2, 2},
+            BytesFor<double>({1.0, 2.0, 3.0, 4.0}));
+        WriteNpy(
+            name_path,
+            "<U8",
+            {2},
+            UnicodeNpyBytesFor(names, 8));
+
+        SpectrumSnapshotHandle snapshot =
+            specforge::LoadSpectrumSnapshotFromPath(path, 0);
+        const specforge::SourceCollectionManifest manifest =
+            specforge::LoadSourceCollectionManifest(*snapshot);
+        std::vector<std::string> expected_names;
+        expected_names.reserve(names.size());
+        for (const std::string_view name : names) {
+            expected_names.emplace_back(name);
+        }
+        bool values_preserved =
+            manifest.sample_names.size() ==
+            expected_names.size();
+        for (std::size_t index = 0;
+             values_preserved && index < expected_names.size();
+             ++index) {
+            const auto is_blank = [](const std::string& value) {
+                return std::all_of(
+                    value.begin(),
+                    value.end(),
+                    [](unsigned char character) {
+                        return std::isspace(character) != 0;
+                    });
+            };
+            values_preserved =
+                is_blank(expected_names[index])
+                    ? is_blank(manifest.sample_names[index])
+                    : manifest.sample_names[index] ==
+                        expected_names[index];
+        }
+        const bool names_preserved =
+            values_preserved &&
+                manifest.diagnostics.size() == 1 &&
+                manifest.diagnostics.front().kind ==
+                    specforge::SourceCollectionManifestDiagnosticKind::
+                        SampleNamesIgnored &&
+                manifest.diagnostics.front().path == name_path &&
+                manifest.diagnostics.front().detail.find("unique") !=
+                    std::string::npos;
+        snapshot.reset();
+        Require(
+            names_preserved,
+            "blank or duplicate NPY companion names must remain available for navigation while being diagnosed as unsuitable canonical roster identity");
+    };
+
+    verify_preserved("blank", {"   ", "beta"});
+    verify_preserved("duplicate", {"alpha", "alpha"});
+}
+
 specforge::SampleLabelingDocument MakeAnnotationAsdfDocument()
 {
     specforge::SampleLabelingDocument document;
@@ -2149,6 +2222,7 @@ int main()
     TestFolderSortingPollsCancellation();
     TestLoadsSelectedNpyRow();
     TestLoadsNpySampleAnnotationContext();
+    TestPreservesNonCanonicalNpySampleNamesForNavigation();
     TestLoadsReadOnlyAnnotationDtypes();
     TestAnnotationAdapterPreservesWideNumericSemantics();
     TestAnnotationAdapterLoadsCanonicalAsdfDocumentsForSource();

@@ -1383,6 +1383,9 @@ SourceCollectionSessionResult SourceCollectionSession::OpenPreparedSource(
                 transition.snapshot_index_to_load;
         }
     }
+    if (result.action.annotation_roster_changed) {
+        source_session_state_->MarkDirtyAfterRestore();
+    }
     const SpectrumSnapshotHandle& active_snapshot = roster_->snapshot();
     const std::optional<std::size_t> active_index = workflow_->current_index();
     if (active_snapshot && active_index && active_snapshot->collection.spectrum_count > 0 &&
@@ -1766,6 +1769,9 @@ void SourceCollectionSession::ApplyWorkflowTransitionOutcome(
     SourceCollectionSessionResult& result,
     SampleWorkflowTransitionOutcome outcome)
 {
+    if (outcome.action.annotation_roster_changed) {
+        MarkSourceSessionCacheDirty();
+    }
     MergeSourceCollectionSessionAction(
         result.action,
         outcome.action);

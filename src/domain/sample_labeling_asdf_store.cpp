@@ -439,6 +439,70 @@ WriteSampleLabelingAsdfDocumentAtomically(
     return WriteAtomically(path, document, {});
 }
 
+SampleLabelingAsdfStoreGenerationWriteResult
+WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source) noexcept
+{
+    try {
+        if (const std::optional<SampleLabelingAsdfStoreError>
+                mismatch = SourceCompatibilityError(
+                    document,
+                    source,
+                    {})) {
+            return SampleLabelingAsdfStoreGenerationWriteResult{
+                .error = std::move(*mismatch)};
+        }
+    } catch (const std::bad_alloc&) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight allocation failed")};
+    } catch (const std::exception& error) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight failed: " +
+                std::string(error.what()))};
+    } catch (...) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = UnexpectedStoreError(
+                "ASDF labeling owner creation preflight failed")};
+    }
+
+    const SampleLabelingAsdfStoreWriteResult write =
+        WriteSampleLabelingAsdfDocumentAtomically(
+            path,
+            document);
+    if (!write.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .error = write.error};
+    }
+
+    SampleLabelingAsdfStoreOpenResult opened =
+        OpenSampleLabelingAsdfDocumentStore(
+            path,
+            source);
+    if (!opened.succeeded()) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = std::move(opened.error)};
+    }
+    if (!KnownDocumentGenerationMatches(
+            document,
+            opened.snapshot->document())) {
+        return SampleLabelingAsdfStoreGenerationWriteResult{
+            .document_replaced = true,
+            .error = {
+                .kind = SampleLabelingAsdfStoreErrorKind::
+                    PublishedGenerationMismatch,
+                .message =
+                    "opened ASDF labeling owner does not match the published canonical generation"}};
+    }
+    return SampleLabelingAsdfStoreGenerationWriteResult{
+        .snapshot = std::move(opened.snapshot),
+        .document_replaced = true};
+}
+
 SampleLabelingAsdfStoreWriteResult
 RewriteSampleLabelingAsdfValuesAtomically(
     SampleLabelingAsdfOpenSnapshot& snapshot,

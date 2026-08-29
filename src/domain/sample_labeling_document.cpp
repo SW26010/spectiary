@@ -1,6 +1,7 @@
 #include "domain/sample_labeling_document.h"
 
 #include "domain/sample_labeling.h"
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_collection_manifest.h"
 
 #include <algorithm>
@@ -36,27 +37,12 @@ void AddIssue(
     result.issues.push_back({kind, index});
 }
 
-}  // namespace
-
-SampleLabelingDocument BuildSampleLabelingDocument(
-    std::string source_kind,
-    const SourceCollectionContext& source_context,
+SampleLabelingDocument BuildDocumentWithSource(
+    SampleLabelingDocumentSource source,
     const SampleLabelingTask& task)
 {
     SampleLabelingDocument document;
-    const SourceCollectionIdentity& source_identity = source_context.identity;
-    document.source.base_identity = source_identity.id;
-    document.source.kind = std::move(source_kind);
-    document.source.name = source_identity.source_name;
-    document.source.fingerprint = source_identity.source_fingerprint;
-    document.source.sample_count = source_identity.spectrum_count;
-    if (!source_context.manifest.sample_names.empty()) {
-        document.source.roster.identity_kind =
-            std::string{kSampleLabelingDocumentExplicitNamesRoster};
-        document.source.roster.sample_names =
-            source_context.manifest.sample_names;
-    }
-
+    document.source = std::move(source);
     document.annotation.name = task.task_name;
     document.annotation.values.reserve(task.values.size());
     for (const int value : task.values) {
@@ -66,14 +52,68 @@ SampleLabelingDocument BuildSampleLabelingDocument(
 
     document.labeling.id = task.task_id;
     document.labeling.name = task.task_name;
-    document.labeling.labels.reserve(task.label_set.labels.size());
-    for (const SampleLabelDefinition& label : task.label_set.labels) {
+    document.labeling.labels.reserve(
+        task.label_set.labels.size());
+    for (const SampleLabelDefinition& label :
+         task.label_set.labels) {
         document.labeling.labels.push_back({
             static_cast<std::int32_t>(label.code),
             label.name,
-            label.shortcut == '\0' ? std::string{} : std::string(1, label.shortcut)});
+            label.shortcut == '\0'
+                ? std::string{}
+                : std::string(1, label.shortcut)});
     }
     return document;
+}
+
+}  // namespace
+
+SampleLabelingDocument BuildSampleLabelingDocument(
+    std::string source_kind,
+    const SourceCollectionContext& source_context,
+    const SampleLabelingTask& task)
+{
+    SampleLabelingDocumentSource source;
+    const SourceCollectionIdentity& source_identity = source_context.identity;
+    source.base_identity = source_identity.id;
+    source.kind = std::move(source_kind);
+    source.name = source_identity.source_name;
+    source.fingerprint = source_identity.source_fingerprint;
+    source.sample_count = source_identity.spectrum_count;
+    if (SourceCollectionSampleNamesFormCanonicalRoster(
+            source_context.manifest.sample_names,
+            source.sample_count)) {
+        source.roster.identity_kind =
+            std::string{kSampleLabelingDocumentExplicitNamesRoster};
+        source.roster.sample_names =
+            source_context.manifest.sample_names;
+    }
+    return BuildDocumentWithSource(
+        std::move(source),
+        task);
+}
+
+SampleLabelingDocument BuildSampleLabelingDocument(
+    const SampleLabelingCanonicalSourceDescriptor& source,
+    const SampleLabelingTask& task)
+{
+    SampleLabelingDocumentSource document_source;
+    document_source.base_identity = source.base_identity;
+    document_source.kind = source.source_kind;
+    document_source.name = source.source_name;
+    document_source.fingerprint = source.source_fingerprint;
+    document_source.sample_count = source.sample_count;
+    if (SourceCollectionSampleNamesFormCanonicalRoster(
+            source.sample_names,
+            document_source.sample_count)) {
+        document_source.roster.identity_kind =
+            std::string{kSampleLabelingDocumentExplicitNamesRoster};
+        document_source.roster.sample_names =
+            source.sample_names;
+    }
+    return BuildDocumentWithSource(
+        std::move(document_source),
+        task);
 }
 
 std::optional<SampleLabelingTask>

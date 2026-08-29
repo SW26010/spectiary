@@ -274,6 +274,59 @@ void TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes()
         "source-index roster should be semantically valid");
 }
 
+void TestInvalidSourceNamesFallBackToSourceIndexRoster()
+{
+    specforge::SourceCollectionContext source_context;
+    source_context.identity = {
+        .id = "sha256-v1:invalid-roster-source",
+        .source_name = "matrix.npy",
+        .source_fingerprint = "sha256-v1:invalid-roster-fingerprint",
+        .spectrum_count = 3};
+    source_context.manifest.sample_names = {
+        "sample-a",
+        "   ",
+        "sample-a",
+    };
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "invalid-roster-task",
+            "Index fallback",
+            3);
+
+    const specforge::SampleLabelingDocument from_context =
+        specforge::BuildSampleLabelingDocument(
+            "npy",
+            source_context,
+            task);
+    Require(
+        from_context.source.roster.identity_kind ==
+                specforge::kSampleLabelingDocumentSourceIndexRoster &&
+            from_context.source.roster.sample_names.empty() &&
+            specforge::ValidateSampleLabelingDocument(from_context)
+                .valid(),
+        "blank or duplicate manifest names must fall back to source-index identity instead of making canonical Save As invalid");
+
+    specforge::SpectrumSnapshot snapshot;
+    snapshot.source.metadata = {
+        {"format", "npy", "domain"},
+    };
+    const specforge::SampleLabelingCanonicalSourceDescriptor descriptor =
+        specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+            snapshot,
+            source_context);
+    const specforge::SampleLabelingDocument from_descriptor =
+        specforge::BuildSampleLabelingDocument(
+            descriptor,
+            task);
+    Require(
+        descriptor.sample_names.empty() &&
+            from_descriptor.source.roster.identity_kind ==
+                specforge::kSampleLabelingDocumentSourceIndexRoster &&
+            specforge::ValidateSampleLabelingDocument(from_descriptor)
+                .valid(),
+        "the durable source descriptor must preserve the same source-index fallback used by the direct builder");
+}
+
 void TestValidatorEnforcesSampleAlignmentAndRosterShape()
 {
     specforge::SampleLabelingDocument document = ValidDocument();
@@ -449,6 +502,7 @@ int main()
         TestBuildSeparatesCanonicalDocumentFromTaskSessionState();
         TestCanonicalSourceDescriptorOwnsPreparedSourceFacts();
         TestSourceIndexRosterIsExplicitWithoutMaterializedIndexes();
+        TestInvalidSourceNamesFallBackToSourceIndexRoster();
         TestValidatorEnforcesSampleAlignmentAndRosterShape();
         TestValidatorEnforcesLabelAndUnlabeledInvariants();
         TestValidatorRejectsUnsupportedDocumentSemantics();

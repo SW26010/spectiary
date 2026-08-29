@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -360,6 +361,18 @@ void LoadNpySampleNames(
 
     try {
         manifest.sample_names = ReadStringNpyValues(*name_path, spectrum_count, cancellation_checkpoint);
+        if (!SourceCollectionSampleNamesFormCanonicalRoster(
+                manifest.sample_names,
+                spectrum_count)) {
+            manifest.diagnostics.push_back({
+                .kind =
+                    SourceCollectionManifestDiagnosticKind::
+                        SampleNamesIgnored,
+                .path = *name_path,
+                .detail =
+                    "sample names remain available for display but must be non-blank and unique for canonical roster identity; using source-index roster identity",
+            });
+        }
     } catch (const std::exception& error) {
         Checkpoint(cancellation_checkpoint);
         manifest.diagnostics.push_back({
@@ -648,6 +661,44 @@ bool FinishReadOnlySampleAnnotationIngestion(
 }
 
 }  // namespace
+
+bool SourceCollectionSampleNamesFormCanonicalRoster(
+    std::span<const std::string> sample_names,
+    std::size_t expected_count)
+{
+    if (sample_names.empty() ||
+        sample_names.size() != expected_count) {
+        return false;
+    }
+    for (const std::string& name : sample_names) {
+        if (std::none_of(
+                name.begin(),
+                name.end(),
+                [](unsigned char character) {
+                    return std::isspace(character) == 0;
+                })) {
+            return false;
+        }
+    }
+
+    std::vector<std::size_t> order(sample_names.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::ranges::sort(
+        order,
+        [sample_names](std::size_t left, std::size_t right) {
+            const std::string& left_name = sample_names[left];
+            const std::string& right_name = sample_names[right];
+            return left_name < right_name ||
+                (left_name == right_name && left < right);
+        });
+    for (std::size_t index = 1; index < order.size(); ++index) {
+        if (sample_names[order[index - 1U]] ==
+            sample_names[order[index]]) {
+            return false;
+        }
+    }
+    return true;
+}
 
 bool IngestReadOnlySampleAnnotation(
     SourceCollectionManifest& manifest,

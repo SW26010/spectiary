@@ -154,6 +154,16 @@ WriteSampleLabelingAsdfDocumentAtomically(
     const std::filesystem::path& path,
     const SampleLabelingDocument& document) noexcept;
 
+// Publishes a new canonical owner and reopens the exact known generation. The
+// path is not considered adopted by a controller unless this returns a
+// snapshot. document_replaced still reports a durable replacement when reopen
+// or verification fails so callers can retain conservative recovery state.
+[[nodiscard]] SampleLabelingAsdfStoreGenerationWriteResult
+WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+    const std::filesystem::path& path,
+    const SampleLabelingDocument& document,
+    const SampleLabelingSourceCompatibility& source) noexcept;
+
 // Metadata-changing rewrite of one opened generation. This preserves unknown
 // metadata from the snapshot while replacing the known canonical fields from
 // document. The snapshot is stale after success and must be discarded.

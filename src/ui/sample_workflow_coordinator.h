@@ -314,7 +314,12 @@ private:
             source_descriptor,
         SourceCollectionSessionAction& action);
     [[nodiscard]] bool
-        SynchronizeActiveCanonicalAsdfAttachment();
+        SynchronizeActiveCanonicalAsdfAttachment(
+            SourceCollectionSessionAction* action = nullptr);
+    [[nodiscard]] bool
+        SynchronizeCanonicalAsdfOwnerAttachments(
+            const SpectrumSnapshotHandle& snapshot,
+            SourceCollectionSessionAction* action = nullptr);
     void ClearSampleWorkflow(SourceCollectionSessionAction& action);
     [[nodiscard]] NavigationInputReconcileEffects ReconcileNavigationInputs(
         const SpectrumSnapshotHandle& snapshot,

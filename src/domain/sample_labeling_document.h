@@ -12,6 +12,8 @@
 
 namespace specforge {
 
+struct SampleLabelingCanonicalSourceDescriptor;
+
 struct SourceCollectionContext;
 
 inline constexpr std::string_view kSampleLabelingDocumentFormatKind =
@@ -137,6 +139,13 @@ struct SampleLabelingDocumentValidationResult {
 [[nodiscard]] SampleLabelingDocument BuildSampleLabelingDocument(
     std::string source_kind,
     const SourceCollectionContext& source_context,
+    const SampleLabelingTask& task);
+
+// Builds a canonical owner directly from the controller's durable source
+// descriptor. This is the creation path used after source preparation has
+// released its SourceCollectionContext.
+[[nodiscard]] SampleLabelingDocument BuildSampleLabelingDocument(
+    const SampleLabelingCanonicalSourceDescriptor& source,
     const SampleLabelingTask& task);
 
 // Builds the editable/runtime projection of one canonical document generation.

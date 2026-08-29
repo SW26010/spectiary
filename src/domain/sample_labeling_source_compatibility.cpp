@@ -60,14 +60,20 @@ BuildSampleLabelingCanonicalSourceDescriptor(
     const SourceCollectionIdentity& identity,
     const SourceCollectionManifest& manifest)
 {
-    return SampleLabelingCanonicalSourceDescriptor{
+    SampleLabelingCanonicalSourceDescriptor descriptor{
         .base_identity = identity.id,
         .source_kind = CanonicalSourceKind(snapshot),
         .source_name = identity.source_name,
         .source_fingerprint = identity.source_fingerprint,
         .sample_count = identity.spectrum_count,
-        .sample_names = manifest.sample_names,
+        .sample_names = {},
     };
+    if (SourceCollectionSampleNamesFormCanonicalRoster(
+            manifest.sample_names,
+            identity.spectrum_count)) {
+        descriptor.sample_names = manifest.sample_names;
+    }
+    return descriptor;
 }
 
 SampleLabelingSourceCompatibility

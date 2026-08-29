@@ -399,6 +399,7 @@ SampleLabelWriteResult ClearSampleLabel(SampleLabelingTask& task, std::size_t sa
 
 void MarkSampleLabelTaskPersisted(SampleLabelingTask& task, SampleLabelSaveStateKind clean_state)
 {
+    task.initial_publication_pending = false;
     task.pending_sample_indices.clear();
     task.metadata_save_pending = false;
     task.save_state.pending_count = 0;
@@ -413,6 +414,7 @@ void SelectSampleLabelTaskOutputPath(SampleLabelingTask& task, std::filesystem::
     task.output_path = std::move(output_path);
     task.output_format =
         SampleLabelingOutputArtifactFormat::LegacyNpyWithSidecar;
+    task.initial_publication_pending = false;
     task.pending_sample_indices.clear();
     task.metadata_save_pending = true;
 

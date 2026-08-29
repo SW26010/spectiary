@@ -260,6 +260,23 @@ specforge::SpectrumSnapshotHandle MakeSnapshot(
     return snapshot;
 }
 
+void ActivateCanonicalFixtureSource(
+    specforge::SampleLabelingController& controller,
+    const std::filesystem::path& source_path,
+    const specforge::SourceCollectionContext& context)
+{
+    const specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(
+            source_path,
+            context.identity.spectrum_count,
+            0);
+    controller.ActivateSource(
+        context.identity,
+        specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+            *snapshot,
+            context));
+}
+
 specforge::PreparedSampleWorkflowState PrepareWorkflow(
     const specforge::SpectrumSnapshotHandle& snapshot,
     const specforge::SourceCollectionContext& context,
@@ -1247,13 +1264,12 @@ void TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites()
     Require(session.View().labeling.current_code == 1, "exhausted bounded history should preserve the current value");
 }
 
-void TestSavingToCompanionAnnotationKeepsLabelUndoHistory()
+void TestSavingCanonicalOwnerKeepsLabelUndoHistory()
 {
     const std::filesystem::path source_path = UniqueTempPath("_samples.npy");
     TouchFile(source_path);
-    const std::optional<std::filesystem::path> companion_path =
-        specforge::SourceCollectionCompanionAnnotationPath(source_path);
-    Require(companion_path.has_value(), "NPY source should provide a companion sample annotation path");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_labels.asdf");
 
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 1);
@@ -1265,14 +1281,14 @@ void TestSavingToCompanionAnnotationKeepsLabelUndoHistory()
     (void)Submit(session, AssignActiveLabelToCurrentSample(1));
 
     const specforge::SourceCollectionSessionResult save_result =
-        Submit(session, SetActiveLabelingOutputPath(*companion_path));
-    Require(save_result.action.navigation_inputs_changed, "companion save should resync sample workflow inputs");
-    Require(std::filesystem::exists(*companion_path), "companion sample annotation should be written");
+        Submit(session, SetActiveLabelingOutputPath(output_path));
+    Require(save_result.action.navigation_inputs_changed, "canonical save should resync sample workflow inputs");
+    Require(std::filesystem::exists(output_path), "canonical ASDF owner should be written");
 
     (void)Submit(session, UndoLastLabelWrite());
     Require(
         session.View().labeling.current_code == specforge::kUnlabeledSampleLabelCode,
-        "saving the active task to its companion sample annotation must preserve label undo history");
+        "formalizing the active task as canonical ASDF must preserve label undo history");
 }
 
 void TestNoOpLabelUpsertKeepsLabelUndoHistory()
@@ -1500,7 +1516,7 @@ void TestResolvedSequencePositionTracksFinalNavigationSequence()
 void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -1549,7 +1565,7 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -1597,7 +1613,7 @@ void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
 void TestRemovingLabelPrunesItsSampleFilterValue()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -1637,7 +1653,7 @@ void TestRemovingLabelPrunesItsSampleFilterValue()
 void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -1687,16 +1703,17 @@ void TestChangingUsedLabelCodeMigratesValuesAndSampleFilter()
         session.View().snapshot && session.View().snapshot->collection.current_index == 0,
         "migrated sample filtering should keep the spectrum snapshot aligned");
 
-    std::string load_error;
-    const std::optional<specforge::LoadedSampleLabelResult> persisted =
-        specforge::SampleAnnotationIoAdapter{}.LoadLabelResult(
-            output_path,
-            3,
-            {},
-            &load_error);
-    Require(persisted.has_value(), load_error.empty() ? "recode output should load" : load_error);
+    const specforge::SampleLabelingAsdfReadResult persisted =
+        specforge::ReadSampleLabelingAsdfDocument(
+            output_path);
     Require(
-        persisted->values == std::vector<int>({7, 4, -1}),
+        persisted.succeeded(),
+        persisted.error.message.empty()
+            ? "recode ASDF output should load"
+            : persisted.error.message);
+    Require(
+        persisted.document->annotation.values ==
+            std::vector<std::int32_t>({7, 4, -1}),
         "confirmed recode should persist migrated values");
 }
 
@@ -2284,14 +2301,16 @@ void TestAnnotationSortingSourcesRequireComparablePlainValues()
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
     result = Submit(session, SetActiveLabelingOutputPath(rank_path));
     Require(
-        !HasSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
-        "annotation should stop being a sort source after it becomes the active local task output");
+        session.View().labeling.active_task_is_temporary &&
+            !session.View().labeling.output_path,
+        "canonical formalization must reject an existing legacy NPY annotation instead of adopting it as a new owner");
     Require(
-        !HasAvailableSortSource(session.View().sorting, AnnotationSourceId(rank_path)),
-        "local task output annotation should not remain addable for sorting");
-    Require(!session.View().sorting.active, "invalidated annotation sorting should be cleared");
-    Require(!session.View().navigation.sequence_active, "cleared sorting should remove the active sorting sequence");
-    Require(session.View().navigation.row_location_available, "cleared sorting should restore ordinary row location");
+        HasSortSource(
+            session.View().sorting,
+            AnnotationSourceId(rank_path)) &&
+            session.View().sorting.active &&
+            session.View().navigation.sequence_active,
+        "a rejected canonical formalization must preserve the existing annotation sorting state");
 }
 
 void TestSourceSessionRestoresAnnotationSortingState()
@@ -2834,7 +2853,7 @@ void TestDiscardingTemporaryLabelingTaskAllowsFreshStart()
 void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_quality.npy");
+    const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
     const std::string saved_name = Utf8(output_path.stem().u8string());
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
@@ -2926,11 +2945,342 @@ void TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask()
         "the persistent draft option should safely switch back from a formal annotation");
 }
 
+void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
+{
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath("_formal_attachment_sources.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_formal_attachment_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_formal_attachment_labeling.json");
+    const std::filesystem::path source_path =
+        UniqueTempPath("_formal_attachment_source.npy");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_formal_attachment.asdf");
+    const std::filesystem::path invalid_output_path =
+        UniqueTempPath("_formal_attachment.npy");
+    TouchFile(source_path);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded;
+        PreparedSession session = MakePersistentSession(
+            loaded,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            {{source_path, 3}});
+        (void)Submit(
+            session,
+            OpenSourceCollection(source_path, 0));
+        Require(
+            session.FlushStateCaches(),
+            "formal attachment fixture should begin from a clean persisted source session");
+        (void)Submit(
+            session,
+            StartOrResumeTemporaryLabelingTask());
+        Require(
+            Submit(
+                session,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        5,
+                        "accepted",
+                        'a'}))
+                .changed,
+            "formal attachment fixture should define its label");
+        (void)Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+        const specforge::SourceCollectionSessionResult rejected =
+            Submit(
+                session,
+                SetActiveLabelingOutputPath(
+                    invalid_output_path));
+        Require(
+            !rejected.action.navigation_inputs_changed &&
+                session.View().labeling.active_task_is_temporary &&
+                !session.View().labeling.output_path &&
+                session.View().navigation.current_annotations.empty() &&
+                !std::filesystem::exists(invalid_output_path),
+            "canonical formalization must reject a non-ASDF path before publishing or attaching it");
+        const specforge::SourceCollectionSessionResult saved =
+            Submit(
+                session,
+                SetActiveLabelingOutputPath(output_path));
+        Require(
+            saved.action.navigation_inputs_changed &&
+                std::filesystem::exists(output_path) &&
+                session.View().navigation.current_annotations.size() == 1,
+            "formal attachment fixture should add its canonical owner to the live manifest");
+        (void)Submit(
+            session,
+            DeactivateActiveLabelingTask());
+        Require(
+            session.FlushStateCaches(),
+            "formal attachment fixture should flush all owners before restart");
+    }
+
+    const specforge::SourceCollectionSessionStateCache persisted =
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache)
+            .cache;
+    Require(
+        persisted.sources.size() == 1 &&
+            persisted.sources[0].annotation_paths ==
+                std::vector<std::filesystem::path>{output_path},
+        "formalization must mark the source-session attachment roster dirty and persist the ASDF path");
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    PreparedSession restored = MakePersistentSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        {{source_path, 3}});
+    Require(
+        restored.View().navigation.current_annotations.size() == 1 &&
+            restored.View().navigation.current_annotations[0].path ==
+                output_path,
+        "restart should restore the newly formalized canonical attachment without manual reattachment");
+    const specforge::SourceCollectionSessionResult activated =
+        Submit(
+            restored,
+            ActivateLabelingTaskFromAnnotation(output_path));
+    Require(
+        activated.action.workflow_changed &&
+            restored.View().labeling.has_active_task &&
+            restored.View().labeling.output_path == output_path,
+        "the restored canonical attachment should remain selectable as its formal task owner");
+}
+
+void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
+{
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath("_crash_repair_sources.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath("_crash_repair_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_crash_repair_labeling.json");
+    const std::filesystem::path source_path =
+        UniqueTempPath("_crash_repair_source.npy");
+    const std::filesystem::path output_path =
+        UniqueTempPath("_crash_repair_owner.asdf");
+    TouchFile(source_path);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded;
+        PreparedSession session = MakePersistentSession(
+            loaded,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            {{source_path, 3}});
+        (void)Submit(
+            session,
+            OpenSourceCollection(source_path, 0));
+        Require(
+            session.FlushStateCaches(),
+            "crash-repair fixture should persist a source roster without annotations");
+        (void)Submit(
+            session,
+            StartOrResumeTemporaryLabelingTask());
+        Require(
+            Submit(
+                session,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        5,
+                        "accepted",
+                        'a'}))
+                .changed,
+            "crash-repair fixture should define its label");
+        (void)Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+        Require(
+            Submit(
+                session,
+                SetActiveLabelingOutputPath(output_path))
+                .action.navigation_inputs_changed,
+            "crash-repair fixture should synchronously publish its canonical owner");
+        Require(
+            Submit(
+                session,
+                DeactivateActiveLabelingTask())
+                .action.workflow_changed,
+            "crash-repair fixture should persist an inactive canonical owner");
+        // Deliberately do not flush the source-session cache. This models a
+        // process loss after the synchronous labeling checkpoint but before
+        // the attachment-roster debounce fires.
+    }
+
+    const specforge::SourceCollectionSessionStateCache before_repair =
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache)
+            .cache;
+    Require(
+        before_repair.sources.size() == 1 &&
+            before_repair.sources[0].annotation_paths.empty(),
+        "the crash fixture must retain the old source-session roster while the labeling cache owns the ASDF path");
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    PreparedSession restored = MakePersistentSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        {{source_path, 3}});
+    Require(
+        !restored.View().labeling.has_active_task &&
+            restored.View().navigation.current_annotations.size() == 1 &&
+            restored.View().navigation.current_annotations[0].path ==
+                output_path,
+        "prepared restore must derive a missing attachment from the inactive durable canonical owner");
+    Require(
+        restored.FlushStateCaches(),
+        "prepared attachment repair should be durable after the restore batch completes");
+    const specforge::SourceCollectionSessionStateCache after_repair =
+        specforge::LoadSourceCollectionSessionStateCache(
+            source_session_cache)
+            .cache;
+    Require(
+        after_repair.sources.size() == 1 &&
+            after_repair.sources[0].annotation_paths ==
+                std::vector<std::filesystem::path>{output_path},
+        "prepared restore must persist the repaired canonical attachment roster");
+}
+
+void AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(
+    bool corrupt_owner)
+{
+    const std::string suffix = corrupt_owner
+        ? "_corrupt_canonical_owner"
+        : "_missing_canonical_owner";
+    const std::filesystem::path source_session_cache =
+        UniqueTempPath(suffix + "_sources.json");
+    const std::filesystem::path navigation_cache =
+        UniqueTempPath(suffix + "_navigation.json");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath(suffix + "_labeling.json");
+    const std::filesystem::path source_path =
+        UniqueTempPath(suffix + "_source.npy");
+    const std::filesystem::path output_path =
+        UniqueTempPath(suffix + ".asdf");
+    TouchFile(source_path);
+
+    {
+        std::vector<LoadedSourceSnapshot> loaded;
+        PreparedSession session = MakePersistentSession(
+            loaded,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            {{source_path, 3}});
+        (void)Submit(
+            session,
+            OpenSourceCollection(source_path, 0));
+        (void)Submit(
+            session,
+            StartOrResumeTemporaryLabelingTask());
+        Require(
+            Submit(
+                session,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        5,
+                        "accepted",
+                        'a'}))
+                .changed,
+            "unavailable-owner fixture should define its label");
+        (void)Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+        Require(
+            Submit(
+                session,
+                SetActiveLabelingOutputPath(output_path))
+                .action.navigation_inputs_changed,
+            "unavailable-owner fixture should formalize its canonical task");
+        (void)Submit(
+            session,
+            DeactivateActiveLabelingTask());
+        Require(
+            session.FlushStateCaches(),
+            "unavailable-owner fixture should persist task and attachment ownership");
+    }
+
+    if (corrupt_owner) {
+        WriteTextFile(
+            output_path,
+            "not an ASDF labeling document\n");
+    } else {
+        std::error_code remove_error;
+        Require(
+            std::filesystem::remove(
+                output_path,
+                remove_error) &&
+                !remove_error,
+            "missing-owner fixture should remove its canonical document");
+    }
+
+    std::vector<LoadedSourceSnapshot> restored_loads;
+    PreparedSession restored = MakePersistentSession(
+        restored_loads,
+        source_session_cache,
+        navigation_cache,
+        labeling_cache,
+        {{source_path, 3}});
+    const specforge::SourceCollectionSessionView view =
+        restored.View();
+    Require(
+        !view.labeling.has_active_task &&
+            view.navigation.current_annotations.size() == 1,
+        "an unavailable canonical owner must remain visible as one inactive annotation task row after restart");
+    const specforge::SourceCollectionAnnotationValueView& owner =
+        view.navigation.current_annotations.front();
+    Require(
+        owner.path == output_path &&
+            owner.relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    LocalLabelingTask &&
+            owner.output_missing &&
+            !owner.missing &&
+            owner.display_text.empty() &&
+            owner.can_activate_labeling &&
+            !owner.can_filter_samples,
+        "the unavailable canonical row must expose owner identity and missing-output state without projecting structural values");
+    Require(
+        view.filter.sources.empty() &&
+            view.filter.available_sources.empty(),
+        "an unavailable canonical owner must not become a data-bearing filter source");
+    Require(
+        std::any_of(
+            view.navigation.annotation_diagnostics.begin(),
+            view.navigation.annotation_diagnostics.end(),
+            [&output_path](
+                const specforge::SourceCollectionManifestDiagnostic&
+                    diagnostic) {
+                return diagnostic.path == output_path &&
+                    diagnostic.kind ==
+                        specforge::
+                            SourceCollectionManifestDiagnosticKind::
+                                AnnotationIgnored;
+            }),
+        "the unavailable canonical row should retain its controlled attachment failure diagnostic");
+}
+
+void TestUnavailableCanonicalOwnersRemainVisibleAfterRestart()
+{
+    AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(false);
+    AssertUnavailableCanonicalOwnerRemainsVisibleAfterRestart(true);
+}
+
 void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path blocked_output_path = UniqueTempPath("_blocked_output");
-    const std::filesystem::path replacement_output_path = UniqueTempPath("_replacement.npy");
+    const std::filesystem::path blocked_output_path =
+        UniqueTempPath("_blocked_output.asdf");
+    const std::filesystem::path replacement_output_path = UniqueTempPath("_replacement.asdf");
     std::filesystem::create_directories(blocked_output_path);
 
     std::vector<std::size_t> loaded_indices;
@@ -2972,13 +3322,12 @@ void TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask()
         "replacement output should save successfully");
 }
 
-void TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask()
+void TestMalformedExistingAsdfKeepsRecoverableTemporaryTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
-    const std::filesystem::path output_path = UniqueTempPath("_metadata_blocked.npy");
-    const std::filesystem::path replacement_output_path = UniqueTempPath("_metadata_replacement.npy");
-    std::filesystem::create_directories(
-        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(output_path));
+    const std::filesystem::path output_path = UniqueTempPath("_malformed.asdf");
+    const std::filesystem::path replacement_output_path = UniqueTempPath("_replacement.asdf");
+    WriteTextFile(output_path, "not an ASDF labeling document\n");
 
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
@@ -2986,18 +3335,17 @@ void TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask()
     (void)Submit(session, StartOrResumeTemporaryLabelingTask());
 
     specforge::SourceCollectionSessionResult result = Submit(session, SetActiveLabelingOutputPath(output_path));
-    Require(std::filesystem::exists(output_path), "metadata failure fixture should still write the label array");
-    Require(session.View().labeling.has_temporary_task, "failed first metadata save should retain the draft");
+    Require(session.View().labeling.has_temporary_task, "malformed target failure should retain the draft");
     Require(
         session.View().labeling.active_task_is_temporary,
-        "failed first metadata save must not formalize the task");
-    Require(!session.View().labeling.output_path, "failed first metadata save must not bind the partial output");
+        "malformed ASDF target must not formalize the task");
+    Require(!session.View().labeling.output_path, "malformed ASDF target must not bind an owner");
     Require(
         session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
-        "failed first metadata save should surface the sidecar failure");
+        "malformed ASDF target should surface the controlled publication failure");
     Require(
         session.View().labeling.can_deactivate_task && session.View().labeling.can_delete_task,
-        "failed first metadata save should leave the draft recoverable");
+        "malformed ASDF target should leave the draft recoverable");
 
     result = Submit(session, SetActiveLabelingOutputPath(replacement_output_path));
     Require(!session.View().labeling.active_task_is_temporary, "replacement target should formalize the draft");
@@ -3062,7 +3410,7 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path = UniqueTempPath("_blocked_activation.npy");
-    const std::filesystem::path formal_output_path = UniqueTempPath("_formal_output.npy");
+    const std::filesystem::path formal_output_path = UniqueTempPath("_formal_output.asdf");
 
     specforge::SampleLabelSet label_set;
     label_set.labels.push_back(specforge::SampleLabelDefinition{5, "bad", 'b'});
@@ -3099,10 +3447,20 @@ void TestAnnotationActivationRequiresCurrentTaskToBeClosed()
     Require(
         session.View().labeling.save_state.kind == specforge::SampleLabelSaveStateKind::Failed,
         "blocked activation should preserve the failed save state");
+    const auto external = std::find_if(
+        session.View().navigation.current_annotations.begin(),
+        session.View().navigation.current_annotations.end(),
+        [&annotation_path](
+            const specforge::SourceCollectionAnnotationValueView& annotation) {
+            return annotation.path == annotation_path;
+        });
     Require(
-        session.View().navigation.current_annotations[0].relationship ==
-            specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
-        "blocked activation should leave the annotation external");
+        external !=
+                session.View().navigation.current_annotations.end() &&
+            external->relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    ExternalLabelResult,
+        "blocked activation should leave the requested annotation external");
 }
 
 void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
@@ -4077,7 +4435,7 @@ void TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration()
         "inactive filtering must continue to evaluate the hydrated generation B attachment");
 }
 
-void TestInactiveUnattachedCanonicalOwnerIsNotDataBearing()
+void TestInactiveCanonicalOwnerRepairsAttachmentProjection()
 {
     const std::filesystem::path source_path =
         UniqueTempPath("_inactive_canonical_owner.npy");
@@ -4186,11 +4544,25 @@ void TestInactiveUnattachedCanonicalOwnerIsNotDataBearing()
     const specforge::SourceCollectionSessionView view =
         session.View();
     Require(
-        view.navigation.current_annotations.empty(),
-        "unattached canonical cache placeholders must not appear as annotation values");
+        view.navigation.current_annotations.size() == 1 &&
+            view.navigation.current_annotations[0].path ==
+                annotation_path &&
+            view.navigation.current_annotations[0].display_text ==
+                "bad (5)",
+        "an inactive canonical owner must repair its attachment and project ASDF base values instead of structural placeholders");
     Require(
-        view.filter.available_sources.empty(),
-        "unattached canonical cache placeholders must not appear as labeling filter sources");
+        view.filter.available_sources.size() == 1,
+        "the repaired inactive canonical attachment must become an available labeling filter source");
+    const auto good = std::find_if(
+        view.filter.available_sources[0].options.begin(),
+        view.filter.available_sources[0].options.end(),
+        [](const specforge::SampleFilterValueOption& option) {
+            return option.key == "9";
+        });
+    Require(
+        good != view.filter.available_sources[0].options.end() &&
+            good->sample_count == 2,
+        "the repaired canonical filter projection must apply sparse pending values above authoritative ASDF values");
 }
 
 void TestSameIdentitySourceActivationReplacesAutoAdvanceFeedback()
@@ -6357,7 +6729,7 @@ void TestDeferredLabelAutoAdvancePreservesNewLocalFilterFollowUp()
     const std::filesystem::path source_path =
         UniqueTempPath("_deferred_local_label_filter.npy");
     const std::filesystem::path output_path =
-        UniqueTempPath("_deferred_local_label_filter_result.npy");
+        UniqueTempPath("_deferred_local_label_filter_result.asdf");
     specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle initial_snapshot =
@@ -6444,7 +6816,7 @@ void TestDeferredLabelUndoClearsSupersededLocalFilterFollowUp()
     const std::filesystem::path source_path =
         UniqueTempPath("_deferred_local_label_undo_filter.npy");
     const std::filesystem::path output_path =
-        UniqueTempPath("_deferred_local_label_undo_filter_result.npy");
+        UniqueTempPath("_deferred_local_label_undo_filter_result.asdf");
     specforge::SourceCollectionSession session({}, {}, {}, {});
 
     const specforge::SpectrumSnapshotHandle row_zero_snapshot =
@@ -8496,7 +8868,7 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
     fixture.source_path =
         UniqueTempPath(std::string(suffix) + "_source.npy");
     fixture.output_path =
-        UniqueTempPath(std::string(suffix) + "_labels.npy");
+        UniqueTempPath(std::string(suffix) + "_labels.asdf");
     fixture.navigation_cache =
         UniqueTempPath(std::string(suffix) + "_navigation.json");
     fixture.labeling_cache =
@@ -8629,6 +9001,26 @@ LabelingProjectionHandoffFixture SeedLabelingProjectionHandoffFixture(
             seed.FlushStateCaches(),
             "labeling projection handoff fixture should persist its caches");
     }
+    std::string annotation_error;
+    Require(
+        IngestReadOnlySampleAnnotation(
+            fixture.context.manifest,
+            fixture.output_path,
+            specforge::SampleAnnotationSourceCompatibility{
+                .base_identity = fixture.context.identity.id,
+                .source_kind = "test",
+                .source_name = fixture.context.identity.source_name,
+                .source_fingerprint =
+                    fixture.context.identity.source_fingerprint,
+                .sample_count =
+                    fixture.context.identity.spectrum_count,
+                .sample_names =
+                    fixture.context.manifest.sample_names,
+            },
+            &annotation_error),
+        annotation_error.empty()
+            ? "labeling projection handoff fixture should attach its canonical owner"
+            : annotation_error);
     return fixture;
 }
 
@@ -8637,7 +9029,10 @@ void WriteLatestLabelingProjection(
 {
     specforge::SampleLabelingController editor(
         fixture.labeling_cache);
-    editor.ActivateSource(fixture.context.identity);
+    ActivateCanonicalFixtureSource(
+        editor,
+        fixture.source_path,
+        fixture.context);
     if (editor.View().active_task == nullptr) {
         Require(
             editor.ActivateTask(
@@ -8671,8 +9066,8 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
 {
     TemporaryDraftNavigationRefreshFixture fixture;
     fixture.source_path = UniqueTempPath(std::string(suffix) + "_source.npy");
-    fixture.formal_output_path = UniqueTempPath(std::string(suffix) + "_formal.npy");
-    fixture.draft_output_path = UniqueTempPath(std::string(suffix) + "_draft.npy");
+    fixture.formal_output_path = UniqueTempPath(std::string(suffix) + "_formal.asdf");
+    fixture.draft_output_path = UniqueTempPath(std::string(suffix) + "_draft.asdf");
     fixture.navigation_cache = UniqueTempPath(std::string(suffix) + "_navigation.json");
     fixture.labeling_cache = UniqueTempPath(std::string(suffix) + "_labeling.json");
     fixture.workflow_cache = UniqueTempPath(std::string(suffix) + "_workflow.json");
@@ -8692,7 +9087,10 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
 
     {
         specforge::SampleLabelingController seed(fixture.labeling_cache);
-        seed.ActivateSource(fixture.context.identity);
+        ActivateCanonicalFixtureSource(
+            seed,
+            fixture.source_path,
+            fixture.context);
         Require(
             seed.CreateTask("formal-task", "Formal task").accepted &&
                 seed.UpsertActiveLabel(
@@ -8733,17 +9131,6 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
                 seed.ActivateTask("formal-task").accepted,
             "navigation refresh fixture should persist and select the formal task");
     }
-
-    std::string annotation_error;
-    Require(
-        IngestReadOnlySampleAnnotation(
-            fixture.context.manifest,
-            fixture.draft_output_path,
-            fixture.context.identity.spectrum_count,
-            &annotation_error),
-        annotation_error.empty()
-            ? "navigation refresh fixture should load the draft annotation"
-            : annotation_error);
 
     const specforge::SpectrumSnapshotHandle snapshot =
         MakeSnapshot(fixture.source_path, 3, 0);
@@ -8808,6 +9195,19 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
     Require(
         draft != source->second.tasks.end() && draft->output_path,
         "navigation refresh fixture should find its formalized draft");
+    const specforge::SampleLabelingAsdfReadResult draft_document =
+        specforge::ReadSampleLabelingAsdfDocument(
+            fixture.draft_output_path);
+    Require(
+        draft_document.succeeded(),
+        draft_document.error.message.empty()
+            ? "navigation refresh fixture should reopen its canonical draft values"
+            : draft_document.error.message);
+    draft->values.assign(
+        draft_document.document->annotation.values.begin(),
+        draft_document.document->annotation.values.end());
+    draft->values_are_authoritative = true;
+    specforge::RebuildSampleLabelingTaskStatistics(*draft);
     draft->output_path.reset();
     draft->output_format =
         specforge::SampleLabelingOutputArtifactFormat::None;
@@ -8817,20 +9217,9 @@ SeedTemporaryDraftNavigationRefreshFixture(std::string_view suffix)
             cache.cache),
         "navigation refresh fixture should restore the draft-only projection");
 
-    std::error_code metadata_error;
-    std::filesystem::remove(
-        specforge::SampleAnnotationIoAdapter::MetadataPathForResult(
-            fixture.draft_output_path),
-        metadata_error);
     Require(
-        !metadata_error,
-        "navigation refresh fixture should remove the formal metadata sidecar");
-    Require(
-        fixture.context.manifest.annotations.size() == 1,
-        "navigation refresh fixture should retain one plain annotation");
-    fixture.context.manifest.annotations.front().label_metadata.reset();
-    fixture.context.manifest.annotations.front().relationship =
-        specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation;
+        fixture.context.manifest.annotations.empty(),
+        "navigation refresh fixture should retain a pure recovery draft with no pre-existing annotation attachment");
     return fixture;
 }
 
@@ -8838,7 +9227,10 @@ void FormalizeTemporaryDraftFromAnotherInstance(
     const TemporaryDraftNavigationRefreshFixture& fixture)
 {
     specforge::SampleLabelingController formalizer(fixture.labeling_cache);
-    formalizer.ActivateSource(fixture.context.identity);
+    ActivateCanonicalFixtureSource(
+        formalizer,
+        fixture.source_path,
+        fixture.context);
     Require(
         formalizer.ActivateTask(fixture.draft_task_id).accepted &&
             formalizer
@@ -8929,6 +9321,7 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         "external formalization should reject the stale recovery command");
     Require(
         result.action.navigation_inputs_changed &&
+            result.action.annotation_roster_changed &&
             !result.action.workflow_changed,
         "task projection convergence should reconcile filter, sort, and navigation inputs");
 
@@ -8938,6 +9331,34 @@ void AssertTemporaryDraftProjectionRefreshPreservesActiveUndo(
         coordinator.BuildSortingView(snapshot);
     const specforge::SourceCollectionNavigationView refreshed_navigation =
         coordinator.NavigationView(snapshot);
+    const auto restored_annotation = std::find_if(
+        refreshed_navigation.current_annotations.begin(),
+        refreshed_navigation.current_annotations.end(),
+        [&fixture](
+            const specforge::SourceCollectionAnnotationValueView&
+                annotation) {
+            return annotation.path ==
+                fixture.draft_output_path;
+        });
+    Require(
+        restored_annotation !=
+                refreshed_navigation.current_annotations.end() &&
+            restored_annotation->relationship ==
+                specforge::SampleAnnotationWorkflowRelationship::
+                    LocalLabelingTask,
+        "task projection convergence must attach the canonical owner created by another instance");
+    const std::string refreshed_source_id =
+        "labeling:" + fixture.draft_task_id;
+    Require(
+        std::any_of(
+            refreshed_filter.sources.begin(),
+            refreshed_filter.sources.end(),
+            [&refreshed_source_id](
+                const specforge::SourceCollectionFilterSourceView& source) {
+                return source.id ==
+                    refreshed_source_id;
+            }),
+        "the externally formalized canonical owner must remain available in the labeling selector and filter projection");
     Require(
         refreshed_filter.evaluation.included_count == 1,
         "task projection convergence should publish the latest filter values");
@@ -9074,7 +9495,10 @@ void TestRejectedStaleTaskActivationReconcilesNavigation()
 
     specforge::SampleLabelingController deleting(
         fixture.labeling_cache);
-    deleting.ActivateSource(fixture.context.identity);
+    ActivateCanonicalFixtureSource(
+        deleting,
+        fixture.source_path,
+        fixture.context);
     Require(
         deleting.ActivateTask(
                     "temporary-labeling-task")
@@ -9205,7 +9629,7 @@ void RunAllTests()
     TestLabelUndoHistoryInvalidatesWithTaskAndLabelDefinitions();
     TestLabelUndoHistoryIsBoundedToTwoHundredFiftySixWrites();
     TestNoOpLabelUpsertKeepsLabelUndoHistory();
-    TestSavingToCompanionAnnotationKeepsLabelUndoHistory();
+    TestSavingCanonicalOwnerKeepsLabelUndoHistory();
     TestAnnotationFilterSelectionAppliesToNavigation();
     TestResolvedSequencePositionTracksFinalNavigationSequence();
     TestLocalLabelingAnnotationCanBeSampleFilterSource();
@@ -9232,13 +9656,16 @@ void RunAllTests()
     TestLabelingViewAndIntentClearValuesWhenRemovingUsedLabel();
     TestDiscardingTemporaryLabelingTaskAllowsFreshStart();
     TestSavingTemporaryTaskCreatesNamedAnnotationAndAllowsFreshTemporaryTask();
+    TestFormalizedCanonicalAttachmentPersistsAcrossRestart();
+    TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash();
+    TestUnavailableCanonicalOwnersRemainVisibleAfterRestart();
     TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask();
-    TestFailedFirstMetadataSaveKeepsRecoverableTemporaryTask();
+    TestMalformedExistingAsdfKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
     TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner();
     TestCanonicalAsdfAnnotationActivatesPersistedOwner();
     TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration();
-    TestInactiveUnattachedCanonicalOwnerIsNotDataBearing();
+    TestInactiveCanonicalOwnerRepairsAttachmentProjection();
     TestAnnotationActivationRequiresCurrentTaskToBeClosed();
     TestRejectedAnnotationSwitchKeepsCurrentEditingTask();
     TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar();

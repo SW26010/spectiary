@@ -352,6 +352,52 @@ void TestAtomicFullWriteAndSourceAwareOpen()
         "full write should refuse an existing document whose unknown metadata cannot be preserved safely");
 }
 
+void TestInitialCanonicalPublicationReopensExactGeneration()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory("specforge-asdf-store-initial-publication");
+    const std::filesystem::path path = directory / "labels.asdf";
+    const specforge::SampleLabelingDocument document = MakeDocument();
+
+    const specforge::SampleLabelingAsdfStoreGenerationWriteResult published =
+        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+            path,
+            document,
+            CompatibleSource(document));
+    Require(
+        published.document_replaced &&
+            published.succeeded() &&
+            published.snapshot->path() == path &&
+            published.snapshot->durable_base().valid() &&
+            published.snapshot->document().annotation.values ==
+                document.annotation.values &&
+            published.snapshot->document().labeling.id ==
+                document.labeling.id &&
+            !HasTemporarySibling(path),
+        published.error.message.empty()
+            ? "initial canonical publication should reopen the exact durable generation"
+            : published.error.message);
+
+    const std::filesystem::path rejected_path =
+        directory / "source-mismatch.asdf";
+    specforge::SampleLabelingSourceCompatibility wrong_source =
+        CompatibleSource(document);
+    wrong_source.source_kind = "fits";
+    const specforge::SampleLabelingAsdfStoreGenerationWriteResult rejected =
+        specforge::WriteSampleLabelingAsdfDocumentAndOpenAtomically(
+            rejected_path,
+            document,
+            wrong_source);
+    Require(
+        !rejected.document_replaced &&
+            !rejected.succeeded() &&
+            rejected.error.kind ==
+                specforge::SampleLabelingAsdfStoreErrorKind::
+                    SourceMismatch &&
+            !std::filesystem::exists(rejected_path),
+        "initial canonical publication should reject source mismatch before replacement");
+}
+
 void TestValueOnlyRewriteReusesRosterBlockWithoutReopen()
 {
     const std::filesystem::path directory =
@@ -670,6 +716,7 @@ int main()
     try {
         TestSourceKindMismatchIsRejected();
         TestAtomicFullWriteAndSourceAwareOpen();
+        TestInitialCanonicalPublicationReopensExactGeneration();
         TestValueOnlyRewriteReusesRosterBlockWithoutReopen();
         TestMetadataChangingRewritesPreserveForwardUnknownFields();
         TestWriteFailuresPreserveThePreviousDocument();

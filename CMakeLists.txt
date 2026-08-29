@@ -1223,6 +1223,12 @@ specforge_add_test(
     tests/source_collection_session_tests.cpp
     specforge_sessions
 )
+set_tests_properties(
+    specforge_sample_labeling_filter_tests
+    specforge_source_collection_session_tests
+    PROPERTIES
+        LABELS "labeling;ci-headless;required"
+)
 specforge_add_test(
     specforge_source_collection_load_queue_tests
     tests/source_collection_load_queue_tests.cpp

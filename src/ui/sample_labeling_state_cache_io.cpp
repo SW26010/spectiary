@@ -8,6 +8,7 @@
 #include "domain/source_collection_identity_digest.h"
 #include "domain/stable_sha256.h"
 #include "platform/exclusive_file_lease.h"
+#include "ui/sample_annotation_labeling_rules.h"
 
 #include <algorithm>
 #include <chrono>
@@ -394,6 +395,26 @@ ParsedTask ParseTask(
     }
     malformed =
         !ParseTaskOutput(task_object, schema_version, task) || malformed;
+    if (const JsonValue* initial_publication_pending =
+            ObjectMember(
+                task_object,
+                "initial_publication_pending");
+        initial_publication_pending != nullptr &&
+        initial_publication_pending->kind !=
+            JsonValue::Kind::Bool) {
+        malformed = true;
+    }
+    task.initial_publication_pending =
+        ReadBoolMember(
+            task_object,
+            "initial_publication_pending",
+            false);
+    if (task.initial_publication_pending &&
+        (!task.output_path ||
+         task.output_format !=
+             SampleLabelingOutputArtifactFormat::CanonicalAsdf)) {
+        malformed = true;
+    }
     if (task.output_format ==
         SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
         task.values_are_authoritative = false;
@@ -579,6 +600,25 @@ ParsedTask ParseTask(
     } else if (!task.output_path && task.save_state.kind == SampleLabelSaveStateKind::Pending) {
         task.save_state.kind = SampleLabelSaveStateKind::InternalDraftOnly;
     }
+    if (task.initial_publication_pending) {
+        // The cache is the write-ahead side of a first-publication
+        // transaction. Without an adopted canonical generation, its sparse
+        // overlay is the complete non-default draft state. Restore that state
+        // as a genuine temporary task so Save As remains available. A normal
+        // formal owner never carries this phase and still fails closed if its
+        // output later disappears.
+        task.output_path.reset();
+        task.output_format =
+            SampleLabelingOutputArtifactFormat::None;
+        task.initial_publication_pending = false;
+        task.task_name =
+            std::string{kTemporarySampleLabelingTaskName};
+        task.values_are_authoritative = true;
+        task.pending_sample_indices.clear();
+        task.metadata_save_pending = false;
+        task.save_state = SampleLabelSaveState{
+            .kind = SampleLabelSaveStateKind::InternalDraftOnly};
+    }
     RebuildSampleLabelingTaskStatistics(task, cancellation_checkpoint);
     return ParsedTask{
         .task = std::move(task),
@@ -602,7 +642,8 @@ bool ValidateOutputOwnership(
         (void)source_identity;
         for (const SampleLabelingTask& task : state.tasks) {
             if (!task.output_path) {
-                if (task.output_format ==
+                if (!task.initial_publication_pending &&
+                    task.output_format ==
                     SampleLabelingOutputArtifactFormat::None) {
                     continue;
                 }
@@ -625,6 +666,14 @@ bool ValidateOutputOwnership(
                 SetError(
                     error_message,
                     "sample-labeling cache contains an invalid output path or format");
+                return false;
+            }
+            if (task.initial_publication_pending &&
+                task.output_format !=
+                    SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+                SetError(
+                    error_message,
+                    "sample-labeling cache contains an invalid initial publication owner");
                 return false;
             }
         }
@@ -1367,6 +1416,9 @@ bool SaveSampleLabelingStateCache(
                         OutputFormatText(task.output_format));
                     stream << "\n";
                     stream << "          },\n";
+                    if (task.initial_publication_pending) {
+                        stream << "          \"initial_publication_pending\": true,\n";
+                    }
                     stream << "          \"labels\": [";
                     if (!task.label_set.labels.empty()) {
                         stream << "\n";

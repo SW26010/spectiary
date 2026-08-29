@@ -75,6 +75,9 @@ struct SourceCollectionSessionAction {
         SourceCollectionSnapshotChangeReason::None;
     bool workflow_changed = false;
     bool navigation_inputs_changed = false;
+    // The set of annotation paths persisted with the source session changed.
+    // Value-only refreshes of an existing attachment do not set this flag.
+    bool annotation_roster_changed = false;
 };
 
 inline void MergeSourceCollectionSessionAction(
@@ -91,6 +94,9 @@ inline void MergeSourceCollectionSessionAction(
     }
     target.workflow_changed = target.workflow_changed || source.workflow_changed;
     target.navigation_inputs_changed = target.navigation_inputs_changed || source.navigation_inputs_changed;
+    target.annotation_roster_changed =
+        target.annotation_roster_changed ||
+        source.annotation_roster_changed;
 }
 
 struct SourceCollectionSampleNameMatchView {

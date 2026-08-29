@@ -553,9 +553,13 @@ bool SampleNavigationController::AddReadOnlyAnnotationToActiveSource(
 }
 
 bool SampleNavigationController::
-    RefreshAttachedAnnotationForActiveSource(
-        SampleAnnotationResult annotation)
+    UpsertAttachedAnnotationForActiveSource(
+        SampleAnnotationResult annotation,
+        bool* attachment_added)
 {
+    if (attachment_added != nullptr) {
+        *attachment_added = false;
+    }
     SourceSession* session = ActiveSession();
     if (session == nullptr ||
         annotation.path.empty() ||
@@ -573,9 +577,14 @@ bool SampleNavigationController::
         });
     if (existing ==
         session->manifest.annotations.end()) {
-        return false;
+        session->manifest.annotations.push_back(
+            std::move(annotation));
+        if (attachment_added != nullptr) {
+            *attachment_added = true;
+        }
+    } else {
+        *existing = std::move(annotation);
     }
-    *existing = std::move(annotation);
     ++active_context_generation_;
     return true;
 }
