@@ -243,6 +243,7 @@ add_library(specforge_core STATIC
     src/domain/npy_array_io.cpp
     src/domain/sample_annotation_io.cpp
     src/domain/sample_filter.cpp
+    src/domain/sample_label_export.cpp
     src/domain/sample_labeling_asdf_codec.cpp
     src/domain/sample_labeling_asdf_store.cpp
     src/domain/sample_labeling.cpp
@@ -1190,6 +1191,16 @@ specforge_add_test(
     specforge_sample_labeling_filter_tests
     tests/sample_labeling_filter_tests.cpp
     specforge_sessions
+)
+specforge_add_test(
+    specforge_sample_label_export_tests
+    tests/sample_label_export_tests.cpp
+    specforge_core
+)
+set_tests_properties(
+    specforge_sample_label_export_tests
+    PROPERTIES
+        LABELS "labeling;ci-headless;required"
 )
 specforge_add_test(
     specforge_sample_labeling_document_tests

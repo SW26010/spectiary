@@ -501,6 +501,10 @@ private:
             TaskEditLeaseSet& leases,
             const SampleLabelingTask& task,
             bool resolve_physical_paths = true) const;
+    [[nodiscard]] ExclusiveFileLeaseAcquireResult
+        TryAttachArtifactLeases(
+            TaskEditLeaseSet& leases,
+            std::vector<std::string> output_keys) const;
     [[nodiscard]] bool ActiveTaskLeaseMatches(
         std::string_view source_identity,
         const SampleLabelingTask& task);

@@ -1,6 +1,7 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
+#include "domain/sample_label_export.h"
 #include "domain/sample_labeling_asdf_store.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
@@ -2214,6 +2215,168 @@ void TestSampleLabelResultWritesCompactNpy()
     const std::vector<std::int32_t> values = ReadTestInt32NpyPayload(path);
     Require(values.size() == 3, "written NPY should have one value per sample");
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
+}
+
+void TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization()
+{
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "quality",
+            "Quality",
+            3);
+    Require(
+        specforge::UpsertSampleLabel(
+            task.label_set,
+            specforge::SampleLabelDefinition{
+                5,
+                "selected",
+                's'}),
+        "export snapshot fixture should add its label");
+    Require(
+        specforge::AssignSampleLabel(task, 0, 5).accepted &&
+            specforge::AssignSampleLabel(task, 2, 5).accepted,
+        "export snapshot fixture should assign canonical source rows");
+
+    specforge::SampleLabelingCanonicalSourceDescriptor source{
+        .base_identity = "folder-source",
+        .source_kind = "folder",
+        .source_name = "spectra",
+        .source_fingerprint = "folder-fingerprint",
+        .sample_count = 3,
+        .sample_names = {
+            "zeta.fits",
+            "alpha.fits",
+            "beta.fits"},
+    };
+    std::string error;
+    const std::optional<specforge::SampleLabelExportSnapshot>
+        named_snapshot =
+            specforge::BuildSampleLabelExportSnapshot(
+                specforge::SampleLabelExportFormat::Csv,
+                task,
+                source,
+                &error);
+    Require(
+        named_snapshot.has_value(),
+        error.empty()
+            ? "canonical named export snapshot should build"
+            : error);
+    Require(
+        named_snapshot->format ==
+                specforge::SampleLabelExportFormat::Csv &&
+            named_snapshot->source_kind == "folder" &&
+            named_snapshot->sample_names ==
+                std::vector<std::string>({
+                    "zeta.fits",
+                    "alpha.fits",
+                    "beta.fits"}) &&
+            !named_snapshot->uses_source_index &&
+            named_snapshot->values ==
+                std::vector<int>({5, -1, 5}) &&
+            named_snapshot->labels.labels.size() == 1 &&
+            named_snapshot->labels.labels[0].name ==
+                "selected",
+        "snapshot should copy active task data in unsorted canonical source roster order");
+
+    task.values[0] = specforge::kUnlabeledSampleLabelCode;
+    source.sample_names[0] = "changed.fits";
+    Require(
+        named_snapshot->values[0] == 5 &&
+            named_snapshot->sample_names[0] ==
+                "zeta.fits",
+        "export snapshot should own an immutable copy of task and source data");
+
+    Require(
+        specforge::SerializeSampleLabelValueForExport(
+            named_snapshot->labels,
+            specforge::kUnlabeledSampleLabelCode) ==
+                "unlabeled" &&
+            specforge::SerializeSampleLabelValueForExport(
+                named_snapshot->labels,
+                5) == "selected" &&
+            specforge::SerializeSampleLabelValueForExport(
+                named_snapshot->labels,
+                42) == "42" &&
+            specforge::FormatSampleLabelValue(
+                named_snapshot->labels,
+                5) == "selected (5)",
+        "export label serialization should be stable and separate from presentation text");
+
+    task.values = {5, -1, 5};
+    source.sample_names.clear();
+    error.clear();
+    const std::optional<specforge::SampleLabelExportSnapshot>
+        source_index_snapshot =
+            specforge::BuildSampleLabelExportSnapshot(
+                specforge::SampleLabelExportFormat::Npy,
+                task,
+                source,
+                &error);
+    Require(
+        source_index_snapshot.has_value() &&
+            source_index_snapshot->uses_source_index &&
+            source_index_snapshot->sample_names.empty(),
+        error.empty()
+            ? "unnamed export snapshot should retain source-index identity"
+            : error);
+
+    specforge::SampleLabelingCanonicalSourceDescriptor invalid_source =
+        source;
+    invalid_source.sample_names = {"duplicate", "duplicate", "third"};
+    error.clear();
+    Require(
+        !specforge::BuildSampleLabelExportSnapshot(
+             specforge::SampleLabelExportFormat::Csv,
+             task,
+             invalid_source,
+             &error) &&
+            !error.empty(),
+        "snapshot builder should reject a non-canonical sample-name roster");
+
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_label_export_snapshot_dispatch");
+    const std::filesystem::path direct_path =
+        directory / "direct.npy";
+    const std::filesystem::path dispatched_path =
+        directory / "dispatched.npy";
+    error.clear();
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            direct_path,
+            source_index_snapshot->values,
+            &error),
+        error.empty()
+            ? "reference NPY export should succeed"
+            : error);
+    error.clear();
+    Require(
+        specforge::ExportSampleLabelSnapshot(
+            dispatched_path,
+            *source_index_snapshot,
+            &error),
+        error.empty()
+            ? "snapshot-dispatched NPY export should succeed"
+            : error);
+    Require(
+        ReadBinaryFile(direct_path) ==
+            ReadBinaryFile(dispatched_path),
+        "NPY snapshot dispatcher must preserve the existing byte representation");
+
+    specforge::SampleLabelExportSnapshot csv_snapshot =
+        *named_snapshot;
+    const std::filesystem::path csv_path =
+        directory / "labels.csv";
+    error.clear();
+    Require(
+        !specforge::ExportSampleLabelSnapshot(
+             csv_path,
+             csv_snapshot,
+             &error) &&
+            error.find("not implemented") !=
+                std::string::npos &&
+            !std::filesystem::exists(csv_path),
+        "this refactor should dispatch but not implement CSV output");
 }
 
 void TestLabelValuesNpyExportIsStateless()
@@ -10519,6 +10682,7 @@ int main(int argc, char* argv[])
         TestChangingUnusedSampleLabelCode();
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
+        TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization();
         TestLabelValuesNpyExportIsStateless();
         TestLabelValuesNpyExportRejectsManagedAndLeasedOwners();
         TestOutputArtifactOwnershipIsFormatAware();

@@ -1,6 +1,7 @@
 #include "ui/sample_labeling_controller.h"
 
 #include "domain/sample_annotation_io.h"
+#include "domain/sample_label_export.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
 #include "domain/stable_sha256.h"
@@ -124,17 +125,8 @@ std::string TemporarySlotEditLeaseKey(
 }
 
 std::vector<std::string> OutputEditLeaseKeys(
-    const SampleLabelingTask& task,
-    bool resolve_physical_paths = true)
+    const SampleAnnotationArtifactIdentitySet& identities)
 {
-    if (!task.output_path) {
-        return {};
-    }
-    const SampleAnnotationArtifactIdentitySet identities =
-        SampleAnnotationArtifactIdentities(
-            *task.output_path,
-            task.output_format,
-            resolve_physical_paths);
     std::vector<std::string> keys;
     keys.reserve(
         identities.stable_path_keys.size() +
@@ -151,14 +143,38 @@ std::vector<std::string> OutputEditLeaseKeys(
     return keys;
 }
 
+std::vector<std::string> OutputEditLeaseKeys(
+    const SampleLabelingTask& task,
+    bool resolve_physical_paths = true)
+{
+    if (!task.output_path) {
+        return {};
+    }
+    return OutputEditLeaseKeys(
+        SampleAnnotationArtifactIdentities(
+            *task.output_path,
+            task.output_format,
+            resolve_physical_paths));
+}
+
+std::vector<std::string> NpyExportEditLeaseKeys(
+    const std::filesystem::path& output_path)
+{
+    // A stateless NPY export writes only the array, but it must coordinate
+    // with both paths that form an existing legacy NPY owner.
+    return OutputEditLeaseKeys(
+        SampleAnnotationArtifactIdentities(
+            output_path,
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar));
+}
+
 bool HasManagedOutputArtifactConflict(
     const std::unordered_map<
         std::string,
         SampleLabelingController::SourceState>& sources,
-    const SampleLabelingTask& candidate)
+    std::span<const std::string> requested)
 {
-    const std::vector<std::string> requested =
-        OutputEditLeaseKeys(candidate);
     for (const auto& [source_identity, state] : sources) {
         (void)source_identity;
         for (const SampleLabelingTask& task : state.tasks) {
@@ -2771,14 +2787,33 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     const std::filesystem::path& output_path) const
 {
     const SampleLabelingTask* task = ActiveTask();
-    if (task == nullptr || !task->values_are_authoritative) {
+    if (task == nullptr || !task->values_are_authoritative ||
+        !active_source_descriptor_) {
         return RejectOperation();
     }
-    if (!IsLabelValuesNpyExportPath(output_path)) {
+    if (!IsSampleLabelExportPath(
+            output_path,
+            SampleLabelExportFormat::Npy)) {
         SampleLabelingOperationResult rejected = RejectOperation();
         rejected.issue =
             SampleLabelingOperationResult::Issue::
                 LabelValuesExportInvalidPath;
+        return rejected;
+    }
+
+    std::string snapshot_error;
+    const std::optional<SampleLabelExportSnapshot> snapshot =
+        BuildSampleLabelExportSnapshot(
+            SampleLabelExportFormat::Npy,
+            *task,
+            *active_source_descriptor_,
+            &snapshot_error);
+    if (!snapshot) {
+        SampleLabelingOperationResult rejected = RejectOperation();
+        rejected.issue =
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportFailed;
+        rejected.diagnostic = std::move(snapshot_error);
         return rejected;
     }
 
@@ -2801,18 +2836,13 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
         return rejected;
     };
 
-    SampleLabelingTask export_target;
-    export_target.task_id =
-        "__specforge_npy_export_target__";
-    export_target.output_path = output_path;
-    export_target.output_format =
-        SampleLabelingOutputArtifactFormat::
-            LegacyNpyWithSidecar;
+    const std::vector<std::string> export_artifact_keys =
+        NpyExportEditLeaseKeys(output_path);
     TaskEditLeaseSet export_artifact_guard;
     ExclusiveFileLeaseAcquireResult guard =
-        TryAttachOutputLease(
+        TryAttachArtifactLeases(
             export_artifact_guard,
-            export_target);
+            export_artifact_keys);
     if (guard.status ==
         ExclusiveFileLeaseAcquireStatus::Unavailable) {
         return reject_protected();
@@ -2831,7 +2861,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     // adopted as task state.
     if (HasManagedOutputArtifactConflict(
             sources_,
-            export_target)) {
+            export_artifact_keys)) {
         return reject_protected();
     }
     if (!state_cache_path_.empty()) {
@@ -2853,10 +2883,9 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
             return reject_guard_failure(
                 std::move(diagnostic));
         }
-        if (HasSampleLabelingOutputPathConflict(
-                latest.cache,
-                export_target,
-                {})) {
+        if (HasManagedOutputArtifactConflict(
+                latest.cache.sources,
+                export_artifact_keys)) {
             return reject_protected();
         }
     }
@@ -2880,9 +2909,9 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     result.export_attempted = true;
     result.revision = revision_;
     std::string export_error;
-    result.exported = ExportLabelValuesToNpy(
+    result.exported = ExportSampleLabelSnapshot(
         output_path,
-        task->values,
+        *snapshot,
         &export_error);
     if (!result.exported) {
         std::error_code sidecar_error;
@@ -4731,6 +4760,17 @@ SampleLabelingController::TryAttachOutputLease(
             ExclusiveFileLeaseAcquireStatus::Acquired;
         return result;
     }
+    return TryAttachArtifactLeases(
+        leases,
+        std::move(output_keys));
+}
+
+ExclusiveFileLeaseAcquireResult
+SampleLabelingController::TryAttachArtifactLeases(
+    TaskEditLeaseSet& leases,
+    std::vector<std::string> output_keys) const
+{
+    ExclusiveFileLeaseAcquireResult result;
     if (output_keys.empty()) {
         result.error =
             "labeling output identity is empty";
