@@ -1224,10 +1224,14 @@ specforge_add_test(
     specforge_sessions
 )
 set_tests_properties(
+    specforge_sample_workflow_rules_tests
+    specforge_sample_labeling_document_tests
+    specforge_sample_labeling_asdf_codec_tests
+    specforge_sample_labeling_asdf_store_tests
     specforge_sample_labeling_filter_tests
     specforge_source_collection_session_tests
     PROPERTIES
-        LABELS "labeling;ci-headless;required"
+        LABELS "labeling;asdf-lifecycle;ci-headless;required"
 )
 specforge_add_test(
     specforge_source_collection_load_queue_tests

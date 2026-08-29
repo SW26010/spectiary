@@ -42,6 +42,6 @@ add_test(
 set_tests_properties(
     specforge_asdf_labeling_interoperability
     PROPERTIES
-        LABELS "asdf;interoperability;required"
+        LABELS "asdf;asdf-lifecycle;interoperability;required"
         TIMEOUT 120
 )

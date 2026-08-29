@@ -1527,6 +1527,11 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path output_path = UniqueTempPath("_quality.asdf");
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(
+        CompanionNamePath(source_path),
+        {"gamma", "alpha", "beta"},
+        6);
     std::vector<std::size_t> loaded_indices;
     PreparedSession session = MakeSession(loaded_indices, source_path, 3);
     (void)Submit(session, OpenSourceCollection(source_path, 0));
@@ -1547,6 +1552,8 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
 
     specforge::SourceCollectionSessionResult result =
         Submit(session, SetActiveLabelingOutputPath(output_path));
+    const std::string canonical_bytes_after_formalization =
+        ReadBinaryFile(output_path);
     const std::string source_id = "labeling:temporary-labeling-task";
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
@@ -1563,6 +1570,10 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     result = Submit(session, AddSampleFilterSource(source_id));
     Require(session.View().filter.sources.size() == 1, "local labeling source should be explicitly addable");
     Require(session.View().filter.sources[0].options.size() == 3, "labeling source should expose labels and unlabeled");
+    Require(
+        ReadBinaryFile(output_path) ==
+            canonical_bytes_after_formalization,
+        "adding a canonical filter source must not rewrite or reorder the ASDF roster and values");
 
     result = Submit(session, SetFilterValueSelected(source_id, "2", true));
     Require(session.View().navigation.filter_active, "local labeling sample filter should affect navigation");
@@ -1570,6 +1581,31 @@ void TestLocalLabelingAnnotationCanBeSampleFilterSource()
     Require(
         session.View().navigation.current_index && *session.View().navigation.current_index == 1,
         "local labeling filter should move to the first matching sample");
+    Require(
+        ReadBinaryFile(output_path) ==
+            canonical_bytes_after_formalization,
+        "enabling a canonical filter value must not rewrite or reorder the ASDF roster and values");
+
+    result = Submit(
+        session,
+        SetSampleSortSource("sample-name"));
+    Require(
+        result.action.navigation_inputs_changed &&
+            session.View().sorting.active,
+        "canonical roster fixture should activate sample-name sorting");
+    result = Submit(
+        session,
+        SetSampleSortDirection(
+            specforge::SampleNavigationSortDirection::Descending));
+    Require(
+        result.action.navigation_inputs_changed &&
+            session.View().navigation.current_sequence_position &&
+            *session.View().navigation.current_sequence_position == 1,
+        "descending sorting should reorder the filtered navigation sequence while retaining the current source row");
+    Require(
+        ReadBinaryFile(output_path) ==
+            canonical_bytes_after_formalization,
+        "sorting must not rewrite or reorder the canonical ASDF roster and values");
 }
 
 void TestRemovingLabelSelectedBySampleFilterReloadsReconciledSnapshot()
@@ -3110,6 +3146,31 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 std::filesystem::exists(output_path) &&
                 session.View().navigation.current_annotations.size() == 1,
             "formal attachment fixture should add its canonical owner to the live manifest");
+        Require(
+            Submit(
+                session,
+                MoveSampleNavigation(
+                    specforge::SampleNavigationRequest::LocateRow(1)))
+                .action.navigation_inputs_changed,
+            "canonical lifecycle fixture should navigate before its first formal value edit");
+        const specforge::SourceCollectionSessionResult value_edit =
+            Submit(
+                session,
+                AssignActiveLabelToCurrentSample(5));
+        Require(
+            value_edit.label_write &&
+                value_edit.label_write->write.changed &&
+                value_edit.label_write->operation.output_saved,
+            "a formal canonical owner should autosave a value edit before restart");
+        const specforge::SampleLabelingAsdfReadResult edited =
+            specforge::ReadSampleLabelingAsdfDocument(output_path);
+        Require(
+            edited.succeeded() &&
+                edited.document->annotation.values ==
+                    std::vector<std::int32_t>({5, 5, -1}),
+            edited.error.message.empty()
+                ? "the first canonical generation should contain the formal value edit"
+                : edited.error.message);
         (void)Submit(
             session,
             DeactivateActiveLabelingTask());
@@ -3128,27 +3189,109 @@ void TestFormalizedCanonicalAttachmentPersistsAcrossRestart()
                 std::vector<std::filesystem::path>{output_path},
         "formalization must mark the source-session attachment roster dirty and persist the ASDF path");
 
-    std::vector<LoadedSourceSnapshot> restored_loads;
-    PreparedSession restored = MakePersistentSession(
-        restored_loads,
+    const std::string canonical_cache_after_value_edit =
+        ReadTextFile(labeling_cache);
+    Require(
+        canonical_cache_after_value_edit.find(
+            "          \"values\":") ==
+                std::string::npos &&
+            canonical_cache_after_value_edit.find(
+                "\"pending_values\"") ==
+                std::string::npos,
+        "a clean formal ASDF owner cache must not retain a second canonical values copy or stale overlay");
+
+    {
+        std::vector<LoadedSourceSnapshot> restored_loads;
+        PreparedSession restored = MakePersistentSession(
+            restored_loads,
+            source_session_cache,
+            navigation_cache,
+            labeling_cache,
+            {{source_path, 3}});
+        Require(
+            restored.View().navigation.current_annotations.size() == 1 &&
+                restored.View().navigation.current_annotations[0].path ==
+                    output_path,
+            "restart should restore the newly formalized canonical attachment without manual reattachment");
+        const specforge::SourceCollectionSessionResult activated =
+            Submit(
+                restored,
+                ActivateLabelingTaskFromAnnotation(output_path));
+        Require(
+            activated.action.workflow_changed &&
+                restored.View().labeling.has_active_task &&
+                restored.View().labeling.output_path == output_path,
+            "the restored canonical attachment should remain selectable as its formal task owner");
+        const specforge::SampleLabelingAsdfReadResult hydrated =
+            specforge::ReadSampleLabelingAsdfDocument(output_path);
+        Require(
+            hydrated.succeeded() &&
+                hydrated.document->annotation.values ==
+                    std::vector<std::int32_t>({5, 5, -1}),
+            "restart hydration should retain the value generation published before restart");
+
+        Require(
+            Submit(
+                restored,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        9,
+                        Utf8(u8"复核 ✓"),
+                        'r'}))
+                .changed,
+            "the hydrated canonical owner should autosave an added Unicode label definition");
+        Require(
+            Submit(
+                restored,
+                UpdateActiveLabel(
+                    5,
+                    specforge::SampleLabelDefinition{
+                        5,
+                        Utf8(u8"已接受 ✓"),
+                        'v'},
+                    false))
+                .changed,
+            "the hydrated canonical owner should autosave label metadata edits");
+        (void)Submit(
+            restored,
+            DeactivateActiveLabelingTask());
+        Require(
+            restored.FlushStateCaches(),
+            "metadata generation should flush before the second restart");
+    }
+
+    std::vector<LoadedSourceSnapshot> metadata_restart_loads;
+    PreparedSession metadata_restart = MakePersistentSession(
+        metadata_restart_loads,
         source_session_cache,
         navigation_cache,
         labeling_cache,
         {{source_path, 3}});
     Require(
-        restored.View().navigation.current_annotations.size() == 1 &&
-            restored.View().navigation.current_annotations[0].path ==
-                output_path,
-        "restart should restore the newly formalized canonical attachment without manual reattachment");
-    const specforge::SourceCollectionSessionResult activated =
         Submit(
-            restored,
-            ActivateLabelingTaskFromAnnotation(output_path));
+            metadata_restart,
+            ActivateLabelingTaskFromAnnotation(output_path))
+            .action.workflow_changed,
+        "the metadata generation should remain activatable after a second restart");
+    const specforge::SourceCollectionLabelingView& final_view =
+        metadata_restart.View().labeling;
+    const specforge::SampleLabelDefinition* accepted =
+        specforge::FindSampleLabel(final_view.label_set, 5);
+    const specforge::SampleLabelDefinition* reviewed =
+        specforge::FindSampleLabel(final_view.label_set, 9);
+    const specforge::SampleLabelingAsdfReadResult final_document =
+        specforge::ReadSampleLabelingAsdfDocument(output_path);
     Require(
-        activated.action.workflow_changed &&
-            restored.View().labeling.has_active_task &&
-            restored.View().labeling.output_path == output_path,
-        "the restored canonical attachment should remain selectable as its formal task owner");
+        final_view.has_active_task &&
+            accepted != nullptr &&
+            accepted->name == Utf8(u8"已接受 ✓") &&
+            accepted->shortcut == 'v' &&
+            reviewed != nullptr &&
+            reviewed->name == Utf8(u8"复核 ✓") &&
+            final_document.succeeded() &&
+            final_document.document->annotation.values ==
+                std::vector<std::int32_t>({5, 5, -1}),
+        "metadata restart hydration should preserve Unicode definitions and the same canonical value generation");
 }
 
 void TestCanonicalOwnerRepairsMissingPreparedAttachmentAfterCrash()
