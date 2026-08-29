@@ -362,6 +362,17 @@ ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::SetActiveLabelingOutputPa
     return intent;
 }
 
+ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::ExportActiveLabelValuesToNpy(
+    std::filesystem::path output_path)
+{
+    ActiveSampleWorkflowIntent intent;
+    intent.kind =
+        ActiveSampleWorkflowIntentKind::
+            ExportActiveLabelValuesToNpy;
+    intent.path = std::move(output_path);
+    return intent;
+}
+
 ActiveSampleWorkflowIntent ActiveSampleWorkflowIntent::DeactivateActiveLabelingTask()
 {
     ActiveSampleWorkflowIntent intent;

@@ -94,6 +94,19 @@ struct SampleLabelResultWriteOutcome {
     std::string message;
 };
 
+// Writes a one-shot NumPy value export. This API deliberately accepts only
+// values: it does not own a labeling task, mutate its persistence target, or
+// create the legacy metadata sidecar. A target with an existing adjacent
+// legacy metadata sidecar is rejected rather than leaving stale definitions.
+// This is the atomic file primitive; workflow callers must guard the legacy
+// artifact identities and reject managed owners before invoking it.
+[[nodiscard]] bool IsLabelValuesNpyExportPath(
+    const std::filesystem::path& path);
+[[nodiscard]] bool ExportLabelValuesToNpy(
+    const std::filesystem::path& path,
+    std::span<const int> values,
+    std::string* error_message = nullptr);
+
 class SampleAnnotationIoAdapter {
 public:
     [[nodiscard]] std::optional<SampleAnnotationResult> Load(

@@ -79,6 +79,7 @@ enum class ActiveSampleWorkflowIntentKind {
     SetActiveLabelingAutoAdvance,
     SetActiveLabelingSkipLabeledOnAdvance,
     SetActiveLabelingOutputPath,
+    ExportActiveLabelValuesToNpy,
     DeactivateActiveLabelingTask,
     AssignActiveLabelToCurrentSample,
     ClearActiveLabelForCurrentSample,
@@ -164,6 +165,8 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingOutputPath(std::filesystem::path output_path);
+    [[nodiscard]] static ActiveSampleWorkflowIntent ExportActiveLabelValuesToNpy(
+        std::filesystem::path output_path);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeactivateActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] static ActiveSampleWorkflowIntent ClearActiveLabelForCurrentSample();

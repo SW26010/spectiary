@@ -59,12 +59,14 @@ public:
         PanelSessionInteraction& interaction,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
         SampleWorkflowShortcut& shortcut);
     void RenderLabeling(
         PanelSessionInteraction& interaction,
         UiLanguage language,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+        const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
         SampleWorkflowShortcut& shortcut);
 
     void RenderFilters(
@@ -145,6 +147,7 @@ private:
     std::optional<std::array<float, 4>> labeling_pause_rect_;
     std::optional<std::array<float, 4>> labeling_delete_rect_;
     std::optional<std::array<float, 4>> labeling_recovery_rect_;
+    std::optional<std::array<float, 4>> labeling_export_rect_;
     std::optional<std::array<float, 4>> temporary_labeling_action_rect_;
     std::optional<std::array<float, 4>> labeling_delete_confirmation_rect_;
     std::unordered_map<std::string, std::array<float, 4>>

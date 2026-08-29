@@ -1173,6 +1173,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     PanelSessionInteraction& interaction,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
     SampleWorkflowShortcut& shortcut)
 {
     RenderLabeling(
@@ -1180,6 +1181,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         UiLanguage::English,
         open,
         choose_output_path,
+        choose_npy_export_path,
         shortcut);
 }
 
@@ -1212,12 +1214,14 @@ void SampleWorkflowPanelUi::RenderLabeling(
     UiLanguage language,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
+    const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
     SampleWorkflowShortcut& shortcut)
 {
     labeling_selector_rect_.reset();
     labeling_pause_rect_.reset();
     labeling_delete_rect_.reset();
     labeling_recovery_rect_.reset();
+    labeling_export_rect_.reset();
     temporary_labeling_action_rect_.reset();
     labeling_delete_confirmation_rect_.reset();
     recovery_action_rects_.clear();
@@ -2433,6 +2437,31 @@ void SampleWorkflowPanelUi::RenderLabeling(
                             SetActiveLabelingOutputPath(*path)));
             }
         }
+    }
+    if (labeling_view.has_active_task &&
+        labeling_view.can_export_label_values) {
+        ImGui::SameLine();
+        const std::string export_label = StableUiLabel(
+            language,
+            UiTextId::ExportLabels,
+            "SpecForgeExportLabelValuesToNpy");
+        if (ImGui::Button(export_label.c_str())) {
+            if (std::optional<std::filesystem::path> path =
+                    choose_npy_export_path()) {
+                (void)submit(
+                    ChangeActiveSampleWorkflow(
+                        ActiveSampleWorkflowIntent::
+                            ExportActiveLabelValuesToNpy(
+                                *path)));
+            }
+        }
+        const ImVec2 export_min = ImGui::GetItemRectMin();
+        const ImVec2 export_max = ImGui::GetItemRectMax();
+        labeling_export_rect_ = {
+            export_min.x,
+            export_min.y,
+            export_max.x,
+            export_max.y};
     }
 
     bool block_shortcuts_this_frame = label_shortcut_capture_active_;

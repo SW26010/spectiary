@@ -831,8 +831,17 @@ writer for newly formalized tasks and the source-aware annotation/task-hydration
 adapter. New canonical owners require an `.asdf` path before their write-ahead
 checkpoint is committed. NPY remains a read adapter and the persistence writer
 for existing or explicitly adopted legacy-format owners, including tasks created
-by promoting an existing NPY annotation. Its lease identity always protects both
-the selected result path and the adjacent `<stem>.sf-labels.json`. Output artifact
+by promoting an existing NPY annotation. That legacy owner's lease identity
+always protects both the selected result path and the adjacent
+`<stem>.sf-labels.json`. NPY is also available through a separate one-shot value
+export operation; that operation is not an output owner and does not acquire a
+task-identity lease, write a metadata sidecar, change the autosave target, or
+clear the task's pending overlay. It does acquire the legacy artifact set's
+stable and physical identity locks for the duration of the single write. While
+that transient guard is held, export rejects paths owned in the local task
+cache, aliases of those paths, paths protected by another instance, and NPY
+files with an existing adjacent metadata sidecar. The guard is released before
+the command returns and never becomes task state. Output artifact
 ownership is declared by format rather than inferred from a filename extension:
 canonical ASDF owns one document, while legacy NPY owns the `.npy` result and
 its `.sf-labels.json` sidecar. Explicit migration creates a new canonical ASDF
@@ -921,6 +930,12 @@ roster, and the one-dimensional label values share one atomic generation.
 Numeric tasks write stable label codes, and the sample label set owns the
 interpretation from numeric code to user-facing label. Unlabeled samples use
 `-1`; the canonical v1 value array is signed `int32`.
+Save and autosave continue to publish through the task's declared owner format.
+`Export Labels` writes a standalone `.npy` snapshot of the current task values
+in canonical source-roster order without changing that owner. The exported file
+does not become an autosave target, is not attached automatically, and has no
+canonical `.sf-labels.json` sidecar; CSV and a format chooser remain separate
+follow-up work.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 

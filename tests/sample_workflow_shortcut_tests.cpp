@@ -202,6 +202,12 @@ struct SampleWorkflowPanelUiTestAccess {
         return panel.label_shortcut_capture_active_;
     }
 
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingExportRect(const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_export_rect_;
+    }
+
     static void SetPendingAnnotationActivation(
         SampleWorkflowPanelUi& panel,
         const SourceCollectionAnnotationValueView& annotation)
@@ -447,6 +453,7 @@ specforge::SourceCollectionSessionView MakeLabelingPanelView(int label_code, cha
     view.labeling.task_id = "quality";
     view.labeling.task_name = "Quality";
     view.labeling.sample_count = 1;
+    view.labeling.can_export_label_values = true;
     view.labeling.can_deactivate_task = true;
     view.labeling.can_delete_task = true;
     view.labeling.label_set.labels.push_back(
@@ -488,9 +495,61 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
         shortcut);
     ImGui::EndFrame();
     return shortcut;
+}
+
+struct LabelingExportFrameObservation {
+    int export_path_request_count = 0;
+    std::optional<specforge::ActiveSampleWorkflowIntentKind>
+        submitted_workflow_kind;
+};
+
+LabelingExportFrameObservation RenderLabelingExportFrame(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view)
+{
+    BeginFrame();
+    ImGui::SetNextWindowPos(
+        ImVec2(20.0f, 20.0f),
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        ImVec2(520.0f, 500.0f),
+        ImGuiCond_Always);
+    bool open = true;
+    LabelingExportFrameObservation observation;
+    specforge::PanelSessionInteraction interaction(
+        [&observation](
+            specforge::SourceCollectionSessionIntent intent,
+            std::optional<
+                specforge::NavigationLatencyInputKind>) {
+            observation.submitted_workflow_kind =
+                specforge::SourceCollectionPanelUiTestAccess::
+                    ActiveWorkflowKind(intent);
+            return specforge::SourceCollectionSessionResult{};
+        },
+        [&view]() -> const specforge::SourceCollectionSessionView& {
+            return view;
+        });
+    specforge::SampleWorkflowShortcut shortcut;
+    panel.RenderLabeling(
+        interaction,
+        &open,
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
+        [&observation]()
+            -> std::optional<std::filesystem::path> {
+            ++observation.export_path_request_count;
+            return std::filesystem::path{"export.npy"};
+        },
+        shortcut);
+    ImGui::EndFrame();
+    return observation;
 }
 
 struct LabelingTaskSwitchFrameObservation {
@@ -698,6 +757,9 @@ RecoveryFrameObservation RenderRecoveryFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
         shortcut);
     if (capture_text) {
         observation.logged_text = GImGui->LogBuffer.c_str();
@@ -786,6 +848,9 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
     panel.RenderLabeling(
         interaction,
         &open,
+        []() -> std::optional<std::filesystem::path> {
+            return std::nullopt;
+        },
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
@@ -976,6 +1041,70 @@ void TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner()
         !specforge::SampleWorkflowCanonicalOutputActionTextId(
             view),
         "canonical owner should not expose another ownership migration action");
+}
+
+void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    const specforge::SourceCollectionSessionView active_view =
+        MakeLabelingPanelView(7, 'q');
+
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderLabelingExportFrame(panel, active_view);
+    const auto export_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingExportRect(panel);
+    Require(
+        export_rect.has_value(),
+        "an active labeling task should expose Export Labels");
+    const ImVec2 export_position(
+        ((*export_rect)[0] + (*export_rect)[2]) * 0.5f,
+        ((*export_rect)[1] + (*export_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        export_position.x,
+        export_position.y);
+    (void)RenderLabelingExportFrame(panel, active_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingExportFrame(panel, active_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation submitted =
+        RenderLabelingExportFrame(panel, active_view);
+    Require(
+        submitted.export_path_request_count == 1 &&
+            submitted.submitted_workflow_kind ==
+                specforge::ActiveSampleWorkflowIntentKind::
+                    ExportActiveLabelValuesToNpy,
+        "Export Labels should request an NPY path and submit only the stateless export intent");
+
+    specforge::SourceCollectionSessionView inactive_view =
+        active_view;
+    inactive_view.labeling.has_active_task = false;
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderLabelingExportFrame(panel, inactive_view);
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingExportRect(panel),
+        "Export Labels should be hidden when no editable task is active");
+
+    specforge::SourceCollectionSessionView structural_view =
+        active_view;
+    structural_view.labeling.output_format =
+        specforge::SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    structural_view.labeling.can_export_label_values = false;
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    const LabelingExportFrameObservation structural =
+        RenderLabelingExportFrame(panel, structural_view);
+    Require(
+        !specforge::SampleWorkflowPanelUiTestAccess::
+             LabelingExportRect(panel) &&
+            structural.export_path_request_count == 0 &&
+            !structural.submitted_workflow_kind,
+        "Export Labels should be hidden for a structural canonical task without authoritative values");
 }
 
 void TestShortcutDisplayUsesKeyboardLegends()
@@ -3387,6 +3516,7 @@ int main()
 {
     TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
     TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
+    TestLabelingPanelRoutesExportLabelsAsASeparateIntent();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();

@@ -57,6 +57,21 @@ SampleLabelingIssueTextFor(
             UiTextId::LabelingMigrationOwnerSwitchFailed,
             "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
             "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"};
+    case Issue::LabelValuesExportInvalidPath:
+        return {
+            UiTextId::LabelValuesExportInvalidPath,
+            "Choose a .npy file for label export.",
+            "请选择 .npy 文件导出标签。"};
+    case Issue::LabelValuesExportTargetProtected:
+        return {
+            UiTextId::LabelValuesExportTargetProtected,
+            "This NPY export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
+            "此 NPY 导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"};
+    case Issue::LabelValuesExportFailed:
+        return {
+            UiTextId::LabelValuesExportFailed,
+            "Could not export label values to NPY.",
+            "无法将标签值导出为 NPY。"};
     case Issue::None:
     default:
         return {};

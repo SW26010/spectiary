@@ -801,6 +801,16 @@ specforge::SourceCollectionSessionIntent SetActiveLabelingOutputPath(std::filesy
         specforge::ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(std::move(output_path)));
 }
 
+specforge::SourceCollectionSessionIntent ExportActiveLabelValuesToNpy(
+    std::filesystem::path output_path)
+{
+    return specforge::SourceCollectionSessionIntent::
+        ChangeActiveSampleWorkflow(
+            specforge::ActiveSampleWorkflowIntent::
+                ExportActiveLabelValuesToNpy(
+                    std::move(output_path)));
+}
+
 specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabelDefinition label)
 {
     return specforge::SourceCollectionSessionIntent::ChangeActiveSampleWorkflow(
@@ -2482,6 +2492,94 @@ void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
     Require(session.View().labeling.has_active_task, "temporary task should resume");
     Require(session.View().labeling.task_id == temporary_task_id, "resumed task should keep its stable id");
     Require(session.View().labeling.current_code == 3, "resumed task should keep its draft values");
+}
+
+void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_export_source.npy");
+    const std::filesystem::path export_path =
+        UniqueTempPath("_export_labels.npy");
+    const std::filesystem::path sidecar_path =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(export_path);
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session = MakeSession(
+        loaded_indices,
+        source_path,
+        3);
+    (void)Submit(
+        session,
+        OpenSourceCollection(source_path, 0));
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    8,
+                    "exported",
+                    'e'}))
+            .changed,
+        "export fixture should add a label");
+    (void)Submit(
+        session,
+        AssignActiveLabelToCurrentSample(8));
+
+    const std::string task_id_before =
+        session.View().labeling.task_id;
+    const specforge::SourceCollectionSessionResult result =
+        Submit(
+            session,
+            ExportActiveLabelValuesToNpy(export_path));
+    Require(
+        result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            !result.changed &&
+            !result.action.workflow_changed &&
+            !result.action.navigation_inputs_changed &&
+            !result.action.annotation_roster_changed,
+        "one-shot export should not mutate workflow or navigation state");
+
+    std::string load_error;
+    const std::optional<specforge::LoadedSampleLabelResult>
+        exported =
+            specforge::SampleAnnotationIoAdapter{}
+                .LoadLabelResult(
+                    export_path,
+                    3,
+                    {},
+                    &load_error);
+    Require(
+        exported.has_value() &&
+            exported->values ==
+                std::vector<int>({8, -1, -1}),
+        load_error.empty()
+            ? "session export should write current values in source order"
+            : load_error);
+    Require(
+        !std::filesystem::exists(sidecar_path),
+        "session export must not write a canonical metadata sidecar");
+
+    const specforge::SourceCollectionLabelingView& labeling =
+        session.View().labeling;
+    Require(
+        labeling.task_id == task_id_before &&
+            labeling.has_active_task &&
+            labeling.can_export_label_values &&
+            labeling.has_temporary_task &&
+            labeling.active_task_is_temporary &&
+            !labeling.output_path &&
+            labeling.output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::None,
+        "session export must not formalize the task or change its autosave owner");
+    Require(
+        session.View().navigation.current_annotations.empty(),
+        "the exported NPY must not be attached as a labeling owner or annotation");
 }
 
 void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
@@ -9981,6 +10079,7 @@ void RunAllTests()
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
     TestTemporaryLabelingTaskUsesDefaultNameAndResumes();
+    TestExportingLabelValuesDoesNotFormalizeOrAttachTask();
     TestTemporaryDraftRecoveryViewRestoresAfterRestart();
     TestTemporaryDraftRecoveryViewReportsLeaseConflict();
     TestTemporaryDraftRecoveryViewReportsUntrustedStaleDrafts();

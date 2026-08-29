@@ -365,7 +365,7 @@ std::string DecodeNpyString(std::string_view bytes, const NpyScalarType& scalar_
     return decoded;
 }
 
-void WriteNpyInt32Vector(std::ostream& stream, const std::vector<int>& values)
+void WriteNpyInt32Values(std::ostream& stream, std::span<const int> values)
 {
     const std::string header = MakeNpyHeader("<i4", values.size());
     constexpr std::array<unsigned char, 6> kMagic = {0x93, 'N', 'U', 'M', 'P', 'Y'};

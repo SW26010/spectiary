@@ -754,6 +754,18 @@ void TestSampleWorkflowMappingsAreExact()
             "The ASDF document was created, but SpecForge could not persist the owner switch. The legacy owner remains active; retry migration to adopt the ASDF output.",
             "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"},
         ExpectedText{
+            UiTextId::LabelValuesExportInvalidPath,
+            "Choose a .npy file for label export.",
+            "请选择 .npy 文件导出标签。"},
+        ExpectedText{
+            UiTextId::LabelValuesExportTargetProtected,
+            "This NPY export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
+            "此 NPY 导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"},
+        ExpectedText{
+            UiTextId::LabelValuesExportFailed,
+            "Could not export label values to NPY.",
+            "无法将标签值导出为 NPY。"},
+        ExpectedText{
             UiTextId::LabelingDeleteTargetChanged,
             "This labeling task changed on disk and could not be deleted from the stale view.",
             "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
@@ -847,6 +859,7 @@ void TestSampleWorkflowMappingsAreExact()
         ExpectedText{UiTextId::SkipLabeled, "Skip labeled", "跳过已标注样本"},
         ExpectedText{UiTextId::SaveTo, "Save to...", "另存为…"},
         ExpectedText{UiTextId::MigrateToAsdf, "Migrate to ASDF...", "迁移到 ASDF…"},
+        ExpectedText{UiTextId::ExportLabels, "Export Labels", "导出标签"},
         ExpectedText{UiTextId::Labels, "Labels", "标签"},
         ExpectedText{UiTextId::AddLabel, "Add label", "添加标签"},
         ExpectedText{UiTextId::DefaultLabelName, "Label %d", "标签 %d"},
@@ -1615,7 +1628,10 @@ void TestLabelingIssueDescriptorIsTheSingleMapping()
         Issue::OutputPathAlreadyUsed,
         Issue::OutputMigrationCheckpointFailed,
         Issue::OutputMigrationPublicationFailed,
-        Issue::OutputMigrationOwnerSwitchFailed};
+        Issue::OutputMigrationOwnerSwitchFailed,
+        Issue::LabelValuesExportInvalidPath,
+        Issue::LabelValuesExportTargetProtected,
+        Issue::LabelValuesExportFailed};
     for (const Issue issue : kIssues) {
         const specforge::SampleLabelingIssueTextDescriptor descriptor =
             specforge::SampleLabelingIssueTextFor(issue);

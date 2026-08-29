@@ -802,6 +802,48 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
     return DialogResultPath(dialog.Get());
 }
 
+std::optional<std::filesystem::path> ShowLabelValuesNpyExportFilePicker(
+    UiLanguage language)
+{
+    ScopedComInitialization com;
+    if (!com.ready()) {
+        return std::nullopt;
+    }
+
+    ComPtr<IFileSaveDialog> dialog;
+    if (!CreateSaveDialog(dialog)) {
+        return std::nullopt;
+    }
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        options |= FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR |
+            FOS_OVERWRITEPROMPT;
+        dialog->SetOptions(options);
+    }
+
+    const std::wstring filter_name = Utf8ToWide(UiText(
+        language,
+        UiTextId::NumpyLabelArraysFilter));
+    const COMDLG_FILTERSPEC export_filter = {
+        filter_name.c_str(),
+        L"*.npy"};
+    const std::wstring title = Utf8ToWide(UiText(
+        language,
+        UiTextId::ExportLabelValuesDialog));
+    dialog->SetTitle(title.c_str());
+    dialog->SetFileTypes(1, &export_filter);
+    dialog->SetFileTypeIndex(1);
+    dialog->SetDefaultExtension(L"npy");
+
+    const HRESULT show_result = dialog->Show(GetActiveWindow());
+    if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) ||
+        FAILED(show_result)) {
+        return std::nullopt;
+    }
+    return DialogResultPath(dialog.Get());
+}
+
 void RenderDiagnosticRows(
     const SpectrumSnapshotHandle& snapshot,
     UiLanguage language)
@@ -2627,6 +2669,12 @@ void ShellUi::RenderLabelingPanel(bool panel_open)
              .View()
              .language]() {
             return ShowLabelOutputFilePicker(language);
+        },
+        [language = application_settings_
+             .View()
+             .language]() {
+            return ShowLabelValuesNpyExportFilePicker(
+                language);
         },
         shortcut);
     HandleSessionAction(

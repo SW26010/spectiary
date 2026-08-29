@@ -2216,6 +2216,344 @@ void TestSampleLabelResultWritesCompactNpy()
     Require(values[0] == 5 && values[1] == -1 && values[2] == 5, "written NPY should preserve label codes and sentinel");
 }
 
+void TestLabelValuesNpyExportIsStateless()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_label_values_npy_export");
+    const std::filesystem::path direct_export =
+        directory / "direct.npy";
+    const std::filesystem::path direct_sidecar =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(direct_export);
+
+    const std::array<int, 3> direct_values = {7, -1, 4};
+    std::string error;
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            direct_export,
+            direct_values,
+            &error),
+        error.empty()
+            ? "one-shot NPY export should succeed"
+            : error);
+    Require(
+        ReadTestInt32NpyPayload(direct_export) ==
+            std::vector<std::int32_t>({7, -1, 4}),
+        "one-shot NPY export should preserve canonical roster order and values");
+    const std::vector<unsigned char> direct_bytes =
+        ReadBinaryFile(direct_export);
+    WriteTextFile(direct_sidecar, "sidecar sentinel\n");
+    error.clear();
+    const std::array<int, 3> replacement_values = {1, 1, 1};
+    Require(
+        !specforge::ExportLabelValuesToNpy(
+            direct_export,
+            replacement_values,
+            &error) &&
+            error.find("metadata sidecar") !=
+                std::string::npos,
+        "one-shot NPY export should reject a target with adjacent legacy metadata");
+    Require(
+        ReadBinaryFile(direct_export) == direct_bytes &&
+        ReadTextFile(direct_sidecar) ==
+            "sidecar sentinel\n",
+        "a rejected legacy pair must preserve both the NPY payload and sidecar");
+
+    const std::filesystem::path cache_path =
+        directory / "labeling-cache.json";
+    specforge::SampleLabelingController controller(
+        cache_path);
+    ActivateCanonicalTestSource(
+        controller,
+        "export-source",
+        3);
+    Require(
+        controller.StartOrResumeTemporaryTask().accepted,
+        "export fixture should create a temporary task");
+    Require(
+        controller.UpsertActiveLabel(
+            specforge::SampleLabelDefinition{
+                5,
+                "selected",
+                's'}).accepted,
+        "export fixture should add a label");
+    Require(
+        controller.AssignLabel(0, 5).write.accepted &&
+            controller.AssignLabel(2, 5).write.accepted,
+        "export fixture should retain current pending values");
+
+    const specforge::SampleLabelingTask before =
+        *ActiveTask(controller);
+    const std::uint64_t revision_before =
+        controller.View().revision;
+    const bool state_save_pending_before =
+        controller.state_save_pending();
+    const auto maintenance_deadline_before =
+        controller.NextMaintenanceDeadline();
+    const std::filesystem::path controller_export =
+        directory / "controller-export.npy";
+    const std::filesystem::path controller_sidecar =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(controller_export);
+
+    const specforge::SampleLabelingOperationResult invalid =
+        controller.ExportActiveLabelValuesToNpy(
+            directory / "wrong.csv");
+    Require(
+        !invalid.accepted && !invalid.export_attempted &&
+            invalid.issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::LabelValuesExportInvalidPath,
+        "the controller should reject a non-NPY export path with a stable issue");
+
+    const std::filesystem::path blocked_export =
+        directory / "blocked.npy";
+    std::filesystem::create_directories(blocked_export);
+    const specforge::SampleLabelingOperationResult failed =
+        controller.ExportActiveLabelValuesToNpy(
+            blocked_export);
+    Require(
+        failed.accepted && failed.export_attempted &&
+            !failed.exported &&
+            failed.issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::LabelValuesExportFailed &&
+            !failed.diagnostic.empty(),
+        "an NPY export I/O failure should retain diagnostic detail behind a stable UI issue");
+
+    const specforge::SampleLabelingOperationResult exported =
+        controller.ExportActiveLabelValuesToNpy(
+            controller_export);
+    Require(
+        exported.accepted &&
+            exported.export_attempted &&
+            exported.exported &&
+            !exported.changed &&
+            !exported.output_save_attempted &&
+            !exported.output_saved &&
+            exported.issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None,
+        "NPY export should be reported separately from canonical persistence");
+    Require(
+        ReadTestInt32NpyPayload(controller_export) ==
+            std::vector<std::int32_t>({5, -1, 5}),
+        "controller export should use the current task values in source roster order");
+
+    const specforge::SampleLabelingTask& after =
+        *ActiveTask(controller);
+    Require(
+        after.task_id == before.task_id &&
+            after.task_name == before.task_name &&
+            after.output_path == before.output_path &&
+            after.output_format == before.output_format &&
+            after.values == before.values &&
+            after.pending_sample_indices ==
+                before.pending_sample_indices &&
+            after.metadata_save_pending ==
+                before.metadata_save_pending &&
+            after.save_state.kind == before.save_state.kind &&
+            after.save_state.pending_count ==
+                before.save_state.pending_count,
+        "NPY export must not change the task owner, autosave state, or pending overlay");
+    Require(
+        controller.View().revision == revision_before &&
+            controller.state_save_pending() ==
+                state_save_pending_before &&
+            controller.NextMaintenanceDeadline() ==
+                maintenance_deadline_before,
+        "NPY export must not touch controller revision or persistence scheduling");
+    Require(
+        !std::filesystem::exists(controller_sidecar),
+        "controller export must not create an adjacent legacy sidecar");
+
+    specforge::ExclusiveFileLeaseAcquireResult export_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            controller_export);
+    Require(
+        export_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "one-shot export must not retain a task artifact lease");
+}
+
+void TestLabelValuesNpyExportRejectsManagedAndLeasedOwners()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge_label_values_export_owner_guard");
+    const std::filesystem::path cache_path =
+        directory / "labeling-cache.json";
+    const std::filesystem::path managed_output =
+        directory / "managed.npy";
+    const std::filesystem::path managed_alias =
+        directory / "managed-alias.npy";
+    const std::array<int, 3> managed_values = {2, -1, 2};
+    std::string error;
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            managed_output,
+            managed_values,
+            &error),
+        error.empty()
+            ? "managed-owner fixture should create its NPY"
+            : error);
+    Require(
+        CreateFileHardLink(
+            managed_alias,
+            managed_output),
+        "managed-owner fixture should create a physical path alias");
+
+    specforge::SampleLabelingStateCache cache;
+    specforge::SampleLabelingSourceState managed_source;
+    managed_source.sample_count = 3;
+    managed_source.tasks.push_back(
+        OutputTask(
+            "managed-task",
+            managed_output,
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar));
+    cache.sources.emplace(
+        "managed-source",
+        std::move(managed_source));
+    Require(
+        specforge::SaveSampleLabelingStateCache(
+            cache_path,
+            cache),
+        "managed-owner fixture should persist its local owner");
+
+    specforge::SampleLabelingController controller(
+        cache_path);
+    ActivateCanonicalTestSource(
+        controller,
+        "export-source",
+        3);
+    Require(
+        controller.StartOrResumeTemporaryTask().accepted,
+        "owner-guard fixture should create its exporting task");
+    Require(
+        controller.UpsertActiveLabel(
+            specforge::SampleLabelDefinition{
+                9,
+                "new",
+                'n'}).accepted &&
+            controller.AssignLabel(0, 9).write.accepted,
+        "owner-guard fixture should prepare different export values");
+
+    const std::vector<unsigned char> managed_bytes =
+        ReadBinaryFile(managed_output);
+    const auto require_protected = [](
+                                       const specforge::SampleLabelingOperationResult& result,
+                                       std::string_view message) {
+        Require(
+            !result.accepted &&
+                !result.export_attempted &&
+                !result.exported &&
+                result.issue ==
+                    specforge::SampleLabelingOperationResult::
+                        Issue::LabelValuesExportTargetProtected,
+            message);
+    };
+    require_protected(
+        controller.ExportActiveLabelValuesToNpy(
+            managed_output),
+        "export must reject an exact managed legacy owner path");
+    require_protected(
+        controller.ExportActiveLabelValuesToNpy(
+            managed_alias),
+        "export must reject a hard-link alias of a managed legacy owner");
+    Require(
+        ReadBinaryFile(managed_output) == managed_bytes,
+        "managed owner rejection must preserve its NPY generation");
+
+    const std::filesystem::path sidecar_target =
+        directory / "sidecar-owner.npy";
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            sidecar_target,
+            managed_values,
+            &error),
+        "sidecar-owner fixture should create its original NPY");
+    WriteTextFile(
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(sidecar_target),
+        "legacy metadata sentinel\n");
+    const std::vector<unsigned char> sidecar_target_bytes =
+        ReadBinaryFile(sidecar_target);
+    require_protected(
+        controller.ExportActiveLabelValuesToNpy(
+            sidecar_target),
+        "export must reject any target carrying adjacent legacy metadata");
+    Require(
+        ReadBinaryFile(sidecar_target) ==
+            sidecar_target_bytes,
+        "sidecar-owner rejection must preserve the existing NPY payload");
+
+    const std::filesystem::path leased_output =
+        directory / "leased.npy";
+    const std::filesystem::path leased_alias =
+        directory / "leased-alias.npy";
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            leased_output,
+            managed_values,
+            &error),
+        "lease-owner fixture should create its original NPY");
+    Require(
+        CreateFileHardLink(
+            leased_alias,
+            leased_output),
+        "lease-owner fixture should create a physical alias");
+    const std::vector<unsigned char> leased_bytes =
+        ReadBinaryFile(leased_output);
+    specforge::ExclusiveFileLeaseAcquireResult external_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            leased_output);
+    Require(
+        external_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "lease-owner fixture should emulate another instance's artifact lease");
+    require_protected(
+        controller.ExportActiveLabelValuesToNpy(
+            leased_output),
+        "export must respect another instance's legacy artifact lease");
+    Require(
+        ReadBinaryFile(leased_output) == leased_bytes,
+        "lease rejection must preserve the protected NPY generation");
+    external_lease.lease.Reset();
+
+    specforge::ExclusiveFileLeaseAcquireResult physical_lease =
+        TryAcquireCurrentArtifactLease(
+            cache_path,
+            leased_output);
+    Require(
+        physical_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "lease-owner fixture should emulate a physical-identity lease");
+    require_protected(
+        controller.ExportActiveLabelValuesToNpy(
+            leased_alias),
+        "export must respect a physical owner lease through a hard-link alias");
+    Require(
+        ReadBinaryFile(leased_output) == leased_bytes,
+        "aliased lease rejection must preserve the protected NPY generation");
+    physical_lease.lease.Reset();
+
+    const specforge::SampleLabelingOperationResult after_release =
+        controller.ExportActiveLabelValuesToNpy(
+            leased_output);
+    Require(
+        after_release.accepted &&
+            after_release.export_attempted &&
+            after_release.exported,
+        "an unmanaged export target should become writable after its transient external lease is released");
+}
+
 void TestOutputArtifactOwnershipIsFormatAware()
 {
     const std::filesystem::path directory =
@@ -10181,6 +10519,8 @@ int main(int argc, char* argv[])
         TestChangingUnusedSampleLabelCode();
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
+        TestLabelValuesNpyExportIsStateless();
+        TestLabelValuesNpyExportRejectsManagedAndLeasedOwners();
         TestOutputArtifactOwnershipIsFormatAware();
         TestSampleLabelResultWritesMetadataSidecar();
         TestAnnotationAdapterRoundTripsLabelArtifacts();

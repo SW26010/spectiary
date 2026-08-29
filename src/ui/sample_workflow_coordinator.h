@@ -245,6 +245,8 @@ private:
     [[nodiscard]] SampleWorkflowTransitionOutcome SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] SampleWorkflowTransitionOutcome SetActiveLabelingOutputPath(
         std::filesystem::path output_path);
+    [[nodiscard]] SampleWorkflowTransitionOutcome ExportActiveLabelValuesToNpy(
+        std::filesystem::path output_path);
     [[nodiscard]] SampleWorkflowTransitionOutcome DeactivateActiveLabelingTask();
     [[nodiscard]] SampleWorkflowTransitionOutcome AssignActiveLabelToCurrentSample(
         const SpectrumSnapshotHandle& snapshot,

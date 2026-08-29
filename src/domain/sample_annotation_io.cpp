@@ -78,6 +78,11 @@ bool IsAsdfLabelingPath(const std::filesystem::path& path)
     return LowerAscii(PathToUtf8(path.extension())) == ".asdf";
 }
 
+bool IsNpyPath(const std::filesystem::path& path)
+{
+    return LowerAscii(PathToUtf8(path.extension())) == ".npy";
+}
+
 std::filesystem::path Utf8ToPath(const std::string& value)
 {
     return std::filesystem::path(std::u8string(value.begin(), value.end()));
@@ -128,6 +133,30 @@ bool ValidateNpyLabelOutputPath(
         return false;
     }
     return true;
+}
+
+bool WriteLabelValuesToNpyAtomically(
+    const std::filesystem::path& path,
+    std::span<const int> values,
+    std::string* error_message,
+    std::string_view target_description)
+{
+    AtomicFileWriteOptions options;
+    options.open_mode = std::ios::binary | std::ios::trunc;
+    options.target_description = std::string(target_description);
+    return WriteFileAtomically(
+        path,
+        options,
+        [values](std::ostream& stream, std::string& error) {
+            try {
+                WriteNpyInt32Values(stream, values);
+            } catch (const NpyArrayError& write_error) {
+                error = write_error.what();
+                return false;
+            }
+            return true;
+        },
+        error_message);
 }
 
 bool ValidateLabelMetadataContract(
@@ -823,6 +852,51 @@ std::optional<LoadedSampleLabelResult> SampleAnnotationIoAdapter::LoadLabelResul
     }
 }
 
+bool IsLabelValuesNpyExportPath(
+    const std::filesystem::path& path)
+{
+    return !path.empty() && IsNpyPath(path);
+}
+
+bool ExportLabelValuesToNpy(
+    const std::filesystem::path& path,
+    std::span<const int> values,
+    std::string* error_message)
+{
+    if (!IsLabelValuesNpyExportPath(path)) {
+        if (error_message != nullptr) {
+            *error_message = "label values export path must use the .npy extension";
+        }
+        return false;
+    }
+    std::error_code sidecar_error;
+    const bool legacy_sidecar_exists =
+        std::filesystem::exists(
+            SampleAnnotationIoAdapter::
+                MetadataPathForResult(path),
+            sidecar_error);
+    if (sidecar_error) {
+        if (error_message != nullptr) {
+            *error_message =
+                "could not verify the adjacent label metadata sidecar: " +
+                sidecar_error.message();
+        }
+        return false;
+    }
+    if (legacy_sidecar_exists) {
+        if (error_message != nullptr) {
+            *error_message =
+                "label values export target has an adjacent legacy metadata sidecar";
+        }
+        return false;
+    }
+    return WriteLabelValuesToNpyAtomically(
+        path,
+        values,
+        error_message,
+        "sample label values export");
+}
+
 bool SampleAnnotationIoAdapter::SaveLabelArray(
     const std::filesystem::path& path,
     const SampleLabelingTask& task,
@@ -831,22 +905,11 @@ bool SampleAnnotationIoAdapter::SaveLabelArray(
     if (!ValidateNpyLabelOutputPath(path, error_message)) {
         return false;
     }
-    AtomicFileWriteOptions options;
-    options.open_mode = std::ios::binary | std::ios::trunc;
-    options.target_description = "sample label result";
-    return WriteFileAtomically(
+    return WriteLabelValuesToNpyAtomically(
         path,
-        options,
-        [&task](std::ostream& stream, std::string& error) {
-            try {
-                WriteNpyInt32Vector(stream, task.values);
-            } catch (const NpyArrayError& write_error) {
-                error = write_error.what();
-                return false;
-            }
-            return true;
-        },
-        error_message);
+        task.values,
+        error_message,
+        "sample label result");
 }
 
 bool SampleAnnotationIoAdapter::SaveLabelMetadata(

@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -59,7 +60,7 @@ void ValidateNpyPayloadSize(
     std::size_t item_size);
 void SeekNpyData(std::istream& stream, const NpyHeader& header);
 [[nodiscard]] std::string DecodeNpyString(std::string_view bytes, const NpyScalarType& scalar_type);
-void WriteNpyInt32Vector(std::ostream& stream, const std::vector<int>& values);
+void WriteNpyInt32Values(std::ostream& stream, std::span<const int> values);
 
 template <typename T>
 std::vector<T> ReadNpyTypedValues(

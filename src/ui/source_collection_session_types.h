@@ -198,6 +198,7 @@ struct SourceCollectionLabelingView {
     SampleLabelingOutputArtifactFormat output_format =
         SampleLabelingOutputArtifactFormat::None;
     SampleLabelSaveState save_state;
+    bool can_export_label_values = false;
     bool can_deactivate_task = false;
     bool can_delete_task = false;
     bool state_save_failed = false;

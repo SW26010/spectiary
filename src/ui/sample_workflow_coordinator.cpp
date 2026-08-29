@@ -574,6 +574,10 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
         outcome = SetActiveLabelingOutputPath(std::move(intent.path));
         break;
+    case ActiveSampleWorkflowIntentKind::ExportActiveLabelValuesToNpy:
+        outcome = ExportActiveLabelValuesToNpy(
+            std::move(intent.path));
+        break;
     case ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask:
         outcome = DeactivateActiveLabelingTask();
         break;
@@ -1796,6 +1800,18 @@ SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
 }
 
 SampleWorkflowTransitionOutcome
+SampleWorkflowCoordinator::ExportActiveLabelValuesToNpy(
+    std::filesystem::path output_path)
+{
+    SampleWorkflowTransitionOutcome outcome;
+    const SampleLabelingOperationResult operation =
+        labeling_.ExportActiveLabelValuesToNpy(
+            output_path);
+    ApplyLabelingLeaseIssue(outcome, operation);
+    return outcome;
+}
+
+SampleWorkflowTransitionOutcome
 SampleWorkflowCoordinator::DeactivateActiveLabelingTask()
 {
     SampleWorkflowTransitionOutcome outcome;
@@ -2192,6 +2208,8 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
         view.output_path = task->output_path;
         view.output_format = task->output_format;
         view.save_state = task->save_state;
+        view.can_export_label_values =
+            task->values_are_authoritative;
         view.can_deactivate_task = labeling_.CanDeactivateActiveTask();
         view.can_delete_task = labeling_.CanDeleteActiveTask();
     }

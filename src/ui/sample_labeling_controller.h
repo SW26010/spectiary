@@ -79,6 +79,9 @@ struct SampleLabelingOperationResult {
         OutputMigrationCheckpointFailed,
         OutputMigrationPublicationFailed,
         OutputMigrationOwnerSwitchFailed,
+        LabelValuesExportInvalidPath,
+        LabelValuesExportTargetProtected,
+        LabelValuesExportFailed,
     };
 
     bool accepted = false;
@@ -87,6 +90,8 @@ struct SampleLabelingOperationResult {
     bool output_save_attempted = false;
     bool output_saved = false;
     bool output_retry_scheduled = false;
+    bool export_attempted = false;
+    bool exported = false;
     bool state_save_scheduled = false;
     bool state_save_attempted = false;
     bool state_saved = false;
@@ -243,6 +248,13 @@ public:
     [[nodiscard]] SampleLabelingOperationResult
         MigrateActiveLegacyTaskToCanonicalAsdf(
             std::filesystem::path output_path);
+    // One-shot value export. It is intentionally const and does not touch the
+    // task owner, autosave target, pending overlay, or scheduler. A transient
+    // artifact guard is acquired only for this call and is never retained as
+    // a task lease.
+    [[nodiscard]] SampleLabelingOperationResult
+        ExportActiveLabelValuesToNpy(
+            const std::filesystem::path& output_path) const;
     [[nodiscard]] bool CanDeactivateActiveTask() const;
     [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();

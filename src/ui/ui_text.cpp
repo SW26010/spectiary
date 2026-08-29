@@ -180,6 +180,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Open annotation file", "打开标注文件"},
     UiTextEntry{"Sample annotation files", "样本标注文件"},
     UiTextEntry{"Save labeling annotation", "保存标注结果"},
+    UiTextEntry{"Export label values to NPY", "将标签值导出为 NPY"},
     UiTextEntry{"NumPy label arrays", "NumPy 标签数组"},
     UiTextEntry{
         "Choose performance profile output folder",
@@ -618,6 +619,27 @@ constexpr std::array kTextCatalog = {
             SampleLabelingOperationResult::Issue::
                 OutputMigrationOwnerSwitchFailed).simplified_chinese},
     UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportInvalidPath).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportInvalidPath).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportTargetProtected).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportTargetProtected).simplified_chinese},
+    UiTextEntry{
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportFailed).english,
+        SampleLabelingIssueTextFor(
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportFailed).simplified_chinese},
+    UiTextEntry{
         "This labeling task changed on disk and could not be deleted from the stale view.",
         "此标注任务已在磁盘上发生变化，无法从过期视图删除。"},
     UiTextEntry{
@@ -726,6 +748,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Skip labeled", "跳过已标注样本"},
     UiTextEntry{"Save to...", "另存为…"},
     UiTextEntry{"Migrate to ASDF...", "迁移到 ASDF…"},
+    UiTextEntry{"Export Labels", "导出标签"},
     UiTextEntry{"Labels", "标签"},
     UiTextEntry{"Add label", "添加标签"},
     UiTextEntry{"Label %d", "标签 %d"},

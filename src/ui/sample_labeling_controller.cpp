@@ -151,6 +151,38 @@ std::vector<std::string> OutputEditLeaseKeys(
     return keys;
 }
 
+bool HasManagedOutputArtifactConflict(
+    const std::unordered_map<
+        std::string,
+        SampleLabelingController::SourceState>& sources,
+    const SampleLabelingTask& candidate)
+{
+    const std::vector<std::string> requested =
+        OutputEditLeaseKeys(candidate);
+    for (const auto& [source_identity, state] : sources) {
+        (void)source_identity;
+        for (const SampleLabelingTask& task : state.tasks) {
+            if (!task.output_path) {
+                continue;
+            }
+            const std::vector<std::string> managed =
+                OutputEditLeaseKeys(task);
+            if (std::any_of(
+                    requested.begin(),
+                    requested.end(),
+                    [&managed](const std::string& key) {
+                        return std::binary_search(
+                            managed.begin(),
+                            managed.end(),
+                            key);
+                    })) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool SameTaskProjection(
     const SampleLabelingTask& left,
     const SampleLabelingTask& right)
@@ -2731,6 +2763,146 @@ SampleLabelingController::MigrateActiveLegacyTaskToCanonicalAsdf(
     result.state_save_attempted = true;
     result.state_saved = FlushStateCache();
     result.revision = revision_;
+    return result;
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::ExportActiveLabelValuesToNpy(
+    const std::filesystem::path& output_path) const
+{
+    const SampleLabelingTask* task = ActiveTask();
+    if (task == nullptr || !task->values_are_authoritative) {
+        return RejectOperation();
+    }
+    if (!IsLabelValuesNpyExportPath(output_path)) {
+        SampleLabelingOperationResult rejected = RejectOperation();
+        rejected.issue =
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportInvalidPath;
+        return rejected;
+    }
+
+    const auto reject_protected = [this]() {
+        SampleLabelingOperationResult rejected =
+            RejectOperation();
+        rejected.issue =
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportTargetProtected;
+        return rejected;
+    };
+    const auto reject_guard_failure = [this](
+                                                std::string diagnostic) {
+        SampleLabelingOperationResult rejected =
+            RejectOperation();
+        rejected.issue =
+            SampleLabelingOperationResult::Issue::
+                LabelValuesExportFailed;
+        rejected.diagnostic = std::move(diagnostic);
+        return rejected;
+    };
+
+    SampleLabelingTask export_target;
+    export_target.task_id =
+        "__specforge_npy_export_target__";
+    export_target.output_path = output_path;
+    export_target.output_format =
+        SampleLabelingOutputArtifactFormat::
+            LegacyNpyWithSidecar;
+    TaskEditLeaseSet export_artifact_guard;
+    ExclusiveFileLeaseAcquireResult guard =
+        TryAttachOutputLease(
+            export_artifact_guard,
+            export_target);
+    if (guard.status ==
+        ExclusiveFileLeaseAcquireStatus::Unavailable) {
+        return reject_protected();
+    }
+    if (guard.status !=
+        ExclusiveFileLeaseAcquireStatus::Acquired) {
+        return reject_guard_failure(
+            guard.error.empty()
+            ? "could not guard the NPY export artifact set"
+            : std::move(guard.error));
+    }
+
+    // The guard closes the race with another instance creating or activating
+    // an owner while both the live local projection and latest durable cache
+    // are checked. It is released when this one call returns and is never
+    // adopted as task state.
+    if (HasManagedOutputArtifactConflict(
+            sources_,
+            export_target)) {
+        return reject_protected();
+    }
+    if (!state_cache_path_.empty()) {
+        const SampleLabelingStateCacheLoadResult latest =
+            LoadSampleLabelingStateCache(
+                state_cache_path_,
+                {},
+                SampleLabelingStateCacheLoadPolicy::
+                    AllowPersistentOutputsWithoutResultHydration);
+        if (latest.issue_kind !=
+            SampleLabelingStateCacheLoadIssueKind::None) {
+            std::string diagnostic = latest.warning.empty()
+                ? "could not verify the latest labeling owners before NPY export"
+                : latest.warning;
+            if (!latest.diagnostic_detail.empty()) {
+                diagnostic += ": " +
+                    latest.diagnostic_detail;
+            }
+            return reject_guard_failure(
+                std::move(diagnostic));
+        }
+        if (HasSampleLabelingOutputPathConflict(
+                latest.cache,
+                export_target,
+                {})) {
+            return reject_protected();
+        }
+    }
+    std::error_code sidecar_probe_error;
+    const bool legacy_sidecar_exists =
+        std::filesystem::exists(
+            SampleAnnotationIoAdapter::
+                MetadataPathForResult(output_path),
+            sidecar_probe_error);
+    if (sidecar_probe_error) {
+        return reject_guard_failure(
+            "could not verify the adjacent label metadata sidecar: " +
+            sidecar_probe_error.message());
+    }
+    if (legacy_sidecar_exists) {
+        return reject_protected();
+    }
+
+    SampleLabelingOperationResult result;
+    result.accepted = true;
+    result.export_attempted = true;
+    result.revision = revision_;
+    std::string export_error;
+    result.exported = ExportLabelValuesToNpy(
+        output_path,
+        task->values,
+        &export_error);
+    if (!result.exported) {
+        std::error_code sidecar_error;
+        const bool failure_sidecar_exists =
+            std::filesystem::exists(
+                SampleAnnotationIoAdapter::
+                    MetadataPathForResult(output_path),
+                sidecar_error) &&
+            !sidecar_error;
+        result.issue = failure_sidecar_exists
+            ? SampleLabelingOperationResult::Issue::
+                  LabelValuesExportTargetProtected
+            : SampleLabelingOperationResult::Issue::
+                  LabelValuesExportFailed;
+        if (failure_sidecar_exists) {
+            result.accepted = false;
+            result.export_attempted = false;
+        }
+        result.diagnostic = std::move(export_error);
+    }
     return result;
 }
 
