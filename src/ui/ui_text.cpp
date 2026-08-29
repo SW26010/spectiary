@@ -670,6 +670,9 @@ constexpr std::array kTextCatalog = {
         "Make \"%s\" editable in Labeling. Future autosaves will write to this annotation result and its metadata sidecar.",
         "使“%s”可在“标注任务”中编辑。此后的自动保存将写入该标注结果及其元数据附属文件。"},
     UiTextEntry{
+        "Adopt the existing ASDF document \"%s\" as an editable labeling task. Future autosaves will update only this single file in place; no metadata sidecar will be created.",
+        "将现有 ASDF 文档“%s”收养为可编辑的标注任务。后续自动保存只会原地更新该单文件，不会创建元数据附属文件。"},
+    UiTextEntry{
         "This edits the selected annotation result in place. Back up the file first if you need to preserve the original labels.",
         "此操作会直接修改所选标注结果。若需保留原标签，请先备份文件。"},
     UiTextEntry{

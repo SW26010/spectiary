@@ -979,6 +979,32 @@ bool AnnotationActivationNeedsConfirmation(SampleAnnotationWorkflowRelationship 
 
 }  // namespace
 
+SampleWorkflowAnnotationActivationTextIds
+SampleWorkflowAnnotationActivationText(
+    SampleAnnotationWorkflowRelationship relationship,
+    SampleLabelingOutputArtifactFormat owner_format)
+{
+    if (owner_format ==
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf) {
+        return {
+            .editable_message =
+                UiTextId::AdoptCanonicalAsdfEditableMessage,
+            .detail_message = std::nullopt,
+        };
+    }
+    return {
+        .editable_message =
+            UiTextId::UseAnnotationEditableMessage,
+        .detail_message = relationship ==
+                SampleAnnotationWorkflowRelationship::
+                    PlainAnnotation
+            ? std::optional<UiTextId>{
+                  UiTextId::MetadataSidecarWillBeCreated}
+            : std::optional<UiTextId>{
+                  UiTextId::ExistingLabelMetadataReused},
+    };
+}
+
 std::string SampleWorkflowPanelUi::RecoveryDraftRowToken(
     const SourceCollectionLabelingView& labeling_view,
     std::size_t draft_index)
@@ -1053,6 +1079,19 @@ void SampleWorkflowPanelUi::ResetForSampleWorkflow()
     pending_delete_task_source_identity_.clear();
     pending_delete_task_id_.clear();
     pending_annotation_activation_relationship_ = SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    pending_annotation_activation_owner_format_ =
+        SampleLabelingOutputArtifactFormat::None;
+}
+
+void SampleWorkflowPanelUi::SetPendingAnnotationActivation(
+    const SourceCollectionAnnotationValueView& annotation)
+{
+    pending_annotation_activation_path_ = annotation.path;
+    pending_annotation_activation_name_ = annotation.name;
+    pending_annotation_activation_relationship_ =
+        annotation.relationship;
+    pending_annotation_activation_owner_format_ =
+        annotation.labeling_owner_format;
 }
 
 void SampleWorkflowPanelUi::ClearLabelingOperationMessage()
@@ -2042,9 +2081,8 @@ void SampleWorkflowPanelUi::RenderLabeling(
     }
     if (dropped_annotation != nullptr) {
         if (AnnotationActivationNeedsConfirmation(dropped_annotation->relationship)) {
-            pending_annotation_activation_path_ = dropped_annotation->path;
-            pending_annotation_activation_name_ = dropped_annotation->name;
-            pending_annotation_activation_relationship_ = dropped_annotation->relationship;
+            SetPendingAnnotationActivation(
+                *dropped_annotation);
             ImGui::OpenPopup(
                 annotation_to_labeling_popup.c_str());
         } else {
@@ -2152,10 +2190,15 @@ void SampleWorkflowPanelUi::RenderLabeling(
             annotation_to_labeling_popup.c_str(),
             nullptr,
             ImGuiWindowFlags_AlwaysAutoResize)) {
+        const SampleWorkflowAnnotationActivationTextIds
+            activation_text =
+                SampleWorkflowAnnotationActivationText(
+                    pending_annotation_activation_relationship_,
+                    pending_annotation_activation_owner_format_);
         const std::string editable_message =
             FormatUiText(
                 language,
-                UiTextId::UseAnnotationEditableMessage,
+                activation_text.editable_message,
                 pending_annotation_activation_name_.c_str());
         ImGui::TextWrapped(
             "%s",
@@ -2168,17 +2211,11 @@ void SampleWorkflowPanelUi::RenderLabeling(
             "%.*s",
             static_cast<int>(in_place_warning.size()),
             in_place_warning.data());
-        if (pending_annotation_activation_relationship_ ==
-            SampleAnnotationWorkflowRelationship::PlainAnnotation) {
+        if (activation_text.detail_message) {
             RenderDisabledText(
                 UiText(
                     language,
-                    UiTextId::MetadataSidecarWillBeCreated));
-        } else {
-            RenderDisabledText(
-                UiText(
-                    language,
-                    UiTextId::ExistingLabelMetadataReused));
+                    *activation_text.detail_message));
         }
         const std::string use_annotation_label =
             StableUiLabel(
@@ -2196,6 +2233,8 @@ void SampleWorkflowPanelUi::RenderLabeling(
             pending_annotation_activation_name_.clear();
             pending_annotation_activation_relationship_ =
                 SampleAnnotationWorkflowRelationship::PlainAnnotation;
+            pending_annotation_activation_owner_format_ =
+                SampleLabelingOutputArtifactFormat::None;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
@@ -2210,6 +2249,8 @@ void SampleWorkflowPanelUi::RenderLabeling(
             pending_annotation_activation_name_.clear();
             pending_annotation_activation_relationship_ =
                 SampleAnnotationWorkflowRelationship::PlainAnnotation;
+            pending_annotation_activation_owner_format_ =
+                SampleLabelingOutputArtifactFormat::None;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

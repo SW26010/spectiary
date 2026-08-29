@@ -32,6 +32,17 @@ class ShellUi;
     UiLanguage language,
     const SampleLabelSaveState& save_state);
 
+struct SampleWorkflowAnnotationActivationTextIds {
+    UiTextId editable_message =
+        UiTextId::UseAnnotationEditableMessage;
+    std::optional<UiTextId> detail_message;
+};
+
+[[nodiscard]] SampleWorkflowAnnotationActivationTextIds
+SampleWorkflowAnnotationActivationText(
+    SampleAnnotationWorkflowRelationship relationship,
+    SampleLabelingOutputArtifactFormat owner_format);
+
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();
@@ -89,6 +100,8 @@ private:
     void CaptureLabelingOperationResult(
         const SourceCollectionSessionResult& result,
         UiLanguage language);
+    void SetPendingAnnotationActivation(
+        const SourceCollectionAnnotationValueView& annotation);
     void ClearLabelingOperationMessage();
     [[nodiscard]] static std::string RecoveryDraftRowToken(
         const SourceCollectionLabelingView& labeling_view,
@@ -136,6 +149,9 @@ private:
         recovery_identity_rects_;
     SampleAnnotationWorkflowRelationship pending_annotation_activation_relationship_ =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    SampleLabelingOutputArtifactFormat
+        pending_annotation_activation_owner_format_ =
+            SampleLabelingOutputArtifactFormat::None;
 };
 
 }  // namespace specforge

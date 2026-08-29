@@ -400,6 +400,7 @@ enum class UiTextId {
     OutputAutosaveCloseBlocked,
     OutputAutosaveDeleteBlocked,
     UseAnnotationEditableMessage,
+    AdoptCanonicalAsdfEditableMessage,
     EditAnnotationInPlaceWarning,
     MetadataSidecarWillBeCreated,
     ExistingLabelMetadataReused,

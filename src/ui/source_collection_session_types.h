@@ -120,6 +120,8 @@ struct SourceCollectionAnnotationValueView {
     bool can_sort_samples = false;
     bool can_rename_annotation = false;
     bool can_remove_annotation = false;
+    SampleLabelingOutputArtifactFormat labeling_owner_format =
+        SampleLabelingOutputArtifactFormat::None;
 };
 
 // Read-only position of the current sample in the final navigation sequence.

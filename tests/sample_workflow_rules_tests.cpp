@@ -235,7 +235,7 @@ void TestMetadataActivationPlanRejectsSamePathIdentityMismatch()
         "a same-path local task must not activate when its sample count differs");
 }
 
-void TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner()
+void TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner()
 {
     const std::filesystem::path path = TempPath("_canonical.asdf");
     specforge::SampleAnnotationResult annotation =
@@ -267,8 +267,9 @@ void TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner()
     Require(
         plan.kind ==
                 specforge::SampleAnnotationLabelingActivationKind::
-                    None,
-        "canonical ASDF annotations without a persisted owner must remain read-only");
+                    AdoptCanonicalAsdfTask &&
+            plan.task_id == "canonical-quality",
+        "standalone canonical ASDF annotations should adopt their embedded task identity");
 
     std::vector<specforge::SampleLabelingTask> tasks;
     tasks.push_back(
@@ -302,8 +303,22 @@ void TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner()
     Require(
         plan.kind ==
             specforge::SampleAnnotationLabelingActivationKind::
-                None,
-        "a same-path canonical owner with a different task identity must fail closed");
+                AdoptCanonicalAsdfTask &&
+            plan.task_id == "canonical-quality",
+        "canonical adoption should preserve the embedded identity so the controller can report an owner conflict");
+
+    tasks[0].task_id = "canonical-quality";
+    tasks[0].output_path = TempPath("_different_owner.asdf");
+    plan = specforge::PlanSampleAnnotationLabelingActivation(
+        specforge::SampleAnnotationLabelingActivationRequest{
+            .annotation = &annotation,
+            .active_source_tasks = &tasks});
+    Require(
+        plan.kind ==
+                specforge::SampleAnnotationLabelingActivationKind::
+                    AdoptCanonicalAsdfTask &&
+            plan.task_id == "canonical-quality",
+        "same-id different-owner conflicts must not be hidden by generating a replacement task id");
 
     const specforge::SampleFilterSource filter =
         specforge::BuildAnnotationFilterSource(annotation);
@@ -850,7 +865,7 @@ int main()
     TestMetadataActivationPlanReusesExistingTask();
     TestMetadataCreatePlanAvoidsTaskIdCollision();
     TestMetadataActivationPlanRejectsSamePathIdentityMismatch();
-    TestCanonicalAsdfAnnotationActivatesOnlyPersistedOwner();
+    TestCanonicalAsdfAnnotationAdoptsOrActivatesExactOwner();
     TestSampleNameSortingSource();
     TestAnnotationSortingSources();
     TestTypedAnnotationSortingPreservesNumericPrecision();

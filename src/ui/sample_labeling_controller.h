@@ -194,6 +194,13 @@ public:
         std::vector<int> values,
         std::filesystem::path output_path,
         bool metadata_clean);
+    // Adopts an attached canonical document without rewriting it. The
+    // attached generation supplies only the expected task identity; the
+    // controller acquires the task/output leases and reopens the current
+    // durable generation before creating the local owner record.
+    [[nodiscard]] SampleLabelingOperationResult AdoptCanonicalAsdfTask(
+        std::string expected_task_id,
+        std::filesystem::path output_path);
     [[nodiscard]] SampleLabelingOperationResult ActivateTask(std::string_view task_id);
     // Recover a temporary draft identified by a recovery projection. The
     // source identity is part of the command so a stale projection cannot

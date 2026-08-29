@@ -3380,6 +3380,12 @@ void TestActivatingExternalAnnotationResultCreatesLocalLabelingTask()
             specforge::SampleAnnotationWorkflowRelationship::ExternalLabelResult,
         "metadata-backed annotation should start as external");
     Require(
+        session.View().navigation.current_annotations[0]
+                .labeling_owner_format ==
+            specforge::SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar,
+        "legacy external annotation confirmation should retain NPY plus sidecar ownership");
+    Require(
         session.View().navigation.current_annotations[0].can_activate_labeling,
         "categorical annotation should be draggable into labeling");
 
@@ -3484,6 +3490,11 @@ void TestActivatingPlainIntegerAnnotationCreatesMetadataSidecar()
         session.View().navigation.current_annotations[0].relationship ==
             specforge::SampleAnnotationWorkflowRelationship::PlainAnnotation,
         "annotation without metadata should start as plain");
+    Require(
+        session.View().navigation.current_annotations[0]
+                .labeling_owner_format ==
+            specforge::SampleLabelingOutputArtifactFormat::None,
+        "plain annotation should not claim a labeling output owner before activation");
 
     result = Submit(session, ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(session.View().labeling.has_active_task, "plain annotation activation should create an active task");
@@ -3682,14 +3693,29 @@ void TestSwitchingSourceCollectionRestoresWorkflowAndClearsFilters()
         "switching source identity should discard the previous source's label undo history");
 }
 
-void TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner()
+void TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask()
 {
     const std::filesystem::path source_path = UniqueTempPath(".npy");
     const std::filesystem::path annotation_path =
-        UniqueTempPath("_read_only.asdf");
+        UniqueTempPath("_standalone.asdf");
+    const std::filesystem::path labeling_cache =
+        UniqueTempPath("_standalone_labeling.json");
     TouchFile(source_path);
     std::vector<std::size_t> loaded_indices;
-    PreparedSession session = MakeSession(loaded_indices, source_path, 3);
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "standalone ASDF session should reload its source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(source_path, 3, spectrum_index);
+        },
+        {},
+        UniqueTempPath("_standalone_navigation.json"),
+        labeling_cache,
+        UniqueTempPath("_standalone_workflow.json"));
     (void)Submit(session, OpenSourceCollection(source_path, 0));
 
     const specforge::SpectrumSnapshotHandle snapshot =
@@ -3736,22 +3762,229 @@ void TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner()
     Require(result.loaded, "compatible ASDF annotation should attach");
     Require(
         session.View().navigation.current_annotations.size() == 1 &&
-            !session.View().navigation.current_annotations[0]
+            session.View().navigation.current_annotations[0]
                  .can_activate_labeling &&
             session.View().navigation.current_annotations[0]
+                    .labeling_owner_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            session.View().navigation.current_annotations[0]
                     .display_text == "bad (5)",
-        "ASDF annotation should expose canonical labels but no editable activation");
+        "standalone ASDF should remain read-only until its explicit activation is offered");
 
     result = Submit(
         session,
         ActivateLabelingTaskFromAnnotation(annotation_path));
     Require(
-        !result.action.workflow_changed &&
-            !session.View().labeling.has_active_task,
-        "programmatic ASDF activation must not create a task owned by the NPY writer");
+        session.View().labeling.has_active_task &&
+            session.View().labeling.task_id == "canonical-quality" &&
+            session.View().labeling.task_name == "Canonical quality" &&
+            session.View().labeling.current_code == 5 &&
+            session.View().labeling.output_path == annotation_path &&
+            session.View().labeling.label_set.labels.size() == 2 &&
+            session.View().labeling.label_set.labels[1].code == 9 &&
+            session.View().labeling.label_set.labels[1].name == "good",
+        "explicit activation should adopt the ASDF task identity, metadata, values, and owner path exactly");
     Require(
         ReadBinaryFile(annotation_path) == original_bytes,
-        "rejected ASDF activation must preserve the original file verbatim");
+        "adoption must not rewrite the standalone ASDF document");
+
+    const specforge::SampleLabelingStateCacheLoadResult cache =
+        specforge::LoadSampleLabelingStateCache(
+            labeling_cache,
+            {},
+            specforge::SampleLabelingStateCacheLoadPolicy::
+                AllowPersistentOutputsWithoutResultHydration);
+    const auto source = cache.cache.sources.find(identity.id);
+    Require(
+        cache.issue_kind ==
+                specforge::SampleLabelingStateCacheLoadIssueKind::None &&
+            source != cache.cache.sources.end() &&
+            source->second.tasks.size() == 1 &&
+            source->second.tasks[0].task_id == "canonical-quality" &&
+            source->second.tasks[0].output_path == annotation_path &&
+            source->second.tasks[0].output_format ==
+                specforge::SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf &&
+            !source->second.tasks[0]
+                 .values_are_authoritative,
+        "adoption should persist one canonical local owner record without creating a legacy owner");
+
+    result = Submit(
+        session,
+        AssignActiveLabelToCurrentSample(9));
+    const specforge::SampleLabelingAsdfReadResult edited =
+        specforge::ReadSampleLabelingAsdfDocument(
+            annotation_path);
+    Require(
+        result.labeling_issue ==
+            specforge::SampleLabelingOperationResult::Issue::None,
+        "the first edit after adoption should retain its task and output leases");
+    Require(
+        result.label_write &&
+            result.label_write->write.changed,
+        "the first edit after adoption should be accepted as a labeling mutation");
+    Require(
+        session.View().labeling.current_code == 9,
+        "the first edit after adoption should update the active runtime projection");
+    Require(
+        edited.succeeded(),
+        edited.error.message.empty()
+            ? "the first edit after adoption should leave a readable canonical ASDF"
+            : edited.error.message);
+    Require(
+        edited.document->annotation.values ==
+            std::vector<std::int32_t>({9, -1, 9}),
+        "the first edit after adoption should publish through the existing canonical ASDF autosave pipeline");
+
+    const std::filesystem::path conflicting_path =
+        UniqueTempPath("_same_task_different_owner.asdf");
+    {
+        std::ofstream stream(
+            conflicting_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document)
+                .succeeded(),
+            "same-id conflict ASDF should write");
+    }
+    Require(
+        Submit(
+            session,
+            AddReadOnlyAnnotation(conflicting_path))
+            .loaded,
+        "same-id conflict ASDF should attach read-only");
+    const specforge::SourceCollectionSessionResult conflict =
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(
+                conflicting_path));
+    Require(
+        conflict.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged &&
+            session.View().labeling.task_id ==
+                "canonical-quality" &&
+            session.View().labeling.output_path ==
+                annotation_path &&
+            session.View().labeling.task_ids.size() == 1,
+        "a same-id different-owner adoption should report a conflict instead of inventing another task identity");
+
+    specforge::SampleLabelingController competing(
+        labeling_cache);
+    competing.ActivateSource(
+        identity,
+        specforge::SampleLabelingCanonicalSourceDescriptor{
+            .base_identity = identity.id,
+            .source_kind = "test",
+            .source_name = identity.source_name,
+            .source_fingerprint =
+                identity.source_fingerprint,
+            .sample_count = identity.spectrum_count,
+        });
+    const specforge::SampleLabelingOperationResult blocked =
+        competing.ActivateTask("canonical-quality");
+    Require(
+        !blocked.accepted &&
+            blocked.issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditLeaseUnavailable,
+        "an adopted task should retain its canonical edit ownership lease");
+}
+
+void TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_adoption_reopen.npy");
+    const std::filesystem::path annotation_path =
+        UniqueTempPath("_adoption_reopen.asdf");
+    TouchFile(source_path);
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(
+        session,
+        OpenSourceCollection(source_path, 0));
+
+    const specforge::SpectrumSnapshotHandle snapshot =
+        session.CurrentSourceSnapshot();
+    Require(
+        snapshot != nullptr,
+        "adoption reopen fixture needs an active source");
+    const specforge::SourceCollectionIdentity identity =
+        specforge::BuildSourceCollectionIdentity(*snapshot);
+
+    specforge::SampleLabelingDocument document;
+    document.source.base_identity = identity.id;
+    document.source.kind = "test";
+    document.source.name = identity.source_name;
+    document.source.fingerprint =
+        identity.source_fingerprint;
+    document.source.sample_count =
+        identity.spectrum_count;
+    document.source.roster.identity_kind =
+        std::string{
+            specforge::
+                kSampleLabelingDocumentSourceIndexRoster};
+    document.annotation.name = "quality-code";
+    document.annotation.values = {5, -1, 9};
+    document.labeling.id = "attached-generation";
+    document.labeling.name = "Attached generation";
+    document.labeling.labels = {
+        {5, "bad", "b"},
+        {9, "good", "g"},
+    };
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document)
+                .succeeded(),
+            "attached ASDF generation should write");
+    }
+    Require(
+        Submit(
+            session,
+            AddReadOnlyAnnotation(annotation_path))
+            .loaded,
+        "attached ASDF generation should load read-only");
+
+    document.labeling.id = "replacement-generation";
+    document.labeling.name = "Replacement generation";
+    {
+        std::ofstream stream(
+            annotation_path,
+            std::ios::binary | std::ios::trunc);
+        Require(
+            specforge::WriteSampleLabelingAsdfDocument(
+                stream,
+                document)
+                .succeeded(),
+            "replacement ASDF generation should write");
+    }
+    const std::string replacement_bytes =
+        ReadBinaryFile(annotation_path);
+
+    const specforge::SourceCollectionSessionResult result =
+        Submit(
+            session,
+            ActivateLabelingTaskFromAnnotation(
+                annotation_path));
+    Require(
+        !session.View().labeling.has_active_task &&
+            result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::Issue::
+                    EditTargetChanged,
+        "adoption must fail closed when the leased durable generation no longer has the attached task identity");
+    Require(
+        ReadBinaryFile(annotation_path) ==
+            replacement_bytes,
+        "failed adoption must not rewrite the current durable generation");
 }
 
 void TestCanonicalAsdfAnnotationActivatesPersistedOwner()
@@ -9662,7 +9895,8 @@ void RunAllTests()
     TestFailedFirstOutputSaveKeepsRecoverableTemporaryTask();
     TestMalformedExistingAsdfKeepsRecoverableTemporaryTask();
     TestActivatingExternalAnnotationResultCreatesLocalLabelingTask();
-    TestCanonicalAsdfAnnotationCannotEnterNpyPersistenceOwner();
+    TestStandaloneCanonicalAsdfAnnotationAdoptsExactTask();
+    TestStandaloneCanonicalAsdfAdoptionReopensCurrentGeneration();
     TestCanonicalAsdfAnnotationActivatesPersistedOwner();
     TestCanonicalAsdfDeactivationRetainsHydratedAttachmentGeneration();
     TestInactiveCanonicalOwnerRepairsAttachmentProjection();

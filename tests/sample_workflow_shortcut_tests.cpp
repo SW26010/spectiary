@@ -201,6 +201,20 @@ struct SampleWorkflowPanelUiTestAccess {
     {
         return panel.label_shortcut_capture_active_;
     }
+
+    static void SetPendingAnnotationActivation(
+        SampleWorkflowPanelUi& panel,
+        const SourceCollectionAnnotationValueView& annotation)
+    {
+        panel.SetPendingAnnotationActivation(annotation);
+    }
+
+    [[nodiscard]] static SampleLabelingOutputArtifactFormat
+    PendingAnnotationActivationOwnerFormat(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.pending_annotation_activation_owner_format_;
+    }
 };
 
 }  // namespace specforge
@@ -862,6 +876,78 @@ SortingPopupFrameObservation RenderSortingPopupFrame(
     }
     ImGui::EndFrame();
     return observation;
+}
+
+void TestCanonicalAnnotationActivationUsesSingleFileConfirmation()
+{
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionAnnotationValueView canonical;
+    canonical.name = "Canonical quality";
+    canonical.path = "quality.asdf";
+    canonical.relationship =
+        specforge::SampleAnnotationWorkflowRelationship::
+            ExternalLabelResult;
+    canonical.labeling_owner_format =
+        specforge::SampleLabelingOutputArtifactFormat::
+            CanonicalAsdf;
+    specforge::SampleWorkflowPanelUiTestAccess::
+        SetPendingAnnotationActivation(
+            panel,
+            canonical);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                PendingAnnotationActivationOwnerFormat(panel) ==
+            specforge::SampleLabelingOutputArtifactFormat::
+                CanonicalAsdf,
+        "canonical annotation activation should retain its owner format in pending confirmation state");
+
+    const specforge::SampleWorkflowAnnotationActivationTextIds
+        canonical_text =
+            specforge::SampleWorkflowAnnotationActivationText(
+                canonical.relationship,
+                canonical.labeling_owner_format);
+    Require(
+        canonical_text.editable_message ==
+                specforge::UiTextId::
+                    AdoptCanonicalAsdfEditableMessage &&
+            !canonical_text.detail_message,
+        "canonical adoption confirmation should describe one ASDF file without legacy sidecar detail");
+
+    const specforge::SampleWorkflowAnnotationActivationTextIds
+        legacy_external =
+            specforge::SampleWorkflowAnnotationActivationText(
+                specforge::
+                    SampleAnnotationWorkflowRelationship::
+                        ExternalLabelResult,
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        LegacyNpyWithSidecar);
+    Require(
+        legacy_external.editable_message ==
+                specforge::UiTextId::
+                    UseAnnotationEditableMessage &&
+            legacy_external.detail_message ==
+                specforge::UiTextId::
+                    ExistingLabelMetadataReused,
+        "legacy external annotation confirmation should retain its existing metadata-sidecar wording");
+
+    const specforge::SampleWorkflowAnnotationActivationTextIds
+        plain_annotation =
+            specforge::SampleWorkflowAnnotationActivationText(
+                specforge::
+                    SampleAnnotationWorkflowRelationship::
+                        PlainAnnotation,
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        None);
+    Require(
+        plain_annotation.editable_message ==
+                specforge::UiTextId::
+                    UseAnnotationEditableMessage &&
+            plain_annotation.detail_message ==
+                specforge::UiTextId::
+                    MetadataSidecarWillBeCreated,
+        "ownerless plain annotation confirmation should retain its existing sidecar-creation wording");
 }
 
 void TestShortcutDisplayUsesKeyboardLegends()
@@ -3234,6 +3320,7 @@ void TestTabStillMovesControlFocus()
 
 int main()
 {
+    TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();

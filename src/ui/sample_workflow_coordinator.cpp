@@ -256,14 +256,26 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
     }
     view.can_activate_labeling =
         local_task != nullptr ||
-        (annotation.kind == SampleAnnotationKind::CategoricalInteger &&
-         !annotation.labeling_document);
+        annotation.kind ==
+            SampleAnnotationKind::CategoricalInteger;
     view.can_filter_samples = local_task != nullptr || annotation.kind != SampleAnnotationKind::ContinuousFloat;
     view.can_sort_samples = local_task == nullptr &&
                             annotation.relationship == SampleAnnotationWorkflowRelationship::PlainAnnotation &&
                             !annotation.label_metadata;
     view.can_rename_annotation = !view.path.empty();
     view.can_remove_annotation = local_task == nullptr;
+    if (local_task != nullptr) {
+        view.labeling_owner_format = local_task->output_format;
+    } else if (annotation.labeling_document) {
+        view.labeling_owner_format =
+            SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    } else if (annotation.relationship ==
+               SampleAnnotationWorkflowRelationship::
+                   ExternalLabelResult) {
+        view.labeling_owner_format =
+            SampleLabelingOutputArtifactFormat::
+                LegacyNpyWithSidecar;
+    }
     if (local_task != nullptr && local_task->output_path) {
         view.output_missing = !PathExists(*local_task->output_path);
         if (local_task->output_format ==
@@ -303,6 +315,7 @@ SourceCollectionAnnotationValueView BuildLocalTaskAnnotationValueView(
     view.can_sort_samples = false;
     view.can_rename_annotation = task.output_path.has_value();
     view.can_remove_annotation = false;
+    view.labeling_owner_format = task.output_format;
     if (task.output_path) {
         view.output_missing =
             (task.output_format ==
@@ -1522,12 +1535,27 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     if (plan.kind == SampleAnnotationLabelingActivationKind::None) {
         return outcome;
     }
-    if (active_task != nullptr && active_task->task_id == plan.task_id) {
+    if (plan.kind ==
+            SampleAnnotationLabelingActivationKind::
+                ActivateExistingTask &&
+        active_task != nullptr &&
+        active_task->task_id == plan.task_id) {
         return outcome;
     }
-    if (plan.kind == SampleAnnotationLabelingActivationKind::ActivateExistingTask) {
+    if (plan.kind ==
+            SampleAnnotationLabelingActivationKind::
+                ActivateExistingTask ||
+        plan.kind ==
+            SampleAnnotationLabelingActivationKind::
+                AdoptCanonicalAsdfTask) {
         const SampleLabelingOperationResult activation =
-            labeling_.ActivateTask(plan.task_id);
+            plan.kind ==
+                    SampleAnnotationLabelingActivationKind::
+                        AdoptCanonicalAsdfTask
+            ? labeling_.AdoptCanonicalAsdfTask(
+                  plan.task_id,
+                  annotation->path)
+            : labeling_.ActivateTask(plan.task_id);
         ApplyLabelingLeaseIssue(outcome, activation);
         const bool attachment_refreshed =
             activation.accepted &&

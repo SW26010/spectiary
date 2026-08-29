@@ -1739,6 +1739,186 @@ SampleLabelingOperationResult SampleLabelingController::CreateTaskFromAnnotation
     return result;
 }
 
+SampleLabelingOperationResult
+SampleLabelingController::AdoptCanonicalAsdfTask(
+    std::string expected_task_id,
+    std::filesystem::path output_path)
+{
+    SourceState* state = ActiveSource();
+    if (state == nullptr ||
+        !active_source_identity_ ||
+        expected_task_id.empty() ||
+        output_path.empty() ||
+        !IsCanonicalAsdfOutputPath(output_path) ||
+        !active_source_descriptor_ ||
+        active_source_descriptor_->base_identity !=
+            *active_source_identity_) {
+        return RejectOperation();
+    }
+
+    const auto id_match = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [&expected_task_id](const SampleLabelingTask& task) {
+            return task.task_id == expected_task_id;
+        });
+    const auto output_match = std::find_if(
+        state->tasks.begin(),
+        state->tasks.end(),
+        [&output_path](const SampleLabelingTask& task) {
+            return task.output_path &&
+                OutputPathMatches(
+                    *task.output_path,
+                    output_path);
+        });
+    if (id_match != state->tasks.end() ||
+        output_match != state->tasks.end()) {
+        if (id_match != state->tasks.end() &&
+            output_match == id_match &&
+            id_match->output_format ==
+                SampleLabelingOutputArtifactFormat::
+                    CanonicalAsdf) {
+            return ActivateTask(expected_task_id);
+        }
+        return RejectEditTargetChanged();
+    }
+
+    const SampleLabelingTask* current_active_task =
+        ActiveTask();
+    if (current_active_task != nullptr &&
+        !CanDeleteTask(*current_active_task)) {
+        return RejectOperation();
+    }
+
+    SampleLabelingTask local_state =
+        CreateSampleLabelingTask(
+            expected_task_id,
+            expected_task_id,
+            state->sample_count);
+    local_state.output_path = output_path;
+    local_state.output_format =
+        SampleLabelingOutputArtifactFormat::CanonicalAsdf;
+    MarkSampleLabelTaskPersisted(
+        local_state,
+        SampleLabelSaveStateKind::AutosavedToOutput);
+
+    TaskEditLeaseSet leases;
+    leases.task_identity_key =
+        TaskIdentityEditLeaseKey(
+            *active_source_identity_,
+            expected_task_id);
+    if (leases.task_identity_key.empty()) {
+        return RejectOperation();
+    }
+    if (!state_cache_path_.empty()) {
+        TaskEditLeaseAcquireResult task_lease =
+            TryAcquireTaskEditLease(
+                leases.task_identity_key);
+        if (task_lease.status !=
+            ExclusiveFileLeaseAcquireStatus::Acquired) {
+            return RejectLeaseAcquireStatus(
+                task_lease.status);
+        }
+        leases.task_identity =
+            std::move(task_lease.component);
+    }
+
+    ExclusiveFileLeaseAcquireResult output_lease =
+        TryAttachOutputLease(
+            leases,
+            local_state);
+    if (output_lease.status !=
+        ExclusiveFileLeaseAcquireStatus::Acquired) {
+        return RejectLeaseAcquireStatus(
+            output_lease.status);
+    }
+
+    bool expected_absent = true;
+    if (!state_cache_path_.empty()) {
+        const SampleLabelingStateCacheLoadResult latest =
+            LoadSampleLabelingStateCache(
+                state_cache_path_,
+                {},
+                SampleLabelingStateCacheLoadPolicy::
+                    AllowPersistentOutputsWithoutResultHydration);
+        if (latest.issue_kind !=
+            SampleLabelingStateCacheLoadIssueKind::None) {
+            return RejectEditTargetChanged();
+        }
+        const auto latest_source = latest.cache.sources.find(
+            *active_source_identity_);
+        if (latest_source != latest.cache.sources.end()) {
+            if (latest_source->second.sample_count !=
+                state->sample_count) {
+                return RejectEditTargetChanged();
+            }
+            const auto latest_id_match = std::find_if(
+                latest_source->second.tasks.begin(),
+                latest_source->second.tasks.end(),
+                [&expected_task_id](
+                    const SampleLabelingTask& task) {
+                    return task.task_id == expected_task_id;
+                });
+            if (latest_id_match !=
+                latest_source->second.tasks.end()) {
+                if (!latest_id_match->output_path ||
+                    latest_id_match->output_format !=
+                        SampleLabelingOutputArtifactFormat::
+                            CanonicalAsdf ||
+                    latest_id_match->values.size() !=
+                        state->sample_count ||
+                    !OutputPathMatches(
+                        *latest_id_match->output_path,
+                        output_path)) {
+                    return RejectEditTargetChanged();
+                }
+                local_state = *latest_id_match;
+                expected_absent = false;
+            }
+        }
+        if (HasSampleLabelingOutputPathConflict(
+                latest.cache,
+                local_state,
+                *active_source_identity_)) {
+            return RejectEditTargetChanged();
+        }
+    }
+
+    std::optional<SampleLabelingAsdfOpenSnapshot>
+        asdf_snapshot;
+    std::string hydration_error;
+    std::optional<SampleLabelingTask> hydrated =
+        HydrateCanonicalAsdfTask(
+            local_state,
+            &asdf_snapshot,
+            &hydration_error);
+    if (!hydrated || !asdf_snapshot) {
+        return RejectEditTargetChanged();
+    }
+
+    state->tasks.push_back(std::move(*hydrated));
+    state->active_task_id =
+        state->tasks.back().task_id;
+    MarkTaskUpsert(
+        *active_source_identity_,
+        *state,
+        state->tasks.back(),
+        expected_absent);
+    MarkActiveTaskSelection(
+        *active_source_identity_,
+        *state);
+    SampleLabelingOperationResult result =
+        CompleteMutation(
+            &state->tasks.back(),
+            PersistencePolicy::FlushStateSave,
+            TaskProjectionEffect::Changed);
+    TransitionActiveTaskLeases(
+        std::move(leases),
+        std::move(asdf_snapshot),
+        result.state_saved);
+    return result;
+}
+
 SampleLabelingOperationResult SampleLabelingController::ActivateTask(std::string_view task_id)
 {
     return ActivateTaskWithExpectation(

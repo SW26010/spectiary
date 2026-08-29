@@ -267,16 +267,29 @@ SampleAnnotationLabelingActivationPlan PlanSampleAnnotationLabelingActivation(
             FindLocalTaskForLoadedAnnotation(
                 request.active_source_tasks,
                 annotation);
-        if (existing_task == nullptr ||
-            (request.active_task != nullptr &&
-             request.active_task->task_id !=
-                 existing_task->task_id)) {
+        if (existing_task != nullptr) {
+            if (request.active_task != nullptr &&
+                request.active_task->task_id !=
+                    existing_task->task_id) {
+                return plan;
+            }
+            plan.kind =
+                SampleAnnotationLabelingActivationKind::
+                    ActivateExistingTask;
+            plan.task_id = existing_task->task_id;
+            return plan;
+        }
+
+        const std::string& document_task_id =
+            annotation.labeling_document->labeling.id;
+        if (annotation.path.empty() ||
+            document_task_id.empty()) {
             return plan;
         }
         plan.kind =
             SampleAnnotationLabelingActivationKind::
-                ActivateExistingTask;
-        plan.task_id = existing_task->task_id;
+                AdoptCanonicalAsdfTask;
+        plan.task_id = document_task_id;
         return plan;
     }
     if (request.active_task != nullptr) {

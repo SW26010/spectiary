@@ -105,11 +105,16 @@ label definitions, annotation identity/values, source identity, and roster)
 while projecting the values and label definitions into the existing annotation
 views. Count-only attachment APIs do not accept ASDF because they cannot prove
 roster compatibility. Existing `.npy` and `.npy` plus `.sf-labels.json` reads
-remain unchanged. An attached ASDF row becomes editable only when a matching
-local task record already declares the same path and canonical ASDF ownership
-and the document carries that task id. Without that persisted owner it remains
-read-only; SpecForge does not convert the document into a new legacy task or
-hand its path to the NPY writer.
+remain unchanged. An attached standalone ASDF remains an external read-only
+result until the user explicitly confirms that it should be edited in place.
+Confirmation adopts that same document as a canonical local owner: SpecForge
+uses the document's stable task id/name, labels, and values, never generates a
+replacement task identity, and never hands the path to the legacy NPY writer.
+Adoption first acquires the task-identity and canonical one-file output leases,
+then reopens the current durable generation through the ASDF document store and
+validates source, roster, annotation, and task identity. Only after validation
+does it persist a structural local task record and hydrate the editable
+projection. Adoption itself neither copies nor rewrites the ASDF bytes.
 
 ## Manual Labeling
 
@@ -509,8 +514,12 @@ action.
 External label results should display the mapped label value from their
 canonical document or adjacent legacy metadata and be visibly marked as
 external. They may be dragged into `Labeling`, but doing so requires the
-in-place edit warning. If the user confirms, SpecForge creates a local task
-record whose output path and owner format point at that label result.
+in-place edit warning. If the user confirms a standalone canonical ASDF,
+SpecForge adopts its embedded stable task identity and exact document path as a
+`canonical_asdf` owner after a leased store reopen; a same-id/different-path or
+same-path/different-id local owner is a conflict and must not be resolved by
+inventing `-2` style identities. Legacy annotation promotion remains the
+separate `legacy_npy_with_sidecar` path.
 
 Local labeling tasks should display the mapped label value and be visibly marked
 as local. A canonical owner is missing when its ASDF document is unavailable; a
@@ -812,6 +821,16 @@ another logical document. A successful metadata rewrite invalidates the old
 snapshot and requires reopening the new generation.
 Controller leases, recovery state, retry policy, and UI activation remain above
 that store and are not codec responsibilities.
+
+Adopting a standalone canonical document acquires its stable task-identity
+lease and ASDF one-file output lease before reopening the writable store. The
+read-only attachment generation supplies only the user-selected path and
+expected embedded task id; it is not trusted as the durable base. A malformed,
+changed, source/roster-incompatible, or task-id-mismatched generation fails
+closed without creating a local owner or modifying the document. Successful
+adoption stores only structural/session state locally and retains the reopened
+snapshot in memory, so the first actual value or metadata edit enters the same
+autosave pipeline as every other canonical owner.
 
 Activating a cached canonical owner first acquires the ASDF document's one-file
 output lease, then opens the document store against the controller's owned

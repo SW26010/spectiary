@@ -16,6 +16,7 @@ inline constexpr std::string_view kTemporarySampleLabelingTaskName = "Temporary 
 enum class SampleAnnotationLabelingActivationKind {
     None,
     ActivateExistingTask,
+    AdoptCanonicalAsdfTask,
     CreateTaskFromAnnotation,
 };
 
