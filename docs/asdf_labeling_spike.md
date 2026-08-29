@@ -21,8 +21,8 @@ production persistence lifecycle.
    implements and interoperably validates this path. The domain document store
    now owns source-aware open, durable-base reuse, and atomic replacement. The
    controller hydrates persisted canonical owners under their one-file output
-   lease and retains the opened generation; ASDF publication/retry integration
-   remains separate follow-up work.
+   lease, retains the opened generation, and publishes value-only or full
+   metadata generations through the store with write-ahead recovery and retry.
 5. The checked-in corpus contains 9 approved valid documents, 1 standard-valid
    document outside the narrow wire profile, 4 ASDF-valid semantic violations,
    and 4 structurally malformed documents.
@@ -35,6 +35,34 @@ production persistence lifecycle.
    encoded blocks permit a verified 13-19 ms 1M-sample autosave path. The native
    production component retains the same block-preserving wire operation; a
    future regression of that property would reopen the JSON decision.
+
+## Current production architecture
+
+The #74 owner lifecycle integration is complete:
+
+- temporary tasks remain internal drafts until explicit Save As formalizes
+  them as single-file canonical ASDF owners;
+- task state persists the formal owner path and format explicitly, while a
+  canonical owner's long-term cache record remains structural and stores only
+  local workflow state plus a sparse pending recovery overlay;
+- activation acquires the task and one-file output leases before reopening the
+  ASDF through the document store; the durable snapshot/generation remains a
+  runtime-only controller fact;
+- value-only autosaves reuse the encoded roster block, while task and label
+  metadata edits publish one complete metadata-and-values generation and
+  preserve forward-compatible unknown fields;
+- failed publication retains the last trusted ASDF generation and the newest
+  write-ahead overlay, then retries against a reopened current durable base;
+- standalone ASDF documents can be explicitly adopted without rewriting their
+  bytes, and legacy NPY + sidecar owners can be explicitly migrated without
+  silently changing the legacy artifacts;
+- NPY export is a one-shot stateless operation and never becomes a persistence
+  owner or autosave target.
+
+The required native `asdf-lifecycle` CTest label locks the document, codec,
+store, controller, workflow, and restart/session contracts. The dedicated
+pinned-Python interoperability test continues to validate both writer/reader
+directions independently of the production runtime.
 
 ## Reference environment
 
@@ -192,12 +220,12 @@ workload. The promoted production ASDF codec is direct-to-vector and implements
 native zlib read/write plus preservation/copying of encoded unchanged blocks.
 Its compressed writer, reader, and block-reuse paths pass the Python
 interoperability matrix. The atomic document store now owns durable-base and
-replacement lifecycle below the controller. Persisted ASDF owners now open
-through that store after their output lease is acquired, with local sparse
-recovery overlays applied above the canonical generation. Remaining work is to
-publish those edits through the store and connect ASDF-specific retry policy;
-recompressing the roster on every edit would still require reopening the JSON
-decision.
+replacement lifecycle below the controller. Persisted ASDF owners open through
+that store after their output lease is acquired, with local sparse recovery
+overlays applied above the canonical generation. Value and metadata edits now
+publish through that store, and ASDF-specific failure/recovery/retry is part of
+the production owner lifecycle. Recompressing the roster on every edit would
+still require reopening the JSON decision.
 
 ## Missing / unlabeled representation
 
@@ -448,19 +476,23 @@ write, and block-reuse interoperability directions.
 | asdf-cxx 8.0.0 | Fail: no string ndarray | Fail: cannot emit approved roster | Fail: abort/exit paths | Reject |
 | strict minimal subset | Pass: 9/9 approved fixtures, including Python zlib | Pass: both blocks zlib; Python semantic equality | 9/9 golden rejections plus 2 invalid rewrites controlled | Recommend |
 
-## Follow-up work after codec promotion
+## Non-blocking production hardening
 
 The #74 production component now uses bounded streaming block I/O instead of
-the spike's whole-file `ReadAll` seam. Remaining integration and hardening work
-outside that completed promotion is to:
+the spike's whole-file `ReadAll` seam, and its atomic store is fully connected
+to output ownership, write-ahead recovery, publication, and retry. That product
+lifecycle work is complete.
 
-1. connect the atomic document store to the existing output lease,
-   write-ahead recovery, retry, and persistence owner;
-2. measure the native reuse path itself at 1M scale;
-3. fuzz YAML/block headers, integer bounds, Unicode, and truncated inputs;
-4. continue rejecting nonzero checksums unless separately justified and broaden
-   fuzz coverage beyond the checked corrupt-zlib/truncated fixtures.
+Remaining hardening is tracked separately in
+[GitHub issue #78](https://github.com/SW26010/SpecForge/issues/78):
 
-The pinned Python oracle and dedicated native-spike preset are enforced by the
-required `specforge_asdf_labeling_interoperability` CTest in CI. These remaining
-items do not change the approved semantic representation.
+1. benchmark the exact production native reuse/read/write paths at 1M scale;
+2. broaden bounded fuzz/property coverage for YAML, block headers/indexes,
+   Unicode, integer/offset/shape limits, truncated inputs, and unknown fields;
+3. re-evaluate checksum policy only with separate interoperability and cost
+   evidence.
+
+These items do not change the approved semantic representation or production
+owner state machine and are not blockers for #74 product acceptance. The pinned
+Python oracle and dedicated native-spike preset remain enforced by the required
+`specforge_asdf_labeling_interoperability` CTest in CI.
