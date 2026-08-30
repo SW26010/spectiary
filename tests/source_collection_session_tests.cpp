@@ -244,13 +244,18 @@ void SaveLabelResultFixture(
 specforge::SpectrumSnapshotHandle MakeSnapshot(
     const std::filesystem::path& path,
     std::size_t spectrum_count,
-    std::size_t current_index)
+    std::size_t current_index,
+    std::string format = "test")
 {
     auto snapshot = std::make_shared<specforge::SpectrumSnapshot>();
     snapshot->source.id = "source";
     snapshot->source.display_name = "source";
     snapshot->source.path = path;
-    snapshot->source.metadata.push_back(specforge::SpectrumMetadataEntry{"format", "test", "test"});
+    snapshot->source.metadata.push_back(
+        specforge::SpectrumMetadataEntry{
+            "format",
+            format,
+            format});
     snapshot->collection.spectrum_count = spectrum_count;
     snapshot->collection.current_index = current_index;
     snapshot->collection.can_move_previous = current_index > 0;
@@ -1054,6 +1059,42 @@ std::string ReadBinaryFile(const std::filesystem::path& path)
     return std::string(
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char>());
+}
+
+std::vector<specforge::CsvRecord> ReadCsvRecords(
+    const std::filesystem::path& path)
+{
+    specforge::BoundedCsvFileReader reader(path);
+    std::vector<specforge::CsvRecord> records;
+    while (true) {
+        specforge::CsvRecordReadResult result =
+            reader.ReadRecord();
+        if (result.status ==
+            specforge::CsvRecordReadStatus::End) {
+            return records;
+        }
+        Require(
+            result.has_record(),
+            result.error.message.empty()
+                ? "could not read CSV fixture"
+                : result.error.message);
+        records.push_back(std::move(result.record));
+    }
+}
+
+void WriteCsvRecords(
+    const std::filesystem::path& path,
+    const std::vector<specforge::CsvRecord>& records)
+{
+    const specforge::CsvRecordWriteResult result =
+        specforge::WriteCsvRecordsAtomically(
+            path,
+            records);
+    Require(
+        result.succeeded(),
+        result.error.message.empty()
+            ? "could not write CSV fixture"
+            : result.error.message);
 }
 
 void TestLabelAutoAdvanceExposesNonAdjacentFilteredTransition()
@@ -2532,6 +2573,600 @@ void TestTemporaryLabelingTaskUsesDefaultNameAndResumes()
     Require(session.View().labeling.has_active_task, "temporary task should resume");
     Require(session.View().labeling.task_id == temporary_task_id, "resumed task should keep its stable id");
     Require(session.View().labeling.current_code == 3, "resumed task should keep its draft values");
+}
+
+void TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState()
+{
+    const std::filesystem::path directory =
+        UniqueTempPath("_label_export_matrix");
+    std::filesystem::create_directories(directory);
+    const std::filesystem::path source_path =
+        directory / "spectra.npy";
+    const std::filesystem::path labeling_cache =
+        directory / "labeling.json";
+    const std::filesystem::path owner_path =
+        directory / "quality.asdf";
+    TouchFile(source_path);
+    WriteUnicodeNameNpy(
+        CompanionNamePath(source_path),
+        {
+            "zeta,\r\nsample",
+            "alpha\"sample",
+            "beta\nsample",
+            "delta",
+        },
+        16);
+
+    bool fail_canonical_value_publication = false;
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "label export matrix should reload its NPY source");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                4,
+                spectrum_index,
+                "npy");
+        },
+        {},
+        directory / "navigation.json",
+        labeling_cache,
+        directory / "workflow.json",
+        [&fail_canonical_value_publication](
+            specforge::SampleLabelingAsdfOpenSnapshot&
+                owner_snapshot,
+            std::span<const std::int32_t> values) {
+            if (fail_canonical_value_publication) {
+                return specforge::
+                    SampleLabelingAsdfStoreWriteResult{
+                        .error = {
+                            .kind = specforge::
+                                SampleLabelingAsdfStoreErrorKind::
+                                    AtomicWriteFailure,
+                            .message =
+                                "injected label export matrix publication failure"}};
+            }
+            return specforge::
+                RewriteSampleLabelingAsdfValuesAtomically(
+                    owner_snapshot,
+                    values);
+        });
+    Require(
+        session.Open(source_path).loaded,
+        "label export matrix source should open");
+    Require(
+        session.View().labeling.source_kind == "npy",
+        "label export matrix should use the canonical NPY source kind");
+
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+    const std::string special_label =
+        Utf8(u8"星系,\"A\"\r\n可信");
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    5,
+                    special_label,
+                    's'}))
+                .changed &&
+            Submit(
+                session,
+                UpsertActiveLabel(
+                    specforge::SampleLabelDefinition{
+                        6,
+                        "unlabeled",
+                        'u'}))
+                .changed,
+        "label export matrix should accept stable edge-case labels");
+    const specforge::SourceCollectionSessionResult
+        first_assignment = Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+    Require(
+        first_assignment.label_write &&
+            first_assignment.label_write->write.changed,
+        "label export matrix should label canonical row zero");
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(2)));
+    const specforge::SourceCollectionSessionResult
+        second_assignment = Submit(
+            session,
+            AssignActiveLabelToCurrentSample(6));
+    Require(
+        second_assignment.label_write &&
+            second_assignment.label_write->write.changed,
+        "label export matrix should label canonical row two");
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(0)));
+    const specforge::SourceCollectionSessionResult
+        formalized = Submit(
+            session,
+            SetActiveLabelingOutputPath(owner_path));
+    Require(
+        formalized.action.navigation_inputs_changed &&
+            std::filesystem::exists(owner_path) &&
+            !session.View().labeling.active_task_is_temporary &&
+            session.View().labeling.output_path == owner_path &&
+            session.View().labeling.output_format ==
+                specforge::
+                    SampleLabelingOutputArtifactFormat::
+                        CanonicalAsdf,
+        "label export matrix should establish a canonical ASDF owner");
+
+    fail_canonical_value_publication = true;
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(3)));
+    const specforge::SourceCollectionSessionResult
+        pending_write = Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+    Require(
+        pending_write.label_write &&
+            pending_write.label_write->write.changed,
+        "label export matrix pending write should change canonical row three");
+    Require(
+        pending_write.label_write->operation
+                .output_save_attempted &&
+            !pending_write.label_write->operation.output_saved,
+        "label export matrix should exercise the injected canonical publication failure");
+    Require(
+            session.View().labeling.save_state.kind ==
+                specforge::SampleLabelSaveStateKind::Failed &&
+            session.View().labeling.save_state.pending_count == 1,
+        "label export matrix should retain one pending canonical overlay");
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(0)));
+
+    const std::vector<int> expected_values{
+        5,
+        specforge::kUnlabeledSampleLabelCode,
+        6,
+        5,
+    };
+    const std::vector<specforge::CsvRecord>
+        expected_csv{
+            {"sample", "label"},
+            {"zeta,\r\nsample", special_label},
+            {"alpha\"sample", "unlabeled"},
+            {"beta\nsample", "\\unlabeled"},
+            {"delta", special_label},
+        };
+    const std::filesystem::path csv_before =
+        directory / "before-sequence.csv";
+    const std::filesystem::path npy_before =
+        directory / "before-sequence.npy";
+    const std::filesystem::path npy_reference =
+        directory / "reference.npy";
+
+    const auto require_export_state_unchanged =
+        [&](const specforge::SourceCollectionSessionView& before,
+            const std::string& cache_bytes,
+            const std::string& owner_bytes,
+            const std::vector<std::filesystem::path>&
+                attachment_paths,
+            std::string_view message) {
+            const specforge::SourceCollectionSessionView& after =
+                session.View();
+            const bool labels_unchanged =
+                after.labeling.label_set.labels.size() ==
+                    before.labeling.label_set.labels.size() &&
+                std::equal(
+                    after.labeling.label_set.labels.begin(),
+                    after.labeling.label_set.labels.end(),
+                    before.labeling.label_set.labels.begin(),
+                    [](const auto& left, const auto& right) {
+                        return left.code == right.code &&
+                               left.name == right.name &&
+                               left.shortcut == right.shortcut;
+                    });
+            Require(
+                after.labeling.task_id ==
+                        before.labeling.task_id &&
+                    labels_unchanged &&
+                    after.labeling.labeled_count ==
+                        before.labeling.labeled_count &&
+                    after.labeling.current_code ==
+                        before.labeling.current_code &&
+                    after.labeling.remembered_position ==
+                        before.labeling.remembered_position &&
+                    after.labeling.output_path ==
+                        before.labeling.output_path &&
+                    after.labeling.output_format ==
+                        before.labeling.output_format &&
+                    after.labeling.save_state.kind ==
+                        before.labeling.save_state.kind &&
+                    after.labeling.save_state.pending_count ==
+                        before.labeling.save_state.pending_count &&
+                    after.labeling.save_state.message_kind ==
+                        before.labeling.save_state.message_kind &&
+                    after.labeling.save_state.message ==
+                        before.labeling.save_state.message &&
+                    after.navigation.current_index ==
+                        before.navigation.current_index &&
+                    ReadBinaryFile(labeling_cache) ==
+                        cache_bytes &&
+                    ReadBinaryFile(owner_path) ==
+                        owner_bytes &&
+                    session.AnnotationPathsForSource(
+                        source_path) == attachment_paths,
+                message);
+        };
+
+    const specforge::SourceCollectionSessionView
+        state_before_first_export = session.View();
+    const std::string cache_before_first_export =
+        ReadBinaryFile(labeling_cache);
+    const std::string owner_before_first_export =
+        ReadBinaryFile(owner_path);
+    const std::vector<std::filesystem::path>
+        attachments_before_first_export =
+            session.AnnotationPathsForSource(source_path);
+    const specforge::SourceCollectionSessionResult
+        first_csv_result = Submit(
+            session,
+            ExportActiveLabels(
+                csv_before,
+                specforge::SampleLabelExportFormat::Csv));
+    const specforge::SourceCollectionSessionResult
+        first_npy_result = Submit(
+            session,
+            ExportActiveLabels(
+                npy_before,
+                specforge::SampleLabelExportFormat::Npy));
+    Require(
+        first_csv_result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            first_npy_result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            !first_csv_result.changed &&
+            !first_npy_result.changed &&
+            !first_csv_result.action.workflow_changed &&
+            !first_npy_result.action.workflow_changed &&
+            !first_csv_result.action.annotation_roster_changed &&
+            !first_npy_result.action.annotation_roster_changed,
+        "NPY and CSV session exports should report stateless outcomes");
+    Require(
+        ReadCsvRecords(csv_before) == expected_csv,
+        "CSV export should preserve comma, quote, Unicode, CR/LF, unlabeled, and escaped label fields in canonical order");
+    std::string export_error;
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            npy_reference,
+            expected_values,
+            &export_error) &&
+            ReadBinaryFile(npy_before) ==
+                ReadBinaryFile(npy_reference),
+        export_error.empty()
+            ? "session NPY bytes should match the existing stateless exporter"
+            : export_error);
+    require_export_state_unchanged(
+        state_before_first_export,
+        cache_before_first_export,
+        owner_before_first_export,
+        attachments_before_first_export,
+        "export must preserve task values, pending overlay, canonical owner, output path, save state, current sample, and attachment roster");
+
+    const std::string labeling_filter_source =
+        session.View().filter.available_sources.front().id;
+    Require(
+        Submit(
+            session,
+            AddSampleFilterSource(
+                labeling_filter_source))
+                .action.workflow_changed &&
+            Submit(
+                session,
+                SetFilterValueSelected(
+                    labeling_filter_source,
+                    "5",
+                    true))
+                .action.navigation_inputs_changed &&
+            Submit(
+                session,
+                SetSampleSortSource(
+                    "sample-name"))
+                .action.navigation_inputs_changed &&
+            Submit(
+                session,
+                SetSampleSortDirection(
+                    specforge::
+                        SampleNavigationSortDirection::
+                            Descending))
+                .action.navigation_inputs_changed &&
+            session.View().navigation.filter_active &&
+            session.View().sorting.active,
+        "label export matrix should activate a filtered and sorted navigation sequence");
+
+    const std::filesystem::path csv_after =
+        directory / "after-sequence.csv";
+    const std::filesystem::path npy_after =
+        directory / "after-sequence.npy";
+    const specforge::SourceCollectionSessionView
+        state_before_sequence_export = session.View();
+    const std::string cache_before_sequence_export =
+        ReadBinaryFile(labeling_cache);
+    const std::string owner_before_sequence_export =
+        ReadBinaryFile(owner_path);
+    const std::vector<std::filesystem::path>
+        attachments_before_sequence_export =
+            session.AnnotationPathsForSource(source_path);
+    (void)Submit(
+        session,
+        ExportActiveLabels(
+            csv_after,
+            specforge::SampleLabelExportFormat::Csv));
+    (void)Submit(
+        session,
+        ExportActiveLabels(
+            npy_after,
+            specforge::SampleLabelExportFormat::Npy));
+    Require(
+        ReadBinaryFile(csv_after) ==
+                ReadBinaryFile(csv_before) &&
+            ReadBinaryFile(npy_after) ==
+                ReadBinaryFile(npy_before),
+        "filtering and sorting must not change canonical CSV or NPY export mapping");
+    require_export_state_unchanged(
+        state_before_sequence_export,
+        cache_before_sequence_export,
+        owner_before_sequence_export,
+        attachments_before_sequence_export,
+        "sequence-active export must remain stateless across every labeling and source-session owner");
+
+    const specforge::SourceCollectionSessionResult attached =
+        Submit(
+            session,
+            AddReadOnlyAnnotation(csv_before));
+    Require(
+        attached.loaded &&
+            session.AnnotationPathsForSource(
+                source_path).size() ==
+                attachments_before_sequence_export.size() + 1,
+        "an exported CSV should reattach as one plain annotation");
+
+    const std::filesystem::path empty_path =
+        directory / "empty-label.csv";
+    WriteCsvRecords(
+        empty_path,
+        {
+            {"sample", "label"},
+            {"zeta,\r\nsample", ""},
+            {"alpha\"sample", "A"},
+            {"beta\nsample", "B"},
+            {"delta", "C"},
+        });
+    Require(
+        Submit(
+            session,
+            AddReadOnlyAnnotation(empty_path))
+            .loaded,
+        "CSV ingestion should retain an empty text annotation field");
+    const auto empty_annotation = std::find_if(
+        session.View().navigation.current_annotations.begin(),
+        session.View().navigation.current_annotations.end(),
+        [&empty_path](const auto& annotation) {
+            return annotation.path == empty_path;
+        });
+    Require(
+        empty_annotation !=
+                session.View().navigation.current_annotations.end() &&
+            empty_annotation->display_text.empty(),
+        "an attached empty CSV label should remain an empty text value");
+
+    const std::vector<std::filesystem::path>
+        valid_attachment_paths =
+            session.AnnotationPathsForSource(source_path);
+    const std::filesystem::path duplicate_path =
+        directory / "duplicate-identity.csv";
+    WriteCsvRecords(
+        duplicate_path,
+        {
+            {"sample", "label"},
+            {"zeta,\r\nsample", "A"},
+            {"zeta,\r\nsample", "duplicate"},
+            {"alpha\"sample", "B"},
+            {"beta\nsample", "C"},
+            {"delta", "D"},
+        });
+    const specforge::SourceCollectionSessionResult duplicate =
+        Submit(
+            session,
+            AddReadOnlyAnnotation(duplicate_path));
+    Require(
+        !duplicate.loaded &&
+            duplicate.message.find(
+                "duplicate sample identity") !=
+                std::string::npos &&
+            session.AnnotationPathsForSource(
+                source_path) == valid_attachment_paths,
+        "duplicate CSV identity must be rejected without changing the attachment roster");
+
+    const std::filesystem::path missing_path =
+        directory / "missing-identity.csv";
+    WriteCsvRecords(
+        missing_path,
+        {
+            {"sample", "label"},
+            {"zeta,\r\nsample", "A"},
+            {"alpha\"sample", "B"},
+            {"beta\nsample", "C"},
+        });
+    const specforge::SourceCollectionSessionResult missing =
+        Submit(
+            session,
+            AddReadOnlyAnnotation(missing_path));
+    Require(
+        !missing.loaded &&
+            missing.message.find(
+                "missing canonical sample identity") !=
+                std::string::npos &&
+            session.AnnotationPathsForSource(
+                source_path) == valid_attachment_paths,
+        "missing CSV identity must be rejected without changing the attachment roster");
+}
+
+void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
+{
+    const std::filesystem::path directory =
+        UniqueTempPath("_folder_label_export_matrix");
+    const std::filesystem::path source_path =
+        directory / "spectra";
+    const std::filesystem::path labeling_cache =
+        directory / "labeling.json";
+    std::filesystem::create_directories(source_path);
+    TouchFile(source_path / "row-0.fits");
+    TouchFile(source_path / "row-1.fits");
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session(
+        [&loaded_indices, source_path](
+            const std::filesystem::path& path,
+            std::size_t spectrum_index) {
+            Require(
+                path == source_path,
+                "folder export matrix should reload its source directory");
+            loaded_indices.push_back(spectrum_index);
+            return MakeSnapshot(
+                source_path,
+                2,
+                spectrum_index,
+                "folder");
+        },
+        {},
+        directory / "navigation.json",
+        labeling_cache,
+        directory / "workflow.json");
+    const specforge::SourceCollectionSessionResult opened =
+        session.Open(source_path);
+    Require(
+        opened.loaded,
+        "folder export matrix source should open");
+    Require(
+        session.View().labeling.source_kind == "folder",
+        "folder export matrix should activate a canonical folder source");
+    (void)Submit(
+        session,
+        StartOrResumeTemporaryLabelingTask());
+    Require(
+        Submit(
+            session,
+            UpsertActiveLabel(
+                specforge::SampleLabelDefinition{
+                    5,
+                    "selected",
+                    's'}))
+            .changed,
+        "folder export matrix should add its label");
+    const specforge::SourceCollectionSessionResult assigned =
+        Submit(
+            session,
+            AssignActiveLabelToCurrentSample(5));
+    Require(
+        assigned.label_write &&
+            assigned.label_write->write.changed,
+        "folder export matrix should label its first canonical filename");
+
+    const specforge::SourceCollectionSessionView before =
+        session.View();
+    const std::string cache_before =
+        ReadBinaryFile(labeling_cache);
+    const std::vector<std::filesystem::path>
+        attachments_before =
+            session.AnnotationPathsForSource(source_path);
+    const std::filesystem::path csv_path =
+        directory / "folder-default.csv";
+    const std::filesystem::path npy_path =
+        directory / "folder-override.npy";
+    const specforge::SourceCollectionSessionResult csv_result =
+        Submit(
+            session,
+            ExportActiveLabels(
+                csv_path,
+                specforge::SampleLabelExportFormat::Csv));
+    const specforge::SourceCollectionSessionResult npy_result =
+        Submit(
+            session,
+            ExportActiveLabels(
+                npy_path,
+                specforge::SampleLabelExportFormat::Npy));
+    Require(
+        csv_result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            npy_result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            ReadCsvRecords(csv_path) ==
+                std::vector<specforge::CsvRecord>({
+                    {"filename", "label"},
+                    {"row-0.fits", "selected"},
+                    {"row-1.fits", "unlabeled"},
+                }),
+        "folder CSV default should use canonical filenames while the NPY override remains available");
+
+    const std::filesystem::path npy_reference =
+        directory / "folder-reference.npy";
+    std::string export_error;
+    const std::vector<int> expected_values{
+        5,
+        specforge::kUnlabeledSampleLabelCode,
+    };
+    Require(
+        specforge::ExportLabelValuesToNpy(
+            npy_reference,
+            expected_values,
+            &export_error) &&
+            ReadBinaryFile(npy_path) ==
+                ReadBinaryFile(npy_reference),
+        export_error.empty()
+            ? "folder NPY override should retain existing exporter bytes"
+            : export_error);
+
+    const specforge::SourceCollectionSessionView& after =
+        session.View();
+    Require(
+        after.labeling.task_id == before.labeling.task_id &&
+            after.labeling.labeled_count ==
+                before.labeling.labeled_count &&
+            after.labeling.current_code ==
+                before.labeling.current_code &&
+            after.labeling.output_path ==
+                before.labeling.output_path &&
+            after.labeling.output_format ==
+                before.labeling.output_format &&
+            after.labeling.save_state.kind ==
+                before.labeling.save_state.kind &&
+            after.labeling.save_state.pending_count ==
+                before.labeling.save_state.pending_count &&
+            after.navigation.current_index ==
+                before.navigation.current_index &&
+            ReadBinaryFile(labeling_cache) ==
+                cache_before &&
+            session.AnnotationPathsForSource(
+                source_path) == attachments_before,
+        "folder CSV/NPY format choices must not mutate task or source-session state");
 }
 
 void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
@@ -10262,6 +10897,8 @@ void RunAllTests()
     TestEmptyFilterSequenceDoesNotLoadFallbackSnapshot();
     TestDeactivatingLabelingTaskKeepsAnnotationFilter();
     TestTemporaryLabelingTaskUsesDefaultNameAndResumes();
+    TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState();
+    TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts();
     TestExportingLabelValuesDoesNotFormalizeOrAttachTask();
     TestTemporaryDraftRecoveryViewRestoresAfterRestart();
     TestTemporaryDraftRecoveryViewReportsLeaseConflict();

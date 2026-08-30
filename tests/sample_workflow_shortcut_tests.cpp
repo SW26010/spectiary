@@ -229,13 +229,6 @@ struct SampleWorkflowPanelUiTestAccess {
         return panel.labeling_export_format_;
     }
 
-    static void SetLabelingExportFormat(
-        SampleWorkflowPanelUi& panel,
-        SampleLabelExportFormat format)
-    {
-        panel.labeling_export_format_ = format;
-    }
-
     static void SetPendingAnnotationActivation(
         SampleWorkflowPanelUi& panel,
         const SourceCollectionAnnotationValueView& annotation)
@@ -592,6 +585,110 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
         shortcut);
     ImGui::EndFrame();
     return observation;
+}
+
+void SelectLabelExportFormatThroughUi(
+    specforge::SampleWorkflowPanelUi& panel,
+    const specforge::SourceCollectionSessionView& view,
+    specforge::SampleLabelExportFormat format)
+{
+    const auto selector_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingExportFormatRect(panel);
+    Require(
+        selector_rect.has_value(),
+        "export format selector should expose a deterministic rectangle");
+    const ImVec2 selector_position(
+        ((*selector_rect)[0] + (*selector_rect)[2]) *
+            0.5f,
+        ((*selector_rect)[1] + (*selector_rect)[3]) *
+            0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        selector_position.x,
+        selector_position.y);
+    (void)RenderLabelingExportFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingExportFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation opened =
+        RenderLabelingExportFrame(panel, view);
+    Require(
+        !opened.requested_export_format &&
+            !opened.submitted_workflow_kind &&
+            !GImGui->OpenPopupStack.empty() &&
+            GImGui->OpenPopupStack.back().Window != nullptr,
+        "clicking the export format selector should open its popup without exporting");
+
+    ImGuiWindow* popup_window =
+        GImGui->OpenPopupStack.back().Window;
+    ImGui::GetIO().AddMousePosEvent(
+        popup_window->InnerRect.Min.x + 1.0f,
+        popup_window->InnerRect.Min.y + 1.0f);
+    const LabelingExportFrameObservation settled =
+        RenderLabelingExportFrame(panel, view);
+    Require(
+        !settled.requested_export_format &&
+            !settled.submitted_workflow_kind &&
+            !GImGui->OpenPopupStack.empty() &&
+            GImGui->OpenPopupStack.back().Window != nullptr,
+        "settling the real export format popup must not execute an export");
+    popup_window = GImGui->OpenPopupStack.back().Window;
+    const int option_index =
+        format == specforge::SampleLabelExportFormat::Npy
+        ? 0
+        : 1;
+    const char* option_label =
+        format == specforge::SampleLabelExportFormat::Csv
+        ? "CSV##SpecForgeLabelExportFormatCsv"
+        : "NPY##SpecForgeLabelExportFormatNpy";
+    const ImGuiID option_id =
+        popup_window->GetID(option_label);
+    const float option_height = ImGui::GetTextLineHeight();
+    const ImVec2 option_position(
+        popup_window->DC.CursorStartPos.x +
+            ImGui::GetStyle().FramePadding.x,
+        popup_window->DC.CursorStartPos.y +
+            static_cast<float>(option_index) *
+                (option_height +
+                 ImGui::GetStyle().ItemSpacing.y) +
+            option_height * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        option_position.x,
+        option_position.y);
+    const LabelingExportFrameObservation hovered =
+        RenderLabelingExportFrame(panel, view);
+    Require(
+        !hovered.requested_export_format &&
+            !hovered.submitted_workflow_kind &&
+            !GImGui->OpenPopupStack.empty() &&
+            GImGui->HoveredId == option_id,
+        "hovering a real export format option must hit that item without exporting");
+
+    ImGui::GetIO().AddMousePosEvent(
+        option_position.x,
+        option_position.y);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    const LabelingExportFrameObservation pressed =
+        RenderLabelingExportFrame(panel, view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation selected =
+        RenderLabelingExportFrame(panel, view);
+    Require(
+        !pressed.requested_export_format &&
+            !pressed.submitted_workflow_kind &&
+            !selected.requested_export_format &&
+            !selected.submitted_workflow_kind &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingExportFormat(panel) == format,
+        "clicking a real combo option should switch only the export format preference");
 }
 
 struct LabelingTaskSwitchFrameObservation {
@@ -1174,10 +1271,10 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
             specforge::SampleLabelExportFormat::Npy,
         "NPY source should default label export to NPY");
 
-    specforge::SampleWorkflowPanelUiTestAccess::
-        SetLabelingExportFormat(
-            panel,
-            specforge::SampleLabelExportFormat::Csv);
+    SelectLabelExportFormatThroughUi(
+        panel,
+        npy_view,
+        specforge::SampleLabelExportFormat::Csv);
     (void)RenderLabelingExportFrame(panel, npy_view);
     Require(
         specforge::SampleWorkflowPanelUiTestAccess::
@@ -1244,10 +1341,10 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
                 specforge::SampleLabelExportFormat::Csv,
         "folder default should drive both the chooser and export intent as CSV");
 
-    specforge::SampleWorkflowPanelUiTestAccess::
-        SetLabelingExportFormat(
-            panel,
-            specforge::SampleLabelExportFormat::Npy);
+    SelectLabelExportFormatThroughUi(
+        panel,
+        folder_view,
+        specforge::SampleLabelExportFormat::Npy);
     ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
     (void)RenderLabelingExportFrame(panel, folder_view);
     Require(
@@ -1275,6 +1372,117 @@ void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
             overridden.submitted_export_format ==
                 specforge::SampleLabelExportFormat::Npy,
         "folder NPY override should drive both the chooser and export intent");
+}
+
+void TestLabelExportFormatMatrixRoutesToChooserAndIntent()
+{
+    struct MatrixCase {
+        std::string_view source_kind;
+        std::optional<specforge::SampleLabelExportFormat>
+            override_format;
+        specforge::SampleLabelExportFormat expected_default;
+        specforge::SampleLabelExportFormat expected_export;
+    };
+    constexpr std::array kCases = {
+        MatrixCase{
+            "npy",
+            std::nullopt,
+            specforge::SampleLabelExportFormat::Npy,
+            specforge::SampleLabelExportFormat::Npy},
+        MatrixCase{
+            "folder",
+            std::nullopt,
+            specforge::SampleLabelExportFormat::Csv,
+            specforge::SampleLabelExportFormat::Csv},
+        MatrixCase{
+            "npy",
+            specforge::SampleLabelExportFormat::Csv,
+            specforge::SampleLabelExportFormat::Npy,
+            specforge::SampleLabelExportFormat::Csv},
+        MatrixCase{
+            "folder",
+            specforge::SampleLabelExportFormat::Npy,
+            specforge::SampleLabelExportFormat::Csv,
+            specforge::SampleLabelExportFormat::Npy},
+    };
+
+    for (std::size_t case_index = 0;
+         case_index < kCases.size();
+         ++case_index) {
+        const MatrixCase& matrix_case = kCases[case_index];
+        ScopedImGuiContext context;
+        specforge::SampleWorkflowPanelUi panel;
+        specforge::SourceCollectionSessionView view =
+            MakeLabelingPanelView(7, 'q');
+        view.labeling.source_identity =
+            "export-matrix-" +
+            std::to_string(case_index);
+        view.labeling.source_kind =
+            matrix_case.source_kind;
+
+        ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+        const LabelingExportFrameObservation initialized =
+            RenderLabelingExportFrame(panel, view);
+        Require(
+            !initialized.requested_export_format &&
+                !initialized.submitted_workflow_kind &&
+                specforge::SampleWorkflowPanelUiTestAccess::
+                        LabelingExportFormat(panel) ==
+                    matrix_case.expected_default,
+            "rendering an export format recommendation must not execute an export");
+
+        if (matrix_case.override_format) {
+            SelectLabelExportFormatThroughUi(
+                panel,
+                view,
+                *matrix_case.override_format);
+            const LabelingExportFrameObservation overridden =
+                RenderLabelingExportFrame(panel, view);
+            Require(
+                !overridden.requested_export_format &&
+                    !overridden.submitted_workflow_kind &&
+                    specforge::SampleWorkflowPanelUiTestAccess::
+                            LabelingExportFormat(panel) ==
+                        matrix_case.expected_export,
+                "switching the export format must remain a session-only preference until export is requested");
+        }
+
+        const auto export_rect =
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportRect(panel);
+        Require(
+            export_rect.has_value(),
+            "each export matrix case should expose the export action");
+        const ImVec2 export_position(
+            ((*export_rect)[0] + (*export_rect)[2]) *
+                0.5f,
+            ((*export_rect)[1] + (*export_rect)[3]) *
+                0.5f);
+        ImGui::GetIO().AddMousePosEvent(
+            export_position.x,
+            export_position.y);
+        (void)RenderLabelingExportFrame(panel, view);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            true);
+        (void)RenderLabelingExportFrame(panel, view);
+        ImGui::GetIO().AddMouseButtonEvent(
+            ImGuiMouseButton_Left,
+            false);
+        const LabelingExportFrameObservation exported =
+            RenderLabelingExportFrame(panel, view);
+        Require(
+            exported.export_path_request_count == 1 &&
+                exported.requested_export_format ==
+                    matrix_case.expected_export &&
+                exported.submitted_workflow_kind ==
+                    specforge::
+                        ActiveSampleWorkflowIntentKind::
+                            ExportActiveLabels &&
+                exported.submitted_export_format ==
+                    matrix_case.expected_export,
+            "the selected matrix format must reach both the path chooser and export intent");
+    }
 }
 
 void TestLabelExportFormatControlsDefaultExtension()
@@ -3716,6 +3924,7 @@ int main()
     TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
     TestLabelingPanelRoutesExportLabelsAsASeparateIntent();
     TestLabelingPanelKeepsFormatOverrideUntilSourceChanges();
+    TestLabelExportFormatMatrixRoutesToChooserAndIntent();
     TestLabelExportFormatControlsDefaultExtension();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
