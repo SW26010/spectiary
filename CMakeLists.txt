@@ -238,6 +238,7 @@ add_library(specforge_core STATIC
     src/app/specforge_metadata.cpp
     src/app/specforge_metadata_finalizer.cpp
     src/app/specforge_metadata_validation.cpp
+    src/domain/canonical_timestamp.cpp
     src/domain/csv_record_codec.cpp
     src/domain/fits_file_reader.cpp
     src/domain/fits_spectrum_loader.cpp
@@ -260,6 +261,8 @@ add_library(specforge_core STATIC
     src/domain/spectrum_loader_support.cpp
     src/domain/spectrum_loader.cpp
     src/domain/spectrum_smoothing.cpp
+    src/domain/utf8.cpp
+    src/domain/uuid_v4.cpp
     src/overlays/spectral_line_catalog.cpp
     src/overlays/catalog_user_state_reconciliation.cpp
     src/overlays/spectral_line_user_state_cache_io.cpp
@@ -267,6 +270,7 @@ add_library(specforge_core STATIC
     src/platform/atomic_file.cpp
     src/platform/exclusive_file_lease.cpp
     src/platform/file_sha256.cpp
+    src/platform/secure_random_bytes.cpp
     src/platform/win32_directory_change_generation.cpp
     src/platform/win32_compositor_clock.cpp
     src/platform/win32_message_render_observer.cpp
@@ -1208,6 +1212,11 @@ specforge_add_test(
     tests/csv_record_codec_tests.cpp
     specforge_core
 )
+specforge_add_test(
+    specforge_labeling_primitives_tests
+    tests/labeling_primitives_tests.cpp
+    specforge_core
+)
 set_tests_properties(
     specforge_sample_label_export_tests
     PROPERTIES
@@ -1222,6 +1231,11 @@ set_tests_properties(
     specforge_csv_record_codec_tests
     PROPERTIES
         LABELS "data;ci-headless;required"
+)
+set_tests_properties(
+    specforge_labeling_primitives_tests
+    PROPERTIES
+        LABELS "labeling;ci-headless;required"
 )
 specforge_add_test(
     specforge_sample_labeling_document_tests
