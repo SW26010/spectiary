@@ -574,9 +574,10 @@ SampleWorkflowTransitionOutcome SampleWorkflowCoordinator::Apply(
     case ActiveSampleWorkflowIntentKind::SetActiveLabelingOutputPath:
         outcome = SetActiveLabelingOutputPath(std::move(intent.path));
         break;
-    case ActiveSampleWorkflowIntentKind::ExportActiveLabelValuesToNpy:
-        outcome = ExportActiveLabelValuesToNpy(
-            std::move(intent.path));
+    case ActiveSampleWorkflowIntentKind::ExportActiveLabels:
+        outcome = ExportActiveLabels(
+            std::move(intent.path),
+            intent.export_format);
         break;
     case ActiveSampleWorkflowIntentKind::DeactivateActiveLabelingTask:
         outcome = DeactivateActiveLabelingTask();
@@ -1794,13 +1795,15 @@ SampleWorkflowCoordinator::SetActiveLabelingOutputPath(
 }
 
 SampleWorkflowTransitionOutcome
-SampleWorkflowCoordinator::ExportActiveLabelValuesToNpy(
-    std::filesystem::path output_path)
+SampleWorkflowCoordinator::ExportActiveLabels(
+    std::filesystem::path output_path,
+    SampleLabelExportFormat format)
 {
     SampleWorkflowTransitionOutcome outcome;
     const SampleLabelingOperationResult operation =
-        labeling_.ExportActiveLabelValuesToNpy(
-            output_path);
+        labeling_.ExportActiveLabels(
+            output_path,
+            format);
     ApplyLabelingLeaseIssue(outcome, operation);
     return outcome;
 }
@@ -2154,6 +2157,10 @@ SourceCollectionLabelingView SampleWorkflowCoordinator::LabelingView(const Spect
     const SampleLabelingRecoveryView recovery_view = labeling_.RecoveryView();
     view.has_active_source = snapshot && !snapshot->source.path.empty() && ActiveSampleCount(snapshot) > 0;
     view.source_identity = recovery_view.source_identity;
+    if (const std::optional<SampleLabelingSourceCompatibility>
+            source = navigation_.active_source_compatibility()) {
+        view.source_kind = source->source_kind;
+    }
     view.recovery_revision = recovery_view.revision;
     view.recovery_drafts.reserve(recovery_view.temporary_drafts.size());
     for (const SampleLabelingRecoveryDraftView& draft :

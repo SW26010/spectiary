@@ -60,18 +60,18 @@ SampleLabelingIssueTextFor(
     case Issue::LabelValuesExportInvalidPath:
         return {
             UiTextId::LabelValuesExportInvalidPath,
-            "Choose a .npy file for label export.",
-            "请选择 .npy 文件导出标签。"};
+            "Choose a file with the extension required by the selected label export format.",
+            "请选择扩展名符合所选标签导出格式要求的文件。"};
     case Issue::LabelValuesExportTargetProtected:
         return {
             UiTextId::LabelValuesExportTargetProtected,
-            "This NPY export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
-            "此 NPY 导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"};
+            "This label export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
+            "此标签导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"};
     case Issue::LabelValuesExportFailed:
         return {
             UiTextId::LabelValuesExportFailed,
-            "Could not export label values to NPY.",
-            "无法将标签值导出为 NPY。"};
+            "Could not export label values to the selected file.",
+            "无法将标签值导出到所选文件。"};
     case Issue::None:
     default:
         return {};

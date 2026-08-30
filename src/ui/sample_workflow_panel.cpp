@@ -1021,6 +1021,27 @@ SampleWorkflowCanonicalOutputActionTextId(
     return std::nullopt;
 }
 
+SampleLabelExportFormat RecommendedSampleLabelExportFormat(
+    std::string_view source_kind) noexcept
+{
+    return source_kind == "folder"
+        ? SampleLabelExportFormat::Csv
+        : SampleLabelExportFormat::Npy;
+}
+
+std::filesystem::path EnsureSampleLabelExportPathExtension(
+    std::filesystem::path path,
+    SampleLabelExportFormat format)
+{
+    if (!path.has_extension() || path.extension() == ".") {
+        path.replace_extension(
+            format == SampleLabelExportFormat::Csv
+                ? ".csv"
+                : ".npy");
+    }
+    return path;
+}
+
 std::string SampleWorkflowPanelUi::RecoveryDraftRowToken(
     const SourceCollectionLabelingView& labeling_view,
     std::size_t draft_index)
@@ -1173,7 +1194,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     PanelSessionInteraction& interaction,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
-    const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
+    const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
     RenderLabeling(
@@ -1181,7 +1202,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
         UiLanguage::English,
         open,
         choose_output_path,
-        choose_npy_export_path,
+        choose_export_path,
         shortcut);
 }
 
@@ -1214,7 +1235,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     UiLanguage language,
     bool* open,
     const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
-    const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
+    const SampleLabelExportPathChooser& choose_export_path,
     SampleWorkflowShortcut& shortcut)
 {
     labeling_selector_rect_.reset();
@@ -1222,6 +1243,7 @@ void SampleWorkflowPanelUi::RenderLabeling(
     labeling_delete_rect_.reset();
     labeling_recovery_rect_.reset();
     labeling_export_rect_.reset();
+    labeling_export_format_rect_.reset();
     temporary_labeling_action_rect_.reset();
     labeling_delete_confirmation_rect_.reset();
     recovery_action_rects_.clear();
@@ -1311,6 +1333,17 @@ void SampleWorkflowPanelUi::RenderLabeling(
     const SourceCollectionSessionView& session_view =
         interaction.View();
     const SourceCollectionLabelingView labeling_view = session_view.labeling;
+    if (labeling_view.has_active_source &&
+        (!labeling_export_format_initialized_ ||
+         labeling_export_source_identity_ !=
+             labeling_view.source_identity)) {
+        labeling_export_format_initialized_ = true;
+        labeling_export_source_identity_ =
+            labeling_view.source_identity;
+        labeling_export_format_ =
+            RecommendedSampleLabelExportFormat(
+                labeling_view.source_kind);
+    }
     const std::optional<std::size_t> current_index = labeling_view.current_index;
     std::unordered_map<std::string, std::size_t> labeling_task_id_counts;
     if (!labeling_view.task_ids.empty()) {
@@ -2444,15 +2477,17 @@ void SampleWorkflowPanelUi::RenderLabeling(
         const std::string export_label = StableUiLabel(
             language,
             UiTextId::ExportLabels,
-            "SpecForgeExportLabelValuesToNpy");
+            "SpecForgeExportLabels");
         if (ImGui::Button(export_label.c_str())) {
             if (std::optional<std::filesystem::path> path =
-                    choose_npy_export_path()) {
+                    choose_export_path(
+                        labeling_export_format_)) {
                 (void)submit(
                     ChangeActiveSampleWorkflow(
                         ActiveSampleWorkflowIntent::
-                            ExportActiveLabelValuesToNpy(
-                                *path)));
+                            ExportActiveLabels(
+                                *path,
+                                labeling_export_format_)));
             }
         }
         const ImVec2 export_min = ImGui::GetItemRectMin();
@@ -2462,6 +2497,55 @@ void SampleWorkflowPanelUi::RenderLabeling(
             export_min.y,
             export_max.x,
             export_max.y};
+
+        ImGui::SameLine();
+        const char* export_format_text =
+            labeling_export_format_ ==
+                    SampleLabelExportFormat::Csv
+            ? "CSV"
+            : "NPY";
+        ImGui::SetNextItemWidth(
+            ImGui::CalcTextSize("CSV").x +
+            ImGui::GetFrameHeight() +
+            ImGui::GetStyle().FramePadding.x * 2.0f);
+        if (ImGui::BeginCombo(
+                "##SpecForgeLabelExportFormat",
+                export_format_text)) {
+            const bool npy_selected =
+                labeling_export_format_ ==
+                SampleLabelExportFormat::Npy;
+            if (ImGui::Selectable(
+                    "NPY##SpecForgeLabelExportFormatNpy",
+                    npy_selected)) {
+                labeling_export_format_ =
+                    SampleLabelExportFormat::Npy;
+            }
+            if (npy_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            const bool csv_selected =
+                labeling_export_format_ ==
+                SampleLabelExportFormat::Csv;
+            if (ImGui::Selectable(
+                    "CSV##SpecForgeLabelExportFormatCsv",
+                    csv_selected)) {
+                labeling_export_format_ =
+                    SampleLabelExportFormat::Csv;
+            }
+            if (csv_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        const ImVec2 export_format_min =
+            ImGui::GetItemRectMin();
+        const ImVec2 export_format_max =
+            ImGui::GetItemRectMax();
+        labeling_export_format_rect_ = {
+            export_format_min.x,
+            export_format_min.y,
+            export_format_max.x,
+            export_format_max.y};
     }
 
     bool block_shortcuts_this_frame = label_shortcut_capture_active_;

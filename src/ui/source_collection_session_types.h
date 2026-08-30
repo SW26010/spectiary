@@ -178,6 +178,7 @@ struct SourceCollectionLabelingRecoveryDraftView {
 struct SourceCollectionLabelingView {
     bool has_active_source = false;
     std::string source_identity;
+    std::string source_kind;
     std::optional<std::size_t> current_index;
     bool has_active_task = false;
     bool has_temporary_task = false;

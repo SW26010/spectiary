@@ -180,7 +180,7 @@ constexpr std::array kTextCatalog = {
     UiTextEntry{"Open annotation file", "打开标注文件"},
     UiTextEntry{"Sample annotation files", "样本标注文件"},
     UiTextEntry{"Save labeling annotation", "保存标注结果"},
-    UiTextEntry{"Export label values to NPY", "将标签值导出为 NPY"},
+    UiTextEntry{"Export label values", "导出标签值"},
     UiTextEntry{"NumPy label arrays", "NumPy 标签数组"},
     UiTextEntry{
         "Choose performance profile output folder",

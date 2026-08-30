@@ -802,8 +802,9 @@ std::optional<std::filesystem::path> ShowLabelOutputFilePicker(
     return DialogResultPath(dialog.Get());
 }
 
-std::optional<std::filesystem::path> ShowLabelValuesNpyExportFilePicker(
-    UiLanguage language)
+std::optional<std::filesystem::path> ShowLabelValuesExportFilePicker(
+    UiLanguage language,
+    SampleLabelExportFormat format)
 {
     ScopedComInitialization com;
     if (!com.ready()) {
@@ -822,26 +823,38 @@ std::optional<std::filesystem::path> ShowLabelValuesNpyExportFilePicker(
         dialog->SetOptions(options);
     }
 
+    const bool csv_export =
+        format == SampleLabelExportFormat::Csv;
     const std::wstring filter_name = Utf8ToWide(UiText(
         language,
-        UiTextId::NumpyLabelArraysFilter));
+        csv_export
+            ? UiTextId::CsvFilesFilter
+            : UiTextId::NumpyLabelArraysFilter));
     const COMDLG_FILTERSPEC export_filter = {
         filter_name.c_str(),
-        L"*.npy"};
+        csv_export ? L"*.csv" : L"*.npy"};
     const std::wstring title = Utf8ToWide(UiText(
         language,
         UiTextId::ExportLabelValuesDialog));
     dialog->SetTitle(title.c_str());
     dialog->SetFileTypes(1, &export_filter);
     dialog->SetFileTypeIndex(1);
-    dialog->SetDefaultExtension(L"npy");
+    dialog->SetDefaultExtension(
+        csv_export ? L"csv" : L"npy");
 
     const HRESULT show_result = dialog->Show(GetActiveWindow());
     if (show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED) ||
         FAILED(show_result)) {
         return std::nullopt;
     }
-    return DialogResultPath(dialog.Get());
+    const std::optional<std::filesystem::path> path =
+        DialogResultPath(dialog.Get());
+    return path
+        ? std::optional<std::filesystem::path>{
+              EnsureSampleLabelExportPathExtension(
+                  *path,
+                  format)}
+        : std::nullopt;
 }
 
 void RenderDiagnosticRows(
@@ -2672,9 +2685,10 @@ void ShellUi::RenderLabelingPanel(bool panel_open)
         },
         [language = application_settings_
              .View()
-             .language]() {
-            return ShowLabelValuesNpyExportFilePicker(
-                language);
+             .language](SampleLabelExportFormat format) {
+            return ShowLabelValuesExportFilePicker(
+                language,
+                format);
         },
         shortcut);
     HandleSessionAction(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/local_user_state.h"
+#include "domain/sample_label_export.h"
 #include "domain/spectrum_snapshot.h"
 #include "domain/source_collection_manifest.h"
 #include "ui/sample_labeling_controller.h"
@@ -79,7 +80,7 @@ enum class ActiveSampleWorkflowIntentKind {
     SetActiveLabelingAutoAdvance,
     SetActiveLabelingSkipLabeledOnAdvance,
     SetActiveLabelingOutputPath,
-    ExportActiveLabelValuesToNpy,
+    ExportActiveLabels,
     DeactivateActiveLabelingTask,
     AssignActiveLabelToCurrentSample,
     ClearActiveLabelForCurrentSample,
@@ -165,8 +166,9 @@ struct ActiveSampleWorkflowIntent {
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingAutoAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingSkipLabeledOnAdvance(bool enabled);
     [[nodiscard]] static ActiveSampleWorkflowIntent SetActiveLabelingOutputPath(std::filesystem::path output_path);
-    [[nodiscard]] static ActiveSampleWorkflowIntent ExportActiveLabelValuesToNpy(
-        std::filesystem::path output_path);
+    [[nodiscard]] static ActiveSampleWorkflowIntent ExportActiveLabels(
+        std::filesystem::path output_path,
+        SampleLabelExportFormat format);
     [[nodiscard]] static ActiveSampleWorkflowIntent DeactivateActiveLabelingTask();
     [[nodiscard]] static ActiveSampleWorkflowIntent AssignActiveLabelToCurrentSample(int code);
     [[nodiscard]] static ActiveSampleWorkflowIntent ClearActiveLabelForCurrentSample();
@@ -188,6 +190,8 @@ private:
     bool enabled = false;
     int label_code = kUnlabeledSampleLabelCode;
     bool allow_used_label_code_change = false;
+    SampleLabelExportFormat export_format =
+        SampleLabelExportFormat::Npy;
 };
 
 struct SampleFilteringIntent {

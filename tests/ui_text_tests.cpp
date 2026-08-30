@@ -208,6 +208,18 @@ void TestRepresentativeMappingsAreExact()
     Require(
         UiText(
             UiLanguage::English,
+            UiTextId::ExportLabelValuesDialog) ==
+            "Export label values",
+        "label export dialog title should be format-neutral");
+    Require(
+        UiText(
+            UiLanguage::SimplifiedChinese,
+            UiTextId::ExportLabelValuesDialog) ==
+            "导出标签值",
+        "localized label export dialog title should be format-neutral");
+    Require(
+        UiText(
+            UiLanguage::English,
             UiTextId::CaptureNextMainFrame) ==
             "Capture Next Main Frame",
         "English frame capture action should be exact");
@@ -755,16 +767,16 @@ void TestSampleWorkflowMappingsAreExact()
             "ASDF 文档已创建，但 SpecForge 无法持久化所有者切换。旧所有者仍保持活动状态；请重试迁移以采用该 ASDF 输出。"},
         ExpectedText{
             UiTextId::LabelValuesExportInvalidPath,
-            "Choose a .npy file for label export.",
-            "请选择 .npy 文件导出标签。"},
+            "Choose a file with the extension required by the selected label export format.",
+            "请选择扩展名符合所选标签导出格式要求的文件。"},
         ExpectedText{
             UiTextId::LabelValuesExportTargetProtected,
-            "This NPY export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
-            "此 NPY 导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"},
+            "This label export target belongs to, aliases, or is protected by a labeling owner. Choose a different file.",
+            "此标签导出目标属于、别名指向或正受标注所有者保护。请选择其他文件。"},
         ExpectedText{
             UiTextId::LabelValuesExportFailed,
-            "Could not export label values to NPY.",
-            "无法将标签值导出为 NPY。"},
+            "Could not export label values to the selected file.",
+            "无法将标签值导出到所选文件。"},
         ExpectedText{
             UiTextId::LabelingDeleteTargetChanged,
             "This labeling task changed on disk and could not be deleted from the stale view.",

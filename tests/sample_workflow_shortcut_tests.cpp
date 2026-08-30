@@ -38,6 +38,13 @@ struct SourceCollectionPanelUiTestAccess {
     {
         return intent.active_sample_workflow.task_id;
     }
+
+    [[nodiscard]] static SampleLabelExportFormat
+    ActiveWorkflowExportFormat(
+        const SourceCollectionSessionIntent& intent)
+    {
+        return intent.active_sample_workflow.export_format;
+    }
 };
 
 struct SampleWorkflowPanelUiTestAccess {
@@ -206,6 +213,27 @@ struct SampleWorkflowPanelUiTestAccess {
     LabelingExportRect(const SampleWorkflowPanelUi& panel)
     {
         return panel.labeling_export_rect_;
+    }
+
+    [[nodiscard]] static std::optional<std::array<float, 4>>
+    LabelingExportFormatRect(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_export_format_rect_;
+    }
+
+    [[nodiscard]] static SampleLabelExportFormat
+    LabelingExportFormat(
+        const SampleWorkflowPanelUi& panel)
+    {
+        return panel.labeling_export_format_;
+    }
+
+    static void SetLabelingExportFormat(
+        SampleWorkflowPanelUi& panel,
+        SampleLabelExportFormat format)
+    {
+        panel.labeling_export_format_ = format;
     }
 
     static void SetPendingAnnotationActivation(
@@ -447,6 +475,8 @@ specforge::SourceCollectionSessionView MakeLabelingPanelView(int label_code, cha
 {
     specforge::SourceCollectionSessionView view;
     view.labeling.has_active_source = true;
+    view.labeling.source_identity = "source";
+    view.labeling.source_kind = "npy";
     view.labeling.current_index = 0;
     view.labeling.has_active_task = true;
     view.labeling.active_task_is_temporary = false;
@@ -495,7 +525,8 @@ specforge::SampleWorkflowShortcut RenderLabelingPanelFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        []() -> std::optional<std::filesystem::path> {
+        [](specforge::SampleLabelExportFormat)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
         shortcut);
@@ -507,6 +538,10 @@ struct LabelingExportFrameObservation {
     int export_path_request_count = 0;
     std::optional<specforge::ActiveSampleWorkflowIntentKind>
         submitted_workflow_kind;
+    std::optional<specforge::SampleLabelExportFormat>
+        requested_export_format;
+    std::optional<specforge::SampleLabelExportFormat>
+        submitted_export_format;
 };
 
 LabelingExportFrameObservation RenderLabelingExportFrame(
@@ -530,6 +565,9 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
             observation.submitted_workflow_kind =
                 specforge::SourceCollectionPanelUiTestAccess::
                     ActiveWorkflowKind(intent);
+            observation.submitted_export_format =
+                specforge::SourceCollectionPanelUiTestAccess::
+                    ActiveWorkflowExportFormat(intent);
             return specforge::SourceCollectionSessionResult{};
         },
         [&view]() -> const specforge::SourceCollectionSessionView& {
@@ -542,10 +580,14 @@ LabelingExportFrameObservation RenderLabelingExportFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        [&observation]()
+        [&observation](
+            specforge::SampleLabelExportFormat format)
             -> std::optional<std::filesystem::path> {
             ++observation.export_path_request_count;
-            return std::filesystem::path{"export.npy"};
+            observation.requested_export_format = format;
+            return format == specforge::SampleLabelExportFormat::Csv
+                ? std::filesystem::path{"export.csv"}
+                : std::filesystem::path{"export.npy"};
         },
         shortcut);
     ImGui::EndFrame();
@@ -757,7 +799,8 @@ RecoveryFrameObservation RenderRecoveryFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        []() -> std::optional<std::filesystem::path> {
+        [](specforge::SampleLabelExportFormat)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
         shortcut);
@@ -851,7 +894,8 @@ LabelingTaskSwitchFrameObservation RenderLabelingTaskSwitchFrame(
         []() -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
-        []() -> std::optional<std::filesystem::path> {
+        [](specforge::SampleLabelExportFormat)
+            -> std::optional<std::filesystem::path> {
             return std::nullopt;
         },
         observation.shortcut);
@@ -1056,8 +1100,13 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
         specforge::SampleWorkflowPanelUiTestAccess::
             LabelingExportRect(panel);
     Require(
-        export_rect.has_value(),
-        "an active labeling task should expose Export Labels");
+        export_rect.has_value() &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormatRect(panel) &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+                specforge::SampleLabelExportFormat::Npy,
+        "an active NPY labeling source should expose Export Labels with the NPY selector default");
     const ImVec2 export_position(
         ((*export_rect)[0] + (*export_rect)[2]) * 0.5f,
         ((*export_rect)[1] + (*export_rect)[3]) * 0.5f);
@@ -1078,8 +1127,12 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
         submitted.export_path_request_count == 1 &&
             submitted.submitted_workflow_kind ==
                 specforge::ActiveSampleWorkflowIntentKind::
-                    ExportActiveLabelValuesToNpy,
-        "Export Labels should request an NPY path and submit only the stateless export intent");
+                    ExportActiveLabels &&
+            submitted.requested_export_format ==
+                specforge::SampleLabelExportFormat::Npy &&
+            submitted.submitted_export_format ==
+                specforge::SampleLabelExportFormat::Npy,
+        "Export Labels should request and submit the selected stateless NPY export format");
 
     specforge::SourceCollectionSessionView inactive_view =
         active_view;
@@ -1105,6 +1158,151 @@ void TestLabelingPanelRoutesExportLabelsAsASeparateIntent()
             structural.export_path_request_count == 0 &&
             !structural.submitted_workflow_kind,
         "Export Labels should be hidden for a structural canonical task without authoritative values");
+}
+
+void TestLabelingPanelKeepsFormatOverrideUntilSourceChanges()
+{
+    ScopedImGuiContext context;
+    specforge::SampleWorkflowPanelUi panel;
+    specforge::SourceCollectionSessionView npy_view =
+        MakeLabelingPanelView(7, 'q');
+
+    (void)RenderLabelingExportFrame(panel, npy_view);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+            specforge::SampleLabelExportFormat::Npy,
+        "NPY source should default label export to NPY");
+
+    specforge::SampleWorkflowPanelUiTestAccess::
+        SetLabelingExportFormat(
+            panel,
+            specforge::SampleLabelExportFormat::Csv);
+    (void)RenderLabelingExportFrame(panel, npy_view);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+            specforge::SampleLabelExportFormat::Csv,
+        "same-source rendering must preserve a manual CSV override");
+    panel.ResetForSampleWorkflow();
+    (void)RenderLabelingExportFrame(panel, npy_view);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+            specforge::SampleLabelExportFormat::Csv,
+        "same-source workflow resets must not discard the export override");
+
+    specforge::SourceCollectionSessionView next_npy_view =
+        npy_view;
+    next_npy_view.labeling.source_identity = "next-npy-source";
+    (void)RenderLabelingExportFrame(
+        panel,
+        next_npy_view);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+            specforge::SampleLabelExportFormat::Npy,
+        "source identity changes should reapply the NPY recommendation");
+
+    specforge::SourceCollectionSessionView folder_view =
+        npy_view;
+    folder_view.labeling.source_identity = "folder-source";
+    folder_view.labeling.source_kind = "folder";
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    const auto export_rect =
+        specforge::SampleWorkflowPanelUiTestAccess::
+            LabelingExportRect(panel);
+    Require(
+        export_rect &&
+            specforge::SampleWorkflowPanelUiTestAccess::
+                    LabelingExportFormat(panel) ==
+                specforge::SampleLabelExportFormat::Csv,
+        "folder source should default label export to CSV");
+
+    const ImVec2 export_position(
+        ((*export_rect)[0] + (*export_rect)[2]) * 0.5f,
+        ((*export_rect)[1] + (*export_rect)[3]) * 0.5f);
+    ImGui::GetIO().AddMousePosEvent(
+        export_position.x,
+        export_position.y);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation submitted =
+        RenderLabelingExportFrame(panel, folder_view);
+    Require(
+        submitted.export_path_request_count == 1 &&
+            submitted.requested_export_format ==
+                specforge::SampleLabelExportFormat::Csv &&
+            submitted.submitted_export_format ==
+                specforge::SampleLabelExportFormat::Csv,
+        "folder default should drive both the chooser and export intent as CSV");
+
+    specforge::SampleWorkflowPanelUiTestAccess::
+        SetLabelingExportFormat(
+            panel,
+            specforge::SampleLabelExportFormat::Npy);
+    ImGui::GetIO().AddMousePosEvent(0.0f, 0.0f);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    Require(
+        specforge::SampleWorkflowPanelUiTestAccess::
+                LabelingExportFormat(panel) ==
+            specforge::SampleLabelExportFormat::Npy,
+        "same folder source should preserve a manual NPY override");
+    ImGui::GetIO().AddMousePosEvent(
+        export_position.x,
+        export_position.y);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        true);
+    (void)RenderLabelingExportFrame(panel, folder_view);
+    ImGui::GetIO().AddMouseButtonEvent(
+        ImGuiMouseButton_Left,
+        false);
+    const LabelingExportFrameObservation overridden =
+        RenderLabelingExportFrame(panel, folder_view);
+    Require(
+        overridden.export_path_request_count == 1 &&
+            overridden.requested_export_format ==
+                specforge::SampleLabelExportFormat::Npy &&
+            overridden.submitted_export_format ==
+                specforge::SampleLabelExportFormat::Npy,
+        "folder NPY override should drive both the chooser and export intent");
+}
+
+void TestLabelExportFormatControlsDefaultExtension()
+{
+    Require(
+        specforge::RecommendedSampleLabelExportFormat(
+            "folder") ==
+                specforge::SampleLabelExportFormat::Csv &&
+            specforge::RecommendedSampleLabelExportFormat(
+                "npy") ==
+                specforge::SampleLabelExportFormat::Npy,
+        "source-aware recommendations should select CSV only for folder sources");
+    Require(
+        specforge::EnsureSampleLabelExportPathExtension(
+            "labels",
+            specforge::SampleLabelExportFormat::Npy) ==
+                std::filesystem::path{"labels.npy"} &&
+            specforge::EnsureSampleLabelExportPathExtension(
+                "labels",
+                specforge::SampleLabelExportFormat::Csv) ==
+                std::filesystem::path{"labels.csv"},
+        "missing export extensions should follow the selected format");
+    Require(
+        specforge::EnsureSampleLabelExportPathExtension(
+            "labels.txt",
+            specforge::SampleLabelExportFormat::Csv) ==
+            std::filesystem::path{"labels.txt"},
+        "an explicit extension should not be silently rewritten");
 }
 
 void TestShortcutDisplayUsesKeyboardLegends()
@@ -3517,6 +3715,8 @@ int main()
     TestCanonicalAnnotationActivationUsesSingleFileConfirmation();
     TestCanonicalOutputActionDistinguishesDraftMigrationAndCanonicalOwner();
     TestLabelingPanelRoutesExportLabelsAsASeparateIntent();
+    TestLabelingPanelKeepsFormatOverrideUntilSourceChanges();
+    TestLabelExportFormatControlsDefaultExtension();
     TestShortcutDisplayUsesKeyboardLegends();
     TestAddSortSourcePopupLocalizesBuiltInSampleName();
     TestShortcutCaptureAcceptsLettersAndKeypadDigits();

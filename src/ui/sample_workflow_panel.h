@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/sample_filter.h"
+#include "domain/sample_label_export.h"
 #include "domain/spectrum_snapshot.h"
 #include "ui/panel_session_interaction.h"
 #include "ui/sample_workflow_shortcut.h"
@@ -47,6 +48,19 @@ SampleWorkflowAnnotationActivationText(
 SampleWorkflowCanonicalOutputActionTextId(
     const SourceCollectionLabelingView& labeling_view);
 
+[[nodiscard]] SampleLabelExportFormat
+RecommendedSampleLabelExportFormat(
+    std::string_view source_kind) noexcept;
+
+[[nodiscard]] std::filesystem::path
+EnsureSampleLabelExportPathExtension(
+    std::filesystem::path path,
+    SampleLabelExportFormat format);
+
+using SampleLabelExportPathChooser =
+    std::function<std::optional<std::filesystem::path>(
+        SampleLabelExportFormat)>;
+
 class SampleWorkflowPanelUi {
 public:
     [[nodiscard]] static const char* LabelingWindowName();
@@ -59,14 +73,14 @@ public:
         PanelSessionInteraction& interaction,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
-        const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
+        const SampleLabelExportPathChooser& choose_export_path,
         SampleWorkflowShortcut& shortcut);
     void RenderLabeling(
         PanelSessionInteraction& interaction,
         UiLanguage language,
         bool* open,
         const std::function<std::optional<std::filesystem::path>()>& choose_output_path,
-        const std::function<std::optional<std::filesystem::path>()>& choose_npy_export_path,
+        const SampleLabelExportPathChooser& choose_export_path,
         SampleWorkflowShortcut& shortcut);
 
     void RenderFilters(
@@ -148,12 +162,18 @@ private:
     std::optional<std::array<float, 4>> labeling_delete_rect_;
     std::optional<std::array<float, 4>> labeling_recovery_rect_;
     std::optional<std::array<float, 4>> labeling_export_rect_;
+    std::optional<std::array<float, 4>>
+        labeling_export_format_rect_;
     std::optional<std::array<float, 4>> temporary_labeling_action_rect_;
     std::optional<std::array<float, 4>> labeling_delete_confirmation_rect_;
     std::unordered_map<std::string, std::array<float, 4>>
         recovery_action_rects_;
     std::unordered_map<std::string, std::array<float, 4>>
         recovery_identity_rects_;
+    bool labeling_export_format_initialized_ = false;
+    std::string labeling_export_source_identity_;
+    SampleLabelExportFormat labeling_export_format_ =
+        SampleLabelExportFormat::Npy;
     SampleAnnotationWorkflowRelationship pending_annotation_activation_relationship_ =
         SampleAnnotationWorkflowRelationship::PlainAnnotation;
     SampleLabelingOutputArtifactFormat

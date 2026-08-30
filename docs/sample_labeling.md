@@ -943,13 +943,15 @@ Numeric tasks write stable label codes, and the sample label set owns the
 interpretation from numeric code to user-facing label. Unlabeled samples use
 `-1`; the canonical v1 value array is signed `int32`.
 Save and autosave continue to publish through the task's declared owner format.
-`Export Labels` writes a standalone `.npy` snapshot of the current task values
-in canonical source-roster order without changing that owner. The exported file
-does not become an autosave target, is not attached automatically, and has no
-canonical `.sf-labels.json` sidecar. The domain/controller export path also
-supports the canonical-roster `.csv` mapping described above without changing
-the owner. Exposing the CSV choice in the labeling UI remains separate
-follow-up work.
+`Export Labels` writes the current task values in canonical source-roster order
+using the adjacent NPY/CSV UI selection without changing that owner. NPY sources
+recommend NPY and folder sources recommend CSV when a source context becomes
+active; a manual override remains selected until the source identity changes.
+The save dialog filter, default extension, and missing-extension completion
+follow the current selection. This lightweight preference does not enter task
+canonical data. The exported file does not become an autosave target, is not
+attached automatically, and NPY interchange export has no canonical
+`.sf-labels.json` sidecar.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 

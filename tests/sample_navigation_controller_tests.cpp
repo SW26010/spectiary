@@ -767,10 +767,13 @@ void TestPreparedSourceAttachesFolderCsvByCanonicalIdentity()
             : outcome.message);
     const specforge::SourceCollectionNavigationView view =
         coordinator.NavigationView(snapshot);
+    const specforge::SourceCollectionLabelingView labeling_view =
+        coordinator.LabelingView(snapshot);
     Require(
         view.current_annotations.size() == 1 &&
-            view.current_annotations.front().display_text == "Z",
-        "coordinator prepared-source CSV attachment should use the canonical filename roster");
+            view.current_annotations.front().display_text == "Z" &&
+            labeling_view.source_kind == "folder",
+        "coordinator prepared-source projection should expose the canonical folder kind and CSV roster");
 
     std::filesystem::remove_all(directory, cleanup_error);
 }

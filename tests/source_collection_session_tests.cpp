@@ -1,3 +1,4 @@
+#include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling.h"
 #include "domain/sample_labeling_asdf_codec.h"
@@ -801,14 +802,17 @@ specforge::SourceCollectionSessionIntent SetActiveLabelingOutputPath(std::filesy
         specforge::ActiveSampleWorkflowIntent::SetActiveLabelingOutputPath(std::move(output_path)));
 }
 
-specforge::SourceCollectionSessionIntent ExportActiveLabelValuesToNpy(
-    std::filesystem::path output_path)
+specforge::SourceCollectionSessionIntent ExportActiveLabels(
+    std::filesystem::path output_path,
+    specforge::SampleLabelExportFormat format =
+        specforge::SampleLabelExportFormat::Npy)
 {
     return specforge::SourceCollectionSessionIntent::
         ChangeActiveSampleWorkflow(
             specforge::ActiveSampleWorkflowIntent::
-                ExportActiveLabelValuesToNpy(
-                    std::move(output_path)));
+                ExportActiveLabels(
+                    std::move(output_path),
+                    format));
 }
 
 specforge::SourceCollectionSessionIntent UpsertActiveLabel(specforge::SampleLabelDefinition label)
@@ -2536,6 +2540,8 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         UniqueTempPath("_export_source.npy");
     const std::filesystem::path export_path =
         UniqueTempPath("_export_labels.npy");
+    const std::filesystem::path csv_export_path =
+        UniqueTempPath("_export_labels.csv");
     const std::filesystem::path sidecar_path =
         specforge::SampleAnnotationIoAdapter::
             MetadataPathForResult(export_path);
@@ -2569,7 +2575,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
     const specforge::SourceCollectionSessionResult result =
         Submit(
             session,
-            ExportActiveLabelValuesToNpy(export_path));
+            ExportActiveLabels(export_path));
     Require(
         result.labeling_issue ==
                 specforge::SampleLabelingOperationResult::
@@ -2600,6 +2606,40 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         !std::filesystem::exists(sidecar_path),
         "session export must not write a canonical metadata sidecar");
 
+    const specforge::SourceCollectionSessionResult csv_result =
+        Submit(
+            session,
+            ExportActiveLabels(
+                csv_export_path,
+                specforge::SampleLabelExportFormat::Csv));
+    Require(
+        csv_result.labeling_issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None &&
+            !csv_result.changed &&
+            !csv_result.action.workflow_changed,
+        "CSV interchange export should use the same stateless session path");
+    specforge::BoundedCsvFileReader csv_reader(
+        csv_export_path);
+    const specforge::CsvRecordReadResult csv_header =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_first =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_second =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_third =
+        csv_reader.ReadRecord();
+    Require(
+        csv_header.record ==
+                specforge::CsvRecord({"sample", "label"}) &&
+            csv_first.record ==
+                specforge::CsvRecord({"0", "exported"}) &&
+            csv_second.record ==
+                specforge::CsvRecord({"1", "unlabeled"}) &&
+            csv_third.record ==
+                specforge::CsvRecord({"2", "unlabeled"}),
+        "session CSV intent should preserve canonical source-index order and stable label text");
+
     const specforge::SourceCollectionLabelingView& labeling =
         session.View().labeling;
     Require(
@@ -2615,7 +2655,7 @@ void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
         "session export must not formalize the task or change its autosave owner");
     Require(
         session.View().navigation.current_annotations.empty(),
-        "the exported NPY must not be attached as a labeling owner or annotation");
+        "interchange exports must not be attached as labeling owners or annotations");
 }
 
 void TestTemporaryDraftRecoveryViewRestoresAfterRestart()
