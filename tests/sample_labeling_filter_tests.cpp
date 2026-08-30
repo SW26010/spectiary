@@ -1,5 +1,6 @@
 #include "domain/sample_filter.h"
 #include "domain/sample_annotation_io.h"
+#include "domain/csv_record_codec.h"
 #include "domain/sample_labeling.h"
 #include "domain/sample_label_export.h"
 #include "domain/sample_labeling_asdf_store.h"
@@ -2369,17 +2370,37 @@ void TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization()
         directory / "labels.csv";
     error.clear();
     Require(
-        !specforge::ExportSampleLabelSnapshot(
-             csv_path,
-             csv_snapshot,
-             &error) &&
-            error.find("not implemented") !=
-                std::string::npos &&
-            !std::filesystem::exists(csv_path),
-        "this refactor should dispatch but not implement CSV output");
+        specforge::ExportSampleLabelSnapshot(
+            csv_path,
+            csv_snapshot,
+            &error),
+        error.empty()
+            ? "snapshot-dispatched CSV export should succeed"
+            : error);
+    specforge::BoundedCsvFileReader csv_reader(csv_path);
+    const specforge::CsvRecordReadResult header =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult first =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult second =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult third =
+        csv_reader.ReadRecord();
+    Require(
+        header.record ==
+                specforge::CsvRecord({"filename", "label"}) &&
+            first.record == specforge::CsvRecord(
+                {"zeta.fits", "selected"}) &&
+            second.record == specforge::CsvRecord(
+                {"alpha.fits", "unlabeled"}) &&
+            third.record == specforge::CsvRecord(
+                {"beta.fits", "selected"}) &&
+            csv_reader.ReadRecord().status ==
+                specforge::CsvRecordReadStatus::End,
+        "CSV dispatcher should preserve the canonical source roster order");
 }
 
-void TestLabelValuesNpyExportIsStateless()
+void TestLabelValueExportsAreStateless()
 {
     const std::filesystem::path directory =
         FreshTestDirectory(
@@ -2445,6 +2466,9 @@ void TestLabelValuesNpyExportIsStateless()
         controller.AssignLabel(0, 5).write.accepted &&
             controller.AssignLabel(2, 5).write.accepted,
         "export fixture should retain current pending values");
+    Require(
+        controller.RememberActivePosition(1).accepted,
+        "export fixture should remember its current canonical sample");
 
     const specforge::SampleLabelingTask before =
         *ActiveTask(controller);
@@ -2504,6 +2528,85 @@ void TestLabelValuesNpyExportIsStateless()
             std::vector<std::int32_t>({5, -1, 5}),
         "controller export should use the current task values in source roster order");
 
+    const std::filesystem::path blocked_csv_export =
+        directory / "blocked-controller-export.csv";
+    specforge::ExclusiveFileLeaseAcquireResult csv_target_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            blocked_csv_export);
+    Require(
+        csv_target_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "CSV export fixture should acquire the target's single-file lease");
+    const specforge::SampleLabelingOperationResult csv_blocked =
+        controller.ExportActiveLabels(
+            blocked_csv_export,
+            specforge::SampleLabelExportFormat::Csv);
+    Require(
+        !csv_blocked.accepted &&
+            !csv_blocked.export_attempted &&
+            csv_blocked.issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::LabelValuesExportTargetProtected,
+        "CSV export should respect a lease on its one target file");
+    csv_target_lease.lease.Reset();
+
+    const std::filesystem::path csv_export =
+        directory / "controller-export.csv";
+    const std::filesystem::path csv_adjacent =
+        specforge::SampleAnnotationIoAdapter::
+            MetadataPathForResult(csv_export);
+    specforge::ExclusiveFileLeaseAcquireResult adjacent_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            csv_adjacent);
+    Require(
+        adjacent_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "CSV export fixture should hold an unrelated adjacent-path lease");
+    const specforge::SampleLabelingOperationResult csv_exported =
+        controller.ExportActiveLabels(
+            csv_export,
+            specforge::SampleLabelExportFormat::Csv);
+    Require(
+        csv_exported.accepted &&
+            csv_exported.export_attempted &&
+            csv_exported.exported &&
+            !csv_exported.changed &&
+            !csv_exported.output_save_attempted &&
+            !csv_exported.output_saved &&
+            csv_exported.issue ==
+                specforge::SampleLabelingOperationResult::
+                    Issue::None,
+        "CSV export should remain separate from canonical persistence");
+    adjacent_lease.lease.Reset();
+    specforge::BoundedCsvFileReader csv_reader(csv_export);
+    const specforge::CsvRecordReadResult csv_header =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_first =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_second =
+        csv_reader.ReadRecord();
+    const specforge::CsvRecordReadResult csv_third =
+        csv_reader.ReadRecord();
+    Require(
+        csv_header.record == specforge::CsvRecord(
+                {"sample", "label"}) &&
+            csv_first.record == specforge::CsvRecord(
+                {"0", "selected"}) &&
+            csv_second.record == specforge::CsvRecord(
+                {"1", "unlabeled"}) &&
+            csv_third.record == specforge::CsvRecord(
+                {"2", "selected"}) &&
+            csv_reader.ReadRecord().status ==
+                specforge::CsvRecordReadStatus::End,
+        "controller CSV export should place zero-based canonical source indices in the sample column");
+    Require(
+        !std::filesystem::exists(csv_adjacent),
+        "CSV export must not create or claim an adjacent legacy sidecar");
+
     const specforge::SampleLabelingTask& after =
         *ActiveTask(controller);
     Require(
@@ -2512,6 +2615,8 @@ void TestLabelValuesNpyExportIsStateless()
             after.output_path == before.output_path &&
             after.output_format == before.output_format &&
             after.values == before.values &&
+            after.remembered_position ==
+                before.remembered_position &&
             after.pending_sample_indices ==
                 before.pending_sample_indices &&
             after.metadata_save_pending ==
@@ -2519,14 +2624,15 @@ void TestLabelValuesNpyExportIsStateless()
             after.save_state.kind == before.save_state.kind &&
             after.save_state.pending_count ==
                 before.save_state.pending_count,
-        "NPY export must not change the task owner, autosave state, or pending overlay");
+        "one-shot exports must not change the task owner, autosave state, "
+        "pending overlay, or remembered sample");
     Require(
         controller.View().revision == revision_before &&
             controller.state_save_pending() ==
                 state_save_pending_before &&
             controller.NextMaintenanceDeadline() ==
                 maintenance_deadline_before,
-        "NPY export must not touch controller revision or persistence scheduling");
+        "one-shot exports must not touch controller revision or persistence scheduling");
     Require(
         !std::filesystem::exists(controller_sidecar),
         "controller export must not create an adjacent legacy sidecar");
@@ -2540,6 +2646,15 @@ void TestLabelValuesNpyExportIsStateless()
             specforge::ExclusiveFileLeaseAcquireStatus::
                 Acquired,
         "one-shot export must not retain a task artifact lease");
+    specforge::ExclusiveFileLeaseAcquireResult csv_export_lease =
+        TryAcquireCurrentStableArtifactLease(
+            cache_path,
+            csv_export);
+    Require(
+        csv_export_lease.status ==
+            specforge::ExclusiveFileLeaseAcquireStatus::
+                Acquired,
+        "one-shot CSV export must not retain its transient target lease");
 }
 
 void TestLabelValuesNpyExportRejectsManagedAndLeasedOwners()
@@ -10683,7 +10798,7 @@ int main(int argc, char* argv[])
         TestChangingUsedSampleLabelCodeRequiresConfirmation();
         TestSampleLabelResultWritesCompactNpy();
         TestSampleLabelExportSnapshotUsesCanonicalRosterAndStableSerialization();
-        TestLabelValuesNpyExportIsStateless();
+        TestLabelValueExportsAreStateless();
         TestLabelValuesNpyExportRejectsManagedAndLeasedOwners();
         TestOutputArtifactOwnershipIsFormatAware();
         TestSampleLabelResultWritesMetadataSidecar();

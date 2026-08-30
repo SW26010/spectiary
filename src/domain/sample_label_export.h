@@ -71,8 +71,8 @@ DeserializeSampleLabelValueFromExport(
     const std::filesystem::path& path,
     SampleLabelExportFormat format);
 
-// Format dispatcher for one-shot interchange exports. CSV serialization is a
-// later slice; the Csv branch currently fails without creating an artifact.
+// Format dispatcher for one-shot interchange exports. It consumes only the
+// immutable snapshot and never adopts the target as durable task state.
 [[nodiscard]] bool ExportSampleLabelSnapshot(
     const std::filesystem::path& path,
     const SampleLabelExportSnapshot& snapshot,

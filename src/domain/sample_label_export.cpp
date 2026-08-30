@@ -1,5 +1,6 @@
 #include "domain/sample_label_export.h"
 
+#include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
 #include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_collection_manifest.h"
@@ -42,6 +43,60 @@ bool IsAsciiCaseInsensitiveExtension(
     return true;
 }
 
+bool ExportSampleLabelSnapshotToCsv(
+    const std::filesystem::path& path,
+    const SampleLabelExportSnapshot& snapshot,
+    std::string* error_message)
+{
+    if (snapshot.source_kind == "folder" &&
+        snapshot.uses_source_index) {
+        SetError(
+            error_message,
+            "folder CSV export requires a canonical filename roster");
+        return false;
+    }
+
+    std::vector<CsvRecord> records;
+    records.reserve(snapshot.values.size() + 1U);
+    std::string identity_header;
+    if (snapshot.source_kind == "folder") {
+        identity_header = "filename";
+    } else {
+        identity_header = "sample";
+    }
+    records.push_back(
+        CsvRecord{std::move(identity_header), "label"});
+
+    for (std::size_t index = 0;
+         index < snapshot.values.size();
+         ++index) {
+        std::string identity = snapshot.uses_source_index
+            ? std::to_string(index)
+            : snapshot.sample_names[index];
+        records.push_back(CsvRecord{
+            std::move(identity),
+            SerializeSampleLabelValueForExport(
+                snapshot.labels,
+                snapshot.values[index]),
+        });
+    }
+
+    const CsvRecordWriteResult result =
+        WriteCsvRecordsAtomically(path, records);
+    if (!result.succeeded()) {
+        SetError(
+            error_message,
+            result.error.message.empty()
+                ? "could not export sample labels as CSV"
+                : result.error.message);
+        return false;
+    }
+    if (error_message != nullptr) {
+        error_message->clear();
+    }
+    return true;
+}
+
 }  // namespace
 
 std::optional<SampleLabelExportSnapshot>
@@ -76,6 +131,14 @@ BuildSampleLabelExportSnapshot(
         SetError(
             error_message,
             "canonical labeling source sample names do not form a valid roster");
+        return std::nullopt;
+    }
+    if (format == SampleLabelExportFormat::Csv &&
+        source.source_kind == "folder" &&
+        source.sample_names.empty()) {
+        SetError(
+            error_message,
+            "folder CSV export requires a canonical filename roster");
         return std::nullopt;
     }
 
@@ -168,11 +231,18 @@ bool ExportSampleLabelSnapshot(
     if (snapshot.uses_source_index !=
             snapshot.sample_names.empty() ||
         (!snapshot.uses_source_index &&
-         snapshot.sample_names.size() !=
-             snapshot.values.size())) {
+         !SourceCollectionSampleNamesFormCanonicalRoster(
+             snapshot.sample_names,
+             snapshot.values.size()))) {
         SetError(
             error_message,
             "sample label export snapshot roster is invalid");
+        return false;
+    }
+    if (snapshot.source_kind.empty()) {
+        SetError(
+            error_message,
+            "sample label export snapshot source kind is empty");
         return false;
     }
 
@@ -183,10 +253,10 @@ bool ExportSampleLabelSnapshot(
             snapshot.values,
             error_message);
     case SampleLabelExportFormat::Csv:
-        SetError(
-            error_message,
-            "CSV sample label export is not implemented");
-        return false;
+        return ExportSampleLabelSnapshotToCsv(
+            path,
+            snapshot,
+            error_message);
     }
     SetError(
         error_message,

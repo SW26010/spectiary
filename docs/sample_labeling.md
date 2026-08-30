@@ -847,9 +847,15 @@ canonical ASDF owns one document, while legacy NPY owns the `.npy` result and
 its `.sf-labels.json` sidecar. Explicit migration creates a new canonical ASDF
 owner from the active legacy task without routing the destination through the
 legacy writer or changing either source artifact.
-Future adapters such as CSV can be added if they can
-produce or consume the same per-sample annotation result shape and validate that
-the value count matches the source collection's spectrum count.
+CSV is also available as a one-shot interchange export through the domain and
+controller boundary. Folder sources write `filename,label`; every non-folder
+source writes `sample,label`. The first column uses canonical sample names when
+present and otherwise contains the zero-based canonical source-row index. Label
+text uses the stable non-localized export serialization, including the fixed
+`unlabeled` sentinel and reversible escaping for colliding label names. CSV
+writes are atomic and transiently guard only the selected `.csv` target; they do
+not adopt an output owner, create a sidecar, or change task/save/navigation
+state. CSV ingestion remains separate follow-up work.
 
 The ASDF codec remains a caller-owned stream component. A separate domain
 document store owns source-aware open, the immutable durable roster/base
@@ -934,8 +940,10 @@ Save and autosave continue to publish through the task's declared owner format.
 `Export Labels` writes a standalone `.npy` snapshot of the current task values
 in canonical source-roster order without changing that owner. The exported file
 does not become an autosave target, is not attached automatically, and has no
-canonical `.sf-labels.json` sidecar; CSV and a format chooser remain separate
-follow-up work.
+canonical `.sf-labels.json` sidecar. The domain/controller export path also
+supports the canonical-roster `.csv` mapping described above without changing
+the owner. Exposing the CSV choice in the labeling UI and CSV ingestion remain
+separate follow-up work.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 

@@ -169,6 +169,17 @@ std::vector<std::string> NpyExportEditLeaseKeys(
                 LegacyNpyWithSidecar));
 }
 
+std::vector<std::string> SingleFileExportEditLeaseKeys(
+    const std::filesystem::path& output_path)
+{
+    SampleAnnotationArtifactIdentitySet identities;
+    identities.stable_path_keys.push_back(
+        SourcePathIdentityKey(output_path));
+    identities.physical_path_keys =
+        OutputPathIdentityKeys(output_path);
+    return OutputEditLeaseKeys(identities);
+}
+
 bool HasManagedOutputArtifactConflict(
     const std::unordered_map<
         std::string,
@@ -2786,6 +2797,16 @@ SampleLabelingOperationResult
 SampleLabelingController::ExportActiveLabelValuesToNpy(
     const std::filesystem::path& output_path) const
 {
+    return ExportActiveLabels(
+        output_path,
+        SampleLabelExportFormat::Npy);
+}
+
+SampleLabelingOperationResult
+SampleLabelingController::ExportActiveLabels(
+    const std::filesystem::path& output_path,
+    SampleLabelExportFormat format) const
+{
     const SampleLabelingTask* task = ActiveTask();
     if (task == nullptr || !task->values_are_authoritative ||
         !active_source_descriptor_) {
@@ -2793,7 +2814,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     }
     if (!IsSampleLabelExportPath(
             output_path,
-            SampleLabelExportFormat::Npy)) {
+            format)) {
         SampleLabelingOperationResult rejected = RejectOperation();
         rejected.issue =
             SampleLabelingOperationResult::Issue::
@@ -2804,7 +2825,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     std::string snapshot_error;
     const std::optional<SampleLabelExportSnapshot> snapshot =
         BuildSampleLabelExportSnapshot(
-            SampleLabelExportFormat::Npy,
+            format,
             *task,
             *active_source_descriptor_,
             &snapshot_error);
@@ -2837,7 +2858,9 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     };
 
     const std::vector<std::string> export_artifact_keys =
-        NpyExportEditLeaseKeys(output_path);
+        format == SampleLabelExportFormat::Npy
+        ? NpyExportEditLeaseKeys(output_path)
+        : SingleFileExportEditLeaseKeys(output_path);
     TaskEditLeaseSet export_artifact_guard;
     ExclusiveFileLeaseAcquireResult guard =
         TryAttachArtifactLeases(
@@ -2851,7 +2874,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
         ExclusiveFileLeaseAcquireStatus::Acquired) {
         return reject_guard_failure(
             guard.error.empty()
-            ? "could not guard the NPY export artifact set"
+            ? "could not guard the label export target"
             : std::move(guard.error));
     }
 
@@ -2874,7 +2897,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
         if (latest.issue_kind !=
             SampleLabelingStateCacheLoadIssueKind::None) {
             std::string diagnostic = latest.warning.empty()
-                ? "could not verify the latest labeling owners before NPY export"
+                ? "could not verify the latest labeling owners before label export"
                 : latest.warning;
             if (!latest.diagnostic_detail.empty()) {
                 diagnostic += ": " +
@@ -2889,19 +2912,21 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
             return reject_protected();
         }
     }
-    std::error_code sidecar_probe_error;
-    const bool legacy_sidecar_exists =
-        std::filesystem::exists(
-            SampleAnnotationIoAdapter::
-                MetadataPathForResult(output_path),
-            sidecar_probe_error);
-    if (sidecar_probe_error) {
-        return reject_guard_failure(
-            "could not verify the adjacent label metadata sidecar: " +
-            sidecar_probe_error.message());
-    }
-    if (legacy_sidecar_exists) {
-        return reject_protected();
+    if (format == SampleLabelExportFormat::Npy) {
+        std::error_code sidecar_probe_error;
+        const bool legacy_sidecar_exists =
+            std::filesystem::exists(
+                SampleAnnotationIoAdapter::
+                    MetadataPathForResult(output_path),
+                sidecar_probe_error);
+        if (sidecar_probe_error) {
+            return reject_guard_failure(
+                "could not verify the adjacent label metadata sidecar: " +
+                sidecar_probe_error.message());
+        }
+        if (legacy_sidecar_exists) {
+            return reject_protected();
+        }
     }
 
     SampleLabelingOperationResult result;
@@ -2916,6 +2941,7 @@ SampleLabelingController::ExportActiveLabelValuesToNpy(
     if (!result.exported) {
         std::error_code sidecar_error;
         const bool failure_sidecar_exists =
+            format == SampleLabelExportFormat::Npy &&
             std::filesystem::exists(
                 SampleAnnotationIoAdapter::
                     MetadataPathForResult(output_path),

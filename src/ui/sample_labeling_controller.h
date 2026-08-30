@@ -23,6 +23,7 @@
 namespace specforge {
 
 struct SourceCollectionIdentity;
+enum class SampleLabelExportFormat;
 
 // Borrowed read-only projection. The pointers remain valid only until the
 // controller's next mutation or destruction; callers must not retain them
@@ -255,6 +256,10 @@ public:
     [[nodiscard]] SampleLabelingOperationResult
         ExportActiveLabelValuesToNpy(
             const std::filesystem::path& output_path) const;
+    [[nodiscard]] SampleLabelingOperationResult
+        ExportActiveLabels(
+            const std::filesystem::path& output_path,
+            SampleLabelExportFormat format) const;
     [[nodiscard]] bool CanDeactivateActiveTask() const;
     [[nodiscard]] bool CanDeleteActiveTask() const;
     [[nodiscard]] SampleLabelingOperationResult DeactivateActiveTask();
