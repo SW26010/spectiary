@@ -1505,23 +1505,17 @@ SampleWorkflowCoordinator::ActivateLabelingTaskFromAnnotation(
     const SampleAnnotationResult* annotation = FindSampleWorkflowAnnotationByPath(*context, annotation_path);
     std::optional<SampleAnnotationResult> loaded_annotation;
     if (annotation == nullptr) {
-        const std::optional<SourceCollectionIdentity> source_identity =
-            navigation_.active_source_identity();
-        if (!source_identity) {
+        const std::optional<SampleLabelingSourceCompatibility>
+            source_compatibility =
+                navigation_.active_source_compatibility();
+        if (!source_compatibility) {
             return outcome;
         }
         std::string load_error;
         loaded_annotation =
             SampleAnnotationIoAdapter{}.LoadForSource(
                 annotation_path,
-                SampleAnnotationSourceCompatibility{
-                    .base_identity = source_identity->id,
-                    .source_name = source_identity->source_name,
-                    .source_fingerprint =
-                        source_identity->source_fingerprint,
-                    .sample_count = source_identity->spectrum_count,
-                    .sample_names = context->sample_names,
-                },
+                *source_compatibility,
                 &load_error);
         if (!loaded_annotation) {
             return outcome;

@@ -1,9 +1,12 @@
+#include "domain/csv_record_codec.h"
+#include "domain/sample_label_export.h"
 #include "domain/spectrum_snapshot.h"
 #include "domain/sample_labeling_asdf_codec.h"
 #include "domain/sample_labeling_document.h"
 #include "profile/navigation_latency_trace.h"
 #include "ui/sample_navigation_controller.h"
 #include "ui/sample_navigation_state_cache_io.h"
+#include "ui/sample_workflow_preparation.h"
 #include "ui/sample_workflow_coordinator.h"
 #include "ui/source_collection_session.h"
 
@@ -550,6 +553,350 @@ void TestControllerAttachesAsdfLabelingDocumentForActiveSource()
     std::filesystem::remove(source_path, cleanup_error);
     std::filesystem::remove(annotation_path, cleanup_error);
     std::filesystem::remove(cache_path, cleanup_error);
+}
+
+void TestControllerAttachesFolderCsvByFilenameIdentity()
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        "specforge_nav_folder_csv_annotation";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(directory, cleanup_error);
+    std::filesystem::create_directories(directory);
+    const std::filesystem::path annotation_path =
+        directory / "labels.csv";
+    const std::filesystem::path cache_path =
+        directory / "navigation.json";
+    Require(
+        specforge::WriteCsvRecordsAtomically(
+            annotation_path,
+            std::vector<specforge::CsvRecord>{
+                {"filename", "label"},
+                {"alpha.fits", "A"},
+                {"zeta.fits", "Z"},
+            })
+            .succeeded(),
+        "folder CSV annotation fixture should write");
+
+    specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(
+            directory,
+            "folder-source",
+            2,
+            1);
+    auto mutable_snapshot =
+        std::const_pointer_cast<specforge::SpectrumSnapshot>(
+            snapshot);
+    mutable_snapshot->source.metadata.push_back(
+        specforge::SpectrumMetadataEntry{
+            "source_type",
+            "folder_collection",
+            "test",
+        });
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {
+        "zeta.fits",
+        "alpha.fits",
+    };
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        snapshot,
+        specforge::SourceCollectionIdentity{
+            .id = "folder-source-identity",
+            .source_name = "spectra",
+            .source_fingerprint = "folder-fingerprint",
+            .context_fingerprint = "folder-context",
+            .spectrum_count = 2,
+        },
+        std::move(manifest));
+    const std::optional<specforge::SampleLabelingSourceCompatibility>
+        source_compatibility =
+            controller.active_source_compatibility();
+    Require(
+        source_compatibility &&
+            source_compatibility->source_kind == "folder" &&
+            controller.current_index() &&
+            *controller.current_index() == 1,
+        "navigation should retain the canonical folder kind and current sample");
+
+    std::string message;
+    Require(
+        controller.AddReadOnlyAnnotationToActiveSource(
+            annotation_path,
+            &message),
+        message.empty()
+            ? "folder CSV annotation should attach"
+            : message);
+    const std::uint64_t attached_generation =
+        controller.active_context_generation();
+    const specforge::SourceCollectionManifest* context =
+        controller.active_context();
+    Require(
+        context != nullptr &&
+            context->annotations.size() == 1 &&
+            context->annotations.front().kind ==
+                specforge::SampleAnnotationKind::Text &&
+            context->annotations.front().relationship ==
+                specforge::
+                    SampleAnnotationWorkflowRelationship::
+                        PlainAnnotation &&
+            !context->annotations.front().label_metadata &&
+            !context->annotations.front().labeling_document,
+        "folder CSV should attach only as a plain text annotation");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            context->annotations.front(),
+            context->annotations.front().values[0]) == "Z" &&
+            specforge::FormatSampleAnnotationValue(
+                context->annotations.front(),
+                context->annotations.front().values[1]) == "A" &&
+            controller.current_index() &&
+            *controller.current_index() == 1,
+        "folder CSV attachment should reorder by filename without moving the current sample");
+
+    Require(
+        specforge::WriteCsvRecordsAtomically(
+            annotation_path,
+            std::vector<specforge::CsvRecord>{
+                {"filename", "label"},
+                {"zeta.fits", "changed"},
+                {"zeta.fits", "duplicate"},
+                {"alpha.fits", "A"},
+            })
+            .succeeded(),
+        "duplicate folder CSV fixture should write");
+    Require(
+        !controller.AddReadOnlyAnnotationToActiveSource(
+            annotation_path,
+            &message) &&
+            controller.active_context_generation() ==
+                attached_generation,
+        "duplicate CSV identity should not replace the attached annotation");
+    context = controller.active_context();
+    Require(
+        context != nullptr &&
+            context->annotations.size() == 1 &&
+            specforge::FormatSampleAnnotationValue(
+                context->annotations.front(),
+                context->annotations.front().values[0]) == "Z" &&
+            !context->diagnostics.empty() &&
+            context->diagnostics.back().detail.find(
+                "duplicate sample identity") !=
+                std::string::npos,
+        "rejected duplicate CSV should preserve the previous attachment and report a diagnostic");
+
+    std::filesystem::remove_all(directory, cleanup_error);
+}
+
+void TestPreparedSourceAttachesFolderCsvByCanonicalIdentity()
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        "specforge-prepared-folder-csv-annotation";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(directory, cleanup_error);
+    std::filesystem::create_directories(directory, cleanup_error);
+    const std::filesystem::path cache_path =
+        directory / "navigation-state.json";
+    const std::filesystem::path annotation_path =
+        directory / "labels.csv";
+    Require(
+        specforge::WriteCsvRecordsAtomically(
+            annotation_path,
+            std::vector<specforge::CsvRecord>{
+                {"filename", "label"},
+                {"alpha.fits", "A"},
+                {"zeta.fits", "Z"},
+            })
+            .succeeded(),
+        "prepared folder CSV annotation fixture should write");
+
+    specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(
+            directory,
+            "prepared-folder-source",
+            2,
+            0);
+    auto mutable_snapshot =
+        std::const_pointer_cast<specforge::SpectrumSnapshot>(
+            snapshot);
+    mutable_snapshot->source.metadata.push_back(
+        specforge::SpectrumMetadataEntry{
+            "source_type",
+            "folder_collection",
+            "test",
+        });
+    const specforge::SourceCollectionIdentity identity{
+        .id = "prepared-folder-source-identity",
+        .source_name = "spectra",
+        .source_fingerprint = "prepared-folder-fingerprint",
+        .context_fingerprint = "prepared-folder-context",
+        .spectrum_count = 2,
+    };
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {
+        "zeta.fits",
+        "alpha.fits",
+    };
+    specforge::PreparedSampleWorkflowState prepared;
+    prepared.current_index = 0;
+
+    specforge::SourceCollectionContext context;
+    context.identity = identity;
+    context.manifest = std::move(manifest);
+    specforge::SampleWorkflowCoordinator coordinator(
+        cache_path,
+        directory / "labeling-state.json",
+        directory / "workflow-state.json");
+    (void)coordinator.SyncPreparedActiveSource(
+        "prepared-source",
+        snapshot,
+        std::move(context),
+        std::move(prepared));
+    const specforge::SampleWorkflowTransitionOutcome outcome =
+        coordinator.Apply(
+            specforge::SourceCollectionIntent::
+                AddReadOnlyAnnotationResult(annotation_path),
+            snapshot);
+    Require(
+        outcome.loaded,
+        outcome.message.empty()
+            ? "prepared folder source should attach CSV"
+            : outcome.message);
+    const specforge::SourceCollectionNavigationView view =
+        coordinator.NavigationView(snapshot);
+    Require(
+        view.current_annotations.size() == 1 &&
+            view.current_annotations.front().display_text == "Z",
+        "coordinator prepared-source CSV attachment should use the canonical filename roster");
+
+    std::filesystem::remove_all(directory, cleanup_error);
+}
+
+void TestInvalidDisplayNamesExportAndAttachByCanonicalIndex()
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() /
+        "specforge-invalid-display-names-csv-annotation";
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(directory, cleanup_error);
+    std::filesystem::create_directories(directory, cleanup_error);
+    const std::filesystem::path cache_path =
+        directory / "navigation-state.json";
+    const std::filesystem::path annotation_path =
+        directory / "labels.csv";
+    specforge::SpectrumSnapshotHandle snapshot =
+        MakeSnapshot(
+            directory / "spectra.npy",
+            "invalid-display-name-source",
+            2,
+            0);
+    auto mutable_snapshot =
+        std::const_pointer_cast<specforge::SpectrumSnapshot>(
+            snapshot);
+    mutable_snapshot->source.metadata.push_back(
+        specforge::SpectrumMetadataEntry{
+            "format",
+            "npy",
+            "test",
+        });
+    const specforge::SourceCollectionIdentity identity{
+        .id = "invalid-display-name-source-identity",
+        .source_name = "spectra.npy",
+        .source_fingerprint = "invalid-display-name-fingerprint",
+        .context_fingerprint = "invalid-display-name-context",
+        .spectrum_count = 2,
+    };
+    specforge::SourceCollectionManifest manifest;
+    manifest.sample_names = {
+        "duplicate",
+        "duplicate",
+    };
+    const specforge::SampleLabelingCanonicalSourceDescriptor source =
+        specforge::BuildSampleLabelingCanonicalSourceDescriptor(
+            *snapshot,
+            identity,
+            manifest);
+    Require(
+        source.source_kind == "npy" &&
+            source.sample_names.empty(),
+        "invalid display names should select the canonical source-index roster");
+
+    specforge::SampleLabelingTask task =
+        specforge::CreateSampleLabelingTask(
+            "quality",
+            "Quality",
+            2);
+    Require(
+        specforge::UpsertSampleLabel(
+            task.label_set,
+            specforge::SampleLabelDefinition{
+                5,
+                "selected",
+                's'}) &&
+            specforge::AssignSampleLabel(
+                task,
+                1,
+                5)
+                .accepted,
+        "source-index CSV fixture should assign a label");
+    std::string message;
+    const std::optional<specforge::SampleLabelExportSnapshot>
+        export_snapshot =
+            specforge::BuildSampleLabelExportSnapshot(
+                specforge::SampleLabelExportFormat::Csv,
+                task,
+                source,
+                &message);
+    Require(
+        export_snapshot &&
+            specforge::ExportSampleLabelSnapshot(
+                annotation_path,
+                *export_snapshot,
+                &message),
+        message.empty()
+            ? "source-index CSV export should write"
+            : message);
+
+    specforge::SampleNavigationController controller(cache_path);
+    controller.ActivateSource(
+        "source",
+        snapshot,
+        identity,
+        std::move(manifest));
+    const std::optional<specforge::SampleLabelingSourceCompatibility>
+        active_compatibility =
+            controller.active_source_compatibility();
+    Require(
+        active_compatibility &&
+            active_compatibility->source_kind == "npy" &&
+            active_compatibility->sample_names.empty(),
+        "live and fallback attachment should borrow the canonical source-index roster view");
+    Require(
+        controller.AddReadOnlyAnnotationToActiveSource(
+            annotation_path,
+            &message),
+        message.empty()
+            ? "source-index CSV export should reattach"
+            : message);
+    const specforge::SourceCollectionManifest* context =
+        controller.active_context();
+    Require(
+        context != nullptr &&
+            context->annotations.size() == 1 &&
+            specforge::FormatSampleAnnotationValue(
+                context->annotations.front(),
+                context->annotations.front().values[0]) ==
+                "unlabeled" &&
+            specforge::FormatSampleAnnotationValue(
+                context->annotations.front(),
+                context->annotations.front().values[1]) ==
+                "selected",
+        "CSV reattach should ignore invalid display names and use canonical source indexes");
+
+    std::filesystem::remove_all(directory, cleanup_error);
 }
 
 void TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity()
@@ -1843,6 +2190,9 @@ int main()
     TestControllerAddsManualAnnotationToActiveContext();
     TestControllerRestoresAndRemovesProvidedAnnotations();
     TestControllerAttachesAsdfLabelingDocumentForActiveSource();
+    TestControllerAttachesFolderCsvByFilenameIdentity();
+    TestInvalidDisplayNamesExportAndAttachByCanonicalIndex();
+    TestPreparedSourceAttachesFolderCsvByCanonicalIdentity();
     TestAnnotationPathLookupUsesOnlyInMemorySourceIdentity();
     TestControllerPersistsLastIndexBySourceIdentity();
     TestControllerDebouncesNavigationStatePersistence();

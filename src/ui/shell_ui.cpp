@@ -732,7 +732,7 @@ std::optional<std::filesystem::path> ShowAnnotationFilePicker(
     };
     const std::array<COMDLG_FILTERSPEC, 2>
         annotation_filters = {{
-            {filter_names[0].c_str(), L"*.npy;*.asdf"},
+            {filter_names[0].c_str(), L"*.npy;*.asdf;*.csv"},
             {filter_names[1].c_str(), L"*.*"},
         }};
     const std::wstring title = Utf8ToWide(UiText(

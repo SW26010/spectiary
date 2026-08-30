@@ -1,5 +1,6 @@
 #include "ui/sample_navigation_controller.h"
 
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_path_identity.h"
 #include "platform/win32_text.h"
 #include "profile/navigation_latency_trace.h"
@@ -24,6 +25,17 @@ using TargetResolutionClock = std::chrono::steady_clock;
 
 constexpr auto kStateCacheSaveDebounce = 500ms;
 constexpr auto kStateCacheSaveRetry = 2s;
+
+SampleLabelingSourceCompatibility ReadOnlyAnnotationCompatibilityView(
+    const SampleLabelingCanonicalSourceDescriptor& source)
+{
+    SampleLabelingSourceCompatibility compatibility =
+        SampleLabelingCompatibilityView(source);
+    if (compatibility.source_kind == "unknown") {
+        compatibility.source_kind = {};
+    }
+    return compatibility;
+}
 
 std::int64_t ElapsedNanoseconds(TargetResolutionClock::time_point started_at)
 {
@@ -279,6 +291,12 @@ void SampleNavigationController::ActivateSource(
     const std::string previous_query = std::move(session.sample_name_query);
     const std::optional<std::size_t> previous_index = session.current_index;
 
+    session.canonical_source =
+        BuildSampleLabelingCanonicalSourceDescriptor(
+            *snapshot,
+            identity,
+            manifest);
+
     session.source_collection_identity = identity.id;
     session.source_name = identity.source_name;
     session.source_fingerprint = identity.source_fingerprint;
@@ -372,6 +390,11 @@ BackgroundRetirementHandle SampleNavigationController::ActivatePreparedSource(
         session_entry->second = SourceSession{};
     }
     SourceSession& session = session_entry->second;
+    session.canonical_source =
+        BuildSampleLabelingCanonicalSourceDescriptor(
+            *snapshot,
+            identity,
+            manifest);
     session.source_collection_identity = identity.id;
     session.source_name = identity.source_name;
     session.source_fingerprint = identity.source_fingerprint;
@@ -497,6 +520,17 @@ std::optional<SourceCollectionIdentity> SampleNavigationController::active_sourc
         .context_fingerprint = session->second.context_fingerprint,
         .spectrum_count = session->second.spectrum_count,
     };
+}
+
+std::optional<SampleLabelingSourceCompatibility>
+SampleNavigationController::active_source_compatibility() const
+{
+    const SourceSession* session = ActiveSession();
+    if (session == nullptr) {
+        return std::nullopt;
+    }
+    return ReadOnlyAnnotationCompatibilityView(
+        session->canonical_source);
 }
 
 BackgroundRetirementHandle SampleNavigationController::RemoveSource(std::string_view source_key)
@@ -1462,13 +1496,8 @@ bool SampleNavigationController::LoadReadOnlyAnnotationIntoSession(
     return IngestReadOnlySampleAnnotation(
         session.manifest,
         path,
-        SampleAnnotationSourceCompatibility{
-            .base_identity = session.source_collection_identity,
-            .source_name = session.source_name,
-            .source_fingerprint = session.source_fingerprint,
-            .sample_count = session.spectrum_count,
-            .sample_names = session.manifest.sample_names,
-        },
+        ReadOnlyAnnotationCompatibilityView(
+            session.canonical_source),
         message);
 }
 

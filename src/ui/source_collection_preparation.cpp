@@ -1,5 +1,6 @@
 #include "ui/source_collection_preparation_internal.h"
 
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/source_path_identity.h"
 #include "domain/spectrum_loader.h"
 #include "ui/sample_labeling_state_cache_io.h"
@@ -35,9 +36,19 @@ void ValidateDecodedSnapshot(const SpectrumSnapshotHandle& snapshot)
 
 void LoadRestoredAnnotations(
     SourceCollectionContext& context,
+    const SpectrumSnapshot& snapshot,
     const std::vector<std::filesystem::path>& annotation_paths,
     const SourceCollectionCancellationCheckpoint& checkpoint)
 {
+    const SampleLabelingCanonicalSourceDescriptor source =
+        BuildSampleLabelingCanonicalSourceDescriptor(
+            snapshot,
+            context);
+    SampleAnnotationSourceCompatibility compatibility =
+        SampleLabelingCompatibilityView(source);
+    if (compatibility.source_kind == "unknown") {
+        compatibility.source_kind = {};
+    }
     for (const std::filesystem::path& annotation_path :
          annotation_paths) {
         checkpoint();
@@ -49,14 +60,7 @@ void LoadRestoredAnnotations(
         (void)IngestReadOnlySampleAnnotationCancelable(
             context.manifest,
             annotation_path,
-            SampleAnnotationSourceCompatibility{
-                .base_identity = context.identity.id,
-                .source_name = context.identity.source_name,
-                .source_fingerprint =
-                    context.identity.source_fingerprint,
-                .sample_count = context.identity.spectrum_count,
-                .sample_names = context.manifest.sample_names,
-            },
+            compatibility,
             checkpoint);
     }
 }
@@ -458,10 +462,12 @@ private:
 
     void FinalizeContext(
         const Work& work,
+        const SpectrumSnapshot& snapshot,
         SourceCollectionContext& context)
     {
         LoadRestoredAnnotations(
             context,
+            snapshot,
             work.request.annotation_paths,
             work.checkpoint);
         FinalizeSourceCollectionAnnotationContextFingerprint(
@@ -929,7 +935,7 @@ private:
                         *snapshot,
                         listing,
                         work.checkpoint));
-                FinalizeContext(work, *context);
+                FinalizeContext(work, *snapshot, *context);
             }
             if (work.request.latency_attempt) {
                 work.request.latency_attempt
@@ -1118,7 +1124,7 @@ private:
                         *snapshot,
                         initial_state,
                         work.checkpoint));
-                FinalizeContext(work, *context);
+                FinalizeContext(work, *snapshot, *context);
             }
             if (work.request.latency_attempt) {
                 work.request.latency_attempt

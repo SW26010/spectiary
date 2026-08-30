@@ -1199,6 +1199,11 @@ specforge_add_test(
     specforge_core
 )
 specforge_add_test(
+    specforge_sample_annotation_csv_tests
+    tests/sample_annotation_csv_tests.cpp
+    specforge_core
+)
+specforge_add_test(
     specforge_csv_record_codec_tests
     tests/csv_record_codec_tests.cpp
     specforge_core
@@ -1207,6 +1212,11 @@ set_tests_properties(
     specforge_sample_label_export_tests
     PROPERTIES
         LABELS "labeling;ci-headless;required"
+)
+set_tests_properties(
+    specforge_sample_annotation_csv_tests
+    PROPERTIES
+        LABELS "data;labeling;ci-headless;required"
 )
 set_tests_properties(
     specforge_csv_record_codec_tests

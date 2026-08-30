@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/local_user_state.h"
+#include "domain/sample_labeling_source_compatibility.h"
 #include "domain/sample_navigation_direction.h"
 #include "domain/source_collection_manifest.h"
 #include "domain/spectrum_snapshot.h"
@@ -115,6 +116,8 @@ public:
     [[nodiscard]] std::optional<std::size_t> KnownSourceCurrentIndex(
         std::string_view source_key) const;
     [[nodiscard]] std::optional<SourceCollectionIdentity> active_source_identity() const;
+    [[nodiscard]] std::optional<SampleLabelingSourceCompatibility>
+        active_source_compatibility() const;
     [[nodiscard]] BackgroundRetirementHandle RemoveSource(std::string_view source_key);
     void ClearActiveSource();
     [[nodiscard]] bool AddReadOnlyAnnotationToActiveSource(
@@ -187,6 +190,7 @@ private:
 
     struct SourceSession {
         std::string source_collection_identity;
+        SampleLabelingCanonicalSourceDescriptor canonical_source;
         std::string source_name;
         std::string source_fingerprint;
         std::string context_fingerprint;

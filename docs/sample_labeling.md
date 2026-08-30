@@ -855,7 +855,13 @@ text uses the stable non-localized export serialization, including the fixed
 `unlabeled` sentinel and reversible escaping for colliding label names. CSV
 writes are atomic and transiently guard only the selected `.csv` target; they do
 not adopt an output owner, create a sidecar, or change task/save/navigation
-state. CSV ingestion remains separate follow-up work.
+state. Source-aware CSV ingestion accepts the same `filename,label` and
+`sample,label` schemas, maps identities back to the canonical source roster,
+and loads the decoded label column as a plain text annotation. Duplicate,
+unknown, or missing identities are rejected. This attachment does not invent a
+labeling task id, label definitions, durable owner, or canonical provenance;
+CSV therefore remains an interchange annotation rather than a lossless
+labeling-task round-trip.
 
 The ASDF codec remains a caller-owned stream component. A separate domain
 document store owns source-aware open, the immutable durable roster/base
@@ -942,8 +948,8 @@ in canonical source-roster order without changing that owner. The exported file
 does not become an autosave target, is not attached automatically, and has no
 canonical `.sf-labels.json` sidecar. The domain/controller export path also
 supports the canonical-roster `.csv` mapping described above without changing
-the owner. Exposing the CSV choice in the labeling UI and CSV ingestion remain
-separate follow-up work.
+the owner. Exposing the CSV choice in the labeling UI remains separate
+follow-up work.
 `*_y.npy` is not the default output meaning; it is only a special auto-loaded
 companion convention for existing labels in the NPY adapter.
 

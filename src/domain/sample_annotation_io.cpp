@@ -1,8 +1,11 @@
 #include "domain/sample_annotation_io.h"
 
 #include "app/local_user_state_json.h"
+#include "domain/csv_record_codec.h"
 #include "domain/npy_array_io.h"
+#include "domain/sample_label_export.h"
 #include "domain/sample_labeling_asdf_codec.h"
+#include "domain/source_collection_manifest.h"
 #include "domain/source_path_identity.h"
 #include "platform/atomic_file.h"
 
@@ -23,6 +26,7 @@
 #include <string_view>
 #include <system_error>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,6 +36,7 @@ namespace {
 constexpr const char* kMetadataFormatKind = "specforge.sample_label_result.metadata";
 constexpr int kMetadataSchemaVersion = 1;
 constexpr std::string_view kInt32DtypeText = "int32";
+constexpr std::string_view kCsvTextDtypeText = "utf8";
 
 class NpyAnnotationError : public std::runtime_error {
 public:
@@ -44,6 +49,14 @@ public:
 class AsdfAnnotationError : public std::runtime_error {
 public:
     explicit AsdfAnnotationError(std::string message)
+        : std::runtime_error(std::move(message))
+    {
+    }
+};
+
+class CsvAnnotationError : public std::runtime_error {
+public:
+    explicit CsvAnnotationError(std::string message)
         : std::runtime_error(std::move(message))
     {
     }
@@ -81,6 +94,11 @@ bool IsAsdfLabelingPath(const std::filesystem::path& path)
 bool IsNpyPath(const std::filesystem::path& path)
 {
     return LowerAscii(PathToUtf8(path.extension())) == ".npy";
+}
+
+bool IsCsvPath(const std::filesystem::path& path)
+{
+    return LowerAscii(PathToUtf8(path.extension())) == ".csv";
 }
 
 std::filesystem::path Utf8ToPath(const std::string& value)
@@ -514,6 +532,141 @@ void ApplyLabelResultMetadata(
     }
 }
 
+SampleAnnotationResult ReadAnnotationCsvValues(
+    const std::filesystem::path& path,
+    const SampleAnnotationSourceCompatibility& source,
+    const SampleAnnotationCancellationCheckpoint& cancellation_checkpoint)
+{
+    if (source.source_kind.empty()) {
+        throw CsvAnnotationError(
+            "CSV sample annotations require the canonical source kind");
+    }
+
+    const bool folder_source = source.source_kind == "folder";
+    const bool uses_explicit_names = !source.sample_names.empty();
+    if ((folder_source && !uses_explicit_names) ||
+        (uses_explicit_names &&
+         !SourceCollectionSampleNamesFormCanonicalRoster(
+             source.sample_names,
+             source.sample_count))) {
+        throw CsvAnnotationError(
+            "CSV sample annotation source names do not form a canonical roster");
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+
+    BoundedCsvFileReader reader(path);
+    CsvRecordReadResult header = reader.ReadRecord();
+    if (header.status == CsvRecordReadStatus::Error) {
+        throw CsvAnnotationError(
+            header.error.message.empty()
+                ? "could not read the CSV sample annotation header"
+                : header.error.message);
+    }
+    if (header.status == CsvRecordReadStatus::End) {
+        throw CsvAnnotationError(
+            "CSV sample annotation is empty");
+    }
+
+    const CsvRecord expected_header{
+        folder_source ? "filename" : "sample",
+        "label",
+    };
+    if (header.record != expected_header) {
+        throw CsvAnnotationError(
+            folder_source
+                ? "folder CSV sample annotations require the exact header filename,label"
+                : "non-folder CSV sample annotations require the exact header sample,label");
+    }
+
+    std::unordered_map<std::string, std::size_t>
+        canonical_indices;
+    canonical_indices.reserve(source.sample_count);
+    for (std::size_t index = 0;
+         index < source.sample_count;
+         ++index) {
+        std::string identity = uses_explicit_names
+            ? source.sample_names[index]
+            : std::to_string(index);
+        canonical_indices.emplace(
+            std::move(identity),
+            index);
+    }
+
+    std::vector<std::optional<std::string>> canonical_values(
+        source.sample_count);
+    while (true) {
+        if (cancellation_checkpoint) {
+            cancellation_checkpoint();
+        }
+        CsvRecordReadResult row = reader.ReadRecord();
+        if (row.status == CsvRecordReadStatus::End) {
+            break;
+        }
+        if (row.status == CsvRecordReadStatus::Error) {
+            throw CsvAnnotationError(
+                row.error.message.empty()
+                    ? "could not read a CSV sample annotation row"
+                    : row.error.message);
+        }
+        if (row.record.size() != 2U) {
+            throw CsvAnnotationError(
+                "each CSV sample annotation row must contain exactly two fields");
+        }
+
+        const auto canonical =
+            canonical_indices.find(row.record[0]);
+        if (canonical == canonical_indices.end()) {
+            throw CsvAnnotationError(
+                "CSV sample annotation contains an unknown sample identity: " +
+                row.record[0]);
+        }
+        if (canonical_values[canonical->second]) {
+            throw CsvAnnotationError(
+                "CSV sample annotation contains a duplicate sample identity: " +
+                row.record[0]);
+        }
+
+        DeserializedSampleLabelExportValue decoded =
+            DeserializeSampleLabelValueFromExport(
+                row.record[1]);
+        canonical_values[canonical->second] =
+            decoded.represents_unlabeled
+            ? std::string{kUnlabeledSampleLabelExportText}
+            : std::move(decoded.label_text);
+    }
+
+    SampleAnnotationResult result;
+    result.name = FileNameToUtf8(path.filename());
+    result.path = path;
+    result.kind = SampleAnnotationKind::Text;
+    result.dtype = std::string{kCsvTextDtypeText};
+    result.dtype_name = std::string{kCsvTextDtypeText};
+    result.relationship =
+        SampleAnnotationWorkflowRelationship::PlainAnnotation;
+    result.values.reserve(source.sample_count);
+    for (std::size_t index = 0;
+         index < canonical_values.size();
+         ++index) {
+        if (!canonical_values[index]) {
+            const std::string missing_identity =
+                uses_explicit_names
+                ? source.sample_names[index]
+                : std::to_string(index);
+            throw CsvAnnotationError(
+                "CSV sample annotation is missing canonical sample identity: " +
+                missing_identity);
+        }
+        result.values.push_back(SampleAnnotationValue{
+            std::move(*canonical_values[index])});
+    }
+    if (cancellation_checkpoint) {
+        cancellation_checkpoint();
+    }
+    return result;
+}
+
 SampleAnnotationResult ReadAnnotationNpyValues(
     const std::filesystem::path& path,
     std::size_t expected_count,
@@ -749,6 +902,10 @@ std::optional<SampleAnnotationResult> SampleAnnotationIoAdapter::LoadCancelable(
             throw AsdfAnnotationError(
                 "ASDF labeling documents require source collection identity and roster validation");
         }
+        if (IsCsvPath(path)) {
+            throw CsvAnnotationError(
+                "CSV sample annotations require source collection kind and roster validation");
+        }
         return ReadAnnotationNpyValues(path, expected_count, cancellation_checkpoint);
     } catch (const std::exception& error) {
         if (cancellation_checkpoint) {
@@ -779,6 +936,12 @@ SampleAnnotationIoAdapter::LoadForSourceCancelable(
     try {
         if (IsAsdfLabelingPath(path)) {
             return ReadAnnotationAsdfValues(
+                path,
+                source,
+                cancellation_checkpoint);
+        }
+        if (IsCsvPath(path)) {
+            return ReadAnnotationCsvValues(
                 path,
                 source,
                 cancellation_checkpoint);
