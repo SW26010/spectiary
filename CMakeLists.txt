@@ -238,6 +238,7 @@ add_library(specforge_core STATIC
     src/app/specforge_metadata.cpp
     src/app/specforge_metadata_finalizer.cpp
     src/app/specforge_metadata_validation.cpp
+    src/domain/csv_record_codec.cpp
     src/domain/fits_file_reader.cpp
     src/domain/fits_spectrum_loader.cpp
     src/domain/npy_array_io.cpp
@@ -1197,10 +1198,20 @@ specforge_add_test(
     tests/sample_label_export_tests.cpp
     specforge_core
 )
+specforge_add_test(
+    specforge_csv_record_codec_tests
+    tests/csv_record_codec_tests.cpp
+    specforge_core
+)
 set_tests_properties(
     specforge_sample_label_export_tests
     PROPERTIES
         LABELS "labeling;ci-headless;required"
+)
+set_tests_properties(
+    specforge_csv_record_codec_tests
+    PROPERTIES
+        LABELS "data;ci-headless;required"
 )
 specforge_add_test(
     specforge_sample_labeling_document_tests
