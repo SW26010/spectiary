@@ -250,7 +250,15 @@ SourceCollectionAnnotationValueView BuildAnnotationValueView(
             local_task->label_set,
             local_task->values[current_index]);
     } else if (current_index < annotation.values.size()) {
-        view.display_text = FormatSampleAnnotationValue(annotation, annotation.values[current_index]);
+        const SampleAnnotationValue& value =
+            annotation.values[current_index];
+        view.missing = value.missing;
+        if (!view.missing) {
+            view.display_text =
+                FormatSampleAnnotationValue(
+                    annotation,
+                    value);
+        }
     } else {
         view.missing = true;
     }

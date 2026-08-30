@@ -594,7 +594,7 @@ SampleAnnotationResult ReadAnnotationCsvValues(
             index);
     }
 
-    std::vector<std::optional<std::string>> canonical_values(
+    std::vector<std::optional<SampleAnnotationValue>> canonical_values(
         source.sample_count);
     while (true) {
         if (cancellation_checkpoint) {
@@ -632,9 +632,13 @@ SampleAnnotationResult ReadAnnotationCsvValues(
             DeserializeSampleLabelValueFromExport(
                 row.record[1]);
         canonical_values[canonical->second] =
-            decoded.represents_unlabeled
-            ? std::string{kUnlabeledSampleLabelExportText}
-            : std::move(decoded.label_text);
+            SampleAnnotationValue{
+                .semantic = decoded.represents_unlabeled
+                    ? std::string{
+                          kUnlabeledSampleLabelExportText}
+                    : std::move(decoded.label_text),
+                .missing = decoded.represents_unlabeled,
+            };
     }
 
     SampleAnnotationResult result;
@@ -658,8 +662,8 @@ SampleAnnotationResult ReadAnnotationCsvValues(
                 "CSV sample annotation is missing canonical sample identity: " +
                 missing_identity);
         }
-        result.values.push_back(SampleAnnotationValue{
-            std::move(*canonical_values[index])});
+        result.values.push_back(
+            std::move(*canonical_values[index]));
     }
     if (cancellation_checkpoint) {
         cancellation_checkpoint();
@@ -1207,6 +1211,10 @@ std::optional<int> SampleAnnotationValueAsInt(const SampleAnnotationValue& value
 
 std::string SampleAnnotationValueKey(const SampleAnnotationValue& value)
 {
+    if (value.missing) {
+        return std::string{
+            kUnlabeledSampleLabelExportText};
+    }
     if (const std::int64_t* signed_value = std::get_if<std::int64_t>(&value.semantic)) {
         return std::to_string(*signed_value);
     }
@@ -1216,13 +1224,17 @@ std::string SampleAnnotationValueKey(const SampleAnnotationValue& value)
     if (const double* floating_value = std::get_if<double>(&value.semantic)) {
         return FormatFloatingValue(*floating_value);
     }
-    return std::get<std::string>(value.semantic);
+    return SerializeSampleLabelNameForExport(
+        std::get<std::string>(value.semantic));
 }
 
 std::string FormatSampleAnnotationValue(
     const SampleAnnotationResult& annotation,
     const SampleAnnotationValue& value)
 {
+    if (value.missing) {
+        return "Unlabeled";
+    }
     if (annotation.labeling_document) {
         if (const std::optional<int> code =
                 SampleAnnotationValueAsInt(value)) {
@@ -1254,6 +1266,10 @@ std::string FormatSampleAnnotationValue(
         return annotation.dtype_name == "float32"
             ? FormatFloatingValue(static_cast<float>(*floating_value))
             : FormatFloatingValue(*floating_value);
+    }
+    if (const std::string* text =
+            std::get_if<std::string>(&value.semantic)) {
+        return *text;
     }
     return SampleAnnotationValueKey(value);
 }

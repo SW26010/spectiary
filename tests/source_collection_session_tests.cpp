@@ -3169,6 +3169,106 @@ void TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts()
         "folder CSV/NPY format choices must not mutate task or source-session state");
 }
 
+void TestAttachedCsvPreservesUnlabeledSemantics()
+{
+    const std::filesystem::path source_path =
+        UniqueTempPath("_csv_unlabeled_semantics.npy");
+    const std::filesystem::path csv_path =
+        UniqueTempPath("_csv_unlabeled_semantics.csv");
+    WriteCsvRecords(
+        csv_path,
+        {
+            {"sample", "label"},
+            {"0", "unlabeled"},
+            {"1", "\\unlabeled"},
+            {"2", "\\\\unlabeled"},
+        });
+
+    std::vector<std::size_t> loaded_indices;
+    PreparedSession session =
+        MakeSession(loaded_indices, source_path, 3);
+    (void)Submit(
+        session,
+        OpenSourceCollection(source_path, 0));
+    const specforge::SourceCollectionSessionResult attached =
+        Submit(
+            session,
+            AddReadOnlyAnnotation(csv_path));
+    Require(
+        attached.loaded,
+        "CSV unlabeled semantics fixture should attach");
+
+    const auto current_annotation = [&]()
+        -> const specforge::SourceCollectionAnnotationValueView& {
+        const auto& annotations =
+            session.View().navigation.current_annotations;
+        const auto match = std::find_if(
+            annotations.begin(),
+            annotations.end(),
+            [&csv_path](const auto& annotation) {
+                return annotation.path == csv_path;
+            });
+        Require(
+            match != annotations.end(),
+            "attached CSV should project its current annotation value");
+        return *match;
+    };
+
+    Require(
+        current_annotation().missing,
+        "CSV unlabeled sentinel should project as a missing value");
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(1)));
+    Require(
+        !current_annotation().missing &&
+            current_annotation().display_text == "unlabeled",
+        "escaped CSV unlabeled text should remain a labeled value");
+    (void)Submit(
+        session,
+        MoveSampleNavigation(
+            specforge::SampleNavigationRequest::
+                LocateRow(2)));
+    Require(
+        !current_annotation().missing &&
+            current_annotation().display_text == "\\unlabeled",
+        "double-escaped CSV text should retain one leading backslash");
+
+    const auto& available_sources =
+        session.View().filter.available_sources;
+    const auto source = std::find_if(
+        available_sources.begin(),
+        available_sources.end(),
+        [&csv_path](const auto& candidate) {
+            return candidate.annotation_path == csv_path;
+        });
+    Require(
+        source != available_sources.end() &&
+            source->options.size() == 3,
+        "CSV sentinel and escaped labels should produce three distinct sample filter options");
+    const auto unlabeled_option = std::find_if(
+        source->options.begin(),
+        source->options.end(),
+        [](const auto& option) {
+            return option.represents_unlabeled_value;
+        });
+    const auto labeled_unlabeled_option = std::find_if(
+        source->options.begin(),
+        source->options.end(),
+        [](const auto& option) {
+            return !option.represents_unlabeled_value &&
+                   option.display_text == "unlabeled";
+        });
+    Require(
+        unlabeled_option != source->options.end() &&
+            labeled_unlabeled_option != source->options.end() &&
+            unlabeled_option->key !=
+                labeled_unlabeled_option->key,
+        "CSV sentinel and labeled text unlabeled must retain different sample filter keys");
+}
+
 void TestExportingLabelValuesDoesNotFormalizeOrAttachTask()
 {
     const std::filesystem::path source_path =
@@ -10899,6 +10999,7 @@ void RunAllTests()
     TestTemporaryLabelingTaskUsesDefaultNameAndResumes();
     TestLabelExportsIgnoreNavigationSequenceAndPreserveCanonicalState();
     TestFolderSessionExportsDefaultCsvAndNpyOverrideArtifacts();
+    TestAttachedCsvPreservesUnlabeledSemantics();
     TestExportingLabelValuesDoesNotFormalizeOrAttachTask();
     TestTemporaryDraftRecoveryViewRestoresAfterRestart();
     TestTemporaryDraftRecoveryViewReportsLeaseConflict();

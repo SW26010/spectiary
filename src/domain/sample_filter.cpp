@@ -128,6 +128,11 @@ std::string FormatIndexedAnnotationValue(
     const AnnotationLabelIndex& index,
     const std::optional<int>& code)
 {
+    if (value.missing) {
+        return FormatSampleAnnotationValue(
+            annotation,
+            value);
+    }
     if (code && index.active) {
         const IndexedAnnotationLabel* label =
             FindIndexedAnnotationLabel(index, code);
@@ -312,8 +317,9 @@ SampleFilterSource BuildAnnotationFilterSource(
         const IndexedAnnotationLabel* indexed_label =
             FindIndexedAnnotationLabel(label_index, integer_value);
         const bool represents_unlabeled_value =
-            indexed_label != nullptr &&
-            indexed_label->represents_unlabeled_value;
+            value.missing ||
+            (indexed_label != nullptr &&
+             indexed_label->represents_unlabeled_value);
         source.value_keys_by_sample.push_back(key);
         if (source.filterable) {
             const bool needs_display_text =

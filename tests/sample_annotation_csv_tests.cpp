@@ -1,8 +1,10 @@
 #include "domain/csv_record_codec.h"
 #include "domain/sample_annotation_io.h"
+#include "domain/sample_filter.h"
 #include "domain/sample_label_export.h"
 #include "domain/sample_labeling_source_compatibility.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -268,6 +270,112 @@ void TestSourceIndexCsvMapsByCanonicalDecimalIdentity()
         "source-index identities should map to canonical rows independently of CSV row order");
 }
 
+void TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion()
+{
+    const std::filesystem::path directory =
+        FreshTestDirectory(
+            "specforge-unlabeled-semantics-sample-annotation-csv");
+    const std::filesystem::path path =
+        directory / "labels.csv";
+    WriteCsv(
+        path,
+        {
+            {"sample", "label"},
+            {"0", "unlabeled"},
+            {"1", "\\unlabeled"},
+            {"2", "\\\\unlabeled"},
+        });
+
+    std::string error;
+    const std::optional<specforge::SampleAnnotationResult>
+        annotation = LoadCsv(
+            path,
+            "npy",
+            {},
+            3,
+            &error);
+    Require(
+        annotation.has_value(),
+        error.empty()
+            ? "CSV unlabeled semantics fixture should load"
+            : error);
+    Require(
+        TextValues(*annotation) ==
+                std::vector<std::string>({
+                    "unlabeled",
+                    "unlabeled",
+                    "\\unlabeled",
+                }) &&
+            annotation->values[0].missing &&
+            !annotation->values[1].missing &&
+            !annotation->values[2].missing,
+        "CSV ingestion should retain missing separately from decoded label text");
+    Require(
+        specforge::FormatSampleAnnotationValue(
+            *annotation,
+            annotation->values[0]) == "Unlabeled" &&
+            specforge::FormatSampleAnnotationValue(
+                *annotation,
+                annotation->values[1]) == "unlabeled" &&
+            specforge::FormatSampleAnnotationValue(
+                *annotation,
+                annotation->values[2]) == "\\unlabeled",
+        "CSV missing display must not expose wire escaping or merge with labeled text");
+
+    const std::string missing_key =
+        specforge::SampleAnnotationValueKey(
+            annotation->values[0]);
+    const std::string labeled_unlabeled_key =
+        specforge::SampleAnnotationValueKey(
+            annotation->values[1]);
+    const std::string leading_backslash_key =
+        specforge::SampleAnnotationValueKey(
+            annotation->values[2]);
+    Require(
+        missing_key != labeled_unlabeled_key &&
+            missing_key != leading_backslash_key &&
+            labeled_unlabeled_key != leading_backslash_key,
+        "CSV sentinel and escaped labels should retain distinct sample annotation keys");
+
+    const specforge::SampleFilterSource filter_source =
+        specforge::BuildAnnotationFilterSource(
+            *annotation);
+    const auto unlabeled_option = std::find_if(
+        filter_source.options.begin(),
+        filter_source.options.end(),
+        [](const auto& option) {
+            return option.represents_unlabeled_value;
+        });
+    const auto labeled_unlabeled_option = std::find_if(
+        filter_source.options.begin(),
+        filter_source.options.end(),
+        [](const auto& option) {
+            return !option.represents_unlabeled_value &&
+                   option.display_text == "unlabeled";
+        });
+    Require(
+        filter_source.options.size() == 3 &&
+            unlabeled_option != filter_source.options.end() &&
+            labeled_unlabeled_option !=
+                filter_source.options.end() &&
+            unlabeled_option->key !=
+                labeled_unlabeled_option->key,
+        "CSV missing and labeled text should produce distinct sample filter options");
+
+    specforge::SampleFilterController filter;
+    filter.SetCondition(
+        filter_source.id,
+        {missing_key});
+    const specforge::SampleFilterEvaluation evaluation =
+        filter.Evaluate(
+            {filter_source},
+            3);
+    Require(
+        evaluation.included_samples ==
+            std::vector<bool>({true, false, false}),
+        "selecting the CSV missing option should not include labeled text with the same name");
+}
+
 void RequireCsvRejected(
     const std::filesystem::path& path,
     const std::vector<specforge::CsvRecord>& records,
@@ -376,6 +484,7 @@ int main()
         TestNamedCsvMapsRowsToCanonicalRoster();
         TestFolderExportReloadsWithoutCanonicalTaskProvenance();
         TestSourceIndexCsvMapsByCanonicalDecimalIdentity();
+        TestCsvUnlabeledSemanticsRemainDistinctAfterIngestion();
         TestCsvIdentityContractRejectsInvalidMappings();
         std::cout << "sample annotation CSV tests passed\n";
         return 0;

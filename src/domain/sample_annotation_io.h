@@ -56,6 +56,9 @@ struct SampleAnnotationValue {
     using SemanticValue = std::variant<std::int64_t, std::uint64_t, double, std::string>;
 
     SemanticValue semantic;
+    // Missing is orthogonal to semantic so a sentinel remains distinct from
+    // an otherwise identical legitimate annotation value.
+    bool missing = false;
 };
 
 using SampleAnnotationSourceCompatibility =
