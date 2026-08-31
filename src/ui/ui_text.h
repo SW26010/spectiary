@@ -211,6 +211,8 @@ enum class UiTextId {
     DearImGuiComponentFallback,
     ImPlotComponent,
     ImPlotComponentFallback,
+    CfitsioComponent,
+    CfitsioComponentFallback,
     YamlCppComponent,
     YamlCppComponentFallback,
     ZlibComponent,

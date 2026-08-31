@@ -154,6 +154,15 @@ if ($yamlCppVersion -isnot [string] -or
     $yamlCppVersion -cne $yamlCppVersion.Trim()) {
     throw 'Portable build metadata yaml_cpp must be a non-empty unpadded string.'
 }
+$cfitsioVersion = Get-RequiredProperty `
+    -Object $build `
+    -Name 'cfitsio' `
+    -Description 'Portable build metadata'
+if ($cfitsioVersion -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($cfitsioVersion) -or
+    $cfitsioVersion -cnotmatch '^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$') {
+    throw 'Portable build metadata cfitsio must be a dotted numeric version.'
+}
 
 $deployment = Get-RequiredProperty `
     -Object $metadata `

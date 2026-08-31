@@ -1071,6 +1071,10 @@ void TestAboutArtifactPresentationMatrix()
             "ImPlot - MIT License" &&
             specforge::UiText(
                 specforge::UiLanguage::English,
+                specforge::UiTextId::CfitsioComponentFallback) ==
+            "CFITSIO - NASA License" &&
+            specforge::UiText(
+                specforge::UiLanguage::English,
                 specforge::UiTextId::YamlCppComponentFallback) ==
             "yaml-cpp - MIT License" &&
             specforge::UiText(

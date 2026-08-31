@@ -148,6 +148,15 @@ BuildMetadataReadResult ReadBuildMetadata(
         ReadRequiredMetadataString(*build, "dear_imgui");
     const std::optional<std::string> implot =
         ReadRequiredMetadataString(*build, "implot");
+    // cfitsio was added after schema 5 had already shipped. A missing member
+    // denotes the legacy schema 5 shape and is completed from the executable's
+    // generated build identity. A present member must remain fully valid.
+    const JsonValue* cfitsio_member = JsonObjectMember(*build, "cfitsio");
+    const std::optional<std::string> cfitsio =
+        schema_version == metadata_contract::kSchema5Version &&
+            cfitsio_member != nullptr
+        ? ReadRequiredMetadataString(*build, "cfitsio")
+        : std::optional<std::string>{build_info::kBuildCfitsioVersion};
     // yaml_cpp was added after schema 5 had already shipped.  A missing member
     // therefore denotes the legacy schema 5 shape and is completed from the
     // executable's generated build identity.  If the member is present it must
@@ -191,7 +200,8 @@ BuildMetadataReadResult ReadBuildMetadata(
     if (!product_name || !specforge_version || !configuration ||
         !target_architecture || !source_mode || !source_revision ||
         !compiler_id || !compiler_version || !cmake_version || !generator ||
-        !windows_sdk_version || !dear_imgui || !implot || !yaml_cpp || !zlib) {
+        !windows_sdk_version || !dear_imgui || !implot || !cfitsio ||
+        !yaml_cpp || !zlib) {
         return {};
     }
     metadata.compiler_id = *compiler_id;
@@ -201,6 +211,7 @@ BuildMetadataReadResult ReadBuildMetadata(
     metadata.windows_sdk_version = *windows_sdk_version;
     metadata.dear_imgui_version = *dear_imgui;
     metadata.implot_version = *implot;
+    metadata.cfitsio_version = *cfitsio;
     metadata.yaml_cpp_version = *yaml_cpp;
     metadata.zlib_version = *zlib;
     metadata.finalized_artifact = std::move(finalized_artifact);

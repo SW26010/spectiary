@@ -16,6 +16,9 @@
 #ifndef SPECFORGE_METADATA_FIXTURE_DIR
 #error "SPECFORGE_METADATA_FIXTURE_DIR must be configured."
 #endif
+#ifndef SPECFORGE_EXPECTED_CFITSIO_VERSION
+#error "SPECFORGE_EXPECTED_CFITSIO_VERSION must be configured."
+#endif
 
 namespace {
 
@@ -136,6 +139,7 @@ std::string Schema5Metadata(
         "    \"windows_sdk_version\": null,\n"
         "    \"dear_imgui\": \"1.92.5\",\n"
         "    \"implot\": \"0.17\",\n"
+        "    \"cfitsio\": \"4.6.4\",\n"
         "    \"yaml_cpp\": \"0.9.0\",\n"
         "    \"zlib\": \"1.3.1\"";
     if (include_completed_at) {
@@ -391,7 +395,8 @@ void TestSchema5StrictParsing()
     const specforge::BuildMetadata& metadata =
         *fixture.build_metadata.metadata;
     Require(
-        metadata.yaml_cpp_version == "0.9.0" &&
+        metadata.cfitsio_version == "4.6.4" &&
+            metadata.yaml_cpp_version == "0.9.0" &&
             metadata.finalized_artifact &&
             metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
@@ -430,6 +435,57 @@ void TestSchema5StrictParsing()
                 specforge::BuildMetadataStatus::Available &&
             legacy_without_yaml_cpp.build_metadata.metadata,
         "schema 5 sidecars created before yaml-cpp provenance must remain available");
+
+    std::string legacy_without_cfitsio_document = Schema5Metadata();
+    const std::size_t cfitsio_begin =
+        legacy_without_cfitsio_document.find("    \"cfitsio\": ");
+    Require(
+        cfitsio_begin != std::string::npos,
+        "schema 5 compatibility fixture should contain cfitsio before mutation");
+    const std::size_t cfitsio_end =
+        legacy_without_cfitsio_document.find('\n', cfitsio_begin);
+    Require(
+        cfitsio_end != std::string::npos,
+        "schema 5 cfitsio fixture line should terminate");
+    legacy_without_cfitsio_document.erase(
+        cfitsio_begin,
+        cfitsio_end - cfitsio_begin + 1U);
+    WriteTextFile(path, legacy_without_cfitsio_document);
+    const specforge::SpecForgeMetadataReadResult legacy_without_cfitsio =
+        specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
+    Require(
+        !legacy_without_cfitsio.startup_error &&
+            legacy_without_cfitsio.build_metadata.status ==
+                specforge::BuildMetadataStatus::Available &&
+            legacy_without_cfitsio.build_metadata.metadata &&
+            legacy_without_cfitsio.build_metadata.metadata->cfitsio_version ==
+                SPECFORGE_EXPECTED_CFITSIO_VERSION,
+        "legacy schema 5 without cfitsio should use the executable's compiled version");
+
+    for (std::string_view malformed_value : {
+             std::string_view{"\"\""},
+             std::string_view{"\"4.6.x\""},
+         }) {
+        std::string malformed_cfitsio = Schema5Metadata();
+        const std::size_t cfitsio_value =
+            malformed_cfitsio.find("\"cfitsio\": \"4.6.4\"");
+        Require(
+            cfitsio_value != std::string::npos,
+            "schema 5 malformed cfitsio fixture should contain its value");
+        malformed_cfitsio.replace(
+            cfitsio_value,
+            std::string_view("\"cfitsio\": \"4.6.4\"").size(),
+            "\"cfitsio\": " + std::string(malformed_value));
+        WriteTextFile(path, malformed_cfitsio);
+        const specforge::SpecForgeMetadataReadResult malformed_cfitsio_result =
+            specforge::ReadSpecForgeMetadata(path, WorkingTreeIdentity());
+        Require(
+            !malformed_cfitsio_result.startup_error &&
+                malformed_cfitsio_result.build_metadata.status ==
+                    specforge::BuildMetadataStatus::Unavailable &&
+                !malformed_cfitsio_result.build_metadata.metadata,
+            "present but empty or malformed cfitsio provenance must be unavailable");
+    }
 
     std::string malformed_yaml_cpp = Schema5Metadata();
     const std::size_t yaml_cpp_value =

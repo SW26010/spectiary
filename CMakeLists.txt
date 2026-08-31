@@ -25,6 +25,7 @@ include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")
 
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+find_package(cfitsio CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
@@ -115,6 +116,7 @@ set(SPECFORGE_APPLICATION_ICON
 include("${CMAKE_SOURCE_DIR}/cmake/third_party_versions.cmake")
 specforge_read_vcpkg_package_version(imgui SPECFORGE_IMGUI_VERSION)
 specforge_read_vcpkg_package_version(implot SPECFORGE_IMPLOT_VERSION)
+specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)
 specforge_read_vcpkg_package_version(yaml-cpp SPECFORGE_YAML_CPP_VERSION)
 specforge_read_vcpkg_package_version(zlib SPECFORGE_ZLIB_VERSION)
 specforge_require_notice_heading(
@@ -126,6 +128,11 @@ specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
     "ImPlot"
     "ImPlot ${SPECFORGE_IMPLOT_VERSION}"
+)
+specforge_require_notice_heading(
+    "${SPECFORGE_THIRD_PARTY_NOTICES}"
+    "CFITSIO"
+    "CFITSIO ${SPECFORGE_CFITSIO_VERSION}"
 )
 specforge_require_notice_heading(
     "${SPECFORGE_THIRD_PARTY_NOTICES}"
@@ -141,6 +148,7 @@ message(STATUS
     "Resolved third-party versions: "
     "Dear ImGui ${SPECFORGE_IMGUI_VERSION}, "
     "ImPlot ${SPECFORGE_IMPLOT_VERSION}, "
+    "CFITSIO ${SPECFORGE_CFITSIO_VERSION}, "
     "yaml-cpp ${SPECFORGE_YAML_CPP_VERSION}, "
     "zlib ${SPECFORGE_ZLIB_VERSION}"
 )
@@ -295,7 +303,7 @@ target_include_directories(specforge_core PRIVATE
 )
 specforge_use_runtime_paths(specforge_core)
 specforge_use_embedded_resources(specforge_core)
-target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp ZLIB::ZLIB bcrypt)
+target_link_libraries(specforge_core PRIVATE yaml-cpp::yaml-cpp CFITSIO::cfitsio ZLIB::ZLIB bcrypt)
 
 add_library(specforge_imgui_layout STATIC
     src/app/imgui_layout_persistence.cpp
@@ -899,6 +907,7 @@ specforge_add_test(
 )
 target_compile_definitions(specforge_metadata_tests PRIVATE
     SPECFORGE_METADATA_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/build_metadata"
+    SPECFORGE_EXPECTED_CFITSIO_VERSION="${SPECFORGE_CFITSIO_VERSION}"
 )
 specforge_add_test(
     specforge_metadata_finalizer_tests
@@ -1055,6 +1064,7 @@ add_test(
         -RepoRoot "${CMAKE_SOURCE_DIR}"
         -DearImGuiVersion "${SPECFORGE_IMGUI_VERSION}"
         -ImPlotVersion "${SPECFORGE_IMPLOT_VERSION}"
+        -CfitsioVersion "${SPECFORGE_CFITSIO_VERSION}"
         -YamlCppVersion "${SPECFORGE_YAML_CPP_VERSION}"
         -ZlibVersion "${SPECFORGE_ZLIB_VERSION}"
         -BuiltExecutable "$<TARGET_FILE:specforge_native>"

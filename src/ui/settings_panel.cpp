@@ -2163,6 +2163,12 @@ void SettingsPanelUi::RenderAbout(
         ImGui::BulletText(
             UiText(
                 language,
+                UiTextId::CfitsioComponent)
+                .data(),
+            metadata.cfitsio_version.c_str());
+        ImGui::BulletText(
+            UiText(
+                language,
                 UiTextId::YamlCppComponent)
                 .data(),
             metadata.yaml_cpp_version.c_str());
@@ -2194,6 +2200,17 @@ void SettingsPanelUi::RenderAbout(
             UiText(
                 language,
                 UiTextId::ImPlotComponentFallback)
+                .data());
+        ImGui::BulletText(
+            "%.*s",
+            static_cast<int>(
+                UiText(
+                    language,
+                    UiTextId::CfitsioComponentFallback)
+                    .size()),
+            UiText(
+                language,
+                UiTextId::CfitsioComponentFallback)
                 .data());
         ImGui::BulletText(
             "%.*s",

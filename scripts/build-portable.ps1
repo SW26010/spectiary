@@ -265,12 +265,16 @@ foreach ($propertyName in @(
     'windows_sdk_version',
     'dear_imgui',
     'implot',
+    'cfitsio',
     'yaml_cpp',
     'zlib'
 )) {
     [void](Get-RequiredMetadataString `
         -Metadata $buildMetadata `
         -PropertyName $propertyName)
+}
+if ($buildMetadata.cfitsio -cnotmatch '^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$') {
+    throw "SpecForge metadata has invalid cfitsio version '$($buildMetadata.cfitsio)'."
 }
 if ($buildMetadata.source_mode -cne $SourceMode) {
     throw "SpecForge metadata has source mode '$($buildMetadata.source_mode)'; expected '$SourceMode'."
@@ -362,6 +366,10 @@ Assert-SingleNoticeHeading `
     -Lines $thirdPartyNoticeLines `
     -ComponentName 'ImPlot' `
     -ExpectedHeading "ImPlot $($buildMetadata.implot)"
+Assert-SingleNoticeHeading `
+    -Lines $thirdPartyNoticeLines `
+    -ComponentName 'CFITSIO' `
+    -ExpectedHeading "CFITSIO $($buildMetadata.cfitsio)"
 Assert-SingleNoticeHeading `
     -Lines $thirdPartyNoticeLines `
     -ComponentName 'yaml-cpp' `

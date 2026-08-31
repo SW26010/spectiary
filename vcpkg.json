@@ -12,6 +12,10 @@
       ]
     },
     "implot",
+    {
+      "name": "cfitsio",
+      "default-features": false
+    },
     "yaml-cpp",
     "zlib"
   ]

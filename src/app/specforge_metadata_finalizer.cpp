@@ -311,6 +311,9 @@ bool WriteSchema5Metadata(
            << "    \"implot\": ";
     WriteJsonString(stream, build.implot_version);
     stream << ",\n"
+           << "    \"cfitsio\": ";
+    WriteJsonString(stream, build.cfitsio_version);
+    stream << ",\n"
            << "    \"yaml_cpp\": ";
     WriteJsonString(stream, build.yaml_cpp_version);
     stream << ",\n"

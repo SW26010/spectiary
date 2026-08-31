@@ -200,6 +200,7 @@ bool ValidateSchema5BuildMetadata(
         !IsRequiredMetadataString(metadata.generator) ||
         !IsRequiredMetadataString(metadata.dear_imgui_version) ||
         !IsRequiredMetadataString(metadata.implot_version) ||
+        !IsRequiredMetadataString(metadata.cfitsio_version) ||
         !IsRequiredMetadataString(metadata.yaml_cpp_version) ||
         !IsRequiredMetadataString(metadata.zlib_version)) {
         return fail("configured build metadata contains an empty or padded required string");
@@ -216,6 +217,9 @@ bool ValidateSchema5BuildMetadata(
     if (metadata.windows_sdk_version &&
         !IsDottedNumericVersion(*metadata.windows_sdk_version, 2U, 3U)) {
         return fail("windows_sdk_version must be a dotted numeric version");
+    }
+    if (!IsDottedNumericVersion(metadata.cfitsio_version, 1U, 3U)) {
+        return fail("cfitsio must be a dotted numeric version");
     }
 
     if (!metadata.finalized_artifact ||

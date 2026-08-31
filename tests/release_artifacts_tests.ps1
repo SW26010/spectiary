@@ -10,6 +10,9 @@ param(
     [string]$ImPlotVersion,
 
     [Parameter(Mandatory = $true)]
+    [string]$CfitsioVersion,
+
+    [Parameter(Mandatory = $true)]
     [string]$YamlCppVersion,
 
     [Parameter(Mandatory = $true)]
@@ -673,6 +676,7 @@ $expectedBuildMetadata = [ordered]@{
     configuration = $Configuration
     dear_imgui = $DearImGuiVersion
     implot = $ImPlotVersion
+    cfitsio = $CfitsioVersion
     yaml_cpp = $YamlCppVersion
     zlib = $ZlibVersion
 }
@@ -697,6 +701,7 @@ $aboutSourcePath = Join-Path $RepoRoot 'src\ui\settings_panel.cpp'
 $aboutTextSourcePath = Join-Path $RepoRoot 'src\ui\ui_text.cpp'
 $mainSourcePath = Join-Path $RepoRoot 'src\main.cpp'
 $cmakeSourcePath = Join-Path $RepoRoot 'CMakeLists.txt'
+$vcpkgManifestPath = Join-Path $RepoRoot 'vcpkg.json'
 $metadataEnsureScriptPath = Join-Path `
     $RepoRoot `
     'cmake\ensure_specforge_metadata.cmake'
@@ -721,6 +726,7 @@ foreach ($requiredPath in @(
     $aboutTextSourcePath,
     $mainSourcePath,
     $cmakeSourcePath,
+    $vcpkgManifestPath,
     $metadataEnsureScriptPath,
     $buildIdentityTemplatePath,
     $buildSourceContractPath,
@@ -736,6 +742,31 @@ foreach ($requiredPath in @(
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required release source is missing: $requiredPath"
     }
+}
+
+$vcpkgManifest = Get-Content -Raw -LiteralPath $vcpkgManifestPath |
+    ConvertFrom-Json
+$cfitsioDependencies = @(
+    $vcpkgManifest.dependencies |
+        Where-Object {
+            $null -ne $_.PSObject.Properties['name'] -and
+            $_.name -ceq 'cfitsio'
+        }
+)
+if ($cfitsioDependencies.Count -ne 1) {
+    throw "vcpkg.json must declare exactly one structured cfitsio dependency; found $($cfitsioDependencies.Count)."
+}
+$cfitsioDependency = $cfitsioDependencies[0]
+$defaultFeaturesProperty =
+    $cfitsioDependency.PSObject.Properties['default-features']
+if ($null -eq $defaultFeaturesProperty -or
+    $defaultFeaturesProperty.Value -ne $false) {
+    throw 'vcpkg.json cfitsio dependency must set default-features to false.'
+}
+$cfitsioFeaturesProperty = $cfitsioDependency.PSObject.Properties['features']
+if ($null -ne $cfitsioFeaturesProperty -and
+    @($cfitsioFeaturesProperty.Value).Count -ne 0) {
+    throw 'vcpkg.json cfitsio dependency must not enable optional features.'
 }
 
 $builtLegalRoot = Join-Path `
@@ -778,6 +809,8 @@ foreach ($expected in @(
     'Copyright (c) 2014-2026 Omar Cornut',
     "ImPlot $ImPlotVersion",
     'Copyright (c) 2020 Evan Pezent',
+    "CFITSIO $CfitsioVersion",
+    'Permission to freely use, copy, modify, and distribute this software',
     "yaml-cpp $YamlCppVersion",
     'Copyright (c) 2008-2015 Jesse Beder',
     "zlib $ZlibVersion",
@@ -793,6 +826,16 @@ foreach ($expected in @(
 )) {
     Assert-Contains $notices $expected 'Third-party notices'
 }
+Assert-NoticeSectionContains `
+    -Text $notices `
+    -Heading "CFITSIO $CfitsioVersion" `
+    -Expected @(
+        'U.S. Government as represented by the Administrator',
+        'Permission to freely use, copy, modify, and distribute this software',
+        "THE SOFTWARE IS PROVIDED 'AS IS' WITHOUT ANY WARRANTY OF ANY KIND",
+        'IN NO EVENT SHALL NASA BE LIABLE FOR ANY',
+        'DAMAGES, INCLUDING, BUT NOT LIMITED TO, DIRECT, INDIRECT, SPECIAL OR'
+    )
 Assert-NoticeSectionContains `
     -Text $notices `
     -Heading 'ProggyClean (embedded with Dear ImGui)' `
@@ -1004,6 +1047,15 @@ Assert-Contains $cmakeSource `
     'include("${CMAKE_SOURCE_DIR}/cmake/specforge_build_source.cmake")' `
     'CMake build-source contract entry'
 Assert-Contains $cmakeSource `
+    'find_package(cfitsio CONFIG REQUIRED)' `
+    'CMake CFITSIO package discovery'
+Assert-Contains $cmakeSource `
+    'specforge_read_vcpkg_package_version(cfitsio SPECFORGE_CFITSIO_VERSION)' `
+    'CMake CFITSIO package version resolution'
+Assert-Contains $cmakeSource `
+    'CFITSIO::cfitsio ZLIB::ZLIB' `
+    'CMake core CFITSIO and zlib linkage'
+Assert-Contains $cmakeSource `
     'OBJECT_DEPENDS' `
     'CMake embedded legal-document dependencies'
 Assert-Contains $cmakeSource `
@@ -1109,6 +1161,7 @@ Assert-Contains $aboutSource `
     'About build source revision'
 Assert-Contains $aboutSource 'metadata.dear_imgui_version' 'About Dear ImGui metadata version'
 Assert-Contains $aboutSource 'metadata.implot_version' 'About ImPlot metadata version'
+Assert-Contains $aboutSource 'metadata.cfitsio_version' 'About CFITSIO metadata version'
 Assert-Contains $aboutSource 'metadata.yaml_cpp_version' 'About yaml-cpp metadata version'
 Assert-Contains $aboutSource 'metadata.zlib_version' 'About zlib metadata version'
 
@@ -1119,6 +1172,7 @@ foreach ($expectedIdentityText in @(
     "kTargetArchitecture[] = `"$TargetArchitecture`"",
     "kBuildSourceMode[] = `"$SourceMode`"",
     "kBuildSourceRevision[] = `"$SourceRevision`"",
+    "kBuildCfitsioVersion[] = `"$CfitsioVersion`"",
     "kBuildYamlCppVersion[] = `"$YamlCppVersion`""
 )) {
     Assert-Contains `
@@ -1479,6 +1533,35 @@ try {
             $originalPortableMetadataBytes)
     }
 
+    try {
+        $invalidPortableMetadata =
+            Get-Content -Raw -LiteralPath $verifiedPackageMetadataPath |
+            ConvertFrom-Json
+        $invalidPortableMetadata.build.cfitsio = '4.6.x'
+        [IO.File]::WriteAllText(
+            $verifiedPackageMetadataPath,
+            (($invalidPortableMetadata | ConvertTo-Json -Depth 10) +
+                [Environment]::NewLine),
+            (New-Object Text.UTF8Encoding($false)))
+        Assert-ScriptFails `
+            -ScriptPath $portableVerifierPath `
+            -Arguments @(
+                '-BuildExecutable',
+                $resolvedBuiltExecutable,
+                '-PackageRoot',
+                $verifiedPackageRoot,
+                '-ZipPath',
+                $verifiedPackageZip
+            ) `
+            -ExpectedMessage 'cfitsio must be a dotted numeric version' `
+            -Description 'Portable verifier rejects malformed CFITSIO version'
+    }
+    finally {
+        [IO.File]::WriteAllBytes(
+            $verifiedPackageMetadataPath,
+            $originalPortableMetadataBytes)
+    }
+
     $invalidMetadataCases = @(
         [pscustomobject]@{
             Description = 'Metadata schema as string'
@@ -1564,6 +1647,20 @@ try {
             Remove = $false
             Value = 'current'
             ExpectedMessage = 'invalid windows_sdk_version'
+        },
+        [pscustomobject]@{
+            Description = 'Metadata missing CFITSIO provenance'
+            PropertyName = 'cfitsio'
+            Remove = $true
+            Value = $null
+            ExpectedMessage = "missing non-empty string 'cfitsio'"
+        },
+        [pscustomobject]@{
+            Description = 'Metadata CFITSIO provenance disagrees with notices'
+            PropertyName = 'cfitsio'
+            Remove = $false
+            Value = '999.0.0'
+            ExpectedMessage = 'THIRD_PARTY_NOTICES.txt is stale for CFITSIO'
         },
         [pscustomobject]@{
             Description = 'Metadata missing yaml-cpp provenance'

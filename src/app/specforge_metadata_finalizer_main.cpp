@@ -27,6 +27,8 @@ specforge::BuildMetadata ConfiguredBuildMetadata()
         .dear_imgui_version =
             specforge::build_info::kBuildDearImguiVersion,
         .implot_version = specforge::build_info::kBuildImPlotVersion,
+        .cfitsio_version =
+            specforge::build_info::kBuildCfitsioVersion,
         .yaml_cpp_version =
             specforge::build_info::kBuildYamlCppVersion,
         .zlib_version = specforge::build_info::kBuildZlibVersion,

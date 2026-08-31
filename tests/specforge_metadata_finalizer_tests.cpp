@@ -81,6 +81,7 @@ specforge::BuildMetadata ConfiguredBuildMetadata()
         .windows_sdk_version = std::nullopt,
         .dear_imgui_version = "1.92.5",
         .implot_version = "0.17",
+        .cfitsio_version = "4.6.4",
         .yaml_cpp_version = "0.9.0",
         .zlib_version = "1.3.1",
     };
@@ -154,7 +155,8 @@ void TestFinalizerWritesSchema5AndHashesFinalExecutable()
     const specforge::BuildMetadata& metadata =
         *result.build_metadata.metadata;
     Require(
-        metadata.finalized_artifact &&
+        metadata.cfitsio_version == "4.6.4" &&
+            metadata.finalized_artifact &&
             metadata.finalized_artifact->completed_at_utc ==
                 "2026-08-05T09:21:32Z" &&
             metadata.finalized_artifact->artifact.file == "SpecForge.exe" &&
@@ -487,6 +489,12 @@ void TestRejectsSchema5InvalidBuildValuesWithoutPublishingMetadata()
         },
         [](specforge::BuildMetadata& build) {
             build.windows_sdk_version = "10.0.26100.preview";
+        },
+        [](specforge::BuildMetadata& build) {
+            build.cfitsio_version.clear();
+        },
+        [](specforge::BuildMetadata& build) {
+            build.cfitsio_version = "4.6.x";
         },
     };
 
