@@ -102,6 +102,12 @@ jobs:
             -BuildDirectory build\ninja-msvc-debug `
             -ArtifactsDirectory "$env:AUTOMATION_RUN_ROOT\ctest" -SuiteTimeoutSec 300 -TestTimeoutSec 120
 
+      - name: Set up pinned ASDF oracle Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          check-latest: false
+
       - name: Install pinned ASDF interoperability and hardening oracle
         shell: pwsh
         timeout-minutes: 5
